@@ -154,11 +154,23 @@ function render() {
   <td class="calc">0</td>
   <td><input type="number" value="${item.finalOrder || 0}"></td>
   <td class="date">-</td>
-  <td class="pallets">-</td>
+  <td class="pallets">
+  <div class="pallet-info">-</div>
+  <button class="btn small pallet-btn">Округлить</button>
+</td>
 `;
 
 
     const i = tr.querySelectorAll('input');
+    const palletBtn = tr.querySelector('.pallet-btn');
+
+palletBtn.onclick = () => {
+  roundToPallet(item);
+  updateRow(tr, item);
+
+  // обновим поле "Заказ итого" визуально
+  i[3].value = item.finalOrder;
+};
  i[0].oninput = e => {
   item.name = e.target.value;
 };
@@ -196,8 +208,29 @@ function updateRow(tr, item) {
       ? calc.coverageDate.toLocaleDateString()
       : '-';
 
-  tr.querySelector('.pallets').textContent =
-    calc.palletsInfo
-      ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
-      : '-';
+tr.querySelector('.pallet-info').textContent =
+  calc.palletsInfo
+    ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
+    : '-';
+
+function roundToPallet(item) {
+  if (!item.boxesPerPallet || !item.finalOrder) return;
+
+  let boxes;
+
+  if (orderState.settings.unit === 'boxes') {
+    boxes = item.finalOrder;
+  } else {
+    if (!item.qtyPerBox) return;
+    boxes = item.finalOrder / item.qtyPerBox;
+  }
+
+  const pallets = Math.ceil(boxes / item.boxesPerPallet);
+  const roundedBoxes = pallets * item.boxesPerPallet;
+
+  if (orderState.settings.unit === 'boxes') {
+    item.finalOrder = roundedBoxes;
+  } else {
+    item.finalOrder = roundedBoxes * item.qtyPerBox;
+  }
 }
