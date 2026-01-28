@@ -4,6 +4,8 @@ import { supabase } from './supabase.js';
 
 const tbody = document.getElementById('items');
 const manualForm = document.getElementById('manualForm');
+const searchInput = document.getElementById('productSearch');
+const searchResults = document.getElementById('searchResults');
 
 /* ================= НАСТРОЙКИ ================= */
 
@@ -27,6 +29,55 @@ document.getElementById('unit').onchange = e => {
   rerenderAll();
 };
 
+/* ================= ПОИСК ================= */
+
+let searchTimer = null;
+
+searchInput.oninput = () => {
+  const q = searchInput.value.trim();
+  clearTimeout(searchTimer);
+
+  if (q.length < 2) {
+    searchResults.innerHTML = '';
+    return;
+  }
+
+  searchTimer = setTimeout(() => searchProducts(q), 300);
+};
+
+async function searchProducts(q) {
+  const isSku = /^[0-9A-Za-z-]+$/.test(q);
+
+  let query = supabase
+    .from('products')
+    .select('*')
+    .limit(10);
+
+  query = isSku
+    ? query.ilike('sku', `%${q}%`)
+    : query.ilike('name', `%${q}%`);
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  searchResults.innerHTML = '';
+
+  data.forEach(p => {
+    const div = document.createElement('div');
+    div.textContent = `${p.sku || ''} — ${p.name}`;
+    div.onclick = () => {
+      addItem(p);
+      searchResults.innerHTML = '';
+      searchInput.value = '';
+    };
+    searchResults.appendChild(div);
+  });
+}
+
 /* ================= РУЧНОЙ ТОВАР ================= */
 
 document.getElementById('addManual').onclick = () =>
@@ -47,11 +98,18 @@ document.getElementById('m_add').onclick = async () => {
   if (!product.name) return alert('Введите наименование');
 
   if (m_save.checked) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('products')
       .insert(product)
       .select()
       .single();
+
+    if (error) {
+      alert('Ошибка сохранения в базу');
+      console.error(error);
+      return;
+    }
+
     addItem(data);
   } else {
     addItem(product);
