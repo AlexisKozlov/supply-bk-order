@@ -1,0 +1,24 @@
+<script type="module">
+  import { orderState } from './js/state.js';
+  import { calculateItem } from './js/calculations.js';
+
+  orderState.settings.today = new Date('2026-01-01');
+  orderState.settings.deliveryDate = new Date('2026-01-10');
+  orderState.settings.periodDays = 30;
+  orderState.settings.safetyDays = 5;
+  orderState.settings.safetyPercent = 10;
+  orderState.settings.unit = 'boxes';
+
+  const item = {
+    name: 'Тестовый товар',
+    consumptionPeriod: 300,
+    stock: 50,
+    qtyPerBox: 10,
+    boxesPerPallet: 20,
+    finalOrder: 200
+  };
+
+  console.log(
+    calculateItem(item, orderState.settings)
+  );
+</script>
