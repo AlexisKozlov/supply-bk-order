@@ -3,9 +3,31 @@ import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
 
 const tbody = document.getElementById('items');
-const searchInput = document.getElementById('productSearch');
-const searchResults = document.getElementById('searchResults');
 const manualForm = document.getElementById('manualForm');
+
+/* ================= НАСТРОЙКИ ================= */
+
+function bindSetting(id, key, isDate = false) {
+  document.getElementById(id).addEventListener('input', e => {
+    orderState.settings[key] = isDate
+      ? new Date(e.target.value)
+      : +e.target.value || e.target.value;
+    rerenderAll();
+  });
+}
+
+bindSetting('today', 'today', true);
+bindSetting('deliveryDate', 'deliveryDate', true);
+bindSetting('periodDays', 'periodDays');
+bindSetting('safetyDays', 'safetyDays');
+bindSetting('safetyPercent', 'safetyPercent');
+
+document.getElementById('unit').onchange = e => {
+  orderState.settings.unit = e.target.value;
+  rerenderAll();
+};
+
+/* ================= РУЧНОЙ ТОВАР ================= */
 
 document.getElementById('addManual').onclick = () =>
   manualForm.classList.remove('hidden');
@@ -25,37 +47,23 @@ document.getElementById('m_add').onclick = async () => {
   if (!product.name) return alert('Введите наименование');
 
   if (m_save.checked) {
-    const { data } = await supabase.from('products').insert(product).select().single();
+    const { data } = await supabase
+      .from('products')
+      .insert(product)
+      .select()
+      .single();
     addItem(data);
-  } else addItem(product);
+  } else {
+    addItem(product);
+  }
 
   manualForm.classList.add('hidden');
 };
 
+/* ================= ДОБАВЛЕНИЕ ================= */
+
 document.getElementById('addItem').onclick = () =>
   addItem({ name: 'Новый товар', qty_per_box: 1 });
-
-searchInput.oninput = async () => {
-  const q = searchInput.value.trim();
-  if (q.length < 2) return (searchResults.innerHTML = '');
-
-  const isCode = /^[0-9A-Za-z-]+$/.test(q);
-  let query = supabase.from('products').select('*').limit(10);
-  query = isCode ? query.ilike('sku', `%${q}%`) : query.ilike('name', `%${q}%`);
-
-  const { data } = await query;
-  searchResults.innerHTML = '';
-  data?.forEach(p => {
-    const div = document.createElement('div');
-    div.textContent = `${p.sku || ''} — ${p.name}`;
-    div.onclick = () => {
-      addItem(p);
-      searchResults.innerHTML = '';
-      searchInput.value = '';
-    };
-    searchResults.appendChild(div);
-  });
-};
 
 function addItem(p) {
   orderState.items.push({
@@ -70,11 +78,14 @@ function addItem(p) {
   render();
 }
 
+/* ================= ТАБЛИЦА ================= */
+
 function render() {
   tbody.innerHTML = '';
 
   orderState.items.forEach(item => {
     const tr = document.createElement('tr');
+
     tr.innerHTML = `
       <td><input value="${item.name}"></td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>
@@ -108,28 +119,42 @@ function render() {
 
 function update(tr, item) {
   const calc = calculateItem(item, orderState.settings);
-  tr.querySelector('.calc').textContent = calc.calculatedOrder.toFixed(2);
+
+  tr.querySelector('.calc').textContent =
+    calc.calculatedOrder.toFixed(2);
+
   tr.querySelector('.date').textContent =
-    calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-';
+    calc.coverageDate
+      ? calc.coverageDate.toLocaleDateString()
+      : '-';
+
   tr.querySelector('.pallet-info').textContent =
     calc.palletsInfo
       ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
       : '-';
 }
 
+function rerenderAll() {
+  document.querySelectorAll('#items tr').forEach((tr, idx) =>
+    update(tr, orderState.items[idx])
+  );
+}
+
 function roundToPallet(item) {
   if (!item.boxesPerPallet) return;
 
-  let boxes = orderState.settings.unit === 'boxes'
-    ? item.finalOrder
-    : item.finalOrder / item.qtyPerBox;
+  const boxes =
+    orderState.settings.unit === 'boxes'
+      ? item.finalOrder
+      : item.finalOrder / item.qtyPerBox;
 
   const pallets = Math.ceil(boxes / item.boxesPerPallet);
   const rounded = pallets * item.boxesPerPallet;
 
-  item.finalOrder = orderState.settings.unit === 'boxes'
-    ? rounded
-    : rounded * item.qtyPerBox;
+  item.finalOrder =
+    orderState.settings.unit === 'boxes'
+      ? rounded
+      : rounded * item.qtyPerBox;
 }
 
 render();
