@@ -33,10 +33,18 @@
 
   <section class="card">
     <h2>Добавление товаров</h2>
+
     <div class="actions">
       <button id="addItem" class="btn secondary">➕ Пустая строка</button>
       <button id="addManual" class="btn primary">✍️ Ручной товар</button>
     </div>
+
+    <label>
+      Поставщик
+      <select id="supplierFilter">
+        <option value="">Все / свободный</option>
+      </select>
+    </label>
 
     <section class="search">
       <input id="productSearch" placeholder="🔍 Поиск по артикулу или названию" />
@@ -44,7 +52,7 @@
     </section>
   </section>
 
-  <!-- РУЧНОЙ ТОВАР -->
+  <!-- Ручной товар -->
   <section class="card manual hidden" id="manualForm">
     <h2>Ручной товар</h2>
 

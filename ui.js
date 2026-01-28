@@ -6,9 +6,15 @@ const tbody = document.getElementById('items');
 const manualForm = document.getElementById('manualForm');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
+const supplierSelect = document.getElementById('supplierFilter');
 
-/* ================= НАСТРОЙКИ ================= */
+/* ========= ДАТА СЕГОДНЯ ========= */
+const todayInput = document.getElementById('today');
+const today = new Date();
+todayInput.value = today.toISOString().slice(0, 10);
+orderState.settings.today = today;
 
+/* ========= НАСТРОЙКИ ========= */
 function bindSetting(id, key, isDate = false) {
   document.getElementById(id).addEventListener('input', e => {
     orderState.settings[key] = isDate
@@ -29,8 +35,42 @@ document.getElementById('unit').onchange = e => {
   rerenderAll();
 };
 
-/* ================= ПОИСК ================= */
+/* ========= ПОСТАВЩИКИ ========= */
+loadSuppliers();
 
+async function loadSuppliers() {
+  const { data } = await supabase
+    .from('products')
+    .select('supplier');
+
+  const suppliers = [...new Set(
+    data.map(p => p.supplier).filter(Boolean)
+  )];
+
+  suppliers.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    supplierSelect.appendChild(opt);
+  });
+}
+
+supplierSelect.onchange = async () => {
+  const supplier = supplierSelect.value;
+  orderState.items = [];
+  render();
+
+  if (!supplier) return;
+
+  const { data } = await supabase
+    .from('products')
+    .select('*')
+    .eq('supplier', supplier);
+
+  data.forEach(addItem);
+};
+
+/* ========= ПОИСК ========= */
 let searchTimer = null;
 
 searchInput.oninput = () => {
@@ -48,24 +88,19 @@ searchInput.oninput = () => {
 async function searchProducts(q) {
   const isSku = /^[0-9A-Za-z-]+$/.test(q);
 
-  let query = supabase
-    .from('products')
-    .select('*')
-    .limit(10);
+  let query = supabase.from('products').select('*').limit(10);
+
+  if (supplierSelect.value) {
+    query = query.eq('supplier', supplierSelect.value);
+  }
 
   query = isSku
     ? query.ilike('sku', `%${q}%`)
     : query.ilike('name', `%${q}%`);
 
-  const { data, error } = await query;
-
-  if (error) {
-    console.error(error);
-    return;
-  }
+  const { data } = await query;
 
   searchResults.innerHTML = '';
-
   data.forEach(p => {
     const div = document.createElement('div');
     div.textContent = `${p.sku || ''} — ${p.name}`;
@@ -78,8 +113,7 @@ async function searchProducts(q) {
   });
 }
 
-/* ================= РУЧНОЙ ТОВАР ================= */
-
+/* ========= РУЧНОЙ ТОВАР ========= */
 document.getElementById('addManual').onclick = () =>
   manualForm.classList.remove('hidden');
 
@@ -98,18 +132,11 @@ document.getElementById('m_add').onclick = async () => {
   if (!product.name) return alert('Введите наименование');
 
   if (m_save.checked) {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('products')
       .insert(product)
       .select()
       .single();
-
-    if (error) {
-      alert('Ошибка сохранения в базу');
-      console.error(error);
-      return;
-    }
-
     addItem(data);
   } else {
     addItem(product);
@@ -118,8 +145,7 @@ document.getElementById('m_add').onclick = async () => {
   manualForm.classList.add('hidden');
 };
 
-/* ================= ДОБАВЛЕНИЕ ================= */
-
+/* ========= ДОБАВЛЕНИЕ ========= */
 document.getElementById('addItem').onclick = () =>
   addItem({ name: 'Новый товар', qty_per_box: 1 });
 
@@ -136,14 +162,12 @@ function addItem(p) {
   render();
 }
 
-/* ================= ТАБЛИЦА ================= */
-
+/* ========= ТАБЛИЦА ========= */
 function render() {
   tbody.innerHTML = '';
 
   orderState.items.forEach(item => {
     const tr = document.createElement('tr');
-
     tr.innerHTML = `
       <td><input value="${item.name}"></td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>
@@ -178,14 +202,9 @@ function render() {
 function update(tr, item) {
   const calc = calculateItem(item, orderState.settings);
 
-  tr.querySelector('.calc').textContent =
-    calc.calculatedOrder.toFixed(2);
-
+  tr.querySelector('.calc').textContent = calc.calculatedOrder.toFixed(2);
   tr.querySelector('.date').textContent =
-    calc.coverageDate
-      ? calc.coverageDate.toLocaleDateString()
-      : '-';
-
+    calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-';
   tr.querySelector('.pallet-info').textContent =
     calc.palletsInfo
       ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
