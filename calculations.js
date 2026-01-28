@@ -30,7 +30,16 @@ export function calculateItem(item, settings) {
 
   let calculatedOrder = totalNeed - item.stock;
   if (calculatedOrder < 0) calculatedOrder = 0;
-  if (unit === 'boxes') calculatedOrder = roundUp(calculatedOrder);
+
+  /* ===== ОКРУГЛЕНИЕ ===== */
+  if (unit === 'boxes') {
+    calculatedOrder = roundUp(calculatedOrder);
+  }
+
+  if (unit === 'pieces' && item.qtyPerBox) {
+    calculatedOrder =
+      roundUp(calculatedOrder / item.qtyPerBox) * item.qtyPerBox;
+  }
 
   const available = item.stock + (item.finalOrder || 0);
   const days = safeDivide(available, daily);

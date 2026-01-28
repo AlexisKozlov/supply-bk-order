@@ -137,18 +137,18 @@ function render() {
   orderState.items.forEach(item => {
     const tr = document.createElement('tr');
 
-    tr.innerHTML = `
-      <td><input value="${item.name}"></td>
-      <td><input type="number" value="${item.consumptionPeriod}"></td>
-      <td><input type="number" value="${item.stock}"></td>
-      <td class="calc">0</td>
-      <td><input type="number" value="${item.finalOrder}"></td>
-      <td class="date">-</td>
-      <td class="pallets">
-        <div class="pallet-info">-</div>
-        <button class="btn small">Округлить</button>
-      </td>
-    `;
+  tr.innerHTML = `
+  <td class="item-name">${item.name}</td>
+  <td><input type="number" value="${item.consumptionPeriod}"></td>
+  <td><input type="number" value="${item.stock}"></td>
+  <td class="calc">0</td>
+  <td><input type="number" value="${item.finalOrder}"></td>
+  <td class="date">-</td>
+  <td class="pallets">
+    <div class="pallet-info">-</div>
+    <button class="btn small">Округлить</button>
+  </td>
+`;
 
     const inputs = tr.querySelectorAll('input');
     const roundBtn = tr.querySelector('button');
