@@ -7,89 +7,68 @@
 </head>
 <body>
 
-<h1>📦 Калькулятор заказа</h1>
+<header class="header">
+  <h1>🍔 Калькулятор заказа BK</h1>
+</header>
 
-<section class="settings">
-  <label>
-    Дата сегодня:
-    <input type="date" id="today" />
-  </label>
+<main class="container">
 
-  <label>
-    Дата прихода:
-    <input type="date" id="deliveryDate" />
-  </label>
+  <section class="card">
+    <h2>Параметры заказа</h2>
 
-  <label>
-    Период расхода (дней):
-    <input type="number" id="periodDays" value="30" />
-  </label>
+    <div class="settings">
+      <label>Дата сегодня<input type="date" id="today" /></label>
+      <label>Дата прихода<input type="date" id="deliveryDate" /></label>
+      <label>Период расхода (дней)<input type="number" id="periodDays" value="30" /></label>
+      <label>Запас (дни)<input type="number" id="safetyDays" value="0" /></label>
+      <label>Запас (%)<input type="number" id="safetyPercent" value="0" /></label>
+      <label>Единицы
+        <select id="unit">
+          <option value="pieces">Штуки</option>
+          <option value="boxes">Коробки</option>
+        </select>
+      </label>
+    </div>
+  </section>
 
-  <label>
-    Запас (дни):
-    <input type="number" id="safetyDays" value="0" />
-  </label>
+  <section class="card">
+    <h2>Добавление товаров</h2>
 
-  <label>
-    Запас (%):
-    <input type="number" id="safetyPercent" value="0" />
-  </label>
+    <div class="actions">
+      <button id="addItem" class="btn secondary">➕ Пустая строка</button>
+      <button id="addManual" class="btn primary">✍️ Ручной товар</button>
+    </div>
 
-  <label>
-    Единицы:
-    <select id="unit">
-      <option value="pieces">Штуки</option>
-      <option value="boxes">Коробки</option>
-    </select>
-  </label>
-</section>
+    <section class="search">
+      <input id="productSearch" placeholder="🔍 Поиск по артикулу или названию" />
+      <div id="searchResults" class="search-results"></div>
+    </section>
+  </section>
 
-<button id="addItem">➕ Добавить товар</button>
-<button id="addManual">✍️ Ручной товар</button>
+  <section class="card">
+    <h2>Заказ</h2>
 
-<div id="manualForm" class="manual hidden">
-  <h3>Новый товар</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Товар</th>
+            <th>Расход</th>
+            <th>Остаток</th>
+            <th>Расчёт</th>
+            <th>Заказ</th>
+            <th>Хватит до</th>
+            <th>Паллеты</th>
+          </tr>
+        </thead>
+        <tbody id="items"></tbody>
+      </table>
+    </div>
+  </section>
 
-  <input id="m_name" placeholder="Наименование*" />
-  <input id="m_sku" placeholder="Артикул" />
-  <input id="m_supplier" placeholder="Поставщик" />
-  <input id="m_box" type="number" placeholder="Штук в коробке" value="1" />
-  <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
-
-  <label>
-    <input type="checkbox" id="m_save" />
-    Сохранить в базу
-  </label>
-
-  <button id="m_add">Добавить</button>
-  <button id="m_cancel">Отмена</button>
-</div>
-
-
-<section class="search">
-  <input
-    type="text"
-    id="productSearch"
-    placeholder="🔍 Поиск товара в базе"
-  />
-  <div id="searchResults" class="search-results"></div>
-</section>
-
-<table>
-  <thead>
-    <tr>
-      <th>Товар</th>
-      <th>Расход за период</th>
-      <th>Остаток</th>
-      <th>Расчёт</th>
-      <th>Заказ итого</th>
-      <th>Хватит до</th>
-      <th>Паллеты</th>
-    </tr>
-  </thead>
-  <tbody id="items"></tbody>
-</table>
+</main>
 
 <script type="module" src="./ui.js"></script>
 </body>
+
 </html>
