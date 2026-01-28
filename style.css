@@ -7,9 +7,7 @@
   --border: #e2e2e2;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -22,11 +20,6 @@ body {
   background: var(--red);
   color: white;
   padding: 16px 24px;
-}
-
-.header h1 {
-  margin: 0;
-  font-size: 22px;
 }
 
 .container {
@@ -43,13 +36,6 @@ body {
   border-radius: 10px;
   padding: 16px 20px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-}
-
-.card h2 {
-  margin-top: 0;
-  margin-bottom: 12px;
-  font-size: 18px;
-  color: var(--brown);
 }
 
 .settings {
@@ -69,12 +55,6 @@ input, select {
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  font-size: 14px;
-}
-
-input:focus, select:focus {
-  outline: none;
-  border-color: var(--orange);
 }
 
 .actions {
@@ -92,33 +72,17 @@ input:focus, select:focus {
   font-weight: 600;
 }
 
-.btn.primary {
-  background: var(--red);
-  color: white;
-}
+.btn.primary { background: var(--red); color: white; }
+.btn.secondary { background: var(--orange); color: var(--brown); }
+.btn.small { padding: 4px 6px; font-size: 12px; }
 
-.btn.secondary {
-  background: var(--orange);
-  color: var(--brown);
-}
-
-.btn:hover {
-  opacity: 0.9;
-}
-
-.search {
-  position: relative;
-  max-width: 400px;
-}
-
+.search { position: relative; max-width: 400px; }
 .search-results {
   position: absolute;
   width: 100%;
   background: white;
   border: 1px solid var(--border);
   border-radius: 6px;
-  margin-top: 4px;
-  overflow: hidden;
   z-index: 20;
 }
 
@@ -127,13 +91,7 @@ input:focus, select:focus {
   cursor: pointer;
 }
 
-.search-results div:hover {
-  background: var(--bg);
-}
-
-.table-wrap {
-  overflow-x: auto;
-}
+.table-wrap { overflow-x: auto; }
 
 table {
   width: 100%;
@@ -152,22 +110,5 @@ th, td {
   text-align: center;
 }
 
-tbody tr:nth-child(even) {
-  background: #fafafa;
-}
-
-.manual {
-  border: 1px dashed var(--orange);
-  padding: 12px;
-  border-radius: 8px;
-}
-
-.hidden {
-  display: none;
-}
-.btn.small {
-  margin-top: 4px;
-  padding: 4px 6px;
-  font-size: 12px;
-  border-radius: 6px;
-}
+.manual { border: 1px dashed var(--orange); }
+.hidden { display: none; }

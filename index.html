@@ -2,9 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Калькулятор заказа</title>
+  <title>Калькулятор заказа BK</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
+
 <body>
 
 <header class="header">
@@ -15,7 +16,6 @@
 
   <section class="card">
     <h2>Параметры заказа</h2>
-
     <div class="settings">
       <label>Дата сегодня<input type="date" id="today" /></label>
       <label>Дата прихода<input type="date" id="deliveryDate" /></label>
@@ -33,7 +33,6 @@
 
   <section class="card">
     <h2>Добавление товаров</h2>
-
     <div class="actions">
       <button id="addItem" class="btn secondary">➕ Пустая строка</button>
       <button id="addManual" class="btn primary">✍️ Ручной товар</button>
@@ -45,9 +44,29 @@
     </section>
   </section>
 
+  <!-- РУЧНОЙ ТОВАР -->
+  <section class="card manual hidden" id="manualForm">
+    <h2>Ручной товар</h2>
+
+    <input id="m_name" placeholder="Наименование*" />
+    <input id="m_sku" placeholder="Артикул" />
+    <input id="m_supplier" placeholder="Поставщик" />
+    <input id="m_box" type="number" placeholder="Штук в коробке" value="1" />
+    <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
+
+    <label>
+      <input type="checkbox" id="m_save" />
+      Сохранить в базу
+    </label>
+
+    <div class="actions">
+      <button id="m_add" class="btn primary">Добавить</button>
+      <button id="m_cancel" class="btn secondary">Отмена</button>
+    </div>
+  </section>
+
   <section class="card">
     <h2>Заказ</h2>
-
     <div class="table-wrap">
       <table>
         <thead>
@@ -70,5 +89,4 @@
 
 <script type="module" src="./ui.js"></script>
 </body>
-
 </html>

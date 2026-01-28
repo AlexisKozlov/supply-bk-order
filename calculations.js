@@ -1,50 +1,28 @@
 import { daysBetween, roundUp, safeDivide } from './utils.js';
 
 export function calculateItem(item, settings) {
-  const {
-    today,
-    deliveryDate,
-    periodDays,
-    safetyDays,
-    safetyPercent,
-    unit
-  } = settings;
+  const { today, deliveryDate, periodDays, safetyDays, safetyPercent, unit } = settings;
 
-  if (!today || !deliveryDate) return item;
+  if (!today || !deliveryDate) {
+    return { ...item, calculatedOrder: 0, coverageDate: null, palletsInfo: null };
+  }
 
   const transitDays = daysBetween(today, deliveryDate);
+  const daily = safeDivide(item.consumptionPeriod, periodDays);
 
-  const dailyConsumption =
-    safeDivide(item.consumptionPeriod, periodDays);
+  const need =
+    daily * transitDays +
+    daily * safetyDays;
 
-  const consumptionBeforeDelivery =
-    dailyConsumption * transitDays;
+  const totalNeed = need + need * (safetyPercent / 100);
 
-  const safetyByDays =
-    dailyConsumption * safetyDays;
-
-  const baseNeed =
-    consumptionBeforeDelivery + safetyByDays;
-
-  const safetyByPercent =
-    baseNeed * (safetyPercent / 100);
-
-  let calculatedOrder =
-    baseNeed + safetyByPercent - item.stock;
-
+  let calculatedOrder = totalNeed - item.stock;
   if (calculatedOrder < 0) calculatedOrder = 0;
   if (unit === 'boxes') calculatedOrder = roundUp(calculatedOrder);
 
-  const totalAvailable =
-    item.stock + (item.finalOrder || 0);
-
-  const daysCoverage =
-    safeDivide(totalAvailable, dailyConsumption);
-
-  const coverageDate =
-    dailyConsumption > 0
-      ? new Date(today.getTime() + daysCoverage * 86400000)
-      : null;
+  const available = item.stock + (item.finalOrder || 0);
+  const days = safeDivide(available, daily);
+  const coverageDate = daily ? new Date(today.getTime() + days * 86400000) : null;
 
   return {
     ...item,
@@ -57,17 +35,12 @@ export function calculateItem(item, settings) {
 function calculatePallets(item, unit) {
   if (!item.boxesPerPallet || !item.finalOrder) return null;
 
-  let boxesOrdered = item.finalOrder;
+  let boxes = unit === 'boxes'
+    ? item.finalOrder
+    : item.finalOrder / item.qtyPerBox;
 
-  // если заказ в штуках — переводим в коробки
-  if (unit === 'pieces') {
-    if (!item.qtyPerBox) return null;
-    boxesOrdered = item.finalOrder / item.qtyPerBox;
-  }
-
-  const pallets = Math.floor(boxesOrdered / item.boxesPerPallet);
-  const boxesLeft = Math.ceil(boxesOrdered % item.boxesPerPallet);
-
-  return { pallets, boxesLeft };
+  return {
+    pallets: Math.floor(boxes / item.boxesPerPallet),
+    boxesLeft: Math.ceil(boxes % item.boxesPerPallet)
+  };
 }
-

@@ -5,63 +5,45 @@ import { supabase } from './supabase.js';
 const tbody = document.getElementById('items');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
+const manualForm = document.getElementById('manualForm');
 
-/* ---------- SETTINGS ---------- */
+document.getElementById('addManual').onclick = () =>
+  manualForm.classList.remove('hidden');
 
-function bindSetting(id, key, isDate = false) {
-  document.getElementById(id).addEventListener('input', e => {
-    orderState.settings[key] = isDate
-      ? new Date(e.target.value)
-      : +e.target.value || e.target.value;
-    render();
-  });
-}
+document.getElementById('m_cancel').onclick = () =>
+  manualForm.classList.add('hidden');
 
-bindSetting('today', 'today', true);
-bindSetting('deliveryDate', 'deliveryDate', true);
-bindSetting('periodDays', 'periodDays');
-bindSetting('safetyDays', 'safetyDays');
-bindSetting('safetyPercent', 'safetyPercent');
+document.getElementById('m_add').onclick = async () => {
+  const product = {
+    name: m_name.value.trim(),
+    sku: m_sku.value || null,
+    supplier: m_supplier.value || null,
+    qty_per_box: +m_box.value || 1,
+    boxes_per_pallet: +m_pallet.value || null
+  };
 
-document.getElementById('unit').onchange = e => {
-  orderState.settings.unit = e.target.value;
-  render();
+  if (!product.name) return alert('Введите наименование');
+
+  if (m_save.checked) {
+    const { data } = await supabase.from('products').insert(product).select().single();
+    addItem(data);
+  } else addItem(product);
+
+  manualForm.classList.add('hidden');
 };
 
-/* ---------- ADD EMPTY ---------- */
-
-document.getElementById('addItem').onclick = () => {
+document.getElementById('addItem').onclick = () =>
   addItem({ name: 'Новый товар', qty_per_box: 1 });
-};
 
-/* ---------- SEARCH ---------- */
-
-let searchTimeout;
-
-searchInput.oninput = () => {
-  clearTimeout(searchTimeout);
+searchInput.oninput = async () => {
   const q = searchInput.value.trim();
   if (q.length < 2) return (searchResults.innerHTML = '');
 
-  searchTimeout = setTimeout(() => searchProducts(q), 300);
-};
-
-async function searchProducts(q) {
   const isCode = /^[0-9A-Za-z-]+$/.test(q);
-
-  let query = supabase
-    .from('products')
-    .select('*')
-    .limit(10);
-
-  if (isCode) {
-    query = query.ilike('sku', `%${q}%`);
-  } else {
-    query = query.ilike('name', `%${q}%`);
-  }
+  let query = supabase.from('products').select('*').limit(10);
+  query = isCode ? query.ilike('sku', `%${q}%`) : query.ilike('name', `%${q}%`);
 
   const { data } = await query;
-
   searchResults.innerHTML = '';
   data?.forEach(p => {
     const div = document.createElement('div');
@@ -73,57 +55,7 @@ async function searchProducts(q) {
     };
     searchResults.appendChild(div);
   });
-}
-
-
-/* ---------- MANUAL FORM ---------- */
-
-const form = document.getElementById('manualForm');
-
-document.getElementById('addManual').onclick = () =>
-  form.classList.remove('hidden');
-
-document.getElementById('m_cancel').onclick = () =>
-  form.classList.add('hidden');
-
-document.getElementById('m_add').onclick = async () => {
-  const product = {
-    name: m_name.value.trim(),
-    sku: m_sku.value || null,
-    supplier: m_supplier.value || null,
-    qty_per_box: +m_box.value || 1,
-    boxes_per_pallet: +m_pallet.value || null
-  };
-
-  if (!product.name) {
-    alert('Наименование обязательно');
-    return;
-  }
-
-  if (m_save.checked) {
-    const { data, error } = await supabase
-      .from('products')
-      .insert(product)
-      .select()
-      .single();
-
-    if (error) {
-      alert('Ошибка сохранения');
-      return;
-    }
-
-    addItem(data);
-  } else {
-    addItem(product);
-  }
-
-  form.classList.add('hidden');
-  form.querySelectorAll('input').forEach(i => (i.value = ''));
-  m_box.value = 1;
-  m_save.checked = false;
 };
-
-/* ---------- ITEMS ---------- */
 
 function addItem(p) {
   orderState.items.push({
@@ -138,100 +70,66 @@ function addItem(p) {
   render();
 }
 
-/* ---------- RENDER ---------- */
-
 function render() {
   tbody.innerHTML = '';
 
   orderState.items.forEach(item => {
-    const calc = calculateItem(item, orderState.settings);
     const tr = document.createElement('tr');
-
     tr.innerHTML = `
-  <td><input value="${item.name}"></td>
-  <td><input type="number" value="${item.consumptionPeriod}"></td>
-  <td><input type="number" value="${item.stock}"></td>
-  <td class="calc">0</td>
-  <td><input type="number" value="${item.finalOrder || 0}"></td>
-  <td class="date">-</td>
-  <td class="pallets">
-  <div class="pallet-info">-</div>
-  <button class="btn small pallet-btn">Округлить</button>
-</td>
-`;
-
+      <td><input value="${item.name}"></td>
+      <td><input type="number" value="${item.consumptionPeriod}"></td>
+      <td><input type="number" value="${item.stock}"></td>
+      <td class="calc">0</td>
+      <td><input type="number" value="${item.finalOrder}"></td>
+      <td class="date">-</td>
+      <td class="pallets">
+        <div class="pallet-info">-</div>
+        <button class="btn small">Округлить</button>
+      </td>
+    `;
 
     const i = tr.querySelectorAll('input');
-    const palletBtn = tr.querySelector('.pallet-btn');
+    const btn = tr.querySelector('button');
 
-palletBtn.onclick = () => {
-  roundToPallet(item);
-  updateRow(tr, item);
+    i[1].oninput = e => { item.consumptionPeriod = +e.target.value || 0; update(tr, item); };
+    i[2].oninput = e => { item.stock = +e.target.value || 0; update(tr, item); };
+    i[3].oninput = e => { item.finalOrder = +e.target.value || 0; update(tr, item); };
 
-  // обновим поле "Заказ итого" визуально
-  i[3].value = item.finalOrder;
-};
- i[0].oninput = e => {
-  item.name = e.target.value;
-};
+    btn.onclick = () => {
+      roundToPallet(item);
+      i[3].value = item.finalOrder;
+      update(tr, item);
+    };
 
-i[1].oninput = e => {
-  item.consumptionPeriod = +e.target.value || 0;
-  updateRow(tr, item);
-};
-
-
-i[2].oninput = e => {
-  item.stock = +e.target.value || 0;
-  updateRow(tr, item);
-};
-
-
-i[3].oninput = e => {
-  item.finalOrder = +e.target.value || 0;
-  updateRow(tr, item);
-};
     tbody.appendChild(tr);
+    update(tr, item);
   });
 }
 
-render();
-
-function updateRow(tr, item) {
+function update(tr, item) {
   const calc = calculateItem(item, orderState.settings);
-
-  tr.querySelector('.calc').textContent =
-    (calc.calculatedOrder ?? 0).toFixed(2);
-
+  tr.querySelector('.calc').textContent = calc.calculatedOrder.toFixed(2);
   tr.querySelector('.date').textContent =
-    calc.coverageDate
-      ? calc.coverageDate.toLocaleDateString()
+    calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-';
+  tr.querySelector('.pallet-info').textContent =
+    calc.palletsInfo
+      ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
       : '-';
-
-tr.querySelector('.pallet-info').textContent =
-  calc.palletsInfo
-    ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
-    : '-';
+}
 
 function roundToPallet(item) {
-  if (!item.boxesPerPallet || !item.finalOrder) return;
+  if (!item.boxesPerPallet) return;
 
-  let boxes;
-
-  if (orderState.settings.unit === 'boxes') {
-    boxes = item.finalOrder;
-  } else {
-    if (!item.qtyPerBox) return;
-    boxes = item.finalOrder / item.qtyPerBox;
-  }
+  let boxes = orderState.settings.unit === 'boxes'
+    ? item.finalOrder
+    : item.finalOrder / item.qtyPerBox;
 
   const pallets = Math.ceil(boxes / item.boxesPerPallet);
-  const roundedBoxes = pallets * item.boxesPerPallet;
+  const rounded = pallets * item.boxesPerPallet;
 
-  if (orderState.settings.unit === 'boxes') {
-    item.finalOrder = roundedBoxes;
-  } else {
-    item.finalOrder = roundedBoxes * item.qtyPerBox;
-  }
+  item.finalOrder = orderState.settings.unit === 'boxes'
+    ? rounded
+    : rounded * item.qtyPerBox;
 }
-}
+
+render();
