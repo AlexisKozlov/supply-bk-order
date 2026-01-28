@@ -234,3 +234,4 @@ function roundToPallet(item) {
     item.finalOrder = roundedBoxes * item.qtyPerBox;
   }
 }
+}
