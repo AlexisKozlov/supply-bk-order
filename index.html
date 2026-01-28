@@ -53,10 +53,30 @@
     </section>
   </section>
 
-  <!-- Итоги -->
-  <section class="card" id="summary">
-    <h2>Итоги по поставщику</h2>
-    <div id="summaryContent"></div>
+  <section class="card">
+    <h2>Заказ</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Товар</th>
+            <th>Расход</th>
+            <th>Остаток</th>
+            <th>Расчёт</th>
+            <th>Заказ итого</th>
+            <th>Хватит до</th>
+            <th>Паллеты</th>
+          </tr>
+        </thead>
+        <tbody id="items"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ИТОГИ ДЛЯ СКРИНА -->
+  <section class="card">
+    <h2>Итог заказа</h2>
+    <div id="finalSummary"></div>
   </section>
 
   <!-- Ручной товар -->
@@ -77,26 +97,6 @@
     <div class="actions">
       <button id="m_add" class="btn primary">Добавить</button>
       <button id="m_cancel" class="btn secondary">Отмена</button>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Заказ</h2>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Товар</th>
-            <th>Расход</th>
-            <th>Остаток</th>
-            <th>Расчёт</th>
-            <th>Заказ</th>
-            <th>Хватит до</th>
-            <th>Паллеты</th>
-          </tr>
-        </thead>
-        <tbody id="items"></tbody>
-      </table>
     </div>
   </section>
 
