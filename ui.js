@@ -150,11 +150,24 @@ function render() {
     `;
 
     const i = tr.querySelectorAll('input');
-    i[0].oninput = e => item.name = e.target.value;
-    i[1].oninput = e => item.consumptionPeriod = +e.target.value || 0;
-    i[2].oninput = e => item.stock = +e.target.value || 0;
-    i[3].oninput = e => item.finalOrder = +e.target.value || 0;
+ i[0].oninput = e => {
+  item.name = e.target.value;
+};
 
+i[1].oninput = e => {
+  item.consumptionPeriod = +e.target.value || 0;
+  render();
+};
+
+i[2].oninput = e => {
+  item.stock = +e.target.value || 0;
+  render();
+};
+
+i[3].oninput = e => {
+  item.finalOrder = +e.target.value || 0;
+  render();
+};
     tbody.appendChild(tr);
   });
 }

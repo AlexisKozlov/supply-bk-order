@@ -55,14 +55,19 @@ export function calculateItem(item, settings) {
 }
 
 function calculatePallets(item, unit) {
-  if (
-    unit !== 'boxes' ||
-    !item.boxesPerPallet ||
-    !item.finalOrder
-  ) return null;
+  if (!item.boxesPerPallet || !item.finalOrder) return null;
 
-  return {
-    pallets: Math.floor(item.finalOrder / item.boxesPerPallet),
-    boxesLeft: item.finalOrder % item.boxesPerPallet
-  };
+  let boxesOrdered = item.finalOrder;
+
+  // если заказ в штуках — переводим в коробки
+  if (unit === 'pieces') {
+    if (!item.qtyPerBox) return null;
+    boxesOrdered = item.finalOrder / item.qtyPerBox;
+  }
+
+  const pallets = Math.floor(boxesOrdered / item.boxesPerPallet);
+  const boxesLeft = Math.ceil(boxesOrdered % item.boxesPerPallet);
+
+  return { pallets, boxesLeft };
 }
+
