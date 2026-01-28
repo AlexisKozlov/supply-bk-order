@@ -7,10 +7,14 @@ const tbody = document.getElementById('items');
 const supplierSelect = document.getElementById('supplierFilter');
 const finalSummary = document.getElementById('finalSummary');
 
+const manualForm = document.getElementById('manualForm');
+const addManualBtn = document.getElementById('addManual');
+const manualAddBtn = document.getElementById('m_add');
+const manualCancelBtn = document.getElementById('m_cancel');
+
 /* ================= ДАТА СЕГОДНЯ ================= */
 const today = new Date();
-const todayInput = document.getElementById('today');
-todayInput.value = today.toISOString().slice(0, 10);
+document.getElementById('today').value = today.toISOString().slice(0, 10);
 orderState.settings.today = today;
 
 /* ================= НАСТРОЙКИ ================= */
@@ -39,25 +43,14 @@ document.getElementById('unit').addEventListener('change', e => {
 
 /* ================= ПОСТАВЩИКИ ================= */
 (async function loadSuppliers() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('supplier');
-
-  if (error) {
-    console.error(error);
-    return;
-  }
-
-  const suppliers = [...new Set(
-    data.map(p => p.supplier).filter(Boolean)
-  )];
-
-  suppliers.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
-    supplierSelect.appendChild(opt);
-  });
+  const { data } = await supabase.from('products').select('supplier');
+  [...new Set(data.map(p => p.supplier).filter(Boolean))]
+    .forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      supplierSelect.appendChild(opt);
+    });
 })();
 
 supplierSelect.addEventListener('change', async () => {
@@ -66,17 +59,57 @@ supplierSelect.addEventListener('change', async () => {
 
   if (!supplierSelect.value) return;
 
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from('products')
     .select('*')
     .eq('supplier', supplierSelect.value);
 
-  if (error) {
-    console.error(error);
+  data.forEach(addItem);
+});
+
+/* ================= РУЧНОЙ ТОВАР ================= */
+addManualBtn.addEventListener('click', () => {
+  manualForm.classList.remove('hidden');
+});
+
+manualCancelBtn.addEventListener('click', () => {
+  manualForm.classList.add('hidden');
+});
+
+manualAddBtn.addEventListener('click', async () => {
+  const name = document.getElementById('m_name').value.trim();
+  if (!name) {
+    alert('Введите наименование');
     return;
   }
 
-  data.forEach(addItem);
+  const product = {
+    name,
+    sku: document.getElementById('m_sku').value || null,
+    supplier: document.getElementById('m_supplier').value || null,
+    qty_per_box: +document.getElementById('m_box').value || 1,
+    boxes_per_pallet: +document.getElementById('m_pallet').value || null
+  };
+
+  if (document.getElementById('m_save').checked) {
+    const { data, error } = await supabase
+      .from('products')
+      .insert(product)
+      .select()
+      .single();
+
+    if (error) {
+      alert('Ошибка сохранения в базу');
+      console.error(error);
+      return;
+    }
+
+    addItem(data);
+  } else {
+    addItem(product);
+  }
+
+  manualForm.classList.add('hidden');
 });
 
 /* ================= ДОБАВЛЕНИЕ ================= */
@@ -159,7 +192,6 @@ function updateRow(tr, item) {
       ? calc.coverageDate.toLocaleDateString()
       : '-';
 
-  // --- паллеты всегда считаем через коробки ---
   if (item.boxesPerPallet && item.finalOrder > 0) {
     const boxes =
       orderState.settings.unit === 'boxes'
@@ -178,7 +210,7 @@ function updateRow(tr, item) {
   updateFinalSummary();
 }
 
-/* ================= ОКРУГЛЕНИЕ ДО ПАЛЛЕТЫ ================= */
+/* ================= ОКРУГЛЕНИЕ ================= */
 function roundToPallet(item) {
   if (!item.boxesPerPallet) return;
 
