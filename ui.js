@@ -28,79 +28,103 @@ document.getElementById('unit').onchange = e => {
   render();
 };
 
-/* ---------- ADD EMPTY ITEM ---------- */
+/* ---------- ADD EMPTY ---------- */
 
 document.getElementById('addItem').onclick = () => {
-  addItem({
-    name: 'Новый товар',
-    qty_per_box: 1,
-    boxes_per_pallet: null
-  });
+  addItem({ name: 'Новый товар', qty_per_box: 1 });
 };
 
 /* ---------- SEARCH ---------- */
 
-let searchTimeout = null;
+let searchTimeout;
 
 searchInput.oninput = () => {
   clearTimeout(searchTimeout);
-  const query = searchInput.value.trim();
+  const q = searchInput.value.trim();
+  if (q.length < 2) return (searchResults.innerHTML = '');
 
-  if (query.length < 2) {
-    searchResults.innerHTML = '';
-    return;
-  }
-
-  searchTimeout = setTimeout(() => {
-    searchProducts(query);
-  }, 300);
+  searchTimeout = setTimeout(() => searchProducts(q), 300);
 };
 
-async function searchProducts(query) {
-  const { data, error } = await supabase
+async function searchProducts(q) {
+  const { data } = await supabase
     .from('products')
     .select('*')
-    .ilike('name', `%${query}%`)
+    .ilike('name', `%${q}%`)
     .limit(10);
 
-  if (error) {
-    console.error(error);
-    return;
-  }
-
-  renderSearchResults(data);
-}
-
-function renderSearchResults(products) {
   searchResults.innerHTML = '';
-
-  products.forEach(p => {
+  data?.forEach(p => {
     const div = document.createElement('div');
-    div.textContent = `${p.name} (${p.sku || 'без артикула'})`;
-
+    div.textContent = p.name;
     div.onclick = () => {
       addItem(p);
       searchResults.innerHTML = '';
       searchInput.value = '';
     };
-
     searchResults.appendChild(div);
   });
 }
 
+/* ---------- MANUAL FORM ---------- */
+
+const form = document.getElementById('manualForm');
+
+document.getElementById('addManual').onclick = () =>
+  form.classList.remove('hidden');
+
+document.getElementById('m_cancel').onclick = () =>
+  form.classList.add('hidden');
+
+document.getElementById('m_add').onclick = async () => {
+  const product = {
+    name: m_name.value.trim(),
+    sku: m_sku.value || null,
+    supplier: m_supplier.value || null,
+    qty_per_box: +m_box.value || 1,
+    boxes_per_pallet: +m_pallet.value || null
+  };
+
+  if (!product.name) {
+    alert('Наименование обязательно');
+    return;
+  }
+
+  if (m_save.checked) {
+    const { data, error } = await supabase
+      .from('products')
+      .insert(product)
+      .select()
+      .single();
+
+    if (error) {
+      alert('Ошибка сохранения');
+      return;
+    }
+
+    addItem(data);
+  } else {
+    addItem(product);
+  }
+
+  form.classList.add('hidden');
+  form.querySelectorAll('input').forEach(i => (i.value = ''));
+  m_box.value = 1;
+  m_save.checked = false;
+};
+
 /* ---------- ITEMS ---------- */
 
-function addItem(product) {
+function addItem(p) {
   orderState.items.push({
     id: crypto.randomUUID(),
-    name: product.name,
+    name: p.name,
     consumptionPeriod: 0,
     stock: 0,
-    qtyPerBox: product.qty_per_box || 1,
-    boxesPerPallet: product.boxes_per_pallet,
+    qtyPerBox: p.qty_per_box || 1,
+    boxesPerPallet: p.boxes_per_pallet,
     finalOrder: 0
   });
-
   render();
 }
 
@@ -125,11 +149,11 @@ function render() {
         : '-'}</td>
     `;
 
-    const inputs = tr.querySelectorAll('input');
-    inputs[0].oninput = e => item.name = e.target.value;
-    inputs[1].oninput = e => item.consumptionPeriod = +e.target.value || 0;
-    inputs[2].oninput = e => item.stock = +e.target.value || 0;
-    inputs[3].oninput = e => item.finalOrder = +e.target.value || 0;
+    const i = tr.querySelectorAll('input');
+    i[0].oninput = e => item.name = e.target.value;
+    i[1].oninput = e => item.consumptionPeriod = +e.target.value || 0;
+    i[2].oninput = e => item.stock = +e.target.value || 0;
+    i[3].oninput = e => item.finalOrder = +e.target.value || 0;
 
     tbody.appendChild(tr);
   });

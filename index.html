@@ -45,6 +45,26 @@
 </section>
 
 <button id="addItem">➕ Добавить товар</button>
+<button id="addManual">✍️ Ручной товар</button>
+
+<div id="manualForm" class="manual hidden">
+  <h3>Новый товар</h3>
+
+  <input id="m_name" placeholder="Наименование*" />
+  <input id="m_sku" placeholder="Артикул" />
+  <input id="m_supplier" placeholder="Поставщик" />
+  <input id="m_box" type="number" placeholder="Штук в коробке" value="1" />
+  <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
+
+  <label>
+    <input type="checkbox" id="m_save" />
+    Сохранить в базу
+  </label>
+
+  <button id="m_add">Добавить</button>
+  <button id="m_cancel">Отмена</button>
+</div>
+
 
 <section class="search">
   <input
