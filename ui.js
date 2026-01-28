@@ -1,7 +1,12 @@
 import { orderState } from './state.js';
 import { calculateItem } from './calculations.js';
+import { supabase } from './supabase.js';
 
 const tbody = document.getElementById('items');
+const searchInput = document.getElementById('productSearch');
+const searchResults = document.getElementById('searchResults');
+
+/* ---------- SETTINGS ---------- */
 
 function bindSetting(id, key, isDate = false) {
   document.getElementById(id).addEventListener('input', e => {
@@ -23,18 +28,83 @@ document.getElementById('unit').onchange = e => {
   render();
 };
 
+/* ---------- ADD EMPTY ITEM ---------- */
+
 document.getElementById('addItem').onclick = () => {
+  addItem({
+    name: 'Новый товар',
+    qty_per_box: 1,
+    boxes_per_pallet: null
+  });
+};
+
+/* ---------- SEARCH ---------- */
+
+let searchTimeout = null;
+
+searchInput.oninput = () => {
+  clearTimeout(searchTimeout);
+  const query = searchInput.value.trim();
+
+  if (query.length < 2) {
+    searchResults.innerHTML = '';
+    return;
+  }
+
+  searchTimeout = setTimeout(() => {
+    searchProducts(query);
+  }, 300);
+};
+
+async function searchProducts(query) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .ilike('name', `%${query}%`)
+    .limit(10);
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  renderSearchResults(data);
+}
+
+function renderSearchResults(products) {
+  searchResults.innerHTML = '';
+
+  products.forEach(p => {
+    const div = document.createElement('div');
+    div.textContent = `${p.name} (${p.sku || 'без артикула'})`;
+
+    div.onclick = () => {
+      addItem(p);
+      searchResults.innerHTML = '';
+      searchInput.value = '';
+    };
+
+    searchResults.appendChild(div);
+  });
+}
+
+/* ---------- ITEMS ---------- */
+
+function addItem(product) {
   orderState.items.push({
     id: crypto.randomUUID(),
-    name: 'Новый товар',
+    name: product.name,
     consumptionPeriod: 0,
     stock: 0,
-    qtyPerBox: 1,
-    boxesPerPallet: null,
+    qtyPerBox: product.qty_per_box || 1,
+    boxesPerPallet: product.boxes_per_pallet,
     finalOrder: 0
   });
+
   render();
-};
+}
+
+/* ---------- RENDER ---------- */
 
 function render() {
   tbody.innerHTML = '';
