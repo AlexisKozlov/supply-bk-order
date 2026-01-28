@@ -15,7 +15,10 @@ orderState.settings.today = today;
 
 /* ================= НАСТРОЙКИ ================= */
 function bindSetting(id, key, isDate = false) {
-  document.getElementById(id).addEventListener('input', e => {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  el.addEventListener('input', e => {
     orderState.settings[key] = isDate
       ? new Date(e.target.value)
       : +e.target.value || 0;
@@ -29,15 +32,25 @@ bindSetting('periodDays', 'periodDays');
 bindSetting('safetyDays', 'safetyDays');
 bindSetting('safetyPercent', 'safetyPercent');
 
-document.getElementById('unit').onchange = e => {
+document.getElementById('unit').addEventListener('change', e => {
   orderState.settings.unit = e.target.value;
   rerenderAll();
-};
+});
 
 /* ================= ПОСТАВЩИКИ ================= */
 (async function loadSuppliers() {
-  const { data } = await supabase.from('products').select('supplier');
-  const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
+  const { data, error } = await supabase
+    .from('products')
+    .select('supplier');
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  const suppliers = [...new Set(
+    data.map(p => p.supplier).filter(Boolean)
+  )];
 
   suppliers.forEach(s => {
     const opt = document.createElement('option');
@@ -47,23 +60,29 @@ document.getElementById('unit').onchange = e => {
   });
 })();
 
-supplierSelect.onchange = async () => {
+supplierSelect.addEventListener('change', async () => {
   orderState.items = [];
   render();
 
   if (!supplierSelect.value) return;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('products')
     .select('*')
     .eq('supplier', supplierSelect.value);
 
+  if (error) {
+    console.error(error);
+    return;
+  }
+
   data.forEach(addItem);
-};
+});
 
 /* ================= ДОБАВЛЕНИЕ ================= */
-document.getElementById('addItem').onclick = () =>
+document.getElementById('addItem').addEventListener('click', () => {
   addItem({ name: 'Новый товар', qty_per_box: 1 });
+});
 
 function addItem(p) {
   orderState.items.push({
@@ -72,7 +91,7 @@ function addItem(p) {
     consumptionPeriod: 0,
     stock: 0,
     qtyPerBox: p.qty_per_box || 1,
-    boxesPerPallet: p.boxes_per_pallet,
+    boxesPerPallet: p.boxes_per_pallet || null,
     finalOrder: 0
   });
   render();
@@ -99,37 +118,37 @@ function render() {
     `;
 
     const inputs = tr.querySelectorAll('input');
-    const btn = tr.querySelector('button');
+    const roundBtn = tr.querySelector('button');
 
-    inputs[1].oninput = e => {
+    inputs[1].addEventListener('input', e => {
       item.consumptionPeriod = +e.target.value || 0;
-      update(tr, item);
-    };
+      updateRow(tr, item);
+    });
 
-    inputs[2].oninput = e => {
+    inputs[2].addEventListener('input', e => {
       item.stock = +e.target.value || 0;
-      update(tr, item);
-    };
+      updateRow(tr, item);
+    });
 
-    inputs[3].oninput = e => {
+    inputs[3].addEventListener('input', e => {
       item.finalOrder = +e.target.value || 0;
-      update(tr, item);
-    };
+      updateRow(tr, item);
+    });
 
-    btn.onclick = () => {
+    roundBtn.addEventListener('click', () => {
       roundToPallet(item);
       inputs[3].value = item.finalOrder;
-      update(tr, item);
-    };
+      updateRow(tr, item);
+    });
 
     tbody.appendChild(tr);
-    update(tr, item);
+    updateRow(tr, item);
   });
 
   updateFinalSummary();
 }
 
-function update(tr, item) {
+function updateRow(tr, item) {
   const calc = calculateItem(item, orderState.settings);
 
   tr.querySelector('.calc').textContent =
@@ -140,12 +159,23 @@ function update(tr, item) {
       ? calc.coverageDate.toLocaleDateString()
       : '-';
 
-  if (calc.palletsInfo) {
+  // --- паллеты всегда считаем через коробки ---
+  if (item.boxesPerPallet && item.finalOrder > 0) {
+    const boxes =
+      orderState.settings.unit === 'boxes'
+        ? item.finalOrder
+        : item.finalOrder / item.qtyPerBox;
+
+    const pallets = Math.floor(boxes / item.boxesPerPallet);
+    const boxesLeft = Math.ceil(boxes % item.boxesPerPallet);
+
     tr.querySelector('.pallet-info').textContent =
-      `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`;
+      `${pallets} пал. + ${boxesLeft} кор.`;
   } else {
     tr.querySelector('.pallet-info').textContent = '-';
   }
+
+  updateFinalSummary();
 }
 
 /* ================= ОКРУГЛЕНИЕ ДО ПАЛЛЕТЫ ================= */
@@ -166,40 +196,23 @@ function roundToPallet(item) {
       : roundedBoxes * item.qtyPerBox;
 }
 
-/* ================= ИТОГИ ДЛЯ СКРИНА ================= */
+/* ================= ИТОГ В КОРОБКАХ ================= */
 function updateFinalSummary() {
-  finalSummary.innerHTML = orderState.items
-    .map(i => `<div><b>${i.name}</b> — ${i.finalOrder}</div>`)
-    .join('');
+  finalSummary.innerHTML = orderState.items.map(item => {
+    const boxes =
+      orderState.settings.unit === 'boxes'
+        ? item.finalOrder
+        : item.finalOrder / item.qtyPerBox;
+
+    return `<div><b>${item.name}</b> — ${Math.ceil(boxes)} коробок</div>`;
+  }).join('');
 }
-
-/* ================= ЭКСПОРТ В EXCEL ================= */
-document.getElementById('exportExcel').onclick = () => {
-  let html =
-    '<table><tr><th>Номенклатура</th><th>Заказ итого</th></tr>';
-
-  orderState.items.forEach(i => {
-    html += `<tr><td>${i.name}</td><td>${i.finalOrder}</td></tr>`;
-  });
-
-  html += '</table>';
-
-  const blob = new Blob(
-    ['\ufeff' + html],
-    { type: 'application/vnd.ms-excel' }
-  );
-
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'order.xls';
-  a.click();
-};
 
 /* ================= ПЕРЕРИСОВКА ================= */
 function rerenderAll() {
-  document.querySelectorAll('#items tr')
-    .forEach((tr, i) => update(tr, orderState.items[i]));
-  updateFinalSummary();
+  document
+    .querySelectorAll('#items tr')
+    .forEach((tr, i) => updateRow(tr, orderState.items[i]));
 }
 
 render();
