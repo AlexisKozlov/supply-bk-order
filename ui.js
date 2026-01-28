@@ -47,16 +47,25 @@ searchInput.oninput = () => {
 };
 
 async function searchProducts(q) {
-  const { data } = await supabase
+  const isCode = /^[0-9A-Za-z-]+$/.test(q);
+
+  let query = supabase
     .from('products')
     .select('*')
-    .ilike('name', `%${q}%`)
     .limit(10);
+
+  if (isCode) {
+    query = query.ilike('sku', `%${q}%`);
+  } else {
+    query = query.ilike('name', `%${q}%`);
+  }
+
+  const { data } = await query;
 
   searchResults.innerHTML = '';
   data?.forEach(p => {
     const div = document.createElement('div');
-    div.textContent = p.name;
+    div.textContent = `${p.sku || ''} — ${p.name}`;
     div.onclick = () => {
       addItem(p);
       searchResults.innerHTML = '';
@@ -65,6 +74,7 @@ async function searchProducts(q) {
     searchResults.appendChild(div);
   });
 }
+
 
 /* ---------- MANUAL FORM ---------- */
 
@@ -138,16 +148,15 @@ function render() {
     const tr = document.createElement('tr');
 
     tr.innerHTML = `
-      <td><input value="${item.name}"></td>
-      <td><input type="number" value="${item.consumptionPeriod}"></td>
-      <td><input type="number" value="${item.stock}"></td>
-      <td>${(calc.calculatedOrder ?? 0).toFixed(2)}</td>
-      <td><input type="number" value="${item.finalOrder || 0}"></td>
-      <td>${calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-'}</td>
-      <td>${calc.palletsInfo
-        ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
-        : '-'}</td>
-    `;
+  <td><input value="${item.name}"></td>
+  <td><input type="number" value="${item.consumptionPeriod}"></td>
+  <td><input type="number" value="${item.stock}"></td>
+  <td class="calc">0</td>
+  <td><input type="number" value="${item.finalOrder || 0}"></td>
+  <td class="date">-</td>
+  <td class="pallets">-</td>
+`;
+
 
     const i = tr.querySelectorAll('input');
  i[0].oninput = e => {
@@ -156,20 +165,39 @@ function render() {
 
 i[1].oninput = e => {
   item.consumptionPeriod = +e.target.value || 0;
-  render();
+  updateRow(tr, item);
 };
+
 
 i[2].oninput = e => {
   item.stock = +e.target.value || 0;
-  render();
+  updateRow(tr, item);
 };
+
 
 i[3].oninput = e => {
   item.finalOrder = +e.target.value || 0;
-  render();
+  updateRow(tr, item);
 };
     tbody.appendChild(tr);
   });
 }
 
 render();
+
+function updateRow(tr, item) {
+  const calc = calculateItem(item, orderState.settings);
+
+  tr.querySelector('.calc').textContent =
+    (calc.calculatedOrder ?? 0).toFixed(2);
+
+  tr.querySelector('.date').textContent =
+    calc.coverageDate
+      ? calc.coverageDate.toLocaleDateString()
+      : '-';
+
+  tr.querySelector('.pallets').textContent =
+    calc.palletsInfo
+      ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
+      : '-';
+}
