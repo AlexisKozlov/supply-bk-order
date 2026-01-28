@@ -2,19 +2,21 @@ import { orderState } from './state.js';
 import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
 
+/* ================= DOM ================= */
 const tbody = document.getElementById('items');
+const summary = document.getElementById('summaryContent');
 const manualForm = document.getElementById('manualForm');
+const supplierSelect = document.getElementById('supplierFilter');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
-const supplierSelect = document.getElementById('supplierFilter');
 
-/* ========= ДАТА СЕГОДНЯ ========= */
+/* ================= ДАТА СЕГОДНЯ ================= */
 const todayInput = document.getElementById('today');
 const today = new Date();
 todayInput.value = today.toISOString().slice(0, 10);
 orderState.settings.today = today;
 
-/* ========= НАСТРОЙКИ ========= */
+/* ================= НАСТРОЙКИ ================= */
 function bindSetting(id, key, isDate = false) {
   document.getElementById(id).addEventListener('input', e => {
     orderState.settings[key] = isDate
@@ -35,13 +37,11 @@ document.getElementById('unit').onchange = e => {
   rerenderAll();
 };
 
-/* ========= ПОСТАВЩИКИ ========= */
+/* ================= ПОСТАВЩИКИ ================= */
 loadSuppliers();
 
 async function loadSuppliers() {
-  const { data } = await supabase
-    .from('products')
-    .select('supplier');
+  const { data } = await supabase.from('products').select('supplier');
 
   const suppliers = [...new Set(
     data.map(p => p.supplier).filter(Boolean)
@@ -56,21 +56,20 @@ async function loadSuppliers() {
 }
 
 supplierSelect.onchange = async () => {
-  const supplier = supplierSelect.value;
   orderState.items = [];
   render();
 
-  if (!supplier) return;
+  if (!supplierSelect.value) return;
 
   const { data } = await supabase
     .from('products')
     .select('*')
-    .eq('supplier', supplier);
+    .eq('supplier', supplierSelect.value);
 
   data.forEach(addItem);
 };
 
-/* ========= ПОИСК ========= */
+/* ================= ПОИСК ================= */
 let searchTimer = null;
 
 searchInput.oninput = () => {
@@ -113,7 +112,7 @@ async function searchProducts(q) {
   });
 }
 
-/* ========= РУЧНОЙ ТОВАР ========= */
+/* ================= РУЧНОЙ ТОВАР ================= */
 document.getElementById('addManual').onclick = () =>
   manualForm.classList.remove('hidden');
 
@@ -132,11 +131,18 @@ document.getElementById('m_add').onclick = async () => {
   if (!product.name) return alert('Введите наименование');
 
   if (m_save.checked) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('products')
       .insert(product)
       .select()
       .single();
+
+    if (error) {
+      alert('Ошибка сохранения');
+      console.error(error);
+      return;
+    }
+
     addItem(data);
   } else {
     addItem(product);
@@ -145,7 +151,7 @@ document.getElementById('m_add').onclick = async () => {
   manualForm.classList.add('hidden');
 };
 
-/* ========= ДОБАВЛЕНИЕ ========= */
+/* ================= ДОБАВЛЕНИЕ ================= */
 document.getElementById('addItem').onclick = () =>
   addItem({ name: 'Новый товар', qty_per_box: 1 });
 
@@ -162,12 +168,13 @@ function addItem(p) {
   render();
 }
 
-/* ========= ТАБЛИЦА ========= */
+/* ================= ТАБЛИЦА ================= */
 function render() {
   tbody.innerHTML = '';
 
   orderState.items.forEach(item => {
     const tr = document.createElement('tr');
+
     tr.innerHTML = `
       <td><input value="${item.name}"></td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>
@@ -175,63 +182,83 @@ function render() {
       <td class="calc">0</td>
       <td><input type="number" value="${item.finalOrder}"></td>
       <td class="date">-</td>
-      <td class="pallets">
-        <div class="pallet-info">-</div>
-        <button class="btn small">Округлить</button>
-      </td>
+      <td class="pallets"><div class="pallet-info">-</div></td>
     `;
 
     const i = tr.querySelectorAll('input');
-    const btn = tr.querySelector('button');
 
     i[1].oninput = e => { item.consumptionPeriod = +e.target.value || 0; update(tr, item); };
     i[2].oninput = e => { item.stock = +e.target.value || 0; update(tr, item); };
     i[3].oninput = e => { item.finalOrder = +e.target.value || 0; update(tr, item); };
 
-    btn.onclick = () => {
-      roundToPallet(item);
-      i[3].value = item.finalOrder;
-      update(tr, item);
-    };
-
     tbody.appendChild(tr);
     update(tr, item);
   });
+
+  updateSummary();
 }
 
 function update(tr, item) {
   const calc = calculateItem(item, orderState.settings);
 
-  tr.querySelector('.calc').textContent = calc.calculatedOrder.toFixed(2);
+  tr.querySelector('.calc').textContent =
+    calc.calculatedOrder.toFixed(2);
+
   tr.querySelector('.date').textContent =
-    calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-';
+    calc.coverageDate
+      ? calc.coverageDate.toLocaleDateString()
+      : '-';
+
   tr.querySelector('.pallet-info').textContent =
     calc.palletsInfo
-      ? `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`
+      ? `${calc.palletsInfo.pallets} пал.`
       : '-';
+}
+
+/* ================= ИТОГИ ================= */
+function updateSummary() {
+  let totalOrder = 0;
+  let totalPallets = 0;
+
+  orderState.items.forEach(i => {
+    totalOrder += i.finalOrder || 0;
+
+    if (i.boxesPerPallet) {
+      const boxes = orderState.settings.unit === 'boxes'
+        ? i.finalOrder
+        : i.finalOrder / i.qtyPerBox;
+
+      totalPallets += Math.floor(boxes / i.boxesPerPallet);
+    }
+  });
+
+  summary.innerHTML = `
+    <b>Строк:</b> ${orderState.items.length}<br>
+    <b>Всего заказано:</b> ${totalOrder.toFixed(2)}<br>
+    <b>Всего паллет:</b> ${totalPallets}
+  `;
 }
 
 function rerenderAll() {
   document.querySelectorAll('#items tr').forEach((tr, idx) =>
     update(tr, orderState.items[idx])
   );
+  updateSummary();
 }
 
-function roundToPallet(item) {
-  if (!item.boxesPerPallet) return;
+/* ================= ЭКСПОРТ ================= */
+document.getElementById('exportExcel').onclick = () => {
+  let csv = 'Товар;Заказ;Единица\n';
 
-  const boxes =
-    orderState.settings.unit === 'boxes'
-      ? item.finalOrder
-      : item.finalOrder / item.qtyPerBox;
+  orderState.items.forEach(i => {
+    csv += `${i.name};${i.finalOrder};${orderState.settings.unit}\n`;
+  });
 
-  const pallets = Math.ceil(boxes / item.boxesPerPallet);
-  const rounded = pallets * item.boxesPerPallet;
-
-  item.finalOrder =
-    orderState.settings.unit === 'boxes'
-      ? rounded
-      : rounded * item.qtyPerBox;
-}
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'order.csv';
+  a.click();
+};
 
 render();
