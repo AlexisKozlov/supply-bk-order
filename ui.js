@@ -141,7 +141,7 @@ function render() {
       <td><input value="${item.name}"></td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>
       <td><input type="number" value="${item.stock}"></td>
-      <td>${calc.calculatedOrder.toFixed(2)}</td>
+      <td>${(calc.calculatedOrder ?? 0).toFixed(2)}</td>
       <td><input type="number" value="${item.finalOrder || 0}"></td>
       <td>${calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-'}</td>
       <td>${calc.palletsInfo
