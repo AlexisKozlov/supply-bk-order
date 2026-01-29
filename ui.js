@@ -31,12 +31,53 @@ const nf = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 0
 });
 
+/* ================= TOAST NOTIFICATIONS ================= */
+function createToastContainer() {
+  if (!document.querySelector('.toast-container')) {
+    const container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+}
+
+function showToast(title, message, type = 'info') {
+  createToastContainer();
+  
+  const icons = {
+    success: '✅',
+    error: '❌',
+    info: 'ℹ️'
+  };
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-icon">${icons[type]}</div>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ''}
+    </div>
+    <button class="toast-close">✖</button>
+  `;
+
+  const container = document.querySelector('.toast-container');
+  container.appendChild(toast);
+
+  toast.querySelector('.toast-close').addEventListener('click', () => {
+    toast.remove();
+  });
+
+  setTimeout(() => {
+    toast.remove();
+  }, 4000);
+}
+
 loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
     loginOverlay.style.display = 'none';
     loadOrderHistory();
   } else {
-    alert('Неверный пароль');
+    showToast('Ошибка входа', 'Неверный пароль', 'error');
   }
 });
 
@@ -45,7 +86,7 @@ buildOrderBtn.addEventListener('click', () => {
   const ok = validateRequiredSettings();
 
   if (!ok) {
-    alert('Заполните обязательные поля');
+    showToast('Заполните обязательные поля', 'Укажите даты и запас безопасности', 'error');
     return;
   }
 
@@ -54,7 +95,7 @@ buildOrderBtn.addEventListener('click', () => {
 
 saveOrderBtn.addEventListener('click', async () => {
   if (!orderState.items.length) {
-    alert('Заказ пуст');
+    showToast('Заказ пуст', 'Добавьте товары в заказ', 'error');
     return;
   }
 
@@ -74,7 +115,7 @@ saveOrderBtn.addEventListener('click', async () => {
     .filter(i => i.qty_boxes > 0);
 
   if (!itemsToSave.length) {
-    alert('Нет позиций с количеством');
+    showToast('Нет позиций с количеством', 'Укажите количество для заказа', 'error');
     return;
   }
 
@@ -91,7 +132,7 @@ saveOrderBtn.addEventListener('click', async () => {
     .single();
 
   if (error) {
-    alert('Ошибка сохранения заказа');
+    showToast('Ошибка сохранения', 'Не удалось сохранить заказ', 'error');
     console.error(error);
     return;
   }
@@ -106,12 +147,12 @@ saveOrderBtn.addEventListener('click', async () => {
     .insert(items);
 
   if (itemsError) {
-    alert('Ошибка сохранения состава заказа');
+    showToast('Ошибка сохранения', 'Не удалось сохранить состав заказа', 'error');
     console.error(itemsError);
     return;
   }
 
-  alert('Заказ сохранён');
+  showToast('Заказ сохранён', `Сохранено позиций: ${itemsToSave.length}`, 'success');
   loadOrderHistory();
 });
 
@@ -343,7 +384,7 @@ manualAddBtn.addEventListener('click', async () => {
   const name = document.getElementById('m_name').value.trim();
 
   if (!name) {
-    alert('Введите наименование');
+    showToast('Введите наименование', 'Поле обязательно для заполнения', 'error');
     return;
   }
 
@@ -363,14 +404,16 @@ manualAddBtn.addEventListener('click', async () => {
       .single();
 
     if (error) {
-      alert('Ошибка сохранения в базу');
+      showToast('Ошибка сохранения', 'Не удалось сохранить товар в базу', 'error');
       console.error(error);
       return;
     }
 
     addItem(data);
+    showToast('Товар добавлен', 'Товар сохранён в базе данных', 'success');
   } else {
     addItem(product);
+    showToast('Товар добавлен', 'Товар добавлен в текущий заказ', 'success');
   }
 
   manualModal.classList.add('hidden');
@@ -411,7 +454,7 @@ function addItem(p) {
 /* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
 copyOrderBtn.addEventListener('click', () => {
   if (!orderState.items.length) {
-    alert('Заказ пуст');
+    showToast('Заказ пуст', 'Добавьте товары для копирования', 'error');
     return;
   }
 
@@ -437,7 +480,7 @@ copyOrderBtn.addEventListener('click', () => {
     .filter(Boolean);
 
   if (!lines.length) {
-    alert('В заказе нет позиций с количеством');
+    showToast('Нет позиций', 'В заказе нет позиций с количеством', 'error');
     return;
   }
 
@@ -454,10 +497,10 @@ ${lines.join('\n')}
 
   navigator.clipboard.writeText(text)
     .then(() => {
-      alert('Заказ скопирован в буфер обмена');
+      showToast('Скопировано!', `${lines.length} позиций в буфере обмена`, 'success');
     })
     .catch(() => {
-      alert('Не удалось скопировать заказ');
+      showToast('Ошибка копирования', 'Не удалось скопировать заказ', 'error');
     });
 });
 
