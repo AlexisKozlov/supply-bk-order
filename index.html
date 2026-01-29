@@ -8,7 +8,8 @@
 
 <body>
 
-  <div id="loginOverlay" class="login-overlay">
+<!-- ===== ВХОД ===== -->
+<div id="loginOverlay" class="login-overlay">
   <div class="login-box">
     <h2>Вход</h2>
     <input id="loginPassword" type="password" placeholder="Пароль" />
@@ -16,81 +17,118 @@
   </div>
 </div>
 
-
 <header class="header">
   <h1>🍔 Калькулятор заказа BK</h1>
 </header>
 
 <main class="container">
 
+  <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
   <section class="card">
     <h2>Параметры заказа</h2>
+
     <div class="settings">
-      <label>Дата сегодня<input type="date" id="today" /></label>
-      <label>Дата прихода<input type="date" id="deliveryDate" /></label>
-      <label>Период расхода (дней)<input type="number" id="periodDays" value="30" /></label>
-      <label>Запас (дни)<input type="number" id="safetyDays" value="0" /></label>
-      <label>Запас (%)<input type="number" id="safetyPercent" value="0" /></label>
-      <label>Единицы
+      <label>
+        Дата сегодня
+        <input type="date" id="today" />
+      </label>
+
+      <label>
+        Дата прихода
+        <input type="date" id="deliveryDate" />
+      </label>
+
+      <label>
+        Период расхода (дней)
+        <input type="number" id="periodDays" value="30" />
+      </label>
+
+      <label>
+        Запас (дни)
+        <input type="number" id="safetyDays" />
+      </label>
+
+      <label>
+        Запас (%)
+        <input type="number" id="safetyPercent" value="0" />
+      </label>
+
+      <label>
+        Единицы
         <select id="unit">
           <option value="pieces">Штуки</option>
           <option value="boxes">Коробки</option>
         </select>
       </label>
     </div>
+
+    <!-- КЛЮЧЕВАЯ КНОПКА -->
+    <button id="buildOrder" class="btn primary">
+      📦 Сформировать заказ
+    </button>
   </section>
 
-<div id="orderSection" class="hidden">
-  <section class="card">
-    <h2>Добавление товаров</h2>
+  <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
+  <div id="orderSection" class="hidden">
 
-    <div class="actions">
-      <button id="addItem" class="btn secondary">➕ Пустая строка</button>
-      <button id="addManual" class="btn primary">✍️ Ручной товар</button>
-      <button id="copyOrder" class="btn secondary">📋 Скопировать заказ</button>
-    </div>
+    <!-- ДОБАВЛЕНИЕ ТОВАРОВ -->
+    <section class="card">
+      <h2>Добавление товаров</h2>
 
-    <label>
-      Поставщик
-      <select id="supplierFilter">
-        <option value="">Все / свободный</option>
-      </select>
-    </label>
+      <div class="actions">
+        <button id="addItem" class="btn secondary">➕ Пустая строка</button>
+        <button id="addManual" class="btn primary">✍️ Ручной товар</button>
+        <button id="copyOrder" class="btn secondary">📋 Скопировать заказ</button>
+      </div>
 
-    <section class="search">
-      <input id="productSearch" placeholder="🔍 Поиск по артикулу или названию" />
-      <div id="searchResults" class="search-results"></div>
+      <label>
+        Поставщик
+        <select id="supplierFilter">
+          <option value="">Все / свободный</option>
+        </select>
+      </label>
+
+      <section class="search">
+        <input
+          id="productSearch"
+          placeholder="🔍 Поиск по артикулу или названию"
+        />
+        <div id="searchResults" class="search-results"></div>
+      </section>
     </section>
-  </section>
 
-  <section class="card">
-    <h2>Заказ</h2>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Товар</th>
-            <th>Расход</th>
-            <th>Остаток</th>
-            <th>Расчёт</th>
-            <th>Заказ итого</th>
-            <th>Хватит до</th>
-            <th>Паллеты</th>
-            <th>Статус</th>
-          </tr>
-        </thead>
-        <tbody id="items"></tbody>
-      </table>
-    </div>
-  </section>
+    <!-- ТАБЛИЦА ЗАКАЗА -->
+    <section class="card">
+      <h2>Заказ</h2>
 
-  <!-- ИТОГИ ДЛЯ СКРИНА -->
-  <section class="card">
-    <h2>Итог заказа</h2>
-    <div id="finalSummary"></div>
-  </section>
-</div>
-  <!-- Ручной товар -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Расход</th>
+              <th>Остаток</th>
+              <th>Расчёт</th>
+              <th>Заказ итого</th>
+              <th>Хватит до</th>
+              <th>Паллеты</th>
+              <th>Статус</th>
+            </tr>
+          </thead>
+          <tbody id="items"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ИТОГ -->
+    <section class="card">
+      <h2>Итог заказа</h2>
+      <div id="finalSummary"></div>
+    </section>
+
+  </div>
+
+  <!-- ===== РУЧНОЙ ТОВАР ===== -->
   <section class="card manual hidden" id="manualForm">
     <h2>Ручной товар</h2>
 
