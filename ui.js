@@ -46,7 +46,8 @@ function showToast(title, message, type = 'info') {
   const icons = {
     success: '✅',
     error: '❌',
-    info: 'ℹ️'
+    info: 'ℹ️',
+    warning: '⚠️'
   };
 
   const toast = document.createElement('div');
@@ -72,19 +73,63 @@ function showToast(title, message, type = 'info') {
   }, 4000);
 }
 
+/* ================= MODAL CONFIRMATIONS ================= */
+function showConfirmModal(title, message, onConfirm, onCancel) {
+  // Создаём модалку подтверждения
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-box confirm-modal">
+      <div class="modal-header">
+        <h2>${title}</h2>
+      </div>
+      <div class="confirm-message">${message}</div>
+      <div class="actions">
+        <button class="btn primary confirm-yes">Да</button>
+        <button class="btn secondary confirm-no">Отмена</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const yesBtn = modal.querySelector('.confirm-yes');
+  const noBtn = modal.querySelector('.confirm-no');
+
+  yesBtn.addEventListener('click', () => {
+    modal.remove();
+    if (onConfirm) onConfirm();
+  });
+
+  noBtn.addEventListener('click', () => {
+    modal.remove();
+    if (onCancel) onCancel();
+  });
+
+  // Закрытие по клику вне модалки
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.remove();
+      if (onCancel) onCancel();
+    }
+  });
+}
+
+/* ================= LOGIN ================= */
 loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
-    loginOverlay.style.display = 'none';
-    localStorage.setItem('bk_logged_in', 'true');
+    loginOverlay.classList.add('hidden'); // Используем класс вместо style.display
+    sessionStorage.setItem('bk_logged_in', 'true'); // sessionStorage вместо localStorage
     loadOrderHistory();
+    showToast('Вход выполнен', 'Добро пожаловать!', 'success');
   } else {
     showToast('Ошибка входа', 'Неверный пароль', 'error');
   }
 });
 
-// Проверка сохраненного входа при загрузке
-if (localStorage.getItem('bk_logged_in') === 'true') {
-  loginOverlay.style.display = 'none';
+// Проверка сохраненного входа при загрузке - ТОЛЬКО sessionStorage
+if (sessionStorage.getItem('bk_logged_in') === 'true') {
+  loginOverlay.classList.add('hidden');
   loadOrderHistory();
 }
 
@@ -106,68 +151,70 @@ saveOrderBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Подтверждение сохранения
-  if (!confirm('Сохранить заказ в историю?')) {
-    return;
-  }
+  // Красивое модальное подтверждение
+  showConfirmModal(
+    '💾 Сохранить заказ?',
+    'Заказ будет сохранён в историю. Продолжить?',
+    async () => {
+      const itemsToSave = orderState.items
+        .map(item => {
+          const boxes =
+            orderState.settings.unit === 'boxes'
+              ? item.finalOrder
+              : item.finalOrder / item.qtyPerBox;
 
-  const itemsToSave = orderState.items
-    .map(item => {
-      const boxes =
-        orderState.settings.unit === 'boxes'
-          ? item.finalOrder
-          : item.finalOrder / item.qtyPerBox;
+          return {
+            sku: item.sku || null,
+            name: item.name,
+            qty_boxes: Math.ceil(boxes),
+            qtyperbox: item.qtyPerBox || 1  // ИСПРАВЛЕНО: qtyperbox вместо qty_per_box
+          };
+        })
+        .filter(i => i.qty_boxes > 0);
 
-      return {
-        sku: item.sku || null,
-        name: item.name,
-        qty_boxes: Math.ceil(boxes),
-        qty_per_box: item.qtyPerBox || 1
-      };
-    })
-    .filter(i => i.qty_boxes > 0);
+      if (!itemsToSave.length) {
+        showToast('Нет позиций с количеством', 'Укажите количество для заказа', 'error');
+        return;
+      }
 
-  if (!itemsToSave.length) {
-    showToast('Нет позиций с количеством', 'Укажите количество для заказа', 'error');
-    return;
-  }
+      const { data: order, error } = await supabase
+        .from('orders')
+        .insert({
+          supplier: document.getElementById('supplierFilter').value || 'Свободный',
+          delivery_date: orderState.settings.deliveryDate,
+          safety_days: orderState.settings.safetyDays,
+          period_days: orderState.settings.periodDays,
+          unit: orderState.settings.unit
+        })
+        .select()
+        .single();
 
-  const { data: order, error } = await supabase
-    .from('orders')
-    .insert({
-      supplier: document.getElementById('supplierFilter').value || 'Свободный',
-      delivery_date: orderState.settings.deliveryDate,
-      safety_days: orderState.settings.safetyDays,
-      period_days: orderState.settings.periodDays,
-      unit: orderState.settings.unit
-    })
-    .select()
-    .single();
+      if (error) {
+        showToast('Ошибка сохранения', 'Не удалось сохранить заказ', 'error');
+        console.error(error);
+        return;
+      }
 
-  if (error) {
-    showToast('Ошибка сохранения', 'Не удалось сохранить заказ', 'error');
-    console.error(error);
-    return;
-  }
+      const items = itemsToSave.map(i => ({
+        order_id: order.id,
+        ...i
+      }));
 
-  const items = itemsToSave.map(i => ({
-    order_id: order.id,
-    ...i
-  }));
+      const { error: itemsError } = await supabase
+        .from('order_items')
+        .insert(items);
 
-  const { error: itemsError } = await supabase
-    .from('order_items')
-    .insert(items);
+      if (itemsError) {
+        showToast('Ошибка сохранения', 'Не удалось сохранить состав заказа', 'error');
+        console.error(itemsError);
+        return;
+      }
 
-  if (itemsError) {
-    showToast('Ошибка сохранения', 'Не удалось сохранить состав заказа', 'error');
-    console.error(itemsError);
-    return;
-  }
-
-  showToast('Заказ сохранён', `Сохранено позиций: ${itemsToSave.length}`, 'success');
-  clearDraft(); // Очистка черновика после сохранения
-  loadOrderHistory();
+      showToast('Заказ сохранён', `Сохранено позиций: ${itemsToSave.length}`, 'success');
+      clearDraft(); // Очистка черновика после сохранения
+      loadOrderHistory();
+    }
+  );
 });
 
 async function loadOrderHistory() {
@@ -276,245 +323,121 @@ function renderOrderHistory(orders) {
 
     div.innerHTML = `
       <div class="history-header">
-        <span><b>${date}</b> — ${order.supplier}</span>
-        <button class="btn small" style="background:#d32f2f;color:white;margin-left:10px;" title="Удалить заказ">🗑️</button>
+        <span>📦 <b>${order.supplier}</b> — ${date}</span>
+        <button class="btn small secondary" data-order-id="${order.id}">Загрузить</button>
       </div>
-      <div class="history-items hidden">
-        ${order.order_items.map(i => {
-          const pieces = i.qty_boxes * (i.qty_per_box || 1);
-          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${pieces} шт)</div>`;
-        }).join('')}
+      <div class="history-items">
+        ${order.order_items.map(i => `
+          <div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} кор.</div>
+        `).join('')}
       </div>
     `;
 
-    const header = div.querySelector('.history-header span');
-    const deleteBtn = div.querySelector('.history-header button');
+    div.querySelector('button').addEventListener('click', () => {
+      loadOrder(order);
+    });
 
-    header.style.cursor = 'pointer';
-    header.onclick = () => {
-      div.querySelector('.history-items').classList.toggle('hidden');
-    };
+    historyContainer.appendChild(div);
+  });
 
-    deleteBtn.onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm('Удалить этот заказ из истории?')) return;
+  historySupplier.addEventListener('change', loadOrderHistory);
+}
 
-      const { error } = await supabase
-        .from('orders')
-        .delete()
-        .eq('id', order.id);
+async function loadOrder(order) {
+  showConfirmModal(
+    '📥 Загрузить заказ из истории?',
+    'Текущий заказ будет заменён. Продолжить?',
+    async () => {
+      const { data, error } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', order.id);
 
       if (error) {
-        showToast('Ошибка удаления', 'Не удалось удалить заказ', 'error');
+        showToast('Ошибка загрузки', 'Не удалось загрузить заказ', 'error');
         console.error(error);
         return;
       }
 
-      showToast('Заказ удален', '', 'success');
-      loadOrderHistory();
-    };
+      orderState.items = data.map(i => ({
+        id: Date.now() + Math.random(),
+        sku: i.sku,
+        name: i.name,
+        consumptionPeriod: 0,
+        stock: 0,
+        transit: 0,
+        qtyPerBox: i.qtyperbox || 1,
+        boxesPerPallet: null,
+        finalOrder: i.qty_boxes,
+        isManual: false
+      }));
 
-    historyContainer.appendChild(div);
-  });
-}
+      document.getElementById('supplierFilter').value = order.supplier || '';
+      document.getElementById('deliveryDate').value = order.delivery_date;
+      orderState.settings.deliveryDate = new Date(order.delivery_date);
 
-
-/* ================= ДАТА СЕГОДНЯ ================= */
-const today = new Date();
-document.getElementById('today').value = today.toISOString().slice(0, 10);
-orderState.settings.today = today;
-
-/* ================= НАСТРОЙКИ ================= */
-function bindSetting(id, key, isDate = false) {
-  const el = document.getElementById(id);
-  if (!el) return;
-
-  el.addEventListener('input', e => {
-    orderState.settings[key] = isDate
-      ? new Date(e.target.value)
-      : +e.target.value || 0;
-    rerenderAll();
-    validateRequiredSettings();
-    saveDraft(); // Автосохранение
-  });
-}
-
-bindSetting('today', 'today', true);
-bindSetting('deliveryDate', 'deliveryDate', true);
-bindSetting('periodDays', 'periodDays');
-bindSetting('safetyDays', 'safetyDays');
-
-
-document.getElementById('unit').addEventListener('change', e => {
-  orderState.settings.unit = e.target.value;
-  rerenderAll();
-  saveDraft();
-});
-
-function validateRequiredSettings() {
-  const todayEl = document.getElementById('today');
-  const deliveryEl = document.getElementById('deliveryDate');
-  const safetyEl = document.getElementById('safetyDays');
-
-  let valid = true;
-
-  if (!todayEl.value) {
-    todayEl.classList.add('required');
-    valid = false;
-  } else todayEl.classList.remove('required');
-
-  if (!deliveryEl.value) {
-    deliveryEl.classList.add('required');
-    valid = false;
-  } else deliveryEl.classList.remove('required');
-
-  if (safetyEl.value === '' || safetyEl.value === null) {
-    safetyEl.classList.add('required');
-    valid = false;
-  } else safetyEl.classList.remove('required');
-
-  return valid;
-}
-
-
-/* ================= ПОСТАВЩИКИ ================= */
-(async function loadSuppliers() {
-  const { data } = await supabase.from('products').select('supplier');
-
-  const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
-
-  suppliers.forEach(s => {
-    // основной фильтр
-    const opt1 = document.createElement('option');
-    opt1.value = s;
-    opt1.textContent = s;
-    supplierSelect.appendChild(opt1);
-
-    // фильтр истории
-    const opt2 = document.createElement('option');
-    opt2.value = s;
-    opt2.textContent = s;
-    historySupplier.appendChild(opt2);
-  });
-
-  historySupplier.addEventListener('change', loadOrderHistory);
-})();
-
-supplierSelect.addEventListener('change', async () => {
-  orderState.items = [];
-  render();
-
-  if (!supplierSelect.value) return;
-
-  const { data } = await supabase
-    .from('products')
-    .select('*')
-    .eq('supplier', supplierSelect.value);
-
-  data.forEach(addItem);
-});
-
-/* ================= ПОИСК ПО КАРТОЧКАМ ================= */
-let searchTimer = null;
-
-if (searchInput) {
-  searchInput.addEventListener('input', () => {
-    const q = searchInput.value.trim();
-    clearTimeout(searchTimer);
-
-    if (q.length < 2) {
-      searchResults.innerHTML = '';
-      return;
+      orderSection.classList.remove('hidden');
+      render();
+      historyModal.classList.add('hidden');
+      
+      showToast('Заказ загружен', 'Заказ успешно загружен из истории', 'success');
+      saveDraft();
     }
-
-    searchTimer = setTimeout(() => searchProducts(q), 300);
-  });
+  );
 }
 
-async function searchProducts(q) {
-  const isSku = /^[0-9A-Za-z-]+$/.test(q);
+/* ================= КОПИРОВАНИЕ ================= */
+copyOrderBtn.addEventListener('click', () => {
+  const text = orderState.items
+    .filter(item => item.finalOrder > 0)
+    .map(item => {
+      const boxes =
+        orderState.settings.unit === 'boxes'
+          ? item.finalOrder
+          : Math.ceil(item.finalOrder / item.qtyPerBox);
 
-  let query = supabase
-    .from('products')
-    .select('*')
-    .limit(10);
+      return `${item.sku}\t${item.name}\t${nf.format(boxes)}`;
+    })
+    .join('\n');
 
-  // если выбран поставщик — ищем только по нему
-  if (supplierSelect.value) {
-    query = query.eq('supplier', supplierSelect.value);
+  if (!text) {
+    showToast('Заказ пуст', 'Нет товаров для копирования', 'error');
+    return;
   }
 
-  query = isSku
-    ? query.ilike('sku', `%${q}%`)
-    : query.ilike('name', `%${q}%`);
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Скопировано', 'Заказ скопирован в буфер обмена', 'success');
+  });
+});
 
-  const { data, error } = await query;
+/* ================= SUPPLIERS ================= */
+async function loadSuppliers() {
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('name')
+    .order('name');
 
   if (error) {
-    console.error('Ошибка поиска:', error);
+    console.error(error);
     return;
   }
 
-  searchResults.innerHTML = '';
+  data.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.name;
+    supplierSelect.appendChild(opt);
 
-  if (!data.length) {
-    searchResults.innerHTML =
-      '<div style="color:#999">Ничего не найдено</div>';
-    return;
-  }
-
-  data.forEach(p => {
-    const div = document.createElement('div');
-    div.textContent = `${p.sku} ${p.name}`;
-    div.addEventListener('click', () => {
-      addItem(p);
-      searchResults.innerHTML = '';
-      searchInput.value = '';
-    });
-    searchResults.appendChild(div);
+    const opt2 = document.createElement('option');
+    opt2.value = s.name;
+    opt2.textContent = s.name;
+    historySupplier.appendChild(opt2);
   });
 }
 
-/* ================= РУЧНОЙ ТОВАР ================= */
-manualAddBtn.addEventListener('click', async () => {
-  const name = document.getElementById('m_name').value.trim();
+loadSuppliers();
 
-  if (!name) {
-    showToast('Введите наименование', 'Поле обязательно для заполнения', 'error');
-    return;
-  }
-
-  const product = {
-    name,
-    sku: document.getElementById('m_sku').value || null,
-    supplier: document.getElementById('m_supplier').value || null,
-    qty_per_box: +document.getElementById('m_box').value || 1,
-    boxes_per_pallet: +document.getElementById('m_pallet').value || null
-  };
-
-  if (document.getElementById('m_save').checked) {
-    const { data, error } = await supabase
-      .from('products')
-      .insert(product)
-      .select()
-      .single();
-
-    if (error) {
-      showToast('Ошибка сохранения', 'Не удалось сохранить товар в базу', 'error');
-      console.error(error);
-      return;
-    }
-
-    addItem(data);
-    showToast('Товар добавлен', 'Товар сохранён в базе данных', 'success');
-  } else {
-    addItem(product);
-    showToast('Товар добавлен', 'Товар добавлен в текущий заказ', 'success');
-  }
-
-  manualModal.classList.add('hidden');
-});
-
+/* ================= MANUAL ITEM ================= */
 addManualBtn.addEventListener('click', () => {
   manualModal.classList.remove('hidden');
 });
@@ -527,159 +450,282 @@ manualCancelBtn.addEventListener('click', () => {
   manualModal.classList.add('hidden');
 });
 
+manualAddBtn.addEventListener('click', async () => {
+  const name = document.getElementById('m_name').value.trim();
 
-/* ================= ДОБАВЛЕНИЕ ================= */
-function addItem(p) {
-  orderState.items.push({
-    id: crypto.randomUUID(),
-    sku: p.sku || '',
-    name: p.name,
+  if (!name) {
+    showToast('Укажите название', 'Название товара обязательно', 'error');
+    return;
+  }
+
+  const item = {
+    id: Date.now(),
+    sku: document.getElementById('m_sku').value.trim() || null,
+    name,
     consumptionPeriod: 0,
     stock: 0,
     transit: 0,
-    qtyPerBox: p.qty_per_box || 1,
-    boxesPerPallet: p.boxes_per_pallet || null,
-    finalOrder: 0
-  });
+    qtyPerBox: +document.getElementById('m_box').value || 1,
+    boxesPerPallet: +document.getElementById('m_pallet').value || null,
+    finalOrder: 0,
+    isManual: true
+  };
+
+  const saveToDb = document.getElementById('m_save').checked;
+
+  if (saveToDb) {
+    const { error } = await supabase.from('products').insert({
+      sku: item.sku,
+      name: item.name,
+      supplier: document.getElementById('m_supplier').value.trim() || null,
+      qty_per_box: item.qtyPerBox,
+      boxes_per_pallet: item.boxesPerPallet
+    });
+
+    if (error) {
+      console.error(error);
+      showToast('Ошибка', 'Не удалось сохранить в базу', 'error');
+    } else {
+      showToast('Сохранено', 'Товар добавлен в базу данных', 'success');
+    }
+  }
+
+  orderState.items.push(item);
   render();
   saveDraft();
-}
 
-/* ================= УДАЛЕНИЕ ТОВАРА ================= */
-function removeItem(itemId) {
-  if (confirm('Удалить товар из заказа?')) {
-    orderState.items = orderState.items.filter(item => item.id !== itemId);
-    render();
-    saveDraft();
-    showToast('Товар удален', '', 'success');
-  }
-}
+  manualModal.classList.add('hidden');
 
-/* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
-copyOrderBtn.addEventListener('click', () => {
-  if (!orderState.items.length) {
-    showToast('Заказ пуст', 'Добавьте товары для копирования', 'error');
-    return;
-  }
-
-  const deliveryDate = orderState.settings.deliveryDate
-    ? orderState.settings.deliveryDate.toLocaleDateString()
-    : '—';
-
-  const lines = orderState.items
-    .map(item => {
-      const boxes =
-        orderState.settings.unit === 'boxes'
-          ? item.finalOrder
-          : item.finalOrder / item.qtyPerBox;
-
-      const roundedBoxes = Math.ceil(boxes);
-
-      if (roundedBoxes <= 0) return null;
-
-      const name = `${item.sku ? item.sku + ' ' : ''}${item.name}`;
-
-      return `${name} ${roundedBoxes} коробок`;
-    })
-    .filter(Boolean);
-
-  if (!lines.length) {
-    showToast('Нет позиций', 'В заказе нет позиций с количеством', 'error');
-    return;
-  }
-
-  const text =
-`Добрый день!
-
-Просьба поставить:
-
-${lines.join('\n')}
-
-Дата прихода: ${deliveryDate}
-
-Спасибо!`;
-
-  navigator.clipboard.writeText(text)
-    .then(() => {
-      showToast('Скопировано!', `${lines.length} позиций в буфере обмена`, 'success');
-    })
-    .catch(() => {
-      showToast('Ошибка копирования', 'Не удалось скопировать заказ', 'error');
-    });
+  // Очистка формы
+  document.getElementById('m_name').value = '';
+  document.getElementById('m_sku').value = '';
+  document.getElementById('m_supplier').value = '';
+  document.getElementById('m_box').value = '';
+  document.getElementById('m_pallet').value = '';
+  document.getElementById('m_save').checked = false;
+  
+  showToast('Товар добавлен', name, 'success');
 });
 
+/* ================= SEARCH ================= */
+let searchTimeout;
+searchInput.addEventListener('input', async e => {
+  clearTimeout(searchTimeout);
+  const term = e.target.value.trim();
 
-/* ================= EXCEL-НАВИГАЦИЯ ================= */
-function setupExcelNavigation(input, rowIndex, columnIndex) {
-  input.addEventListener('keydown', (e) => {
-    // Enter или стрелка вниз
+  if (!term) {
+    searchResults.innerHTML = '';
+    return;
+  }
+
+  searchTimeout = setTimeout(async () => {
+    const sup = supplierSelect.value;
+    let query = supabase
+      .from('products')
+      .select('*')
+      .or(`sku.ilike.%${term}%,name.ilike.%${term}%`);
+
+    if (sup) {
+      query = query.eq('supplier', sup);
+    }
+
+    const { data, error } = await query.limit(10);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    searchResults.innerHTML = data
+      .map(
+        p =>
+          `<div data-product='${JSON.stringify(p)}'>${p.sku} ${p.name}</div>`
+      )
+      .join('');
+
+    searchResults.querySelectorAll('div').forEach(div => {
+      div.addEventListener('click', () => {
+        const product = JSON.parse(div.getAttribute('data-product'));
+        addProduct(product);
+        searchInput.value = '';
+        searchResults.innerHTML = '';
+      });
+    });
+  }, 300);
+});
+
+function addProduct(product) {
+  const exists = orderState.items.find(i => i.sku === product.sku);
+  if (exists) {
+    showToast('Товар уже в заказе', product.name, 'warning');
+    return;
+  }
+
+  orderState.items.push({
+    id: Date.now(),
+    sku: product.sku,
+    name: product.name,
+    consumptionPeriod: 0,
+    stock: 0,
+    transit: 0,
+    qtyPerBox: product.qty_per_box || 1,
+    boxesPerPallet: product.boxes_per_pallet || null,
+    finalOrder: 0,
+    isManual: false
+  });
+
+  render();
+  saveDraft();
+  showToast('Товар добавлен', product.name, 'success');
+}
+
+function removeItem(id) {
+  showConfirmModal(
+    '🗑️ Удалить товар?',
+    'Товар будет удалён из заказа',
+    () => {
+      orderState.items = orderState.items.filter(i => i.id !== id);
+      render();
+      saveDraft();
+      showToast('Товар удалён', '', 'info');
+    }
+  );
+}
+
+/* ================= SETTINGS ================= */
+document.getElementById('today').addEventListener('change', e => {
+  orderState.settings.today = e.target.value ? new Date(e.target.value) : null;
+  rerenderAll();
+  saveDraft();
+});
+
+document.getElementById('deliveryDate').addEventListener('change', e => {
+  orderState.settings.deliveryDate = e.target.value
+    ? new Date(e.target.value)
+    : null;
+  rerenderAll();
+  saveDraft();
+});
+
+document.getElementById('periodDays').addEventListener('input', e => {
+  orderState.settings.periodDays = +e.target.value || 0;
+  rerenderAll();
+  saveDraft();
+});
+
+document.getElementById('safetyDays').addEventListener('input', e => {
+  orderState.settings.safetyDays = +e.target.value || 0;
+  rerenderAll();
+  saveDraft();
+});
+
+document.getElementById('unit').addEventListener('change', e => {
+  orderState.settings.unit = e.target.value;
+  rerenderAll();
+  saveDraft();
+});
+
+function validateRequiredSettings() {
+  let ok = true;
+
+  const todayInput = document.getElementById('today');
+  const deliveryInput = document.getElementById('deliveryDate');
+  const safetyInput = document.getElementById('safetyDays');
+
+  if (!todayInput.value) {
+    todayInput.classList.add('required');
+    ok = false;
+  } else {
+    todayInput.classList.remove('required');
+  }
+
+  if (!deliveryInput.value) {
+    deliveryInput.classList.add('required');
+    ok = false;
+  } else {
+    deliveryInput.classList.remove('required');
+  }
+
+  if (!safetyInput.value) {
+    safetyInput.classList.add('required');
+    ok = false;
+  } else {
+    safetyInput.classList.remove('required');
+  }
+
+  return ok;
+}
+
+/* ================= NAVIGATION ================= */
+function setupExcelNavigation(input, rowIndex, colIndex) {
+  input.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === 'ArrowDown') {
       e.preventDefault();
-      moveToCell(rowIndex + 1, columnIndex);
+      const nextRow = tbody.querySelectorAll('tr')[rowIndex + 1];
+      if (nextRow) {
+        const inputs = nextRow.querySelectorAll('input');
+        inputs[colIndex]?.focus();
+      }
     }
-    // Стрелка вверх
-    else if (e.key === 'ArrowUp') {
+
+    if (e.key === 'ArrowUp') {
       e.preventDefault();
-      moveToCell(rowIndex - 1, columnIndex);
+      const prevRow = tbody.querySelectorAll('tr')[rowIndex - 1];
+      if (prevRow) {
+        const inputs = prevRow.querySelectorAll('input');
+        inputs[colIndex]?.focus();
+      }
     }
-    // Стрелка вправо (только если курсор в конце)
-    else if (e.key === 'ArrowRight' && input.selectionStart === input.value.length) {
+
+    if (e.key === 'ArrowRight') {
       e.preventDefault();
-      moveToCell(rowIndex, columnIndex + 1);
+      const row = tbody.querySelectorAll('tr')[rowIndex];
+      const inputs = row.querySelectorAll('input');
+      inputs[colIndex + 1]?.focus();
     }
-    // Стрелка влево (только если курсор в начале)
-    else if (e.key === 'ArrowLeft' && input.selectionStart === 0) {
+
+    if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      moveToCell(rowIndex, columnIndex - 1);
+      const row = tbody.querySelectorAll('tr')[rowIndex];
+      const inputs = row.querySelectorAll('input');
+      inputs[colIndex - 1]?.focus();
     }
   });
 }
 
-function moveToCell(rowIndex, columnIndex) {
-  const rows = tbody.querySelectorAll('tr');
-  
-  // Проверка границ (теперь 4 колонки: расход, остаток, транзит, заказ-штуки, заказ-коробки)
-  if (rowIndex < 0 || rowIndex >= rows.length) return;
-  if (columnIndex < 0 || columnIndex > 4) return;
-  
-  const targetRow = rows[rowIndex];
-  const inputs = targetRow.querySelectorAll('input[type="number"]');
-  
-  if (inputs[columnIndex]) {
-    inputs[columnIndex].focus();
-    inputs[columnIndex].select();
-  }
-}
-
-/* ================= ТАБЛИЦА ================= */
+/* ================= RENDER ================= */
 function render() {
   tbody.innerHTML = '';
 
   orderState.items.forEach((item, rowIndex) => {
     const tr = document.createElement('tr');
+    if (item.isManual) tr.classList.add('manual');
 
-  tr.innerHTML = `
-  <td class="item-name">
-  ${item.sku ? `<b>${item.sku}</b> ` : ''}${item.name}
-</td>
-  <td><input type="number" value="${item.consumptionPeriod}"></td>
-  <td><input type="number" value="${item.stock}"></td>
-  <td><input type="number" value="${item.transit || 0}"></td>
-  <td class="calc">0</td>
-  <td class="order-cell">
-    <input type="number" class="order-pieces" value="0" style="width:70px;"> / 
-    <input type="number" class="order-boxes" value="0" style="width:70px;">
-  </td>
-  <td class="date">-</td>
-  <td class="pallets">
-    <div class="pallet-info">-</div>
-    <button class="btn small">Округлить</button>
-  </td>
-  <td class="status">-</td>
-  <td><button class="btn small" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
-`;
+    tr.innerHTML = `
+      <td class="item-name">
+        ${item.sku ? `<b>${item.sku}</b>` : ''}
+        ${item.name}
+      </td>
+      <td><input type="number" value="${item.consumptionPeriod || 0}" min="0" /></td>
+      <td><input type="number" value="${item.stock || 0}" min="0" /></td>
+      <td><input type="number" value="${item.transit || 0}" min="0" /></td>
+      <td class="calc">0</td>
+      <td class="order-cell">
+        <input class="order-pieces" type="number" value="0" min="0" /> /
+        <input class="order-boxes" type="number" value="0" min="0" />
+      </td>
+      <td class="date">-</td>
+      <td class="pallets">
+        <div class="pallet-info">-</div>
+        <button class="btn small secondary">📦 Округлить</button>
+      </td>
+      <td class="status">-</td>
+      <td>
+        <button class="btn small secondary">🗑️</button>
+      </td>
+    `;
 
- const inputs = tr.querySelectorAll('input[type="number"]');
+    const inputs = tr.querySelectorAll('input:not(.order-pieces):not(.order-boxes)');
     const orderPiecesInput = tr.querySelector('.order-pieces');
     const orderBoxesInput = tr.querySelector('.order-boxes');
     const roundBtn = tr.querySelector('button');
@@ -803,11 +849,23 @@ if (
 
 tr.querySelector('.calc').textContent = calcText;
 
-
-  tr.querySelector('.date').textContent =
-    calc.coverageDate
-      ? calc.coverageDate.toLocaleDateString()
-      : '-';
+  // ИСПРАВЛЕНО: Добавляем количество дней в скобках
+  const dateCell = tr.querySelector('.date');
+  if (calc.coverageDate) {
+    const dateStr = calc.coverageDate.toLocaleDateString();
+    
+    // Вычисляем количество дней запаса
+    const today = orderState.settings.today || new Date();
+    const available = (item.stock + (item.transit || 0)) + (item.finalOrder || 0);
+    const daily = orderState.settings.periodDays 
+      ? item.consumptionPeriod / orderState.settings.periodDays 
+      : 0;
+    const daysOfStock = daily > 0 ? Math.floor(available / daily) : 0;
+    
+    dateCell.textContent = `${dateStr} (${daysOfStock} дн.)`;
+  } else {
+    dateCell.textContent = '-';
+  }
 
   if (item.boxesPerPallet && item.finalOrder > 0) {
     const boxes =
