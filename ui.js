@@ -27,7 +27,9 @@ const manualModal = document.getElementById('manualModal');
 const closeManualBtn = document.getElementById('closeManual');
 
 
-
+const nf = new Intl.NumberFormat('ru-RU', {
+  maximumFractionDigits: 0
+});
 
 loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
@@ -516,14 +518,14 @@ inputs[2].addEventListener('input', e => {
 function updateRow(tr, item) {
   const calc = calculateItem(item, orderState.settings);
 
-  let calcText = calc.calculatedOrder.toFixed(2);
+let calcText = nf.format(Math.round(calc.calculatedOrder));
 
 if (
   orderState.settings.unit === 'pieces' &&
   item.qtyPerBox
 ) {
   const boxes = calc.calculatedOrder / item.qtyPerBox;
-  calcText += ` (${Math.ceil(boxes)} кор.)`;
+  calcText += ` (${nf.format(Math.ceil(boxes))} кор.)`;
 }
 
 tr.querySelector('.calc').textContent = calcText;
@@ -544,7 +546,7 @@ tr.querySelector('.calc').textContent = calcText;
     const boxesLeft = Math.ceil(boxes % item.boxesPerPallet);
 
     tr.querySelector('.pallet-info').textContent =
-  `${pallets} пал. + ${boxesLeft} кор. (${item.boxesPerPallet} кор./пал.)`;
+  `${nf.format(pallets)} пал. + ${nf.format(boxesLeft)} кор. (${nf.format(item.boxesPerPallet)} кор./пал.)`
   } else {
     tr.querySelector('.pallet-info').textContent = '-';
   }
@@ -620,7 +622,7 @@ function updateFinalSummary() {
   return `
   <div>
     <b>${item.sku ? item.sku + ' ' : ''}${item.name}</b>
-    — ${Math.ceil(boxes)} коробок
+    — ${nf.format(Math.ceil(boxes))} коробок
   </div>
 `;
   }).join('');
