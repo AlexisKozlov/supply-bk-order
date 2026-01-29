@@ -201,7 +201,7 @@ function render() {
 
   tr.innerHTML = `
   <td class="item-name">
-  ${item.sku ? `<b>${item.sku}</b> — ` : ''}${item.name}
+  ${item.sku ? `<b>${item.sku}</b> ` : ''}${item.name}
 </td>
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
@@ -300,9 +300,9 @@ function updateFinalSummary() {
         ? item.finalOrder
         : item.finalOrder / item.qtyPerBox;
 
-    return `
+  return `
   <div>
-    <b>${item.sku ? item.sku + ' — ' : ''}${item.name}</b>
+    <b>${item.sku ? item.sku + ' ' : ''}${item.name}</b>
     — ${Math.ceil(boxes)} коробок
   </div>
 `;
