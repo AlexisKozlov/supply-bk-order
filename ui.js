@@ -8,7 +8,6 @@ const tbody = document.getElementById('items');
 const supplierSelect = document.getElementById('supplierFilter');
 const finalSummary = document.getElementById('finalSummary');
 
-const manualForm = document.getElementById('manualForm');
 const addManualBtn = document.getElementById('addManual');
 const manualAddBtn = document.getElementById('m_add');
 const manualCancelBtn = document.getElementById('m_cancel');
@@ -338,13 +337,7 @@ async function searchProducts(q) {
 
 
 /* ================= РУЧНОЙ ТОВАР ================= */
-addManualBtn.addEventListener('click', () => {
-  manualForm.classList.remove('hidden');
-});
 
-manualCancelBtn.addEventListener('click', () => {
-  manualForm.classList.add('hidden');
-});
 
 manualAddBtn.addEventListener('click', async () => {
   const name = document.getElementById('m_name').value.trim();
@@ -379,7 +372,7 @@ manualAddBtn.addEventListener('click', async () => {
     addItem(product);
   }
 
-  manualForm.classList.add('hidden');
+  manualModal.classList.add('hidden');
 });
 
 addManualBtn.addEventListener('click', () => {
