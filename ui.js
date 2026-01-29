@@ -624,7 +624,7 @@ function rerenderAll() {
 }
 
 render();
-initModals();
+
 
 
 function initModals() {
@@ -646,3 +646,6 @@ function initModals() {
     historyModal.classList.add('hidden');
   });
 }
+
+render();
+initModals();
