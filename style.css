@@ -317,3 +317,7 @@ td input {
   font-size: 18px;
   cursor: pointer;
 }
+
+.modal.hidden {
+  display: none !important;
+}
