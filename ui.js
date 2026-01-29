@@ -3,6 +3,7 @@ import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
 
 /* ================= DOM ================= */
+const copyOrderBtn = document.getElementById('copyOrder');
 const tbody = document.getElementById('items');
 const supplierSelect = document.getElementById('supplierFilter');
 const finalSummary = document.getElementById('finalSummary');
@@ -191,6 +192,60 @@ function addItem(p) {
   });
   render();
 }
+
+/* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
+copyOrderBtn.addEventListener('click', () => {
+  if (!orderState.items.length) {
+    alert('Заказ пуст');
+    return;
+  }
+
+  const deliveryDate = orderState.settings.deliveryDate
+    ? orderState.settings.deliveryDate.toLocaleDateString()
+    : '—';
+
+  const lines = orderState.items
+    .map(item => {
+      const boxes =
+        orderState.settings.unit === 'boxes'
+          ? item.finalOrder
+          : item.finalOrder / item.qtyPerBox;
+
+      const roundedBoxes = Math.ceil(boxes);
+
+      if (roundedBoxes <= 0) return null;
+
+      const name = `${item.sku ? item.sku + ' ' : ''}${item.name}`;
+
+      return `${name} ${roundedBoxes} коробок`;
+    })
+    .filter(Boolean);
+
+  if (!lines.length) {
+    alert('В заказе нет позиций с количеством');
+    return;
+  }
+
+  const text =
+`Добрый день!
+
+Просьба поставить:
+
+${lines.join('\n')}
+
+Дата прихода: ${deliveryDate}
+
+Спасибо!`;
+
+  navigator.clipboard.writeText(text)
+    .then(() => {
+      alert('Заказ скопирован в буфер обмена');
+    })
+    .catch(() => {
+      alert('Не удалось скопировать заказ');
+    });
+});
+
 
 /* ================= ТАБЛИЦА ================= */
 function render() {
