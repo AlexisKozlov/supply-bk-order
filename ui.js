@@ -117,9 +117,10 @@ function showConfirmModal(title, message, onConfirm, onCancel) {
 
 /* ================= LOGIN ================= */
 loginBtn.addEventListener('click', () => {
-  if (loginPassword.value === '157') {
+  if (loginPassword.value === 'be93') {
     loginOverlay.classList.add('hidden'); // Используем класс вместо style.display
     sessionStorage.setItem('bk_logged_in', 'true'); // sessionStorage вместо localStorage
+    loadSuppliers(); // Загружаем поставщиков после входа
     loadOrderHistory();
     showToast('Вход выполнен', 'Добро пожаловать!', 'success');
   } else {
@@ -130,6 +131,7 @@ loginBtn.addEventListener('click', () => {
 // Проверка сохраненного входа при загрузке - ТОЛЬКО sessionStorage
 if (sessionStorage.getItem('bk_logged_in') === 'true') {
   loginOverlay.classList.add('hidden');
+  loadSuppliers(); // Загружаем поставщиков
   loadOrderHistory();
 }
 
@@ -324,7 +326,10 @@ function renderOrderHistory(orders) {
     div.innerHTML = `
       <div class="history-header">
         <span>📦 <b>${order.supplier}</b> — ${date}</span>
-        <button class="btn small secondary" data-order-id="${order.id}">Загрузить</button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn small secondary load-btn" data-order-id="${order.id}">📥 Загрузить</button>
+          <button class="btn small secondary delete-btn" data-order-id="${order.id}">🗑️ Удалить</button>
+        </div>
       </div>
       <div class="history-items">
         ${order.order_items.map(i => `
@@ -333,14 +338,53 @@ function renderOrderHistory(orders) {
       </div>
     `;
 
-    div.querySelector('button').addEventListener('click', () => {
+    div.querySelector('.load-btn').addEventListener('click', () => {
       loadOrder(order);
+    });
+
+    div.querySelector('.delete-btn').addEventListener('click', () => {
+      deleteOrder(order.id);
     });
 
     historyContainer.appendChild(div);
   });
 
   historySupplier.addEventListener('change', loadOrderHistory);
+}
+
+async function deleteOrder(orderId) {
+  showConfirmModal(
+    '🗑️ Удалить заказ из истории?',
+    'Это действие нельзя отменить. Заказ будет удалён навсегда.',
+    async () => {
+      // Сначала удаляем связанные order_items
+      const { error: itemsError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', orderId);
+
+      if (itemsError) {
+        showToast('Ошибка', 'Не удалось удалить состав заказа', 'error');
+        console.error(itemsError);
+        return;
+      }
+
+      // Затем удаляем сам заказ
+      const { error: orderError } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderId);
+
+      if (orderError) {
+        showToast('Ошибка', 'Не удалось удалить заказ', 'error');
+        console.error(orderError);
+        return;
+      }
+
+      showToast('Заказ удалён', 'Заказ успешно удалён из истории', 'success');
+      loadOrderHistory(); // Перезагружаем историю
+    }
+  );
 }
 
 async function loadOrder(order) {
@@ -435,7 +479,7 @@ async function loadSuppliers() {
   });
 }
 
-loadSuppliers();
+// loadSuppliers() вызывается после входа, не здесь!
 
 /* ================= MANUAL ITEM ================= */
 addManualBtn.addEventListener('click', () => {
