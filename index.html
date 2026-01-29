@@ -78,7 +78,6 @@
       <div class="actions">
         <button id="addItem" class="btn secondary">➕ Пустая строка</button>
         <button id="addManual" class="btn primary">✍️ Ручной товар</button>
-        <button id="bulkImport" class="btn secondary">📋 Вставить из Excel</button>
         <button id="copyOrder" class="btn secondary">📋 Скопировать заказ</button>
         <button id="saveOrder" class="btn primary">💾 Сохранить заказ</button>
         <button id="openHistory" class="btn secondary">
@@ -180,34 +179,6 @@
     <div class="actions">
       <button id="m_add" class="btn primary">Добавить</button>
       <button id="m_cancel" class="btn secondary">Отмена</button>
-    </div>
-  </div>
-</div>
-
-
-<!-- ===== МОДАЛКА: BULK ИМПОРТ ===== -->
-<div id="bulkModal" class="modal hidden">
-  <div class="modal-box large">
-    <div class="modal-header">
-      <h2>Вставить из Excel</h2>
-      <button id="closeBulk" class="modal-close">✖</button>
-    </div>
-
-    <p style="color:#8a8a8a;font-size:14px;margin-bottom:16px;">
-      Скопируйте данные из Excel и вставьте сюда. Формат: <b>Название | Расход | Остаток | Артикул (опционально)</b>
-    </p>
-
-    <textarea id="bulkData" 
-      placeholder="Пример:
-Биг Кинг	500	200	BK001
-Воппер Джуниор	300	150
-Картофель фри	1000	500	BK003"
-      style="width:100%;height:200px;padding:12px;border-radius:10px;border:2px solid #e2e2e2;font-family:monospace;font-size:13px;resize:vertical;"
-    ></textarea>
-
-    <div class="actions" style="margin-top:20px;">
-      <button id="bulkImportBtn" class="btn primary">📥 Импортировать</button>
-      <button id="bulkCancel" class="btn secondary">Отмена</button>
     </div>
   </div>
 </div>

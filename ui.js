@@ -26,13 +26,6 @@ const historyModal = document.getElementById('historyModal');
 const manualModal = document.getElementById('manualModal');
 const closeManualBtn = document.getElementById('closeManual');
 
-const bulkModal = document.getElementById('bulkModal');
-const bulkImportBtn = document.getElementById('bulkImport');
-const bulkImportConfirmBtn = document.getElementById('bulkImportBtn');
-const bulkCancelBtn = document.getElementById('bulkCancel');
-const closeBulkBtn = document.getElementById('closeBulk');
-const bulkDataInput = document.getElementById('bulkData');
-
 
 const nf = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 0
@@ -536,78 +529,6 @@ function removeItem(itemId) {
     showToast('Товар удален', '', 'success');
   }
 }
-
-/* ================= BULK ИМПОРТ ================= */
-bulkImportBtn.addEventListener('click', () => {
-  bulkModal.classList.remove('hidden');
-});
-
-closeBulkBtn.addEventListener('click', () => {
-  bulkModal.classList.add('hidden');
-});
-
-bulkCancelBtn.addEventListener('click', () => {
-  bulkModal.classList.add('hidden');
-});
-
-bulkImportConfirmBtn.addEventListener('click', () => {
-  const data = bulkDataInput.value.trim();
-  
-  if (!data) {
-    showToast('Нет данных', 'Вставьте данные из Excel', 'error');
-    return;
-  }
-
-  const lines = data.split('\n').filter(line => line.trim());
-  let imported = 0;
-  let errors = 0;
-
-  lines.forEach(line => {
-    // Разделители: табуляция, запятая, точка с запятой, или несколько пробелов
-    const parts = line.split(/\t|,|;|\s{2,}/).map(p => p.trim());
-    
-    if (parts.length < 2) {
-      errors++;
-      return;
-    }
-
-    const name = parts[0];
-    const consumption = parseFloat(parts[1]) || 0;
-    const stock = parseFloat(parts[2]) || 0;
-    const sku = parts[3] || '';
-
-    if (!name) {
-      errors++;
-      return;
-    }
-
-    addItem({
-      name,
-      sku,
-      qty_per_box: 1,
-      boxes_per_pallet: null
-    });
-
-    // Устанавливаем значения расхода и остатка
-    const lastItem = orderState.items[orderState.items.length - 1];
-    lastItem.consumptionPeriod = consumption;
-    lastItem.stock = stock;
-
-    imported++;
-  });
-
-  bulkModal.classList.add('hidden');
-  bulkDataInput.value = '';
-  
-  render();
-  saveDraft();
-  
-  if (errors > 0) {
-    showToast(`Импортировано: ${imported}`, `Ошибок: ${errors}`, 'info');
-  } else {
-    showToast('Импорт завершен', `Добавлено товаров: ${imported}`, 'success');
-  }
-});
 
 /* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
 copyOrderBtn.addEventListener('click', () => {
