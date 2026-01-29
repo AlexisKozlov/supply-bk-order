@@ -516,8 +516,18 @@ inputs[2].addEventListener('input', e => {
 function updateRow(tr, item) {
   const calc = calculateItem(item, orderState.settings);
 
-  tr.querySelector('.calc').textContent =
-    calc.calculatedOrder.toFixed(2);
+  let calcText = calc.calculatedOrder.toFixed(2);
+
+if (
+  orderState.settings.unit === 'pieces' &&
+  item.qtyPerBox
+) {
+  const boxes = calc.calculatedOrder / item.qtyPerBox;
+  calcText += ` (${Math.ceil(boxes)} кор.)`;
+}
+
+tr.querySelector('.calc').textContent = calcText;
+
 
   tr.querySelector('.date').textContent =
     calc.coverageDate
@@ -534,7 +544,7 @@ function updateRow(tr, item) {
     const boxesLeft = Math.ceil(boxes % item.boxesPerPallet);
 
     tr.querySelector('.pallet-info').textContent =
-      `${pallets} пал. + ${boxesLeft} кор.`;
+  `${pallets} пал. + ${boxesLeft} кор. (${item.boxesPerPallet} кор./пал.)`;
   } else {
     tr.querySelector('.pallet-info').textContent = '-';
   }
