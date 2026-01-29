@@ -28,6 +28,7 @@ const historySupplier = document.getElementById('historySupplier');
 loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
     loginOverlay.style.display = 'none';
+    loadOrderHistory();
   } else {
     alert('Неверный пароль');
   }
@@ -236,14 +237,15 @@ function validateRequiredSettings() {
 /* ================= ПОСТАВЩИКИ ================= */
 (async function loadSuppliers() {
   const { data } = await supabase.from('products').select('supplier');
-  [...new Set(data.map(p => p.supplier).filter(Boolean))]
-    .forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = s;
-      supplierSelect.appendChild(opt);
-      historySupplier.addEventListener('change', loadOrderHistory);
-    });
+[...new Set(data.map(p => p.supplier).filter(Boolean))]
+  .forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    supplierSelect.appendChild(opt);
+  });
+
+historySupplier.addEventListener('change', loadOrderHistory);
 })();
 
 supplierSelect.addEventListener('change', async () => {
@@ -436,7 +438,7 @@ ${lines.join('\n')}
     });
 });
 
-loadOrderHistory();
+
 /* ================= ТАБЛИЦА ================= */
 function render() {
   tbody.innerHTML = '';
