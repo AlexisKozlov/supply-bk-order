@@ -242,6 +242,7 @@ function validateRequiredSettings() {
       opt.value = s;
       opt.textContent = s;
       supplierSelect.appendChild(opt);
+      historySupplier.addEventListener('change', loadOrderHistory);
     });
 })();
 
@@ -435,7 +436,7 @@ ${lines.join('\n')}
     });
 });
 
-
+loadOrderHistory();
 /* ================= ТАБЛИЦА ================= */
 function render() {
   tbody.innerHTML = '';
