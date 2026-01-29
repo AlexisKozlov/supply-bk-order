@@ -170,7 +170,7 @@ inputs[2].addEventListener('input', e => {
 
     roundBtn.addEventListener('click', () => {
       roundToPallet(item);
-      inputs[3].value = item.finalOrder;
+      inputs[2].value = item.finalOrder;
       updateRow(tr, item);
     });
 
