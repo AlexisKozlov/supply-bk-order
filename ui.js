@@ -19,6 +19,10 @@ const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
 const loginBtn = document.getElementById('loginBtn');
 const loginPassword = document.getElementById('loginPassword');
+const saveOrderBtn = document.getElementById('saveOrder');
+const historyContainer = document.getElementById('orderHistory');
+const historySupplier = document.getElementById('historySupplier');
+
 
 
 loginBtn.addEventListener('click', () => {
@@ -40,6 +44,136 @@ buildOrderBtn.addEventListener('click', () => {
 
   orderSection.classList.remove('hidden');
 });
+
+saveOrderBtn.addEventListener('click', async () => {
+  if (!orderState.items.length) {
+    alert('Заказ пуст');
+    return;
+  }
+
+  const itemsToSave = orderState.items
+    .map(item => {
+      const boxes =
+        orderState.settings.unit === 'boxes'
+          ? item.finalOrder
+          : item.finalOrder / item.qtyPerBox;
+
+      return {
+        sku: item.sku || null,
+        name: item.name,
+        qty_boxes: Math.ceil(boxes)
+      };
+    })
+    .filter(i => i.qty_boxes > 0);
+
+  if (!itemsToSave.length) {
+    alert('Нет позиций с количеством');
+    return;
+  }
+
+  const { data: order, error } = await supabase
+    .from('orders')
+    .insert({
+      supplier: document.getElementById('supplierFilter').value || 'Свободный',
+      delivery_date: orderState.settings.deliveryDate,
+      safety_days: orderState.settings.safetyDays,
+      period_days: orderState.settings.periodDays,
+      unit: orderState.settings.unit
+    })
+    .select()
+    .single();
+
+  if (error) {
+    alert('Ошибка сохранения заказа');
+    console.error(error);
+    return;
+  }
+
+  const items = itemsToSave.map(i => ({
+    order_id: order.id,
+    ...i
+  }));
+
+  const { error: itemsError } = await supabase
+    .from('order_items')
+    .insert(items);
+
+  if (itemsError) {
+    alert('Ошибка сохранения состава заказа');
+    console.error(itemsError);
+    return;
+  }
+
+  alert('Заказ сохранён');
+  loadOrderHistory();
+});
+
+async function loadOrderHistory() {
+  historyContainer.innerHTML = 'Загрузка...';
+
+  let query = supabase
+    .from('orders')
+    .select(`
+      id,
+      created_at,
+      supplier,
+      order_items (
+        sku,
+        name,
+        qty_boxes
+      )
+    `)
+    .order('created_at', { ascending: false });
+
+  if (historySupplier.value) {
+    query = query.eq('supplier', historySupplier.value);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    historyContainer.innerHTML = 'Ошибка загрузки истории';
+    console.error(error);
+    return;
+  }
+
+  renderOrderHistory(data);
+}
+
+
+function renderOrderHistory(orders) {
+  historyContainer.innerHTML = '';
+
+  if (!orders.length) {
+    historyContainer.innerHTML = 'История пуста';
+    return;
+  }
+
+  orders.forEach(order => {
+    const div = document.createElement('div');
+    div.className = 'history-order';
+
+    const date = new Date(order.created_at).toLocaleDateString();
+
+    div.innerHTML = `
+      <div class="history-header">
+        <b>${date}</b> — ${order.supplier}
+      </div>
+      <div class="history-items hidden">
+        ${order.order_items.map(i =>
+          `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок</div>`
+        ).join('')}
+      </div>
+    `;
+
+    div.querySelector('.history-header').onclick = () => {
+      div.querySelector('.history-items').classList.toggle('hidden');
+    };
+
+    historyContainer.appendChild(div);
+  });
+}
+
 
 /* ================= ДАТА СЕГОДНЯ ================= */
 const today = new Date();

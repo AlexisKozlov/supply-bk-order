@@ -263,3 +263,19 @@ td input {
   width: 100%;
   margin-bottom: 12px;
 }
+
+.history-order {
+  border-top: 1px solid #e2e2e2;
+  padding: 8px 0;
+}
+
+.history-header {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.history-items {
+  padding-left: 12px;
+  margin-top: 6px;
+  font-size: 13px;
+}
