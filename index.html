@@ -8,6 +8,15 @@
 
 <body>
 
+  <div id="loginOverlay" class="login-overlay">
+  <div class="login-box">
+    <h2>Вход</h2>
+    <input id="loginPassword" type="password" placeholder="Пароль" />
+    <button id="loginBtn" class="btn primary">Войти</button>
+  </div>
+</div>
+
+
 <header class="header">
   <h1>🍔 Калькулятор заказа BK</h1>
 </header>
@@ -31,6 +40,7 @@
     </div>
   </section>
 
+<div id="orderSection" class="hidden">
   <section class="card">
     <h2>Добавление товаров</h2>
 
@@ -79,7 +89,7 @@
     <h2>Итог заказа</h2>
     <div id="finalSummary"></div>
   </section>
-
+</div>
   <!-- Ручной товар -->
   <section class="card manual hidden" id="manualForm">
     <h2>Ручной товар</h2>

@@ -14,6 +14,32 @@ const manualAddBtn = document.getElementById('m_add');
 const manualCancelBtn = document.getElementById('m_cancel');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
+const buildOrderBtn = document.getElementById('buildOrder');
+const orderSection = document.getElementById('orderSection');
+const loginOverlay = document.getElementById('loginOverlay');
+const loginBtn = document.getElementById('loginBtn');
+const loginPassword = document.getElementById('loginPassword');
+
+
+loginBtn.addEventListener('click', () => {
+  if (loginPassword.value === '157') {
+    loginOverlay.style.display = 'none';
+  } else {
+    alert('Неверный пароль');
+  }
+});
+
+
+buildOrderBtn.addEventListener('click', () => {
+  const ok = validateRequiredSettings();
+
+  if (!ok) {
+    alert('Заполните обязательные поля');
+    return;
+  }
+
+  orderSection.classList.remove('hidden');
+});
 
 /* ================= ДАТА СЕГОДНЯ ================= */
 const today = new Date();
@@ -30,6 +56,8 @@ function bindSetting(id, key, isDate = false) {
       ? new Date(e.target.value)
       : +e.target.value || 0;
     rerenderAll();
+    validateRequiredSettings();
+
   });
 }
 
@@ -39,10 +67,37 @@ bindSetting('periodDays', 'periodDays');
 bindSetting('safetyDays', 'safetyDays');
 bindSetting('safetyPercent', 'safetyPercent');
 
+
 document.getElementById('unit').addEventListener('change', e => {
   orderState.settings.unit = e.target.value;
   rerenderAll();
 });
+
+function validateRequiredSettings() {
+  const todayEl = document.getElementById('today');
+  const deliveryEl = document.getElementById('deliveryDate');
+  const safetyEl = document.getElementById('safetyDays');
+
+  let valid = true;
+
+  if (!todayEl.value) {
+    todayEl.classList.add('required');
+    valid = false;
+  } else todayEl.classList.remove('required');
+
+  if (!deliveryEl.value) {
+    deliveryEl.classList.add('required');
+    valid = false;
+  } else deliveryEl.classList.remove('required');
+
+  if (safetyEl.value === '' || safetyEl.value === null) {
+    safetyEl.classList.add('required');
+    valid = false;
+  } else safetyEl.classList.remove('required');
+
+  return valid;
+}
+
 
 /* ================= ПОСТАВЩИКИ ================= */
 (async function loadSuppliers() {
@@ -302,20 +357,6 @@ inputs[2].addEventListener('input', e => {
 }
 
 function updateRow(tr, item) {
-  // ===== ОБЯЗАТЕЛЬНЫЕ ПАРАМЕТРЫ =====
-if (
-  !orderState.settings.deliveryDate ||
-  orderState.settings.safetyDays === null ||
-  orderState.settings.safetyDays === undefined
-) {
-  tr.querySelector('.calc').textContent = '—';
-  tr.querySelector('.date').textContent = '—';
-
-  const palletInfo = tr.querySelector('.pallet-info');
-  if (palletInfo) palletInfo.textContent = '—';
-
-  return;
-}
   const calc = calculateItem(item, orderState.settings);
 
   tr.querySelector('.calc').textContent =

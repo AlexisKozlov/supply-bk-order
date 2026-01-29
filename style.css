@@ -141,3 +141,32 @@ th, td {
 #productSearch {
   width: 100%;
 }
+
+/* ===== ОБЯЗАТЕЛЬНЫЕ ПОЛЯ ===== */
+.required {
+  border: 2px solid #d32f2f !important;
+  background: #fff0f0;
+}
+
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.login-box {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  width: 280px;
+  text-align: center;
+}
+
+.login-box input {
+  width: 100%;
+  margin-bottom: 12px;
+}
