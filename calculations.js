@@ -6,7 +6,6 @@ export function calculateItem(item, settings) {
     deliveryDate,
     periodDays,
     safetyDays,
-    safetyPercent,
     unit
   } = settings;
 
@@ -25,10 +24,11 @@ export function calculateItem(item, settings) {
     daily * transitDays +
     daily * safetyDays;
 
-  const totalNeed =
-    baseNeed + baseNeed * (safetyPercent / 100);
+  const totalNeed = baseNeed;
 
-  let calculatedOrder = totalNeed - item.stock;
+  // Учитываем транзит как дополнительный остаток
+  const totalStock = item.stock + (item.transit || 0);
+  let calculatedOrder = totalNeed - totalStock;
   if (calculatedOrder < 0) calculatedOrder = 0;
 
   /* ===== ОКРУГЛЕНИЕ ===== */
@@ -41,7 +41,7 @@ export function calculateItem(item, settings) {
       roundUp(calculatedOrder / item.qtyPerBox) * item.qtyPerBox;
   }
 
-  const available = item.stock + (item.finalOrder || 0);
+  const available = totalStock + (item.finalOrder || 0);
   const days = safeDivide(available, daily);
 
   const coverageDate =
