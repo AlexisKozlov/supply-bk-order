@@ -854,6 +854,11 @@ function render() {
     setupExcelNavigation(orderBoxesInput, rowIndex, 4);
 
     roundBtn.addEventListener('click', () => {
+      if (!item.boxesPerPallet) {
+        showToast('Не указано', 'Для этого товара не задано коробок на паллете', 'warning');
+        return;
+      }
+      
       roundToPallet(item);
       // После округления обновляем оба поля
       if (orderState.settings.unit === 'pieces') {
@@ -865,6 +870,7 @@ function render() {
       }
       updateRow(tr, item);
       saveDraft();
+      showToast('Округлено', 'Заказ округлён до целых паллет', 'success');
     });
 
     deleteBtn.addEventListener('click', () => {
