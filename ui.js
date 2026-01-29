@@ -181,6 +181,7 @@ document.getElementById('addItem').addEventListener('click', () => {
 function addItem(p) {
   orderState.items.push({
     id: crypto.randomUUID(),
+    sku: p.sku || '',
     name: p.name,
     consumptionPeriod: 0,
     stock: 0,
@@ -199,7 +200,9 @@ function render() {
     const tr = document.createElement('tr');
 
   tr.innerHTML = `
-  <td class="item-name">${item.name}</td>
+  <td class="item-name">
+  ${item.sku ? `<b>${item.sku}</b> — ` : ''}${item.name}
+</td>
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
   <td class="calc">0</td>
@@ -297,7 +300,12 @@ function updateFinalSummary() {
         ? item.finalOrder
         : item.finalOrder / item.qtyPerBox;
 
-    return `<div><b>${item.name}</b> — ${Math.ceil(boxes)} коробок</div>`;
+    return `
+  <div>
+    <b>${item.sku ? item.sku + ' — ' : ''}${item.name}</b>
+    — ${Math.ceil(boxes)} коробок
+  </div>
+`;
   }).join('');
 }
 
