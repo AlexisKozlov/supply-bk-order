@@ -11,6 +11,8 @@ const manualForm = document.getElementById('manualForm');
 const addManualBtn = document.getElementById('addManual');
 const manualAddBtn = document.getElementById('m_add');
 const manualCancelBtn = document.getElementById('m_cancel');
+const searchInput = document.getElementById('productSearch');
+const searchResults = document.getElementById('searchResults');
 
 /* ================= ДАТА СЕГОДНЯ ================= */
 const today = new Date();
@@ -66,6 +68,65 @@ supplierSelect.addEventListener('change', async () => {
 
   data.forEach(addItem);
 });
+
+/* ================= ПОИСК ПО КАРТОЧКАМ ================= */
+let searchTimer = null;
+
+if (searchInput) {
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    clearTimeout(searchTimer);
+
+    if (q.length < 2) {
+      searchResults.innerHTML = '';
+      return;
+    }
+
+    searchTimer = setTimeout(() => searchProducts(q), 300);
+  });
+}
+
+async function searchProducts(q) {
+  const isSku = /^[0-9A-Za-z-]+$/.test(q);
+
+  let query = supabase
+    .from('products')
+    .select('*')
+    .limit(10);
+
+  // если выбран поставщик — ищем только по нему
+  if (supplierSelect.value) {
+    query = query.eq('supplier', supplierSelect.value);
+  }
+
+  query = isSku
+    ? query.ilike('sku', `%${q}%`)
+    : query.ilike('name', `%${q}%`);
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Ошибка поиска:', error);
+    return;
+  }
+
+  searchResults.innerHTML = '';
+
+  data.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'search-item';
+    div.textContent = `${p.sku || ''} — ${p.name}`;
+
+    div.addEventListener('click', () => {
+      addItem(p);
+      searchResults.innerHTML = '';
+      searchInput.value = '';
+    });
+
+    searchResults.appendChild(div);
+  });
+}
+
 
 /* ================= РУЧНОЙ ТОВАР ================= */
 addManualBtn.addEventListener('click', () => {
