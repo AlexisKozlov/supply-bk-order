@@ -302,6 +302,20 @@ inputs[2].addEventListener('input', e => {
 }
 
 function updateRow(tr, item) {
+  // ===== ОБЯЗАТЕЛЬНЫЕ ПАРАМЕТРЫ =====
+if (
+  !orderState.settings.deliveryDate ||
+  orderState.settings.safetyDays === null ||
+  orderState.settings.safetyDays === undefined
+) {
+  tr.querySelector('.calc').textContent = '—';
+  tr.querySelector('.date').textContent = '—';
+
+  const palletInfo = tr.querySelector('.pallet-info');
+  if (palletInfo) palletInfo.textContent = '—';
+
+  return;
+}
   const calc = calculateItem(item, orderState.settings);
 
   tr.querySelector('.calc').textContent =

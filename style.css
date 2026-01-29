@@ -125,3 +125,19 @@ th, td {
 .status-bad {
   color: #d32f2f;
 }
+
+/* ===== UI правки ===== */
+
+/* уменьшаем селект поставщика */
+#supplierFilter {
+  max-width: 220px;
+}
+
+/* расширяем поиск */
+.search {
+  max-width: 600px;
+}
+
+#productSearch {
+  width: 100%;
+}
