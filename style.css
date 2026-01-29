@@ -263,10 +263,11 @@ th {
 }
 
 td {
-  padding: 12px 10px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--border);
   text-align: center;
   vertical-align: middle;
+  font-size: 13px;
 }
 
 tbody tr {
@@ -295,9 +296,18 @@ td.item-name b {
 }
 
 td input {
-  width: 100px;
+  width: 80px;
   text-align: center;
-  padding: 8px 10px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+td.order-cell {
+  white-space: nowrap;
+}
+
+td.order-cell input {
+  width: 70px;
 }
 
 /* ===== STATUS ===== */
@@ -330,15 +340,15 @@ td input {
 #finalSummary {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 13px;
 }
 
 #finalSummary > div {
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: #f8f8f8;
-  border-radius: 8px;
-  border-left: 4px solid var(--orange);
+  border-radius: 6px;
+  border-left: 3px solid var(--orange);
 }
 
 /* ===== MANUAL ===== */
@@ -411,7 +421,9 @@ td input {
 }
 
 .history-header {
-  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   font-weight: 700;
   padding: 8px 12px;
   border-radius: 8px;
