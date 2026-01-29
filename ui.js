@@ -106,6 +106,11 @@ saveOrderBtn.addEventListener('click', async () => {
     return;
   }
 
+  // Подтверждение сохранения
+  if (!confirm('Сохранить заказ в историю?')) {
+    return;
+  }
+
   const itemsToSave = orderState.items
     .map(item => {
       const boxes =
@@ -116,7 +121,8 @@ saveOrderBtn.addEventListener('click', async () => {
       return {
         sku: item.sku || null,
         name: item.name,
-        qty_boxes: Math.ceil(boxes)
+        qty_boxes: Math.ceil(boxes),
+        qty_per_box: item.qtyPerBox || 1
       };
     })
     .filter(i => i.qty_boxes > 0);
@@ -224,12 +230,10 @@ function loadDraft() {
     }
     orderState.settings.periodDays = data.settings.periodDays || 30;
     orderState.settings.safetyDays = data.settings.safetyDays || 0;
-    orderState.settings.safetyPercent = data.settings.safetyPercent || 0;
     orderState.settings.unit = data.settings.unit || 'pieces';
     
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     document.getElementById('safetyDays').value = orderState.settings.safetyDays;
-    document.getElementById('safetyPercent').value = orderState.settings.safetyPercent;
     document.getElementById('unit').value = orderState.settings.unit;
     
     // Восстановление товаров
@@ -272,17 +276,42 @@ function renderOrderHistory(orders) {
 
     div.innerHTML = `
       <div class="history-header">
-        <b>${date}</b> — ${order.supplier}
+        <span><b>${date}</b> — ${order.supplier}</span>
+        <button class="btn small" style="background:#d32f2f;color:white;margin-left:10px;" title="Удалить заказ">🗑️</button>
       </div>
       <div class="history-items hidden">
-        ${order.order_items.map(i =>
-          `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок</div>`
-        ).join('')}
+        ${order.order_items.map(i => {
+          const pieces = i.qty_boxes * (i.qty_per_box || 1);
+          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${pieces} шт)</div>`;
+        }).join('')}
       </div>
     `;
 
-    div.querySelector('.history-header').onclick = () => {
+    const header = div.querySelector('.history-header span');
+    const deleteBtn = div.querySelector('.history-header button');
+
+    header.style.cursor = 'pointer';
+    header.onclick = () => {
       div.querySelector('.history-items').classList.toggle('hidden');
+    };
+
+    deleteBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('Удалить этот заказ из истории?')) return;
+
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', order.id);
+
+      if (error) {
+        showToast('Ошибка удаления', 'Не удалось удалить заказ', 'error');
+        console.error(error);
+        return;
+      }
+
+      showToast('Заказ удален', '', 'success');
+      loadOrderHistory();
     };
 
     historyContainer.appendChild(div);
@@ -314,7 +343,6 @@ bindSetting('today', 'today', true);
 bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
 bindSetting('safetyDays', 'safetyDays');
-bindSetting('safetyPercent', 'safetyPercent');
 
 
 document.getElementById('unit').addEventListener('change', e => {
@@ -501,10 +529,6 @@ manualCancelBtn.addEventListener('click', () => {
 
 
 /* ================= ДОБАВЛЕНИЕ ================= */
-document.getElementById('addItem').addEventListener('click', () => {
-  addItem({ name: 'Новый товар', qty_per_box: 1 });
-});
-
 function addItem(p) {
   orderState.items.push({
     id: crypto.randomUUID(),
@@ -512,6 +536,7 @@ function addItem(p) {
     name: p.name,
     consumptionPeriod: 0,
     stock: 0,
+    transit: 0,
     qtyPerBox: p.qty_per_box || 1,
     boxesPerPallet: p.boxes_per_pallet || null,
     finalOrder: 0
@@ -613,9 +638,9 @@ function setupExcelNavigation(input, rowIndex, columnIndex) {
 function moveToCell(rowIndex, columnIndex) {
   const rows = tbody.querySelectorAll('tr');
   
-  // Проверка границ
+  // Проверка границ (теперь 4 колонки: расход, остаток, транзит, заказ-штуки, заказ-коробки)
   if (rowIndex < 0 || rowIndex >= rows.length) return;
-  if (columnIndex < 0 || columnIndex > 2) return;
+  if (columnIndex < 0 || columnIndex > 4) return;
   
   const targetRow = rows[rowIndex];
   const inputs = targetRow.querySelectorAll('input[type="number"]');
@@ -639,8 +664,12 @@ function render() {
 </td>
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
+  <td><input type="number" value="${item.transit || 0}"></td>
   <td class="calc">0</td>
-  <td><input type="number" value="${item.finalOrder}"></td>
+  <td class="order-cell">
+    <input type="number" class="order-pieces" value="0" style="width:70px;"> / 
+    <input type="number" class="order-boxes" value="0" style="width:70px;">
+  </td>
   <td class="date">-</td>
   <td class="pallets">
     <div class="pallet-info">-</div>
@@ -650,9 +679,49 @@ function render() {
   <td><button class="btn small" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
 `;
 
- const inputs = tr.querySelectorAll('input')
+ const inputs = tr.querySelectorAll('input[type="number"]');
+    const orderPiecesInput = tr.querySelector('.order-pieces');
+    const orderBoxesInput = tr.querySelector('.order-boxes');
     const roundBtn = tr.querySelector('button');
     const deleteBtn = tr.querySelectorAll('button')[1];
+
+    // Функция синхронизации штук и коробок
+    function syncOrderInputs(fromPieces) {
+      if (fromPieces) {
+        // Изменили штуки - пересчитываем коробки
+        const pieces = +orderPiecesInput.value || 0;
+        const boxes = item.qtyPerBox ? Math.ceil(pieces / item.qtyPerBox) : 0;
+        orderBoxesInput.value = boxes;
+        
+        // Сохраняем в зависимости от выбранных единиц
+        if (orderState.settings.unit === 'pieces') {
+          item.finalOrder = pieces;
+        } else {
+          item.finalOrder = boxes;
+        }
+      } else {
+        // Изменили коробки - пересчитываем штуки
+        const boxes = +orderBoxesInput.value || 0;
+        const pieces = boxes * (item.qtyPerBox || 1);
+        orderPiecesInput.value = pieces;
+        
+        // Сохраняем в зависимости от выбранных единиц
+        if (orderState.settings.unit === 'pieces') {
+          item.finalOrder = pieces;
+        } else {
+          item.finalOrder = boxes;
+        }
+      }
+    }
+
+    // Инициализация значений при рендере
+    if (orderState.settings.unit === 'pieces') {
+      orderPiecesInput.value = item.finalOrder || 0;
+      orderBoxesInput.value = item.qtyPerBox ? Math.ceil((item.finalOrder || 0) / item.qtyPerBox) : 0;
+    } else {
+      orderBoxesInput.value = item.finalOrder || 0;
+      orderPiecesInput.value = (item.finalOrder || 0) * (item.qtyPerBox || 1);
+    }
 
     // Колонка 0: Расход
     inputs[0].addEventListener('input', e => {
@@ -670,17 +739,40 @@ function render() {
     });
     setupExcelNavigation(inputs[1], rowIndex, 1);
 
-    // Колонка 2: Заказ итого
+    // Колонка 2: Транзит
     inputs[2].addEventListener('input', e => {
-      item.finalOrder = +e.target.value || 0;
+      item.transit = +e.target.value || 0;
       updateRow(tr, item);
       saveDraft();
     });
     setupExcelNavigation(inputs[2], rowIndex, 2);
 
+    // Колонка 3 (штуки): Заказ в штуках
+    orderPiecesInput.addEventListener('input', e => {
+      syncOrderInputs(true);
+      updateRow(tr, item);
+      saveDraft();
+    });
+    setupExcelNavigation(orderPiecesInput, rowIndex, 3);
+
+    // Колонка 4 (коробки): Заказ в коробках
+    orderBoxesInput.addEventListener('input', e => {
+      syncOrderInputs(false);
+      updateRow(tr, item);
+      saveDraft();
+    });
+    setupExcelNavigation(orderBoxesInput, rowIndex, 4);
+
     roundBtn.addEventListener('click', () => {
       roundToPallet(item);
-      inputs[2].value = item.finalOrder;
+      // После округления обновляем оба поля
+      if (orderState.settings.unit === 'pieces') {
+        orderPiecesInput.value = item.finalOrder;
+        orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      } else {
+        orderBoxesInput.value = item.finalOrder;
+        orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+      }
       updateRow(tr, item);
       saveDraft();
     });
@@ -794,16 +886,28 @@ function roundToPallet(item) {
 
 /* ================= ИТОГ В КОРОБКАХ ================= */
 function updateFinalSummary() {
-  finalSummary.innerHTML = orderState.items.map(item => {
-    const boxes =
-      orderState.settings.unit === 'boxes'
-        ? item.finalOrder
-        : item.finalOrder / item.qtyPerBox;
+  const itemsWithOrder = orderState.items.filter(item => item.finalOrder > 0);
+  
+  if (itemsWithOrder.length === 0) {
+    finalSummary.innerHTML = '<div style="color:#8a8a8a;text-align:center;">Нет товаров с заказом</div>';
+    return;
+  }
+  
+  finalSummary.innerHTML = itemsWithOrder.map(item => {
+    let boxes, pieces;
+    
+    if (orderState.settings.unit === 'boxes') {
+      boxes = item.finalOrder;
+      pieces = item.finalOrder * (item.qtyPerBox || 1);
+    } else {
+      boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      pieces = item.finalOrder;
+    }
 
   return `
   <div>
     <b>${item.sku ? item.sku + ' ' : ''}${item.name}</b>
-    — ${nf.format(Math.ceil(boxes))} коробок
+    — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(Math.round(pieces))} шт)
   </div>
 `;
   }).join('');
