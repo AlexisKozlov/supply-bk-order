@@ -320,27 +320,28 @@ async function searchProducts(q) {
 
   searchResults.innerHTML = '';
 
+  if (!data.length) {
+    searchResults.innerHTML =
+      '<div style="color:#999">Ничего не найдено</div>';
+    return;
+  }
+
   data.forEach(p => {
     const div = document.createElement('div');
-    div.className = 'search-item';
-    div.textContent = `${p.sku || ''} — ${p.name}`;
-
+    div.textContent = `${p.sku} ${p.name}`;
     div.addEventListener('click', () => {
       addItem(p);
       searchResults.innerHTML = '';
       searchInput.value = '';
     });
-
     searchResults.appendChild(div);
   });
 }
 
-
 /* ================= РУЧНОЙ ТОВАР ================= */
-
-
 manualAddBtn.addEventListener('click', async () => {
   const name = document.getElementById('m_name').value.trim();
+
   if (!name) {
     alert('Введите наименование');
     return;
@@ -461,11 +462,53 @@ ${lines.join('\n')}
 });
 
 
+/* ================= EXCEL-НАВИГАЦИЯ ================= */
+function setupExcelNavigation(input, rowIndex, columnIndex) {
+  input.addEventListener('keydown', (e) => {
+    // Enter или стрелка вниз
+    if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveToCell(rowIndex + 1, columnIndex);
+    }
+    // Стрелка вверх
+    else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveToCell(rowIndex - 1, columnIndex);
+    }
+    // Стрелка вправо (только если курсор в конце)
+    else if (e.key === 'ArrowRight' && input.selectionStart === input.value.length) {
+      e.preventDefault();
+      moveToCell(rowIndex, columnIndex + 1);
+    }
+    // Стрелка влево (только если курсор в начале)
+    else if (e.key === 'ArrowLeft' && input.selectionStart === 0) {
+      e.preventDefault();
+      moveToCell(rowIndex, columnIndex - 1);
+    }
+  });
+}
+
+function moveToCell(rowIndex, columnIndex) {
+  const rows = tbody.querySelectorAll('tr');
+  
+  // Проверка границ
+  if (rowIndex < 0 || rowIndex >= rows.length) return;
+  if (columnIndex < 0 || columnIndex > 2) return;
+  
+  const targetRow = rows[rowIndex];
+  const inputs = targetRow.querySelectorAll('input[type="number"]');
+  
+  if (inputs[columnIndex]) {
+    inputs[columnIndex].focus();
+    inputs[columnIndex].select();
+  }
+}
+
 /* ================= ТАБЛИЦА ================= */
 function render() {
   tbody.innerHTML = '';
 
-  orderState.items.forEach(item => {
+  orderState.items.forEach((item, rowIndex) => {
     const tr = document.createElement('tr');
 
   tr.innerHTML = `
@@ -487,20 +530,26 @@ function render() {
  const inputs = tr.querySelectorAll('input')
     const roundBtn = tr.querySelector('button');
 
+    // Колонка 0: Расход
     inputs[0].addEventListener('input', e => {
-  item.consumptionPeriod = +e.target.value || 0;
-  updateRow(tr, item);
-});
+      item.consumptionPeriod = +e.target.value || 0;
+      updateRow(tr, item);
+    });
+    setupExcelNavigation(inputs[0], rowIndex, 0);
 
-inputs[1].addEventListener('input', e => {
-  item.stock = +e.target.value || 0;
-  updateRow(tr, item);
-});
+    // Колонка 1: Остаток
+    inputs[1].addEventListener('input', e => {
+      item.stock = +e.target.value || 0;
+      updateRow(tr, item);
+    });
+    setupExcelNavigation(inputs[1], rowIndex, 1);
 
-inputs[2].addEventListener('input', e => {
-  item.finalOrder = +e.target.value || 0;
-  updateRow(tr, item);
-});
+    // Колонка 2: Заказ итого
+    inputs[2].addEventListener('input', e => {
+      item.finalOrder = +e.target.value || 0;
+      updateRow(tr, item);
+    });
+    setupExcelNavigation(inputs[2], rowIndex, 2);
 
     roundBtn.addEventListener('click', () => {
       roundToPallet(item);
