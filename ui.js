@@ -150,23 +150,23 @@ function render() {
   </td>
 `;
 
-    const inputs = tr.querySelectorAll('input');
+ const inputs = tr.querySelectorAll('input')
     const roundBtn = tr.querySelector('button');
 
-    inputs[1].addEventListener('input', e => {
-      item.consumptionPeriod = +e.target.value || 0;
-      updateRow(tr, item);
-    });
+    inputs[0].addEventListener('input', e => {
+  item.consumptionPeriod = +e.target.value || 0;
+  updateRow(tr, item);
+});
 
-    inputs[2].addEventListener('input', e => {
-      item.stock = +e.target.value || 0;
-      updateRow(tr, item);
-    });
+inputs[1].addEventListener('input', e => {
+  item.stock = +e.target.value || 0;
+  updateRow(tr, item);
+});
 
-    inputs[3].addEventListener('input', e => {
-      item.finalOrder = +e.target.value || 0;
-      updateRow(tr, item);
-    });
+inputs[2].addEventListener('input', e => {
+  item.finalOrder = +e.target.value || 0;
+  updateRow(tr, item);
+});
 
     roundBtn.addEventListener('click', () => {
       roundToPallet(item);
