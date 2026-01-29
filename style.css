@@ -10,7 +10,6 @@
   --muted: #8a8a8a;
   --success: #2e7d32;
   --error: #d32f2f;
-  --warning: #f57c00;
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.08);
   --shadow-md: 0 6px 16px rgba(0,0,0,0.12);
   --shadow-lg: 0 12px 32px rgba(0,0,0,0.16);
@@ -264,11 +263,10 @@ th {
 }
 
 td {
-  padding: 8px 8px;
+  padding: 12px 10px;
   border-bottom: 1px solid var(--border);
   text-align: center;
   vertical-align: middle;
-  font-size: 13px;
 }
 
 tbody tr {
@@ -297,18 +295,9 @@ td.item-name b {
 }
 
 td input {
-  width: 80px;
+  width: 100px;
   text-align: center;
-  padding: 6px 8px;
-  font-size: 13px;
-}
-
-td.order-cell {
-  white-space: nowrap;
-}
-
-td.order-cell input {
-  width: 70px;
+  padding: 8px 10px;
 }
 
 /* ===== STATUS ===== */
@@ -341,15 +330,15 @@ td.order-cell input {
 #finalSummary {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  gap: 10px;
+  font-size: 14px;
 }
 
 #finalSummary > div {
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: #f8f8f8;
-  border-radius: 6px;
-  border-left: 3px solid var(--orange);
+  border-radius: 8px;
+  border-left: 4px solid var(--orange);
 }
 
 /* ===== MANUAL ===== */
@@ -422,9 +411,7 @@ td.order-cell input {
 }
 
 .history-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  cursor: pointer;
   font-weight: 700;
   padding: 8px 12px;
   border-radius: 8px;
@@ -518,29 +505,6 @@ td.order-cell input {
   margin-bottom: 16px;
 }
 
-/* ===== CONFIRM MODAL ===== */
-.confirm-modal {
-  width: 420px;
-}
-
-.confirm-message {
-  font-size: 15px;
-  color: var(--brown);
-  margin-bottom: 24px;
-  line-height: 1.6;
-  text-align: center;
-}
-
-.confirm-modal .actions {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 0;
-}
-
-.confirm-modal .actions .btn {
-  flex: 1;
-}
-
 /* ===== TOAST NOTIFICATIONS ===== */
 .toast-container {
   position: fixed;
@@ -589,10 +553,6 @@ td.order-cell input {
 
 .toast.toast-info {
   border-left-color: var(--orange);
-}
-
-.toast.toast-warning {
-  border-left-color: var(--warning);
 }
 
 .toast-icon {
@@ -672,10 +632,6 @@ td.order-cell input {
   }
 
   .modal-box.large {
-    width: calc(100% - 32px);
-  }
-
-  .confirm-modal {
     width: calc(100% - 32px);
   }
 
