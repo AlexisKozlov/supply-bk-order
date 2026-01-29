@@ -279,3 +279,41 @@ td input {
   margin-top: 6px;
   font-size: 13px;
 }
+
+/* ===== MODAL ===== */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal-box {
+  background: white;
+  border-radius: 14px;
+  padding: 24px;
+  width: 420px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-box.large {
+  width: 720px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+}

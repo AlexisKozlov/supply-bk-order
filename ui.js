@@ -22,6 +22,13 @@ const loginPassword = document.getElementById('loginPassword');
 const saveOrderBtn = document.getElementById('saveOrder');
 const historyContainer = document.getElementById('orderHistory');
 const historySupplier = document.getElementById('historySupplier');
+const historyModal = document.getElementById('historyModal');
+const openHistoryBtn = document.getElementById('openHistory');
+const closeHistoryBtn = document.getElementById('closeHistory');
+
+const manualModal = document.getElementById('manualModal');
+const closeManualBtn = document.getElementById('closeManual');
+
 
 
 
@@ -374,6 +381,19 @@ manualAddBtn.addEventListener('click', async () => {
 
   manualForm.classList.add('hidden');
 });
+
+addManualBtn.addEventListener('click', () => {
+  manualModal.classList.remove('hidden');
+});
+
+closeManualBtn.addEventListener('click', () => {
+  manualModal.classList.add('hidden');
+});
+
+manualCancelBtn.addEventListener('click', () => {
+  manualModal.classList.add('hidden');
+});
+
 
 /* ================= ДОБАВЛЕНИЕ ================= */
 document.getElementById('addItem').addEventListener('click', () => {
