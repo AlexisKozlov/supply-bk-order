@@ -18,6 +18,9 @@
 @font-face {
     font-family: 'Flame';
     src: url('Flame-Regular.otf') format('opentype');
+      font-weight: normal;
+    font-style: normal;
+    font-display: swap; /* Оптимизация загрузки */
 }
 
 * {
