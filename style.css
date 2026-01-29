@@ -5,9 +5,12 @@
   --bg: #FFF6E5;
   --card: #ffffff;
   --border: #e2e2e2;
+  --muted: #8a8a8a;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
@@ -16,87 +19,155 @@ body {
   color: var(--brown);
 }
 
+/* ===== HEADER ===== */
 .header {
   background: var(--red);
   color: white;
   padding: 16px 24px;
 }
 
+.header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+/* ===== LAYOUT ===== */
 .container {
-  max-width: 1400px;
-  margin: 20px auto;
-  padding: 0 20px;
+  max-width: 1440px;
+  margin: 24px auto;
+  padding: 0 24px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
+/* ===== CARD ===== */
 .card {
   background: var(--card);
-  border-radius: 10px;
-  padding: 16px 20px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.06);
 }
 
+.card h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+/* ===== SETTINGS ===== */
 .settings {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 label {
   font-size: 13px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-input, select {
-  padding: 8px 10px;
-  border-radius: 6px;
+input,
+select {
+  padding: 10px 12px;
+  border-radius: 8px;
   border: 1px solid var(--border);
+  font-size: 14px;
 }
 
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--orange);
+}
+
+/* ===== REQUIRED ===== */
+.required {
+  border: 2px solid #d32f2f !important;
+  background: #fff0f0;
+}
+
+/* ===== BUTTONS ===== */
 .actions {
   display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .btn {
   border: none;
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 10px 16px;
   font-size: 14px;
   cursor: pointer;
   font-weight: 600;
+  white-space: nowrap;
 }
 
-.btn.primary { background: var(--red); color: white; }
-.btn.secondary { background: var(--orange); color: var(--brown); }
-.btn.small { padding: 4px 6px; font-size: 12px; }
+.btn.primary {
+  background: var(--red);
+  color: white;
+}
 
-.search { position: relative; max-width: 400px; }
+.btn.secondary {
+  background: var(--orange);
+  color: var(--brown);
+}
+
+.btn.small {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* ===== SEARCH ===== */
+.search {
+  position: relative;
+  max-width: 640px;
+}
+
+#productSearch {
+  width: 100%;
+}
+
 .search-results {
   position: absolute;
+  top: calc(100% + 4px);
   width: 100%;
   background: white;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  z-index: 20;
+  border-radius: 8px;
+  z-index: 50;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .search-results div {
-  padding: 8px 10px;
+  padding: 10px 12px;
   cursor: pointer;
+  border-bottom: 1px solid var(--border);
 }
 
-.table-wrap { overflow-x: auto; }
+.search-results div:last-child {
+  border-bottom: none;
+}
+
+.search-results div:hover {
+  background: #f8f8f8;
+}
+
+/* ===== TABLE ===== */
+.table-wrap {
+  overflow-x: auto;
+}
 
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  min-width: 1100px;
 }
 
 thead {
@@ -104,15 +175,25 @@ thead {
   color: white;
 }
 
-th, td {
-  padding: 8px;
+th,
+td {
+  padding: 10px 8px;
   border-bottom: 1px solid var(--border);
   text-align: center;
+  vertical-align: middle;
 }
 
-.manual { border: 1px dashed var(--orange); }
-.hidden { display: none; }
+td.item-name {
+  text-align: left;
+  font-weight: 600;
+  max-width: 420px;
+}
 
+td input {
+  width: 90px;
+}
+
+/* ===== STATUS ===== */
 .status {
   font-weight: 600;
   font-size: 13px;
@@ -126,28 +207,36 @@ th, td {
   color: #d32f2f;
 }
 
-/* ===== UI правки ===== */
-
-/* уменьшаем селект поставщика */
-#supplierFilter {
-  max-width: 220px;
+/* ===== PALLETS ===== */
+.pallets {
+  min-width: 140px;
 }
 
-/* расширяем поиск */
-.search {
-  max-width: 600px;
+.pallet-info {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
 }
 
-#productSearch {
-  width: 100%;
+/* ===== SUMMARY ===== */
+#finalSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
 }
 
-/* ===== ОБЯЗАТЕЛЬНЫЕ ПОЛЯ ===== */
-.required {
-  border: 2px solid #d32f2f !important;
-  background: #fff0f0;
+/* ===== MANUAL ===== */
+.manual {
+  border: 2px dashed var(--orange);
 }
 
+/* ===== MISC ===== */
+.hidden {
+  display: none;
+}
+
+/* ===== LOGIN ===== */
 .login-overlay {
   position: fixed;
   inset: 0;
@@ -160,10 +249,14 @@ th, td {
 
 .login-box {
   background: white;
-  padding: 24px;
-  border-radius: 12px;
-  width: 280px;
+  padding: 28px;
+  border-radius: 14px;
+  width: 300px;
   text-align: center;
+}
+
+.login-box h2 {
+  margin-top: 0;
 }
 
 .login-box input {
