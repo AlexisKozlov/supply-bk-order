@@ -115,15 +115,15 @@ async function loadOrderHistory() {
   let query = supabase
     .from('orders')
     .select(`
-      id,
-      created_at,
-      supplier,
-      order_items (
-        sku,
-        name,
-        qty_boxes
-      )
-    `)
+  id,
+  delivery_date,
+  supplier,
+  order_items (
+    sku,
+    name,
+    qty_boxes
+  )
+`)
     .order('created_at', { ascending: false });
 
   if (historySupplier.value) {
@@ -154,7 +154,7 @@ function renderOrderHistory(orders) {
     const div = document.createElement('div');
     div.className = 'history-order';
 
-    const date = new Date(order.created_at).toLocaleDateString();
+    const date = new Date(order.delivery_date).toLocaleDateString();
 
     div.innerHTML = `
       <div class="history-header">
@@ -237,15 +237,24 @@ function validateRequiredSettings() {
 /* ================= ПОСТАВЩИКИ ================= */
 (async function loadSuppliers() {
   const { data } = await supabase.from('products').select('supplier');
-[...new Set(data.map(p => p.supplier).filter(Boolean))]
-  .forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
-    supplierSelect.appendChild(opt);
+
+  const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
+
+  suppliers.forEach(s => {
+    // основной фильтр
+    const opt1 = document.createElement('option');
+    opt1.value = s;
+    opt1.textContent = s;
+    supplierSelect.appendChild(opt1);
+
+    // фильтр истории
+    const opt2 = document.createElement('option');
+    opt2.value = s;
+    opt2.textContent = s;
+    historySupplier.appendChild(opt2);
   });
 
-historySupplier.addEventListener('change', loadOrderHistory);
+  historySupplier.addEventListener('change', loadOrderHistory);
 })();
 
 supplierSelect.addEventListener('change', async () => {
