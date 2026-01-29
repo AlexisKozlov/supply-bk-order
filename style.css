@@ -112,3 +112,16 @@ th, td {
 
 .manual { border: 1px dashed var(--orange); }
 .hidden { display: none; }
+
+.status {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.status-good {
+  color: #2e7d32;
+}
+
+.status-bad {
+  color: #d32f2f;
+}

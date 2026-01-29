@@ -212,6 +212,7 @@ function render() {
     <div class="pallet-info">-</div>
     <button class="btn small">Округлить</button>
   </td>
+  <td class="status">-</td>
 `;
 
  const inputs = tr.querySelectorAll('input')
@@ -270,7 +271,46 @@ function updateRow(tr, item) {
   } else {
     tr.querySelector('.pallet-info').textContent = '-';
   }
+// ===== СТАТУС НАЛИЧИЯ =====
+const statusCell = tr.querySelector('.status');
 
+if (!orderState.settings.deliveryDate || !item.consumptionPeriod) {
+  statusCell.textContent = '-';
+  statusCell.className = 'status';
+  return;
+}
+
+const daily =
+  orderState.settings.periodDays
+    ? item.consumptionPeriod / orderState.settings.periodDays
+    : 0;
+
+if (!daily || !calc.coverageDate) {
+  statusCell.textContent = '-';
+  statusCell.className = 'status';
+  return;
+}
+
+if (calc.coverageDate < orderState.settings.deliveryDate) {
+  const deficitDays = Math.ceil(
+    (orderState.settings.deliveryDate - calc.coverageDate) / 86400000
+  );
+
+  const deficitUnits = deficitDays * daily;
+
+  const deficitText =
+    orderState.settings.unit === 'boxes'
+      ? `${Math.ceil(deficitUnits)} кор.`
+      : `${Math.ceil(deficitUnits)} шт`;
+
+  statusCell.textContent =
+    `❌ Не хватает ${deficitDays} дн. (${deficitText})`;
+
+  statusCell.className = 'status status-bad';
+} else {
+  statusCell.textContent = '✅ Хватает';
+  statusCell.className = 'status status-good';
+}
   updateFinalSummary();
 }
 
