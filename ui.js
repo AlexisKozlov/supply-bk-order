@@ -22,8 +22,6 @@ const saveOrderBtn = document.getElementById('saveOrder');
 const historyContainer = document.getElementById('orderHistory');
 const historySupplier = document.getElementById('historySupplier');
 const historyModal = document.getElementById('historyModal');
-const openHistoryBtn = document.getElementById('openHistory');
-const closeHistoryBtn = document.getElementById('closeHistory');
 
 const manualModal = document.getElementById('manualModal');
 const closeManualBtn = document.getElementById('closeManual');
@@ -626,3 +624,25 @@ function rerenderAll() {
 }
 
 render();
+initModals();
+
+
+function initModals() {
+  const openHistoryBtn = document.getElementById('openHistory');
+  const closeHistoryBtn = document.getElementById('closeHistory');
+  const historyModal = document.getElementById('historyModal');
+
+  if (!openHistoryBtn || !closeHistoryBtn || !historyModal) {
+    console.error('История заказов: элементы не найдены');
+    return;
+  }
+
+  openHistoryBtn.addEventListener('click', () => {
+    historyModal.classList.remove('hidden');
+    loadOrderHistory();
+  });
+
+  closeHistoryBtn.addEventListener('click', () => {
+    historyModal.classList.add('hidden');
+  });
+}
