@@ -24,10 +24,7 @@ export function calculateItem(item, settings) {
     daily * transitDays +
     daily * safetyDays;
 
-  // Используем индивидуальный процент запаса для каждого товара
-  const safetyPercent = item.safetyPercent || 0;
-  const totalNeed =
-    baseNeed + baseNeed * (safetyPercent / 100);
+  const totalNeed = baseNeed;
 
   // Учитываем транзит как дополнительный остаток
   const totalStock = item.stock + (item.transit || 0);

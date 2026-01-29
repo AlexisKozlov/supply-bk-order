@@ -121,7 +121,8 @@ saveOrderBtn.addEventListener('click', async () => {
       return {
         sku: item.sku || null,
         name: item.name,
-        qty_boxes: Math.ceil(boxes)
+        qty_boxes: Math.ceil(boxes),
+        qty_per_box: item.qtyPerBox || 1
       };
     })
     .filter(i => i.qty_boxes > 0);
@@ -536,7 +537,6 @@ function addItem(p) {
     consumptionPeriod: 0,
     stock: 0,
     transit: 0,
-    safetyPercent: 0,
     qtyPerBox: p.qty_per_box || 1,
     boxesPerPallet: p.boxes_per_pallet || null,
     finalOrder: 0
@@ -638,7 +638,7 @@ function setupExcelNavigation(input, rowIndex, columnIndex) {
 function moveToCell(rowIndex, columnIndex) {
   const rows = tbody.querySelectorAll('tr');
   
-  // Проверка границ (теперь 5 колонок: расход, остаток, транзит, запас%, заказ)
+  // Проверка границ (теперь 4 колонки: расход, остаток, транзит, заказ-штуки, заказ-коробки)
   if (rowIndex < 0 || rowIndex >= rows.length) return;
   if (columnIndex < 0 || columnIndex > 4) return;
   
@@ -665,10 +665,9 @@ function render() {
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
   <td><input type="number" value="${item.transit || 0}"></td>
-  <td><input type="number" value="${item.safetyPercent || 0}" min="0" max="100"></td>
   <td class="calc">0</td>
   <td class="order-cell">
-    <input type="number" class="order-pieces" value="${item.finalOrder}" style="width:70px;"> / 
+    <input type="number" class="order-pieces" value="0" style="width:70px;"> / 
     <input type="number" class="order-boxes" value="0" style="width:70px;">
   </td>
   <td class="date">-</td>
@@ -687,26 +686,41 @@ function render() {
     const deleteBtn = tr.querySelectorAll('button')[1];
 
     // Функция синхронизации штук и коробок
-    function syncOrderInputs() {
-      if (orderState.settings.unit === 'pieces') {
+    function syncOrderInputs(fromPieces) {
+      if (fromPieces) {
+        // Изменили штуки - пересчитываем коробки
         const pieces = +orderPiecesInput.value || 0;
         const boxes = item.qtyPerBox ? Math.ceil(pieces / item.qtyPerBox) : 0;
         orderBoxesInput.value = boxes;
-        item.finalOrder = pieces;
+        
+        // Сохраняем в зависимости от выбранных единиц
+        if (orderState.settings.unit === 'pieces') {
+          item.finalOrder = pieces;
+        } else {
+          item.finalOrder = boxes;
+        }
       } else {
+        // Изменили коробки - пересчитываем штуки
         const boxes = +orderBoxesInput.value || 0;
         const pieces = boxes * (item.qtyPerBox || 1);
         orderPiecesInput.value = pieces;
-        item.finalOrder = boxes;
+        
+        // Сохраняем в зависимости от выбранных единиц
+        if (orderState.settings.unit === 'pieces') {
+          item.finalOrder = pieces;
+        } else {
+          item.finalOrder = boxes;
+        }
       }
     }
 
-    // Инициализация значений
+    // Инициализация значений при рендере
     if (orderState.settings.unit === 'pieces') {
-      orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      orderPiecesInput.value = item.finalOrder || 0;
+      orderBoxesInput.value = item.qtyPerBox ? Math.ceil((item.finalOrder || 0) / item.qtyPerBox) : 0;
     } else {
-      orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
-      orderBoxesInput.value = item.finalOrder;
+      orderBoxesInput.value = item.finalOrder || 0;
+      orderPiecesInput.value = (item.finalOrder || 0) * (item.qtyPerBox || 1);
     }
 
     // Колонка 0: Расход
@@ -733,44 +747,32 @@ function render() {
     });
     setupExcelNavigation(inputs[2], rowIndex, 2);
 
-    // Колонка 3: Запас %
-    inputs[3].addEventListener('input', e => {
-      item.safetyPercent = +e.target.value || 0;
-      updateRow(tr, item);
-      saveDraft();
-    });
-    setupExcelNavigation(inputs[3], rowIndex, 3);
-
-    // Колонка 4 (штуки): Заказ в штуках
+    // Колонка 3 (штуки): Заказ в штуках
     orderPiecesInput.addEventListener('input', e => {
-      const pieces = +e.target.value || 0;
-      if (orderState.settings.unit === 'pieces') {
-        item.finalOrder = pieces;
-      } else {
-        item.finalOrder = item.qtyPerBox ? Math.ceil(pieces / item.qtyPerBox) : 0;
-      }
-      syncOrderInputs();
+      syncOrderInputs(true);
       updateRow(tr, item);
       saveDraft();
     });
-    setupExcelNavigation(orderPiecesInput, rowIndex, 4);
+    setupExcelNavigation(orderPiecesInput, rowIndex, 3);
 
-    // Колонка 5 (коробки): Заказ в коробках
+    // Колонка 4 (коробки): Заказ в коробках
     orderBoxesInput.addEventListener('input', e => {
-      const boxes = +e.target.value || 0;
-      if (orderState.settings.unit === 'boxes') {
-        item.finalOrder = boxes;
-      } else {
-        item.finalOrder = boxes * (item.qtyPerBox || 1);
-      }
-      syncOrderInputs();
+      syncOrderInputs(false);
       updateRow(tr, item);
       saveDraft();
     });
+    setupExcelNavigation(orderBoxesInput, rowIndex, 4);
 
     roundBtn.addEventListener('click', () => {
       roundToPallet(item);
-      syncOrderInputs();
+      // После округления обновляем оба поля
+      if (orderState.settings.unit === 'pieces') {
+        orderPiecesInput.value = item.finalOrder;
+        orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      } else {
+        orderBoxesInput.value = item.finalOrder;
+        orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+      }
       updateRow(tr, item);
       saveDraft();
     });
@@ -892,20 +894,20 @@ function updateFinalSummary() {
   }
   
   finalSummary.innerHTML = itemsWithOrder.map(item => {
-    const boxes =
-      orderState.settings.unit === 'boxes'
-        ? item.finalOrder
-        : item.finalOrder / item.qtyPerBox;
+    let boxes, pieces;
     
-    const pieces = 
-      orderState.settings.unit === 'pieces'
-        ? item.finalOrder
-        : item.finalOrder * item.qtyPerBox;
+    if (orderState.settings.unit === 'boxes') {
+      boxes = item.finalOrder;
+      pieces = item.finalOrder * (item.qtyPerBox || 1);
+    } else {
+      boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      pieces = item.finalOrder;
+    }
 
   return `
   <div>
     <b>${item.sku ? item.sku + ' ' : ''}${item.name}</b>
-    — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(pieces)} шт)
+    — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(Math.round(pieces))} шт)
   </div>
 `;
   }).join('');
