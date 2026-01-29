@@ -26,6 +26,13 @@ const historyModal = document.getElementById('historyModal');
 const manualModal = document.getElementById('manualModal');
 const closeManualBtn = document.getElementById('closeManual');
 
+const bulkModal = document.getElementById('bulkModal');
+const bulkImportBtn = document.getElementById('bulkImport');
+const bulkImportConfirmBtn = document.getElementById('bulkImportBtn');
+const bulkCancelBtn = document.getElementById('bulkCancel');
+const closeBulkBtn = document.getElementById('closeBulk');
+const bulkDataInput = document.getElementById('bulkData');
+
 
 const nf = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 0
@@ -75,11 +82,18 @@ function showToast(title, message, type = 'info') {
 loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
     loginOverlay.style.display = 'none';
+    localStorage.setItem('bk_logged_in', 'true');
     loadOrderHistory();
   } else {
     showToast('Ошибка входа', 'Неверный пароль', 'error');
   }
 });
+
+// Проверка сохраненного входа при загрузке
+if (localStorage.getItem('bk_logged_in') === 'true') {
+  loginOverlay.style.display = 'none';
+  loadOrderHistory();
+}
 
 
 buildOrderBtn.addEventListener('click', () => {
@@ -153,11 +167,12 @@ saveOrderBtn.addEventListener('click', async () => {
   }
 
   showToast('Заказ сохранён', `Сохранено позиций: ${itemsToSave.length}`, 'success');
+  clearDraft(); // Очистка черновика после сохранения
   loadOrderHistory();
 });
 
 async function loadOrderHistory() {
-  historyContainer.innerHTML = 'Загрузка...';
+  historyContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
   let query = supabase
     .from('orders')
@@ -186,6 +201,65 @@ async function loadOrderHistory() {
   }
 
   renderOrderHistory(data);
+}
+
+/* ================= АВТОСОХРАНЕНИЕ ЧЕРНОВИКА ================= */
+function saveDraft() {
+  const draft = {
+    settings: orderState.settings,
+    items: orderState.items,
+    timestamp: new Date().toISOString()
+  };
+  localStorage.setItem('bk_draft', JSON.stringify(draft));
+}
+
+function loadDraft() {
+  const draft = localStorage.getItem('bk_draft');
+  if (!draft) return false;
+
+  try {
+    const data = JSON.parse(draft);
+    
+    // Восстановление настроек
+    if (data.settings.today) {
+      orderState.settings.today = new Date(data.settings.today);
+      document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
+    }
+    if (data.settings.deliveryDate) {
+      orderState.settings.deliveryDate = new Date(data.settings.deliveryDate);
+      document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+    }
+    orderState.settings.periodDays = data.settings.periodDays || 30;
+    orderState.settings.safetyDays = data.settings.safetyDays || 0;
+    orderState.settings.safetyPercent = data.settings.safetyPercent || 0;
+    orderState.settings.unit = data.settings.unit || 'pieces';
+    
+    document.getElementById('periodDays').value = orderState.settings.periodDays;
+    document.getElementById('safetyDays').value = orderState.settings.safetyDays;
+    document.getElementById('safetyPercent').value = orderState.settings.safetyPercent;
+    document.getElementById('unit').value = orderState.settings.unit;
+    
+    // Восстановление товаров
+    orderState.items = data.items || [];
+    
+    if (orderState.items.length > 0) {
+      orderSection.classList.remove('hidden');
+      render();
+      
+      const draftDate = new Date(data.timestamp).toLocaleString('ru-RU');
+      showToast('Черновик загружен', `Восстановлено из ${draftDate}`, 'info');
+      return true;
+    }
+    
+  } catch (e) {
+    console.error('Ошибка загрузки черновика:', e);
+  }
+  
+  return false;
+}
+
+function clearDraft() {
+  localStorage.removeItem('bk_draft');
 }
 
 
@@ -239,7 +313,7 @@ function bindSetting(id, key, isDate = false) {
       : +e.target.value || 0;
     rerenderAll();
     validateRequiredSettings();
-
+    saveDraft(); // Автосохранение
   });
 }
 
@@ -253,6 +327,7 @@ bindSetting('safetyPercent', 'safetyPercent');
 document.getElementById('unit').addEventListener('change', e => {
   orderState.settings.unit = e.target.value;
   rerenderAll();
+  saveDraft();
 });
 
 function validateRequiredSettings() {
@@ -449,7 +524,90 @@ function addItem(p) {
     finalOrder: 0
   });
   render();
+  saveDraft();
 }
+
+/* ================= УДАЛЕНИЕ ТОВАРА ================= */
+function removeItem(itemId) {
+  if (confirm('Удалить товар из заказа?')) {
+    orderState.items = orderState.items.filter(item => item.id !== itemId);
+    render();
+    saveDraft();
+    showToast('Товар удален', '', 'success');
+  }
+}
+
+/* ================= BULK ИМПОРТ ================= */
+bulkImportBtn.addEventListener('click', () => {
+  bulkModal.classList.remove('hidden');
+});
+
+closeBulkBtn.addEventListener('click', () => {
+  bulkModal.classList.add('hidden');
+});
+
+bulkCancelBtn.addEventListener('click', () => {
+  bulkModal.classList.add('hidden');
+});
+
+bulkImportConfirmBtn.addEventListener('click', () => {
+  const data = bulkDataInput.value.trim();
+  
+  if (!data) {
+    showToast('Нет данных', 'Вставьте данные из Excel', 'error');
+    return;
+  }
+
+  const lines = data.split('\n').filter(line => line.trim());
+  let imported = 0;
+  let errors = 0;
+
+  lines.forEach(line => {
+    // Разделители: табуляция, запятая, точка с запятой, или несколько пробелов
+    const parts = line.split(/\t|,|;|\s{2,}/).map(p => p.trim());
+    
+    if (parts.length < 2) {
+      errors++;
+      return;
+    }
+
+    const name = parts[0];
+    const consumption = parseFloat(parts[1]) || 0;
+    const stock = parseFloat(parts[2]) || 0;
+    const sku = parts[3] || '';
+
+    if (!name) {
+      errors++;
+      return;
+    }
+
+    addItem({
+      name,
+      sku,
+      qty_per_box: 1,
+      boxes_per_pallet: null
+    });
+
+    // Устанавливаем значения расхода и остатка
+    const lastItem = orderState.items[orderState.items.length - 1];
+    lastItem.consumptionPeriod = consumption;
+    lastItem.stock = stock;
+
+    imported++;
+  });
+
+  bulkModal.classList.add('hidden');
+  bulkDataInput.value = '';
+  
+  render();
+  saveDraft();
+  
+  if (errors > 0) {
+    showToast(`Импортировано: ${imported}`, `Ошибок: ${errors}`, 'info');
+  } else {
+    showToast('Импорт завершен', `Добавлено товаров: ${imported}`, 'success');
+  }
+});
 
 /* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
 copyOrderBtn.addEventListener('click', () => {
@@ -568,15 +726,18 @@ function render() {
     <button class="btn small">Округлить</button>
   </td>
   <td class="status">-</td>
+  <td><button class="btn small" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
 `;
 
  const inputs = tr.querySelectorAll('input')
     const roundBtn = tr.querySelector('button');
+    const deleteBtn = tr.querySelectorAll('button')[1];
 
     // Колонка 0: Расход
     inputs[0].addEventListener('input', e => {
       item.consumptionPeriod = +e.target.value || 0;
       updateRow(tr, item);
+      saveDraft();
     });
     setupExcelNavigation(inputs[0], rowIndex, 0);
 
@@ -584,6 +745,7 @@ function render() {
     inputs[1].addEventListener('input', e => {
       item.stock = +e.target.value || 0;
       updateRow(tr, item);
+      saveDraft();
     });
     setupExcelNavigation(inputs[1], rowIndex, 1);
 
@@ -591,6 +753,7 @@ function render() {
     inputs[2].addEventListener('input', e => {
       item.finalOrder = +e.target.value || 0;
       updateRow(tr, item);
+      saveDraft();
     });
     setupExcelNavigation(inputs[2], rowIndex, 2);
 
@@ -598,6 +761,11 @@ function render() {
       roundToPallet(item);
       inputs[2].value = item.finalOrder;
       updateRow(tr, item);
+      saveDraft();
+    });
+
+    deleteBtn.addEventListener('click', () => {
+      removeItem(item.id);
     });
 
     tbody.appendChild(tr);
@@ -753,3 +921,14 @@ function initModals() {
 
 render();
 initModals();
+
+// Загрузка черновика при старте
+loadDraft();
+
+// Предупреждение перед закрытием страницы
+window.addEventListener('beforeunload', (e) => {
+  if (orderState.items.length > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
