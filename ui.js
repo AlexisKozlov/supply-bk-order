@@ -160,7 +160,8 @@ saveOrderBtn.addEventListener('click', async () => {
       delivery_date: orderState.settings.deliveryDate,
       safety_days: orderState.settings.safetyDays,
       period_days: orderState.settings.periodDays,
-      unit: orderState.settings.unit
+      unit: orderState.settings.unit,
+      legal_entity: orderState.settings.legalEntity
     })
     .select()
     .single();
@@ -200,6 +201,10 @@ async function loadOrderHistory() {
   id,
   delivery_date,
   supplier,
+  legal_entity,
+  safety_days,
+  period_days,
+  unit,
   order_items (
     sku,
     name,
@@ -212,6 +217,10 @@ async function loadOrderHistory() {
   if (historySupplier.value) {
     query = query.eq('supplier', historySupplier.value);
   }
+
+  // Фильтр по юр. лицу
+  const currentLegalEntity = orderState.settings.legalEntity || document.getElementById('legalEntity').value;
+  query = query.eq('legal_entity', currentLegalEntity);
 
   const { data, error } = await query;
 
@@ -313,11 +322,15 @@ async function renderOrderHistory(orders) {
     div.className = 'history-order';
 
     const date = new Date(order.delivery_date).toLocaleDateString();
+    const legalEntity = order.legal_entity || 'Бургер БК';
 
     div.innerHTML = `
       <div class="history-header">
-        <span><b>${date}</b> — ${order.supplier}</span>
-        <button class="btn small" style="background:#d32f2f;color:white;margin-left:10px;" title="Удалить заказ">🗑️</button>
+        <span><b>${date}</b> — ${order.supplier} (${legalEntity})</span>
+        <div class="history-actions">
+          <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
+          <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
+        </div>
       </div>
       <div class="history-items hidden">
         ${order.order_items.map(i => {
@@ -330,11 +343,79 @@ async function renderOrderHistory(orders) {
     `;
 
     const header = div.querySelector('.history-header span');
-    const deleteBtn = div.querySelector('.history-header button');
+    const copyBtn = div.querySelector('.copy-order-btn');
+    const deleteBtn = div.querySelector('.delete-order-btn');
 
     header.style.cursor = 'pointer';
     header.onclick = () => {
       div.querySelector('.history-items').classList.toggle('hidden');
+    };
+
+    // Копирование заказа из истории
+    copyBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const confirmed = await customConfirm('Скопировать заказ?', 'Текущий заказ будет заменен данными из истории');
+      if (!confirmed) return;
+
+      // Очищаем текущий заказ
+      orderState.items = [];
+
+      // Восстанавливаем параметры заказа
+      orderState.settings.legalEntity = legalEntity;
+      orderState.settings.deliveryDate = new Date(order.delivery_date);
+      orderState.settings.safetyDays = order.safety_days || 0;
+      orderState.settings.periodDays = order.period_days || 30;
+      orderState.settings.unit = order.unit || 'pieces';
+
+      document.getElementById('legalEntity').value = legalEntity;
+      document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+      document.getElementById('safetyDays').value = orderState.settings.safetyDays;
+      document.getElementById('periodDays').value = orderState.settings.periodDays;
+      document.getElementById('unit').value = orderState.settings.unit;
+
+      // Загружаем товары из истории
+      for (const histItem of order.order_items) {
+        // Пытаемся найти товар в базе products
+        const { data: productData } = await supabase
+          .from('products')
+          .select('*')
+          .eq('sku', histItem.sku)
+          .single();
+
+        if (productData) {
+          addItem(productData);
+          const addedItem = orderState.items[orderState.items.length - 1];
+          
+          // Устанавливаем finalOrder из истории
+          if (orderState.settings.unit === 'boxes') {
+            addedItem.finalOrder = histItem.qty_boxes;
+          } else {
+            const qtyPerBox = histItem.qty_per_box || productData.qty_per_box || 1;
+            addedItem.finalOrder = histItem.qty_boxes * qtyPerBox;
+          }
+        } else {
+          // Если товар не найден в products, создаем вручную
+          addItem({
+            sku: histItem.sku,
+            name: histItem.name,
+            qty_per_box: histItem.qty_per_box || 1,
+            boxes_per_pallet: null
+          });
+          const addedItem = orderState.items[orderState.items.length - 1];
+          
+          if (orderState.settings.unit === 'boxes') {
+            addedItem.finalOrder = histItem.qty_boxes;
+          } else {
+            addedItem.finalOrder = histItem.qty_boxes * (histItem.qty_per_box || 1);
+          }
+        }
+      }
+
+      orderSection.classList.remove('hidden');
+      render();
+      saveDraft();
+      historyModal.classList.add('hidden');
+      showToast('Заказ скопирован', `Загружено ${order.order_items.length} товаров`, 'success');
     };
 
     deleteBtn.onclick = async (e) => {
@@ -387,6 +468,12 @@ bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
 bindSetting('safetyDays', 'safetyDays');
 
+
+document.getElementById('legalEntity').addEventListener('change', e => {
+  orderState.settings.legalEntity = e.target.value;
+  saveDraft();
+  loadOrderHistory(); // Обновляем историю при смене юр. лица
+});
 
 document.getElementById('unit').addEventListener('change', e => {
   orderState.settings.unit = e.target.value;
@@ -617,13 +704,19 @@ copyOrderBtn.addEventListener('click', () => {
           ? item.finalOrder
           : item.finalOrder / item.qtyPerBox;
 
+      const pieces = 
+        orderState.settings.unit === 'pieces'
+          ? item.finalOrder
+          : item.finalOrder * item.qtyPerBox;
+
       const roundedBoxes = Math.ceil(boxes);
+      const roundedPieces = Math.round(pieces);
 
       if (roundedBoxes <= 0) return null;
 
       const name = `${item.sku ? item.sku + ' ' : ''}${item.name}`;
 
-      return `${name} ${roundedBoxes} коробок`;
+      return `${name}, ${roundedPieces} шт - ${roundedBoxes} коробок`;
     })
     .filter(Boolean);
 
@@ -770,6 +863,13 @@ function render() {
     // Колонка 0: Расход
     inputs[0].addEventListener('input', e => {
       item.consumptionPeriod = +e.target.value || 0;
+      
+      // Автозаполнение заказа из расчета
+      const calc = calculateItem(item, orderState.settings);
+      if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
+        item.finalOrder = Math.round(calc.calculatedOrder);
+      }
+      
       updateRow(tr, item);
       saveDraft();
     });
@@ -778,6 +878,13 @@ function render() {
     // Колонка 1: Остаток
     inputs[1].addEventListener('input', e => {
       item.stock = +e.target.value || 0;
+      
+      // Автозаполнение заказа из расчета
+      const calc = calculateItem(item, orderState.settings);
+      if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
+        item.finalOrder = Math.round(calc.calculatedOrder);
+      }
+      
       updateRow(tr, item);
       saveDraft();
     });
@@ -786,6 +893,13 @@ function render() {
     // Колонка 2: Транзит
     inputs[2].addEventListener('input', e => {
       item.transit = +e.target.value || 0;
+      
+      // Автозаполнение заказа из расчета
+      const calc = calculateItem(item, orderState.settings);
+      if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
+        item.finalOrder = Math.round(calc.calculatedOrder);
+      }
+      
       updateRow(tr, item);
       saveDraft();
     });
@@ -847,16 +961,34 @@ if (
 
 tr.querySelector('.calc').textContent = calcText;
 
-  // Вычисляем количество дней запаса
-  const totalStock = item.stock + (item.transit || 0);
-  const available = totalStock + (item.finalOrder || 0);
+  // Вычисляем количество дней запаса ПОСЛЕ даты поставки
   const dailyConsumption = orderState.settings.periodDays ? item.consumptionPeriod / orderState.settings.periodDays : 0;
-  const daysOfStock = dailyConsumption > 0 ? Math.floor(available / dailyConsumption) : 0;
-
-  tr.querySelector('.date').textContent =
-    calc.coverageDate
-      ? `${calc.coverageDate.toLocaleDateString()} (${daysOfStock} дн.)`
-      : '-';
+  
+  if (dailyConsumption > 0 && orderState.settings.today && orderState.settings.deliveryDate) {
+    // Дни до поставки
+    const daysUntilDelivery = Math.ceil((orderState.settings.deliveryDate - orderState.settings.today) / 86400000);
+    
+    // Расход до поставки
+    const consumedBeforeDelivery = dailyConsumption * daysUntilDelivery;
+    
+    // Остаток на момент поставки
+    const totalStock = item.stock + (item.transit || 0);
+    const stockAtDelivery = Math.max(0, totalStock - consumedBeforeDelivery);
+    
+    // Запас после поставки
+    const availableAfterDelivery = stockAtDelivery + (item.finalOrder || 0);
+    
+    // Дни запаса после поставки
+    const daysOfStockAfterDelivery = Math.floor(availableAfterDelivery / dailyConsumption);
+    
+    // Дата окончания запаса
+    const coverageDate = new Date(orderState.settings.deliveryDate.getTime() + daysOfStockAfterDelivery * 86400000);
+    
+    tr.querySelector('.date').textContent = 
+      `${coverageDate.toLocaleDateString()} (${daysOfStockAfterDelivery} дн.)`;
+  } else {
+    tr.querySelector('.date').textContent = '-';
+  }
 
   if (item.boxesPerPallet && item.finalOrder > 0) {
     const boxes =
