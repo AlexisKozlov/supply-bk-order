@@ -72,6 +72,34 @@ function showToast(title, message, type = 'info') {
   }, 4000);
 }
 
+/* ================= CUSTOM CONFIRM ================= */
+function customConfirm(title, message) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('confirmModal');
+    const titleEl = document.getElementById('confirmTitle');
+    const messageEl = document.getElementById('confirmMessage');
+    const yesBtn = document.getElementById('confirmYes');
+    const noBtn = document.getElementById('confirmNo');
+    const closeBtn = document.getElementById('closeConfirm');
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    modal.classList.remove('hidden');
+
+    const cleanup = (result) => {
+      modal.classList.add('hidden');
+      yesBtn.replaceWith(yesBtn.cloneNode(true));
+      noBtn.replaceWith(noBtn.cloneNode(true));
+      closeBtn.replaceWith(closeBtn.cloneNode(true));
+      resolve(result);
+    };
+
+    document.getElementById('confirmYes').addEventListener('click', () => cleanup(true));
+    document.getElementById('confirmNo').addEventListener('click', () => cleanup(false));
+    document.getElementById('closeConfirm').addEventListener('click', () => cleanup(false));
+  });
+}
+
 loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
     loginOverlay.style.display = 'none';
@@ -82,11 +110,12 @@ loginBtn.addEventListener('click', () => {
   }
 });
 
-// Проверка сохраненного входа при загрузке
-if (localStorage.getItem('bk_logged_in') === 'true') {
-  loginOverlay.style.display = 'none';
-  loadOrderHistory();
-}
+// Проверка сохраненного входа при загрузке - выполняется сразу
+(function checkAuth() {
+  if (localStorage.getItem('bk_logged_in') === 'true') {
+    loginOverlay.style.display = 'none';
+  }
+})();
 
 
 buildOrderBtn.addEventListener('click', () => {
@@ -107,9 +136,8 @@ saveOrderBtn.addEventListener('click', async () => {
   }
 
   // Подтверждение сохранения
-  if (!confirm('Сохранить заказ в историю?')) {
-    return;
-  }
+  const confirmed = await customConfirm('Сохранить заказ?', 'Заказ будет сохранен в историю');
+  if (!confirmed) return;
 
   const itemsToSave = orderState.items
     .map(item => {
@@ -282,7 +310,7 @@ function renderOrderHistory(orders) {
       <div class="history-items hidden">
         ${order.order_items.map(i => {
           const pieces = i.qty_boxes * (i.qty_per_box || 1);
-          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${pieces} шт)</div>`;
+          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${nf.format(pieces)} шт)</div>`;
         }).join('')}
       </div>
     `;
@@ -297,7 +325,8 @@ function renderOrderHistory(orders) {
 
     deleteBtn.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm('Удалить этот заказ из истории?')) return;
+      const confirmed = await customConfirm('Удалить заказ?', 'Заказ будет удален из истории безвозвратно');
+      if (!confirmed) return;
 
       const { error } = await supabase
         .from('orders')
@@ -546,8 +575,9 @@ function addItem(p) {
 }
 
 /* ================= УДАЛЕНИЕ ТОВАРА ================= */
-function removeItem(itemId) {
-  if (confirm('Удалить товар из заказа?')) {
+async function removeItem(itemId) {
+  const confirmed = await customConfirm('Удалить товар?', 'Товар будет удален из текущего заказа');
+  if (confirmed) {
     orderState.items = orderState.items.filter(item => item.id !== itemId);
     render();
     saveDraft();
@@ -803,10 +833,15 @@ if (
 
 tr.querySelector('.calc').textContent = calcText;
 
+  // Вычисляем количество дней запаса
+  const totalStock = item.stock + (item.transit || 0);
+  const available = totalStock + (item.finalOrder || 0);
+  const daily = orderState.settings.periodDays ? item.consumptionPeriod / orderState.settings.periodDays : 0;
+  const daysOfStock = daily > 0 ? Math.floor(available / daily) : 0;
 
   tr.querySelector('.date').textContent =
     calc.coverageDate
-      ? calc.coverageDate.toLocaleDateString()
+      ? `${calc.coverageDate.toLocaleDateString()} (${daysOfStock} дн.)`
       : '-';
 
   if (item.boxesPerPallet && item.finalOrder > 0) {
