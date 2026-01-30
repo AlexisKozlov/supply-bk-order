@@ -193,6 +193,16 @@
 </div>
 
 
+<!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
+<script>
+// Проверка авторизации ДО загрузки основного скрипта
+(function() {
+  if (localStorage.getItem('bk_logged_in') === 'true') {
+    document.getElementById('loginOverlay').style.display = 'none';
+  }
+})();
+</script>
+
 <script type="module" src="./ui.js"></script>
 
 </body>

@@ -110,13 +110,6 @@ loginBtn.addEventListener('click', () => {
   }
 });
 
-// Проверка сохраненного входа при загрузке - выполняется сразу
-(function checkAuth() {
-  if (localStorage.getItem('bk_logged_in') === 'true') {
-    loginOverlay.style.display = 'none';
-  }
-})();
-
 
 buildOrderBtn.addEventListener('click', () => {
   const ok = validateRequiredSettings();
@@ -210,7 +203,8 @@ async function loadOrderHistory() {
   order_items (
     sku,
     name,
-    qty_boxes
+    qty_boxes,
+    qty_per_box
   )
 `)
     .order('created_at', { ascending: false });
@@ -288,12 +282,30 @@ function clearDraft() {
 }
 
 
-function renderOrderHistory(orders) {
+async function renderOrderHistory(orders) {
   historyContainer.innerHTML = '';
 
   if (!orders.length) {
     historyContainer.innerHTML = 'История пуста';
     return;
+  }
+
+  // Получаем все SKU для подтягивания qty_per_box из products
+  const allSkus = [...new Set(
+    orders.flatMap(o => o.order_items.map(i => i.sku)).filter(Boolean)
+  )];
+
+  // Загружаем данные о товарах из products
+  const { data: productsData } = await supabase
+    .from('products')
+    .select('sku, qty_per_box')
+    .in('sku', allSkus);
+
+  const productMap = {};
+  if (productsData) {
+    productsData.forEach(p => {
+      productMap[p.sku] = p.qty_per_box;
+    });
   }
 
   orders.forEach(order => {
@@ -309,7 +321,9 @@ function renderOrderHistory(orders) {
       </div>
       <div class="history-items hidden">
         ${order.order_items.map(i => {
-          const pieces = i.qty_boxes * (i.qty_per_box || 1);
+          // Используем qty_per_box из order_items, если есть, иначе из products, иначе 1
+          const qtyPerBox = i.qty_per_box || (i.sku ? productMap[i.sku] : null) || 1;
+          const pieces = i.qty_boxes * qtyPerBox;
           return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${nf.format(pieces)} шт)</div>`;
         }).join('')}
       </div>
