@@ -836,8 +836,8 @@ tr.querySelector('.calc').textContent = calcText;
   // Вычисляем количество дней запаса
   const totalStock = item.stock + (item.transit || 0);
   const available = totalStock + (item.finalOrder || 0);
-  const daily = orderState.settings.periodDays ? item.consumptionPeriod / orderState.settings.periodDays : 0;
-  const daysOfStock = daily > 0 ? Math.floor(available / daily) : 0;
+  const dailyConsumption = orderState.settings.periodDays ? item.consumptionPeriod / orderState.settings.periodDays : 0;
+  const daysOfStock = dailyConsumption > 0 ? Math.floor(available / dailyConsumption) : 0;
 
   tr.querySelector('.date').textContent =
     calc.coverageDate
@@ -867,12 +867,7 @@ if (!orderState.settings.deliveryDate || !item.consumptionPeriod) {
   return;
 }
 
-const daily =
-  orderState.settings.periodDays
-    ? item.consumptionPeriod / orderState.settings.periodDays
-    : 0;
-
-if (!daily || !calc.coverageDate) {
+if (!dailyConsumption || !calc.coverageDate) {
   statusCell.textContent = '-';
   statusCell.className = 'status';
   return;
@@ -883,7 +878,7 @@ if (calc.coverageDate < orderState.settings.deliveryDate) {
     (orderState.settings.deliveryDate - calc.coverageDate) / 86400000
   );
 
-  const deficitUnits = deficitDays * daily;
+  const deficitUnits = deficitDays * dailyConsumption;
 
   const deficitText =
     orderState.settings.unit === 'boxes'
