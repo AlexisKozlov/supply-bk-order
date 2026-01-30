@@ -4,6 +4,7 @@ import { supabase } from './supabase.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
+const clearOrderBtn = document.getElementById('clearOrder');
 const tbody = document.getElementById('items');
 const supplierSelect = document.getElementById('supplierFilter');
 const finalSummary = document.getElementById('finalSummary');
@@ -143,7 +144,10 @@ saveOrderBtn.addEventListener('click', async () => {
         sku: item.sku || null,
         name: item.name,
         qty_boxes: Math.ceil(boxes),
-        qty_per_box: item.qtyPerBox || 1
+        qty_per_box: item.qtyPerBox || 1,
+        consumption_period: item.consumptionPeriod || 0,
+        stock: item.stock || 0,
+        transit: item.transit || 0
       };
     })
     .filter(i => i.qty_boxes > 0);
@@ -209,7 +213,10 @@ async function loadOrderHistory() {
     sku,
     name,
     qty_boxes,
-    qty_per_box
+    qty_per_box,
+    consumption_period,
+    stock,
+    transit
   )
 `)
     .order('created_at', { ascending: false });
@@ -386,6 +393,11 @@ async function renderOrderHistory(orders) {
           addItem(productData);
           const addedItem = orderState.items[orderState.items.length - 1];
           
+          // Восстанавливаем все данные из истории
+          addedItem.consumptionPeriod = histItem.consumption_period || 0;
+          addedItem.stock = histItem.stock || 0;
+          addedItem.transit = histItem.transit || 0;
+          
           // Устанавливаем finalOrder из истории
           if (orderState.settings.unit === 'boxes') {
             addedItem.finalOrder = histItem.qty_boxes;
@@ -402,6 +414,11 @@ async function renderOrderHistory(orders) {
             boxes_per_pallet: null
           });
           const addedItem = orderState.items[orderState.items.length - 1];
+          
+          // Восстанавливаем все данные из истории
+          addedItem.consumptionPeriod = histItem.consumption_period || 0;
+          addedItem.stock = histItem.stock || 0;
+          addedItem.transit = histItem.transit || 0;
           
           if (orderState.settings.unit === 'boxes') {
             addedItem.finalOrder = histItem.qty_boxes;
@@ -619,7 +636,8 @@ manualAddBtn.addEventListener('click', async () => {
     sku: document.getElementById('m_sku').value || null,
     supplier: document.getElementById('m_supplier').value || null,
     qty_per_box: +document.getElementById('m_box').value || 1,
-    boxes_per_pallet: +document.getElementById('m_pallet').value || null
+    boxes_per_pallet: +document.getElementById('m_pallet').value || null,
+    unit_of_measure: document.getElementById('m_unit').value || 'шт'
   };
 
   if (document.getElementById('m_save').checked) {
@@ -669,6 +687,7 @@ function addItem(p) {
     transit: 0,
     qtyPerBox: p.qty_per_box || 1,
     boxesPerPallet: p.boxes_per_pallet || null,
+    unitOfMeasure: p.unit_of_measure || 'шт',
     finalOrder: 0
   });
   render();
@@ -715,8 +734,10 @@ copyOrderBtn.addEventListener('click', () => {
       if (roundedBoxes <= 0) return null;
 
       const name = `${item.sku ? item.sku + ' ' : ''}${item.name}`;
+      const unit = item.unitOfMeasure || 'шт';
+      const qtyPerBox = item.qtyPerBox || 1;
 
-      return `${name}, ${roundedPieces} шт - ${roundedBoxes} коробок`;
+      return `${name}, ${qtyPerBox} ${unit} (${roundedPieces} ${unit}) - ${roundedBoxes} коробок`;
     })
     .filter(Boolean);
 
@@ -725,8 +746,12 @@ copyOrderBtn.addEventListener('click', () => {
     return;
   }
 
+  const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
+  
   const text =
 `Добрый день!
+
+Юр. лицо: ${legalEntity}
 
 Просьба поставить:
 
@@ -743,6 +768,28 @@ ${lines.join('\n')}
     .catch(() => {
       showToast('Ошибка копирования', 'Не удалось скопировать заказ', 'error');
     });
+});
+
+/* ================= ОЧИСТКА ЗАКАЗА ================= */
+clearOrderBtn.addEventListener('click', async () => {
+  if (!orderState.items.length) {
+    showToast('Заказ пуст', 'Нет данных для очистки', 'error');
+    return;
+  }
+
+  const confirmed = await customConfirm('Очистить данные заказа?', 'Расход, остаток, транзит и заказ будут сброшены. Товары останутся.');
+  if (!confirmed) return;
+
+  orderState.items.forEach(item => {
+    item.consumptionPeriod = 0;
+    item.stock = 0;
+    item.transit = 0;
+    item.finalOrder = 0;
+  });
+
+  render();
+  saveDraft();
+  showToast('Данные очищены', 'Товары сохранены, данные сброшены', 'success');
 });
 
 
@@ -864,10 +911,19 @@ function render() {
     inputs[0].addEventListener('input', e => {
       item.consumptionPeriod = +e.target.value || 0;
       
-      // Автозаполнение заказа из расчета
+      // Автозаполнение заказа из расчета (только если еще не введен)
       const calc = calculateItem(item, orderState.settings);
       if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
         item.finalOrder = Math.round(calc.calculatedOrder);
+        
+        // Обновляем оба поля ввода
+        if (orderState.settings.unit === 'pieces') {
+          orderPiecesInput.value = item.finalOrder;
+          orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+        } else {
+          orderBoxesInput.value = item.finalOrder;
+          orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+        }
       }
       
       updateRow(tr, item);
@@ -879,10 +935,19 @@ function render() {
     inputs[1].addEventListener('input', e => {
       item.stock = +e.target.value || 0;
       
-      // Автозаполнение заказа из расчета
+      // Автозаполнение заказа из расчета (только если еще не введен)
       const calc = calculateItem(item, orderState.settings);
       if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
         item.finalOrder = Math.round(calc.calculatedOrder);
+        
+        // Обновляем оба поля ввода
+        if (orderState.settings.unit === 'pieces') {
+          orderPiecesInput.value = item.finalOrder;
+          orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+        } else {
+          orderBoxesInput.value = item.finalOrder;
+          orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+        }
       }
       
       updateRow(tr, item);
@@ -894,10 +959,19 @@ function render() {
     inputs[2].addEventListener('input', e => {
       item.transit = +e.target.value || 0;
       
-      // Автозаполнение заказа из расчета
+      // Автозаполнение заказа из расчета (только если еще не введен)
       const calc = calculateItem(item, orderState.settings);
       if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
         item.finalOrder = Math.round(calc.calculatedOrder);
+        
+        // Обновляем оба поля ввода
+        if (orderState.settings.unit === 'pieces') {
+          orderPiecesInput.value = item.finalOrder;
+          orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+        } else {
+          orderBoxesInput.value = item.finalOrder;
+          orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+        }
       }
       
       updateRow(tr, item);
@@ -1062,7 +1136,15 @@ function roundToPallet(item) {
 
 /* ================= ИТОГ В КОРОБКАХ ================= */
 function updateFinalSummary() {
-  const itemsWithOrder = orderState.items.filter(item => item.finalOrder > 0);
+  const itemsWithOrder = orderState.items.filter(item => {
+    let boxes;
+    if (orderState.settings.unit === 'boxes') {
+      boxes = item.finalOrder;
+    } else {
+      boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+    }
+    return boxes > 1;
+  });
   
   if (itemsWithOrder.length === 0) {
     finalSummary.innerHTML = '<div style="color:#8a8a8a;text-align:center;">Нет товаров с заказом</div>';
