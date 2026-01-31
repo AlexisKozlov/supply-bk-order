@@ -306,7 +306,7 @@ async function renderOrderHistory(orders) {
     return;
   }
 
-  // Получаем все SKU для подтягивания qty_per_box из products
+  // Получаем все SKU для подтягивания данных из products
   const allSkus = [...new Set(
     orders.flatMap(o => o.order_items.map(i => i.sku)).filter(Boolean)
   )];
@@ -314,13 +314,16 @@ async function renderOrderHistory(orders) {
   // Загружаем данные о товарах из products
   const { data: productsData } = await supabase
     .from('products')
-    .select('sku, qty_per_box')
+    .select('sku, qty_per_box, unit_of_measure')
     .in('sku', allSkus);
 
   const productMap = {};
   if (productsData) {
     productsData.forEach(p => {
-      productMap[p.sku] = p.qty_per_box;
+      productMap[p.sku] = {
+        qty_per_box: p.qty_per_box,
+        unit_of_measure: p.unit_of_measure || 'шт'
+      };
     });
   }
 
@@ -341,10 +344,12 @@ async function renderOrderHistory(orders) {
       </div>
       <div class="history-items hidden">
         ${order.order_items.map(i => {
-          // Используем qty_per_box из order_items, если есть, иначе из products, иначе 1
-          const qtyPerBox = i.qty_per_box || (i.sku ? productMap[i.sku] : null) || 1;
+          // Используем данные из order_items, если есть, иначе из products
+          const productInfo = i.sku ? productMap[i.sku] : null;
+          const qtyPerBox = i.qty_per_box || (productInfo ? productInfo.qty_per_box : null) || 1;
+          const unit = productInfo ? productInfo.unit_of_measure : 'шт';
           const pieces = i.qty_boxes * qtyPerBox;
-          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${nf.format(pieces)} шт)</div>`;
+          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${nf.format(pieces)} ${unit})</div>`;
         }).join('')}
       </div>
     `;
@@ -735,9 +740,8 @@ copyOrderBtn.addEventListener('click', () => {
 
       const name = `${item.sku ? item.sku + ' ' : ''}${item.name}`;
       const unit = item.unitOfMeasure || 'шт';
-      const qtyPerBox = item.qtyPerBox || 1;
 
-      return `${name}, ${qtyPerBox} ${unit} (${roundedPieces} ${unit}) - ${roundedBoxes} коробок`;
+      return `${name} (${roundedPieces} ${unit}) - ${roundedBoxes} коробок`;
     })
     .filter(Boolean);
 
@@ -924,6 +928,9 @@ function render() {
           orderBoxesInput.value = item.finalOrder;
           orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
         }
+        
+        // Обновляем итог заказа
+        updateFinalSummary();
       }
       
       updateRow(tr, item);
@@ -948,6 +955,9 @@ function render() {
           orderBoxesInput.value = item.finalOrder;
           orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
         }
+        
+        // Обновляем итог заказа
+        updateFinalSummary();
       }
       
       updateRow(tr, item);
@@ -972,6 +982,9 @@ function render() {
           orderBoxesInput.value = item.finalOrder;
           orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
         }
+        
+        // Обновляем итог заказа
+        updateFinalSummary();
       }
       
       updateRow(tr, item);
@@ -1161,11 +1174,13 @@ function updateFinalSummary() {
       boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
       pieces = item.finalOrder;
     }
+    
+    const unit = item.unitOfMeasure || 'шт';
 
   return `
   <div>
     <b>${item.sku ? item.sku + ' ' : ''}${item.name}</b>
-    — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(Math.round(pieces))} шт)
+    — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(Math.round(pieces))} ${unit})
   </div>
 `;
   }).join('');
