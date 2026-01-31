@@ -269,10 +269,12 @@ function loadDraft() {
     orderState.settings.periodDays = data.settings.periodDays || 30;
     orderState.settings.safetyDays = data.settings.safetyDays || 0;
     orderState.settings.unit = data.settings.unit || 'pieces';
+    orderState.settings.hasTransit = data.settings.hasTransit || false;
     
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     document.getElementById('safetyDays').value = orderState.settings.safetyDays;
     document.getElementById('unit').value = orderState.settings.unit;
+    document.getElementById('hasTransit').checked = orderState.settings.hasTransit;
     
     // Восстановление товаров
     orderState.items = data.items || [];
@@ -502,6 +504,26 @@ document.getElementById('unit').addEventListener('change', e => {
   rerenderAll();
   saveDraft();
 });
+
+// Переключение видимости колонки транзит
+document.getElementById('hasTransit').addEventListener('change', e => {
+  orderState.settings.hasTransit = e.target.checked;
+  toggleTransitColumn();
+  saveDraft();
+});
+
+function toggleTransitColumn() {
+  const hasTransit = orderState.settings.hasTransit;
+  const transitCols = document.querySelectorAll('.transit-col');
+  
+  transitCols.forEach(col => {
+    if (hasTransit) {
+      col.classList.remove('hidden');
+    } else {
+      col.classList.add('hidden');
+    }
+  });
+}
 
 function validateRequiredSettings() {
   const todayEl = document.getElementById('today');
@@ -849,10 +871,11 @@ function render() {
   tr.innerHTML = `
   <td class="item-name">
   ${item.sku ? `<b>${item.sku}</b> ` : ''}${item.name}
+  <div class="shortage-info hidden"></div>
 </td>
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
-  <td><input type="number" value="${item.transit || 0}"></td>
+  <td class="transit-col"><input type="number" value="${item.transit || 0}"></td>
   <td class="calc">
     <div class="calc-value">0</div>
     <button class="btn small calc-to-order" style="margin-top:4px;font-size:11px;padding:4px 8px;">→ В заказ</button>
@@ -866,7 +889,6 @@ function render() {
     <div class="pallet-info">-</div>
     <button class="btn small round-to-pallet">Округлить</button>
   </td>
-  <td class="status">-</td>
   <td><button class="btn small delete-item" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
 `;
 
@@ -1002,6 +1024,7 @@ function render() {
   });
 
   updateFinalSummary();
+  toggleTransitColumn();
 }
 
 function updateRow(tr, item) {
@@ -1065,41 +1088,43 @@ if (calcValueEl) {
   } else {
     tr.querySelector('.pallet-info').textContent = '-';
   }
-// ===== СТАТУС НАЛИЧИЯ =====
-const statusCell = tr.querySelector('.status');
 
-if (!orderState.settings.deliveryDate || !item.consumptionPeriod) {
-  statusCell.textContent = '-';
-  statusCell.className = 'status';
-  return;
-}
+// ===== ПРОВЕРКА ДЕФИЦИТА ДО ПОСТАВКИ (БЕЗ ЗАКАЗА) =====
+const shortageInfo = tr.querySelector('.shortage-info');
 
-if (!dailyConsumption || !calc.coverageDate) {
-  statusCell.textContent = '-';
-  statusCell.className = 'status';
-  return;
-}
-
-if (calc.coverageDate < orderState.settings.deliveryDate) {
-  const deficitDays = Math.ceil(
-    (orderState.settings.deliveryDate - calc.coverageDate) / 86400000
-  );
-
-  const deficitUnits = deficitDays * dailyConsumption;
-
-  const deficitText =
-    orderState.settings.unit === 'boxes'
-      ? `${Math.ceil(deficitUnits)} кор.`
-      : `${Math.ceil(deficitUnits)} шт`;
-
-  statusCell.textContent =
-    `❌ Не хватает ${deficitDays} дн. (${deficitText})`;
-
-  statusCell.className = 'status status-bad';
+if (orderState.settings.deliveryDate && item.consumptionPeriod && dailyConsumption > 0) {
+  // Считаем ТОЛЬКО с остатком и транзитом, БЕЗ заказа
+  const totalStock = item.stock + (item.transit || 0);
+  const daysUntilDelivery = Math.ceil((orderState.settings.deliveryDate - orderState.settings.today) / 86400000);
+  const consumedBeforeDelivery = dailyConsumption * daysUntilDelivery;
+  
+  // Если не хватает до поставки
+  if (totalStock < consumedBeforeDelivery) {
+    const deficit = consumedBeforeDelivery - totalStock;
+    const deficitDays = Math.ceil(deficit / dailyConsumption);
+    
+    const unit = item.unitOfMeasure || 'шт';
+    let deficitText;
+    
+    if (orderState.settings.unit === 'boxes' && item.qtyPerBox) {
+      const deficitBoxes = Math.ceil(deficit / item.qtyPerBox);
+      deficitText = `${Math.ceil(deficit)} ${unit} (${deficitBoxes} кор.)`;
+    } else {
+      deficitText = `${Math.ceil(deficit)} ${unit}`;
+    }
+    
+    shortageInfo.textContent = `⚠️ Не хватит: ${deficitText} | Дефицит: ${deficitDays} дн.`;
+    shortageInfo.classList.remove('hidden');
+    tr.classList.add('shortage-warning');
+  } else {
+    shortageInfo.classList.add('hidden');
+    tr.classList.remove('shortage-warning');
+  }
 } else {
-  statusCell.textContent = '✅ Хватает';
-  statusCell.className = 'status status-good';
+  shortageInfo.classList.add('hidden');
+  tr.classList.remove('shortage-warning');
 }
+
   updateFinalSummary();
 }
 

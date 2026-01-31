@@ -38,6 +38,13 @@
       </label>
 
       <label>
+        Поставщик
+        <select id="supplierFilter">
+          <option value="">Все / свободный</option>
+        </select>
+      </label>
+
+      <label>
         Дата сегодня
         <input type="date" id="today" />
       </label>
@@ -64,6 +71,11 @@
           <option value="boxes">Коробки</option>
         </select>
       </label>
+
+      <label style="flex-direction:row;align-items:center;gap:8px;">
+        <input type="checkbox" id="hasTransit" />
+        Наличие транзита
+      </label>
     </div>
 
     <!-- КЛЮЧЕВАЯ КНОПКА -->
@@ -87,13 +99,6 @@
         <button id="openHistory" class="btn secondary">📚 История заказов</button>
       </div>
 
-      <label>
-        Поставщик
-        <select id="supplierFilter">
-          <option value="">Все / свободный</option>
-        </select>
-      </label>
-
       <section class="search">
         <input
           id="productSearch"
@@ -114,12 +119,11 @@
               <th>Товар</th>
               <th>Расход</th>
               <th>Остаток</th>
-              <th>Транзит</th>
+              <th class="transit-col">Транзит</th>
               <th>Расчёт</th>
               <th>Заказ (шт / кор)</th>
               <th>Хватит до</th>
               <th>Паллеты</th>
-              <th>Статус</th>
               <th>Действия</th>
             </tr>
           </thead>
