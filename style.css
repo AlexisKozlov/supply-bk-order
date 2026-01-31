@@ -236,7 +236,7 @@ select:hover {
 .table-wrap {
   overflow-x: auto;
   overflow-y: auto;
-  max-height: 600px;
+  max-height: 80vh;
   border-radius: 12px;
   border: 1px solid var(--border);
   position: relative;
@@ -252,18 +252,17 @@ table {
 }
 
 thead {
-  background: linear-gradient(135deg, var(--brown) 0%, #4a2309 100%);
+  background: var(--brown);
   color: white;
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
 }
 
 thead th {
   position: sticky;
   top: 0;
-  background: linear-gradient(135deg, var(--brown) 0%, #4a2309 100%);
+  background: var(--brown);
   z-index: 100;
 }
 
