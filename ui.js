@@ -274,7 +274,7 @@ function loadDraft() {
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     document.getElementById('safetyDays').value = orderState.settings.safetyDays;
     document.getElementById('unit').value = orderState.settings.unit;
-    document.getElementById('hasTransit').checked = orderState.settings.hasTransit;
+    document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
     
     // Восстановление товаров
     orderState.items = data.items || [];
@@ -507,7 +507,7 @@ document.getElementById('unit').addEventListener('change', e => {
 
 // Переключение видимости колонки транзит
 document.getElementById('hasTransit').addEventListener('change', e => {
-  orderState.settings.hasTransit = e.target.checked;
+  orderState.settings.hasTransit = e.target.value === 'true';
   toggleTransitColumn();
   saveDraft();
 });

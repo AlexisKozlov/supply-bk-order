@@ -237,6 +237,7 @@ select:hover {
   overflow-x: auto;
   border-radius: 12px;
   border: 1px solid var(--border);
+  position: relative;
 }
 
 table {
@@ -245,6 +246,7 @@ table {
   font-size: 14px;
   min-width: 1100px;
   background: white;
+  position: relative;
 }
 
 thead {
@@ -252,7 +254,15 @@ thead {
   color: white;
   position: sticky;
   top: 0;
-  z-index: 50;
+  z-index: 100;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: linear-gradient(135deg, var(--brown) 0%, #4a2309 100%);
+  z-index: 100;
 }
 
 .transit-col {
@@ -265,6 +275,19 @@ thead {
 
 .shortage-warning {
   background: #ffe6e6 !important;
+}
+
+.shortage-warning td {
+  background: #ffe6e6 !important;
+}
+
+.shortage-warning .item-name {
+  background: #ffe6e6 !important;
+}
+
+tbody tr:hover.shortage-warning td,
+tbody tr:hover.shortage-warning .item-name {
+  background: #ffd0d0 !important;
 }
 
 .shortage-info {
