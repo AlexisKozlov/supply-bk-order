@@ -853,7 +853,10 @@ function render() {
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
   <td><input type="number" value="${item.transit || 0}"></td>
-  <td class="calc">0</td>
+  <td class="calc">
+    <div class="calc-value">0</div>
+    <button class="btn small calc-to-order" style="margin-top:4px;font-size:11px;padding:4px 8px;">→ В заказ</button>
+  </td>
   <td class="order-cell">
     <input type="number" class="order-pieces" value="0" style="width:70px;"> / 
     <input type="number" class="order-boxes" value="0" style="width:70px;">
@@ -861,17 +864,18 @@ function render() {
   <td class="date">-</td>
   <td class="pallets">
     <div class="pallet-info">-</div>
-    <button class="btn small">Округлить</button>
+    <button class="btn small round-to-pallet">Округлить</button>
   </td>
   <td class="status">-</td>
-  <td><button class="btn small" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
+  <td><button class="btn small delete-item" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
 `;
 
  const inputs = tr.querySelectorAll('input[type="number"]');
     const orderPiecesInput = tr.querySelector('.order-pieces');
     const orderBoxesInput = tr.querySelector('.order-boxes');
-    const roundBtn = tr.querySelector('button');
-    const deleteBtn = tr.querySelectorAll('button')[1];
+    const calcToOrderBtn = tr.querySelector('.calc-to-order');
+    const roundBtn = tr.querySelector('.round-to-pallet');
+    const deleteBtn = tr.querySelector('.delete-item');
 
     // Функция синхронизации штук и коробок
     function syncOrderInputs(fromPieces) {
@@ -914,25 +918,6 @@ function render() {
     // Колонка 0: Расход
     inputs[0].addEventListener('input', e => {
       item.consumptionPeriod = +e.target.value || 0;
-      
-      // Автозаполнение заказа из расчета (только если еще не введен)
-      const calc = calculateItem(item, orderState.settings);
-      if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
-        item.finalOrder = Math.round(calc.calculatedOrder);
-        
-        // Обновляем оба поля ввода
-        if (orderState.settings.unit === 'pieces') {
-          orderPiecesInput.value = item.finalOrder;
-          orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
-        } else {
-          orderBoxesInput.value = item.finalOrder;
-          orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
-        }
-        
-        // Обновляем итог заказа
-        updateFinalSummary();
-      }
-      
       updateRow(tr, item);
       saveDraft();
     });
@@ -941,25 +926,6 @@ function render() {
     // Колонка 1: Остаток
     inputs[1].addEventListener('input', e => {
       item.stock = +e.target.value || 0;
-      
-      // Автозаполнение заказа из расчета (только если еще не введен)
-      const calc = calculateItem(item, orderState.settings);
-      if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
-        item.finalOrder = Math.round(calc.calculatedOrder);
-        
-        // Обновляем оба поля ввода
-        if (orderState.settings.unit === 'pieces') {
-          orderPiecesInput.value = item.finalOrder;
-          orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
-        } else {
-          orderBoxesInput.value = item.finalOrder;
-          orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
-        }
-        
-        // Обновляем итог заказа
-        updateFinalSummary();
-      }
-      
       updateRow(tr, item);
       saveDraft();
     });
@@ -968,10 +934,15 @@ function render() {
     // Колонка 2: Транзит
     inputs[2].addEventListener('input', e => {
       item.transit = +e.target.value || 0;
-      
-      // Автозаполнение заказа из расчета (только если еще не введен)
+      updateRow(tr, item);
+      saveDraft();
+    });
+    setupExcelNavigation(inputs[2], rowIndex, 2);
+
+    // Кнопка "→ В заказ" - копирует расчет в заказ
+    calcToOrderBtn.addEventListener('click', () => {
       const calc = calculateItem(item, orderState.settings);
-      if (calc.calculatedOrder > 0 && item.finalOrder === 0) {
+      if (calc.calculatedOrder > 0) {
         item.finalOrder = Math.round(calc.calculatedOrder);
         
         // Обновляем оба поля ввода
@@ -983,20 +954,19 @@ function render() {
           orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
         }
         
-        // Обновляем итог заказа
+        updateRow(tr, item);
         updateFinalSummary();
+        saveDraft();
+        showToast('Добавлено в заказ', '', 'success');
       }
-      
-      updateRow(tr, item);
-      saveDraft();
     });
-    setupExcelNavigation(inputs[2], rowIndex, 2);
 
     // Колонка 3 (штуки): Заказ в штуках
     orderPiecesInput.addEventListener('input', e => {
       syncOrderInputs(true);
       updateRow(tr, item);
       saveDraft();
+      updateFinalSummary();
     });
     setupExcelNavigation(orderPiecesInput, rowIndex, 3);
 
@@ -1005,6 +975,7 @@ function render() {
       syncOrderInputs(false);
       updateRow(tr, item);
       saveDraft();
+      updateFinalSummary();
     });
     setupExcelNavigation(orderBoxesInput, rowIndex, 4);
 
@@ -1046,7 +1017,10 @@ if (
   calcText += ` (${nf.format(Math.ceil(boxes))} кор.)`;
 }
 
-tr.querySelector('.calc').textContent = calcText;
+const calcValueEl = tr.querySelector('.calc-value');
+if (calcValueEl) {
+  calcValueEl.textContent = calcText;
+}
 
   // Вычисляем количество дней запаса ПОСЛЕ даты поставки
   const dailyConsumption = orderState.settings.periodDays ? item.consumptionPeriod / orderState.settings.periodDays : 0;
@@ -1156,7 +1130,7 @@ function updateFinalSummary() {
     } else {
       boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
     }
-    return boxes > 1;
+    return boxes >= 1;
   });
   
   if (itemsWithOrder.length === 0) {
