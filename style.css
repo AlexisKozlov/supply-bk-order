@@ -39,17 +39,17 @@ body {
 .header {
   background: linear-gradient(135deg, var(--red) 0%, #A81D00 100%);
   color: white;
-  padding: 20px 24px;
+  padding: 12px 24px;
   box-shadow: var(--shadow-md);
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 1000;
 }
 
 .header h1 {
   font-family: 'Flame', sans-serif;
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   text-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
