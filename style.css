@@ -962,4 +962,5 @@ td.order-cell input {
 
 ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(to bottom, var(--dodo-orange), var(--dodo-yellow));
-}
+} 
+
