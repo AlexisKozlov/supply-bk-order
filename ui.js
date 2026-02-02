@@ -27,6 +27,7 @@ const historyModal = document.getElementById('historyModal');
 const manualModal = document.getElementById('manualModal');
 const closeManualBtn = document.getElementById('closeManual');
 
+let isLoadingDraft = false;
 
 const nf = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 0
@@ -160,7 +161,7 @@ saveOrderBtn.addEventListener('click', async () => {
   const { data: order, error } = await supabase
     .from('orders')
     .insert({
-      supplier: document.getElementById('supplierFilter').value || 'Свободный',
+      supplier: orderState.settings.supplier || 'Свободный',
       delivery_date: orderState.settings.deliveryDate,
       safety_days: orderState.settings.safetyDays,
       period_days: orderState.settings.periodDays,
@@ -257,6 +258,9 @@ function loadDraft() {
   try {
     const data = JSON.parse(draft);
     
+    // Устанавливаем флаг чтобы не срабатывало событие change поставщика
+    isLoadingDraft = true;
+    
     // Восстановление настроек
     if (data.settings.today) {
       orderState.settings.today = new Date(data.settings.today);
@@ -266,11 +270,15 @@ function loadDraft() {
       orderState.settings.deliveryDate = new Date(data.settings.deliveryDate);
       document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
     }
+    orderState.settings.legalEntity = data.settings.legalEntity || 'Бургер БК';
+    orderState.settings.supplier = data.settings.supplier || '';
     orderState.settings.periodDays = data.settings.periodDays || 30;
     orderState.settings.safetyDays = data.settings.safetyDays || 0;
     orderState.settings.unit = data.settings.unit || 'pieces';
     orderState.settings.hasTransit = data.settings.hasTransit || false;
     
+    document.getElementById('legalEntity').value = orderState.settings.legalEntity;
+    document.getElementById('supplierFilter').value = orderState.settings.supplier;
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     document.getElementById('safetyDays').value = orderState.settings.safetyDays;
     document.getElementById('unit').value = orderState.settings.unit;
@@ -278,6 +286,9 @@ function loadDraft() {
     
     // Восстановление товаров
     orderState.items = data.items || [];
+    
+    // Сбрасываем флаг
+    isLoadingDraft = false;
     
     if (orderState.items.length > 0) {
       orderSection.classList.remove('hidden');
@@ -289,6 +300,7 @@ function loadDraft() {
     }
     
   } catch (e) {
+    isLoadingDraft = false;
     console.error('Ошибка загрузки черновика:', e);
   }
   
@@ -575,8 +587,13 @@ function validateRequiredSettings() {
 })();
 
 supplierSelect.addEventListener('change', async () => {
+  // Игнорируем событие при загрузке черновика
+  if (isLoadingDraft) return;
+  
+  orderState.settings.supplier = supplierSelect.value;
   orderState.items = [];
   render();
+  saveDraft();
 
   if (!supplierSelect.value) return;
 

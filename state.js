@@ -1,6 +1,7 @@
 export const orderState = {
   settings: {
     legalEntity: 'Бургер БК',
+    supplier: '',
     today: null,
     deliveryDate: null,
     periodDays: 30,
