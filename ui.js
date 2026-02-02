@@ -564,7 +564,7 @@ function validateRequiredSettings() {
 
 
 /* ================= ПОСТАВЩИКИ ================= */
-(async function loadSuppliers() {
+const loadSuppliers = (async function() {
   const { data } = await supabase.from('products').select('supplier');
 
   const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
@@ -916,6 +916,15 @@ function render() {
     const roundBtn = tr.querySelector('.round-to-pallet');
     const deleteBtn = tr.querySelector('.delete-item');
 
+    // Автовыделение для расхода/остатка/транзита если значение = 0
+    [inputs[0], inputs[1], inputs[2]].forEach(input => {
+      input.addEventListener('focus', (e) => {
+        if (e.target.value === '0') {
+          e.target.select();
+        }
+      });
+    });
+
     // Функция синхронизации штук и коробок
     function syncOrderInputs(fromPieces) {
       if (fromPieces) {
@@ -1236,8 +1245,10 @@ function initModals() {
 render();
 initModals();
 
-// Загрузка черновика при старте
-loadDraft();
+// Загрузка черновика после загрузки поставщиков
+loadSuppliers.then(() => {
+  loadDraft();
+});
 
 // Предупреждение перед закрытием страницы
 window.addEventListener('beforeunload', (e) => {
