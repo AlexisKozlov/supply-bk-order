@@ -505,8 +505,20 @@ bindSetting('periodDays', 'periodDays');
 bindSetting('safetyDays', 'safetyDays');
 
 
-document.getElementById('legalEntity').addEventListener('change', e => {
+document.getElementById('legalEntity').addEventListener('change', async e => {
+  // Игнорируем при загрузке черновика
+  if (isLoadingDraft) return;
+  
   orderState.settings.legalEntity = e.target.value;
+  
+  // Обнуляем заказ при смене юр. лица
+  orderState.items = [];
+  orderState.settings.supplier = '';
+  
+  // Перезагружаем поставщиков для нового юр. лица
+  await loadSuppliers(e.target.value);
+  
+  render();
   saveDraft();
   loadOrderHistory(); // Обновляем историю при смене юр. лица
 });
@@ -564,9 +576,23 @@ function validateRequiredSettings() {
 
 
 /* ================= ПОСТАВЩИКИ ================= */
-const loadSuppliers = (async function() {
-  const { data } = await supabase.from('products').select('supplier');
-
+async function loadSuppliers(legalEntity) {
+  // Очищаем текущие опции (кроме первой "Все / свободный")
+  supplierSelect.innerHTML = '<option value="">Все / свободный</option>';
+  historySupplier.innerHTML = '<option value="">Все</option>';
+  
+  // Загружаем поставщиков для текущего юр. лица
+  // Бургер БК и Воглия Матта - общие поставщики
+  let query = supabase.from('products').select('supplier, legal_entity');
+  
+  if (legalEntity === 'Пицца Стар') {
+    query = query.eq('legal_entity', 'Пицца Стар');
+  } else {
+    // Для Бургер БК и Воглия Матта - показываем оба
+    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
+  }
+  
+  const { data } = await query;
   const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
 
   suppliers.forEach(s => {
@@ -582,9 +608,12 @@ const loadSuppliers = (async function() {
     opt2.textContent = s;
     historySupplier.appendChild(opt2);
   });
+}
 
-  historySupplier.addEventListener('change', loadOrderHistory);
-})();
+// Инициализация при загрузке
+const initSuppliers = loadSuppliers(orderState.settings.legalEntity);
+
+historySupplier.addEventListener('change', loadOrderHistory);
 
 supplierSelect.addEventListener('change', async () => {
   // Игнорируем событие при загрузке черновика
@@ -629,6 +658,15 @@ async function searchProducts(q) {
     .from('products')
     .select('*')
     .limit(10);
+
+  // Фильтр по юр. лицу
+  const currentLegalEntity = orderState.settings.legalEntity;
+  if (currentLegalEntity === 'Пицца Стар') {
+    query = query.eq('legal_entity', 'Пицца Стар');
+  } else {
+    // Для Бургер БК и Воглия Матта - показываем оба
+    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
+  }
 
   // если выбран поставщик — ищем только по нему
   if (supplierSelect.value) {
@@ -679,6 +717,7 @@ manualAddBtn.addEventListener('click', async () => {
     name,
     sku: document.getElementById('m_sku').value || null,
     supplier: document.getElementById('m_supplier').value || null,
+    legal_entity: document.getElementById('m_legalEntity').value,
     qty_per_box: +document.getElementById('m_box').value || 1,
     boxes_per_pallet: +document.getElementById('m_pallet').value || null,
     unit_of_measure: document.getElementById('m_unit').value || 'шт'
@@ -708,6 +747,8 @@ manualAddBtn.addEventListener('click', async () => {
 });
 
 addManualBtn.addEventListener('click', () => {
+  // Устанавливаем текущее юр. лицо по умолчанию
+  document.getElementById('m_legalEntity').value = orderState.settings.legalEntity;
   manualModal.classList.remove('hidden');
 });
 
@@ -1246,7 +1287,7 @@ render();
 initModals();
 
 // Загрузка черновика после загрузки поставщиков
-loadSuppliers.then(() => {
+initSuppliers.then(() => {
   loadDraft();
 });
 
