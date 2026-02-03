@@ -12,17 +12,14 @@
 <!-- ===== ВХОД ===== -->
 <div id="loginOverlay" class="login-overlay">
   <div class="login-box">
-    <span class="login-logo">🍔</span>
-    <h2>Калькулятор заказа</h2>
-    <p class="login-sub">Введите пароль для входа</p>
-    <input id="loginPassword" type="password" placeholder="Пароль" autocomplete="current-password" />
+    <h2>Вход</h2>
+    <input id="loginPassword" type="password" placeholder="Пароль" />
     <button id="loginBtn" class="btn primary">Войти</button>
   </div>
 </div>
 
 <header class="header">
   <h1>🍔 Калькулятор заказа BK</h1>
-  <span class="entity-badge" id="entityBadge"></span>
 </header>
 
 <main class="container">
@@ -37,6 +34,7 @@
         <select id="legalEntity">
           <option value="Бургер БК">Бургер БК</option>
           <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
         </select>
       </label>
 
@@ -180,6 +178,16 @@
     <input id="m_name" placeholder="Наименование*" />
     <input id="m_sku" placeholder="Артикул" />
     <input id="m_supplier" placeholder="Поставщик" />
+    
+    <label>
+      Юр. лицо
+      <select id="m_legalEntity">
+        <option value="Бургер БК">Бургер БК</option>
+        <option value="Воглия Матта">Воглия Матта</option>
+        <option value="Пицца Стар">Пицца Стар</option>
+      </select>
+    </label>
+    
     <input id="m_box" type="number" placeholder="Штук в коробке" />
     <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
     
