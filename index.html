@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="./favicon.ico" type="image/x-icon">
   <title>Калькулятор заказа BK</title>
   <link rel="stylesheet" href="./style.css" />
@@ -12,21 +13,22 @@
 <!-- ===== ВХОД ===== -->
 <div id="loginOverlay" class="login-overlay">
   <div class="login-box">
-    <span style="font-size:42px;display:block;margin-bottom:2px;">🍔</span>
     <h2>Калькулятор заказа</h2>
     <p>Введите пароль для входа</p>
-    <input id="loginPassword" type="password" placeholder="Пароль" autocomplete="current-password" />
+    <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
     <button id="loginBtn" class="btn primary">Войти</button>
   </div>
 </div>
 
+<!-- ===== ШАПКА ===== -->
 <header class="header">
-  <h1>🍔 Калькулятор заказа BK</h1>
+  <h1>Калькулятор заказа BK</h1>
 </header>
 
+<!-- ===== MAIN ===== -->
 <main class="container">
 
-  <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
+  <!-- ПАРАМЕТРЫ ЗАКАЗА -->
   <section class="card">
     <h2>Параметры заказа</h2>
 
@@ -63,12 +65,12 @@
       </label>
 
       <label>
-        Запас (дни)
+        Запас безопасности (дни)
         <input type="number" id="safetyDays" />
       </label>
 
       <label>
-        Единицы
+        Единицы измерения
         <select id="unit">
           <option value="pieces">Штуки</option>
           <option value="boxes">Коробки</option>
@@ -84,13 +86,12 @@
       </label>
     </div>
 
-    <!-- КЛЮЧЕВАЯ КНОПКА -->
     <button id="buildOrder" class="btn primary">
       📦 Сформировать заказ
     </button>
   </section>
 
-  <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
+  <!-- ЗАКАЗ (скрыт до кнопки) -->
   <div id="orderSection" class="hidden">
 
     <!-- ДОБАВЛЕНИЕ ТОВАРОВ -->
@@ -106,15 +107,12 @@
       </div>
 
       <section class="search">
-        <input
-          id="productSearch"
-          placeholder="🔍 Поиск по артикулу или названию"
-        />
+        <input id="productSearch" placeholder="Поиск по артикулу или названию…" />
         <div id="searchResults" class="search-results"></div>
       </section>
     </section>
 
-    <!-- ТАБЛИЦА ЗАКАЗА -->
+    <!-- ТАБЛИЦА -->
     <section class="card">
       <h2>Заказ</h2>
 
@@ -130,7 +128,7 @@
               <th>Заказ (шт / кор)</th>
               <th>Хватит до</th>
               <th>Паллеты</th>
-              <th>Действия</th>
+              <th>—</th>
             </tr>
           </thead>
           <tbody id="items"></tbody>
@@ -145,19 +143,17 @@
     </section>
 
   </div>
-
-
 </main>
 
-<!-- ===== МОДАЛКА: ИСТОРИЯ ЗАКАЗОВ ===== -->
+<!-- ===== МОДАЛКА: ИСТОРИЯ ===== -->
 <div id="historyModal" class="modal hidden">
   <div class="modal-box large">
     <div class="modal-header">
-      <h2>История заказов</h2>
+      <h2>📚 История заказов</h2>
       <button id="closeHistory" class="modal-close">✖</button>
     </div>
 
-    <label>
+    <label style="margin-bottom:18px;">
       Поставщик
       <select id="historySupplier">
         <option value="">Все</option>
@@ -168,19 +164,18 @@
   </div>
 </div>
 
-
 <!-- ===== МОДАЛКА: РУЧНОЙ ТОВАР ===== -->
 <div id="manualModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h2>Ручной товар</h2>
+      <h2>✍️ Ручной товар</h2>
       <button id="closeManual" class="modal-close">✖</button>
     </div>
 
-    <input id="m_name" placeholder="Наименование*" />
+    <input id="m_name" placeholder="Наименование *" />
     <input id="m_sku" placeholder="Артикул" />
     <input id="m_supplier" placeholder="Поставщик" />
-    
+
     <label>
       Юр. лицо
       <select id="m_legalEntity">
@@ -189,10 +184,10 @@
         <option value="Пицца Стар">Пицца Стар</option>
       </select>
     </label>
-    
+
     <input id="m_box" type="number" placeholder="Штук в коробке" />
-    <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
-    
+    <input id="m_pallet" type="number" placeholder="Коробок на паллете" />
+
     <label>
       Единица измерения
       <select id="m_unit">
@@ -204,11 +199,11 @@
 
     <label>
       <input type="checkbox" id="m_save" />
-      Сохранить в базу
+      Сохранить в базу данных
     </label>
 
-    <div class="actions">
-      <button id="m_add" class="btn primary">Добавить</button>
+    <div class="actions" style="margin-bottom:0;">
+      <button id="m_add" class="btn primary">Добавить товар</button>
       <button id="m_cancel" class="btn secondary">Отмена</button>
     </div>
   </div>
@@ -216,25 +211,21 @@
 
 <!-- ===== МОДАЛКА: ПОДТВЕРЖДЕНИЕ ===== -->
 <div id="confirmModal" class="modal hidden">
-  <div class="modal-box" style="max-width:400px;">
+  <div class="modal-box" style="max-width:440px;">
     <div class="modal-header">
       <h2 id="confirmTitle">Подтверждение</h2>
       <button id="closeConfirm" class="modal-close">✖</button>
     </div>
-    
-    <p id="confirmMessage" style="margin:0 0 24px;color:#5A2D0C;line-height:1.6;"></p>
-    
-    <div class="actions">
-      <button id="confirmYes" class="btn primary">Да</button>
+    <p id="confirmMessage"></p>
+    <div class="actions" style="margin-bottom:0;">
+      <button id="confirmYes" class="btn primary">Подтвердить</button>
       <button id="confirmNo" class="btn secondary">Отмена</button>
     </div>
   </div>
 </div>
 
-
-<!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
+<!-- ===== АВТО-ВХОД ===== -->
 <script>
-// Проверка авторизации ДО загрузки основного скрипта
 (function() {
   if (localStorage.getItem('bk_logged_in') === 'true') {
     document.getElementById('loginOverlay').style.display = 'none';
