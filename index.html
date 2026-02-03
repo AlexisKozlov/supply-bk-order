@@ -12,14 +12,17 @@
 <!-- ===== ВХОД ===== -->
 <div id="loginOverlay" class="login-overlay">
   <div class="login-box">
-    <h2>Вход</h2>
-    <input id="loginPassword" type="password" placeholder="Пароль" />
+    <span class="login-logo">🍔</span>
+    <h2>Калькулятор заказа</h2>
+    <p class="login-sub">Введите пароль для входа</p>
+    <input id="loginPassword" type="password" placeholder="Пароль" autocomplete="current-password" />
     <button id="loginBtn" class="btn primary">Войти</button>
   </div>
 </div>
 
 <header class="header">
   <h1>🍔 Калькулятор заказа BK</h1>
+  <span class="entity-badge" id="entityBadge"></span>
 </header>
 
 <main class="container">
