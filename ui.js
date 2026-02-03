@@ -19,6 +19,12 @@ const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
 const loginBtn = document.getElementById('loginBtn');
 const loginPassword = document.getElementById('loginPassword');
+
+/* ================= BADGE ЮР. ЛИЦА ================= */
+function updateEntityBadge() {
+  const badge = document.getElementById('entityBadge');
+  if (badge) badge.textContent = orderState.settings.legalEntity || 'Бургер БК';
+}
 const saveOrderBtn = document.getElementById('saveOrder');
 const historyContainer = document.getElementById('orderHistory');
 const historySupplier = document.getElementById('historySupplier');
@@ -289,6 +295,7 @@ function loadDraft() {
     
     // Сбрасываем флаг
     isLoadingDraft = false;
+    updateEntityBadge();
     
     if (orderState.items.length > 0) {
       orderSection.classList.remove('hidden');
@@ -510,6 +517,7 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
   if (isLoadingDraft) return;
   
   orderState.settings.legalEntity = e.target.value;
+  updateEntityBadge();
   
   // Обнуляем заказ при смене юр. лица
   orderState.items = [];
@@ -1293,6 +1301,7 @@ initModals();
 // Загрузка черновика после загрузки поставщиков
 initSuppliers.then(() => {
   loadDraft();
+  updateEntityBadge(); // fallback если черновика нет
 });
 
 // Предупреждение перед закрытием страницы

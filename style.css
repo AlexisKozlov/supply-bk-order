@@ -47,8 +47,12 @@ body {
 .header {
   background: linear-gradient(135deg, var(--red) 0%, #A81D00 100%);
   color: white;
-  padding: 14px 28px;
-  box-shadow: 0 3px 12px rgba(214,35,0,0.35);
+  padding: 0 32px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 3px 14px rgba(214,35,0,0.3);
   position: sticky;
   top: 0;
   z-index: 1000;
@@ -61,6 +65,38 @@ body {
   font-weight: 700;
   text-shadow: 0 2px 4px rgba(0,0,0,0.25);
   letter-spacing: 0.3px;
+}
+
+/* ─── entity badge ─── */
+.entity-badge {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--brown);
+  background: rgba(255,255,255,0.95);
+  padding: 6px 16px;
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  position: relative;
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.entity-badge:hover {
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.2);
+}
+
+/* точка-индикатор перед текстом */
+.entity-badge::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--orange);
+  margin-right: 8px;
+  box-shadow: 0 0 6px rgba(245,166,35,0.5);
 }
 
 /* ===== LAYOUT ===== */
@@ -76,23 +112,25 @@ body {
 /* ===== CARD ===== */
 .card {
   background: var(--card);
-  border-radius: var(--radius);
+  border-radius: 18px;
   padding: 26px 28px;
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-light);
-  transition: box-shadow 0.25s ease;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
 .card:hover {
   box-shadow: var(--shadow-md);
+  border-color: var(--border);
 }
 
 .card h2 {
   margin: 0 0 18px;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--brown);
-  letter-spacing: 0.2px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
 }
 
 /* ===== SETTINGS ===== */
@@ -183,21 +221,27 @@ select:focus {
 }
 
 .btn.primary {
-  background: var(--red);
+  background: linear-gradient(135deg, var(--red), #c42000);
   color: white;
+  box-shadow: 0 3px 10px rgba(214,35,0,0.28);
 }
 
 .btn.primary:hover {
-  background: var(--red-hover);
+  background: linear-gradient(135deg, var(--red-hover), #a81d00);
+  box-shadow: 0 4px 14px rgba(214,35,0,0.38);
 }
 
 .btn.secondary {
-  background: var(--orange);
+  background: #fff3e0;
   color: var(--brown);
+  border: 1.5px solid #f0dcc8;
+  box-shadow: none;
 }
 
 .btn.secondary:hover {
-  background: var(--orange-hover);
+  background: #ffe8cc;
+  border-color: var(--orange);
+  box-shadow: 0 2px 8px rgba(245,166,35,0.22);
 }
 
 .btn.small {
@@ -277,7 +321,7 @@ table {
 }
 
 thead {
-  background: var(--brown);
+  background: linear-gradient(90deg, #4e2709, var(--brown), #4e2709);
   color: white;
   position: sticky;
   top: 0;
@@ -287,7 +331,7 @@ thead {
 thead th {
   position: sticky;
   top: 0;
-  background: var(--brown);
+  background: transparent;
   z-index: 100;
 }
 
@@ -369,7 +413,7 @@ td.item-name {
 th:first-child {
   position: sticky;
   left: 0;
-  background: linear-gradient(135deg, var(--brown) 0%, #4a2309 100%);
+  background: #4e2709;
   z-index: 11;
   box-shadow: 2px 0 6px rgba(90,45,12,0.12);
 }
@@ -441,15 +485,16 @@ td.order-cell input[type="number"] {
 }
 
 #finalSummary > div {
-  padding: 9px 14px;
+  padding: 10px 16px;
   background: #fdf9f2;
-  border-radius: var(--radius-xs);
+  border-radius: 10px;
   border-left: 3px solid var(--orange);
-  transition: background 0.15s;
+  transition: background 0.18s, box-shadow 0.18s;
 }
 
 #finalSummary > div:hover {
-  background: #fff3e0;
+  background: #fff0e0;
+  box-shadow: var(--shadow-sm);
 }
 
 /* ===== MANUAL ===== */
@@ -543,14 +588,15 @@ td.order-cell input[type="number"] {
   justify-content: space-between;
   align-items: center;
   font-weight: 600;
-  padding: 12px 16px;
+  padding: 13px 18px;
   background: #fdf9f2;
-  transition: background 0.15s ease;
+  transition: background 0.18s ease;
   font-size: 14px;
+  cursor: pointer;
 }
 
 .history-header:hover {
-  background: #fff3e0;
+  background: #fff0e0;
 }
 
 .history-items {
@@ -618,11 +664,11 @@ td.order-cell input[type="number"] {
 
 .modal-close {
   background: #f2efe9;
-  border: none;
-  border-radius: var(--radius-xs);
+  border: 1.5px solid #e8e3db;
+  border-radius: 8px;
   width: 34px;
   height: 34px;
-  font-size: 16px;
+  font-size: 15px;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
@@ -633,6 +679,7 @@ td.order-cell input[type="number"] {
 
 .modal-close:hover {
   background: var(--red);
+  border-color: var(--red);
   color: white;
   transform: rotate(90deg);
 }
