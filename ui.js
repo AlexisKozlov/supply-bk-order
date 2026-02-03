@@ -1173,7 +1173,11 @@ if (orderState.settings.deliveryDate && item.consumptionPeriod && dailyConsumpti
     const unit = item.unitOfMeasure || 'шт';
     let deficitText;
     
-    if (orderState.settings.unit === 'boxes' && item.qtyPerBox) {
+    if (orderState.settings.unit === 'boxes') {
+      // расход и остаток введены в коробках → deficit тоже в коробках
+      deficitText = `${Math.ceil(deficit)} кор.`;
+    } else if (item.qtyPerBox) {
+      // расход и остаток в штуках → deficit в штуках, коробки в скобках
       const deficitBoxes = Math.ceil(deficit / item.qtyPerBox);
       deficitText = `${Math.ceil(deficit)} ${unit} (${deficitBoxes} кор.)`;
     } else {
