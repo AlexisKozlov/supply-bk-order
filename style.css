@@ -232,16 +232,15 @@ select:focus {
 }
 
 .btn.secondary {
-  background: #fff3e0;
+  background: linear-gradient(135deg, var(--orange), #eea020);
   color: var(--brown);
-  border: 1.5px solid #f0dcc8;
-  box-shadow: none;
+  border: none;
+  box-shadow: 0 3px 10px rgba(245,166,35,0.28);
 }
 
 .btn.secondary:hover {
-  background: #ffe8cc;
-  border-color: var(--orange);
-  box-shadow: 0 2px 8px rgba(245,166,35,0.22);
+  background: linear-gradient(135deg, var(--orange-hover), #d89018);
+  box-shadow: 0 4px 14px rgba(245,166,35,0.38);
 }
 
 .btn.small {
@@ -249,11 +248,16 @@ select:focus {
   font-size: 12px;
   border-radius: var(--radius-xs);
   box-shadow: none;
+  background: #fff8f0;
+  color: var(--brown);
+  border: 1.5px solid #f0dcc8;
 }
 
 .btn.small:hover {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  background: #fff0e0;
+  border-color: var(--orange);
+  box-shadow: 0 2px 6px rgba(245,166,35,0.2);
 }
 
 /* ===== SEARCH ===== */
