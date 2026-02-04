@@ -14,6 +14,21 @@ const manualAddBtn = document.getElementById('m_add');
 const manualCancelBtn = document.getElementById('m_cancel');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
+const clearSearchBtn = document.getElementById('clearSearch');
+
+/* ================= НОВЫЕ DOM-ПЕРЕМЕННЫЕ ================= */
+const menuDatabaseBtn = document.getElementById('menuDatabase');
+const databaseModal = document.getElementById('databaseModal');
+const closeDatabaseBtn = document.getElementById('closeDatabase');
+const dbLegalEntitySelect = document.getElementById('dbLegalEntity');
+const dbSearchInput = document.getElementById('dbSearch');
+const clearDbSearchBtn = document.getElementById('clearDbSearch');
+const dbSearchResults = document.getElementById('dbSearchResults');
+const databaseList = document.getElementById('databaseList');
+
+const editCardModal = document.getElementById('editCardModal');
+const closeEditCardBtn = document.getElementById('closeEditCard');
+let currentEditingProduct = null; // ID товара который редактируем
 const buildOrderBtn = document.getElementById('buildOrder');
 const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
@@ -673,6 +688,15 @@ if (searchInput) {
     const q = searchInput.value.trim();
     clearTimeout(searchTimer);
 
+    // Показываем/скрываем крестик
+    if (clearSearchBtn) {
+      if (q.length > 0) {
+        clearSearchBtn.classList.remove('hidden');
+      } else {
+        clearSearchBtn.classList.add('hidden');
+      }
+    }
+
     if (q.length < 2) {
       searchResults.innerHTML = '';
       return;
@@ -680,6 +704,16 @@ if (searchInput) {
 
     searchTimer = setTimeout(() => searchProducts(q), 300);
   });
+
+  // Обработчик крестика очистки
+  if (clearSearchBtn) {
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchResults.innerHTML = '';
+      clearSearchBtn.classList.add('hidden');
+      searchInput.focus();
+    });
+  }
 }
 
 async function searchProducts(q) {
@@ -821,6 +855,15 @@ async function removeItem(itemId) {
   }
 }
 
+/* ================= ПЕРЕСТАНОВКА ТОВАРОВ ================= */
+function swapItems(fromIndex, toIndex) {
+  const items = orderState.items;
+  const [movedItem] = items.splice(fromIndex, 1);
+  items.splice(toIndex, 0, movedItem);
+  render();
+  saveDraft();
+}
+
 /* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
 copyOrderBtn.addEventListener('click', () => {
   if (!orderState.items.length) {
@@ -956,6 +999,9 @@ function render() {
 
   orderState.items.forEach((item, rowIndex) => {
     const tr = document.createElement('tr');
+    tr.draggable = true;
+    tr.dataset.rowIndex = rowIndex;
+    tr.style.cursor = 'grab';
 
   tr.innerHTML = `
   <td class="item-name">
@@ -991,6 +1037,15 @@ function render() {
 
     // Автовыделение для расхода/остатка/транзита если значение = 0
     [inputs[0], inputs[1], inputs[2]].forEach(input => {
+      input.addEventListener('focus', (e) => {
+        if (e.target.value === '0') {
+          e.target.select();
+        }
+      });
+    });
+
+    // Автовыделение для order-pieces и order-boxes при 0
+    [orderPiecesInput, orderBoxesInput].forEach(input => {
       input.addEventListener('focus', (e) => {
         if (e.target.value === '0') {
           e.target.select();
@@ -1118,7 +1173,48 @@ function render() {
       removeItem(item.id);
     });
 
+    // ===== DRAG AND DROP =====
+    tr.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', rowIndex);
+      tr.style.opacity = '0.4';
+    });
+
+    tr.addEventListener('dragend', (e) => {
+      tr.style.opacity = '1';
+    });
+
+    tr.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      tr.style.background = 'rgba(245,166,35,0.15)';
+    });
+
+    tr.addEventListener('dragleave', (e) => {
+      tr.style.background = '';
+    });
+
+    tr.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tr.style.background = '';
+      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+      const toIndex = rowIndex;
+      if (fromIndex !== toIndex) {
+        swapItems(fromIndex, toIndex);
+      }
+    });
+
     tbody.appendChild(tr);
+    
+    // Двойной клик по названию товара для редактирования
+    const itemNameCell = tr.querySelector('.item-name');
+    if (itemNameCell && item.id) {
+      itemNameCell.style.cursor = 'pointer';
+      itemNameCell.addEventListener('dblclick', async () => {
+        await openEditCard(item.id);
+      });
+    }
+    
     updateRow(tr, item);
   });
 
@@ -1312,7 +1408,7 @@ render();
 
 
 function initModals() {
-  const openHistoryBtn = document.getElementById('openHistory');
+  const openHistoryBtn = document.getElementById('menuHistory');
   const closeHistoryBtn = document.getElementById('closeHistory');
   const historyModal = document.getElementById('historyModal');
 
@@ -1347,3 +1443,298 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = '';
   }
 });
+
+/* ================= БАЗА ДАННЫХ ================= */
+menuDatabaseBtn.addEventListener('click', () => {
+  databaseModal.classList.remove('hidden');
+  dbLegalEntitySelect.value = orderState.settings.legalEntity; // default текущее юр лицо
+  loadDatabaseProducts();
+});
+
+closeDatabaseBtn.addEventListener('click', () => {
+  databaseModal.classList.add('hidden');
+  dbSearchInput.value = '';
+  dbSearchResults.innerHTML = '';
+  if (clearDbSearchBtn) clearDbSearchBtn.classList.add('hidden');
+});
+
+dbLegalEntitySelect.addEventListener('change', () => {
+  loadDatabaseProducts();
+});
+
+async function loadDatabaseProducts() {
+  databaseList.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
+  
+  const legalEntity = dbLegalEntitySelect.value;
+  
+  let query = supabase
+    .from('products')
+    .select('*')
+    .order('name');
+  
+  if (legalEntity === 'Пицца Стар') {
+    query = query.eq('legal_entity', 'Пицца Стар');
+  } else {
+    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
+  }
+  
+  const { data, error } = await query;
+  
+  if (error) {
+    databaseList.innerHTML = '<div style="text-align:center;color:var(--error);">Ошибка загрузки</div>';
+    console.error(error);
+    return;
+  }
+  
+  renderDatabaseList(data);
+}
+
+function renderDatabaseList(products) {
+  if (!products.length) {
+    databaseList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">Карточки не найдены</div>';
+    return;
+  }
+  
+  databaseList.innerHTML = products.map(p => `
+    <div class="db-card" data-product-id="${p.id}">
+      <div class="db-card-info">
+        <div class="db-card-sku">${p.sku || '—'}</div>
+        <div class="db-card-name">${p.name}</div>
+        <div class="db-card-supplier">${p.supplier || 'Без поставщика'}</div>
+      </div>
+      <div class="db-card-actions">
+        <button class="btn small edit-card-btn" data-id="${p.id}">✏️ Изменить</button>
+        <button class="btn small delete-card-btn" data-id="${p.id}" style="background:var(--error);color:white;">🗑️</button>
+      </div>
+    </div>
+  `).join('');
+  
+  // Навешиваем обработчики
+  document.querySelectorAll('.edit-card-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = e.target.dataset.id;
+      await openEditCard(id);
+    });
+  });
+  
+  document.querySelectorAll('.delete-card-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = e.target.dataset.id;
+      await deleteCard(id);
+    });
+  });
+}
+
+/* ================= РЕДАКТИРОВАНИЕ КАРТОЧКИ ================= */
+async function openEditCard(productId) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('id', productId)
+    .single();
+  
+  if (error || !data) {
+    showToast('Ошибка', 'Не удалось загрузить карточку', 'error');
+    return;
+  }
+  
+  currentEditingProduct = data;
+  
+  document.getElementById('e_name').value = data.name || '';
+  document.getElementById('e_sku').value = data.sku || '';
+  document.getElementById('e_supplier').value = data.supplier || '';
+  document.getElementById('e_legalEntity').value = data.legal_entity || 'Бургер БК';
+  document.getElementById('e_box').value = data.qty_per_box || '';
+  document.getElementById('e_pallet').value = data.boxes_per_pallet || '';
+  document.getElementById('e_unit').value = data.unit_of_measure || 'шт';
+  
+  editCardModal.classList.remove('hidden');
+}
+
+closeEditCardBtn.addEventListener('click', () => {
+  editCardModal.classList.add('hidden');
+  currentEditingProduct = null;
+});
+
+document.getElementById('e_cancel').addEventListener('click', () => {
+  editCardModal.classList.add('hidden');
+  currentEditingProduct = null;
+});
+
+document.getElementById('e_save').addEventListener('click', async () => {
+  if (!currentEditingProduct) return;
+  
+  const name = document.getElementById('e_name').value.trim();
+  if (!name) {
+    showToast('Ошибка', 'Наименование обязательно', 'error');
+    return;
+  }
+  
+  const updated = {
+    name,
+    sku: document.getElementById('e_sku').value || null,
+    supplier: document.getElementById('e_supplier').value || null,
+    legal_entity: document.getElementById('e_legalEntity').value,
+    qty_per_box: +document.getElementById('e_box').value || null,
+    boxes_per_pallet: +document.getElementById('e_pallet').value || null,
+    unit_of_measure: document.getElementById('e_unit').value || 'шт'
+  };
+  
+  const { error } = await supabase
+    .from('products')
+    .update(updated)
+    .eq('id', currentEditingProduct.id);
+  
+  if (error) {
+    showToast('Ошибка', 'Не удалось сохранить изменения', 'error');
+    console.error(error);
+    return;
+  }
+  
+  showToast('Сохранено', 'Карточка обновлена', 'success');
+  
+  // Обновляем товар в заказе если он там есть
+  const itemInOrder = orderState.items.find(item => item.id === currentEditingProduct.id);
+  if (itemInOrder) {
+    itemInOrder.name = updated.name;
+    itemInOrder.sku = updated.sku;
+    itemInOrder.qtyPerBox = updated.qty_per_box;
+    itemInOrder.boxesPerPallet = updated.boxes_per_pallet;
+    itemInOrder.unitOfMeasure = updated.unit_of_measure;
+    render();
+    saveDraft();
+  }
+  
+  editCardModal.classList.add('hidden');
+  currentEditingProduct = null;
+  loadDatabaseProducts(); // перезагружаем список
+});
+
+async function deleteCard(productId) {
+  const confirmed = await customConfirm('Удалить карточку?', 'Карточка будет удалена из базы данных. Если она есть в заказе, тоже будет удалена.');
+  if (!confirmed) return;
+  
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', productId);
+  
+  if (error) {
+    showToast('Ошибка', 'Не удалось удалить карточку', 'error');
+    console.error(error);
+    return;
+  }
+  
+  showToast('Удалено', 'Карточка удалена из базы', 'success');
+  
+  // Удаляем из заказа если есть
+  const itemIndex = orderState.items.findIndex(item => item.id === productId);
+  if (itemIndex !== -1) {
+    orderState.items.splice(itemIndex, 1);
+    render();
+    saveDraft();
+  }
+  
+  loadDatabaseProducts();
+}
+
+/* ================= ПОИСК В БАЗЕ ДАННЫХ ================= */
+let dbSearchTimer = null;
+
+if (dbSearchInput) {
+  dbSearchInput.addEventListener('input', () => {
+    const q = dbSearchInput.value.trim();
+    clearTimeout(dbSearchTimer);
+    
+    if (clearDbSearchBtn) {
+      if (q.length > 0) {
+        clearDbSearchBtn.classList.remove('hidden');
+      } else {
+        clearDbSearchBtn.classList.add('hidden');
+      }
+    }
+    
+    if (q.length < 2) {
+      dbSearchResults.innerHTML = '';
+      return;
+    }
+    
+    dbSearchTimer = setTimeout(() => searchDatabaseProducts(q), 300);
+  });
+}
+
+if (clearDbSearchBtn) {
+  clearDbSearchBtn.addEventListener('click', () => {
+    dbSearchInput.value = '';
+    dbSearchResults.innerHTML = '';
+    clearDbSearchBtn.classList.add('hidden');
+    dbSearchInput.focus();
+  });
+}
+
+async function searchDatabaseProducts(q) {
+  const legalEntity = dbLegalEntitySelect.value;
+  const isSku = /^[0-9A-Za-z-]+$/.test(q);
+  
+  let query = supabase
+    .from('products')
+    .select('*')
+    .limit(10);
+  
+  if (legalEntity === 'Пицца Стар') {
+    query = query.eq('legal_entity', 'Пицца Стар');
+  } else {
+    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
+  }
+  
+  query = isSku
+    ? query.ilike('sku', `%${q}%`)
+    : query.ilike('name', `%${q}%`);
+  
+  const { data, error } = await query;
+  
+  if (error) {
+    console.error('Ошибка поиска:', error);
+    return;
+  }
+  
+  dbSearchResults.innerHTML = '';
+  
+  if (!data.length) {
+    dbSearchResults.innerHTML = '<div style="color:#999;padding:12px;">Ничего не найдено</div>';
+    return;
+  }
+  
+  data.forEach(p => {
+    const div = document.createElement('div');
+    div.style.display = 'flex';
+    div.style.justifyContent = 'space-between';
+    div.style.alignItems = 'center';
+    div.innerHTML = `
+      <span>${p.sku || ''} ${p.name}</span>
+      <div style="display:flex;gap:4px;">
+        <button class="btn small" style="font-size:11px;padding:3px 8px;">✏️</button>
+        <button class="btn small" style="font-size:11px;padding:3px 8px;background:var(--error);color:white;">🗑️</button>
+      </div>
+    `;
+    
+    const editBtn = div.querySelector('button:first-of-type');
+    const deleteBtn = div.querySelector('button:last-of-type');
+    
+    editBtn.addEventListener('click', async () => {
+      dbSearchResults.innerHTML = '';
+      dbSearchInput.value = '';
+      if (clearDbSearchBtn) clearDbSearchBtn.classList.add('hidden');
+      await openEditCard(p.id);
+    });
+    
+    deleteBtn.addEventListener('click', async () => {
+      dbSearchResults.innerHTML = '';
+      dbSearchInput.value = '';
+      if (clearDbSearchBtn) clearDbSearchBtn.classList.add('hidden');
+      await deleteCard(p.id);
+    });
+    
+    dbSearchResults.appendChild(div);
+  });
+}
