@@ -64,7 +64,7 @@
       </label>
 
       <label>
-        Товарный запас
+        Запас (дни)
         <input type="number" id="safetyDays" />
       </label>
 
@@ -79,6 +79,14 @@
       <label>
         Наличие транзита
         <select id="hasTransit">
+          <option value="false">Нет</option>
+          <option value="true">Да</option>
+        </select>
+      </label>
+
+      <label>
+        Отображение запаса
+        <select id="showStockColumn">
           <option value="false">Нет</option>
           <option value="true">Да</option>
         </select>
@@ -111,7 +119,6 @@
           id="productSearch"
           placeholder="🔍 Поиск по артикулу или названию"
         />
-        <button id="clearSearch" class="search-clear hidden" title="Очистить поиск">✖</button>
         <div id="searchResults" class="search-results"></div>
       </section>
     </section>
@@ -128,11 +135,12 @@
               <th>Расход</th>
               <th>Остаток</th>
               <th class="transit-col">Транзит</th>
+              <th class="stock-col">Запас</th>
               <th>Расчёт</th>
               <th>Заказ (шт / кор)</th>
               <th>Хватит до</th>
               <th>Паллеты</th>
-              <th>Действия</th>
+              <th style="width:40px;"></th>
             </tr>
           </thead>
           <tbody id="items"></tbody>

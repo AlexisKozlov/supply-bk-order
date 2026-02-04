@@ -14,7 +14,6 @@ const manualAddBtn = document.getElementById('m_add');
 const manualCancelBtn = document.getElementById('m_cancel');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
-const clearSearchBtn = document.getElementById('clearSearch');
 const buildOrderBtn = document.getElementById('buildOrder');
 const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
@@ -283,6 +282,7 @@ function loadDraft() {
     orderState.settings.safetyDays = data.settings.safetyDays || 0;
     orderState.settings.unit = data.settings.unit || 'pieces';
     orderState.settings.hasTransit = data.settings.hasTransit || false;
+    orderState.settings.showStockColumn = data.settings.showStockColumn || false;
     
     document.getElementById('legalEntity').value = orderState.settings.legalEntity;
     document.getElementById('supplierFilter').value = orderState.settings.supplier;
@@ -290,6 +290,7 @@ function loadDraft() {
     document.getElementById('safetyDays').value = orderState.settings.safetyDays;
     document.getElementById('unit').value = orderState.settings.unit;
     document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
+    document.getElementById('showStockColumn').value = orderState.settings.showStockColumn ? 'true' : 'false';
     
     // Восстановление товаров
     orderState.items = data.items || [];
@@ -542,7 +543,15 @@ document.getElementById('unit').addEventListener('change', e => {
 document.getElementById('hasTransit').addEventListener('change', e => {
   orderState.settings.hasTransit = e.target.value === 'true';
   toggleTransitColumn();
+  toggleStockColumn();
   saveDraft();
+});
+
+document.getElementById('showStockColumn').addEventListener('change', e => {
+  orderState.settings.showStockColumn = e.target.value === 'true';
+  toggleStockColumn();
+  saveDraft();
+  render(); // перерисовываем таблицу
 });
 
 function toggleTransitColumn() {
@@ -551,6 +560,19 @@ function toggleTransitColumn() {
   
   transitCols.forEach(col => {
     if (hasTransit) {
+      col.classList.remove('hidden');
+    } else {
+      col.classList.add('hidden');
+    }
+  });
+}
+
+function toggleStockColumn() {
+  const showStock = orderState.settings.showStockColumn;
+  const stockCols = document.querySelectorAll('.stock-col');
+  
+  stockCols.forEach(col => {
+    if (showStock) {
       col.classList.remove('hidden');
     } else {
       col.classList.add('hidden');
@@ -651,15 +673,6 @@ if (searchInput) {
     const q = searchInput.value.trim();
     clearTimeout(searchTimer);
 
-    // Показываем/скрываем крестик
-    if (clearSearchBtn) {
-      if (q.length > 0) {
-        clearSearchBtn.classList.remove('hidden');
-      } else {
-        clearSearchBtn.classList.add('hidden');
-      }
-    }
-
     if (q.length < 2) {
       searchResults.innerHTML = '';
       return;
@@ -667,16 +680,6 @@ if (searchInput) {
 
     searchTimer = setTimeout(() => searchProducts(q), 300);
   });
-
-  // Обработчик крестика очистки
-  if (clearSearchBtn) {
-    clearSearchBtn.addEventListener('click', () => {
-      searchInput.value = '';
-      searchResults.innerHTML = '';
-      clearSearchBtn.classList.add('hidden');
-      searchInput.focus();
-    });
-  }
 }
 
 async function searchProducts(q) {
@@ -818,15 +821,6 @@ async function removeItem(itemId) {
   }
 }
 
-/* ================= ПЕРЕСТАНОВКА ТОВАРОВ ================= */
-function swapItems(fromIndex, toIndex) {
-  const items = orderState.items;
-  const [movedItem] = items.splice(fromIndex, 1);
-  items.splice(toIndex, 0, movedItem);
-  render();
-  saveDraft();
-}
-
 /* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
 copyOrderBtn.addEventListener('click', () => {
   if (!orderState.items.length) {
@@ -962,9 +956,6 @@ function render() {
 
   orderState.items.forEach((item, rowIndex) => {
     const tr = document.createElement('tr');
-    tr.draggable = true;
-    tr.dataset.rowIndex = rowIndex;
-    tr.style.cursor = 'grab';
 
   tr.innerHTML = `
   <td class="item-name">
@@ -974,11 +965,12 @@ function render() {
   <td><input type="number" value="${item.consumptionPeriod}"></td>
   <td><input type="number" value="${item.stock}"></td>
   <td class="transit-col"><input type="number" value="${item.transit || 0}"></td>
+  <td class="stock-col stock-display">-</td>
   <td class="calc">
     <div class="calc-value">0</div>
     <button class="btn small calc-to-order" style="margin-top:4px;font-size:11px;padding:4px 8px;">→ В заказ</button>
   </td>
-  <td class="order-cell">
+  <td class="order-cell order-highlight">
     <input type="number" class="order-pieces" value="0" style="width:70px;"> / 
     <input type="number" class="order-boxes" value="0" style="width:70px;">
   </td>
@@ -987,7 +979,7 @@ function render() {
     <div class="pallet-info">-</div>
     <button class="btn small round-to-pallet">Округлить</button>
   </td>
-  <td><button class="btn small delete-item" style="background:#d32f2f;color:white;" title="Удалить">🗑️</button></td>
+  <td class="delete-cell"><button class="delete-item-x" title="Удалить">✖</button></td>
 `;
 
  const inputs = tr.querySelectorAll('input[type="number"]');
@@ -995,19 +987,10 @@ function render() {
     const orderBoxesInput = tr.querySelector('.order-boxes');
     const calcToOrderBtn = tr.querySelector('.calc-to-order');
     const roundBtn = tr.querySelector('.round-to-pallet');
-    const deleteBtn = tr.querySelector('.delete-item');
+    const deleteBtn = tr.querySelector('.delete-item-x');
 
     // Автовыделение для расхода/остатка/транзита если значение = 0
     [inputs[0], inputs[1], inputs[2]].forEach(input => {
-      input.addEventListener('focus', (e) => {
-        if (e.target.value === '0') {
-          e.target.select();
-        }
-      });
-    });
-
-    // Автовыделение для order-pieces и order-boxes при 0
-    [orderPiecesInput, orderBoxesInput].forEach(input => {
       input.addEventListener('focus', (e) => {
         if (e.target.value === '0') {
           e.target.select();
@@ -1135,43 +1118,13 @@ function render() {
       removeItem(item.id);
     });
 
-    // ===== DRAG AND DROP =====
-    tr.addEventListener('dragstart', (e) => {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', rowIndex);
-      tr.style.opacity = '0.4';
-    });
-
-    tr.addEventListener('dragend', (e) => {
-      tr.style.opacity = '1';
-    });
-
-    tr.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      tr.style.background = 'rgba(245,166,35,0.15)';
-    });
-
-    tr.addEventListener('dragleave', (e) => {
-      tr.style.background = '';
-    });
-
-    tr.addEventListener('drop', (e) => {
-      e.preventDefault();
-      tr.style.background = '';
-      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
-      const toIndex = rowIndex;
-      if (fromIndex !== toIndex) {
-        swapItems(fromIndex, toIndex);
-      }
-    });
-
     tbody.appendChild(tr);
     updateRow(tr, item);
   });
 
   updateFinalSummary();
   toggleTransitColumn();
+  toggleStockColumn();
 }
 
 function updateRow(tr, item) {
@@ -1219,6 +1172,17 @@ if (calcValueEl) {
       `${coverageDate.toLocaleDateString()} (${daysOfStockAfterDelivery} дн.)`;
   } else {
     tr.querySelector('.date').textContent = '-';
+  }
+
+  // ===== КОЛОНКА "ЗАПАС" (текущий остаток без учёта поставки) =====
+  const stockDisplay = tr.querySelector('.stock-display');
+  if (stockDisplay && dailyConsumption > 0 && orderState.settings.today) {
+    const totalStock = item.stock + (item.transit || 0);
+    const daysOfCurrentStock = Math.floor(totalStock / dailyConsumption);
+    const stockEndDate = new Date(orderState.settings.today.getTime() + daysOfCurrentStock * 86400000);
+    stockDisplay.textContent = `${stockEndDate.toLocaleDateString()} (${daysOfCurrentStock} дн.)`;
+  } else if (stockDisplay) {
+    stockDisplay.textContent = '-';
   }
 
   if (item.boxesPerPallet && item.finalOrder > 0) {
