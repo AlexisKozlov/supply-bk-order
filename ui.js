@@ -14,6 +14,7 @@ const manualAddBtn = document.getElementById('m_add');
 const manualCancelBtn = document.getElementById('m_cancel');
 const searchInput = document.getElementById('productSearch');
 const searchResults = document.getElementById('searchResults');
+const clearSearchBtn = document.getElementById('clearSearch');
 const buildOrderBtn = document.getElementById('buildOrder');
 const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
@@ -650,6 +651,15 @@ if (searchInput) {
     const q = searchInput.value.trim();
     clearTimeout(searchTimer);
 
+    // Показываем/скрываем крестик
+    if (clearSearchBtn) {
+      if (q.length > 0) {
+        clearSearchBtn.classList.remove('hidden');
+      } else {
+        clearSearchBtn.classList.add('hidden');
+      }
+    }
+
     if (q.length < 2) {
       searchResults.innerHTML = '';
       return;
@@ -657,6 +667,16 @@ if (searchInput) {
 
     searchTimer = setTimeout(() => searchProducts(q), 300);
   });
+
+  // Обработчик крестика очистки
+  if (clearSearchBtn) {
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchResults.innerHTML = '';
+      clearSearchBtn.classList.add('hidden');
+      searchInput.focus();
+    });
+  }
 }
 
 async function searchProducts(q) {
@@ -798,6 +818,15 @@ async function removeItem(itemId) {
   }
 }
 
+/* ================= ПЕРЕСТАНОВКА ТОВАРОВ ================= */
+function swapItems(fromIndex, toIndex) {
+  const items = orderState.items;
+  const [movedItem] = items.splice(fromIndex, 1);
+  items.splice(toIndex, 0, movedItem);
+  render();
+  saveDraft();
+}
+
 /* ================= КОПИРОВАНИЕ ЗАКАЗА ================= */
 copyOrderBtn.addEventListener('click', () => {
   if (!orderState.items.length) {
@@ -933,6 +962,9 @@ function render() {
 
   orderState.items.forEach((item, rowIndex) => {
     const tr = document.createElement('tr');
+    tr.draggable = true;
+    tr.dataset.rowIndex = rowIndex;
+    tr.style.cursor = 'grab';
 
   tr.innerHTML = `
   <td class="item-name">
@@ -967,6 +999,15 @@ function render() {
 
     // Автовыделение для расхода/остатка/транзита если значение = 0
     [inputs[0], inputs[1], inputs[2]].forEach(input => {
+      input.addEventListener('focus', (e) => {
+        if (e.target.value === '0') {
+          e.target.select();
+        }
+      });
+    });
+
+    // Автовыделение для order-pieces и order-boxes при 0
+    [orderPiecesInput, orderBoxesInput].forEach(input => {
       input.addEventListener('focus', (e) => {
         if (e.target.value === '0') {
           e.target.select();
@@ -1092,6 +1133,37 @@ function render() {
 
     deleteBtn.addEventListener('click', () => {
       removeItem(item.id);
+    });
+
+    // ===== DRAG AND DROP =====
+    tr.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', rowIndex);
+      tr.style.opacity = '0.4';
+    });
+
+    tr.addEventListener('dragend', (e) => {
+      tr.style.opacity = '1';
+    });
+
+    tr.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      tr.style.background = 'rgba(245,166,35,0.15)';
+    });
+
+    tr.addEventListener('dragleave', (e) => {
+      tr.style.background = '';
+    });
+
+    tr.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tr.style.background = '';
+      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+      const toIndex = rowIndex;
+      if (fromIndex !== toIndex) {
+        swapItems(fromIndex, toIndex);
+      }
     });
 
     tbody.appendChild(tr);
