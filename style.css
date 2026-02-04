@@ -1075,3 +1075,16 @@ td.delete-cell {
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* ===== Z-INDEX FIX (confirm поверх database modal) ===== */
+#confirmModal {
+  z-index: 10000;
+}
+
+#databaseModal {
+  z-index: 9998;
+}
+
+#editCardModal {
+  z-index: 9999;
+}

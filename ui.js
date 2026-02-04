@@ -23,7 +23,6 @@ const closeDatabaseBtn = document.getElementById('closeDatabase');
 const dbLegalEntitySelect = document.getElementById('dbLegalEntity');
 const dbSearchInput = document.getElementById('dbSearch');
 const clearDbSearchBtn = document.getElementById('clearDbSearch');
-const dbSearchResults = document.getElementById('dbSearchResults');
 const databaseList = document.getElementById('databaseList');
 
 const editCardModal = document.getElementById('editCardModal');
@@ -830,6 +829,7 @@ manualCancelBtn.addEventListener('click', () => {
 function addItem(p) {
   orderState.items.push({
     id: crypto.randomUUID(),
+    supabaseId: p.id, // НАСТОЯЩИЙ ID из Supabase для редактирования
     sku: p.sku || '',
     name: p.name,
     consumptionPeriod: 0,
@@ -1208,10 +1208,10 @@ function render() {
     
     // Двойной клик по названию товара для редактирования
     const itemNameCell = tr.querySelector('.item-name');
-    if (itemNameCell && item.id) {
+    if (itemNameCell && item.supabaseId) {
       itemNameCell.style.cursor = 'pointer';
       itemNameCell.addEventListener('dblclick', async () => {
-        await openEditCard(item.id);
+        await openEditCard(item.supabaseId);
       });
     }
     
@@ -1594,7 +1594,7 @@ document.getElementById('e_save').addEventListener('click', async () => {
   showToast('Сохранено', 'Карточка обновлена', 'success');
   
   // Обновляем товар в заказе если он там есть
-  const itemInOrder = orderState.items.find(item => item.id === currentEditingProduct.id);
+  const itemInOrder = orderState.items.find(item => item.supabaseId === currentEditingProduct.id);
   if (itemInOrder) {
     itemInOrder.name = updated.name;
     itemInOrder.sku = updated.sku;
@@ -1628,7 +1628,7 @@ async function deleteCard(productId) {
   showToast('Удалено', 'Карточка удалена из базы', 'success');
   
   // Удаляем из заказа если есть
-  const itemIndex = orderState.items.findIndex(item => item.id === productId);
+  const itemIndex = orderState.items.findIndex(item => item.supabaseId === productId);
   if (itemIndex !== -1) {
     orderState.items.splice(itemIndex, 1);
     render();
@@ -1638,13 +1638,10 @@ async function deleteCard(productId) {
   loadDatabaseProducts();
 }
 
-/* ================= ПОИСК В БАЗЕ ДАННЫХ ================= */
-let dbSearchTimer = null;
-
+/* ================= ПОИСК В БАЗЕ ДАННЫХ (фильтрация списка) ================= */
 if (dbSearchInput) {
   dbSearchInput.addEventListener('input', () => {
-    const q = dbSearchInput.value.trim();
-    clearTimeout(dbSearchTimer);
+    const q = dbSearchInput.value.trim().toLowerCase();
     
     if (clearDbSearchBtn) {
       if (q.length > 0) {
@@ -1654,87 +1651,54 @@ if (dbSearchInput) {
       }
     }
     
-    if (q.length < 2) {
-      dbSearchResults.innerHTML = '';
-      return;
-    }
+    // Фильтруем карточки в списке
+    const cards = databaseList.querySelectorAll('.db-card');
+    let visibleCount = 0;
     
-    dbSearchTimer = setTimeout(() => searchDatabaseProducts(q), 300);
+    cards.forEach(card => {
+      const sku = card.querySelector('.db-card-sku')?.textContent.toLowerCase() || '';
+      const name = card.querySelector('.db-card-name')?.textContent.toLowerCase() || '';
+      const supplier = card.querySelector('.db-card-supplier')?.textContent.toLowerCase() || '';
+      
+      if (sku.includes(q) || name.includes(q) || supplier.includes(q)) {
+        card.style.display = 'flex';
+        visibleCount++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+    
+    // Показываем сообщение если ничего не найдено
+    let noResultsMsg = databaseList.querySelector('.no-results-message');
+    if (visibleCount === 0 && q.length > 0) {
+      if (!noResultsMsg) {
+        noResultsMsg = document.createElement('div');
+        noResultsMsg.className = 'no-results-message';
+        noResultsMsg.style.cssText = 'text-align:center;padding:40px;color:var(--muted);';
+        noResultsMsg.textContent = 'Ничего не найдено';
+        databaseList.appendChild(noResultsMsg);
+      }
+      noResultsMsg.style.display = 'block';
+    } else if (noResultsMsg) {
+      noResultsMsg.style.display = 'none';
+    }
   });
 }
 
 if (clearDbSearchBtn) {
   clearDbSearchBtn.addEventListener('click', () => {
     dbSearchInput.value = '';
-    dbSearchResults.innerHTML = '';
-    clearDbSearchBtn.classList.add('hidden');
+    if (clearDbSearchBtn) clearDbSearchBtn.classList.add('hidden');
+    
+    // Показываем все карточки
+    const cards = databaseList.querySelectorAll('.db-card');
+    cards.forEach(card => {
+      card.style.display = 'flex';
+    });
+    
+    const noResultsMsg = databaseList.querySelector('.no-results-message');
+    if (noResultsMsg) noResultsMsg.style.display = 'none';
+    
     dbSearchInput.focus();
-  });
-}
-
-async function searchDatabaseProducts(q) {
-  const legalEntity = dbLegalEntitySelect.value;
-  const isSku = /^[0-9A-Za-z-]+$/.test(q);
-  
-  let query = supabase
-    .from('products')
-    .select('*')
-    .limit(10);
-  
-  if (legalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
-  }
-  
-  query = isSku
-    ? query.ilike('sku', `%${q}%`)
-    : query.ilike('name', `%${q}%`);
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.error('Ошибка поиска:', error);
-    return;
-  }
-  
-  dbSearchResults.innerHTML = '';
-  
-  if (!data.length) {
-    dbSearchResults.innerHTML = '<div style="color:#999;padding:12px;">Ничего не найдено</div>';
-    return;
-  }
-  
-  data.forEach(p => {
-    const div = document.createElement('div');
-    div.style.display = 'flex';
-    div.style.justifyContent = 'space-between';
-    div.style.alignItems = 'center';
-    div.innerHTML = `
-      <span>${p.sku || ''} ${p.name}</span>
-      <div style="display:flex;gap:4px;">
-        <button class="btn small" style="font-size:11px;padding:3px 8px;">✏️</button>
-        <button class="btn small" style="font-size:11px;padding:3px 8px;background:var(--error);color:white;">🗑️</button>
-      </div>
-    `;
-    
-    const editBtn = div.querySelector('button:first-of-type');
-    const deleteBtn = div.querySelector('button:last-of-type');
-    
-    editBtn.addEventListener('click', async () => {
-      dbSearchResults.innerHTML = '';
-      dbSearchInput.value = '';
-      if (clearDbSearchBtn) clearDbSearchBtn.classList.add('hidden');
-      await openEditCard(p.id);
-    });
-    
-    deleteBtn.addEventListener('click', async () => {
-      dbSearchResults.innerHTML = '';
-      dbSearchInput.value = '';
-      if (clearDbSearchBtn) clearDbSearchBtn.classList.add('hidden');
-      await deleteCard(p.id);
-    });
-    
-    dbSearchResults.appendChild(div);
   });
 }
