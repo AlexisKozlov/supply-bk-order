@@ -908,13 +908,16 @@ td.stock-display {
 
 /* ===== ORDER HIGHLIGHT (выделение колонки Заказ) ===== */
 td.order-highlight {
-  border-left: 3px solid var(--orange);
-  border-right: 3px solid var(--orange);
-  background: rgba(245,166,35,0.04);
+  background: #fdf9f2;
+  font-weight: 700;
 }
 
 tbody tr:hover td.order-highlight {
-  background: rgba(245,166,35,0.08);
+  background: #fdf5e8;
+}
+
+td.order-highlight input {
+  font-weight: 700;
 }
 
 /* ===== DELETE CELL (узкая колонка для крестика) ===== */
