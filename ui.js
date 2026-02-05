@@ -639,6 +639,9 @@ async function loadSuppliers(legalEntity) {
   
   const { data } = await query;
   const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
+  
+  // СОРТИРОВКА ПО АЛФАВИТУ
+  suppliers.sort((a, b) => a.localeCompare(b, 'ru'));
 
   suppliers.forEach(s => {
     // основной фильтр
@@ -677,6 +680,10 @@ supplierSelect.addEventListener('change', async () => {
     .eq('supplier', supplierSelect.value);
 
   data.forEach(addItem);
+  
+  // ВАЖНО: вызываем render() чтобы восстановить порядок из Supabase
+  render();
+  saveDraft();
 });
 
 /* ================= ПОИСК ПО КАРТОЧКАМ ================= */
@@ -995,27 +1002,8 @@ function moveToCell(rowIndex, columnIndex) {
 
 /* ================= ТАБЛИЦА ================= */
 function render() {
-  // Восстановление сохранённого порядка
-  const orderKey = 'bk_order_' + (orderState.settings.supplier || 'all');
-  const savedOrder = localStorage.getItem(orderKey);
-  if (savedOrder) {
-    try {
-      const order = JSON.parse(savedOrder);
-      const sorted = [];
-      order.forEach(id => {
-        const item = orderState.items.find(i => (i.supabaseId || i.id) === id);
-        if (item) sorted.push(item);
-      });
-      orderState.items.forEach(item => {
-        if (!sorted.includes(item)) sorted.push(item);
-      });
-      if (sorted.length === orderState.items.length) {
-        orderState.items = sorted;
-      }
-    } catch (err) {
-      console.error('Ошибка восстановления порядка:', err);
-    }
-  }
+  // Восстановление сохранённого порядка из Supabase
+  await restoreItemOrder();
 
   tbody.innerHTML = '';
 
@@ -1266,10 +1254,8 @@ function render() {
           const [movedItem] = items.splice(draggedIndex, 1);
           items.splice(rowIndex, 0, movedItem);
           
-          // Сохранение порядка в localStorage
-          const orderKey = 'bk_order_' + (orderState.settings.supplier || 'all');
-          const order = items.map(item => item.supabaseId || item.id);
-          localStorage.setItem(orderKey, JSON.stringify(order));
+          // Сохранение порядка в Supabase
+          saveItemOrder();
           
           render();
           saveDraft();
@@ -1819,3 +1805,73 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+/* ================= СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ ПОРЯДКА В SUPABASE ================= */
+async function saveItemOrder() {
+  const supplier = orderState.settings.supplier || 'all';
+  const legalEntity = orderState.settings.legalEntity;
+  
+  // Удаляем старый порядок для этого поставщика/юр.лица
+  await supabase
+    .from('item_order')
+    .delete()
+    .eq('supplier', supplier)
+    .eq('legal_entity', legalEntity);
+  
+  // Сохраняем новый порядок
+  const orderData = orderState.items.map((item, index) => ({
+    supplier,
+    legal_entity: legalEntity,
+    item_id: item.supabaseId || item.id,
+    position: index
+  }));
+  
+  if (orderData.length > 0) {
+    const { error } = await supabase
+      .from('item_order')
+      .insert(orderData);
+    
+    if (error) {
+      console.error('Ошибка сохранения порядка:', error);
+    } else {
+      console.log('✅ Порядок сохранён в Supabase для всех пользователей');
+    }
+  }
+}
+
+async function restoreItemOrder() {
+  const supplier = orderState.settings.supplier || 'all';
+  const legalEntity = orderState.settings.legalEntity;
+  
+  const { data, error } = await supabase
+    .from('item_order')
+    .select('*')
+    .eq('supplier', supplier)
+    .eq('legal_entity', legalEntity)
+    .order('position');
+  
+  if (error) {
+    console.error('Ошибка загрузки порядка:', error);
+    return;
+  }
+  
+  if (!data || data.length === 0) return;
+  
+  // Восстанавливаем порядок
+  const sorted = [];
+  data.forEach(orderItem => {
+    const item = orderState.items.find(i => 
+      (i.supabaseId || i.id) === orderItem.item_id
+    );
+    if (item) sorted.push(item);
+  });
+  
+  // Добавляем новые товары которых не было в сохранённом порядке
+  orderState.items.forEach(item => {
+    if (!sorted.includes(item)) sorted.push(item);
+  });
+  
+  if (sorted.length === orderState.items.length) {
+    orderState.items = sorted;
+    console.log('✅ Порядок восстановлен из Supabase');
+  }
+}
