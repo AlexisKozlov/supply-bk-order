@@ -1633,7 +1633,13 @@ document.getElementById('e_cancel').addEventListener('click', () => {
 });
 
 document.getElementById('e_save').addEventListener('click', async () => {
-  if (!currentEditingProduct) return;
+  console.log('=== НАЧАЛО СОХРАНЕНИЯ ===');
+  console.log('currentEditingProduct:', currentEditingProduct);
+  
+  if (!currentEditingProduct) {
+    console.error('❌ currentEditingProduct is null!');
+    return;
+  }
   
   const name = document.getElementById('e_name').value.trim();
   if (!name) {
@@ -1651,16 +1657,24 @@ document.getElementById('e_save').addEventListener('click', async () => {
     unit_of_measure: document.getElementById('e_unit').value || 'шт'
   };
   
-  const { error } = await supabase
+  console.log('Отправка в Supabase:', updated);
+  console.log('ID товара:', currentEditingProduct.id);
+  
+  const { data, error } = await supabase
     .from('products')
     .update(updated)
-    .eq('id', currentEditingProduct.id);
+    .eq('id', currentEditingProduct.id)
+    .select();
+  
+  console.log('Результат Supabase:', { data, error });
   
   if (error) {
-    showToast('Ошибка', 'Не удалось сохранить изменения', 'error');
-    console.error(error);
+    console.error('❌ ОШИБКА SUPABASE:', error);
+    showToast('Ошибка', error.message || 'Не удалось сохранить', 'error');
     return;
   }
+  
+  console.log('✅ Сохранено успешно!', data);
   
   showToast('Сохранено', 'Карточка обновлена', 'success');
   
