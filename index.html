@@ -9,7 +9,6 @@
 
 <body>
 
-<!-- ===== ВХОД ===== -->
 <div id="loginOverlay" class="login-overlay">
   <div class="login-box">
     <span style="font-size:42px;display:block;margin-bottom:2px;">🍔</span>
@@ -21,120 +20,61 @@
 </div>
 
 <header class="header">
-  <h1>🍔 Калькулятор заказа</h1>
+  <h1>🍔 Калькулятор заказа BK</h1>
   <nav class="header-menu">
-    <button id="menuHistory" class="menu-btn">📚 История заказов</button>
+    <button id="menuHistory" class="menu-btn">📚 История</button>
     <button id="menuDatabase" class="menu-btn">🗄️ База данных</button>
   </nav>
   <span id="entityBadge" class="entity-badge">Бургер БК</span>
 </header>
 
 <main class="container">
-
-  <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
   <section class="card">
     <h2>Параметры заказа</h2>
-
     <div class="settings">
-      <label>
-        Юр. лицо
-        <select id="legalEntity">
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-      </label>
-
-      <label>
-        Поставщик
-        <select id="supplierFilter">
-          <option value="">Все / свободный</option>
-        </select>
-      </label>
-
-      <label>
-        Дата сегодня
-        <input type="date" id="today" />
-      </label>
-
-      <label>
-        Дата прихода
-        <input type="date" id="deliveryDate" />
-      </label>
-
-      <label>
-        Период расхода (дней)
-        <input type="number" id="periodDays" value="30" />
-      </label>
-
-      <label>
-        Товарный запас
-        <input type="number" id="safetyDays" />
-      </label>
-
-      <label>
-        Единицы
-        <select id="unit">
-          <option value="pieces">Штуки</option>
-          <option value="boxes">Коробки</option>
-        </select>
-      </label>
-
-      <label>
-        Наличие транзита
-        <select id="hasTransit">
-          <option value="false">Нет</option>
-          <option value="true">Да</option>
-        </select>
-      </label>
-
-      <label>
-        Отображение запаса
-        <select id="showStockColumn">
-          <option value="false">Нет</option>
-          <option value="true">Да</option>
-        </select>
-      </label>
+      <label>Юр. лицо<select id="legalEntity"><option value="Бургер БК">Бургер БК</option><option value="Воглия Матта">Воглия Матта</option><option value="Пицца Стар">Пицца Стар</option></select></label>
+      <label>Поставщик<select id="supplierFilter"><option value="">Все / свободный</option></select></label>
+      <label>Дата сегодня<input type="date" id="today" /></label>
+      <label>Дата прихода<input type="date" id="deliveryDate" /></label>
+      <label>Период расхода (дней)<input type="number" id="periodDays" value="30" /></label>
+      <label>Товарный запас<input type="text" id="safetyDays" placeholder="14" /></label>
+      <label>Единицы<select id="unit"><option value="pieces">Штуки</option><option value="boxes">Коробки</option></select></label>
+      <label>Наличие транзита<select id="hasTransit"><option value="false">Нет</option><option value="true">Да</option></select></label>
+      <label>Отображение запаса<select id="showStockColumn"><option value="false">Нет</option><option value="true">Да</option></select></label>
     </div>
-
-    <!-- КЛЮЧЕВАЯ КНОПКА -->
-    <button id="buildOrder" class="btn primary">
-      📦 Сформировать заказ
-    </button>
+    <button id="buildOrder" class="btn primary">📦 Сформировать заказ</button>
   </section>
 
-  <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
   <div id="orderSection" class="hidden">
-
-    <!-- ДОБАВЛЕНИЕ ТОВАРОВ -->
     <section class="card">
       <h2>Добавление товаров</h2>
-
       <div class="actions">
         <button id="addManual" class="btn primary">✍️ Ручной товар</button>
-        <button id="clearOrder" class="btn secondary">🧹 Очистить заказ</button>
-        <button id="copyOrder" class="btn secondary">📋 Скопировать заказ</button>
-        <button id="saveOrder" class="btn primary">💾 Сохранить заказ</button>
+        <button id="saveOrder" class="btn primary">💾 Сохранить</button>
+        <button id="copyOrder" class="btn secondary">📋 Скопировать</button>
       </div>
-
       <section class="search">
-        <input
-          id="productSearch"
-          placeholder="🔍 Поиск по артикулу или названию"
-        />
-        <button id="clearSearch" class="search-clear hidden" title="Очистить поиск">✖</button>
+        <input id="productSearch" placeholder="🔍 Поиск по артикулу или названию" />
+        <button id="clearSearch" class="search-clear hidden" title="Очистить">✖</button>
         <div id="searchResults" class="search-results"></div>
       </section>
     </section>
 
-    <!-- ТАБЛИЦА ЗАКАЗА -->
     <section class="card">
-      <h2>Заказ</h2>
-
+      <div class="order-header">
+        <h2>Заказ</h2>
+        <div class="order-menu">
+          <button id="undoBtn" class="menu-btn-small" title="Отменить" disabled>↶</button>
+          <button id="redoBtn" class="menu-btn-small" title="Повторить" disabled>↷</button>
+          <button id="applyAllCalc" class="menu-btn-small">📊 Всё в заказ</button>
+          <button id="clearOrder" class="menu-btn-small secondary">🧹 Очистить</button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th style="width:30px;"></th>
               <th>Товар</th>
               <th>Расход</th>
               <th>Остаток</th>
@@ -152,175 +92,72 @@
       </div>
     </section>
 
-    <!-- ИТОГ -->
     <section class="card">
       <h2>Итог заказа</h2>
       <div id="finalSummary"></div>
     </section>
-
   </div>
-
-
 </main>
 
-<!-- ===== МОДАЛКА: ИСТОРИЯ ЗАКАЗОВ ===== -->
 <div id="historyModal" class="modal hidden">
   <div class="modal-box large">
-    <div class="modal-header">
-      <h2>История заказов</h2>
-      <button id="closeHistory" class="modal-close">✖</button>
-    </div>
-
-    <label>
-      Поставщик
-      <select id="historySupplier">
-        <option value="">Все</option>
-      </select>
-    </label>
-
+    <div class="modal-header"><h2>📚 История</h2><button id="closeHistory" class="modal-close">✖</button></div>
+    <label>Поставщик<select id="historySupplier"><option value="">Все</option></select></label>
     <div id="orderHistory"></div>
   </div>
 </div>
 
-
-<!-- ===== МОДАЛКА: РУЧНОЙ ТОВАР ===== -->
 <div id="manualModal" class="modal hidden">
   <div class="modal-box">
-    <div class="modal-header">
-      <h2>Ручной товар</h2>
-      <button id="closeManual" class="modal-close">✖</button>
-    </div>
-
+    <div class="modal-header"><h2>✍️ Ручной товар</h2><button id="closeManual" class="modal-close">✖</button></div>
     <input id="m_name" placeholder="Наименование*" />
     <input id="m_sku" placeholder="Артикул" />
     <input id="m_supplier" placeholder="Поставщик" />
-    
-    <label>
-      Юр. лицо
-      <select id="m_legalEntity">
-        <option value="Бургер БК">Бургер БК</option>
-        <option value="Воглия Матта">Воглия Матта</option>
-        <option value="Пицца Стар">Пицца Стар</option>
-      </select>
-    </label>
-    
+    <label>Юр. лицо<select id="m_legalEntity"><option value="Бургер БК">Бургер БК</option><option value="Воглия Матта">Воглия Матта</option><option value="Пицца Стар">Пицца Стар</option></select></label>
     <input id="m_box" type="number" placeholder="Штук в коробке" />
-    <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
-    
-    <label>
-      Единица измерения
-      <select id="m_unit">
-        <option value="шт">штуки</option>
-        <option value="л">литры</option>
-        <option value="кг">килограммы</option>
-      </select>
-    </label>
-
-    <label>
-      <input type="checkbox" id="m_save" />
-      Сохранить в базу
-    </label>
-
-    <div class="actions">
-      <button id="m_add" class="btn primary">Добавить</button>
-      <button id="m_cancel" class="btn secondary">Отмена</button>
-    </div>
+    <input id="m_pallet" type="number" placeholder="Коробок на паллете" />
+    <label>Единица измерения<select id="m_unit"><option value="шт">штуки</option><option value="л">литры</option><option value="кг">килограммы</option></select></label>
+    <label><input type="checkbox" id="m_save" />Сохранить в базу</label>
+    <div class="actions" style="margin-bottom:0;"><button id="m_add" class="btn primary">Добавить</button><button id="m_cancel" class="btn secondary">Отмена</button></div>
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: ПОДТВЕРЖДЕНИЕ ===== -->
-<div id="confirmModal" class="modal hidden">
-  <div class="modal-box" style="max-width:400px;">
-    <div class="modal-header">
-      <h2 id="confirmTitle">Подтверждение</h2>
-      <button id="closeConfirm" class="modal-close">✖</button>
-    </div>
-    
-    <p id="confirmMessage" style="margin:0 0 24px;color:#5A2D0C;line-height:1.6;"></p>
-    
-    <div class="actions">
-      <button id="confirmYes" class="btn primary">Да</button>
-      <button id="confirmNo" class="btn secondary">Отмена</button>
-    </div>
-  </div>
-</div>
-
-
-
-<!-- ===== МОДАЛКА: БАЗА ДАННЫХ ===== -->
 <div id="databaseModal" class="modal hidden">
   <div class="modal-box large">
-    <div class="modal-header">
-      <h2>🗄️ База данных</h2>
-      <button id="closeDatabase" class="modal-close">✖</button>
-    </div>
-
-    <label>
-      Юр. лицо
-      <select id="dbLegalEntity">
-        <option value="Бургер БК">Бургер БК</option>
-        <option value="Воглия Матта">Воглия Матта</option>
-        <option value="Пицца Стар">Пицца Стар</option>
-      </select>
-    </label>
-
-    <section class="search" style="margin:16px 0;">
-      <input id="dbSearch" placeholder="🔍 Поиск по карточкам" />
-      <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✖</button>
-    </section>
-
+    <div class="modal-header"><h2>🗄️ База данных</h2><button id="closeDatabase" class="modal-close">✖</button></div>
+    <label>Юр. лицо<select id="dbLegalEntity"><option value="Бургер БК">Бургер БК</option><option value="Воглия Матта">Воглия Матта</option><option value="Пицца Стар">Пицца Стар</option></select></label>
+    <section class="search" style="margin:16px 0;"><input id="dbSearch" placeholder="🔍 Поиск" /><button id="clearDbSearch" class="search-clear hidden">✖</button></section>
     <div id="databaseList" style="max-height:60vh;overflow-y:auto;"></div>
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: РЕДАКТИРОВАНИЕ КАРТОЧКИ ===== -->
 <div id="editCardModal" class="modal hidden">
   <div class="modal-box">
-    <div class="modal-header">
-      <h2>✏️ Редактирование карточки</h2>
-      <button id="closeEditCard" class="modal-close">✖</button>
-    </div>
-
+    <div class="modal-header"><h2>✏️ Редактирование</h2><button id="closeEditCard" class="modal-close">✖</button></div>
     <input id="e_name" placeholder="Наименование*" />
     <input id="e_sku" placeholder="Артикул" />
     <input id="e_supplier" placeholder="Поставщик" />
-    
-    <label>
-      Юр. лицо
-      <select id="e_legalEntity">
-        <option value="Бургер БК">Бургер БК</option>
-        <option value="Воглия Матта">Воглия Матта</option>
-        <option value="Пицца Стар">Пицца Стар</option>
-      </select>
-    </label>
-    
+    <label>Юр. лицо<select id="e_legalEntity"><option value="Бургер БК">Бургер БК</option><option value="Воглия Матта">Воглия Матта</option><option value="Пицца Стар">Пицца Стар</option></select></label>
     <input id="e_box" type="number" placeholder="Штук в коробке" />
     <input id="e_pallet" type="number" placeholder="Коробок на паллете" />
-    
-    <label>
-      Единица измерения
-      <select id="e_unit">
-        <option value="шт">штуки</option>
-        <option value="л">литры</option>
-        <option value="кг">килограммы</option>
-      </select>
-    </label>
-
-    <div class="actions" style="margin-bottom:0;">
-      <button id="e_save" class="btn primary">Сохранить</button>
-      <button id="e_cancel" class="btn secondary">Отмена</button>
-    </div>
+    <label>Единица измерения<select id="e_unit"><option value="шт">штуки</option><option value="л">литры</option><option value="кг">килограммы</option></select></label>
+    <div class="actions" style="margin-bottom:0;"><button id="e_save" class="btn primary">Сохранить</button><button id="e_cancel" class="btn secondary">Отмена</button></div>
   </div>
 </div>
 
+<div id="confirmModal" class="modal hidden">
+  <div class="modal-box" style="max-width:400px;">
+    <div class="modal-header"><h2 id="confirmTitle">Подтверждение</h2><button id="closeConfirm" class="modal-close">✖</button></div>
+    <p id="confirmMessage" style="margin:0 0 24px;color:#5A2D0C;line-height:1.6;"></p>
+    <div class="actions" style="margin-bottom:0;"><button id="confirmYes" class="btn primary">Подтвердить</button><button id="confirmNo" class="btn secondary">Отмена</button></div>
+  </div>
+</div>
 
 <footer class="footer">
-  <span class="version">Версия: <span id="appVersion">1.0.2</span></span>
+  <span class="version">Версия: <span id="appVersion">1.0.3</span></span>
 </footer>
 
-<!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
 <script>
-// Проверка авторизации ДО загрузки основного скрипта
 (function() {
   if (localStorage.getItem('bk_logged_in') === 'true') {
     document.getElementById('loginOverlay').style.display = 'none';
