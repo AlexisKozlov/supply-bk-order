@@ -271,7 +271,7 @@ function saveDraft() {
   localStorage.setItem('bk_draft', JSON.stringify(draft));
 }
 
-function loadDraft() {
+async function loadDraft() {
   const draft = localStorage.getItem('bk_draft');
   if (!draft) return false;
 
@@ -315,6 +315,10 @@ function loadDraft() {
     
     if (orderState.items.length > 0) {
       orderSection.classList.remove('hidden');
+      
+      // Восстанавливаем порядок из Supabase
+      await restoreItemOrder();
+      
       render();
       
       const draftDate = new Date(data.timestamp).toLocaleString('ru-RU');
@@ -681,7 +685,10 @@ supplierSelect.addEventListener('change', async () => {
 
   data.forEach(addItem);
   
-  // ВАЖНО: вызываем render() чтобы восстановить порядок из Supabase
+  // Восстанавливаем порядок из Supabase
+  await restoreItemOrder();
+  
+  // Перерисовываем с учётом порядка
   render();
   saveDraft();
 });
@@ -1002,9 +1009,6 @@ function moveToCell(rowIndex, columnIndex) {
 
 /* ================= ТАБЛИЦА ================= */
 function render() {
-  // Восстановление сохранённого порядка из Supabase
-  await restoreItemOrder();
-
   tbody.innerHTML = '';
 
   orderState.items.forEach((item, rowIndex) => {
@@ -1488,8 +1492,8 @@ render();
 initModals();
 
 // Загрузка черновика после загрузки поставщиков
-initSuppliers.then(() => {
-  loadDraft();
+initSuppliers.then(async () => {
+  await loadDraft();
   updateEntityBadge(); // fallback если черновика нет
 });
 
