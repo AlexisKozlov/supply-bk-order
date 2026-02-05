@@ -1250,7 +1250,7 @@ function render() {
         tr.style.background = '';
       });
 
-      tr.addEventListener('drop', (e) => {
+      tr.addEventListener('drop', async (e) => {
         e.preventDefault();
         tr.style.background = '';
         if (draggedIndex !== null && draggedIndex !== rowIndex) {
@@ -1259,7 +1259,7 @@ function render() {
           items.splice(rowIndex, 0, movedItem);
           
           // Сохранение порядка в Supabase
-          saveItemOrder();
+          await saveItemOrder();
           
           render();
           saveDraft();
@@ -1814,12 +1814,18 @@ async function saveItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
+  console.log('💾 Сохранение порядка:', { supplier, legalEntity, items: orderState.items.length });
+  
   // Удаляем старый порядок для этого поставщика/юр.лица
-  await supabase
+  const { error: deleteError } = await supabase
     .from('item_order')
     .delete()
     .eq('supplier', supplier)
     .eq('legal_entity', legalEntity);
+  
+  if (deleteError) {
+    console.error('❌ Ошибка удаления старого порядка:', deleteError);
+  }
   
   // Сохраняем новый порядок
   const orderData = orderState.items.map((item, index) => ({
@@ -1828,6 +1834,8 @@ async function saveItemOrder() {
     item_id: item.supabaseId || item.id,
     position: index
   }));
+  
+  console.log('📊 Данные для сохранения:', orderData);
   
   if (orderData.length > 0) {
     const { error } = await supabase
@@ -1846,6 +1854,8 @@ async function restoreItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
+  console.log('📂 Загрузка порядка:', { supplier, legalEntity });
+  
   const { data, error } = await supabase
     .from('item_order')
     .select('*')
@@ -1854,11 +1864,16 @@ async function restoreItemOrder() {
     .order('position');
   
   if (error) {
-    console.error('Ошибка загрузки порядка:', error);
+    console.error('❌ Ошибка загрузки порядка:', error);
     return;
   }
   
-  if (!data || data.length === 0) return;
+  console.log('📦 Загружено записей порядка:', data ? data.length : 0);
+  
+  if (!data || data.length === 0) {
+    console.log('⚠️ Порядок не найден, используется текущий');
+    return;
+  }
   
   // Восстанавливаем порядок
   const sorted = [];
@@ -1873,6 +1888,8 @@ async function restoreItemOrder() {
   orderState.items.forEach(item => {
     if (!sorted.includes(item)) sorted.push(item);
   });
+  
+  console.log('✅ Порядок восстановлен:', { было: orderState.items.length, стало: sorted.length });
   
   if (sorted.length === orderState.items.length) {
     orderState.items = sorted;
