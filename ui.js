@@ -1255,6 +1255,7 @@ function render() {
         items.splice(rowIndex, 0, movedItem);
         
         // Сохранение порядка в Supabase
+        console.log('🔄 Перетаскивание:', { from: draggedIndex, to: rowIndex });
         await saveItemOrder();
         
         render();
@@ -1618,10 +1619,7 @@ document.getElementById('e_cancel').addEventListener('click', () => {
 });
 
 document.getElementById('e_save').addEventListener('click', async () => {
-  console.log('=== НАЧАЛО СОХРАНЕНИЯ ===');
-  if (!currentEditingProduct) {
-    console.error('❌ currentEditingProduct is null!');
-  }
+  if (!currentEditingProduct) return;
   
   const name = document.getElementById('e_name').value.trim();
   if (!name) {
@@ -1639,17 +1637,17 @@ document.getElementById('e_save').addEventListener('click', async () => {
     unit_of_measure: document.getElementById('e_unit').value || 'шт'
   };
   
-  console.log('Отправка в Supabase:', updated);
-  console.log('ID товара:', currentEditingProduct.id);
+  const { data, error } = await supabase
+    .from('products')
+    .update(updated)
     .eq('id', currentEditingProduct.id)
     .select();
   
-  console.log('Результат Supabase:', { data, error });
-  
   if (error) {
-    console.error('❌ ОШИБКА SUPABASE:', error);
+    console.error('Ошибка сохранения в Supabase:', error);
     showToast('Ошибка', error.message || 'Не удалось сохранить', 'error');
-  console.log('✅ Сохранено успешно!', data);
+    return;
+  }
   
   showToast('Сохранено', 'Карточка обновлена', 'success');
   
@@ -1799,6 +1797,7 @@ async function saveItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
+  console.log('💾 Сохранение порядка:', { supplier, legalEntity, items: orderState.items.length });
   
   // Удаляем старый порядок для этого поставщика/юр.лица
   const { error: deleteError } = await supabase
@@ -1819,6 +1818,7 @@ async function saveItemOrder() {
     position: index
   }));
   
+  console.log('📊 Данные для сохранения:', orderData);
   
   if (orderData.length > 0) {
     const { error } = await supabase
@@ -1837,6 +1837,7 @@ async function restoreItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
+  console.log('📂 Загрузка порядка:', { supplier, legalEntity });
   
   const { data, error } = await supabase
     .from('item_order')
@@ -1848,9 +1849,11 @@ async function restoreItemOrder() {
   if (error) {
     console.error('❌ Ошибка загрузки порядка:', error);
     return;
+  }
   
   console.log('📦 Загружено записей порядка:', data ? data.length : 0);
   
+  if (!data || data.length === 0) {
     console.log('⚠️ Порядок не найден, используется текущий');
     return;
   }
@@ -1865,6 +1868,7 @@ async function restoreItemOrder() {
   });
   
   // Добавляем новые товары которых не было в сохранённом порядке
+  orderState.items.forEach(item => {
     if (!sorted.includes(item)) sorted.push(item);
   });
   
