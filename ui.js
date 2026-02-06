@@ -1,6 +1,7 @@
 import { orderState } from './state.js';
 import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
+import { setupCalculator } from './calculator.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1069,6 +1070,46 @@ function render() {
           e.target.select();
         }
       });
+    });
+
+    // ===== КАЛЬКУЛЯТОР для всех полей =====
+    // Расход
+    setupCalculator(inputs[0], (result) => {
+      item.consumptionPeriod = result;
+      updateRow(tr, item);
+      saveDraft();
+    });
+    
+    // Остаток
+    setupCalculator(inputs[1], (result) => {
+      item.stock = result;
+      updateRow(tr, item);
+      saveDraft();
+    });
+    
+    // Транзит
+    setupCalculator(inputs[2], (result) => {
+      item.transit = result;
+      updateRow(tr, item);
+      saveDraft();
+    });
+    
+    // Заказ (штуки)
+    setupCalculator(orderPiecesInput, (result) => {
+      orderPiecesInput.value = result;
+      syncOrderInputs(true);
+      updateRow(tr, item);
+      saveDraft();
+      updateFinalSummary();
+    });
+    
+    // Заказ (коробки)
+    setupCalculator(orderBoxesInput, (result) => {
+      orderBoxesInput.value = result;
+      syncOrderInputs(false);
+      updateRow(tr, item);
+      saveDraft();
+      updateFinalSummary();
     });
 
     // Функция синхронизации штук и коробок
