@@ -1188,37 +1188,6 @@ function render() {
       removeItem(item.id);
     });
 
-    // ===== DRAG AND DROP =====
-    tr.addEventListener('dragstart', (e) => {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', rowIndex);
-      tr.style.opacity = '0.4';
-    });
-
-    tr.addEventListener('dragend', (e) => {
-      tr.style.opacity = '1';
-    });
-
-    tr.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      tr.style.background = 'rgba(245,166,35,0.15)';
-    });
-
-    tr.addEventListener('dragleave', (e) => {
-      tr.style.background = '';
-    });
-
-    tr.addEventListener('drop', (e) => {
-      e.preventDefault();
-      tr.style.background = '';
-      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
-      const toIndex = rowIndex;
-      if (fromIndex !== toIndex) {
-        swapItems(fromIndex, toIndex);
-      }
-    });
-
     tbody.appendChild(tr);
 
     // ===== DRAG-AND-DROP (только за handle) =====
