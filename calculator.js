@@ -1,22 +1,17 @@
 /**
- * Встроенный калькулятор для input полей
- * Распознаёт выражения типа: 100+50, 200-30, 10*5, 100/2
- * Срабатывает при нажатии Enter или потере фокуса
+ * Встроенный калькулятор для input полей (БЕЗ смены типа)
+ * Работает через отслеживание клавиш
+ * Пример: 100 [Enter] +50 [Enter] → 150
  */
 
 export function setupCalculator(input, onCalculate) {
   
-  // Сохраняем оригинальный тип и ширину
-  const originalType = input.type;
-  const originalWidth = window.getComputedStyle(input).width;
+  let pendingOperation = null; // '+', '-', '*', '/'
+  let firstValue = null;
+  let isEnteringSecondValue = false;
   
-  // При фокусе меняем на text чтобы можно было вводить +, -, *, /
+  // Автовыделение при фокусе если значение = 0
   input.addEventListener('focus', () => {
-    input.type = 'text';
-    // Фиксируем ширину чтобы поле не увеличивалось
-    input.style.width = originalWidth;
-    
-    // Автовыделение если значение = 0
     setTimeout(() => {
       if (input.value === '0') {
         input.select();
@@ -24,91 +19,105 @@ export function setupCalculator(input, onCalculate) {
     }, 0);
   });
   
-  function calculate() {
-    const value = input.value.trim();
-    
-    // Проверяем есть ли математическая операция
-    // Паттерн: число оператор число (например: 100+50, 200-30)
-    const calcPattern = /^(-?\d+\.?\d*)\s*([\+\-\*\/])\s*(-?\d+\.?\d*)$/;
-    const match = value.match(calcPattern);
-    
-    if (match) {
-      const num1 = parseFloat(match[1]);
-      const operator = match[2];
-      const num2 = parseFloat(match[3]);
-      
-      if (!isNaN(num1) && !isNaN(num2)) {
-        let result;
-        
-        switch (operator) {
-          case '+':
-            result = num1 + num2;
-            break;
-          case '-':
-            result = num1 - num2;
-            break;
-          case '*':
-            result = num1 * num2;
-            break;
-          case '/':
-            result = num2 !== 0 ? num1 / num2 : 0;
-            break;
-          default:
-            return false;
-        }
-        
-        // Округляем до целого для количеств
-        result = Math.round(result);
-        
-        // Устанавливаем результат
-        input.value = result;
-        
-        // Показываем подсказку
-        showCalculationHint(input, `${num1} ${operator} ${num2} = ${result}`);
-        
-        // Вызываем callback
-        if (onCalculate) {
-          // Используем setTimeout чтобы сначала обновилось значение
-          setTimeout(() => {
-            onCalculate(result);
-          }, 0);
-        }
-        
-        return true;
-      }
-    }
-    
-    return false;
-  }
-  
-  // Вычисление при нажатии Enter
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    const currentValue = parseFloat(input.value) || 0;
+    
+    // Операторы: +, -, *, /
+    if (['+', '-', '*', '/'].includes(e.key)) {
       e.preventDefault();
-      if (calculate()) {
-        // Переход к следующему полю
-        const form = input.form;
-        if (form) {
-          const inputs = Array.from(form.querySelectorAll('input[type="number"]'));
-          const index = inputs.indexOf(input);
-          if (index >= 0 && index < inputs.length - 1) {
-            inputs[index + 1].focus();
-          }
+      
+      // Если уже была операция, выполняем её
+      if (pendingOperation && isEnteringSecondValue) {
+        const result = calculateResult(firstValue, currentValue, pendingOperation);
+        input.value = result;
+        showCalculationHint(input, `${firstValue} ${pendingOperation} ${currentValue} = ${result}`);
+        
+        if (onCalculate) {
+          setTimeout(() => onCalculate(result), 0);
         }
+        
+        firstValue = result;
+      } else {
+        firstValue = currentValue;
+      }
+      
+      pendingOperation = e.key;
+      isEnteringSecondValue = false;
+      
+      // Показываем подсказку какая операция выбрана
+      showCalculationHint(input, `${firstValue} ${e.key} ...`, 1000);
+      
+      // Выделяем текущее значение чтобы при вводе оно заменилось
+      setTimeout(() => input.select(), 0);
+    }
+    
+    // Enter — выполнить операцию
+    else if (e.key === 'Enter') {
+      if (pendingOperation && firstValue !== null) {
+        e.preventDefault();
+        const secondValue = parseFloat(input.value) || 0;
+        const result = calculateResult(firstValue, secondValue, pendingOperation);
+        
+        input.value = result;
+        showCalculationHint(input, `${firstValue} ${pendingOperation} ${secondValue} = ${result}`);
+        
+        if (onCalculate) {
+          setTimeout(() => onCalculate(result), 0);
+        }
+        
+        // Сбрасываем операцию
+        pendingOperation = null;
+        firstValue = null;
+        isEnteringSecondValue = false;
       }
     }
-  });
-  
-  // Вычисление при потере фокуса
-  input.addEventListener('blur', () => {
-    calculate();
-    // Возвращаем оригинальный тип и убираем фиксированную ширину
-    input.type = originalType;
-    input.style.width = '';
+    
+    // Escape — отменить операцию
+    else if (e.key === 'Escape') {
+      if (pendingOperation) {
+        e.preventDefault();
+        pendingOperation = null;
+        firstValue = null;
+        isEnteringSecondValue = false;
+        showCalculationHint(input, 'Отменено', 800);
+      }
+    }
+    
+    // Любая цифра после оператора
+    else if (!isEnteringSecondValue && pendingOperation && /[0-9]/.test(e.key)) {
+      isEnteringSecondValue = true;
+    }
   });
 }
 
-function showCalculationHint(input, text) {
+function calculateResult(num1, num2, operator) {
+  let result;
+  
+  switch (operator) {
+    case '+':
+      result = num1 + num2;
+      break;
+    case '-':
+      result = num1 - num2;
+      break;
+    case '*':
+      result = num1 * num2;
+      break;
+    case '/':
+      result = num2 !== 0 ? num1 / num2 : 0;
+      break;
+    default:
+      return num1;
+  }
+  
+  return Math.round(result);
+}
+
+function showCalculationHint(input, text, duration = 2000) {
+  // Удаляем предыдущую подсказку если есть
+  const existing = document.querySelector('.calc-hint');
+  if (existing) existing.remove();
+  
   // Создаём временную подсказку
   const hint = document.createElement('div');
   hint.className = 'calc-hint';
@@ -125,7 +134,7 @@ function showCalculationHint(input, text) {
     pointer-events: none;
     z-index: 10000;
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    animation: fadeInOut 2s ease-in-out;
+    animation: fadeInOut ${duration}ms ease-in-out;
   `;
   
   // Позиционируем под полем
@@ -136,10 +145,10 @@ function showCalculationHint(input, text) {
   
   document.body.appendChild(hint);
   
-  // Удаляем через 2 секунды
+  // Удаляем через заданное время
   setTimeout(() => {
     hint.remove();
-  }, 2000);
+  }, duration);
 }
 
 // Добавляем CSS анимацию (только один раз)
