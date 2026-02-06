@@ -1254,8 +1254,6 @@ function render() {
         const [movedItem] = items.splice(draggedIndex, 1);
         items.splice(rowIndex, 0, movedItem);
         
-        // Сохранение порядка в Supabase
-        console.log('🔄 Перетаскивание:', { from: draggedIndex, to: rowIndex });
         await saveItemOrder();
         
         render();
@@ -1470,7 +1468,6 @@ function initModals() {
   const historyModal = document.getElementById('historyModal');
 
   if (!openHistoryBtn || !closeHistoryBtn || !historyModal) {
-    console.error('История заказов: элементы не найдены');
     return;
   }
 
@@ -1644,14 +1641,12 @@ document.getElementById('e_save').addEventListener('click', async () => {
     .select();
   
   if (error) {
-    console.error('Ошибка сохранения в Supabase:', error);
     showToast('Ошибка', error.message || 'Не удалось сохранить', 'error');
     return;
   }
   
   showToast('Сохранено', 'Карточка обновлена', 'success');
   
-  // Обновляем товар в заказе если он там есть
   const itemInOrder = orderState.items.find(item => item.supabaseId === currentEditingProduct.id);
   if (itemInOrder) {
     itemInOrder.name = updated.name;
@@ -1665,7 +1660,7 @@ document.getElementById('e_save').addEventListener('click', async () => {
   
   editCardModal.classList.add('hidden');
   currentEditingProduct = null;
-  loadDatabaseProducts(); // перезагружаем список
+  loadDatabaseProducts();
 });
 
 async function deleteCard(productId) {
@@ -1797,9 +1792,6 @@ async function saveItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
-  console.log('💾 Сохранение порядка:', { supplier, legalEntity, items: orderState.items.length });
-  
-  // Удаляем старый порядок для этого поставщика/юр.лица
   const { error: deleteError } = await supabase
     .from('item_order')
     .delete()
@@ -1807,18 +1799,15 @@ async function saveItemOrder() {
     .eq('legal_entity', legalEntity);
   
   if (deleteError) {
-    console.error('❌ Ошибка удаления старого порядка:', deleteError);
+    console.error('Ошибка удаления старого порядка:', deleteError);
   }
   
-  // Сохраняем новый порядок
   const orderData = orderState.items.map((item, index) => ({
     supplier,
     legal_entity: legalEntity,
     item_id: item.supabaseId || item.id,
     position: index
   }));
-  
-  console.log('📊 Данные для сохранения:', orderData);
   
   if (orderData.length > 0) {
     const { error } = await supabase
@@ -1827,8 +1816,6 @@ async function saveItemOrder() {
     
     if (error) {
       console.error('Ошибка сохранения порядка:', error);
-    } else {
-      console.log('✅ Порядок сохранён в Supabase для всех пользователей');
     }
   }
 }
@@ -1836,8 +1823,6 @@ async function saveItemOrder() {
 async function restoreItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
-  
-  console.log('📂 Загрузка порядка:', { supplier, legalEntity });
   
   const { data, error } = await supabase
     .from('item_order')
@@ -1847,18 +1832,14 @@ async function restoreItemOrder() {
     .order('position');
   
   if (error) {
-    console.error('❌ Ошибка загрузки порядка:', error);
+    console.error('Ошибка загрузки порядка:', error);
     return;
   }
-  
-  console.log('📦 Загружено записей порядка:', data ? data.length : 0);
   
   if (!data || data.length === 0) {
-    console.log('⚠️ Порядок не найден, используется текущий');
     return;
   }
   
-  // Восстанавливаем порядок
   const sorted = [];
   data.forEach(orderItem => {
     const item = orderState.items.find(i => 
@@ -1867,15 +1848,11 @@ async function restoreItemOrder() {
     if (item) sorted.push(item);
   });
   
-  // Добавляем новые товары которых не было в сохранённом порядке
   orderState.items.forEach(item => {
     if (!sorted.includes(item)) sorted.push(item);
   });
   
-  console.log('✅ Порядок восстановлен:', { было: orderState.items.length, стало: sorted.length });
-  
   if (sorted.length === orderState.items.length) {
     orderState.items = sorted;
-    console.log('✅ Порядок восстановлен из Supabase');
   }
 }
