@@ -6,12 +6,22 @@
 
 export function setupCalculator(input, onCalculate) {
   
-  // Сохраняем оригинальный тип
+  // Сохраняем оригинальный тип и ширину
   const originalType = input.type;
+  const originalWidth = window.getComputedStyle(input).width;
   
   // При фокусе меняем на text чтобы можно было вводить +, -, *, /
   input.addEventListener('focus', () => {
     input.type = 'text';
+    // Фиксируем ширину чтобы поле не увеличивалось
+    input.style.width = originalWidth;
+    
+    // Автовыделение если значение = 0
+    setTimeout(() => {
+      if (input.value === '0') {
+        input.select();
+      }
+    }, 0);
   });
   
   function calculate() {
@@ -92,8 +102,9 @@ export function setupCalculator(input, onCalculate) {
   // Вычисление при потере фокуса
   input.addEventListener('blur', () => {
     calculate();
-    // Возвращаем оригинальный тип
+    // Возвращаем оригинальный тип и убираем фиксированную ширину
     input.type = originalType;
+    input.style.width = '';
   });
 }
 

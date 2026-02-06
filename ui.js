@@ -1054,24 +1054,6 @@ function render() {
     const roundBtn = tr.querySelector('.round-to-pallet');
     const deleteBtn = tr.querySelector('.delete-item-x');
 
-    // Автовыделение для расхода/остатка/транзита если значение = 0
-    [inputs[0], inputs[1], inputs[2]].forEach(input => {
-      input.addEventListener('focus', (e) => {
-        if (e.target.value === '0') {
-          e.target.select();
-        }
-      });
-    });
-
-    // Автовыделение для order-pieces и order-boxes при 0
-    [orderPiecesInput, orderBoxesInput].forEach(input => {
-      input.addEventListener('focus', (e) => {
-        if (e.target.value === '0') {
-          e.target.select();
-        }
-      });
-    });
-
     // ===== КАЛЬКУЛЯТОР для всех полей =====
     // Расход
     setupCalculator(inputs[0], (result) => {
@@ -1273,7 +1255,6 @@ function render() {
         items.splice(rowIndex, 0, movedItem);
         
         // Сохранение порядка в Supabase
-        console.log('🔄 Перетаскивание:', { from: draggedIndex, to: rowIndex });
         await saveItemOrder();
         
         render();
@@ -1638,11 +1619,8 @@ document.getElementById('e_cancel').addEventListener('click', () => {
 
 document.getElementById('e_save').addEventListener('click', async () => {
   console.log('=== НАЧАЛО СОХРАНЕНИЯ ===');
-  console.log('currentEditingProduct:', currentEditingProduct);
-  
   if (!currentEditingProduct) {
     console.error('❌ currentEditingProduct is null!');
-    return;
   }
   
   const name = document.getElementById('e_name').value.trim();
@@ -1663,10 +1641,6 @@ document.getElementById('e_save').addEventListener('click', async () => {
   
   console.log('Отправка в Supabase:', updated);
   console.log('ID товара:', currentEditingProduct.id);
-  
-  const { data, error } = await supabase
-    .from('products')
-    .update(updated)
     .eq('id', currentEditingProduct.id)
     .select();
   
@@ -1675,9 +1649,6 @@ document.getElementById('e_save').addEventListener('click', async () => {
   if (error) {
     console.error('❌ ОШИБКА SUPABASE:', error);
     showToast('Ошибка', error.message || 'Не удалось сохранить', 'error');
-    return;
-  }
-  
   console.log('✅ Сохранено успешно!', data);
   
   showToast('Сохранено', 'Карточка обновлена', 'success');
@@ -1828,7 +1799,6 @@ async function saveItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
-  console.log('💾 Сохранение порядка:', { supplier, legalEntity, items: orderState.items.length });
   
   // Удаляем старый порядок для этого поставщика/юр.лица
   const { error: deleteError } = await supabase
@@ -1849,7 +1819,6 @@ async function saveItemOrder() {
     position: index
   }));
   
-  console.log('📊 Данные для сохранения:', orderData);
   
   if (orderData.length > 0) {
     const { error } = await supabase
@@ -1868,7 +1837,6 @@ async function restoreItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
   
-  console.log('📂 Загрузка порядка:', { supplier, legalEntity });
   
   const { data, error } = await supabase
     .from('item_order')
@@ -1880,11 +1848,9 @@ async function restoreItemOrder() {
   if (error) {
     console.error('❌ Ошибка загрузки порядка:', error);
     return;
-  }
   
   console.log('📦 Загружено записей порядка:', data ? data.length : 0);
   
-  if (!data || data.length === 0) {
     console.log('⚠️ Порядок не найден, используется текущий');
     return;
   }
@@ -1899,7 +1865,6 @@ async function restoreItemOrder() {
   });
   
   // Добавляем новые товары которых не было в сохранённом порядке
-  orderState.items.forEach(item => {
     if (!sorted.includes(item)) sorted.push(item);
   });
   
