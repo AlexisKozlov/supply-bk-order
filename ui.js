@@ -1011,6 +1011,9 @@ function moveToCell(rowIndex, columnIndex) {
 function render() {
   tbody.innerHTML = '';
 
+  // Общая переменная для drag-and-drop
+  let draggedIndex = null;
+
   orderState.items.forEach((item, rowIndex) => {
     const tr = document.createElement('tr');
     tr.dataset.rowIndex = rowIndex;
@@ -1192,9 +1195,8 @@ function render() {
 
     // ===== DRAG-AND-DROP (только за handle) =====
     const dragHandle = tr.querySelector('.drag-handle');
+    
     if (dragHandle) {
-      let draggedIndex = null;
-      
       dragHandle.addEventListener('dragstart', (e) => {
         draggedIndex = rowIndex;
         tr.style.opacity = '0.4';
@@ -1207,34 +1209,36 @@ function render() {
         dragHandle.style.cursor = 'grab';
         draggedIndex = null;
       });
-
-      tr.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        if (draggedIndex !== null && draggedIndex !== rowIndex) {
-          tr.style.background = 'rgba(245,166,35,0.15)';
-        }
-      });
-
-      tr.addEventListener('dragleave', () => {
-        tr.style.background = '';
-      });
-
-      tr.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        tr.style.background = '';
-        if (draggedIndex !== null && draggedIndex !== rowIndex) {
-          const items = orderState.items;
-          const [movedItem] = items.splice(draggedIndex, 1);
-          items.splice(rowIndex, 0, movedItem);
-          
-          // Сохранение порядка в Supabase
-          await saveItemOrder();
-          
-          render();
-          saveDraft();
-        }
-      });
     }
+
+    // Обработчики на всей строке (для приёма drop)
+    tr.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (draggedIndex !== null && draggedIndex !== rowIndex) {
+        tr.style.background = 'rgba(245,166,35,0.15)';
+      }
+    });
+
+    tr.addEventListener('dragleave', () => {
+      tr.style.background = '';
+    });
+
+    tr.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      tr.style.background = '';
+      if (draggedIndex !== null && draggedIndex !== rowIndex) {
+        const items = orderState.items;
+        const [movedItem] = items.splice(draggedIndex, 1);
+        items.splice(rowIndex, 0, movedItem);
+        
+        // Сохранение порядка в Supabase
+        console.log('🔄 Перетаскивание:', { from: draggedIndex, to: rowIndex });
+        await saveItemOrder();
+        
+        render();
+        saveDraft();
+      }
+    });
     
     // Двойной клик по названию товара для редактирования
     const itemNameCell = tr.querySelector('.item-name');
