@@ -307,13 +307,8 @@ async function loadDraft() {
     document.getElementById('supplierFilter').value = orderState.settings.supplier;
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     
-    // Устанавливаем товарный запас (дни и дату)
-    const safetyDays = orderState.settings.safetyDays || 0;
-    document.getElementById('safetyDays').value = safetyDays;
-    if (safetyDays > 0 && orderState.settings.today) {
-      const endDate = new Date(orderState.settings.today.getTime() + safetyDays * 86400000);
-      document.getElementById('safetyDate').valueAsDate = endDate;
-    }
+    // Устанавливаем товарный запас
+    updateSafetyDaysDisplay();
     
     document.getElementById('unit').value = orderState.settings.unit;
     document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
@@ -436,13 +431,8 @@ async function renderOrderHistory(orders) {
       document.getElementById('legalEntity').value = legalEntity;
       document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
       
-      // Устанавливаем товарный запас (дни и дату)
-      const safetyDays = orderState.settings.safetyDays || 0;
-      document.getElementById('safetyDays').value = safetyDays;
-      if (safetyDays > 0 && orderState.settings.today) {
-        const endDate = new Date(orderState.settings.today.getTime() + safetyDays * 86400000);
-        document.getElementById('safetyDate').valueAsDate = endDate;
-      }
+      // Устанавливаем товарный запас
+      updateSafetyDaysDisplay();
       
       document.getElementById('periodDays').value = orderState.settings.periodDays;
       document.getElementById('unit').value = orderState.settings.unit;
@@ -551,69 +541,51 @@ bindSetting('today', 'today', true);
 bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
 
-// Товарный запас - синхронизация дней и даты
+// Товарный запас - ОДНО поле с форматом "дни / до даты"
 const safetyDaysInput = document.getElementById('safetyDays');
-const safetyDateInput = document.getElementById('safetyDate');
 
-if (safetyDaysInput && safetyDateInput) {
-  let isUpdating = false; // Флаг чтобы избежать циклических обновлений
-  
-  // При изменении ДНЕЙ - пересчитываем ДАТУ
-  safetyDaysInput.addEventListener('input', (e) => {
-    if (isUpdating) return;
+if (safetyDaysInput) {
+  // Функция обновления отображения
+  function updateSafetyDaysDisplay() {
+    const days = orderState.settings.safetyDays || 0;
+    const today = orderState.settings.today;
     
-    const days = parseInt(e.target.value) || 0;
-    orderState.settings.safetyDays = days;
-    
-    // Пересчитываем дату
-    if (days > 0 && orderState.settings.today) {
-      isUpdating = true;
-      const endDate = new Date(orderState.settings.today.getTime() + days * 86400000);
-      safetyDateInput.valueAsDate = endDate;
-      isUpdating = false;
+    if (days > 0 && today) {
+      const endDate = new Date(today.getTime() + days * 86400000);
+      const formatted = endDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      safetyDaysInput.value = `${days} / до ${formatted}`;
     } else {
-      isUpdating = true;
-      safetyDateInput.value = '';
-      isUpdating = false;
+      safetyDaysInput.value = days || '';
     }
-    
+  }
+  
+  // При фокусе показываем только число
+  safetyDaysInput.addEventListener('focus', () => {
+    const days = orderState.settings.safetyDays || 0;
+    safetyDaysInput.value = days || '';
+  });
+  
+  // При потере фокуса добавляем дату
+  safetyDaysInput.addEventListener('blur', () => {
+    updateSafetyDaysDisplay();
+  });
+  
+  // При вводе сохраняем число
+  safetyDaysInput.addEventListener('input', (e) => {
+    const value = parseInt(e.target.value) || 0;
+    orderState.settings.safetyDays = value;
     rerenderAll();
     validateRequiredSettings();
     saveDraft();
   });
   
-  // При изменении ДАТЫ - пересчитываем ДНИ
-  safetyDateInput.addEventListener('input', (e) => {
-    if (isUpdating) return;
-    
-    const selectedDate = safetyDateInput.valueAsDate;
-    
-    if (selectedDate && orderState.settings.today) {
-      // Вычисляем разницу в днях
-      const diffMs = selectedDate - orderState.settings.today;
-      const days = Math.max(0, Math.ceil(diffMs / 86400000));
-      
-      isUpdating = true;
-      safetyDaysInput.value = days;
-      orderState.settings.safetyDays = days;
-      isUpdating = false;
-      
-      rerenderAll();
-      validateRequiredSettings();
-      saveDraft();
-    }
-  });
+  // Инициализация отображения
+  updateSafetyDaysDisplay();
   
-  // При изменении "Дата сегодня" - пересчитываем дату окончания
-  document.getElementById('today').addEventListener('input', () => {
-    if (isUpdating) return;
-    
-    const days = orderState.settings.safetyDays || 0;
-    if (days > 0 && orderState.settings.today) {
-      isUpdating = true;
-      const endDate = new Date(orderState.settings.today.getTime() + days * 86400000);
-      safetyDateInput.valueAsDate = endDate;
-      isUpdating = false;
+  // Обновляем при изменении даты сегодня
+  document.getElementById('today').addEventListener('change', () => {
+    if (!safetyDaysInput.matches(':focus')) {
+      updateSafetyDaysDisplay();
     }
   });
 }
