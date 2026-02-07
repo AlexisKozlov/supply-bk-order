@@ -892,7 +892,6 @@ manualCancelBtn.addEventListener('click', () => {
 
 /* ================= ДОБАВЛЕНИЕ ================= */
 function addItem(p) {
-  saveStateToHistory(); // Сохраняем перед изменением
   orderState.items.push({
     id: crypto.randomUUID(),
     supabaseId: p.id, // НАСТОЯЩИЙ ID из Supabase для редактирования
@@ -908,16 +907,17 @@ function addItem(p) {
   });
   render();
   saveDraft();
+  saveStateToHistory(); // Сохраняем ПОСЛЕ изменения
 }
 
 /* ================= УДАЛЕНИЕ ТОВАРА ================= */
 async function removeItem(itemId) {
   const confirmed = await customConfirm('Удалить товар?', 'Товар будет удален из текущего заказа');
   if (confirmed) {
-    saveStateToHistory(); // Сохраняем перед изменением
     orderState.items = orderState.items.filter(item => item.id !== itemId);
     render();
     saveDraft();
+    saveStateToHistory(); // Сохраняем ПОСЛЕ изменения
     showToast('Товар удален', '', 'success');
   }
 }
@@ -1038,8 +1038,6 @@ if (allToOrderBtn) {
       return;
     }
     
-    saveStateToHistory(); // Сохраняем перед изменением
-    
     let count = 0;
     orderState.items.forEach(item => {
       const calc = calculateItem(item, orderState.settings);
@@ -1052,6 +1050,7 @@ if (allToOrderBtn) {
     if (count > 0) {
       render();
       saveDraft();
+      saveStateToHistory(); // Сохраняем ПОСЛЕ изменения
       showToast('Готово', `Расчёт перенесён в заказ для ${count} товаров`, 'success');
     } else {
       showToast('Нет данных', 'Нет товаров с расчётом для переноса', 'info');
@@ -1142,8 +1141,6 @@ clearOrderBtn.addEventListener('click', async () => {
   const confirmed = await customConfirm('Очистить данные заказа?', 'Расход, остаток, транзит и заказ будут сброшены. Товары останутся.');
   if (!confirmed) return;
 
-  saveStateToHistory(); // Сохраняем перед изменением
-
   orderState.items.forEach(item => {
     item.consumptionPeriod = 0;
     item.stock = 0;
@@ -1153,6 +1150,7 @@ clearOrderBtn.addEventListener('click', async () => {
 
   render();
   saveDraft();
+  saveStateToHistory(); // Сохраняем ПОСЛЕ изменения
   showToast('Данные очищены', 'Товары сохранены, данные сброшены', 'success');
 });
 
@@ -1682,6 +1680,9 @@ initModals();
 initSuppliers.then(async () => {
   await loadDraft();
   updateEntityBadge(); // fallback если черновика нет
+  
+  // Сохраняем начальное состояние для undo/redo
+  saveStateToHistory();
 });
 
 // Предупреждение перед закрытием страницы
