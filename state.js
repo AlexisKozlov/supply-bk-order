@@ -6,6 +6,7 @@ export const orderState = {
     deliveryDate: null,
     periodDays: 30,
     safetyDays: 0,
+    safetyEndDate: null,
     unit: 'pieces',
     hasTransit: false
   },

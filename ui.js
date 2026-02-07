@@ -2,6 +2,7 @@ import { orderState } from './state.js';
 import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
 import { setupCalculator } from './calculator.js';
+import { SafetyStockManager } from './safety-stock.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -295,6 +296,7 @@ async function loadDraft() {
     orderState.settings.supplier = data.settings.supplier || '';
     orderState.settings.periodDays = data.settings.periodDays || 30;
     orderState.settings.safetyDays = data.settings.safetyDays || 0;
+    orderState.settings.safetyEndDate = data.settings.safetyEndDate ? new Date(data.settings.safetyEndDate) : null;
     orderState.settings.unit = data.settings.unit || 'pieces';
     orderState.settings.hasTransit = data.settings.hasTransit || false;
     orderState.settings.showStockColumn = data.settings.showStockColumn || false;
@@ -302,10 +304,17 @@ async function loadDraft() {
     document.getElementById('legalEntity').value = orderState.settings.legalEntity;
     document.getElementById('supplierFilter').value = orderState.settings.supplier;
     document.getElementById('periodDays').value = orderState.settings.periodDays;
-    document.getElementById('safetyDays').value = orderState.settings.safetyDays;
     document.getElementById('unit').value = orderState.settings.unit;
     document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
     document.getElementById('showStockColumn').value = orderState.settings.showStockColumn ? 'true' : 'false';
+    
+    // Обновляем поле товарного запаса через SafetyStockManager
+    if (safetyStockManager) {
+      safetyStockManager.setDays(orderState.settings.safetyDays);
+      if (orderState.settings.today) {
+        safetyStockManager.setTodayDate(orderState.settings.today);
+      }
+    }
     
     // Восстановление товаров
     orderState.items = data.items || [];
@@ -423,9 +432,16 @@ async function renderOrderHistory(orders) {
 
       document.getElementById('legalEntity').value = legalEntity;
       document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
-      document.getElementById('safetyDays').value = orderState.settings.safetyDays;
       document.getElementById('periodDays').value = orderState.settings.periodDays;
       document.getElementById('unit').value = orderState.settings.unit;
+      
+      // Обновляем товарный запас
+      if (safetyStockManager) {
+        safetyStockManager.setDays(orderState.settings.safetyDays);
+        if (orderState.settings.deliveryDate) {
+          safetyStockManager.setTodayDate(orderState.settings.today);
+        }
+      }
 
       // Загружаем товары из истории
       for (const histItem of order.order_items) {
@@ -530,7 +546,44 @@ function bindSetting(id, key, isDate = false) {
 bindSetting('today', 'today', true);
 bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
-bindSetting('safetyDays', 'safetyDays');
+
+/* ================= ТОВАРНЫЙ ЗАПАС (дни / дата) ================= */
+let safetyStockManager = null;
+const safetyDaysInput = document.getElementById('safetyDays');
+const safetyDatePickerBtn = document.getElementById('safetyDatePicker');
+
+if (safetyDaysInput && safetyDatePickerBtn) {
+  safetyStockManager = new SafetyStockManager(
+    safetyDaysInput,
+    safetyDatePickerBtn,
+    (data) => {
+      orderState.settings.safetyDays = data.days;
+      orderState.settings.safetyEndDate = data.endDate;
+      rerenderAll();
+      validateRequiredSettings();
+      saveDraft();
+    }
+  );
+  
+  // Устанавливаем начальную дату "сегодня"
+  safetyStockManager.setTodayDate(orderState.settings.today);
+}
+
+// При изменении "Дата сегодня" обновляем товарный запас
+document.getElementById('today').addEventListener('change', (e) => {
+  const newToday = new Date(e.target.value);
+  orderState.settings.today = newToday;
+  
+  if (safetyStockManager) {
+    safetyStockManager.setTodayDate(newToday);
+  }
+  
+  rerenderAll();
+  validateRequiredSettings();
+  saveDraft();
+});
+
+});
 
 
 document.getElementById('legalEntity').addEventListener('change', async e => {
@@ -616,7 +669,7 @@ function validateRequiredSettings() {
     valid = false;
   } else deliveryEl.classList.remove('required');
 
-  if (safetyEl.value === '' || safetyEl.value === null) {
+  if (safetyEl.value === '' || orderState.settings.safetyDays === null || orderState.settings.safetyDays === undefined) {
     safetyEl.classList.add('required');
     valid = false;
   } else safetyEl.classList.remove('required');

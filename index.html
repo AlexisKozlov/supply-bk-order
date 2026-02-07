@@ -69,7 +69,10 @@
 
       <label>
         Товарный запас
-        <input type="number" id="safetyDays" />
+        <div style="display:flex;gap:4px;align-items:center;">
+          <input type="text" id="safetyDays" placeholder="0" style="flex:1;" />
+          <button type="button" id="safetyDatePicker" class="btn small" style="padding:8px 12px;" title="Выбрать дату окончания запаса">📅</button>
+        </div>
       </label>
 
       <label>
