@@ -3,6 +3,7 @@ import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
 import { setupCalculator } from './calculator.js';
 import { history } from './history.js';
+import { SafetyStockManager } from './safety-stock.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -308,7 +309,9 @@ async function loadDraft() {
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     
     // Устанавливаем товарный запас
-    updateSafetyDaysDisplay();
+    if (safetyStockManager) {
+      safetyStockManager.setDays(orderState.settings.safetyDays);
+    }
     
     document.getElementById('unit').value = orderState.settings.unit;
     document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
@@ -432,7 +435,9 @@ async function renderOrderHistory(orders) {
       document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
       
       // Устанавливаем товарный запас
-      updateSafetyDaysDisplay();
+      if (safetyStockManager) {
+        safetyStockManager.setDays(orderState.settings.safetyDays);
+      }
       
       document.getElementById('periodDays').value = orderState.settings.periodDays;
       document.getElementById('unit').value = orderState.settings.unit;
@@ -541,53 +546,40 @@ bindSetting('today', 'today', true);
 bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
 
-// Товарный запас - ОДНО поле с форматом "дни / до даты"
+// Товарный запас - с календарём и двусторонней связью
 const safetyDaysInput = document.getElementById('safetyDays');
+const safetyCalendarBtn = document.getElementById('safetyCalendarBtn');
 
-if (safetyDaysInput) {
-  // Функция обновления отображения
-  function updateSafetyDaysDisplay() {
-    const days = orderState.settings.safetyDays || 0;
-    const today = orderState.settings.today;
-    
-    if (days > 0 && today) {
-      const endDate = new Date(today.getTime() + days * 86400000);
-      const formatted = endDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
-      safetyDaysInput.value = `${days} / до ${formatted}`;
-    } else {
-      safetyDaysInput.value = days || '';
+let safetyStockManager = null;
+
+if (safetyDaysInput && safetyCalendarBtn) {
+  safetyStockManager = new SafetyStockManager(
+    safetyDaysInput,
+    safetyCalendarBtn,
+    (data) => {
+      // Callback при изменении
+      orderState.settings.safetyDays = data.days;
+      orderState.settings.safetyEndDate = data.endDate;
+      rerenderAll();
+      validateRequiredSettings();
+      saveDraft();
     }
-  }
+  );
   
-  // При фокусе показываем только число
-  safetyDaysInput.addEventListener('focus', () => {
-    const days = orderState.settings.safetyDays || 0;
-    safetyDaysInput.value = days || '';
-  });
-  
-  // При потере фокуса добавляем дату
-  safetyDaysInput.addEventListener('blur', () => {
-    updateSafetyDaysDisplay();
-  });
-  
-  // При вводе сохраняем число
-  safetyDaysInput.addEventListener('input', (e) => {
-    const value = parseInt(e.target.value) || 0;
-    orderState.settings.safetyDays = value;
-    rerenderAll();
-    validateRequiredSettings();
-    saveDraft();
-  });
-  
-  // Инициализация отображения
-  updateSafetyDaysDisplay();
-  
-  // Обновляем при изменении даты сегодня
+  // Обновляем дату "сегодня" при её изменении
   document.getElementById('today').addEventListener('change', () => {
-    if (!safetyDaysInput.matches(':focus')) {
-      updateSafetyDaysDisplay();
+    if (orderState.settings.today && safetyStockManager) {
+      safetyStockManager.setTodayDate(orderState.settings.today);
     }
   });
+  
+  // Инициализация начального значения
+  if (orderState.settings.safetyDays) {
+    safetyStockManager.setDays(orderState.settings.safetyDays);
+  }
+  if (orderState.settings.today) {
+    safetyStockManager.setTodayDate(orderState.settings.today);
+  }
 }
 
 
@@ -951,7 +943,33 @@ if (undoBtn) {
     if (state) {
       orderState.items = state.items;
       orderState.settings = state.settings;
+      
+      // Конвертируем строки обратно в Date объекты
+      if (orderState.settings.today && typeof orderState.settings.today === 'string') {
+        orderState.settings.today = new Date(orderState.settings.today);
+      }
+      if (orderState.settings.deliveryDate && typeof orderState.settings.deliveryDate === 'string') {
+        orderState.settings.deliveryDate = new Date(orderState.settings.deliveryDate);
+      }
+      if (orderState.settings.safetyEndDate && typeof orderState.settings.safetyEndDate === 'string') {
+        orderState.settings.safetyEndDate = new Date(orderState.settings.safetyEndDate);
+      }
+      
+      // Обновляем интерфейс
       render();
+      
+      // Обновляем поля параметров
+      if (orderState.settings.today) {
+        document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
+      }
+      if (orderState.settings.deliveryDate) {
+        document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+      }
+      if (safetyStockManager && orderState.settings.today) {
+        safetyStockManager.setTodayDate(orderState.settings.today);
+        safetyStockManager.setDays(orderState.settings.safetyDays);
+      }
+      
       saveDraft();
       updateHistoryButtons();
       showToast('Отменено', '', 'info');
@@ -966,7 +984,33 @@ if (redoBtn) {
     if (state) {
       orderState.items = state.items;
       orderState.settings = state.settings;
+      
+      // Конвертируем строки обратно в Date объекты
+      if (orderState.settings.today && typeof orderState.settings.today === 'string') {
+        orderState.settings.today = new Date(orderState.settings.today);
+      }
+      if (orderState.settings.deliveryDate && typeof orderState.settings.deliveryDate === 'string') {
+        orderState.settings.deliveryDate = new Date(orderState.settings.deliveryDate);
+      }
+      if (orderState.settings.safetyEndDate && typeof orderState.settings.safetyEndDate === 'string') {
+        orderState.settings.safetyEndDate = new Date(orderState.settings.safetyEndDate);
+      }
+      
+      // Обновляем интерфейс
       render();
+      
+      // Обновляем поля параметров
+      if (orderState.settings.today) {
+        document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
+      }
+      if (orderState.settings.deliveryDate) {
+        document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+      }
+      if (safetyStockManager && orderState.settings.today) {
+        safetyStockManager.setTodayDate(orderState.settings.today);
+        safetyStockManager.setDays(orderState.settings.safetyDays);
+      }
+      
       saveDraft();
       updateHistoryButtons();
       showToast('Повторено', '', 'info');
