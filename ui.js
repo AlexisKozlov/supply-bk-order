@@ -582,8 +582,7 @@ document.getElementById('today').addEventListener('change', (e) => {
   validateRequiredSettings();
   saveDraft();
 });
-
-});
+;
 
 
 document.getElementById('legalEntity').addEventListener('change', async e => {
