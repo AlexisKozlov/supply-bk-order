@@ -69,9 +69,10 @@
 
       <label>
         Товарный запас
-        <div style="display:flex;gap:4px;align-items:center;">
-          <input type="text" id="safetyDays" placeholder="0" style="flex:1;" />
-          <button type="button" id="safetyDatePicker" class="btn small" style="padding:8px 12px;" title="Выбрать дату окончания запаса">📅</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" id="safetyDays" placeholder="Дни" style="flex:1;" />
+          <span style="color:#b0ada8;">до</span>
+          <input type="date" id="safetyDate" style="flex:1;" />
         </div>
       </label>
 
@@ -115,8 +116,9 @@
 
       <div class="actions">
         <button id="addManual" class="btn primary">✍️ Ручной товар</button>
-        <button id="clearOrder" class="btn secondary">🧹 Очистить заказ</button>
+        <button id="addManual" class="btn primary">✍️ Ручной товар</button>
         <button id="copyOrder" class="btn secondary">📋 Скопировать заказ</button>
+        <button id="saveOrder" class="btn primary">💾 Сохранить заказ</button>
         <button id="saveOrder" class="btn primary">💾 Сохранить заказ</button>
       </div>
 
@@ -130,13 +132,18 @@
       </section>
     </section>
 
+
     <!-- ТАБЛИЦА ЗАКАЗА -->
     <section class="card">
       <h2>Заказ</h2>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
+      <!-- ДЕЙСТВИЯ С ЗАКАЗОМ -->
+      <div class="order-actions" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <button id="undoBtn" class="btn secondary" disabled title="Отменить (Ctrl+Z)">↶ Отменить</button>
+        <button id="redoBtn" class="btn secondary" disabled title="Повторить (Ctrl+Y)">↷ Повторить</button>
+        <button id="allToOrderBtn" class="btn primary" title="Перенести расчёт в заказ для всех товаров">📦 В заказ всё</button>
+        <button id="clearOrder" class="btn secondary">🧹 Очистить заказ</button>
+      </div>
             <tr>
               <th style="width:30px;"></th>
               <th>Товар</th>
@@ -319,7 +326,7 @@
 
 
 <footer class="footer">
-  <span class="version">Версия: <span id="appVersion">1.0.2</span></span>
+  <span class="version">Версия: <span id="appVersion">1.0.3</span></span>
 </footer>
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
