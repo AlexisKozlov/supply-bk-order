@@ -931,6 +931,15 @@ function saveStateToHistory() {
   updateHistoryButtons();
 }
 
+// Debounced версия для сохранения при вводе в поля
+let saveHistoryTimeout = null;
+function saveStateToHistoryDebounced(delay = 1000) {
+  clearTimeout(saveHistoryTimeout);
+  saveHistoryTimeout = setTimeout(() => {
+    saveStateToHistory();
+  }, delay);
+}
+
 function updateHistoryButtons() {
   if (undoBtn) undoBtn.disabled = !history.canUndo();
   if (redoBtn) redoBtn.disabled = !history.canRedo();
@@ -1249,6 +1258,7 @@ function render() {
       item.consumptionPeriod = result;
       updateRow(tr, item);
       saveDraft();
+      saveStateToHistoryDebounced();
     });
     
     // Остаток
@@ -1256,6 +1266,7 @@ function render() {
       item.stock = result;
       updateRow(tr, item);
       saveDraft();
+      saveStateToHistoryDebounced();
     });
     
     // Транзит
@@ -1263,6 +1274,7 @@ function render() {
       item.transit = result;
       updateRow(tr, item);
       saveDraft();
+      saveStateToHistoryDebounced();
     });
     
     // Заказ (штуки)
@@ -1272,6 +1284,7 @@ function render() {
       updateRow(tr, item);
       saveDraft();
       updateFinalSummary();
+      saveStateToHistoryDebounced();
     });
     
     // Заказ (коробки)
@@ -1326,6 +1339,10 @@ function render() {
       item.consumptionPeriod = +e.target.value || 0;
       updateRow(tr, item);
       saveDraft();
+      saveStateToHistoryDebounced();
+    });
+    inputs[0].addEventListener('blur', () => {
+      saveStateToHistory(); // Сохраняем сразу при потере фокуса
     });
     setupExcelNavigation(inputs[0], rowIndex, 0);
 
@@ -1334,6 +1351,10 @@ function render() {
       item.stock = +e.target.value || 0;
       updateRow(tr, item);
       saveDraft();
+      saveStateToHistoryDebounced();
+    });
+    inputs[1].addEventListener('blur', () => {
+      saveStateToHistory(); // Сохраняем сразу при потере фокуса
     });
     setupExcelNavigation(inputs[1], rowIndex, 1);
 
@@ -1342,6 +1363,10 @@ function render() {
       item.transit = +e.target.value || 0;
       updateRow(tr, item);
       saveDraft();
+      saveStateToHistoryDebounced();
+    });
+    inputs[2].addEventListener('blur', () => {
+      saveStateToHistory(); // Сохраняем сразу при потере фокуса
     });
     setupExcelNavigation(inputs[2], rowIndex, 2);
 
@@ -1363,6 +1388,7 @@ function render() {
         updateRow(tr, item);
         updateFinalSummary();
         saveDraft();
+        saveStateToHistory(); // Сохраняем после переноса в заказ
         showToast('Добавлено в заказ', '', 'success');
       }
     });
@@ -1374,6 +1400,9 @@ function render() {
       saveDraft();
       updateFinalSummary();
     });
+    orderPiecesInput.addEventListener('blur', () => {
+      saveStateToHistory(); // Сохраняем при потере фокуса
+    });
     setupExcelNavigation(orderPiecesInput, rowIndex, 3);
 
     // Колонка 4 (коробки): Заказ в коробках
@@ -1382,6 +1411,9 @@ function render() {
       updateRow(tr, item);
       saveDraft();
       updateFinalSummary();
+    });
+    orderBoxesInput.addEventListener('blur', () => {
+      saveStateToHistory(); // Сохраняем при потере фокуса
     });
     setupExcelNavigation(orderBoxesInput, rowIndex, 4);
 
