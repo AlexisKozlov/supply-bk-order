@@ -61,13 +61,16 @@ export class SafetyStockManager {
     const tempInput = document.createElement('input');
     tempInput.type = 'date';
     
-    // Позиционируем календарь рядом с кнопкой
+    // Позиционируем календарь РЯДОМ с кнопкой
     const buttonRect = this.button.getBoundingClientRect();
     tempInput.style.position = 'fixed';
-    tempInput.style.left = buttonRect.left + 'px';
-    tempInput.style.top = buttonRect.bottom + 'px';
-    tempInput.style.opacity = '0';
-    tempInput.style.pointerEvents = 'none';
+    tempInput.style.left = (buttonRect.left + buttonRect.width + 5) + 'px'; // Справа от кнопки
+    tempInput.style.top = buttonRect.top + 'px';
+    tempInput.style.width = '1px';
+    tempInput.style.height = '1px';
+    tempInput.style.opacity = '0.01'; // Почти невидим но достаточно для showPicker
+    tempInput.style.border = 'none';
+    tempInput.style.pointerEvents = 'auto'; // Нужен для работы календаря
     tempInput.style.zIndex = '10000';
     
     // ВАЖНО: Устанавливаем минимальную дату = дата прихода

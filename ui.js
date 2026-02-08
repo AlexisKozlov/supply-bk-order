@@ -623,9 +623,15 @@ if (safetyDaysInput && safetyCalendarBtn) {
   );
   
   // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
+  // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
   document.getElementById('deliveryDate').addEventListener('change', () => {
     if (orderState.settings.deliveryDate && safetyStockManager) {
+      // ВАЖНО: Сбрасываем товарный запас при изменении даты прихода
+      // Пользователь должен заново выставить дни ПОСЛЕ новой даты прихода
+      orderState.settings.safetyDays = 0;
+      safetyStockManager.setDays(0);
       safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
+      saveDraft();
     }
   });
   
@@ -892,19 +898,44 @@ async function searchProducts(q) {
 /* ================= РУЧНОЙ ТОВАР ================= */
 manualAddBtn.addEventListener('click', async () => {
   const name = document.getElementById('m_name').value.trim();
+  const sku = document.getElementById('m_sku').value.trim();
+  const supplier = document.getElementById('m_supplier').value.trim();
+  const qtyPerBox = document.getElementById('m_box').value.trim();
+  const boxesPerPallet = document.getElementById('m_pallet').value.trim();
 
+  // Проверка всех обязательных полей
   if (!name) {
     showToast('Введите наименование', 'Поле обязательно для заполнения', 'error');
+    return;
+  }
+  
+  if (!sku) {
+    showToast('Введите артикул', 'Поле обязательно для заполнения', 'error');
+    return;
+  }
+  
+  if (!supplier) {
+    showToast('Введите поставщика', 'Поле обязательно для заполнения', 'error');
+    return;
+  }
+  
+  if (!qtyPerBox || +qtyPerBox <= 0) {
+    showToast('Введите штук в коробке', 'Поле обязательно и должно быть больше 0', 'error');
+    return;
+  }
+  
+  if (!boxesPerPallet || +boxesPerPallet <= 0) {
+    showToast('Введите коробов на паллете', 'Поле обязательно и должно быть больше 0', 'error');
     return;
   }
 
   const product = {
     name,
-    sku: document.getElementById('m_sku').value || null,
-    supplier: document.getElementById('m_supplier').value || null,
+    sku: sku || null,
+    supplier: supplier || null,
     legal_entity: document.getElementById('m_legalEntity').value,
-    qty_per_box: +document.getElementById('m_box').value || 1,
-    boxes_per_pallet: +document.getElementById('m_pallet').value || null,
+    qty_per_box: +qtyPerBox,
+    boxes_per_pallet: +boxesPerPallet,
     unit_of_measure: document.getElementById('m_unit').value || 'шт'
   };
 
