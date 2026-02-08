@@ -156,8 +156,46 @@ saveOrderBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Подтверждение сохранения
-  const confirmed = await customConfirm('Сохранить заказ?', 'Заказ будет сохранен в историю');
+  // Открываем модалку для ввода примечания
+  const saveOrderModal = document.getElementById('saveOrderModal');
+  const orderNoteInput = document.getElementById('orderNote');
+  const confirmSaveBtn = document.getElementById('confirmSaveOrder');
+  const cancelSaveBtn = document.getElementById('cancelSaveOrder');
+  const closeSaveBtn = document.getElementById('closeSaveOrder');
+  
+  // Очищаем предыдущее примечание
+  orderNoteInput.value = '';
+  
+  // Показываем модалку
+  saveOrderModal.classList.remove('hidden');
+  orderNoteInput.focus();
+  
+  // Промис для ожидания действия пользователя
+  const waitForAction = () => new Promise((resolve) => {
+    const handleSave = () => {
+      cleanup();
+      resolve({ confirmed: true, note: orderNoteInput.value.trim() });
+    };
+    
+    const handleCancel = () => {
+      cleanup();
+      resolve({ confirmed: false, note: '' });
+    };
+    
+    const cleanup = () => {
+      confirmSaveBtn.removeEventListener('click', handleSave);
+      cancelSaveBtn.removeEventListener('click', handleCancel);
+      closeSaveBtn.removeEventListener('click', handleCancel);
+      saveOrderModal.classList.add('hidden');
+    };
+    
+    confirmSaveBtn.addEventListener('click', handleSave);
+    cancelSaveBtn.addEventListener('click', handleCancel);
+    closeSaveBtn.addEventListener('click', handleCancel);
+  });
+  
+  const { confirmed, note } = await waitForAction();
+  
   if (!confirmed) return;
 
   const itemsToSave = orderState.items
@@ -192,7 +230,9 @@ saveOrderBtn.addEventListener('click', async () => {
       safety_days: orderState.settings.safetyDays,
       period_days: orderState.settings.periodDays,
       unit: orderState.settings.unit,
-      legal_entity: orderState.settings.legalEntity
+      legal_entity: orderState.settings.legalEntity,
+      note: note || null, // Примечание
+      created_at: new Date().toISOString() // Дата и время создания
     })
     .select()
     .single();
@@ -236,6 +276,8 @@ async function loadOrderHistory() {
   safety_days,
   period_days,
   unit,
+  note,
+  created_at,
   order_items (
     sku,
     name,
@@ -246,7 +288,7 @@ async function loadOrderHistory() {
     transit
   )
 `)
-    .order('created_at', { ascending: false });
+    .order('delivery_date', { ascending: false }); // Сортировка по дате поставки (новые первые)
 
   if (historySupplier.value) {
     query = query.eq('supplier', historySupplier.value);
@@ -385,11 +427,25 @@ async function renderOrderHistory(orders) {
 
     const date = new Date(order.delivery_date).toLocaleDateString();
     const legalEntity = order.legal_entity || 'Бургер БК';
+    
+    // Форматируем дату и время создания
+    const createdAt = order.created_at ? new Date(order.created_at) : null;
+    const createdDateStr = createdAt 
+      ? createdAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+      : '';
+    const createdTimeStr = createdAt 
+      ? createdAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const createdStr = createdAt ? `${createdDateStr} ${createdTimeStr}` : '';
+    
+    // Примечание
+    const noteStr = order.note ? ` (${order.note})` : '';
 
     div.innerHTML = `
       <div class="history-header">
-        <span><b>${date}</b> — ${order.supplier} (${legalEntity})</span>
+        <span><b>${date}</b> — ${order.supplier} (${legalEntity})${noteStr}</span>
         <div class="history-actions">
+          ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
           <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
           <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
         </div>

@@ -60,9 +60,15 @@ export class SafetyStockManager {
     // Создаем временный input type="date"
     const tempInput = document.createElement('input');
     tempInput.type = 'date';
-    tempInput.style.position = 'absolute';
+    
+    // Позиционируем календарь рядом с кнопкой
+    const buttonRect = this.button.getBoundingClientRect();
+    tempInput.style.position = 'fixed';
+    tempInput.style.left = buttonRect.left + 'px';
+    tempInput.style.top = buttonRect.bottom + 'px';
     tempInput.style.opacity = '0';
     tempInput.style.pointerEvents = 'none';
+    tempInput.style.zIndex = '10000';
     
     // ВАЖНО: Устанавливаем минимальную дату = дата прихода
     // Нельзя выбрать дату ДО прихода заказа!

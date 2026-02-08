@@ -325,6 +325,29 @@
 </div>
 
 
+
+<!-- ===== МОДАЛКА: СОХРАНЕНИЕ ЗАКАЗА ===== -->
+<div id="saveOrderModal" class="modal hidden">
+  <div class="modal-box" style="max-width:500px;">
+    <div class="modal-header">
+      <h2>💾 Сохранить заказ</h2>
+      <button id="closeSaveOrder" class="modal-close">✖</button>
+    </div>
+    
+    <p style="margin:0 0 16px;color:#5A2D0C;">Добавьте примечание к заказу (опционально):</p>
+    
+    <textarea 
+      id="orderNote" 
+      placeholder="Например: Срочный заказ, Пробная партия, и т.д." 
+      style="width:100%;min-height:80px;padding:10px;border:1px solid #E5BE9E;border-radius:4px;font-family:inherit;font-size:14px;resize:vertical;margin-bottom:20px;"
+    ></textarea>
+    
+    <div class="actions" style="margin:0;">
+      <button id="confirmSaveOrder" class="btn primary">💾 Сохранить</button>
+      <button id="cancelSaveOrder" class="btn secondary">Отмена</button>
+    </div>
+  </div>
+</div>
 <footer class="footer">
   <span class="version">Версия: <span id="appVersion">1.0.3</span></span>
 </footer>
