@@ -1,6 +1,7 @@
 /**
  * Модуль для работы с товарным запасом
  * Поддерживает двусторонний ввод: дни ↔ дата
+ * ВАЖНО: Дни отсчитываются от ДАТЫ ПРИХОДА, а не от сегодня!
  */
 
 export class SafetyStockManager {
@@ -11,7 +12,7 @@ export class SafetyStockManager {
     
     this.days = 0;
     this.endDate = null;
-    this.todayDate = new Date();
+    this.deliveryDate = new Date(); // Дата ПРИХОДА заказа (не сегодня!)
     
     this.init();
   }
@@ -63,12 +64,18 @@ export class SafetyStockManager {
     tempInput.style.opacity = '0';
     tempInput.style.pointerEvents = 'none';
     
+    // ВАЖНО: Устанавливаем минимальную дату = дата прихода
+    // Нельзя выбрать дату ДО прихода заказа!
+    if (this.deliveryDate) {
+      tempInput.min = this.formatDateForInput(this.deliveryDate);
+    }
+    
     // Устанавливаем текущую дату окончания (если есть)
     if (this.endDate) {
       tempInput.value = this.formatDateForInput(this.endDate);
     } else {
-      // Или дату через N дней от сегодня
-      const defaultDate = new Date(this.todayDate);
+      // Или дату через N дней от даты прихода
+      const defaultDate = new Date(this.deliveryDate);
       defaultDate.setDate(defaultDate.getDate() + this.days);
       tempInput.value = this.formatDateForInput(defaultDate);
     }
@@ -78,6 +85,14 @@ export class SafetyStockManager {
     // Обработчик выбора даты
     tempInput.addEventListener('change', () => {
       const selectedDate = new Date(tempInput.value);
+      
+      // Дополнительная проверка: дата не может быть раньше deliveryDate
+      if (selectedDate < this.deliveryDate) {
+        console.warn('Нельзя выбрать дату раньше даты прихода');
+        tempInput.remove();
+        return;
+      }
+      
       this.endDate = selectedDate;
       this.calculateDays();
       this.formatDisplay();
@@ -98,7 +113,7 @@ export class SafetyStockManager {
    * Рассчитать дату окончания запаса по количеству дней
    */
   calculateEndDate() {
-    const date = new Date(this.todayDate);
+    const date = new Date(this.deliveryDate);
     date.setDate(date.getDate() + this.days);
     this.endDate = date;
   }
@@ -107,12 +122,12 @@ export class SafetyStockManager {
    * Рассчитать количество дней по дате окончания запаса
    */
   calculateDays() {
-    if (!this.endDate || !this.todayDate) {
+    if (!this.endDate || !this.deliveryDate) {
       this.days = 0;
       return;
     }
     
-    const diffMs = this.endDate - this.todayDate;
+    const diffMs = this.endDate - this.deliveryDate;
     this.days = Math.max(0, Math.ceil(diffMs / 86400000));
   }
   
@@ -130,12 +145,12 @@ export class SafetyStockManager {
   }
   
   /**
-   * Обновить дату "сегодня"
+   * Обновить дату ПРИХОДА заказа (от неё отсчитываются дни запаса)
    */
-  setTodayDate(date) {
-    this.todayDate = date;
+  setDeliveryDate(date) {
+    this.deliveryDate = date;
     
-    // Пересчитываем дату окончания при изменении "сегодня"
+    // Пересчитываем дату окончания при изменении даты прихода
     if (this.days > 0) {
       this.calculateEndDate();
       this.formatDisplay();

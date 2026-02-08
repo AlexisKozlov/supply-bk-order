@@ -566,10 +566,10 @@ if (safetyDaysInput && safetyCalendarBtn) {
     }
   );
   
-  // Обновляем дату "сегодня" при её изменении
-  document.getElementById('today').addEventListener('change', () => {
-    if (orderState.settings.today && safetyStockManager) {
-      safetyStockManager.setTodayDate(orderState.settings.today);
+  // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
+  document.getElementById('deliveryDate').addEventListener('change', () => {
+    if (orderState.settings.deliveryDate && safetyStockManager) {
+      safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
     }
   });
   
@@ -577,8 +577,8 @@ if (safetyDaysInput && safetyCalendarBtn) {
   if (orderState.settings.safetyDays) {
     safetyStockManager.setDays(orderState.settings.safetyDays);
   }
-  if (orderState.settings.today) {
-    safetyStockManager.setTodayDate(orderState.settings.today);
+  if (orderState.settings.deliveryDate) {
+    safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
   }
 }
 
@@ -948,6 +948,9 @@ function updateHistoryButtons() {
 // Undo
 if (undoBtn) {
   undoBtn.addEventListener('click', () => {
+    // Принудительно обновляем состояние кнопок перед действием
+    updateHistoryButtons();
+    
     const state = history.undo();
     if (state) {
       orderState.items = state.items;
@@ -974,8 +977,8 @@ if (undoBtn) {
       if (orderState.settings.deliveryDate) {
         document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
       }
-      if (safetyStockManager && orderState.settings.today) {
-        safetyStockManager.setTodayDate(orderState.settings.today);
+      if (safetyStockManager && orderState.settings.deliveryDate) {
+        safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
         safetyStockManager.setDays(orderState.settings.safetyDays);
       }
       
@@ -989,6 +992,9 @@ if (undoBtn) {
 // Redo
 if (redoBtn) {
   redoBtn.addEventListener('click', () => {
+    // Принудительно обновляем состояние кнопок перед действием
+    updateHistoryButtons();
+    
     const state = history.redo();
     if (state) {
       orderState.items = state.items;
@@ -1015,8 +1021,8 @@ if (redoBtn) {
       if (orderState.settings.deliveryDate) {
         document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
       }
-      if (safetyStockManager && orderState.settings.today) {
-        safetyStockManager.setTodayDate(orderState.settings.today);
+      if (safetyStockManager && orderState.settings.deliveryDate) {
+        safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
         safetyStockManager.setDays(orderState.settings.safetyDays);
       }
       

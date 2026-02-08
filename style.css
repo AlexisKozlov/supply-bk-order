@@ -1088,3 +1088,8 @@ td.delete-cell {
 #editCardModal {
   z-index: 9999;
 }
+/* Кнопка календаря для товарного запаса */
+#safetyCalendarBtn {
+  min-width: 44px;
+  padding: 10px 12px;
+}
