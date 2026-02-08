@@ -60,30 +60,24 @@ export class SafetyStockManager {
     // Создаем временный input type="date"
     const tempInput = document.createElement('input');
     tempInput.type = 'date';
+    tempInput.className = 'safety-date-picker';
     
-    // Позиционируем календарь РЯДОМ с кнопкой
+    // Позиционируем РЯДОМ с кнопкой (absolute для showPicker)
     const buttonRect = this.button.getBoundingClientRect();
-    tempInput.style.position = 'fixed';
-    tempInput.style.left = (buttonRect.left + buttonRect.width + 5) + 'px'; // Справа от кнопки
-    tempInput.style.top = buttonRect.top + 'px';
-    tempInput.style.width = '1px';
-    tempInput.style.height = '1px';
-    tempInput.style.opacity = '0.01'; // Почти невидим но достаточно для showPicker
-    tempInput.style.border = 'none';
-    tempInput.style.pointerEvents = 'auto'; // Нужен для работы календаря
+    tempInput.style.position = 'absolute';
+    tempInput.style.left = (buttonRect.right + window.scrollX + 5) + 'px';
+    tempInput.style.top = (buttonRect.top + window.scrollY) + 'px';
     tempInput.style.zIndex = '10000';
     
     // ВАЖНО: Устанавливаем минимальную дату = дата прихода
-    // Нельзя выбрать дату ДО прихода заказа!
     if (this.deliveryDate) {
       tempInput.min = this.formatDateForInput(this.deliveryDate);
     }
     
-    // Устанавливаем текущую дату окончания (если есть)
+    // Устанавливаем текущую дату
     if (this.endDate) {
       tempInput.value = this.formatDateForInput(this.endDate);
     } else {
-      // Или дату через N дней от даты прихода
       const defaultDate = new Date(this.deliveryDate);
       defaultDate.setDate(defaultDate.getDate() + this.days);
       tempInput.value = this.formatDateForInput(defaultDate);
@@ -91,14 +85,13 @@ export class SafetyStockManager {
     
     document.body.appendChild(tempInput);
     
-    // Обработчик выбора даты
-    tempInput.addEventListener('change', () => {
+    // Обработчики
+    const handleChange = () => {
       const selectedDate = new Date(tempInput.value);
       
-      // Дополнительная проверка: дата не может быть раньше deliveryDate
       if (selectedDate < this.deliveryDate) {
         console.warn('Нельзя выбрать дату раньше даты прихода');
-        tempInput.remove();
+        cleanup();
         return;
       }
       
@@ -106,16 +99,27 @@ export class SafetyStockManager {
       this.calculateDays();
       this.formatDisplay();
       this.notifyUpdate();
-      tempInput.remove();
-    });
+      cleanup();
+    };
     
-    // Открываем датапикер
-    tempInput.showPicker();
+    const cleanup = () => {
+      if (tempInput.parentNode) tempInput.remove();
+    };
     
-    // Удаляем при отмене (клик вне или ESC)
-    tempInput.addEventListener('blur', () => {
-      setTimeout(() => tempInput.remove(), 100);
-    });
+    tempInput.addEventListener('change', handleChange);
+    tempInput.addEventListener('blur', () => setTimeout(cleanup, 200));
+    
+    // Открываем календарь
+    setTimeout(() => {
+      tempInput.focus();
+      if (tempInput.showPicker) {
+        try {
+          tempInput.showPicker();
+        } catch (e) {
+          tempInput.click();
+        }
+      }
+    }, 50);
   }
   
   /**
