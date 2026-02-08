@@ -316,6 +316,168 @@ function clearDraft() {
 
 
 // renderOrderHistory импортирована из order-history.js
+
+/* ================= ДАТА СЕГОДНЯ ================= */
+const today = new Date();
+document.getElementById('today').value = today.toISOString().slice(0, 10);
+orderState.settings.today = today;
+
+/* ================= НАСТРОЙКИ ================= */
+function bindSetting(id, key, isDate = false) {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  el.addEventListener('input', e => {
+    orderState.settings[key] = isDate
+      ? new Date(e.target.value)
+      : +e.target.value || 0;
+    rerenderAll();
+    validateRequiredSettings();
+    saveDraft(); // Автосохранение
+  });
+}
+
+bindSetting('today', 'today', true);
+bindSetting('deliveryDate', 'deliveryDate', true);
+bindSetting('periodDays', 'periodDays');
+
+// Товарный запас - с календарём и двусторонней связью
+const safetyDaysInput = document.getElementById('safetyDays');
+const safetyCalendarBtn = document.getElementById('safetyCalendarBtn');
+
+let safetyStockManager = null;
+
+if (safetyDaysInput && safetyCalendarBtn) {
+  safetyStockManager = new SafetyStockManager(
+    safetyDaysInput,
+    safetyCalendarBtn,
+    (data) => {
+      // Callback при изменении
+      orderState.settings.safetyDays = data.days;
+      orderState.settings.safetyEndDate = data.endDate;
+      rerenderAll();
+      validateRequiredSettings();
+      saveDraft();
+    }
+  );
+  
+  // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
+  // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
+  document.getElementById('deliveryDate').addEventListener('change', () => {
+    if (orderState.settings.deliveryDate && safetyStockManager) {
+      // ВАЖНО: Сбрасываем товарный запас при изменении даты прихода
+      // Пользователь должен заново выставить дни ПОСЛЕ новой даты прихода
+      orderState.settings.safetyDays = 0;
+      safetyStockManager.setDays(0);
+      safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
+      saveDraft();
+    }
+  });
+  
+  // Инициализация начального значения
+  if (orderState.settings.safetyDays) {
+    safetyStockManager.setDays(orderState.settings.safetyDays);
+  }
+  if (orderState.settings.deliveryDate) {
+    safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
+  }
+}
+
+
+document.getElementById('legalEntity').addEventListener('change', async e => {
+  // Игнорируем при загрузке черновика
+  if (isLoadingDraft) return;
+  
+  orderState.settings.legalEntity = e.target.value;
+  updateEntityBadge();
+  
+  // Обнуляем заказ при смене юр. лица
+  orderState.items = [];
+  orderState.settings.supplier = '';
+  
+  // Перезагружаем поставщиков для нового юр. лица
+  await loadSuppliers(e.target.value);
+  
+  render();
+  saveDraft();
+  loadOrderHistory(orderState, historySupplier, historyContainer); // Обновляем историю при смене юр. лица
+});
+
+document.getElementById('unit').addEventListener('change', e => {
+  orderState.settings.unit = e.target.value;
+  rerenderAll();
+  saveDraft();
+});
+
+// Переключение видимости колонки транзит
+document.getElementById('hasTransit').addEventListener('change', e => {
+  orderState.settings.hasTransit = e.target.value === 'true';
+  toggleTransitColumn();
+  toggleStockColumn();
+  saveDraft();
+});
+
+document.getElementById('showStockColumn').addEventListener('change', e => {
+  orderState.settings.showStockColumn = e.target.value === 'true';
+  toggleStockColumn();
+  saveDraft();
+  render(); // перерисовываем таблицу
+});
+
+function toggleTransitColumn() {
+  const hasTransit = orderState.settings.hasTransit;
+  const transitCols = document.querySelectorAll('.transit-col');
+  
+  transitCols.forEach(col => {
+    if (hasTransit) {
+      col.classList.remove('hidden');
+    } else {
+      col.classList.add('hidden');
+    }
+  });
+}
+
+function toggleStockColumn() {
+  const showStock = orderState.settings.showStockColumn;
+  const stockCols = document.querySelectorAll('.stock-col');
+  
+  stockCols.forEach(col => {
+    if (showStock) {
+      col.classList.remove('hidden');
+    } else {
+      col.classList.add('hidden');
+    }
+  });
+}
+
+function validateRequiredSettings() {
+  const todayEl = document.getElementById('today');
+  const deliveryEl = document.getElementById('deliveryDate');
+  const safetyEl = document.getElementById('safetyDays');
+
+  let valid = true;
+
+  if (!todayEl.value) {
+    todayEl.classList.add('required');
+    valid = false;
+  } else todayEl.classList.remove('required');
+
+  if (!deliveryEl.value) {
+    deliveryEl.classList.add('required');
+    valid = false;
+  } else deliveryEl.classList.remove('required');
+
+  if (safetyEl.value === '' || safetyEl.value === null) {
+    safetyEl.classList.add('required');
+    valid = false;
+  } else safetyEl.classList.remove('required');
+
+  return valid;
+}
+
+
+/* ================= ПОСТАВЩИКИ ================= */
+
 /* ================= ПОСТАВЩИКИ ================= */
 async function loadSuppliers(legalEntity) {
   // Очищаем текущие опции (кроме первой "Все / свободный")
@@ -357,7 +519,7 @@ async function loadSuppliers(legalEntity) {
 // Инициализация при загрузке
 const initSuppliers = loadSuppliers(orderState.settings.legalEntity);
 
-historySupplier.addEventListener('change', loadOrderHistory);
+historySupplier.addEventListener('change', () => loadOrderHistory(orderState, historySupplier, historyContainer));
 
 supplierSelect.addEventListener('change', async () => {
   // Игнорируем событие при загрузке черновика
