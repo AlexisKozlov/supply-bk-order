@@ -80,30 +80,6 @@ loginBtn.addEventListener('click', () => {
 
 
 
-function validateRequiredSettings() {
-  const todayEl = document.getElementById('today');
-  const deliveryEl = document.getElementById('deliveryDate');
-  const safetyEl = document.getElementById('safetyDays');
-
-  let valid = true;
-
-  if (!todayEl.value) {
-    todayEl.classList.add('required');
-    valid = false;
-  } else todayEl.classList.remove('required');
-
-  if (!deliveryEl.value) {
-    deliveryEl.classList.add('required');
-    valid = false;
-  } else deliveryEl.classList.remove('required');
-
-  if (safetyEl.value === '' || safetyEl.value === null) {
-    safetyEl.classList.add('required');
-    valid = false;
-  } else safetyEl.classList.remove('required');
-
-  return valid;
-}
 
 buildOrderBtn.addEventListener('click', () => {
   const ok = validateRequiredSettings();
