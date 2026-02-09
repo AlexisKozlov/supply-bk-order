@@ -1099,7 +1099,6 @@ function rerenderAll() {
     });
 }
 
-}
 
 render();
 
