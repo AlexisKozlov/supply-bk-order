@@ -8,7 +8,7 @@ import { SafetyStockManager } from './safety-stock.js';
 import { showToast, customConfirm } from './modals.js';
 import { loadOrderHistory } from './order-history.js';
 import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
-import { renderTable, updateRow } from './table-renderer.js';
+import { renderTable } from './table-renderer.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -72,13 +72,11 @@ loginBtn.addEventListener('click', () => {
   if (loginPassword.value === '157') {
     loginOverlay.style.display = 'none';
     localStorage.setItem('bk_logged_in', 'true');
-    loadOrderHistory(orderState, historySupplier, historyContainer);
+    loadOrderHistory();
   } else {
     showToast('Ошибка входа', 'Неверный пароль', 'error');
   }
 });
-
-
 
 
 buildOrderBtn.addEventListener('click', () => {
@@ -202,11 +200,55 @@ saveOrderBtn.addEventListener('click', async () => {
 
   showToast('Заказ сохранён', `Сохранено позиций: ${itemsToSave.length}`, 'success');
   clearDraft(); // Очистка черновика после сохранения
-  loadOrderHistory(orderState, historySupplier, historyContainer);
+  loadOrderHistory();
 });
 
+async function loadOrderHistory() {
+  historyContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
-// loadOrderHistory импортирована из order-history.js
+  let query = supabase
+    .from('orders')
+    .select(`
+  id,
+  delivery_date,
+  supplier,
+  legal_entity,
+  safety_days,
+  period_days,
+  unit,
+  note,
+  created_at,
+  order_items (
+    sku,
+    name,
+    qty_boxes,
+    qty_per_box,
+    consumption_period,
+    stock,
+    transit
+  )
+`)
+    .order('delivery_date', { ascending: false }); // Сортировка по дате поставки (новые первые)
+
+  if (historySupplier.value) {
+    query = query.eq('supplier', historySupplier.value);
+  }
+
+  // Фильтр по юр. лицу
+  const currentLegalEntity = orderState.settings.legalEntity || document.getElementById('legalEntity').value;
+  query = query.eq('legal_entity', currentLegalEntity);
+
+  const { data, error } = await query;
+
+  if (error) {
+    historyContainer.innerHTML = 'Ошибка загрузки истории';
+    console.error(error);
+    return;
+  }
+
+  renderOrderHistory(data);
+}
+
 /* ================= АВТОСОХРАНЕНИЕ ЧЕРНОВИКА ================= */
 function saveDraft() {
   const draft = {
@@ -290,8 +332,191 @@ function clearDraft() {
 }
 
 
+async function renderOrderHistory(orders) {
+  historyContainer.innerHTML = '';
 
-// renderOrderHistory импортирована из order-history.js
+  if (!orders.length) {
+    historyContainer.innerHTML = 'История пуста';
+    return;
+  }
+
+  // Получаем все SKU для подтягивания данных из products
+  const allSkus = [...new Set(
+    orders.flatMap(o => o.order_items.map(i => i.sku)).filter(Boolean)
+  )];
+
+  // Загружаем данные о товарах из products
+  const { data: productsData } = await supabase
+    .from('products')
+    .select('sku, qty_per_box, unit_of_measure')
+    .in('sku', allSkus);
+
+  const productMap = {};
+  if (productsData) {
+    productsData.forEach(p => {
+      productMap[p.sku] = {
+        qty_per_box: p.qty_per_box,
+        unit_of_measure: p.unit_of_measure || 'шт'
+      };
+    });
+  }
+
+  orders.forEach(order => {
+    const div = document.createElement('div');
+    div.className = 'history-order';
+
+    const date = new Date(order.delivery_date).toLocaleDateString();
+    const legalEntity = order.legal_entity || 'Бургер БК';
+    
+    // Форматируем дату и время создания
+    const createdAt = order.created_at ? new Date(order.created_at) : null;
+    const createdDateStr = createdAt 
+      ? createdAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+      : '';
+    const createdTimeStr = createdAt 
+      ? createdAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const createdStr = createdAt ? `${createdDateStr} ${createdTimeStr}` : '';
+    
+    // Примечание
+    const noteStr = order.note ? ` (${order.note})` : '';
+
+    div.innerHTML = `
+      <div class="history-header">
+        <span><b>${date}</b> — ${order.supplier} (${legalEntity})${noteStr}</span>
+        <div class="history-actions">
+          ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
+          <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
+          <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
+        </div>
+      </div>
+      <div class="history-items hidden">
+        ${order.order_items.map(i => {
+          // Используем данные из order_items, если есть, иначе из products
+          const productInfo = i.sku ? productMap[i.sku] : null;
+          const qtyPerBox = i.qty_per_box || (productInfo ? productInfo.qty_per_box : null) || 1;
+          const unit = productInfo ? productInfo.unit_of_measure : 'шт';
+          const pieces = i.qty_boxes * qtyPerBox;
+          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${nf.format(pieces)} ${unit})</div>`;
+        }).join('')}
+      </div>
+    `;
+
+    const header = div.querySelector('.history-header span');
+    const copyBtn = div.querySelector('.copy-order-btn');
+    const deleteBtn = div.querySelector('.delete-order-btn');
+
+    header.style.cursor = 'pointer';
+    header.onclick = () => {
+      div.querySelector('.history-items').classList.toggle('hidden');
+    };
+
+    // Копирование заказа из истории
+    copyBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const confirmed = await customConfirm('Скопировать заказ?', 'Текущий заказ будет заменен данными из истории');
+      if (!confirmed) return;
+
+      // Очищаем текущий заказ
+      orderState.items = [];
+
+      // Восстанавливаем параметры заказа
+      orderState.settings.legalEntity = legalEntity;
+      orderState.settings.deliveryDate = new Date(order.delivery_date);
+      orderState.settings.safetyDays = order.safety_days || 0;
+      orderState.settings.periodDays = order.period_days || 30;
+      orderState.settings.unit = order.unit || 'pieces';
+
+      document.getElementById('legalEntity').value = legalEntity;
+      document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+      
+      // Устанавливаем товарный запас
+      if (safetyStockManager) {
+        safetyStockManager.setDays(orderState.settings.safetyDays);
+      }
+      
+      document.getElementById('periodDays').value = orderState.settings.periodDays;
+      document.getElementById('unit').value = orderState.settings.unit;
+
+      // Загружаем товары из истории
+      for (const histItem of order.order_items) {
+        // Пытаемся найти товар в базе products
+        const { data: productData } = await supabase
+          .from('products')
+          .select('*')
+          .eq('sku', histItem.sku)
+          .single();
+
+        if (productData) {
+          addItem(productData);
+          const addedItem = orderState.items[orderState.items.length - 1];
+          
+          // Восстанавливаем все данные из истории
+          addedItem.consumptionPeriod = histItem.consumption_period || 0;
+          addedItem.stock = histItem.stock || 0;
+          addedItem.transit = histItem.transit || 0;
+          
+          // Устанавливаем finalOrder из истории
+          if (orderState.settings.unit === 'boxes') {
+            addedItem.finalOrder = histItem.qty_boxes;
+          } else {
+            const qtyPerBox = histItem.qty_per_box || productData.qty_per_box || 1;
+            addedItem.finalOrder = histItem.qty_boxes * qtyPerBox;
+          }
+        } else {
+          // Если товар не найден в products, создаем вручную
+          addItem({
+            sku: histItem.sku,
+            name: histItem.name,
+            qty_per_box: histItem.qty_per_box || 1,
+            boxes_per_pallet: null
+          });
+          const addedItem = orderState.items[orderState.items.length - 1];
+          
+          // Восстанавливаем все данные из истории
+          addedItem.consumptionPeriod = histItem.consumption_period || 0;
+          addedItem.stock = histItem.stock || 0;
+          addedItem.transit = histItem.transit || 0;
+          
+          if (orderState.settings.unit === 'boxes') {
+            addedItem.finalOrder = histItem.qty_boxes;
+          } else {
+            addedItem.finalOrder = histItem.qty_boxes * (histItem.qty_per_box || 1);
+          }
+        }
+      }
+
+      orderSection.classList.remove('hidden');
+      render();
+      saveDraft();
+      historyModal.classList.add('hidden');
+      showToast('Заказ скопирован', `Загружено ${order.order_items.length} товаров`, 'success');
+    };
+
+    deleteBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const confirmed = await customConfirm('Удалить заказ?', 'Заказ будет удален из истории безвозвратно');
+      if (!confirmed) return;
+
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', order.id);
+
+      if (error) {
+        showToast('Ошибка удаления', 'Не удалось удалить заказ', 'error');
+        console.error(error);
+        return;
+      }
+
+      showToast('Заказ удален', '', 'success');
+      loadOrderHistory();
+    };
+
+    historyContainer.appendChild(div);
+  });
+}
+
 
 /* ================= ДАТА СЕГОДНЯ ================= */
 const today = new Date();
@@ -376,7 +601,7 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
   
   render();
   saveDraft();
-  loadOrderHistory(orderState, historySupplier, historyContainer); // Обновляем историю при смене юр. лица
+  loadOrderHistory(); // Обновляем историю при смене юр. лица
 });
 
 document.getElementById('unit').addEventListener('change', e => {
@@ -453,8 +678,6 @@ function validateRequiredSettings() {
 
 
 /* ================= ПОСТАВЩИКИ ================= */
-
-/* ================= ПОСТАВЩИКИ ================= */
 async function loadSuppliers(legalEntity) {
   // Очищаем текущие опции (кроме первой "Все / свободный")
   supplierSelect.innerHTML = '<option value="">Все / свободный</option>';
@@ -495,7 +718,7 @@ async function loadSuppliers(legalEntity) {
 // Инициализация при загрузке
 const initSuppliers = loadSuppliers(orderState.settings.legalEntity);
 
-historySupplier.addEventListener('change', () => loadOrderHistory(orderState, historySupplier, historyContainer));
+historySupplier.addEventListener('change', loadOrderHistory);
 
 supplierSelect.addEventListener('change', async () => {
   // Игнорируем событие при загрузке черновика
@@ -1092,13 +1315,8 @@ function updateFinalSummary() {
 function rerenderAll() {
   document
     .querySelectorAll('#items tr')
-    .forEach((tr, i) => {
-      if (orderState.items[i]) {
-        updateRow(tr, orderState.items[i], orderState.settings);
-      }
-    });
+    .forEach((tr, i) => updateRow(tr, orderState.items[i]));
 }
-
 
 render();
 
@@ -1116,7 +1334,7 @@ function initModals() {
 
   openHistoryBtn.addEventListener('click', () => {
     historyModal.classList.remove('hidden');
-    loadOrderHistory(orderState, historySupplier, historyContainer);
+    loadOrderHistory();
   });
 
   closeHistoryBtn.addEventListener('click', () => {
