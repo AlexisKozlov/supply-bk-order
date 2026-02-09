@@ -171,7 +171,9 @@ saveOrderBtn.addEventListener('click', async () => {
       unit: orderState.settings.unit,
       legal_entity: orderState.settings.legalEntity,
       note: note || null, // Примечание
-      created_at: new Date().toISOString() // Дата и время создания
+      created_at: new Date().toISOString(), // Дата и время создания
+      has_transit: orderState.settings.hasTransit || false,
+      show_stock_column: orderState.settings.showStockColumn || false
     })
     .select()
     .single();
@@ -425,6 +427,8 @@ async function renderOrderHistory(orders) {
       orderState.settings.safetyDays = order.safety_days || 0;
       orderState.settings.periodDays = order.period_days || 30;
       orderState.settings.unit = order.unit || 'pieces';
+      orderState.settings.hasTransit = order.has_transit || false;
+      orderState.settings.showStockColumn = order.show_stock_column || false;
 
       document.getElementById('legalEntity').value = legalEntity;
       document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
@@ -436,6 +440,8 @@ async function renderOrderHistory(orders) {
       
       document.getElementById('periodDays').value = orderState.settings.periodDays;
       document.getElementById('unit').value = orderState.settings.unit;
+      document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
+      document.getElementById('showStockColumn').value = orderState.settings.showStockColumn ? 'true' : 'false';
 
       // Загружаем товары из истории
       for (const histItem of order.order_items) {
@@ -1252,6 +1258,10 @@ function render() {
     saveItemOrder,
     render
   });
+  
+  // Применяем видимость колонок после рендера
+  toggleTransitColumn();
+  toggleStockColumn();
 }
 
 /* ================= ОКРУГЛЕНИЕ ================= */

@@ -22,6 +22,8 @@ export async function loadOrderHistory(orderState, historySupplier, historyConta
       unit,
       note,
       created_at,
+      has_transit,
+      show_stock_column,
       order_items (
         sku,
         name,
