@@ -236,7 +236,7 @@ export function renderTable(orderState, tbody, callbacks) {
       await saveItemOrder();
       saveDraft();
       saveStateToHistory();
-      render(); // Перерисовываем таблицу после перестановки
+      render(); // Перерисовываем таблицу
     });
 
     updateRow(tr, item, orderState.settings);
@@ -247,13 +247,19 @@ export function renderTable(orderState, tbody, callbacks) {
 export function updateRow(tr, item, settings) {
   const calc = calculateItem(item, settings);
   const nf = new Intl.NumberFormat('ru-RU');
+  const periodDays = settings.periodDays || 30;
+  const dailyConsumption = item.consumptionPeriod / periodDays;
   
-  // Расчёт заказа - формат: коробки (штуки) при единицах=штуки
+  // ===== РАСЧЁТ ЗАКАЗА - формат: "4 кор (48 шт)" или "4 кор" =====
   const calcValue = tr.querySelector('.calc-value');
   if (calc.calculatedOrder > 0) {
     if (settings.unit === 'pieces' && item.qtyPerBox) {
+      // Единицы = штуки → показываем "X кор (Y шт)"
       const boxes = Math.ceil(calc.calculatedOrder / item.qtyPerBox);
-      calcValue.textContent = `${boxes} (${Math.round(calc.calculatedOrder)})`;
+      calcValue.textContent = `${boxes} кор (${Math.round(calc.calculatedOrder)} шт)`;
+    } else if (settings.unit === 'boxes') {
+      // Единицы = коробки → показываем "X кор"
+      calcValue.textContent = `${Math.round(calc.calculatedOrder)} кор`;
     } else {
       calcValue.textContent = Math.round(calc.calculatedOrder).toString();
     }
@@ -261,7 +267,7 @@ export function updateRow(tr, item, settings) {
     calcValue.textContent = '0';
   }
   
-  // Дата покрытия - формат: дата (дни)
+  // ===== ДАТА ПОКРЫТИЯ - формат: "дата (дни)" =====
   const dateCell = tr.querySelector('.date');
   if (calc.coverageDate && settings.today) {
     const daysDiff = Math.ceil((calc.coverageDate - settings.today) / 86400000);
@@ -270,7 +276,7 @@ export function updateRow(tr, item, settings) {
     dateCell.textContent = '-';
   }
   
-  // Паллеты
+  // ===== ПАЛЛЕТЫ =====
   const palletInfo = tr.querySelector('.pallet-info');
   if (calc.palletsInfo) {
     palletInfo.textContent = `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`;
@@ -278,16 +284,54 @@ export function updateRow(tr, item, settings) {
     palletInfo.textContent = '-';
   }
   
-  // Запас - формат: дата (дни)
+  // ===== ЗАПАС - формат: "дата (дни)" =====
   const stockDisplay = tr.querySelector('.stock-display');
-  if (settings.today && settings.deliveryDate && item.consumptionPeriod > 0) {
+  if (stockDisplay && dailyConsumption > 0 && settings.today) {
     const totalStock = item.stock + (item.transit || 0);
-    const periodDays = settings.periodDays || 30;
-    const daily = item.consumptionPeriod / periodDays;
-    const stockDays = Math.floor(totalStock / daily);
-    const stockEndDate = new Date(settings.today.getTime() + stockDays * 86400000);
-    stockDisplay.textContent = `${stockEndDate.toLocaleDateString()} (${stockDays} дн.)`;
-  } else {
+    const daysOfCurrentStock = Math.floor(totalStock / dailyConsumption);
+    const stockEndDate = new Date(settings.today.getTime() + daysOfCurrentStock * 86400000);
+    stockDisplay.textContent = `${stockEndDate.toLocaleDateString()} (${daysOfCurrentStock} дн.)`;
+  } else if (stockDisplay) {
     stockDisplay.textContent = '-';
+  }
+  
+  // ===== ПРОВЕРКА ДЕФИЦИТА ДО ПОСТАВКИ =====
+  const shortageInfo = tr.querySelector('.shortage-info');
+  
+  if (settings.deliveryDate && item.consumptionPeriod && dailyConsumption > 0) {
+    // Считаем ТОЛЬКО с остатком и транзитом, БЕЗ заказа
+    const totalStock = item.stock + (item.transit || 0);
+    const daysUntilDelivery = Math.ceil((settings.deliveryDate - settings.today) / 86400000);
+    const consumedBeforeDelivery = dailyConsumption * daysUntilDelivery;
+    
+    // Если не хватает до поставки
+    if (totalStock < consumedBeforeDelivery) {
+      const deficit = consumedBeforeDelivery - totalStock;
+      const deficitDays = Math.ceil(deficit / dailyConsumption);
+      
+      const unit = item.unitOfMeasure || 'шт';
+      let deficitText;
+      
+      if (settings.unit === 'boxes') {
+        // расход и остаток введены в коробках → deficit тоже в коробках
+        deficitText = `${Math.ceil(deficit)} кор.`;
+      } else if (item.qtyPerBox) {
+        // расход и остаток в штуках → deficit в штуках, коробки в скобках
+        const deficitBoxes = Math.ceil(deficit / item.qtyPerBox);
+        deficitText = `${Math.ceil(deficit)} ${unit} (${deficitBoxes} кор.)`;
+      } else {
+        deficitText = `${Math.ceil(deficit)} ${unit}`;
+      }
+      
+      shortageInfo.textContent = `⚠️ Не хватит: ${deficitText} | Дефицит: ${deficitDays} дн.`;
+      shortageInfo.classList.remove('hidden');
+      tr.classList.add('shortage-warning');
+    } else {
+      shortageInfo.classList.add('hidden');
+      tr.classList.remove('shortage-warning');
+    }
+  } else {
+    shortageInfo.classList.add('hidden');
+    tr.classList.remove('shortage-warning');
   }
 }
