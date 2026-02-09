@@ -242,30 +242,81 @@ export function renderTable(orderState, tbody, callbacks) {
   });
 }
 
-function updateRow(tr, item, settings) {
+export function updateRow(tr, item, settings) {
   const calc = calculateItem(item, settings);
+  const nf = new Intl.NumberFormat('ru-RU');
   
+  // Расчёт заказа
   tr.querySelector('.calc-value').textContent = 
     calc.calculatedOrder > 0 ? Math.round(calc.calculatedOrder) : '0';
   
+  // Дата покрытия
   tr.querySelector('.date').textContent = 
     calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-';
   
+  // Паллеты
   const palletInfo = tr.querySelector('.pallet-info');
-  if (calc.palletsInfo) {
-    palletInfo.textContent = `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`;
+  if (item.boxesPerPallet && item.finalOrder > 0) {
+    const boxes = settings.unit === 'boxes'
+      ? item.finalOrder
+      : item.finalOrder / item.qtyPerBox;
+    
+    const pallets = Math.floor(boxes / item.boxesPerPallet);
+    const boxesLeft = Math.ceil(boxes % item.boxesPerPallet);
+    
+    palletInfo.textContent = `${nf.format(pallets)} пал. + ${nf.format(boxesLeft)} кор. (${nf.format(item.boxesPerPallet)} кор./пал.)`;
   } else {
     palletInfo.textContent = '-';
   }
   
+  // Запас - с ДАТОЙ до когда хватит
   const stockDisplay = tr.querySelector('.stock-display');
-  if (settings.today && settings.deliveryDate && item.consumptionPeriod > 0) {
+  const periodDays = settings.periodDays || 30;
+  const dailyConsumption = item.consumptionPeriod / periodDays;
+  
+  if (stockDisplay && dailyConsumption > 0 && settings.today) {
     const totalStock = item.stock + (item.transit || 0);
-    const periodDays = settings.periodDays || 30;
-    const daily = item.consumptionPeriod / periodDays;
-    const stockDays = Math.floor(totalStock / daily);
-    stockDisplay.textContent = `${stockDays} дн.`;
-  } else {
+    const daysOfCurrentStock = Math.floor(totalStock / dailyConsumption);
+    const stockEndDate = new Date(settings.today.getTime() + daysOfCurrentStock * 86400000);
+    stockDisplay.textContent = `${stockEndDate.toLocaleDateString()} (${daysOfCurrentStock} дн.)`;
+  } else if (stockDisplay) {
     stockDisplay.textContent = '-';
+  }
+  
+  // ===== ПРОВЕРКА ДЕФИЦИТА ДО ПОСТАВКИ =====
+  const shortageInfo = tr.querySelector('.shortage-info');
+  
+  if (settings.deliveryDate && item.consumptionPeriod && dailyConsumption > 0) {
+    const totalStock = item.stock + (item.transit || 0);
+    const daysUntilDelivery = Math.ceil((settings.deliveryDate - settings.today) / 86400000);
+    const consumedBeforeDelivery = dailyConsumption * daysUntilDelivery;
+    
+    // Если не хватит до поставки
+    if (totalStock < consumedBeforeDelivery) {
+      const deficit = consumedBeforeDelivery - totalStock;
+      const deficitDays = Math.ceil(deficit / dailyConsumption);
+      
+      const unit = item.unitOfMeasure || 'шт';
+      let deficitText;
+      
+      if (settings.unit === 'boxes') {
+        deficitText = `${Math.ceil(deficit)} кор.`;
+      } else if (item.qtyPerBox) {
+        const deficitBoxes = Math.ceil(deficit / item.qtyPerBox);
+        deficitText = `${Math.ceil(deficit)} ${unit} (${deficitBoxes} кор.)`;
+      } else {
+        deficitText = `${Math.ceil(deficit)} ${unit}`;
+      }
+      
+      shortageInfo.textContent = `⚠️ Не хватит: ${deficitText} | Дефицит: ${deficitDays} дн.`;
+      shortageInfo.classList.remove('hidden');
+      tr.classList.add('shortage-warning');
+    } else {
+      shortageInfo.classList.add('hidden');
+      tr.classList.remove('shortage-warning');
+    }
+  } else {
+    shortageInfo.classList.add('hidden');
+    tr.classList.remove('shortage-warning');
   }
 }
