@@ -14,7 +14,8 @@ export function renderTable(orderState, tbody, callbacks) {
     removeItem,
     setupExcelNavigation,
     roundToPallet,
-    saveItemOrder
+    saveItemOrder,
+    render
   } = callbacks;
 
   tbody.innerHTML = '';
@@ -235,6 +236,7 @@ export function renderTable(orderState, tbody, callbacks) {
       await saveItemOrder();
       saveDraft();
       saveStateToHistory();
+      render(); // Перерисовываем таблицу после перестановки
     });
 
     updateRow(tr, item, orderState.settings);
@@ -242,15 +244,33 @@ export function renderTable(orderState, tbody, callbacks) {
   });
 }
 
-function updateRow(tr, item, settings) {
+export function updateRow(tr, item, settings) {
   const calc = calculateItem(item, settings);
+  const nf = new Intl.NumberFormat('ru-RU');
   
-  tr.querySelector('.calc-value').textContent = 
-    calc.calculatedOrder > 0 ? Math.round(calc.calculatedOrder) : '0';
+  // Расчёт заказа - формат: коробки (штуки) при единицах=штуки
+  const calcValue = tr.querySelector('.calc-value');
+  if (calc.calculatedOrder > 0) {
+    if (settings.unit === 'pieces' && item.qtyPerBox) {
+      const boxes = Math.ceil(calc.calculatedOrder / item.qtyPerBox);
+      calcValue.textContent = `${boxes} (${Math.round(calc.calculatedOrder)})`;
+    } else {
+      calcValue.textContent = Math.round(calc.calculatedOrder).toString();
+    }
+  } else {
+    calcValue.textContent = '0';
+  }
   
-  tr.querySelector('.date').textContent = 
-    calc.coverageDate ? calc.coverageDate.toLocaleDateString() : '-';
+  // Дата покрытия - формат: дата (дни)
+  const dateCell = tr.querySelector('.date');
+  if (calc.coverageDate && settings.today) {
+    const daysDiff = Math.ceil((calc.coverageDate - settings.today) / 86400000);
+    dateCell.textContent = `${calc.coverageDate.toLocaleDateString()} (${daysDiff} дн.)`;
+  } else {
+    dateCell.textContent = '-';
+  }
   
+  // Паллеты
   const palletInfo = tr.querySelector('.pallet-info');
   if (calc.palletsInfo) {
     palletInfo.textContent = `${calc.palletsInfo.pallets} пал. + ${calc.palletsInfo.boxesLeft} кор.`;
@@ -258,13 +278,15 @@ function updateRow(tr, item, settings) {
     palletInfo.textContent = '-';
   }
   
+  // Запас - формат: дата (дни)
   const stockDisplay = tr.querySelector('.stock-display');
   if (settings.today && settings.deliveryDate && item.consumptionPeriod > 0) {
     const totalStock = item.stock + (item.transit || 0);
     const periodDays = settings.periodDays || 30;
     const daily = item.consumptionPeriod / periodDays;
     const stockDays = Math.floor(totalStock / daily);
-    stockDisplay.textContent = `${stockDays} дн.`;
+    const stockEndDate = new Date(settings.today.getTime() + stockDays * 86400000);
+    stockDisplay.textContent = `${stockEndDate.toLocaleDateString()} (${stockDays} дн.)`;
   } else {
     stockDisplay.textContent = '-';
   }
