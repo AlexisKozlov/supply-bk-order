@@ -8,7 +8,7 @@ import { SafetyStockManager } from './safety-stock.js';
 import { showToast, customConfirm } from './modals.js';
 import { loadOrderHistory } from './order-history.js';
 import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
-import { renderTable } from './table-renderer.js';
+import { renderTable, updateRow } from './table-renderer.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1092,7 +1092,13 @@ function updateFinalSummary() {
 function rerenderAll() {
   document
     .querySelectorAll('#items tr')
-    .forEach((tr, i) => updateRow(tr, orderState.items[i]));
+    .forEach((tr, i) => {
+      if (orderState.items[i]) {
+        updateRow(tr, orderState.items[i], orderState.settings);
+      }
+    });
+}
+
 }
 
 render();
