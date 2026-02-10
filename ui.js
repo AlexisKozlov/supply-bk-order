@@ -1576,7 +1576,10 @@ async function loadAnalytics() {
 
   const days = Number(analyticsPeriodSelect.value) || 30;
 
-  const analytics = await getOrdersAnalytics(null, days);
+ const analytics = await getOrdersAnalytics(
+  orderState.settings.legalEntity,
+  days
+);
 
   analyticsContainer.innerHTML = '';
 
