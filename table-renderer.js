@@ -344,4 +344,11 @@ export function updateRow(tr, item, settings) {
     shortageInfo.classList.add('hidden');
     tr.classList.remove('shortage-warning');
   }
+
+  // Подсветка строк без заказа
+  if (item.finalOrder > 0) {
+    tr.classList.remove('zero-order');
+  } else {
+    tr.classList.add('zero-order');
+  }
 }

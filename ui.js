@@ -79,7 +79,12 @@ const nf = new Intl.NumberFormat('ru-RU', {
 /* showToast и customConfirm импортированы из modals.js */
 
 
-loginBtn.addEventListener('click', () => {
+loginBtn.addEventListener('click', doLogin);
+loginPassword.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doLogin();
+});
+
+function doLogin() {
   if (loginPassword.value === '157') {
     loginOverlay.style.display = 'none';
     localStorage.setItem('bk_logged_in', 'true');
@@ -87,7 +92,7 @@ loginBtn.addEventListener('click', () => {
   } else {
     showToast('Ошибка входа', 'Неверный пароль', 'error');
   }
-});
+}
 
 
 buildOrderBtn.addEventListener('click', () => {
@@ -99,6 +104,11 @@ buildOrderBtn.addEventListener('click', () => {
   }
 
   orderSection.classList.remove('hidden');
+  
+  // Автофокус на поиск товаров
+  setTimeout(() => {
+    if (searchInput) searchInput.focus();
+  }, 100);
 });
 
 saveOrderBtn.addEventListener('click', async () => {
@@ -544,6 +554,23 @@ supplierSelect.addEventListener('change', async () => {
   // Игнорируем событие при загрузке черновика
   if (isLoadingDraft) return;
   
+  // Проверяем есть ли заполненные данные (расход/остаток/заказ)
+  const hasFilledData = orderState.items.some(item => 
+    item.consumptionPeriod > 0 || item.stock > 0 || item.transit > 0 || item.finalOrder > 0
+  );
+  
+  if (hasFilledData) {
+    const confirmed = await customConfirm(
+      'Сменить поставщика?', 
+      'Текущий заказ с заполненными данными будет сброшен'
+    );
+    if (!confirmed) {
+      // Возвращаем прежнее значение
+      supplierSelect.value = orderState.settings.supplier;
+      return;
+    }
+  }
+  
   orderState.settings.supplier = supplierSelect.value;
   orderState.items = [];
   render();
@@ -735,10 +762,24 @@ manualAddBtn.addEventListener('click', async () => {
   manualModal.classList.add('hidden');
 });
 
+function clearManualForm() {
+  document.getElementById('m_name').value = '';
+  document.getElementById('m_sku').value = '';
+  document.getElementById('m_supplier').value = '';
+  document.getElementById('m_box').value = '';
+  document.getElementById('m_pallet').value = '';
+  document.getElementById('m_save').checked = false;
+}
+
 addManualBtn.addEventListener('click', () => {
-  // Устанавливаем текущее юр. лицо по умолчанию
+  clearManualForm();
   document.getElementById('m_legalEntity').value = orderState.settings.legalEntity;
+  // Подставляем текущего поставщика если выбран
+  if (orderState.settings.supplier) {
+    document.getElementById('m_supplier').value = orderState.settings.supplier;
+  }
   manualModal.classList.remove('hidden');
+  document.getElementById('m_name').focus();
 });
 
 closeManualBtn.addEventListener('click', () => {
@@ -752,9 +793,18 @@ manualCancelBtn.addEventListener('click', () => {
 
 /* ================= ДОБАВЛЕНИЕ ================= */
 function addItem(p, skipRender = false) {
+  // Проверка дубликатов по SKU
+  if (p.sku && !skipRender) {
+    const existing = orderState.items.find(item => item.sku === p.sku);
+    if (existing) {
+      showToast('Уже в заказе', `${p.sku} ${p.name} уже добавлен`, 'info');
+      return;
+    }
+  }
+
   orderState.items.push({
     id: crypto.randomUUID(),
-    supabaseId: p.id, // НАСТОЯЩИЙ ID из Supabase для редактирования
+    supabaseId: p.id,
     sku: p.sku || '',
     name: p.name,
     consumptionPeriod: 0,
@@ -1027,6 +1077,21 @@ function moveToCell(rowIndex, columnIndex) {
 
 /* ================= ТАБЛИЦА ================= */
 function render() {
+  // Пустое состояние
+  if (orderState.items.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="11" style="text-align:center;padding:40px 20px;color:#8a8a8a;">
+          <div style="font-size:32px;margin-bottom:8px;">📦</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:4px;">Нет товаров в заказе</div>
+          <div style="font-size:13px;">Выберите поставщика или найдите товар через поиск</div>
+        </td>
+      </tr>`;
+    updateItemsCounter();
+    updateFinalSummary();
+    return;
+  }
+
   renderTable(orderState, tbody, {
     saveDraft,
     saveStateToHistoryDebounced,
@@ -1043,6 +1108,19 @@ function render() {
   // Применяем видимость колонок после рендера
   toggleTransitColumn();
   toggleStockColumn();
+  updateItemsCounter();
+}
+
+/* ================= СЧЁТЧИК ПОЗИЦИЙ ================= */
+function updateItemsCounter() {
+  const counter = document.getElementById('itemsCounter');
+  if (!counter) return;
+  const count = orderState.items.length;
+  if (count === 0) {
+    counter.textContent = '';
+  } else {
+    counter.textContent = `(${count} поз.)`;
+  }
 }
 
 /* ================= ОКРУГЛЕНИЕ ================= */

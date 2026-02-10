@@ -368,6 +368,18 @@ tbody tr:hover.shortage-warning .item-name {
   font-weight: 600;
   margin-top: 3px;
   line-height: 1.4;
+
+/* Строки без заказа — приглушённые */
+}
+.zero-order td {
+  opacity: 0.5;
+}
+.zero-order:hover td {
+  opacity: 0.8;
+}
+.zero-order .order-cell,
+.zero-order .delete-cell {
+  opacity: 1;
 }
 
 th {
