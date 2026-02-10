@@ -379,25 +379,27 @@
 
 <!-- ===== МОДАЛКА АНАЛИТИКИ ===== -->
 <div id="analyticsModal" class="modal hidden">
-  <div class="modal-content" style="max-width: 1100px;">
-    <div class="modal-header">
-      <h2>📊 Аналитика заказов</h2>
-      <button id="closeAnalytics" class="close-btn">✕</button>
+  <div class="modal-content analytics-root">
+
+    <div class="analytics-header">
+      <select id="analyticsPeriod">
+        <option value="14">14 дней</option>
+        <option value="30" selected>30 дней</option>
+        <option value="60">60 дней</option>
+        <option value="90">90 дней</option>
+        <option value="180">180 дней</option>
+      </select>
+
+      <button id="refreshAnalyticsBtn">Обновить</button>
     </div>
-    <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
-      <div class="analytics-controls">
-        <label style="display:flex;align-items:center;gap:8px;">
-          Период:
-          <select id="analyticsPeriod" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);">
-            <option value="7">7 дней</option>
-            <option value="14">14 дней</option>
-            <option value="30" selected>30 дней</option>
-            <option value="60">60 дней</option>
-            <option value="90">90 дней</option>
-          </select>
-        </label>
-        <button id="refreshAnalytics" class="btn small">🔄 Обновить</button>
-      </div>
+
+    <div class="analytics-body">
+      <div id="analyticsContainer"></div>
+      <div id="topProductsContainer"></div>
+    </div>
+
+  </div>
+</div>
       
       <div id="analyticsContainer">
         <div style="text-align:center;padding:40px;">

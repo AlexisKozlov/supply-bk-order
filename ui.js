@@ -9,7 +9,12 @@ import { showToast, customConfirm } from './modals.js';
 import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
-import { getOrdersAnalytics, getTopProducts, renderAnalytics, renderTopProducts } from './analytics.js';
+import {
+  getOrdersAnalytics,
+  buildSummary,
+  renderSummary,
+  renderTopProducts
+} from './analytics.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1557,55 +1562,34 @@ if (exportExcelBtn) {
   });
 }
 
-/* ================= АНАЛИТИКА ================= */
+// ===== АНАЛИТИКА =====
+
+const analyticsModal = document.getElementById('analyticsModal');
+const analyticsContainer = document.getElementById('analyticsContainer');
+const topProductsContainer = document.getElementById('topProductsContainer');
+const analyticsPeriod = document.getElementById('analyticsPeriod');
+const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
+
 async function loadAnalytics() {
-  const period = parseInt(analyticsPeriodSelect?.value || '30');
-  const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
-  
-  if (analyticsContainer) {
-    analyticsContainer.innerHTML = '<div style="text-align:center;padding:40px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
-  }
-  if (topProductsContainer) {
-    topProductsContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
-  }
-  
-  try {
-    const analytics = await getOrdersAnalytics(legalEntity, period);
-    if (analyticsContainer) renderAnalytics(analytics, analyticsContainer);
-    
-    const topProducts = await getTopProducts(legalEntity, 10);
-    if (topProductsContainer) renderTopProducts(topProducts, topProductsContainer);
-  } catch (error) {
-    console.error('Ошибка загрузки аналитики:', error);
-    if (analyticsContainer) {
-      analyticsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">Ошибка загрузки данных</div>';
-    }
-  }
-}
+  analyticsContainer.innerHTML = `
+    <div class="analytics-card" style="text-align:center">
+      Загрузка аналитики...
+    </div>
+  `;
+  topProductsContainer.innerHTML = '';
 
-if (menuAnalyticsBtn) {
-  menuAnalyticsBtn.addEventListener('click', async () => {
-    if (analyticsModal) {
-      analyticsModal.classList.remove('hidden');
-      await loadAnalytics();
-    }
-  });
-}
+  const days = Number(analyticsPeriod.value);
 
-if (closeAnalyticsBtn) {
-  closeAnalyticsBtn.addEventListener('click', () => {
-    if (analyticsModal) analyticsModal.classList.add('hidden');
-  });
+  const analytics = await getOrdersAnalytics(null, days);
+
+  analyticsContainer.innerHTML = '';
+
+  const summary = buildSummary(analytics.orders);
+  renderSummary(summary, analyticsContainer);
+  renderTopProducts(analytics.orders, topProductsContainer);
 }
 
 if (refreshAnalyticsBtn) {
-  refreshAnalyticsBtn.addEventListener('click', async () => {
-    await loadAnalytics();
-  });
+  refreshAnalyticsBtn.addEventListener('click', loadAnalytics);
 }
 
-if (analyticsPeriodSelect) {
-  analyticsPeriodSelect.addEventListener('change', async () => {
-    await loadAnalytics();
-  });
-}

@@ -1394,3 +1394,33 @@ td.delete-cell {
     grid-column: 1 / -1;
   }
 }
+/* ================= АНАЛИТИКА ================= */
+
+.analytics-root {
+  background: #FFF6E8;
+  border-radius: 14px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.analytics-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #E5D3B3;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.analytics-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.analytics-card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
