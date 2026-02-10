@@ -1,13 +1,22 @@
 /**
  * Модуль для работы с историей заказов
+ * Вся логика загрузки, отображения, копирования и удаления
  */
 
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
+import { orderState } from './state.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
-export async function loadOrderHistory(orderState, historySupplier, historyContainer) {
+/**
+ * Загрузить и отобразить историю заказов
+ * @param {Object} opts - { historyContainer, historySupplier, callbacks }
+ * callbacks: { addItem, render, saveDraft, safetyStockManager, orderSection, historyModal }
+ */
+export async function loadOrderHistory(opts) {
+  const { historyContainer, historySupplier, callbacks } = opts;
+  
   historyContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
   let query = supabase
@@ -52,10 +61,15 @@ export async function loadOrderHistory(orderState, historySupplier, historyConta
     return;
   }
 
-  renderOrderHistory(data, historyContainer);
+  await renderOrderHistory(data, opts);
 }
 
-async function renderOrderHistory(orders, historyContainer) {
+/**
+ * Рендер списка заказов
+ */
+async function renderOrderHistory(orders, opts) {
+  const { historyContainer } = opts;
+  
   historyContainer.innerHTML = '';
 
   if (!orders.length) {
@@ -63,6 +77,7 @@ async function renderOrderHistory(orders, historyContainer) {
     return;
   }
 
+  // Получаем все SKU для подтягивания данных из products
   const allSkus = [...new Set(
     orders.flatMap(o => o.order_items.map(i => i.sku)).filter(Boolean)
   )];
@@ -105,8 +120,8 @@ async function renderOrderHistory(orders, historyContainer) {
         <span><b>${date}</b> — ${order.supplier} (${legalEntity})${noteStr}</span>
         <div class="history-actions">
           ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
-          <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ"><img src="./icons/copy.png" width="14" height="14" alt=""></button>
-          <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ"><img src="./icons/delete.png" width="14" height="14" alt=""></button>
+          <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
+          <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
         </div>
       </div>
       <div class="history-items hidden">
@@ -120,66 +135,132 @@ async function renderOrderHistory(orders, historyContainer) {
       </div>
     `;
 
-    const header = div.querySelector('.history-header');
-    const items = div.querySelector('.history-items');
-
-    header.addEventListener('click', () => {
-      items.classList.toggle('hidden');
-    });
-
+    const header = div.querySelector('.history-header span');
     const copyBtn = div.querySelector('.copy-order-btn');
     const deleteBtn = div.querySelector('.delete-order-btn');
 
-    copyBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await copyOrderToForm(order);
-    });
+    header.style.cursor = 'pointer';
+    header.onclick = () => {
+      div.querySelector('.history-items').classList.toggle('hidden');
+    };
 
-    deleteBtn.addEventListener('click', async (e) => {
+    copyBtn.onclick = async (e) => {
       e.stopPropagation();
-      await deleteOrder(order.id, historyContainer);
-    });
+      await copyOrderToForm(order, legalEntity, opts);
+    };
+
+    deleteBtn.onclick = async (e) => {
+      e.stopPropagation();
+      await deleteOrder(order.id, opts);
+    };
 
     historyContainer.appendChild(div);
   });
 }
 
-async function copyOrderToForm(order) {
-  // Логика копирования заказа
-  showToast('Заказ скопирован', 'Настройки и товары загружены', 'success');
-  // Здесь должна быть полная реализация копирования
-}
-
-async function deleteOrder(orderId, historyContainer) {
-  const confirmed = await customConfirm('Удалить заказ?', 'Заказ будет удален из истории');
+/**
+ * Копирование заказа из истории в форму
+ */
+async function copyOrderToForm(order, legalEntity, opts) {
+  const { callbacks } = opts;
+  const { addItem, render, saveDraft, safetyStockManager, orderSection, historyModal } = callbacks;
+  
+  const confirmed = await customConfirm('Скопировать заказ?', 'Текущий заказ будет заменен данными из истории');
   if (!confirmed) return;
 
-  const { error } = await supabase
+  orderState.items = [];
+
+  orderState.settings.legalEntity = legalEntity;
+  orderState.settings.today = order.today_date ? new Date(order.today_date) : new Date();
+  orderState.settings.deliveryDate = new Date(order.delivery_date);
+  orderState.settings.safetyDays = order.safety_days || 0;
+  orderState.settings.periodDays = order.period_days || 30;
+  orderState.settings.unit = order.unit || 'pieces';
+  orderState.settings.hasTransit = order.has_transit || false;
+  orderState.settings.showStockColumn = order.show_stock_column || false;
+
+  document.getElementById('legalEntity').value = legalEntity;
+  document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
+  document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+  
+  if (safetyStockManager) {
+    safetyStockManager.setDays(orderState.settings.safetyDays);
+  }
+  
+  document.getElementById('periodDays').value = orderState.settings.periodDays;
+  document.getElementById('unit').value = orderState.settings.unit;
+  document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
+  document.getElementById('showStockColumn').value = orderState.settings.showStockColumn ? 'true' : 'false';
+
+  for (const histItem of order.order_items) {
+    const { data: productData } = await supabase
+      .from('products')
+      .select('*')
+      .eq('sku', histItem.sku)
+      .single();
+
+    if (productData) {
+      addItem(productData, true); // true = без рендера
+    } else {
+      addItem({
+        sku: histItem.sku,
+        name: histItem.name,
+        qty_per_box: histItem.qty_per_box || 1,
+        boxes_per_pallet: null
+      }, true);
+    }
+    
+    const addedItem = orderState.items[orderState.items.length - 1];
+    addedItem.consumptionPeriod = histItem.consumption_period || 0;
+    addedItem.stock = histItem.stock || 0;
+    addedItem.transit = histItem.transit || 0;
+    
+    if (orderState.settings.unit === 'boxes') {
+      addedItem.finalOrder = histItem.qty_boxes;
+    } else {
+      const qtyPerBox = histItem.qty_per_box || (productData ? productData.qty_per_box : 1) || 1;
+      addedItem.finalOrder = histItem.qty_boxes * qtyPerBox;
+    }
+  }
+
+  orderSection.classList.remove('hidden');
+  render();
+  saveDraft();
+  historyModal.classList.add('hidden');
+  showToast('Заказ скопирован', `Загружено ${order.order_items.length} товаров`, 'success');
+}
+
+/**
+ * Удаление заказа из истории
+ */
+async function deleteOrder(orderId, opts) {
+  const confirmed = await customConfirm('Удалить заказ?', 'Заказ будет удален из истории безвозвратно');
+  if (!confirmed) return;
+
+  // Сначала позиции
+  const { error: itemsErr } = await supabase
     .from('order_items')
     .delete()
     .eq('order_id', orderId);
 
-  if (error) {
-    showToast('Ошибка', 'Не удалось удалить заказ', 'error');
-    console.error(error);
+  if (itemsErr) {
+    showToast('Ошибка удаления', 'Не удалось удалить позиции заказа', 'error');
+    console.error(itemsErr);
     return;
   }
 
-  const { error: orderError } = await supabase
+  // Затем заказ
+  const { error } = await supabase
     .from('orders')
     .delete()
     .eq('id', orderId);
 
-  if (orderError) {
-    showToast('Ошибка', 'Не удалось удалить заказ', 'error');
-    console.error(orderError);
+  if (error) {
+    showToast('Ошибка удаления', 'Не удалось удалить заказ', 'error');
+    console.error(error);
     return;
   }
 
   showToast('Заказ удалён', '', 'success');
-  
-  // Перезагрузить историю
-  const orderState = { settings: { legalEntity: document.getElementById('legalEntity').value } };
-  const historySupplier = document.getElementById('historySupplier');
-  loadOrderHistory(orderState, historySupplier, historyContainer);
+  loadOrderHistory(opts);
 }
