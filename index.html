@@ -377,7 +377,7 @@
 
 <script type="module" src="./ui.js?v=1.5.1"></script>
 
-<!-- ===== МОДАЛКА АНАЛИТИКИ ===== -->
+<!-- ===== АНАЛИТИКА (МОДАЛКА) ===== -->
 <div id="analyticsModal" class="modal hidden">
   <div class="modal-content analytics-root">
 
@@ -390,7 +390,13 @@
         <option value="180">180 дней</option>
       </select>
 
-      <button id="refreshAnalyticsBtn">Обновить</button>
+      <button id="refreshAnalytics" class="btn secondary">
+        Обновить
+      </button>
+
+      <button id="closeAnalytics" class="btn small">
+        ✕
+      </button>
     </div>
 
     <div class="analytics-body">
@@ -398,25 +404,6 @@
       <div id="topProductsContainer"></div>
     </div>
 
-  </div>
-</div>
-      
-      <div id="analyticsContainer">
-        <div style="text-align:center;padding:40px;">
-          <div class="loading-spinner"></div>
-          <div>Загрузка данных...</div>
-        </div>
-      </div>
-      
-      <div class="analytics-section">
-        <h3>🔥 Топ-10 товаров</h3>
-        <div id="topProductsContainer">
-          <div style="text-align:center;padding:20px;">
-            <div class="loading-spinner"></div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </div>
 
