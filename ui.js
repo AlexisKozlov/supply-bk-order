@@ -47,7 +47,6 @@ const loginBtn = document.getElementById('loginBtn');
 const loginPassword = document.getElementById('loginPassword');
 
 /* ================= DOM ДЛЯ НОВЫХ ФУНКЦИЙ v1.6.0 ================= */
-const autoCalculateBtn = document.getElementById('autoCalculateBtn');
 const exportExcelBtn = document.getElementById('exportExcelBtn');
 const menuAnalyticsBtn = document.getElementById('menuAnalytics');
 const analyticsModal = document.getElementById('analyticsModal');
@@ -1535,33 +1534,6 @@ async function restoreItemOrder() {
   if (sorted.length === orderState.items.length) {
     orderState.items = sorted;
   }
-}
-/* ================= АВТОЗАКАЗ ================= */
-if (autoCalculateBtn) {
-  autoCalculateBtn.addEventListener('click', () => {
-    if (orderState.items.length === 0) {
-      showToast('Нет товаров', 'Добавьте товары в заказ', 'info');
-      return;
-    }
-    
-    let calculated = 0;
-    orderState.items.forEach(item => {
-      const calc = calculateItem(item, orderState.settings);
-      if (calc.calculatedOrder > 0) {
-        item.finalOrder = calc.calculatedOrder;
-        calculated++;
-      }
-    });
-    
-    if (calculated > 0) {
-      render();
-      saveDraft();
-      saveStateToHistory();
-      showToast('Автозаказ выполнен', `Рассчитано ${calculated} товаров`, 'success');
-    } else {
-      showToast('Нечего рассчитывать', 'Заполните расход и остаток для товаров', 'info');
-    }
-  });
 }
 
 /* ================= ЭКСПОРТ В EXCEL ================= */
