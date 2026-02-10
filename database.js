@@ -89,7 +89,7 @@ async function deleteCard(id) {
   loadDatabaseProducts(dbLegalEntitySelect, databaseList);
 }
 
-async function openEditCard(id) {
+export async function openEditCard(id) {
   const { data, error } = await supabase
     .from('products')
     .select('*')
@@ -207,4 +207,24 @@ export function setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseLis
   });
   
   observer.observe(databaseList, { childList: true });
+}
+/**
+ * Открыть карточку редактирования по SKU товара
+ * Используется при клике на наименование в блоке заказа
+ */
+export async function openEditCardBySku(sku) {
+  if (!sku) return;
+  
+  const { data, error } = await supabase
+    .from('products')
+    .select('id')
+    .eq('sku', sku)
+    .maybeSingle();
+  
+  if (error || !data) {
+    console.warn('Товар с SKU не найден в базе:', sku);
+    return;
+  }
+  
+  openEditCard(data.id);
 }

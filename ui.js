@@ -6,7 +6,7 @@ import { history } from './history.js';
 import { SafetyStockManager } from './safety-stock.js';
 
 import { showToast, customConfirm } from './modals.js';
-import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
+import { loadDatabaseProducts, setupDatabaseSearch, openEditCardBySku } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
 import { getOrdersAnalytics, getTopProducts, renderAnalytics, renderTopProducts } from './analytics.js';
@@ -1281,7 +1281,8 @@ function render() {
     setupExcelNavigation,
     roundToPallet,
     saveItemOrder,
-    render
+    render,
+    openProductForEdit: openEditCardBySku
   });
   
   // Применяем видимость колонок после рендера
