@@ -9,7 +9,7 @@ import { showToast, customConfirm } from './modals.js';
 import { loadDatabaseProducts, setupDatabaseSearch, openEditCardBySku } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
-import { getOrdersAnalytics, getTopProducts, renderAnalytics, renderTopProducts } from './analytics.js';
+import { getOrdersAnalytics, renderAnalytics } from './analytics.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -54,7 +54,6 @@ const closeAnalyticsBtn = document.getElementById('closeAnalytics');
 const analyticsPeriodSelect = document.getElementById('analyticsPeriod');
 const refreshAnalyticsBtn = document.getElementById('refreshAnalytics');
 const analyticsContainer = document.getElementById('analyticsContainer');
-const topProductsContainer = document.getElementById('topProductsContainer');
 
 /* ================= BADGE ЮР. ЛИЦА ================= */
 function updateEntityBadge() {
@@ -1564,22 +1563,20 @@ async function loadAnalytics() {
   const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
   
   if (analyticsContainer) {
-    analyticsContainer.innerHTML = '<div style="text-align:center;padding:40px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
-  }
-  if (topProductsContainer) {
-    topProductsContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
+    analyticsContainer.innerHTML = `
+      <div style="text-align:center;padding:60px;color:#999;">
+        <div class="loading-spinner"></div>
+        <div style="margin-top:14px;">Загрузка данных...</div>
+      </div>`;
   }
   
   try {
     const analytics = await getOrdersAnalytics(legalEntity, period);
     if (analyticsContainer) renderAnalytics(analytics, analyticsContainer);
-    
-    const topProducts = await getTopProducts(legalEntity, 10);
-    if (topProductsContainer) renderTopProducts(topProducts, topProductsContainer);
   } catch (error) {
     console.error('Ошибка загрузки аналитики:', error);
     if (analyticsContainer) {
-      analyticsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">Ошибка загрузки данных</div>';
+      analyticsContainer.innerHTML = '<div style="padding:40px;text-align:center;color:#c62828;">Ошибка загрузки данных. Проверьте консоль.</div>';
     }
   }
 }
