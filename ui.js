@@ -1563,46 +1563,69 @@ if (exportExcelBtn) {
 }
 
 
-/* ===== АНАЛИТИКА ===== */
-
 async function loadAnalytics() {
   analyticsContainer.innerHTML = `
     <div class="analytics-card" style="text-align:center">
-      <div class="loading-spinner"></div>
-      <div>Загрузка аналитики...</div>
+      Загрузка аналитики...
     </div>
   `;
   topProductsContainer.innerHTML = '';
 
   const days = Number(analyticsPeriodSelect.value) || 30;
+  const prevDays = days * 2;
 
- const analytics = await getOrdersAnalytics(
-  orderState.settings.legalEntity,
-  days
-);
+  const current = await getOrdersAnalytics(
+    orderState.settings.legalEntity,
+    days
+  );
+
+  const previous = await getOrdersAnalytics(
+    orderState.settings.legalEntity,
+    prevDays
+  );
 
   analyticsContainer.innerHTML = '';
 
-  const summary = buildSummary(analytics.orders);
-  renderSummary(summary, analyticsContainer);
-  renderTopProducts(analytics.orders, topProductsContainer);
-}
+  /* ===== СВОДКА ===== */
+  const summaryHTML = `
+    <div class="analytics-card">
+      <b>Сводка</b><br><br>
+      Заказов за период: <b>${current.orders.length}</b><br>
+      Заказов ранее: <b>${previous.orders.length}</b><br>
+    </div>
+  `;
+  analyticsContainer.innerHTML += summaryHTML;
 
-if (menuAnalyticsBtn) {
-  menuAnalyticsBtn.addEventListener('click', () => {
-    analyticsModal.classList.remove('hidden');
-    loadAnalytics();
+  /* ===== ТОП ТОВАРОВ ===== */
+  const map = {};
+  current.orders.forEach(o =>
+    o.order_items.forEach(i => {
+      map[i.product_name] = (map[i.product_name] || 0) + (i.qty_boxes || 0);
+    })
+  );
+
+  const sorted = Object.entries(map)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  if (!sorted.length) {
+    topProductsContainer.innerHTML = `
+      <div class="analytics-card">Нет данных</div>
+    `;
+    return;
+  }
+
+  let html = '<ul>';
+  sorted.forEach(([name, qty]) => {
+    html += `<li>${name}: <b>${qty}</b> кор.</li>`;
   });
-}
+  html += '</ul>';
 
-if (refreshAnalyticsBtn) {
-  refreshAnalyticsBtn.addEventListener('click', loadAnalytics);
+  topProductsContainer.innerHTML = `
+    <div class="analytics-card">
+      <b>Топ товаров</b><br><br>
+      ${html}
+    </div>
+  `;
 }
-
-if (closeAnalyticsBtn) {
-  closeAnalyticsBtn.addEventListener('click', () => {
-    analyticsModal.classList.add('hidden');
-  });
-}
-
 
