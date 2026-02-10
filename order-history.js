@@ -199,13 +199,15 @@ async function copyOrderToForm(order, legalEntity, opts) {
       .eq('sku', histItem.sku)
       .single();
 
+    const qtyPerBox = (productData && productData.qty_per_box) || histItem.qty_per_box || 1;
+
     if (productData) {
-      addItem(productData, true); // true = без рендера
+      addItem(productData, true);
     } else {
       addItem({
         sku: histItem.sku,
         name: histItem.name,
-        qty_per_box: histItem.qty_per_box || 1,
+        qty_per_box: qtyPerBox,
         boxes_per_pallet: null
       }, true);
     }
@@ -218,7 +220,6 @@ async function copyOrderToForm(order, legalEntity, opts) {
     if (orderState.settings.unit === 'boxes') {
       addedItem.finalOrder = histItem.qty_boxes;
     } else {
-      const qtyPerBox = histItem.qty_per_box || (productData ? productData.qty_per_box : 1) || 1;
       addedItem.finalOrder = histItem.qty_boxes * qtyPerBox;
     }
   }

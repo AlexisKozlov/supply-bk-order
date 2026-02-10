@@ -40,7 +40,7 @@ const databaseList = document.getElementById('databaseList');
 
 const editCardModal = document.getElementById('editCardModal');
 const closeEditCardBtn = document.getElementById('closeEditCard');
-let currentEditingProduct = null; // ID товара который редактируем
+const confirmModal = document.getElementById('confirmModal');
 const buildOrderBtn = document.getElementById('buildOrder');
 const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
@@ -393,7 +393,6 @@ if (safetyDaysInput && safetyCalendarBtn) {
   );
   
   // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
-  // Обновляем товарный запас при изменении ДАТЫ ПРИХОДА
   document.getElementById('deliveryDate').addEventListener('change', () => {
     if (orderState.settings.deliveryDate && safetyStockManager) {
       // ВАЖНО: Сбрасываем товарный запас при изменении даты прихода
@@ -498,7 +497,10 @@ function validateRequiredSettings() {
     valid = false;
   } else deliveryEl.classList.remove('required');
 
-  if (safetyEl.value === '' || safetyEl.value === null) {
+  // safetyDays: проверяем что введено число (включая 0)
+  const safetyValue = safetyEl.value.trim();
+  const safetyNum = safetyValue.match(/^(\d+)/);
+  if (!safetyNum) {
     safetyEl.classList.add('required');
     valid = false;
   } else safetyEl.classList.remove('required');
@@ -524,7 +526,13 @@ async function loadSuppliers(legalEntity) {
     query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
   }
   
-  const { data } = await query;
+  const { data, error } = await query;
+  
+  if (error || !data) {
+    console.error('Ошибка загрузки поставщиков:', error);
+    return;
+  }
+  
   const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
   
   // СОРТИРОВКА ПО АЛФАВИТУ
@@ -643,8 +651,6 @@ if (searchInput) {
 }
 
 async function searchProducts(q) {
-  const isSku = /^[0-9A-Za-z-]+$/.test(q);
-
   let query = supabase
     .from('products')
     .select('*')
@@ -655,7 +661,6 @@ async function searchProducts(q) {
   if (currentLegalEntity === 'Пицца Стар') {
     query = query.eq('legal_entity', 'Пицца Стар');
   } else {
-    // Для Бургер БК и Воглия Матта - показываем оба
     query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
   }
 
@@ -664,9 +669,8 @@ async function searchProducts(q) {
     query = query.eq('supplier', supplierSelect.value);
   }
 
-  query = isSku
-    ? query.ilike('sku', `%${q}%`)
-    : query.ilike('name', `%${q}%`);
+  // Поиск одновременно по SKU и по имени
+  query = query.or(`sku.ilike.%${q}%,name.ilike.%${q}%`);
 
   const { data, error } = await query;
 
@@ -690,6 +694,7 @@ async function searchProducts(q) {
       addItem(p);
       searchResults.innerHTML = '';
       searchInput.value = '';
+      if (clearSearchBtn) clearSearchBtn.classList.add('hidden');
     });
     searchResults.appendChild(div);
   });
@@ -1259,15 +1264,19 @@ setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseList);
 document.addEventListener('keydown', (e) => {
   // ESC — закрытие модалок
   if (e.key === 'Escape') {
-    if (!manualModal.classList.contains('hidden')) {
+    const saveOrderModal = document.getElementById('saveOrderModal');
+    if (saveOrderModal && !saveOrderModal.classList.contains('hidden')) {
+      saveOrderModal.classList.add('hidden');
+    } else if (!manualModal.classList.contains('hidden')) {
       manualModal.classList.add('hidden');
     } else if (!editCardModal.classList.contains('hidden')) {
       editCardModal.classList.add('hidden');
-      currentEditingProduct = null;
     } else if (!databaseModal.classList.contains('hidden')) {
       databaseModal.classList.add('hidden');
     } else if (!historyModal.classList.contains('hidden')) {
       historyModal.classList.add('hidden');
+    } else if (analyticsModal && !analyticsModal.classList.contains('hidden')) {
+      analyticsModal.classList.add('hidden');
     } else if (!confirmModal.classList.contains('hidden')) {
       confirmModal.classList.add('hidden');
     }
