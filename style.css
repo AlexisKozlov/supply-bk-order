@@ -368,9 +368,9 @@ tbody tr:hover.shortage-warning .item-name {
   font-weight: 600;
   margin-top: 3px;
   line-height: 1.4;
+}
 
 /* Строки с заполненным заказом — зелёный фон */
-}
 .has-order td {
   background: #f0f9f0 !important;
 }
@@ -380,7 +380,6 @@ tbody tr:hover.shortage-warning .item-name {
 tbody tr:hover.has-order td,
 tbody tr:hover.has-order .item-name {
   background: #e2f2e2 !important;
-}
 }
 
 th {
@@ -1386,4 +1385,305 @@ td.delete-cell {
   .product-bar {
     grid-column: 1 / -1;
   }
+}
+
+/* ═══════════════════════════════════════════
+   UPGRADES v2.0 — BK Style Enhanced
+   ═══════════════════════════════════════════ */
+
+/* ── Tooltips (стилизованные) ── */
+[title] {
+  position: relative;
+}
+
+/* Убираем нативный title через JS-подход, 
+   но стилизуем через CSS custom tooltips */
+.tooltip-wrap {
+  position: relative;
+}
+
+.tooltip-wrap::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.92);
+  background: var(--brown);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  padding: 8px 14px;
+  border-radius: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 9000;
+  box-shadow: 0 4px 16px rgba(90,45,12,0.22);
+  max-width: 280px;
+  white-space: normal;
+  text-align: center;
+}
+
+.tooltip-wrap::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.92);
+  border: 5px solid transparent;
+  border-top-color: var(--brown);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 9000;
+}
+
+.tooltip-wrap:hover::after,
+.tooltip-wrap:hover::before {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+/* Тултип для кнопок в header */
+.menu-btn[title],
+.btn[title] {
+  position: relative;
+}
+
+/* ── Плавное появление секций ── */
+.card {
+  animation: fadeSlideUp 0.35s cubic-bezier(.23,1,.32,1) both;
+}
+
+.card:nth-child(1) { animation-delay: 0s; }
+.card:nth-child(2) { animation-delay: 0.06s; }
+.card:nth-child(3) { animation-delay: 0.12s; }
+.card:nth-child(4) { animation-delay: 0.18s; }
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Пульсация на кнопке "Сформировать заказ" ── */
+#buildOrder {
+  position: relative;
+  overflow: hidden;
+}
+
+#buildOrder::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, transparent, rgba(255,255,255,0.15), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#buildOrder:hover::after {
+  opacity: 1;
+  animation: shimmer 1.2s ease-in-out;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ── Улучшенные инпуты в таблице ── */
+td input[type="number"]:not(:placeholder-shown) {
+  background: #fff;
+}
+
+td input[type="number"]:focus {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Полоса прогресса в header ── */
+.header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--orange), var(--red), var(--orange));
+  width: 100%;
+  opacity: 0.6;
+}
+
+/* ── Кнопки undo/redo ── */
+#undoBtn, #redoBtn {
+  font-size: 16px;
+  min-width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+#undoBtn:not(:disabled):hover,
+#redoBtn:not(:disabled):hover {
+  background: var(--orange);
+  color: var(--brown);
+  border-color: var(--orange);
+  transform: scale(1.08);
+}
+
+#undoBtn:disabled, #redoBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ── Кнопка Excel ── */
+#exportExcelBtn {
+  transition: all 0.2s ease;
+}
+
+#exportExcelBtn:hover {
+  background: #43A047 !important;
+  box-shadow: 0 3px 10px rgba(76,175,80,0.3);
+}
+
+/* ── Drag handle при перетаскивании строк ── */
+td:first-child {
+  cursor: grab;
+  user-select: none;
+}
+
+td:first-child:active {
+  cursor: grabbing;
+}
+
+/* ── Строка таблицы — микро-анимация при появлении ── */
+tbody tr {
+  animation: rowFadeIn 0.2s ease both;
+}
+
+@keyframes rowFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Модалки — затемнение кликабельного фона ── */
+.modal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+
+/* ── Кнопка "В заказ всё" — акцентная ── */
+#allToOrderBtn {
+  position: relative;
+  font-weight: 700;
+}
+
+/* ── Итоговая секция — красивые карточки ── */
+#finalSummary > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#finalSummary > div::before {
+  content: '📦';
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+/* ── Скроллбар в таблице — BK-цвета ── */
+.table-wrap::-webkit-scrollbar-thumb {
+  background: #e0c9a8;
+}
+
+.table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--orange);
+}
+
+/* ── Номер строки (drag column) ── */
+td:first-child {
+  font-size: 11px;
+  color: var(--muted-light);
+  font-weight: 600;
+}
+
+/* ── Фокус-кольцо для select (accessibility) ── */
+select:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 1px;
+}
+
+/* ── Счётчик позиций — badge-стиль ── */
+#itemsCounter:not(:empty) {
+  background: rgba(245,166,35,0.15);
+  color: var(--brown);
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 12.5px;
+  margin-left: 6px;
+  display: inline-block;
+}
+
+/* ── Кнопка "Очистить" — осторожная ── */
+#clearOrder:hover {
+  background: #ffebee !important;
+  color: var(--error) !important;
+  border-color: var(--error) !important;
+}
+
+/* ── История заказов — badge дата ── */
+.history-header span b {
+  color: var(--brown);
+}
+
+/* ── Плавное разворачивание history-items ── */
+.history-items {
+  animation: expandDown 0.2s ease;
+}
+
+@keyframes expandDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 800px; }
+}
+
+/* ── Пустое состояние таблицы ── */
+tbody tr td[colspan] {
+  color: var(--muted);
+}
+
+/* ── Print styles ── */
+@media print {
+  .header, .actions, .search, .footer,
+  .btn, #undoBtn, #redoBtn, #allToOrderBtn,
+  #clearOrder, #exportExcelBtn, td.delete-cell,
+  .menu-btn, .entity-badge { 
+    display: none !important; 
+  }
+  
+  .card { 
+    box-shadow: none; 
+    border: 1px solid #ddd;
+    break-inside: avoid;
+  }
+  
+  .table-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+  
+  body { background: white; }
+  .container { margin: 0; padding: 0; }
+  .hidden { display: none !important; }
 }
