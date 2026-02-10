@@ -345,10 +345,10 @@ export function updateRow(tr, item, settings) {
     tr.classList.remove('shortage-warning');
   }
 
-  // Подсветка строк без заказа
+  // Подсветка строк с заполненным заказом
   if (item.finalOrder > 0) {
-    tr.classList.remove('zero-order');
+    tr.classList.add('has-order');
   } else {
-    tr.classList.add('zero-order');
+    tr.classList.remove('has-order');
   }
 }

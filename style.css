@@ -369,17 +369,18 @@ tbody tr:hover.shortage-warning .item-name {
   margin-top: 3px;
   line-height: 1.4;
 
-/* Строки без заказа — приглушённые */
+/* Строки с заполненным заказом — зелёный фон */
 }
-.zero-order td {
-  opacity: 0.5;
+.has-order td {
+  background: #f0f9f0 !important;
 }
-.zero-order:hover td {
-  opacity: 0.8;
+.has-order .item-name {
+  background: #f0f9f0 !important;
 }
-.zero-order .order-cell,
-.zero-order .delete-cell {
-  opacity: 1;
+tbody tr:hover.has-order td,
+tbody tr:hover.has-order .item-name {
+  background: #e2f2e2 !important;
+}
 }
 
 th {
