@@ -1562,23 +1562,19 @@ if (exportExcelBtn) {
   });
 }
 
-// ===== АНАЛИТИКА =====
 
-const analyticsModal = document.getElementById('analyticsModal');
-const analyticsContainer = document.getElementById('analyticsContainer');
-const topProductsContainer = document.getElementById('topProductsContainer');
-const analyticsPeriod = document.getElementById('analyticsPeriod');
-const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
+/* ===== АНАЛИТИКА ===== */
 
 async function loadAnalytics() {
   analyticsContainer.innerHTML = `
     <div class="analytics-card" style="text-align:center">
-      Загрузка аналитики...
+      <div class="loading-spinner"></div>
+      <div>Загрузка аналитики...</div>
     </div>
   `;
   topProductsContainer.innerHTML = '';
 
-  const days = Number(analyticsPeriod.value);
+  const days = Number(analyticsPeriodSelect.value) || 30;
 
   const analytics = await getOrdersAnalytics(null, days);
 
@@ -1589,7 +1585,21 @@ async function loadAnalytics() {
   renderTopProducts(analytics.orders, topProductsContainer);
 }
 
+if (menuAnalyticsBtn) {
+  menuAnalyticsBtn.addEventListener('click', () => {
+    analyticsModal.classList.remove('hidden');
+    loadAnalytics();
+  });
+}
+
 if (refreshAnalyticsBtn) {
   refreshAnalyticsBtn.addEventListener('click', loadAnalytics);
 }
+
+if (closeAnalyticsBtn) {
+  closeAnalyticsBtn.addEventListener('click', () => {
+    analyticsModal.classList.add('hidden');
+  });
+}
+
 
