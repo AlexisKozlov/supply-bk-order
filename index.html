@@ -36,7 +36,6 @@
  История заказов</button>
     <button id="menuDatabase" class="menu-btn"><img src="./icons/base.png" width="14" height="14"  alt="">
  База данных</button>
-     <button id="menuAnalytics" class="menu-btn">📊 Аналитика</button>
   </nav>
   <span id="entityBadge" class="entity-badge">Бургер БК</span>
 </header>
@@ -48,7 +47,7 @@
     <h2>Параметры заказа</h2>
 
     <div class="settings">
-      <label>
+      <label title="Юридическое лицо для которого формируется заказ">
         Юр. лицо
         <select id="legalEntity">
           <option value="Бургер БК">Бургер БК</option>
@@ -57,37 +56,37 @@
         </select>
       </label>
 
-      <label>
+      <label title="Фильтр товаров по поставщику">
         Поставщик
         <select id="supplierFilter">
           <option value="">Все / свободный</option>
         </select>
       </label>
 
-      <label>
+      <label title="Дата от которой считается расход товаров">
         Дата сегодня
         <input type="date" id="today" />
       </label>
 
-      <label>
+      <label title="Предполагаемая дата поступления товара от поставщика">
         Дата прихода
         <input type="date" id="deliveryDate" />
       </label>
 
-      <label>
+      <label title="Количество дней для расчёта среднего дневного расхода">
         Период расхода (дней)
         <input type="number" id="periodDays" value="30" />
       </label>
 
 
-      <label>
+      <label title="Желаемый запас товара на складе после поставки (в днях или дата)">
         Товарный запас
         <div style="display:flex;gap:4px;">
           <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" style="flex:1;" />
-          <button type="button" id="safetyCalendarBtn" class="btn secondary" title="Выбрать дату" style="padding:6px 10px;"><img src="./icons/calendar.png" width="16" height="16" alt=""></button>
+          <button type="button" id="safetyCalendarBtn" class="btn secondary" title="Выбрать дату окончания запаса" style="padding:6px 10px;"><img src="./icons/calendar.png" width="16" height="16" alt=""></button>
         </div>
       </label>
-      <label>
+      <label title="Единицы измерения для ввода расхода и отображения заказа">
         Единицы
         <select id="unit">
           <option value="pieces">Штуки</option>
@@ -95,7 +94,7 @@
         </select>
       </label>
 
-      <label>
+      <label title="Показывать колонку 'Транзит' (товар в пути) в таблице заказа">
         Наличие транзита
         <select id="hasTransit">
           <option value="false">Нет</option>
@@ -103,7 +102,7 @@
         </select>
       </label>
 
-      <label>
+      <label title="Показывать колонку 'Запас' (до какой даты хватит товара) в таблице заказа">
         Отображение запаса
         <select id="showStockColumn">
           <option value="false">Нет</option>
@@ -151,7 +150,6 @@
         <button id="redoBtn" class="btn secondary" disabled title="Повторить (Ctrl+Y)" style="padding:4px 8px;">↷</button>
         <button id="allToOrderBtn" class="btn primary" title="Перенести расчёт в заказ для всех товаров" style="padding:4px 10px;">В заказ всё</button>
         <button id="clearOrder" class="btn secondary" style="padding:4px 10px;">Очистить</button>
-      <button id="exportExcelBtn" class="btn" style="background:var(--green);color:white;" title="Экспортировать заказ в Excel"> 📁Excel</button>
       </div>
 
       <div class="table-wrap">
@@ -362,7 +360,7 @@
   </div>
 </div>
 <footer class="footer">
-  <span class="version">Версия: <span id="appVersion">1.5.1</span>
+  <span class="version">Версия: <span id="appVersion">1.6.1</span>
 </footer>
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
@@ -375,39 +373,7 @@
 })();
 </script>
 
-<script type="module" src="./ui.js?v=1.5.1"></script>
+<script type="module" src="./ui.js?v=1.6.1"></script>
 
-<!-- ===== АНАЛИТИКА (МОДАЛКА) ===== -->
-<div id="analyticsModal" class="modal hidden">
-  <div class="modal-content analytics-root">
-
-    <div class="analytics-header">
-      <select id="analyticsPeriod">
-        <option value="14">14 дней</option>
-        <option value="30" selected>30 дней</option>
-        <option value="60">60 дней</option>
-        <option value="90">90 дней</option>
-        <option value="180">180 дней</option>
-      </select>
-
-      <button id="refreshAnalytics" class="btn secondary">
-        Обновить
-      </button>
-
-      <button id="closeAnalytics" class="btn small">
-        ✕
-      </button>
-    </div>
-
-    <div class="analytics-body">
-      <div id="analyticsContainer"></div>
-      <div id="topProductsContainer"></div>
-    </div>
-
-  </div>
-</div>
-
-</body>
-</html>
 </body>
 </html>

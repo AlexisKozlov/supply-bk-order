@@ -8,74 +8,65 @@ export async function exportToExcel(orderState) {
   
   const nf = new Intl.NumberFormat('ru-RU');
   
-  // Подготовка данных
-  const data = orderState.items.map(item => {
+  // Заголовок с параметрами
+  const supplier = orderState.settings.supplier || 'Все';
+  const deliveryDate = orderState.settings.deliveryDate?.toLocaleDateString('ru-RU') || '';
+  const legalEntity = orderState.settings.legalEntity || '';
+  
+  const headerRows = [
+    [`Поставщик: ${supplier}`],
+    [`Дата прихода: ${deliveryDate}`],
+    [`Юридическое лицо: ${legalEntity}`],
+    [], // Пустая строка
+    ['Наименование', 'Заказ (коробки)'] // Заголовки таблицы
+  ];
+  
+  // Подготовка данных - только наименование и заказ
+  const dataRows = orderState.items.map(item => {
     const boxes = orderState.settings.unit === 'boxes' 
       ? item.finalOrder 
       : Math.ceil(item.finalOrder / (item.qtyPerBox || 1));
     
-    const pieces = orderState.settings.unit === 'boxes'
-      ? item.finalOrder * (item.qtyPerBox || 1)
-      : item.finalOrder;
-    
-    return {
-      'SKU': item.sku || '',
-      'Наименование': item.name || '',
-      'Поставщик': item.supplier || '',
-      'Расход (период)': nf.format(item.consumptionPeriod || 0),
-      'Остаток': nf.format(item.stock || 0),
-      'Транзит': nf.format(item.transit || 0),
-      'Заказ (коробки)': nf.format(boxes),
-      'Заказ (штуки)': nf.format(Math.round(pieces)),
-      'Коробов на паллете': item.boxesPerPallet || '',
-      'Штук в коробе': item.qtyPerBox || ''
-    };
+    return [
+      item.name || '',
+      nf.format(boxes)
+    ];
   });
   
+  // Объединяем всё
+  const allRows = [...headerRows, ...dataRows];
+  
   // Создание листа
-  const ws = XLSX.utils.json_to_sheet(data);
+  const ws = XLSX.utils.aoa_to_sheet(allRows);
   
   // Настройка ширины колонок
-  const colWidths = [
-    { wch: 12 }, // SKU
-    { wch: 35 }, // Наименование
-    { wch: 20 }, // Поставщик
-    { wch: 15 }, // Расход
-    { wch: 10 }, // Остаток
-    { wch: 10 }, // Транзит
-    { wch: 15 }, // Заказ (коробки)
-    { wch: 15 }, // Заказ (штуки)
-    { wch: 18 }, // Коробов на паллете
-    { wch: 15 }  // Штук в коробе
+  ws['!cols'] = [
+    { wch: 50 }, // Наименование
+    { wch: 20 }  // Заказ
   ];
-  ws['!cols'] = colWidths;
+  
+  // Объединение ячеек для заголовка
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }, // Поставщик
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }, // Дата прихода
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 1 } }  // Юр. лицо
+  ];
+  
+  // Стили для заголовков (жирный шрифт)
+  ['A1', 'A2', 'A3', 'A5', 'B5'].forEach(cell => {
+    if (ws[cell]) {
+      ws[cell].s = {
+        font: { bold: true }
+      };
+    }
+  });
   
   // Создание книги
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Заказ');
   
-  // Добавление листа с параметрами
-  const params = [
-    ['Параметр', 'Значение'],
-    ['Дата сегодня', orderState.settings.today?.toLocaleDateString('ru-RU') || ''],
-    ['Дата прихода', orderState.settings.deliveryDate?.toLocaleDateString('ru-RU') || ''],
-    ['Товарный запас (дни)', orderState.settings.safetyDays || 0],
-    ['Период расчёта (дни)', orderState.settings.periodDays || 30],
-    ['Единицы', orderState.settings.unit === 'boxes' ? 'Коробки' : 'Штуки'],
-    ['Поставщик', orderState.settings.supplier || 'Все'],
-    ['Юр. лицо', orderState.settings.legalEntity || ''],
-    ['', ''],
-    ['Итого позиций', data.length],
-    ['Итого коробок', data.reduce((sum, item) => sum + parseInt(item['Заказ (коробки)'].replace(/\s/g, '')) || 0, 0)]
-  ];
-  
-  const wsParams = XLSX.utils.aoa_to_sheet(params);
-  wsParams['!cols'] = [{ wch: 25 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, wsParams, 'Параметры');
-  
   // Формирование имени файла
   const date = new Date().toISOString().slice(0, 10);
-  const supplier = orderState.settings.supplier || 'Все';
   const filename = `Заказ_${supplier}_${date}.xlsx`;
   
   // Сохранение файла

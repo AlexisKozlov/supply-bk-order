@@ -1095,10 +1095,8 @@ td.delete-cell {
 }
 /* ========================================
    СТИЛИ ДЛЯ АНАЛИТИКИ v1.6.0
-   Добавьте в конец style.css
    ======================================== */
 
-/* === АНАЛИТИКА === */
 .analytics-container {
   padding: 20px 0;
 }
@@ -1111,7 +1109,7 @@ td.delete-cell {
 }
 
 .stat-card {
-  background: linear-gradient(135deg, var(--orange) 0%, #ff8c42 100%);
+  background: linear-gradient(135deg, #F5A623 0%, #ff8c42 100%);
   color: white;
   padding: 20px;
   border-radius: 12px;
@@ -1135,23 +1133,22 @@ td.delete-cell {
   background: white;
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid #e8e3db;
 }
 
 .chart-section h3 {
   margin: 0 0 20px 0;
-  color: var(--brown);
+  color: #5A2D0C;
   font-size: 18px;
 }
 
-/* Простой график столбцами */
 .simple-chart {
   display: flex;
   align-items: flex-end;
   gap: 8px;
   height: 200px;
   padding: 10px 0;
-  border-bottom: 2px solid var(--border);
+  border-bottom: 2px solid #e8e3db;
 }
 
 .chart-bar-container {
@@ -1164,7 +1161,7 @@ td.delete-cell {
 
 .chart-bar {
   width: 100%;
-  background: linear-gradient(to top, var(--orange), #ffb366);
+  background: linear-gradient(to top, #F5A623, #ffb366);
   border-radius: 4px 4px 0 0;
   position: relative;
   min-height: 20px;
@@ -1185,7 +1182,7 @@ td.delete-cell {
 .chart-value {
   font-size: 11px;
   font-weight: bold;
-  color: var(--brown);
+  color: #5A2D0C;
 }
 
 .chart-label {
@@ -1194,7 +1191,6 @@ td.delete-cell {
   white-space: nowrap;
 }
 
-/* Список поставщиков */
 .suppliers-list {
   display: flex;
   flex-direction: column;
@@ -1207,18 +1203,18 @@ td.delete-cell {
   gap: 12px;
   align-items: center;
   padding: 12px;
-  background: var(--lightest);
+  background: #fdf9f3;
   border-radius: 6px;
   transition: background 0.2s;
 }
 
 .supplier-row:hover {
-  background: var(--light);
+  background: #f5efe5;
 }
 
 .supplier-name {
   font-weight: 600;
-  color: var(--brown);
+  color: #5A2D0C;
 }
 
 .supplier-stats {
@@ -1230,31 +1226,30 @@ td.delete-cell {
 
 .supplier-bar {
   height: 24px;
-  background: var(--lightest);
+  background: #fdf9f3;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid #e8e3db;
 }
 
 .supplier-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--orange), #ff8c42);
+  background: linear-gradient(90deg, #F5A623, #ff8c42);
   border-radius: 12px;
   transition: width 0.5s ease;
 }
 
-/* Топ товары */
 .analytics-section {
   margin-top: 30px;
   background: white;
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid #e8e3db;
 }
 
 .analytics-section h3 {
   margin: 0 0 20px 0;
-  color: var(--brown);
+  color: #5A2D0C;
   font-size: 18px;
 }
 
@@ -1270,20 +1265,20 @@ td.delete-cell {
   gap: 12px;
   align-items: center;
   padding: 12px;
-  background: var(--lightest);
+  background: #fdf9f3;
   border-radius: 6px;
   transition: all 0.2s;
 }
 
 .product-row:hover {
-  background: var(--light);
+  background: #f5efe5;
   transform: translateX(4px);
 }
 
 .product-rank {
   width: 32px;
   height: 32px;
-  background: var(--orange);
+  background: #F5A623;
   color: white;
   border-radius: 50%;
   display: flex;
@@ -1301,7 +1296,7 @@ td.delete-cell {
 
 .product-name {
   font-weight: 600;
-  color: var(--brown);
+  color: #5A2D0C;
   font-size: 14px;
 }
 
@@ -1319,7 +1314,7 @@ td.delete-cell {
 
 .product-boxes {
   font-weight: 600;
-  color: var(--brown);
+  color: #5A2D0C;
   font-size: 14px;
 }
 
@@ -1330,15 +1325,15 @@ td.delete-cell {
 
 .product-bar {
   height: 20px;
-  background: var(--lightest);
+  background: #fdf9f3;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid #e8e3db;
 }
 
 .product-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--green), #4caf50);
+  background: linear-gradient(90deg, #4CAF50, #4caf50);
   border-radius: 10px;
   transition: width 0.5s ease;
 }
@@ -1349,7 +1344,7 @@ td.delete-cell {
   align-items: center;
   margin-bottom: 20px;
   padding: 12px;
-  background: var(--lightest);
+  background: #fdf9f3;
   border-radius: 8px;
 }
 
@@ -1360,21 +1355,6 @@ td.delete-cell {
   font-weight: 500;
 }
 
-/* Кнопка автозаказа */
-#autoCalculateBtn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  font-weight: 600;
-}
-
-#autoCalculateBtn:hover {
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-/* Адаптив для аналитики */
 @media (max-width: 768px) {
   .stats-cards {
     grid-template-columns: 1fr;
@@ -1393,34 +1373,4 @@ td.delete-cell {
   .product-bar {
     grid-column: 1 / -1;
   }
-}
-/* ================= АНАЛИТИКА ================= */
-
-.analytics-root {
-  background: #FFF6E8;
-  border-radius: 14px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.analytics-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #E5D3B3;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.analytics-body {
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.analytics-card {
-  background: #FFFFFF;
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }

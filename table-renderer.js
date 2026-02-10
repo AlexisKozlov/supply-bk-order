@@ -15,7 +15,8 @@ export function renderTable(orderState, tbody, callbacks) {
     setupExcelNavigation,
     roundToPallet,
     saveItemOrder,
-    render
+    render,
+    openProductForEdit
   } = callbacks;
 
   tbody.innerHTML = '';
@@ -59,6 +60,15 @@ export function renderTable(orderState, tbody, callbacks) {
     const calcToOrderBtn = tr.querySelector('.calc-to-order');
     const roundBtn = tr.querySelector('.round-to-pallet');
     const deleteBtn = tr.querySelector('.delete-item-x');
+    const itemNameCell = tr.querySelector('.item-name');
+
+    // Клик по наименованию - открыть редактирование (если есть SKU)
+    if (itemNameCell && item.sku && openProductForEdit) {
+      itemNameCell.style.cursor = 'pointer';
+      itemNameCell.addEventListener('click', () => {
+        openProductForEdit(item.sku);
+      });
+    }
 
     // Калькулятор для всех полей
     setupCalculator(inputs[0], (result) => {

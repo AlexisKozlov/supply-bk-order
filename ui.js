@@ -9,10 +9,7 @@ import { showToast, customConfirm } from './modals.js';
 import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
-import {
-  getOrdersAnalytics
-} from './analytics.js';
-
+import { getOrdersAnalytics, getTopProducts, renderAnalytics, renderTopProducts } from './analytics.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1560,65 +1557,55 @@ if (exportExcelBtn) {
   });
 }
 
-
+/* ================= АНАЛИТИКА ================= */
 async function loadAnalytics() {
-  analyticsContainer.innerHTML = `
-    <div class="analytics-card" style="text-align:center">
-      Загрузка аналитики...
-    </div>
-  `;
-  topProductsContainer.innerHTML = '';
-
-  const days = Number(analyticsPeriodSelect.value) || 30;
-  const prevDays = days * 2;
-
-  const current = await getOrdersAnalytics(
-    orderState.settings.legalEntity,
-    days
-  );
-
-  const previous = await getOrdersAnalytics(
-    orderState.settings.legalEntity,
-    prevDays
-  );
-
-  analyticsContainer.innerHTML = `
-    <div class="analytics-card">
-      <b>Сводка</b><br><br>
-      Заказов за период: <b>${current.orders.length}</b><br>
-      Заказов ранее: <b>${previous.orders.length}</b>
-    </div>
-  `;
-
-  const map = {};
-  current.orders.forEach(o =>
-    o.order_items.forEach(i => {
-      map[i.product_name] = (map[i.product_name] || 0) + (i.qty_boxes || 0);
-    })
-  );
-
-  const sorted = Object.entries(map)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-
-  if (!sorted.length) {
-    topProductsContainer.innerHTML = `
-      <div class="analytics-card">Нет данных</div>
-    `;
-    return;
+  const period = parseInt(analyticsPeriodSelect?.value || '30');
+  const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
+  
+  if (analyticsContainer) {
+    analyticsContainer.innerHTML = '<div style="text-align:center;padding:40px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
   }
-
-  let html = '<ul>';
-  sorted.forEach(([name, qty]) => {
-    html += `<li>${name}: <b>${qty}</b> кор.</li>`;
-  });
-  html += '</ul>';
-
-  topProductsContainer.innerHTML = `
-    <div class="analytics-card">
-      <b>Топ товаров</b><br><br>
-      ${html}
-    </div>
-  `;
+  if (topProductsContainer) {
+    topProductsContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
+  }
+  
+  try {
+    const analytics = await getOrdersAnalytics(legalEntity, period);
+    if (analyticsContainer) renderAnalytics(analytics, analyticsContainer);
+    
+    const topProducts = await getTopProducts(legalEntity, 10);
+    if (topProductsContainer) renderTopProducts(topProducts, topProductsContainer);
+  } catch (error) {
+    console.error('Ошибка загрузки аналитики:', error);
+    if (analyticsContainer) {
+      analyticsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">Ошибка загрузки данных</div>';
+    }
+  }
 }
 
+if (menuAnalyticsBtn) {
+  menuAnalyticsBtn.addEventListener('click', async () => {
+    if (analyticsModal) {
+      analyticsModal.classList.remove('hidden');
+      await loadAnalytics();
+    }
+  });
+}
+
+if (closeAnalyticsBtn) {
+  closeAnalyticsBtn.addEventListener('click', () => {
+    if (analyticsModal) analyticsModal.classList.add('hidden');
+  });
+}
+
+if (refreshAnalyticsBtn) {
+  refreshAnalyticsBtn.addEventListener('click', async () => {
+    await loadAnalytics();
+  });
+}
+
+if (analyticsPeriodSelect) {
+  analyticsPeriodSelect.addEventListener('change', async () => {
+    await loadAnalytics();
+  });
+}
