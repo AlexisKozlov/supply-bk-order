@@ -39,6 +39,7 @@ const databaseList = document.getElementById('databaseList');
 
 const editCardModal = document.getElementById('editCardModal');
 const closeEditCardBtn = document.getElementById('closeEditCard');
+const confirmModal = document.getElementById('confirmModal');
 let currentEditingProduct = null; // ID товара который редактируем
 const buildOrderBtn = document.getElementById('buildOrder');
 const orderSection = document.getElementById('orderSection');
@@ -224,6 +225,7 @@ async function loadOrderHistory() {
     .select(`
   id,
   delivery_date,
+  today_date,
   supplier,
   legal_entity,
   safety_days,
@@ -231,6 +233,8 @@ async function loadOrderHistory() {
   unit,
   note,
   created_at,
+  has_transit,
+  show_stock_column,
   order_items (
     sku,
     name,
@@ -516,6 +520,18 @@ async function renderOrderHistory(orders) {
       e.stopPropagation();
       const confirmed = await customConfirm('Удалить заказ?', 'Заказ будет удален из истории безвозвратно');
       if (!confirmed) return;
+
+      // Сначала удаляем позиции заказа
+      const { error: itemsErr } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', order.id);
+
+      if (itemsErr) {
+        showToast('Ошибка удаления', 'Не удалось удалить позиции заказа', 'error');
+        console.error(itemsErr);
+        return;
+      }
 
       const { error } = await supabase
         .from('orders')
@@ -1357,7 +1373,6 @@ function rerenderAll() {
     });
 }
 
-render();
 
 
 
