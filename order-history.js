@@ -15,6 +15,7 @@ export async function loadOrderHistory(orderState, historySupplier, historyConta
     .select(`
       id,
       delivery_date,
+      today_date,
       supplier,
       legal_entity,
       safety_days,

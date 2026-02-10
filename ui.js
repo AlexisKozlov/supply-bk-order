@@ -8,6 +8,8 @@ import { SafetyStockManager } from './safety-stock.js';
 import { showToast, customConfirm } from './modals.js';
 import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
+import { exportToExcel, canExportExcel } from './excel-export.js';
+import { getOrdersAnalytics, getTopProducts, renderAnalytics, renderTopProducts } from './analytics.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -43,6 +45,17 @@ const orderSection = document.getElementById('orderSection');
 const loginOverlay = document.getElementById('loginOverlay');
 const loginBtn = document.getElementById('loginBtn');
 const loginPassword = document.getElementById('loginPassword');
+
+/* ================= DOM ДЛЯ НОВЫХ ФУНКЦИЙ v1.6.0 ================= */
+const autoCalculateBtn = document.getElementById('autoCalculateBtn');
+const exportExcelBtn = document.getElementById('exportExcelBtn');
+const menuAnalyticsBtn = document.getElementById('menuAnalytics');
+const analyticsModal = document.getElementById('analyticsModal');
+const closeAnalyticsBtn = document.getElementById('closeAnalytics');
+const analyticsPeriodSelect = document.getElementById('analyticsPeriod');
+const refreshAnalyticsBtn = document.getElementById('refreshAnalytics');
+const analyticsContainer = document.getElementById('analyticsContainer');
+const topProductsContainer = document.getElementById('topProductsContainer');
 
 /* ================= BADGE ЮР. ЛИЦА ================= */
 function updateEntityBadge() {
@@ -166,12 +179,13 @@ saveOrderBtn.addEventListener('click', async () => {
     .insert({
       supplier: orderState.settings.supplier || 'Свободный',
       delivery_date: orderState.settings.deliveryDate,
+      today_date: orderState.settings.today, // Сохраняем дату "сегодня"
       safety_days: orderState.settings.safetyDays,
       period_days: orderState.settings.periodDays,
       unit: orderState.settings.unit,
       legal_entity: orderState.settings.legalEntity,
-      note: note || null, // Примечание
-      created_at: new Date().toISOString(), // Дата и время создания
+      note: note || null,
+      created_at: new Date().toISOString(),
       has_transit: orderState.settings.hasTransit || false,
       show_stock_column: orderState.settings.showStockColumn || false
     })
@@ -423,6 +437,7 @@ async function renderOrderHistory(orders) {
 
       // Восстанавливаем параметры заказа
       orderState.settings.legalEntity = legalEntity;
+      orderState.settings.today = order.today_date ? new Date(order.today_date) : new Date();
       orderState.settings.deliveryDate = new Date(order.delivery_date);
       orderState.settings.safetyDays = order.safety_days || 0;
       orderState.settings.periodDays = order.period_days || 30;
@@ -431,6 +446,7 @@ async function renderOrderHistory(orders) {
       orderState.settings.showStockColumn = order.show_stock_column || false;
 
       document.getElementById('legalEntity').value = legalEntity;
+      document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
       document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
       
       // Устанавливаем товарный запас
@@ -534,9 +550,19 @@ function bindSetting(id, key, isDate = false) {
   if (!el) return;
 
   el.addEventListener('input', e => {
-    orderState.settings[key] = isDate
-      ? new Date(e.target.value)
-      : +e.target.value || 0;
+    const newValue = isDate ? new Date(e.target.value) : +e.target.value || 0;
+    
+    // Валидация дат
+    if (isDate && key === 'deliveryDate') {
+      const today = orderState.settings.today || new Date();
+      if (newValue < today) {
+        showToast('Некорректная дата', 'Дата прихода не может быть раньше сегодняшней', 'error');
+        e.target.value = orderState.settings.deliveryDate?.toISOString().slice(0, 10) || '';
+        return;
+      }
+    }
+    
+    orderState.settings[key] = newValue;
     rerenderAll();
     validateRequiredSettings();
     saveDraft(); // Автосохранение
@@ -1509,4 +1535,105 @@ async function restoreItemOrder() {
   if (sorted.length === orderState.items.length) {
     orderState.items = sorted;
   }
+}
+/* ================= АВТОЗАКАЗ ================= */
+if (autoCalculateBtn) {
+  autoCalculateBtn.addEventListener('click', () => {
+    if (orderState.items.length === 0) {
+      showToast('Нет товаров', 'Добавьте товары в заказ', 'info');
+      return;
+    }
+    
+    let calculated = 0;
+    orderState.items.forEach(item => {
+      const calc = calculateItem(item, orderState.settings);
+      if (calc.calculatedOrder > 0) {
+        item.finalOrder = calc.calculatedOrder;
+        calculated++;
+      }
+    });
+    
+    if (calculated > 0) {
+      render();
+      saveDraft();
+      saveStateToHistory();
+      showToast('Автозаказ выполнен', `Рассчитано ${calculated} товаров`, 'success');
+    } else {
+      showToast('Нечего рассчитывать', 'Заполните расход и остаток для товаров', 'info');
+    }
+  });
+}
+
+/* ================= ЭКСПОРТ В EXCEL ================= */
+if (exportExcelBtn) {
+  exportExcelBtn.addEventListener('click', async () => {
+    if (!canExportExcel(orderState)) {
+      showToast('Нет данных', 'Добавьте товары в заказ', 'info');
+      return;
+    }
+    
+    try {
+      showToast('Экспорт...', 'Подготовка файла Excel', 'info');
+      const result = await exportToExcel(orderState);
+      if (result.success) {
+        showToast('Готово!', `Файл ${result.filename} загружен`, 'success');
+      }
+    } catch (error) {
+      console.error('Ошибка экспорта:', error);
+      showToast('Ошибка', 'Не удалось экспортировать в Excel', 'error');
+    }
+  });
+}
+
+/* ================= АНАЛИТИКА ================= */
+async function loadAnalytics() {
+  const period = parseInt(analyticsPeriodSelect?.value || '30');
+  const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
+  
+  if (analyticsContainer) {
+    analyticsContainer.innerHTML = '<div style="text-align:center;padding:40px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
+  }
+  if (topProductsContainer) {
+    topProductsContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
+  }
+  
+  try {
+    const analytics = await getOrdersAnalytics(legalEntity, period);
+    if (analyticsContainer) renderAnalytics(analytics, analyticsContainer);
+    
+    const topProducts = await getTopProducts(legalEntity, 10);
+    if (topProductsContainer) renderTopProducts(topProducts, topProductsContainer);
+  } catch (error) {
+    console.error('Ошибка загрузки аналитики:', error);
+    if (analyticsContainer) {
+      analyticsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:red;">Ошибка загрузки данных</div>';
+    }
+  }
+}
+
+if (menuAnalyticsBtn) {
+  menuAnalyticsBtn.addEventListener('click', async () => {
+    if (analyticsModal) {
+      analyticsModal.classList.remove('hidden');
+      await loadAnalytics();
+    }
+  });
+}
+
+if (closeAnalyticsBtn) {
+  closeAnalyticsBtn.addEventListener('click', () => {
+    if (analyticsModal) analyticsModal.classList.add('hidden');
+  });
+}
+
+if (refreshAnalyticsBtn) {
+  refreshAnalyticsBtn.addEventListener('click', async () => {
+    await loadAnalytics();
+  });
+}
+
+if (analyticsPeriodSelect) {
+  analyticsPeriodSelect.addEventListener('change', async () => {
+    await loadAnalytics();
+  });
 }
