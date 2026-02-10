@@ -10,11 +10,9 @@ import { loadDatabaseProducts, setupDatabaseSearch } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
 import {
-  getOrdersAnalytics,
-  buildSummary,
-  renderSummary,
-  renderTopProducts
+  getOrdersAnalytics
 } from './analytics.js';
+
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1584,19 +1582,14 @@ async function loadAnalytics() {
     prevDays
   );
 
-  analyticsContainer.innerHTML = '';
-
-  /* ===== СВОДКА ===== */
-  const summaryHTML = `
+  analyticsContainer.innerHTML = `
     <div class="analytics-card">
       <b>Сводка</b><br><br>
       Заказов за период: <b>${current.orders.length}</b><br>
-      Заказов ранее: <b>${previous.orders.length}</b><br>
+      Заказов ранее: <b>${previous.orders.length}</b>
     </div>
   `;
-  analyticsContainer.innerHTML += summaryHTML;
 
-  /* ===== ТОП ТОВАРОВ ===== */
   const map = {};
   current.orders.forEach(o =>
     o.order_items.forEach(i => {
