@@ -437,11 +437,24 @@
         </select>
       </label>
       <label style="flex:0;min-width:100px;">
-        Горизонт
+        Период
         <select id="planMonths">
-          <option value="1">1 месяц</option>
-          <option value="2">2 месяца</option>
-          <option value="3" selected>3 месяца</option>
+          <optgroup label="Недели">
+            <option value="w1">1 неделя</option>
+            <option value="w2">2 недели</option>
+            <option value="w3">3 недели</option>
+            <option value="w4">4 недели</option>
+            <option value="w5">5 недель</option>
+            <option value="w6">6 недель</option>
+            <option value="w8">8 недель</option>
+            <option value="w10">10 недель</option>
+            <option value="w12">12 недель</option>
+          </optgroup>
+          <optgroup label="Месяцы">
+            <option value="m1">1 месяц</option>
+            <option value="m2">2 месяца</option>
+            <option value="m3" selected>3 месяца</option>
+          </optgroup>
         </select>
       </label>
       <button id="planLoadProducts" class="btn primary" style="height:38px;">Загрузить товары</button>
