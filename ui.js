@@ -1257,6 +1257,28 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
+/* ================= ОБНОВЛЕНИЕ КАРТОЧКИ В ЗАКАЗЕ ================= */
+window.addEventListener('product-card-updated', (e) => {
+  const { sku, name, qty_per_box, boxes_per_pallet, unit_of_measure } = e.detail;
+  if (!sku) return;
+  
+  let updated = false;
+  orderState.items.forEach(item => {
+    if (item.sku === sku) {
+      item.name = name;
+      item.qtyPerBox = qty_per_box;
+      item.boxesPerPallet = boxes_per_pallet;
+      item.unitOfMeasure = unit_of_measure;
+      updated = true;
+    }
+  });
+  
+  if (updated) {
+    render();
+    saveDraft();
+  }
+});
+
 
 /* ================= БАЗА ДАННЫХ ================= */
 menuDatabaseBtn.addEventListener('click', () => {
@@ -1322,16 +1344,6 @@ document.addEventListener('keydown', (e) => {
       document.getElementById('confirmYes').click();
     }
   }
-});
-
-/* ================= ЗАКРЫТИЕ МОДАЛОК ПО КЛИКУ НА OVERLAY ================= */
-document.querySelectorAll('.modal').forEach(modal => {
-  modal.addEventListener('click', (e) => {
-    // Клик на сам overlay (не на modal-box внутри)
-    if (e.target === modal) {
-      modal.classList.add('hidden');
-    }
-  });
 });
 
 /* ================= СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ ПОРЯДКА В SUPABASE ================= */

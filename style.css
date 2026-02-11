@@ -1018,10 +1018,6 @@ td.delete-cell {
   transform: translateY(-1px);
 }
 
-.entity-badge {
-  margin-left: 0;
-}
-
 /* ===== FOOTER ===== */
 .footer {
   background: var(--card);

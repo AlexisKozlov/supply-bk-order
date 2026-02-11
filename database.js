@@ -89,7 +89,7 @@ async function deleteCard(id) {
   loadDatabaseProducts(dbLegalEntitySelect, databaseList);
 }
 
-export async function openEditCard(id, onSaved) {
+export async function openEditCard(id, onSaveCallback) {
   const { data, error } = await supabase
     .from('products')
     .select('*')
@@ -124,17 +124,19 @@ export async function openEditCard(id, onSaved) {
       return;
     }
     
+    const updatedData = {
+      name: name,
+      sku: document.getElementById('e_sku').value || null,
+      supplier: document.getElementById('e_supplier').value || null,
+      legal_entity: document.getElementById('e_legalEntity').value,
+      qty_per_box: +document.getElementById('e_box').value || null,
+      boxes_per_pallet: +document.getElementById('e_pallet').value || null,
+      unit_of_measure: document.getElementById('e_unit').value
+    };
+    
     const { error } = await supabase
       .from('products')
-      .update({
-        name: name,
-        sku: document.getElementById('e_sku').value || null,
-        supplier: document.getElementById('e_supplier').value || null,
-        legal_entity: document.getElementById('e_legalEntity').value,
-        qty_per_box: +document.getElementById('e_box').value || null,
-        boxes_per_pallet: +document.getElementById('e_pallet').value || null,
-        unit_of_measure: document.getElementById('e_unit').value
-      })
+      .update(updatedData)
       .eq('id', id);
     
     if (error) {
@@ -145,23 +147,13 @@ export async function openEditCard(id, onSaved) {
     
     showToast('Карточка обновлена', '', 'success');
     editCardModal.classList.add('hidden');
-    
-    // Callback для обновления данных в заказе
-    if (onSaved) {
-      onSaved({
-        name: name,
-        sku: document.getElementById('e_sku').value || null,
-        supplier: document.getElementById('e_supplier').value || null,
-        legal_entity: document.getElementById('e_legalEntity').value,
-        qty_per_box: +document.getElementById('e_box').value || null,
-        boxes_per_pallet: +document.getElementById('e_pallet').value || null,
-        unit_of_measure: document.getElementById('e_unit').value
-      });
-    }
-    
     const databaseList = document.getElementById('databaseList');
     const dbLegalEntitySelect = document.getElementById('dbLegalEntity');
     loadDatabaseProducts(dbLegalEntitySelect, databaseList);
+    
+    // Вызываем callback с обновлёнными данными
+    if (onSaveCallback) onSaveCallback(updatedData);
+    
     cleanup();
   };
   
@@ -224,10 +216,9 @@ export function setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseLis
 }
 /**
  * Открыть карточку редактирования по SKU товара
- * @param {string} sku
- * @param {function} onSaved - callback(updatedProduct) после сохранения
+ * Используется при клике на наименование в блоке заказа
  */
-export async function openEditCardBySku(sku, onSaved) {
+export async function openEditCardBySku(sku, onSaveCallback) {
   if (!sku) return;
   
   const { data, error } = await supabase
@@ -241,5 +232,5 @@ export async function openEditCardBySku(sku, onSaved) {
     return;
   }
   
-  openEditCard(data.id, onSaved);
+  openEditCard(data.id, onSaveCallback);
 }
