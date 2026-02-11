@@ -36,6 +36,8 @@
  История заказов</button>
     <button id="menuDatabase" class="menu-btn"><img src="./icons/base.png" width="14" height="14"  alt="">
  База данных</button>
+    <button id="addManual" class="menu-btn"><img src="./icons/edit.png" width="14" height="14" alt="">
+ Ручной товар</button>
     <button id="menuAnalytics" class="menu-btn">📊 Аналитика</button>
   </nav>
   <span id="entityBadge" class="entity-badge">Бургер БК</span>
@@ -82,10 +84,7 @@
 
       <label class="tooltip-wrap" data-tip="Желаемый запас товара на складе после поставки (в днях или дата)">
         Товарный запас
-        <div style="display:flex;gap:4px;">
-          <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" style="flex:1;" />
-          <button type="button" id="safetyCalendarBtn" class="btn secondary" title="Выбрать дату окончания запаса" style="padding:6px 10px;"><img src="./icons/calendar.png" width="16" height="16" alt=""></button>
-        </div>
+        <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" />
       </label>
       <label class="tooltip-wrap" data-tip="Единицы измерения для ввода расхода и отображения заказа">
         Единицы
@@ -121,37 +120,27 @@
   <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
   <div id="orderSection" class="hidden">
 
-    <!-- ДОБАВЛЕНИЕ ТОВАРОВ -->
-    <section class="card">
-      <h2>Добавление товаров</h2>
-
-      <div class="actions">
-        <button id="addManual" class="btn primary"><img src="./icons/edit.png" width="16" height="16" alt=""> Ручной товар</button>
-        <button id="copyOrder" class="btn secondary"><img src="./icons/copy.png" width="16" height="16" alt=""> Скопировать заказ</button>
-        <button id="saveOrder" class="btn primary"><img src="./icons/save.png" width="16" height="16" alt=""> Сохранить заказ</button>
-      </div>
-
-      <section class="search">
-        <input
-          id="productSearch"
-          placeholder="Поиск по артикулу или названию"
-        />
-        <button id="clearSearch" class="search-clear hidden" title="Очистить поиск"><img src="./icons/close.png" width="12" height="12" alt=""></button>
-        <div id="searchResults" class="search-results"></div>
-      </section>
-    </section>
-
     <!-- ТАБЛИЦА ЗАКАЗА -->
     <section class="card">
       <h2>Заказ <span id="itemsCounter" style="font-weight:400;font-size:14px;color:#8B7355;"></span></h2>
 
       <!-- КОМПАКТНОЕ МЕНЮ -->
-      <div class="order-actions" style="display:flex;gap:6px;margin-bottom:12px;font-size:13px;">
-        <button id="undoBtn" class="btn secondary" disabled title="Отменить (Ctrl+Z)" style="padding:4px 8px;">↶</button>
-        <button id="redoBtn" class="btn secondary" disabled title="Повторить (Ctrl+Y)" style="padding:4px 8px;">↷</button>
-        <button id="allToOrderBtn" class="btn primary" title="Перенести расчёт в заказ для всех товаров" style="padding:4px 10px;">В заказ всё</button>
+      <div class="order-actions" style="display:flex;gap:6px;margin-bottom:12px;font-size:13px;flex-wrap:wrap;align-items:center;">
+        <button id="undoBtn" class="btn secondary tooltip-wrap" disabled data-tip="Отменить (Ctrl+Z)" style="padding:4px 8px;">↶</button>
+        <button id="redoBtn" class="btn secondary tooltip-wrap" disabled data-tip="Повторить (Ctrl+Y)" style="padding:4px 8px;">↷</button>
+        <button id="allToOrderBtn" class="btn primary tooltip-wrap" data-tip="Перенести расчёт в заказ для всех товаров" style="padding:4px 10px;">В заказ всё</button>
         <button id="clearOrder" class="btn secondary" style="padding:4px 10px;">Очистить</button>
-        <button id="exportExcelBtn" class="btn" title="Экспортировать заказ в Excel" style="padding:4px 10px;background:#4CAF50;color:white;border:none;">📊 Excel</button>
+        <button id="copyOrder" class="btn secondary tooltip-wrap" data-tip="Скопировать заказ в буфер обмена" style="padding:4px 10px;"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать</button>
+        <button id="saveOrder" class="btn primary tooltip-wrap" data-tip="Сохранить заказ в историю" style="padding:4px 10px;"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить</button>
+        <button id="exportExcelBtn" class="btn tooltip-wrap" data-tip="Экспортировать заказ в Excel" style="padding:4px 10px;background:#4CAF50;color:white;border:none;">📊 Excel</button>
+        
+        <div style="flex:1;min-width:20px;"></div>
+        
+        <section class="search" style="max-width:300px;margin:0;">
+          <input id="productSearch" placeholder="Поиск товара" />
+          <button id="clearSearch" class="search-clear hidden"><img src="./icons/close.png" width="12" height="12" alt=""></button>
+          <div id="searchResults" class="search-results"></div>
+        </section>
       </div>
 
       <div class="table-wrap">
@@ -195,12 +184,23 @@
       <button id="closeHistory" class="modal-close"><img src="./icons/close.png" width="14" height="14" alt=""></button>
     </div>
 
-    <label>
-      Поставщик
-      <select id="historySupplier">
-        <option value="">Все</option>
-      </select>
-    </label>
+    <div style="display:flex;gap:12px;margin-bottom:16px;">
+      <label style="flex:1;">
+        Юр. лицо
+        <select id="historyLegalEntity">
+          <option value="">Все</option>
+          <option value="Бургер БК">Бургер БК</option>
+          <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
+        </select>
+      </label>
+      <label style="flex:1;">
+        Поставщик
+        <select id="historySupplier">
+          <option value="">Все</option>
+        </select>
+      </label>
+    </div>
 
     <div id="orderHistory"></div>
   </div>
@@ -362,7 +362,7 @@
   </div>
 </div>
 <footer class="footer">
-  <span class="version">Версия: <span id="appVersion">2.0.0</span>
+  <span class="version">Версия: <span id="appVersion">0.9.1</span>
 </footer>
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
@@ -375,7 +375,7 @@
 })();
 </script>
 
-<script type="module" src="./ui.js?v=2.0.0"></script>
+<script type="module" src="./ui.js?v=0.9.1"></script>
 
 <!-- ===== МОДАЛКА АНАЛИТИКИ ===== -->
 <div id="analyticsModal" class="modal hidden">

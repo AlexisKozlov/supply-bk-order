@@ -16,6 +16,7 @@ const nf = new Intl.NumberFormat('ru-RU');
  */
 export async function loadOrderHistory(opts) {
   const { historyContainer, historySupplier, callbacks } = opts;
+  const historyLegalEntity = document.getElementById('historyLegalEntity');
   
   historyContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
@@ -50,8 +51,14 @@ export async function loadOrderHistory(opts) {
     query = query.eq('supplier', historySupplier.value);
   }
 
-  const currentLegalEntity = orderState.settings.legalEntity || document.getElementById('legalEntity').value;
-  query = query.eq('legal_entity', currentLegalEntity);
+  // Фильтр по юр.лицу — из селектора в модалке или из текущего состояния
+  const filterLegalEntity = historyLegalEntity && historyLegalEntity.value 
+    ? historyLegalEntity.value 
+    : (orderState.settings.legalEntity || document.getElementById('legalEntity').value);
+  
+  if (filterLegalEntity) {
+    query = query.eq('legal_entity', filterLegalEntity);
+  }
 
   const { data, error } = await query;
 
@@ -117,7 +124,7 @@ async function renderOrderHistory(orders, opts) {
 
     div.innerHTML = `
       <div class="history-header">
-        <span><b>${date}</b> — ${order.supplier} (${legalEntity})${noteStr}</span>
+        <span><b>${date}</b> — ${order.supplier}${noteStr}</span>
         <div class="history-actions">
           ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
           <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
@@ -171,6 +178,7 @@ async function copyOrderToForm(order, legalEntity, opts) {
   orderState.items = [];
 
   orderState.settings.legalEntity = legalEntity;
+  orderState.settings.supplier = order.supplier || '';
   orderState.settings.today = order.today_date ? new Date(order.today_date) : new Date();
   orderState.settings.deliveryDate = new Date(order.delivery_date);
   orderState.settings.safetyDays = order.safety_days || 0;
@@ -180,6 +188,12 @@ async function copyOrderToForm(order, legalEntity, opts) {
   orderState.settings.showStockColumn = order.show_stock_column || false;
 
   document.getElementById('legalEntity').value = legalEntity;
+  
+  // Загружаем поставщиков для юр. лица, затем устанавливаем значение
+  if (callbacks.loadSuppliers) {
+    await callbacks.loadSuppliers(legalEntity);
+  }
+  document.getElementById('supplierFilter').value = orderState.settings.supplier;
   document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
   document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
   
@@ -226,6 +240,7 @@ async function copyOrderToForm(order, legalEntity, opts) {
 
   orderSection.classList.remove('hidden');
   render();
+  if (callbacks.updateFinalSummary) callbacks.updateFinalSummary();
   saveDraft();
   historyModal.classList.add('hidden');
   showToast('Заказ скопирован', `Загружено ${order.order_items.length} товаров`, 'success');

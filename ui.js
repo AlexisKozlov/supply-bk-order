@@ -238,7 +238,9 @@ function getHistoryOpts() {
       saveDraft,
       safetyStockManager,
       orderSection,
-      historyModal
+      historyModal,
+      loadSuppliers,
+      updateFinalSummary
     }
   };
 }
@@ -372,16 +374,15 @@ bindSetting('today', 'today', true);
 bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
 
-// Товарный запас - с календарём и двусторонней связью
+// Товарный запас - без кнопки календаря, только текстовый ввод
 const safetyDaysInput = document.getElementById('safetyDays');
-const safetyCalendarBtn = document.getElementById('safetyCalendarBtn');
 
 let safetyStockManager = null;
 
-if (safetyDaysInput && safetyCalendarBtn) {
+if (safetyDaysInput) {
   safetyStockManager = new SafetyStockManager(
     safetyDaysInput,
-    safetyCalendarBtn,
+    null, // кнопка календаря убрана
     (data) => {
       // Callback при изменении
       orderState.settings.safetyDays = data.days;
@@ -557,6 +558,11 @@ async function loadSuppliers(legalEntity) {
 const initSuppliers = loadSuppliers(orderState.settings.legalEntity);
 
 historySupplier.addEventListener('change', loadOrderHistory);
+
+const historyLegalEntity = document.getElementById('historyLegalEntity');
+if (historyLegalEntity) {
+  historyLegalEntity.addEventListener('change', loadOrderHistory);
+}
 
 supplierSelect.addEventListener('change', async () => {
   // Игнорируем событие при загрузке черновика
@@ -957,7 +963,7 @@ copyOrderBtn.addEventListener('click', () => {
   }
 
   const deliveryDate = orderState.settings.deliveryDate
-    ? orderState.settings.deliveryDate.toLocaleDateString()
+    ? orderState.settings.deliveryDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
     : '—';
 
   const lines = orderState.items
@@ -980,7 +986,7 @@ copyOrderBtn.addEventListener('click', () => {
       const name = `${item.sku ? item.sku + ' ' : ''}${item.name}`;
       const unit = item.unitOfMeasure || 'шт';
 
-      return `${name} (${roundedPieces} ${unit}) - ${roundedBoxes} коробок`;
+      return `${name} (${nf.format(roundedPieces)} ${unit}) - ${roundedBoxes} коробок`;
     })
     .filter(Boolean);
 
@@ -993,14 +999,9 @@ copyOrderBtn.addEventListener('click', () => {
   
   const text =
 `Добрый день!
-
-Юр. лицо: ${legalEntity}
-
-Просьба поставить:
+Просьба поставить для юр. лица ${legalEntity}, на дату - ${deliveryDate}:
 
 ${lines.join('\n')}
-
-Дата прихода: ${deliveryDate}
 
 Спасибо!`;
 
@@ -1107,13 +1108,28 @@ function render() {
     roundToPallet,
     saveItemOrder,
     render,
-    openProductForEdit: openEditCardBySku
+    openProductForEdit: (sku) => {
+      openEditCardBySku(sku, (updated) => {
+        // Обновляем item в заказе после редактирования карточки
+        const item = orderState.items.find(i => i.sku === sku);
+        if (item) {
+          item.name = updated.name || item.name;
+          item.sku = updated.sku || item.sku;
+          item.qtyPerBox = updated.qty_per_box || item.qtyPerBox;
+          item.boxesPerPallet = updated.boxes_per_pallet || item.boxesPerPallet;
+          item.unitOfMeasure = updated.unit_of_measure || item.unitOfMeasure;
+          render();
+          saveDraft();
+        }
+      });
+    }
   });
   
   // Применяем видимость колонок после рендера
   toggleTransitColumn();
   toggleStockColumn();
   updateItemsCounter();
+  updateFinalSummary();
 }
 
 /* ================= СЧЁТЧИК ПОЗИЦИЙ ================= */
@@ -1260,6 +1276,16 @@ dbLegalEntitySelect.addEventListener('change', () => {
 
 setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseList);
 
+/* ================= ЗАКРЫТИЕ МОДАЛОК ПО ФОНУ ================= */
+document.querySelectorAll('.modal').forEach(modal => {
+  modal.addEventListener('click', (e) => {
+    // Закрываем только если кликнули по самому overlay (не по modal-box)
+    if (e.target === modal) {
+      modal.classList.add('hidden');
+    }
+  });
+});
+
 /* ================= КЛАВИШИ ENTER/ESC ================= */
 document.addEventListener('keydown', (e) => {
   // ESC — закрытие модалок
@@ -1296,6 +1322,17 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+/* ================= ЗАКРЫТИЕ МОДАЛОК ПО КЛИКУ НА OVERLAY ================= */
+document.querySelectorAll('.modal').forEach(modal => {
+  modal.addEventListener('click', (e) => {
+    // Клик на сам overlay (не на modal-box внутри)
+    if (e.target === modal) {
+      modal.classList.add('hidden');
+    }
+  });
+});
+
 /* ================= СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ ПОРЯДКА В SUPABASE ================= */
 async function saveItemOrder() {
   const supplier = orderState.settings.supplier || 'all';

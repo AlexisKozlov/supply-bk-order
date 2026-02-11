@@ -59,12 +59,18 @@ export function customConfirm(title, message) {
 
     const cleanup = (result) => {
       modal.classList.add('hidden');
+      modal.removeEventListener('click', handleBackdrop);
       yesBtn.replaceWith(yesBtn.cloneNode(true));
       noBtn.replaceWith(noBtn.cloneNode(true));
       closeBtn.replaceWith(closeBtn.cloneNode(true));
       resolve(result);
     };
 
+    const handleBackdrop = (e) => {
+      if (e.target === modal) cleanup(false);
+    };
+
+    modal.addEventListener('click', handleBackdrop);
     document.getElementById('confirmYes').addEventListener('click', () => cleanup(true));
     document.getElementById('confirmNo').addEventListener('click', () => cleanup(false));
     document.getElementById('closeConfirm').addEventListener('click', () => cleanup(false));

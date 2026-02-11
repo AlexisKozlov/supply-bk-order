@@ -89,7 +89,7 @@ async function deleteCard(id) {
   loadDatabaseProducts(dbLegalEntitySelect, databaseList);
 }
 
-export async function openEditCard(id) {
+export async function openEditCard(id, onSaved) {
   const { data, error } = await supabase
     .from('products')
     .select('*')
@@ -145,6 +145,20 @@ export async function openEditCard(id) {
     
     showToast('Карточка обновлена', '', 'success');
     editCardModal.classList.add('hidden');
+    
+    // Callback для обновления данных в заказе
+    if (onSaved) {
+      onSaved({
+        name: name,
+        sku: document.getElementById('e_sku').value || null,
+        supplier: document.getElementById('e_supplier').value || null,
+        legal_entity: document.getElementById('e_legalEntity').value,
+        qty_per_box: +document.getElementById('e_box').value || null,
+        boxes_per_pallet: +document.getElementById('e_pallet').value || null,
+        unit_of_measure: document.getElementById('e_unit').value
+      });
+    }
+    
     const databaseList = document.getElementById('databaseList');
     const dbLegalEntitySelect = document.getElementById('dbLegalEntity');
     loadDatabaseProducts(dbLegalEntitySelect, databaseList);
@@ -210,9 +224,10 @@ export function setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseLis
 }
 /**
  * Открыть карточку редактирования по SKU товара
- * Используется при клике на наименование в блоке заказа
+ * @param {string} sku
+ * @param {function} onSaved - callback(updatedProduct) после сохранения
  */
-export async function openEditCardBySku(sku) {
+export async function openEditCardBySku(sku, onSaved) {
   if (!sku) return;
   
   const { data, error } = await supabase
@@ -226,5 +241,5 @@ export async function openEditCardBySku(sku) {
     return;
   }
   
-  openEditCard(data.id);
+  openEditCard(data.id, onSaved);
 }

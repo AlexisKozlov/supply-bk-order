@@ -7,27 +7,26 @@
 export class SafetyStockManager {
   constructor(inputElement, buttonElement, onUpdate) {
     this.input = inputElement;
-    this.button = buttonElement;
+    this.button = buttonElement; // может быть null
     this.onUpdate = onUpdate;
     
     this.days = 0;
     this.endDate = null;
-    this.deliveryDate = new Date(); // Дата ПРИХОДА заказа (не сегодня!)
+    this.deliveryDate = new Date();
     
     this.init();
   }
   
   init() {
-    // Обработчик ввода в поле
     this.input.addEventListener('input', (e) => this.handleInput(e));
     this.input.addEventListener('blur', () => this.formatDisplay());
     
-    // Обработчик кнопки календаря
-    this.button.addEventListener('click', () => this.openDatePicker());
+    // Кнопка календаря опциональна
+    if (this.button) {
+      this.button.addEventListener('click', () => this.openDatePicker());
+    }
     
-    // Форматируем при фокусе
     this.input.addEventListener('focus', () => {
-      // Выделяем только число дней для удобного редактирования
       const value = this.input.value;
       const match = value.match(/^(\d+)/);
       if (match) {
