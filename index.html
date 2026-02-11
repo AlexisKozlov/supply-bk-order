@@ -84,7 +84,12 @@
 
       <label class="tooltip-wrap" data-tip="Желаемый запас товара на складе после поставки (в днях или дата)">
         Товарный запас
-        <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" />
+        <div class="safety-input-wrap">
+          <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" />
+          <button type="button" id="safetyCalendarBtn" class="safety-calendar-icon" title="Выбрать дату окончания запаса">
+            <img src="./icons/calendar.png" width="16" height="16" alt="">
+          </button>
+        </div>
       </label>
       <label class="tooltip-wrap" data-tip="Единицы измерения для ввода расхода и отображения заказа">
         Единицы
@@ -136,7 +141,7 @@
         
         <div style="flex:1;min-width:20px;"></div>
         
-        <section class="search" style="max-width:300px;margin:0;">
+        <section class="search" style="max-width:450px;min-width:280px;margin:0;flex:2;">
           <input id="productSearch" placeholder="Поиск товара" />
           <button id="clearSearch" class="search-clear hidden"><img src="./icons/close.png" width="12" height="12" alt=""></button>
           <div id="searchResults" class="search-results"></div>

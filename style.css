@@ -1102,10 +1102,38 @@ td.delete-cell {
 #editCardModal {
   z-index: 9999;
 }
-/* Кнопка календаря для товарного запаса */
-#safetyCalendarBtn {
-  min-width: 44px;
-  padding: 10px 12px;
+/* Кнопка календаря встроенная в инпут */
+.safety-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.safety-input-wrap input {
+  width: 100%;
+  padding-right: 38px;
+}
+
+.safety-calendar-icon {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+  opacity: 0.6;
+}
+
+.safety-calendar-icon:hover {
+  background: rgba(245,166,35,0.15);
+  opacity: 1;
 }
 /* ========================================
    СТИЛИ ДЛЯ АНАЛИТИКИ v1.6.0
@@ -1408,21 +1436,26 @@ td.delete-cell {
   color: #fff;
   font-size: 12px;
   font-weight: 500;
-  line-height: 1.45;
-  padding: 8px 14px;
+  line-height: 1.35;
+  padding: 7px 14px;
   border-radius: 10px;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.18s ease, transform 0.18s ease;
   z-index: 9000;
   box-shadow: 0 4px 16px rgba(90,45,12,0.22);
-  max-width: 320px;
-  min-width: 180px;
+  max-width: 360px;
+  min-width: 200px;
   white-space: normal;
   text-align: center;
   width: max-content;
   text-transform: none;
   letter-spacing: 0;
+  /* Макс 2 строки */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .tooltip-wrap::before {

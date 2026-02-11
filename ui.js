@@ -374,15 +374,16 @@ bindSetting('today', 'today', true);
 bindSetting('deliveryDate', 'deliveryDate', true);
 bindSetting('periodDays', 'periodDays');
 
-// Товарный запас - без кнопки календаря, только текстовый ввод
+// Товарный запас — с иконкой календаря внутри инпута
 const safetyDaysInput = document.getElementById('safetyDays');
+const safetyCalendarBtn = document.getElementById('safetyCalendarBtn');
 
 let safetyStockManager = null;
 
 if (safetyDaysInput) {
   safetyStockManager = new SafetyStockManager(
     safetyDaysInput,
-    null, // кнопка календаря убрана
+    safetyCalendarBtn, // иконка календаря внутри инпута
     (data) => {
       // Callback при изменении
       orderState.settings.safetyDays = data.days;

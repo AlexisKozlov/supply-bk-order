@@ -56,17 +56,20 @@ export class SafetyStockManager {
    * Открытие датапикера для выбора даты окончания запаса
    */
   openDatePicker() {
-    // Создаем временный input type="date"
     const tempInput = document.createElement('input');
     tempInput.type = 'date';
     tempInput.className = 'safety-date-picker';
     
-    // Позиционируем РЯДОМ с кнопкой (absolute для showPicker)
-    const buttonRect = this.button.getBoundingClientRect();
+    // Позиционируем рядом с инпутом, невидимый
+    const inputRect = this.input.getBoundingClientRect();
     tempInput.style.position = 'absolute';
-    tempInput.style.left = (buttonRect.right + window.scrollX + 5) + 'px';
-    tempInput.style.top = (buttonRect.top + window.scrollY) + 'px';
+    tempInput.style.left = (inputRect.left + window.scrollX) + 'px';
+    tempInput.style.top = (inputRect.bottom + window.scrollY) + 'px';
     tempInput.style.zIndex = '10000';
+    tempInput.style.opacity = '0';
+    tempInput.style.width = '0';
+    tempInput.style.height = '0';
+    tempInput.style.overflow = 'hidden';
     
     // ВАЖНО: Устанавливаем минимальную дату = дата прихода
     if (this.deliveryDate) {
