@@ -219,13 +219,13 @@ function renderPlanTable() {
           <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор</div>
         </td>
         <td class="plan-td-input">
-          <input type="number" class="plan-input plan-consumption" data-idx="${idx}" value="${item.monthlyConsumption || ''}" placeholder="0">
+          <input type="text" inputmode="numeric" class="plan-input plan-consumption" data-idx="${idx}" data-col="0" value="${item.monthlyConsumption || ''}" placeholder="0">
         </td>
         <td class="plan-td-input">
-          <input type="number" class="plan-input plan-stock" data-idx="${idx}" value="${item.stockOnHand || ''}" placeholder="0">
+          <input type="text" inputmode="numeric" class="plan-input plan-stock" data-idx="${idx}" data-col="1" value="${item.stockOnHand || ''}" placeholder="0">
         </td>
         <td class="plan-td-input">
-          <input type="number" class="plan-input plan-supplier-stock" data-idx="${idx}" value="${item.stockAtSupplier || ''}" placeholder="0">
+          <input type="text" inputmode="numeric" class="plan-input plan-supplier-stock" data-idx="${idx}" data-col="2" value="${item.stockAtSupplier || ''}" placeholder="0">
         </td>
         ${headers.map((h, mi) => `<td class="plan-td-result" data-idx="${idx}" data-month="${mi}">—</td>`).join('')}
       </tr>
@@ -246,18 +246,61 @@ function renderPlanTable() {
 
   container.innerHTML = html;
 
-  container.querySelectorAll('.plan-input').forEach(input => {
+  // Обработчики инпутов
+  const allInputs = Array.from(container.querySelectorAll('.plan-input'));
+  
+  allInputs.forEach(input => {
+    // Ввод — обновляем значение (при обычном числе — сразу)
     input.addEventListener('input', (e) => {
-      const idx = parseInt(e.target.dataset.idx);
-      const item = planState.items[idx];
-      if (e.target.classList.contains('plan-consumption')) {
-        item.monthlyConsumption = parseFloat(e.target.value) || 0;
-        // Показываем расход за период под инпутом
-        updateConsumptionHint(e.target, item.monthlyConsumption);
+      const val = e.target.value.trim();
+      // Если это простое число — сразу применяем
+      if (/^\d+\.?\d*$/.test(val)) {
+        applyInputValue(e.target, parseFloat(val));
       }
-      else if (e.target.classList.contains('plan-stock')) item.stockOnHand = parseFloat(e.target.value) || 0;
-      else if (e.target.classList.contains('plan-supplier-stock')) item.stockAtSupplier = parseFloat(e.target.value) || 0;
-      recalcItem(idx);
+    });
+
+    // Enter — вычислить выражение + перейти вниз
+    input.addEventListener('keydown', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      const col = parseInt(e.target.dataset.col);
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        evaluateAndApply(e.target);
+        // Переход вниз
+        navigatePlan(allInputs, idx, col, 1, 0);
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        // Tab — стандартное поведение, но вычислим перед переходом
+        evaluateAndApply(e.target);
+        return;
+      }
+
+      // Стрелки
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        evaluateAndApply(e.target);
+        navigatePlan(allInputs, idx, col, 1, 0);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        evaluateAndApply(e.target);
+        navigatePlan(allInputs, idx, col, -1, 0);
+      } else if (e.key === 'ArrowRight' && e.target.selectionStart === e.target.value.length) {
+        e.preventDefault();
+        evaluateAndApply(e.target);
+        navigatePlan(allInputs, idx, col, 0, 1);
+      } else if (e.key === 'ArrowLeft' && e.target.selectionStart === 0) {
+        e.preventDefault();
+        evaluateAndApply(e.target);
+        navigatePlan(allInputs, idx, col, 0, -1);
+      }
+    });
+
+    // Blur — вычислить выражение при уходе из поля
+    input.addEventListener('blur', (e) => {
+      evaluateAndApply(e.target);
     });
   });
 }
@@ -276,6 +319,88 @@ function updateConsumptionHint(inputEl, monthlyVal) {
     inputEl.parentElement.appendChild(hint);
   }
   hint.textContent = `≈${nf.format(perWeek)}/нед`;
+}
+
+/**
+ * Вычисляет математическое выражение в инпуте (500+300 → 800)
+ * Поддержка: + - * /
+ */
+function evaluateAndApply(input) {
+  const raw = input.value.trim();
+  if (!raw) return;
+  
+  // Если уже простое число — просто применяем
+  if (/^\d+\.?\d*$/.test(raw)) {
+    applyInputValue(input, parseFloat(raw));
+    return;
+  }
+
+  // Проверяем что строка — математическое выражение (цифры и +-*/)
+  if (/^[\d\s+\-*/().]+$/.test(raw)) {
+    try {
+      // Безопасное вычисление через Function
+      const result = new Function('return ' + raw)();
+      if (typeof result === 'number' && isFinite(result)) {
+        const rounded = Math.round(result * 100) / 100;
+        input.value = rounded;
+        applyInputValue(input, rounded);
+      }
+    } catch (e) {
+      // Невалидное выражение — игнорируем
+    }
+  }
+}
+
+/**
+ * Применяет числовое значение к state и пересчитывает
+ */
+function applyInputValue(input, value) {
+  const idx = parseInt(input.dataset.idx);
+  const item = planState.items[idx];
+  if (!item) return;
+
+  if (input.classList.contains('plan-consumption')) {
+    item.monthlyConsumption = value;
+    updateConsumptionHint(input, value);
+  } else if (input.classList.contains('plan-stock')) {
+    item.stockOnHand = value;
+  } else if (input.classList.contains('plan-supplier-stock')) {
+    item.stockAtSupplier = value;
+  }
+  
+  recalcItem(idx);
+}
+
+/**
+ * Навигация между ячейками: dRow = ±1 (вверх/вниз), dCol = ±1 (лево/право)
+ */
+function navigatePlan(allInputs, currentRow, currentCol, dRow, dCol) {
+  const maxCol = 2; // 0=расход, 1=склад, 2=у постав.
+  const maxRow = planState.items.length - 1;
+
+  let newRow = currentRow + dRow;
+  let newCol = currentCol + dCol;
+
+  // Перенос между строками при горизонтальном движении
+  if (newCol > maxCol) {
+    newCol = 0;
+    newRow++;
+  } else if (newCol < 0) {
+    newCol = maxCol;
+    newRow--;
+  }
+
+  // Границы
+  if (newRow < 0 || newRow > maxRow) return;
+
+  const target = allInputs.find(inp => 
+    parseInt(inp.dataset.idx) === newRow && parseInt(inp.dataset.col) === newCol
+  );
+
+  if (target) {
+    target.focus();
+    target.select();
+  }
 }
 
 /* ═══════ CALCULATION ═══════ */
