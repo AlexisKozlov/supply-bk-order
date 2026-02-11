@@ -1749,7 +1749,11 @@ tbody tr td[colspan] {
 .plan-th-name {
   text-align: left !important;
   padding-left: 14px !important;
-  min-width: 200px;
+  min-width: 220px;
+  position: sticky;
+  left: 0;
+  z-index: 12;
+  background: linear-gradient(90deg, #4e2709, var(--brown));
 }
 
 .plan-th-num {
@@ -1765,16 +1769,38 @@ tbody tr td[colspan] {
   padding: 8px 6px;
   border-bottom: 1px solid var(--border-light);
   text-align: center;
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .plan-td-name {
   text-align: left !important;
   padding-left: 14px !important;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: white;
+  border-right: 1px solid var(--border-light);
+}
+
+.plan-table tbody tr:hover .plan-td-name {
+  background: #fffbf0;
 }
 
 .plan-td-input {
   padding: 4px !important;
+  position: relative;
+}
+
+.plan-hint {
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9.5px;
+  color: var(--orange);
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .plan-input {
@@ -1859,4 +1885,13 @@ tbody tr td[colspan] {
 /* Planning modal z-index */
 #planningModal {
   z-index: 9998;
+}
+
+/* Подсказка расхода за неделю */
+.plan-hint {
+  font-size: 10px;
+  color: var(--orange);
+  font-weight: 600;
+  margin-top: 2px;
+  text-align: center;
 }
