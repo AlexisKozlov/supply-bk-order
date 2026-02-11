@@ -26,25 +26,25 @@ function parsePeriod(val) {
 
 function generatePeriodHeaders() {
   const headers = [];
-  const now = new Date();
+  const start = planState.startDate || new Date();
 
   if (planState.periodType === 'weeks') {
     for (let i = 0; i < planState.periodCount; i++) {
-      const start = new Date(now);
-      start.setDate(start.getDate() + i * 7);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 6);
+      const weekStart = new Date(start);
+      weekStart.setDate(weekStart.getDate() + i * 7);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
       const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
       headers.push({
         label: `Нед ${i + 1}`,
-        sublabel: `${fmt(start)}–${fmt(end)}`,
-        periodLabel: `Неделя ${i + 1} (${fmt(start)}–${fmt(end)})`
+        sublabel: `${fmt(weekStart)}–${fmt(weekEnd)}`,
+        periodLabel: `Неделя ${i + 1} (${fmt(weekStart)}–${fmt(weekEnd)})`
       });
     }
   } else {
     const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
     for (let i = 0; i < planState.periodCount; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() + 1 + i, 1);
+      const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
       headers.push({
         label: monthNames[d.getMonth()],
         sublabel: String(d.getFullYear()),
@@ -86,6 +86,13 @@ async function initPlanningUI() {
   if (mainLegal) legalSelect.value = mainLegal.value;
   planState.legalEntity = legalSelect.value;
 
+  // Дата начала по умолчанию = сегодня
+  const startDateInput = document.getElementById('planStartDate');
+  if (startDateInput && !startDateInput.value) {
+    const today = new Date();
+    startDateInput.value = today.toISOString().slice(0, 10);
+  }
+
   await loadPlanSuppliers(legalSelect.value, supplierSelect);
 
   legalSelect.onchange = async () => {
@@ -98,6 +105,10 @@ async function initPlanningUI() {
     const period = parsePeriod(periodSelect.value);
     planState.periodType = period.type;
     planState.periodCount = period.count;
+
+    // Дата начала
+    const startDateInput = document.getElementById('planStartDate');
+    planState.startDate = startDateInput.value ? new Date(startDateInput.value) : new Date();
 
     if (!planState.supplier) {
       showToast('Выберите поставщика', 'Для планирования нужен конкретный поставщик', 'error');
