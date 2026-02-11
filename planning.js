@@ -239,7 +239,11 @@ function renderPlanTable() {
     input.addEventListener('input', (e) => {
       const idx = parseInt(e.target.dataset.idx);
       const item = planState.items[idx];
-      if (e.target.classList.contains('plan-consumption')) item.monthlyConsumption = parseFloat(e.target.value) || 0;
+      if (e.target.classList.contains('plan-consumption')) {
+        item.monthlyConsumption = parseFloat(e.target.value) || 0;
+        // Показываем расход за период под инпутом
+        updateConsumptionHint(e.target, item.monthlyConsumption);
+      }
       else if (e.target.classList.contains('plan-stock')) item.stockOnHand = parseFloat(e.target.value) || 0;
       else if (e.target.classList.contains('plan-supplier-stock')) item.stockAtSupplier = parseFloat(e.target.value) || 0;
       recalcItem(idx);
@@ -247,23 +251,48 @@ function renderPlanTable() {
   });
 }
 
+function updateConsumptionHint(inputEl, monthlyVal) {
+  if (planState.periodType !== 'weeks' || !monthlyVal) {
+    const existing = inputEl.parentElement.querySelector('.plan-hint');
+    if (existing) existing.remove();
+    return;
+  }
+  const perWeek = Math.round(monthlyVal * 7 / 30.44);
+  let hint = inputEl.parentElement.querySelector('.plan-hint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.className = 'plan-hint';
+    inputEl.parentElement.appendChild(hint);
+  }
+  hint.textContent = `≈${nf.format(perWeek)}/нед`;
+}
+
 /* ═══════ CALCULATION ═══════ */
 
 function recalcItem(idx) {
   const item = planState.items[idx];
   item.plan = [];
-  let availableStock = item.stockOnHand + item.stockAtSupplier;
+  
+  // Начальный запас = склад + у поставщика
+  let carryOver = item.stockOnHand + item.stockAtSupplier;
 
   for (let m = 0; m < planState.periodCount; m++) {
     const need = consumptionPerPeriod(item.monthlyConsumption);
-    let deficit = need - availableStock;
-    if (deficit < 0) deficit = 0;
-
+    
+    // Сколько покрывает текущий остаток
+    const covered = Math.min(carryOver, need);
+    const deficit = need - covered;
+    
+    // Заказ = дефицит, округлённый вверх до целых коробок
     const orderBoxes = item.qtyPerBox ? Math.ceil(deficit / item.qtyPerBox) : 0;
     const orderUnits = orderBoxes * item.qtyPerBox;
+    
+    // Остаток на следующий период = (было − расход + заказано)
+    // orderUnits может быть чуть больше deficit из-за округления до коробки
+    carryOver = carryOver - need + orderUnits;
+    if (carryOver < 0) carryOver = 0;
 
     item.plan.push({ month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes, orderUnits });
-    availableStock = Math.max(0, availableStock - need) + orderUnits;
   }
 
   updatePlanCells(idx);
