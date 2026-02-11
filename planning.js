@@ -15,6 +15,7 @@ let planState = {
   supplier: '',
   periodType: 'months',
   periodCount: 3,
+  inputUnit: 'pieces', // 'pieces' или 'boxes'
   items: []
 };
 
@@ -110,6 +111,10 @@ async function initPlanningUI() {
     const startDateInput = document.getElementById('planStartDate');
     planState.startDate = startDateInput.value ? new Date(startDateInput.value) : new Date();
 
+    // Единицы ввода
+    const unitSelect = document.getElementById('planUnit');
+    planState.inputUnit = unitSelect ? unitSelect.value : 'pieces';
+
     if (!planState.supplier) {
       showToast('Выберите поставщика', 'Для планирования нужен конкретный поставщик', 'error');
       return;
@@ -194,15 +199,17 @@ function renderPlanTable() {
 
   const headers = generatePeriodHeaders();
 
+  const unitLabel = planState.inputUnit === 'boxes' ? 'кор' : 'шт';
+
   let html = `
     <div class="plan-table-wrap">
       <table class="plan-table">
         <thead>
           <tr>
             <th class="plan-th-name">Товар</th>
-            <th class="plan-th-num">Расход/мес</th>
-            <th class="plan-th-num">Склад</th>
-            <th class="plan-th-num">У постав.</th>
+            <th class="plan-th-num">Расход/мес (${unitLabel})</th>
+            <th class="plan-th-num">Склад (${unitLabel})</th>
+            <th class="plan-th-num">У постав. (${unitLabel})</th>
             ${headers.map(h => `<th class="plan-th-month">${h.label}<br><span style="font-weight:400;font-size:10px;opacity:0.7;">${h.sublabel}</span></th>`).join('')}
           </tr>
         </thead>
@@ -409,22 +416,24 @@ function recalcItem(idx) {
   const item = planState.items[idx];
   item.plan = [];
   
-  // Начальный запас = склад + у поставщика
-  let carryOver = item.stockOnHand + item.stockAtSupplier;
+  // Конвертация ввода в штуки для расчёта
+  const toUnits = (val) => {
+    if (planState.inputUnit === 'boxes') return val * item.qtyPerBox;
+    return val;
+  };
+  
+  const monthlyUnits = toUnits(item.monthlyConsumption);
+  let carryOver = toUnits(item.stockOnHand) + toUnits(item.stockAtSupplier);
 
   for (let m = 0; m < planState.periodCount; m++) {
-    const need = consumptionPerPeriod(item.monthlyConsumption);
+    const need = planState.periodType === 'weeks' ? monthlyUnits / 4.33 : monthlyUnits;
     
-    // Сколько покрывает текущий остаток
     const covered = Math.min(carryOver, need);
     const deficit = need - covered;
     
-    // Заказ = дефицит, округлённый вверх до целых коробок
     const orderBoxes = item.qtyPerBox ? Math.ceil(deficit / item.qtyPerBox) : 0;
     const orderUnits = orderBoxes * item.qtyPerBox;
     
-    // Остаток на следующий период = (было − расход + заказано)
-    // orderUnits может быть чуть больше deficit из-за округления до коробки
     carryOver = carryOver - need + orderUnits;
     if (carryOver < 0) carryOver = 0;
 
@@ -443,7 +452,7 @@ function updatePlanCells(idx) {
     const cell = container.querySelector(`td.plan-td-result[data-idx="${idx}"][data-month="${mi}"]`);
     if (!cell) return;
     if (p.orderBoxes > 0) {
-      cell.innerHTML = `<span class="plan-result-value">${p.orderBoxes}</span><span class="plan-result-sub">${nf.format(p.orderUnits)} ${item.unitOfMeasure}</span>`;
+      cell.innerHTML = `<span class="plan-result-value">${p.orderBoxes} кор</span><span class="plan-result-sub">${nf.format(p.orderUnits)} ${item.unitOfMeasure}</span>`;
       cell.classList.add('plan-has-value');
     } else {
       cell.innerHTML = '<span class="plan-result-zero">—</span>';
