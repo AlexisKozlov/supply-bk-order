@@ -1449,6 +1449,7 @@ td.delete-cell {
   letter-spacing: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1707,4 +1708,155 @@ tbody tr td[colspan] {
   body { background: white; }
   .container { margin: 0; padding: 0; }
   .hidden { display: none !important; }
+}
+/* ═══════════════════════════════════════════
+   ПЛАНИРОВАНИЕ ЗАКАЗОВ
+   ═══════════════════════════════════════════ */
+
+.plan-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 800px;
+  background: white;
+}
+
+.plan-table thead {
+  background: linear-gradient(90deg, #4e2709, var(--brown), #4e2709);
+  color: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.plan-table th {
+  padding: 10px 8px;
+  text-align: center;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.9);
+  white-space: nowrap;
+}
+
+.plan-th-name {
+  text-align: left !important;
+  padding-left: 14px !important;
+  min-width: 200px;
+}
+
+.plan-th-num {
+  width: 90px;
+}
+
+.plan-th-month {
+  min-width: 120px;
+  background: rgba(255,255,255,0.06);
+}
+
+.plan-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border-light);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.plan-td-name {
+  text-align: left !important;
+  padding-left: 14px !important;
+}
+
+.plan-td-input {
+  padding: 4px !important;
+}
+
+.plan-input {
+  width: 80px !important;
+  text-align: center !important;
+  padding: 5px 4px !important;
+  font-size: 13px !important;
+  border-radius: var(--radius-xs) !important;
+  border: 1.5px solid var(--border) !important;
+  background: #fafaf8 !important;
+  font-weight: 500 !important;
+  transition: border-color 0.15s, box-shadow 0.15s !important;
+  margin: 0 auto !important;
+}
+
+.plan-input:focus {
+  border-color: var(--orange) !important;
+  box-shadow: 0 0 0 2px rgba(245,166,35,0.18) !important;
+  background: white !important;
+}
+
+.plan-td-result {
+  font-size: 13px;
+  min-width: 100px;
+  transition: background 0.15s;
+}
+
+.plan-td-result.plan-has-value {
+  background: #fff8f0;
+}
+
+.plan-result-value {
+  display: block;
+  font-weight: 700;
+  color: var(--brown);
+  font-size: 15px;
+}
+
+.plan-result-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.plan-result-zero {
+  color: var(--muted-light);
+}
+
+/* Totals row */
+.plan-totals {
+  background: #fdf9f2;
+  border-top: 2px solid var(--orange);
+}
+
+.plan-totals td {
+  padding: 10px 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--brown);
+}
+
+.plan-total-cell.plan-has-value {
+  background: rgba(245,166,35,0.12);
+  color: var(--red);
+  font-size: 16px;
+}
+
+/* Hover rows */
+.plan-table tbody tr {
+  transition: background 0.1s;
+}
+
+.plan-table tbody tr:hover {
+  background: #fffbf0;
+}
+
+.plan-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Planning modal z-index */
+#planningModal {
+  z-index: 9998;
 }

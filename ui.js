@@ -11,6 +11,7 @@ import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
 import { getOrdersAnalytics, renderAnalytics } from './analytics.js';
 import { loadOrderHistory as loadHistory } from './order-history.js';
+import { initPlanning } from './planning.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1239,6 +1240,7 @@ function initModals() {
 
 render();
 initModals();
+initPlanning();
 
 // Загрузка черновика после загрузки поставщиков
 initSuppliers.then(async () => {

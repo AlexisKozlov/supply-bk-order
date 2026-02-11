@@ -39,6 +39,7 @@
     <button id="addManual" class="menu-btn"><img src="./icons/edit.png" width="14" height="14" alt="">
  Ручной товар</button>
     <button id="menuAnalytics" class="menu-btn">📊 Аналитика</button>
+    <button id="menuPlanning" class="menu-btn">📋 Планирование</button>
   </nav>
   <span id="entityBadge" class="entity-badge">Бургер БК</span>
 </header>
@@ -367,7 +368,7 @@
   </div>
 </div>
 <footer class="footer">
-  <span class="version">Версия: <span id="appVersion">0.9.1</span>
+  <span class="version">Версия: <span id="appVersion">0.9.1</span></span>
 </footer>
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
@@ -407,6 +408,62 @@
         <div class="loading-spinner"></div>
         <div style="margin-top:14px;">Загрузка данных...</div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== МОДАЛКА: ПЛАНИРОВАНИЕ ===== -->
+<div id="planningModal" class="modal hidden">
+  <div class="modal-box large" style="width:min(1200px,96vw);padding:24px;">
+    <div class="modal-header">
+      <h2 style="font-size:20px;">📋 Планирование заказов</h2>
+      <button id="closePlanning" class="modal-close"><img src="./icons/close.png" width="14" height="14" alt=""></button>
+    </div>
+
+    <!-- Контролы -->
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:14px 16px;background:#fdf9f3;border-radius:8px;margin-bottom:16px;">
+      <label style="flex:1;min-width:140px;">
+        Юр. лицо
+        <select id="planLegalEntity">
+          <option value="Бургер БК">Бургер БК</option>
+          <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
+        </select>
+      </label>
+      <label style="flex:2;min-width:180px;">
+        Поставщик
+        <select id="planSupplier">
+          <option value="">— Выберите поставщика —</option>
+        </select>
+      </label>
+      <label style="flex:0;min-width:100px;">
+        Горизонт
+        <select id="planMonths">
+          <option value="1">1 месяц</option>
+          <option value="2">2 месяца</option>
+          <option value="3" selected>3 месяца</option>
+        </select>
+      </label>
+      <button id="planLoadProducts" class="btn primary" style="height:38px;">Загрузить товары</button>
+    </div>
+
+    <!-- Подсказка -->
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;padding:0 4px;">
+      Введите расход за месяц, остатки на складе и у поставщика — система автоматически рассчитает объёмы заказа по месяцам с округлением до коробок.
+    </div>
+
+    <!-- Таблица планирования -->
+    <div id="planTableContainer" style="max-height:58vh;overflow:auto;">
+      <div style="text-align:center;padding:50px;color:var(--muted);">
+        <div style="font-size:28px;margin-bottom:8px;">📋</div>
+        <div style="font-size:14px;">Выберите поставщика и нажмите «Загрузить товары»</div>
+      </div>
+    </div>
+
+    <!-- Кнопки действий -->
+    <div style="display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-light);">
+      <button id="planCopyBtn" class="btn secondary"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать план</button>
+      <button id="planSaveBtn" class="btn primary"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить план</button>
     </div>
   </div>
 </div>
