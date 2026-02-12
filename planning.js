@@ -159,6 +159,7 @@ async function initPlanningUI() {
 
   setupActionBtn('planCopyBtn', copyPlanToClipboard);
   setupActionBtn('planSaveBtn', savePlanToHistory);
+  setupActionBtn('planExcelBtn', exportPlanToExcel);
 }
 
 function setupActionBtn(id, handler) {
@@ -577,4 +578,121 @@ async function savePlanToHistory() {
   }
   const unitLabel = planState.periodType === 'weeks' ? 'нед.' : 'мес.';
   showToast('План сохранён', `${itemsWithPlan.length} позиций на ${planState.periodCount} ${unitLabel}`, 'success');
+}
+
+/* ═══════ EXCEL EXPORT ═══════ */
+
+async function exportPlanToExcel() {
+  const itemsWithPlan = planState.items.filter(item =>
+    item.plan.some(p => p.orderBoxes > 0)
+  );
+
+  if (!itemsWithPlan.length) {
+    showToast('Нет данных', 'Заполните расход и остатки', 'error');
+    return;
+  }
+
+  const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+  const headers = generatePeriodHeaders();
+
+  // === Шапка ===
+  const rows = [
+    [`Планирование заказов — ${planState.supplier}`],
+    [`Юр. лицо: ${planState.legalEntity}`],
+    [`Дата: ${(planState.startDate || new Date()).toLocaleDateString('ru-RU')}`],
+    [`Период: ${planState.periodCount} ${planState.periodType === 'weeks' ? 'нед.' : 'мес.'}`],
+    [] // пустая строка
+  ];
+
+  // === Заголовки таблицы ===
+  const headerRow = ['Арт.', 'Наименование', 'Расход/мес', 'Склад', 'У постав.'];
+  headers.forEach(h => {
+    headerRow.push(`${h.label} (кор)`);
+    headerRow.push(`${h.label} (шт)`);
+  });
+  headerRow.push('ИТОГО кор');
+  headerRow.push('ИТОГО шт');
+  rows.push(headerRow);
+
+  // === Данные ===
+  itemsWithPlan.forEach(item => {
+    const row = [
+      item.sku || '',
+      item.name,
+      item.monthlyConsumption,
+      item.stockOnHand,
+      item.stockAtSupplier
+    ];
+
+    let totalBoxes = 0;
+    let totalUnits = 0;
+    item.plan.forEach(p => {
+      row.push(p.orderBoxes || 0);
+      row.push(p.orderUnits || 0);
+      totalBoxes += p.orderBoxes || 0;
+      totalUnits += p.orderUnits || 0;
+    });
+    row.push(totalBoxes);
+    row.push(totalUnits);
+    rows.push(row);
+  });
+
+  // === Итого строка ===
+  const totalsRow = ['', 'ИТОГО', '', '', ''];
+  let grandBoxes = 0;
+  let grandUnits = 0;
+  for (let mi = 0; mi < headers.length; mi++) {
+    let colBoxes = 0;
+    let colUnits = 0;
+    itemsWithPlan.forEach(item => {
+      if (item.plan[mi]) {
+        colBoxes += item.plan[mi].orderBoxes || 0;
+        colUnits += item.plan[mi].orderUnits || 0;
+      }
+    });
+    totalsRow.push(colBoxes);
+    totalsRow.push(colUnits);
+    grandBoxes += colBoxes;
+    grandUnits += colUnits;
+  }
+  totalsRow.push(grandBoxes);
+  totalsRow.push(grandUnits);
+  rows.push(totalsRow);
+
+  // === Создание Excel ===
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Ширина колонок
+  const cols = [
+    { wch: 12 },  // арт
+    { wch: 40 },  // наименование
+    { wch: 12 },  // расход
+    { wch: 10 },  // склад
+    { wch: 10 }   // у постав
+  ];
+  headers.forEach(() => {
+    cols.push({ wch: 10 }); // кор
+    cols.push({ wch: 12 }); // шт
+  });
+  cols.push({ wch: 12 }); // итого кор
+  cols.push({ wch: 12 }); // итого шт
+  ws['!cols'] = cols;
+
+  // Merge шапки
+  const totalCols = 5 + headers.length * 2 + 2;
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } },
+    { s: { r: 3, c: 0 }, e: { r: 3, c: totalCols - 1 } }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Планирование');
+
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = `План_${planState.supplier}_${date}.xlsx`;
+
+  XLSX.writeFile(wb, filename);
+  showToast('Excel сохранён', filename, 'success');
 }
