@@ -181,7 +181,7 @@ function renderCalendar() {
       orders.forEach(o => {
         const color = calState.supplierColors[o.supplier] || '#999';
         const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
-        html += `<div class="cal-order-dot" style="background:${color}" title="${o.supplier}: ${boxes} кор"></div>`;
+        html += `<div class="cal-order-dot" style="background:${color}" title="${o.supplier}: ${boxes} кор" data-order-id="${o.id}"></div>`;
       });
       html += '</div>';
     }
@@ -221,5 +221,34 @@ function renderCalendar() {
     calState.month++;
     if (calState.month > 11) { calState.month = 0; calState.year++; }
     loadCalendarData().then(() => renderCalendar());
+  });
+
+  // Клик по точке заказа → загрузить этот заказ
+  container.querySelectorAll('.cal-order-dot').forEach(dot => {
+    dot.style.cursor = 'pointer';
+    dot.addEventListener('click', async () => {
+      const orderId = dot.dataset.orderId;
+      if (!orderId) return;
+
+      // Загружаем полный заказ
+      const { data: order, error } = await supabase
+        .from('orders')
+        .select('*, order_items(*)')
+        .eq('id', orderId)
+        .single();
+
+      if (error || !order) {
+        showToast('Ошибка', 'Не удалось загрузить заказ', 'error');
+        return;
+      }
+
+      // Отправляем событие — ui.js слушает и загружает заказ
+      document.dispatchEvent(new CustomEvent('calendar:load-order', {
+        detail: { order, legalEntity: calState.legalEntity }
+      }));
+
+      // Закрываем календарь
+      document.getElementById('calendarModal')?.classList.add('hidden');
+    });
   });
 }

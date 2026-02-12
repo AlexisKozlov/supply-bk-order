@@ -94,8 +94,28 @@ function mapRows(rows) {
     const row = rows[i];
     if (!row || row.length < 2) continue;
 
-    const sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
-    const name = colMap.name >= 0 ? String(row[colMap.name] || '').trim() : '';
+    let sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
+    let name = colMap.name >= 0 ? String(row[colMap.name] || '').trim() : '';
+
+    // Если sku и name — одна и та же колонка, или только одна из них
+    // Пробуем извлечь артикул из текста
+    if (!sku && name) {
+      const extracted = extractSkuFromText(name);
+      sku = extracted.sku;
+      if (extracted.name) name = extracted.name;
+    } else if (sku && !name) {
+      const extracted = extractSkuFromText(sku);
+      if (extracted.name) {
+        name = extracted.name;
+        sku = extracted.sku;
+      }
+    } else if (colMap.sku === colMap.name && sku) {
+      // Одна колонка — и sku и name ссылаются на неё
+      const extracted = extractSkuFromText(sku);
+      sku = extracted.sku;
+      name = extracted.name || sku;
+    }
+
     if (!sku && !name) continue;
 
     const entry = { sku, name };
@@ -108,6 +128,38 @@ function mapRows(rows) {
   }
 
   return data;
+}
+
+/**
+ * Извлекает артикул из строки вида:
+ * "12345 Бургер Классик" → { sku: "12345", name: "Бургер Классик" }
+ * "АРТ-001 Соус BBQ 1кг" → { sku: "АРТ-001", name: "Соус BBQ 1кг" }
+ * "Котлета говяжья 150г" → { sku: "", name: "Котлета говяжья 150г" }
+ */
+function extractSkuFromText(text) {
+  text = text.trim();
+  
+  // Паттерн 1: начинается с артикула (цифры, возможно с буквами/дефисами) + пробел + наименование
+  // Примеры: "12345 Товар", "АРТ-001 Товар", "SKU001 Товар"
+  const match = text.match(/^([A-Za-zА-Яа-я]{0,4}[\-]?\d{2,}[\-\d]*)\s+(.+)$/);
+  if (match) {
+    return { sku: match[1].trim(), name: match[2].trim() };
+  }
+
+  // Паттерн 2: артикул в начале — чисто цифровой
+  const numMatch = text.match(/^(\d{3,})\s+(.+)$/);
+  if (numMatch) {
+    return { sku: numMatch[1], name: numMatch[2].trim() };
+  }
+
+  // Паттерн 3: наименование потом артикул в скобках: "Товар (12345)"
+  const bracketsMatch = text.match(/^(.+?)\s*\((\d{3,})\)\s*$/);
+  if (bracketsMatch) {
+    return { sku: bracketsMatch[2], name: bracketsMatch[1].trim() };
+  }
+
+  // Не удалось разделить
+  return { sku: '', name: text };
 }
 
 function findCol(headers, keywords) {
@@ -173,25 +225,56 @@ export function showImportDialog(target, items, callback) {
 function matchData(items, fileData, target) {
   let matched = 0;
 
-  // Создаём lookup по SKU (нормализованный)
-  const lookup = new Map();
+  // Lookup по нормализованному SKU
+  const skuLookup = new Map();
   fileData.forEach(d => {
-    if (d.sku) lookup.set(normSku(d.sku), d);
+    if (d.sku) skuLookup.set(normSku(d.sku), d);
   });
 
-  // Также по имени (fallback)
+  // Lookup по имени (точное)
   const nameLookup = new Map();
   fileData.forEach(d => {
     if (d.name) nameLookup.set(d.name.toLowerCase().trim(), d);
   });
 
-  const updatedItems = items.map(item => {
-    // Сначала по SKU
-    let match = item.sku ? lookup.get(normSku(item.sku)) : null;
+  // Lookup по SKU внутри name колонки файла (когда артикул+наименование в одной ячейке)
+  // и по name внутри name колонки файла (частичное совпадение)
+  const nameContainsLookup = [];
+  fileData.forEach(d => {
+    const combined = `${d.sku} ${d.name}`.toLowerCase();
+    nameContainsLookup.push({ combined, data: d });
+  });
 
-    // Fallback по имени
+  const updatedItems = items.map(item => {
+    let match = null;
+
+    // 1. Точное совпадение по SKU
+    if (item.sku) {
+      match = skuLookup.get(normSku(item.sku));
+    }
+
+    // 2. Точное совпадение по имени
     if (!match && item.name) {
       match = nameLookup.get(item.name.toLowerCase().trim());
+    }
+
+    // 3. SKU товара содержится в строке файла (или наоборот)
+    if (!match && item.sku) {
+      const normItemSku = normSku(item.sku);
+      const found = nameContainsLookup.find(e =>
+        normSku(e.combined).includes(normItemSku) ||
+        (e.data.sku && normItemSku.includes(normSku(e.data.sku)))
+      );
+      if (found) match = found.data;
+    }
+
+    // 4. Наименование товара содержится в строке файла
+    if (!match && item.name) {
+      const normName = item.name.toLowerCase().trim();
+      const found = nameContainsLookup.find(e =>
+        e.combined.includes(normName) || normName.includes(e.data.name?.toLowerCase()?.trim())
+      );
+      if (found) match = found.data;
     }
 
     if (!match) return item;
@@ -204,7 +287,6 @@ function matchData(items, fileData, target) {
       if (match.transit !== undefined) updated.transit = match.transit;
       if (match.consumption !== undefined) updated.consumptionPeriod = match.consumption;
     } else {
-      // planning
       if (match.stock !== undefined) updated.stockOnHand = match.stock;
       if (match.transit !== undefined) updated.stockAtSupplier = match.transit;
       if (match.consumption !== undefined) updated.monthlyConsumption = match.consumption;

@@ -1245,6 +1245,70 @@ initModals();
 initPlanning();
 initDeliveryCalendar();
 
+/* ================= ЗАГРУЗКА ЗАКАЗА ИЗ КАЛЕНДАРЯ ================= */
+document.addEventListener('calendar:load-order', async (e) => {
+  const { order, legalEntity } = e.detail;
+  if (!order) return;
+
+  const confirmed = await customConfirm('Загрузить заказ?', `${order.supplier} от ${new Date(order.delivery_date).toLocaleDateString('ru-RU')} — заменить текущий заказ?`);
+  if (!confirmed) return;
+
+  orderState.items = [];
+  orderState.settings.legalEntity = legalEntity;
+  orderState.settings.supplier = order.supplier || '';
+  orderState.settings.today = order.today_date ? new Date(order.today_date) : new Date();
+  orderState.settings.deliveryDate = new Date(order.delivery_date);
+  orderState.settings.safetyDays = order.safety_days || 0;
+  orderState.settings.periodDays = order.period_days || 30;
+  orderState.settings.unit = order.unit || 'pieces';
+  orderState.settings.hasTransit = order.has_transit || false;
+
+  document.getElementById('legalEntity').value = legalEntity;
+  await loadSuppliers(legalEntity);
+  document.getElementById('supplierFilter').value = orderState.settings.supplier;
+  document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
+  document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
+
+  if (safetyStockManager) safetyStockManager.setDays(orderState.settings.safetyDays);
+  document.getElementById('periodDays').value = orderState.settings.periodDays;
+  document.getElementById('unit').value = orderState.settings.unit;
+  document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
+
+  for (const histItem of (order.order_items || [])) {
+    const { data: productData } = await supabase
+      .from('products')
+      .select('*')
+      .eq('sku', histItem.sku)
+      .single();
+
+    const qtyPerBox = (productData && productData.qty_per_box) || histItem.qty_per_box || 1;
+
+    addItem(productData || {
+      sku: histItem.sku,
+      name: histItem.name,
+      qty_per_box: qtyPerBox,
+      boxes_per_pallet: null
+    }, true);
+
+    const addedItem = orderState.items[orderState.items.length - 1];
+    addedItem.consumptionPeriod = histItem.consumption_period || 0;
+    addedItem.stock = histItem.stock || 0;
+    addedItem.transit = histItem.transit || 0;
+
+    if (orderState.settings.unit === 'boxes') {
+      addedItem.finalOrder = histItem.qty_boxes;
+    } else {
+      addedItem.finalOrder = histItem.qty_boxes * qtyPerBox;
+    }
+  }
+
+  orderSection.classList.remove('hidden');
+  render();
+  updateFinalSummary();
+  saveDraft();
+  showToast('Заказ загружен', `${order.supplier} — ${order.order_items?.length || 0} позиций`, 'success');
+});
+
 // Загрузка черновика после загрузки поставщиков
 initSuppliers.then(async () => {
   await loadDraft();
