@@ -1092,7 +1092,7 @@ function render() {
     tbody.innerHTML = `
       <tr>
         <td colspan="11" style="text-align:center;padding:40px 20px;color:#8a8a8a;">
-          <div style="font-size:32px;margin-bottom:8px;">📦</div>
+          <div style="font-size:32px;margin-bottom:8px;"><img src="./icons/box.png" width="32" height="32" alt=""></div>
           <div style="font-size:14px;font-weight:600;margin-bottom:4px;">Нет товаров в заказе</div>
           <div style="font-size:13px;">Выберите поставщика или найдите товар через поиск</div>
         </td>
