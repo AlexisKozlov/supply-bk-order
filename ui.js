@@ -88,13 +88,28 @@ loginPassword.addEventListener('keydown', (e) => {
 });
 
 function doLogin() {
-  if (loginPassword.value === '157') {
-    loginOverlay.style.display = 'none';
-    localStorage.setItem('bk_logged_in', 'true');
-    loadOrderHistory();
-  } else {
-    showToast('Ошибка входа', 'Неверный пароль', 'error');
-  }
+  checkPassword(loginPassword.value).then(valid => {
+    if (valid) {
+      loginOverlay.style.display = 'none';
+      localStorage.setItem('bk_logged_in', 'true');
+      loadOrderHistory();
+    } else {
+      showToast('Ошибка входа', 'Неверный пароль', 'error');
+    }
+  });
+}
+
+async function checkPassword(pwd) {
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'order_calculator_password')
+      .single();
+    if (data && data.value) return pwd === data.value;
+  } catch (e) { /* fallback */ }
+  // Fallback если Supabase недоступен
+  return pwd === '157';
 }
 
 
@@ -299,7 +314,11 @@ async function loadDraft() {
     orderState.settings.showStockColumn = data.settings.showStockColumn || false;
     
     document.getElementById('legalEntity').value = orderState.settings.legalEntity;
+    
+    // Загружаем поставщиков для юр.лица, затем устанавливаем значение
+    await loadSuppliers(orderState.settings.legalEntity);
     document.getElementById('supplierFilter').value = orderState.settings.supplier;
+    
     document.getElementById('periodDays').value = orderState.settings.periodDays;
     
     // Устанавливаем товарный запас
@@ -568,6 +587,11 @@ if (historyLegalEntity) {
   historyLegalEntity.addEventListener('change', loadOrderHistory);
 }
 
+const historyType = document.getElementById('historyType');
+if (historyType) {
+  historyType.addEventListener('change', loadOrderHistory);
+}
+
 supplierSelect.addEventListener('change', async () => {
   // Игнорируем событие при загрузке черновика
   if (isLoadingDraft) return;
@@ -590,6 +614,7 @@ supplierSelect.addEventListener('change', async () => {
   }
   
   orderState.settings.supplier = supplierSelect.value;
+  consumptionCache = null; // сбрасываем кеш проверки данных
   orderState.items = [];
   render();
   saveDraft();
@@ -1134,6 +1159,75 @@ function render() {
   toggleStockColumn();
   updateItemsCounter();
   updateFinalSummary();
+  
+  // #6 Проверка данных — подсветка аномального расхода
+  if (document.getElementById('dataValidation')?.checked) {
+    validateConsumptionData();
+  }
+}
+
+/* ================= #6 ПРОВЕРКА ДАННЫХ ================= */
+let consumptionCache = null; // { supplier: string, data: Map<sku, avgConsumption> }
+
+async function loadConsumptionHistory(supplier) {
+  if (consumptionCache && consumptionCache.supplier === supplier) return consumptionCache.data;
+  
+  const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
+  const { data, error } = await supabase
+    .from('orders')
+    .select('order_items(sku, consumption_period)')
+    .eq('legal_entity', legalEntity)
+    .eq('supplier', supplier)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  
+  const avgMap = new Map();
+  if (!error && data) {
+    const bySku = {};
+    data.forEach(order => {
+      (order.order_items || []).forEach(item => {
+        if (!item.sku || !item.consumption_period) return;
+        if (!bySku[item.sku]) bySku[item.sku] = [];
+        bySku[item.sku].push(item.consumption_period);
+      });
+    });
+    Object.entries(bySku).forEach(([sku, vals]) => {
+      avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length);
+    });
+  }
+  
+  consumptionCache = { supplier, data: avgMap };
+  return avgMap;
+}
+
+async function validateConsumptionData() {
+  const supplier = orderState.settings.supplier;
+  if (!supplier) return;
+  
+  const avgMap = await loadConsumptionHistory(supplier);
+  if (!avgMap.size) return;
+  
+  const rows = tbody.querySelectorAll('tr');
+  orderState.items.forEach((item, idx) => {
+    if (!item.sku || !item.consumptionPeriod) return;
+    const avg = avgMap.get(item.sku);
+    if (!avg) return;
+    
+    const deviation = Math.abs(item.consumptionPeriod - avg) / avg;
+    const row = rows[idx];
+    if (!row) return;
+    
+    const consumptionInput = row.querySelector('input');
+    if (!consumptionInput) return;
+    
+    if (deviation > 0.25) {
+      consumptionInput.classList.add('consumption-warning');
+      consumptionInput.title = `Расход отличается от среднего (${Math.round(avg)}) на ${Math.round(deviation * 100)}%. Проверьте данные.`;
+    } else {
+      consumptionInput.classList.remove('consumption-warning');
+      consumptionInput.title = '';
+    }
+  });
 }
 
 /* ================= СЧЁТЧИК ПОЗИЦИЙ ================= */

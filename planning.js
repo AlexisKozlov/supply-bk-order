@@ -110,6 +110,41 @@ export function initPlanning() {
   });
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+  
+  // Загрузка плана из истории
+  document.addEventListener('history:load-plan', (e) => {
+    const { plan } = e.detail;
+    if (!plan) return;
+    
+    modal.classList.remove('hidden');
+    
+    planState.legalEntity = plan.legal_entity || 'Бургер БК';
+    planState.supplier = plan.supplier || '';
+    planState.periodType = plan.period_type || 'months';
+    planState.periodCount = plan.period_count || 3;
+    planState.startDate = new Date();
+    
+    document.getElementById('planLegalEntity').value = planState.legalEntity;
+    const periodSelect = document.getElementById('planMonths');
+    periodSelect.value = planState.periodType === 'weeks' ? `w${planState.periodCount}` : `m${planState.periodCount}`;
+    
+    // Восстанавливаем товары
+    planState.items = (plan.items || []).map(i => ({
+      sku: i.sku || '',
+      name: i.name || '',
+      qtyPerBox: i.qty_per_box || 1,
+      boxesPerPallet: i.boxes_per_pallet || null,
+      unitOfMeasure: i.unit_of_measure || 'шт',
+      monthlyConsumption: i.monthly_consumption || 0,
+      stockOnHand: i.stock_on_hand || 0,
+      stockAtSupplier: i.stock_at_supplier || 0,
+      plan: []
+    }));
+    
+    renderPlanTable();
+    planState.items.forEach((_, idx) => recalcItem(idx));
+    showToast('План загружен', `${plan.supplier} — ${planState.items.length} позиций`, 'success');
+  });
 }
 
 async function initPlanningUI() {
@@ -267,11 +302,13 @@ function renderPlanTable() {
   planState.items.forEach((item, idx) => {
     const skuPrefix = item.sku ? `<b style="color:var(--orange);margin-right:4px;">${item.sku}</b> ` : '';
 
+    const palletBtn = item.boxesPerPallet ? `<button class="plan-pallet-btn" data-idx="${idx}" title="Округлить до паллеты (${item.boxesPerPallet} кор/пал)">⬆ пал</button>` : '';
+
     html += `
       <tr data-idx="${idx}">
         <td class="plan-td-name">
           <div style="font-weight:600;font-size:13px;color:var(--brown);">${skuPrefix}${item.name}</div>
-          <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор</div>
+          <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''} ${palletBtn}</div>
         </td>
         <td class="plan-td-input">
           <input type="text" inputmode="numeric" class="plan-input plan-consumption" data-idx="${idx}" data-col="0" value="${item.monthlyConsumption || ''}" placeholder="0">
@@ -356,6 +393,14 @@ function renderPlanTable() {
     // Blur — вычислить выражение при уходе из поля
     input.addEventListener('blur', (e) => {
       evaluateAndApply(e.target);
+    });
+  });
+
+  // #14 Кнопки округления до паллеты
+  container.querySelectorAll('.plan-pallet-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx);
+      roundPlanToPallet(idx);
     });
   });
 }
@@ -455,6 +500,35 @@ function navigatePlan(allInputs, currentRow, currentCol, dRow, dCol) {
   if (target) {
     target.focus();
     target.select();
+  }
+}
+
+/**
+ * #14 Округление заказа до полных паллет
+ */
+function roundPlanToPallet(idx) {
+  const item = planState.items[idx];
+  if (!item.boxesPerPallet || !item.plan.length) return;
+  
+  let changed = false;
+  item.plan.forEach(p => {
+    if (p.orderBoxes > 0) {
+      const pallets = Math.ceil(p.orderBoxes / item.boxesPerPallet);
+      const newBoxes = pallets * item.boxesPerPallet;
+      if (newBoxes !== p.orderBoxes) {
+        p.orderBoxes = newBoxes;
+        p.orderUnits = newBoxes * item.qtyPerBox;
+        changed = true;
+      }
+    }
+  });
+  
+  if (changed) {
+    updatePlanCells(idx);
+    updatePlanTotals();
+    showToast('Округлено до паллет', `${item.name}: ${item.boxesPerPallet} кор/паллета`, 'success');
+  } else {
+    showToast('Нечего округлять', 'Нет заказов для этого товара', 'info');
   }
 }
 

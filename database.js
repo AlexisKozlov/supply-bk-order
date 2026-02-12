@@ -30,6 +30,10 @@ export async function loadDatabaseProducts(dbLegalEntitySelect, databaseList) {
   }
   
   renderDatabaseList(data, databaseList);
+  
+  // #10 Обновляем счётчик карточек
+  const countEl = document.getElementById('dbCardCount');
+  if (countEl) countEl.textContent = `(${data.length})`;
 }
 
 function renderDatabaseList(products, databaseList) {

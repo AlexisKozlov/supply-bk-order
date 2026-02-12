@@ -17,6 +17,12 @@ const nf = new Intl.NumberFormat('ru-RU');
 export async function loadOrderHistory(opts) {
   const { historyContainer, historySupplier, callbacks } = opts;
   const historyLegalEntity = document.getElementById('historyLegalEntity');
+  const historyType = document.getElementById('historyType');
+  
+  // Если выбрано "Планирование" — загружаем планы
+  if (historyType && historyType.value === 'plans') {
+    return loadPlanHistory(opts);
+  }
   
   historyContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
@@ -279,4 +285,95 @@ async function deleteOrder(orderId, opts) {
 
   showToast('Заказ удалён', '', 'success');
   loadOrderHistory(opts);
+}
+
+/* ═══════ ИСТОРИЯ ПЛАНИРОВАНИЯ ═══════ */
+
+async function loadPlanHistory(opts) {
+  const { historyContainer } = opts;
+  const historyLegalEntity = document.getElementById('historyLegalEntity');
+  const historySupplier = document.getElementById('historySupplier');
+  
+  historyContainer.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
+
+  let query = supabase
+    .from('plans')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  const legalEntity = historyLegalEntity?.value;
+  if (legalEntity) query = query.eq('legal_entity', legalEntity);
+  if (historySupplier?.value) query = query.eq('supplier', historySupplier.value);
+
+  const { data, error } = await query;
+
+  if (error) {
+    historyContainer.innerHTML = '<div style="padding:20px;color:var(--error);">Ошибка загрузки. Создайте таблицу plans в Supabase.</div>';
+    console.error(error);
+    return;
+  }
+
+  if (!data || !data.length) {
+    historyContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);">Нет сохранённых планов</div>';
+    return;
+  }
+
+  historyContainer.innerHTML = '';
+
+  data.forEach(plan => {
+    const items = plan.items || [];
+    const date = new Date(plan.created_at).toLocaleDateString('ru-RU');
+    const periodLabel = plan.period_type === 'weeks' ? `${plan.period_count} нед.` : `${plan.period_count} мес.`;
+    const totalBoxes = items.reduce((sum, item) => {
+      return sum + (item.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0);
+    }, 0);
+
+    const div = document.createElement('div');
+    div.className = 'history-card';
+    div.innerHTML = `
+      <div class="history-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="cursor:pointer;">
+          <b>${plan.supplier || '—'}</b> · ${date} · ${periodLabel}
+          <span style="color:var(--muted);font-size:12px;">${items.length} позиций · ${nf.format(totalBoxes)} кор</span>
+        </span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn small load-plan-btn" data-id="${plan.id}"><img src="./icons/copy.png" width="12" height="12" alt=""> Загрузить</button>
+          <button class="btn small delete-plan-btn" data-id="${plan.id}" style="background:var(--error);color:white;"><img src="./icons/delete.png" width="12" height="12" alt=""></button>
+        </div>
+      </div>
+      <div class="history-items hidden" style="margin-top:8px;font-size:12px;color:var(--brown-light);max-height:200px;overflow-y:auto;">
+        ${items.map(i => {
+          const totalB = (i.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0);
+          const totalU = (i.plan || []).reduce((s, p) => s + (p.order_units || 0), 0);
+          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${totalB} кор (${nf.format(totalU)} ${i.unit_of_measure || 'шт'})</div>`;
+        }).join('')}
+      </div>
+    `;
+
+    const header = div.querySelector('.history-header span');
+    header.onclick = () => div.querySelector('.history-items').classList.toggle('hidden');
+
+    const loadBtn = div.querySelector('.load-plan-btn');
+    loadBtn.onclick = () => {
+      // Отправляем событие для загрузки плана в модуль планирования
+      document.dispatchEvent(new CustomEvent('history:load-plan', { detail: { plan } }));
+      document.getElementById('historyModal')?.classList.add('hidden');
+    };
+
+    const deleteBtn = div.querySelector('.delete-plan-btn');
+    deleteBtn.onclick = async () => {
+      const confirmed = await customConfirm('Удалить план?', `${plan.supplier} от ${date}`);
+      if (!confirmed) return;
+      const { error: delErr } = await supabase.from('plans').delete().eq('id', plan.id);
+      if (delErr) {
+        showToast('Ошибка', 'Не удалось удалить', 'error');
+        return;
+      }
+      showToast('План удалён', '', 'success');
+      loadPlanHistory(opts);
+    };
+
+    historyContainer.appendChild(div);
+  });
 }

@@ -32,12 +32,9 @@
   Калькулятор заказа
 </h1>
   <nav class="header-menu">
-    <button id="menuHistory" class="menu-btn"><img src="./icons/history.png" width="14" height="14" alt="">
- История заказов</button>
-    <button id="menuDatabase" class="menu-btn"><img src="./icons/base.png" width="14" height="14"  alt="">
- База данных</button>
-    <button id="addManual" class="menu-btn"><img src="./icons/new-product.png" width="14" height="14" alt="">
- Ручной товар</button>
+    <button id="menuHistory" class="menu-btn"><img src="./icons/history.png" width="14" height="14" alt=""> История</button>
+    <button id="menuDatabase" class="menu-btn"><img src="./icons/base.png" width="14" height="14"  alt=""> База данных</button>
+    <button id="addManual" class="menu-btn"><img src="./icons/new-product.png" width="14" height="14" alt=""> Новый товар</button>
     <button id="menuAnalytics" class="menu-btn"><img src="./icons/analytics.png" width="14" height="14"  alt=""> Аналитика</button>
     <button id="menuPlanning" class="menu-btn"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование</button>
     <button id="menuCalendar" class="menu-btn"><img src="./icons/calendar.png" width="14" height="14" alt=""> Календарь</button>
@@ -116,6 +113,11 @@
           <option value="true">Да</option>
         </select>
       </label>
+
+      <label class="tooltip-wrap checkbox-label" data-tip="Подсветка расхода, если он отличается от среднего по истории более чем на 25%">
+        <input type="checkbox" id="dataValidation" checked />
+        Проверка данных
+      </label>
     </div>
 
     <!-- КЛЮЧЕВАЯ КНОПКА -->
@@ -188,11 +190,18 @@
 <div id="historyModal" class="modal hidden">
   <div class="modal-box large">
     <div class="modal-header">
-      <h2>История заказов</h2>
+      <h2><img src="./icons/history.png" width="16" height="16" alt=""> История</h2>
       <button id="closeHistory" class="modal-close"><img src="./icons/close.png" width="14" height="14" alt=""></button>
     </div>
 
-    <div style="display:flex;gap:12px;margin-bottom:16px;">
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+      <label style="flex:0;min-width:140px;">
+        Раздел
+        <select id="historyType">
+          <option value="orders">Заказы</option>
+          <option value="plans">Планирование</option>
+        </select>
+      </label>
       <label style="flex:1;">
         Юр. лицо
         <select id="historyLegalEntity">
@@ -215,16 +224,16 @@
 </div>
 
 
-<!-- ===== МОДАЛКА: РУЧНОЙ ТОВАР ===== -->
+<!-- ===== МОДАЛКА: НОВЫЙ ТОВАР ===== -->
 <div id="manualModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h2>Ручной товар</h2>
+      <h2><img src="./icons/new-product.png" width="16" height="16" alt=""> Новый товар</h2>
       <button id="closeManual" class="modal-close"><img src="./icons/close.png" width="14" height="14" alt=""></button>
     </div>
 
-    <input id="m_name" placeholder="Наименование*" />
     <input id="m_sku" placeholder="Артикул" />
+    <input id="m_name" placeholder="Наименование*" />
     <input id="m_supplier" placeholder="Поставщик" />
     
     <label>
@@ -249,7 +258,7 @@
     </label>
 
     <label>
-      <input type="checkbox" id="m_save" />
+      <input type="checkbox" id="m_save" checked />
       Сохранить в базу
     </label>
 
@@ -283,7 +292,7 @@
 <div id="databaseModal" class="modal hidden">
   <div class="modal-box large">
     <div class="modal-header">
-      <h2><img src="./icons/base.png" width="20" height="20" style="vertical-align:-3px;" alt=""> База данных</h2>
+      <h2><img src="./icons/base.png" width="20" height="20" style="vertical-align:-3px;" alt=""> База данных <span id="dbCardCount" style="font-weight:400;font-size:14px;color:#8B7355;"></span></h2>
       <button id="closeDatabase" class="modal-close"><img src="./icons/close.png" width="14" height="14" alt=""></button>
     </div>
 
@@ -481,10 +490,9 @@
           <option value="boxes">Коробках</option>
         </select>
       </label>
-      <label style="flex:0;min-width:auto;">
-        <span style="visibility:hidden;">_</span>
-        <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
-      </label>
+    </div>
+    <div style="padding:0 16px 14px;">
+      <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
     </div>
 
     <!-- Подсказка -->
