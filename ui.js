@@ -15,6 +15,8 @@ import { initPlanning } from './planning.js';
 import { showImportDialog } from './import-stock.js';
 import { initDeliveryCalendar } from './delivery-calendar.js';
 
+let editingOrderId = null; // ID заказа при редактировании (null = новый)
+
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
 const clearOrderBtn = document.getElementById('clearOrder');
@@ -201,32 +203,56 @@ saveOrderBtn.addEventListener('click', async () => {
     return;
   }
 
-  const { data: order, error } = await supabase
-    .from('orders')
-    .insert({
-      supplier: orderState.settings.supplier || 'Свободный',
-      delivery_date: orderState.settings.deliveryDate,
-      today_date: orderState.settings.today, // Сохраняем дату "сегодня"
-      safety_days: orderState.settings.safetyDays,
-      period_days: orderState.settings.periodDays,
-      unit: orderState.settings.unit,
-      legal_entity: orderState.settings.legalEntity,
-      note: note || null,
-      created_at: new Date().toISOString(),
-      has_transit: orderState.settings.hasTransit || false,
-      show_stock_column: orderState.settings.showStockColumn || false
-    })
-    .select()
-    .single();
+  const orderData = {
+    supplier: orderState.settings.supplier || 'Свободный',
+    delivery_date: orderState.settings.deliveryDate,
+    today_date: orderState.settings.today,
+    safety_days: orderState.settings.safetyDays,
+    period_days: orderState.settings.periodDays,
+    unit: orderState.settings.unit,
+    legal_entity: orderState.settings.legalEntity,
+    note: note || null,
+    has_transit: orderState.settings.hasTransit || false,
+    show_stock_column: orderState.settings.showStockColumn || false
+  };
 
-  if (error) {
-    showToast('Ошибка сохранения', 'Не удалось сохранить заказ', 'error');
-    console.error(error);
-    return;
+  let orderId;
+
+  if (editingOrderId) {
+    // РЕЖИМ РЕДАКТИРОВАНИЯ — UPDATE существующего заказа
+    const { error } = await supabase
+      .from('orders')
+      .update(orderData)
+      .eq('id', editingOrderId);
+
+    if (error) {
+      showToast('Ошибка обновления', 'Не удалось обновить заказ', 'error');
+      console.error(error);
+      return;
+    }
+
+    // Удаляем старые позиции
+    await supabase.from('order_items').delete().eq('order_id', editingOrderId);
+    orderId = editingOrderId;
+  } else {
+    // НОВЫЙ ЗАКАЗ — INSERT
+    orderData.created_at = new Date().toISOString();
+    const { data: order, error } = await supabase
+      .from('orders')
+      .insert(orderData)
+      .select()
+      .single();
+
+    if (error) {
+      showToast('Ошибка сохранения', 'Не удалось сохранить заказ', 'error');
+      console.error(error);
+      return;
+    }
+    orderId = order.id;
   }
 
   const items = itemsToSave.map(i => ({
-    order_id: order.id,
+    order_id: orderId,
     ...i
   }));
 
@@ -240,8 +266,11 @@ saveOrderBtn.addEventListener('click', async () => {
     return;
   }
 
-  showToast('Заказ сохранён', `Сохранено позиций: ${itemsToSave.length}`, 'success');
-  clearDraft(); // Очистка черновика после сохранения
+  const actionLabel = editingOrderId ? 'Заказ обновлён' : 'Заказ сохранён';
+  showToast(actionLabel, `Сохранено позиций: ${itemsToSave.length}`, 'success');
+  editingOrderId = null; // Сбрасываем режим редактирования
+  updateEditingIndicator();
+  clearDraft();
   loadOrderHistory();
 });
 
@@ -1231,6 +1260,28 @@ async function validateConsumptionData() {
 }
 
 /* ================= СЧЁТЧИК ПОЗИЦИЙ ================= */
+function updateEditingIndicator() {
+  let badge = document.getElementById('editingBadge');
+  if (editingOrderId) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'editingBadge';
+      badge.style.cssText = 'background:#fff3e0;color:#e65100;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;margin-left:8px;border:1px solid #ffcc80;';
+      document.querySelector('#orderSection h2')?.appendChild(badge);
+    }
+    badge.textContent = '✏️ Редактирование';
+    badge.onclick = () => {
+      editingOrderId = null;
+      updateEditingIndicator();
+      showToast('Режим сброшен', 'Следующее сохранение создаст новый заказ', 'info');
+    };
+    badge.style.cursor = 'pointer';
+    badge.title = 'Нажмите чтобы сбросить — следующее сохранение создаст новый заказ';
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
 function updateItemsCounter() {
   const counter = document.getElementById('itemsCounter');
   if (!counter) return;
@@ -1340,13 +1391,9 @@ initPlanning();
 initDeliveryCalendar();
 
 /* ================= ЗАГРУЗКА ЗАКАЗА ИЗ КАЛЕНДАРЯ ================= */
-document.addEventListener('calendar:load-order', async (e) => {
-  const { order, legalEntity } = e.detail;
-  if (!order) return;
+/* ═══════ ЗАГРУЗКА ЗАКАЗА ИЗ ИСТОРИИ/КАЛЕНДАРЯ ═══════ */
 
-  const confirmed = await customConfirm('Загрузить заказ?', `${order.supplier} от ${new Date(order.delivery_date).toLocaleDateString('ru-RU')} — заменить текущий заказ?`);
-  if (!confirmed) return;
-
+async function loadOrderIntoForm(order, legalEntity, isEditing = false) {
   orderState.items = [];
   orderState.settings.legalEntity = legalEntity;
   orderState.settings.supplier = order.supplier || '';
@@ -1396,11 +1443,32 @@ document.addEventListener('calendar:load-order', async (e) => {
     }
   }
 
+  // Режим редактирования
+  editingOrderId = isEditing ? order.id : null;
+  updateEditingIndicator();
+
   orderSection.classList.remove('hidden');
   render();
   updateFinalSummary();
   saveDraft();
-  showToast('Заказ загружен', `${order.supplier} — ${order.order_items?.length || 0} позиций`, 'success');
+  
+  const mode = isEditing ? 'Редактирование' : 'Загружен';
+  showToast(`Заказ: ${mode}`, `${order.supplier} — ${order.order_items?.length || 0} позиций`, 'success');
+}
+
+document.addEventListener('calendar:load-order', async (e) => {
+  const { order, legalEntity } = e.detail;
+  if (!order) return;
+  const confirmed = await customConfirm('Загрузить заказ?', `${order.supplier} от ${new Date(order.delivery_date).toLocaleDateString('ru-RU')} — заменить текущий заказ?`);
+  if (!confirmed) return;
+  await loadOrderIntoForm(order, legalEntity, false);
+});
+
+// Редактирование из истории
+document.addEventListener('history:edit-order', async (e) => {
+  const { order, legalEntity } = e.detail;
+  if (!order) return;
+  await loadOrderIntoForm(order, legalEntity, true);
 });
 
 // Загрузка черновика после загрузки поставщиков

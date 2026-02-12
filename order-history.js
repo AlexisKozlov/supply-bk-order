@@ -133,6 +133,7 @@ async function renderOrderHistory(orders, opts) {
         <span><b>${date}</b> — ${order.supplier}${noteStr}</span>
         <div class="history-actions">
           ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
+          <button class="btn small edit-order-btn" style="background:#e3f2fd;color:#1565c0;" title="Редактировать заказ">✏️</button>
           <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
           <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
         </div>
@@ -149,12 +150,23 @@ async function renderOrderHistory(orders, opts) {
     `;
 
     const header = div.querySelector('.history-header span');
+    const editBtn = div.querySelector('.edit-order-btn');
     const copyBtn = div.querySelector('.copy-order-btn');
     const deleteBtn = div.querySelector('.delete-order-btn');
 
     header.style.cursor = 'pointer';
     header.onclick = () => {
       div.querySelector('.history-items').classList.toggle('hidden');
+    };
+
+    editBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const confirmed = await customConfirm('Редактировать заказ?', 'Заказ будет загружен в форму. При сохранении — обновится поверх старого.');
+      if (!confirmed) return;
+      document.dispatchEvent(new CustomEvent('history:edit-order', {
+        detail: { order, legalEntity }
+      }));
+      opts.callbacks.historyModal.classList.add('hidden');
     };
 
     copyBtn.onclick = async (e) => {
