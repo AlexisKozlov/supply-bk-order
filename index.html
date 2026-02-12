@@ -40,6 +40,7 @@
  Ручной товар</button>
     <button id="menuAnalytics" class="menu-btn">📊 Аналитика</button>
     <button id="menuPlanning" class="menu-btn">📋 Планирование</button>
+    <button id="menuCalendar" class="menu-btn">📅 Календарь</button>
   </nav>
   <span id="entityBadge" class="entity-badge">Бургер БК</span>
 </header>
@@ -139,6 +140,7 @@
         <button id="copyOrder" class="btn secondary tooltip-wrap" data-tip="Скопировать заказ в буфер обмена" style="padding:4px 10px;"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать</button>
         <button id="saveOrder" class="btn primary tooltip-wrap" data-tip="Сохранить заказ в историю" style="padding:4px 10px;"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить</button>
         <button id="exportExcelBtn" class="btn tooltip-wrap" data-tip="Экспортировать заказ в Excel" style="padding:4px 10px;background:#4CAF50;color:white;border:none;">📊 Excel</button>
+        <button id="importStockBtn" class="btn secondary tooltip-wrap" data-tip="Импорт остатков из Excel/CSV" style="padding:4px 10px;">📥 Импорт</button>
         
         <div style="flex:1;min-width:20px;"></div>
         
@@ -412,6 +414,17 @@
   </div>
 </div>
 
+<!-- ===== МОДАЛКА: КАЛЕНДАРЬ ПОСТАВОК ===== -->
+<div id="calendarModal" class="modal hidden">
+  <div class="modal-box" style="width:min(720px,96vw);padding:24px;">
+    <div class="modal-header">
+      <h2 style="font-size:20px;">📅 Календарь поставок</h2>
+      <button id="closeCalendar" class="modal-close"><img src="./icons/close.png" width="14" height="14" alt=""></button>
+    </div>
+    <div id="calendarContainer"></div>
+  </div>
+</div>
+
 <!-- ===== МОДАЛКА: ПЛАНИРОВАНИЕ ===== -->
 <div id="planningModal" class="modal hidden">
   <div class="modal-box large" style="width:min(1400px,98vw);max-width:98vw;padding:24px;">
@@ -490,6 +503,7 @@
     <!-- Кнопки действий -->
     <div style="display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-light);">
       <button id="planExcelBtn" class="btn secondary" style="background:#217346;color:white;border-color:#1a5c38;">📊 Excel</button>
+      <button id="planImportBtn" class="btn secondary">📥 Импорт остатков</button>
       <button id="planCopyBtn" class="btn secondary"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать план</button>
       <button id="planSaveBtn" class="btn primary"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить план</button>
     </div>

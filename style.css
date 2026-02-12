@@ -1895,3 +1895,170 @@ tbody tr td[colspan] {
   margin-top: 2px;
   text-align: center;
 }
+
+/* ═══════════════════════════════════════════
+   КАЛЕНДАРЬ ПОСТАВОК
+   ═══════════════════════════════════════════ */
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.cal-nav-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--brown);
+  min-width: 180px;
+  text-align: center;
+}
+
+.cal-nav-btn {
+  background: var(--cream);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+
+.cal-nav-btn:hover {
+  background: var(--orange);
+  color: white;
+  border-color: var(--orange);
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: #fdf9f3;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.cal-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.cal-legend-urgent {
+  background: #ffebee;
+  color: #c62828;
+  font-weight: 600;
+}
+
+.cal-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.cal-day-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 6px 0;
+}
+
+.cal-cell {
+  min-height: 60px;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 4px;
+  position: relative;
+  background: white;
+  transition: background 0.1s;
+}
+
+.cal-cell:hover {
+  background: #fffbf0;
+}
+
+.cal-empty {
+  background: #fafaf8;
+  border-color: transparent;
+}
+
+.cal-past {
+  opacity: 0.5;
+}
+
+.cal-today {
+  border: 2px solid var(--orange) !important;
+  background: #fff8f0 !important;
+  opacity: 1 !important;
+}
+
+.cal-today .cal-day-num {
+  background: var(--orange);
+  color: white;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cal-day-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brown);
+}
+
+.cal-has-orders {
+  background: #fefdf7;
+}
+
+.cal-orders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.cal-order-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  cursor: default;
+  transition: transform 0.1s;
+}
+
+.cal-order-dot:hover {
+  transform: scale(1.4);
+}
+
+.cal-overdue {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #fff3e0;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--orange);
+  font-size: 13px;
+  color: var(--brown);
+  line-height: 1.5;
+}
+
+#calendarModal {
+  z-index: 9997;
+}

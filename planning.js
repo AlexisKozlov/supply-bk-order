@@ -7,6 +7,7 @@
 
 import { supabase } from './supabase.js';
 import { showToast } from './modals.js';
+import { showImportDialog } from './import-stock.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -160,6 +161,18 @@ async function initPlanningUI() {
   setupActionBtn('planCopyBtn', copyPlanToClipboard);
   setupActionBtn('planSaveBtn', savePlanToHistory);
   setupActionBtn('planExcelBtn', exportPlanToExcel);
+  setupActionBtn('planImportBtn', () => {
+    if (!planState.items.length) {
+      showToast('Нет товаров', 'Сначала загрузите товары поставщика', 'info');
+      return;
+    }
+    showImportDialog('planning', planState.items, (updatedItems) => {
+      planState.items = updatedItems;
+      renderPlanTable();
+      // Пересчитать все товары
+      planState.items.forEach((_, idx) => recalcItem(idx));
+    });
+  });
 }
 
 function setupActionBtn(id, handler) {

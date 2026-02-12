@@ -12,6 +12,8 @@ import { exportToExcel, canExportExcel } from './excel-export.js';
 import { getOrdersAnalytics, renderAnalytics } from './analytics.js';
 import { loadOrderHistory as loadHistory } from './order-history.js';
 import { initPlanning } from './planning.js';
+import { showImportDialog } from './import-stock.js';
+import { initDeliveryCalendar } from './delivery-calendar.js';
 
 /* ================= DOM ================= */
 const copyOrderBtn = document.getElementById('copyOrder');
@@ -1241,6 +1243,7 @@ function initModals() {
 render();
 initModals();
 initPlanning();
+initDeliveryCalendar();
 
 // Загрузка черновика после загрузки поставщиков
 initSuppliers.then(async () => {
@@ -1449,6 +1452,23 @@ if (exportExcelBtn) {
       console.error('Ошибка экспорта:', error);
       showToast('Ошибка', 'Не удалось экспортировать в Excel', 'error');
     }
+  });
+}
+
+/* ================= ИМПОРТ ОСТАТКОВ ================= */
+const importStockBtn = document.getElementById('importStockBtn');
+if (importStockBtn) {
+  importStockBtn.addEventListener('click', () => {
+    if (!orderState.items.length) {
+      showToast('Нет товаров', 'Сначала добавьте товары в заказ', 'info');
+      return;
+    }
+    showImportDialog('order', orderState.items, (updatedItems) => {
+      orderState.items = updatedItems;
+      render();
+      saveDraft();
+      saveStateToHistory();
+    });
   });
 }
 
