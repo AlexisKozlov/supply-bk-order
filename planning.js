@@ -30,26 +30,60 @@ function generatePeriodHeaders() {
   const start = planState.startDate || new Date();
 
   if (planState.periodType === 'weeks') {
+    // Недели: первая неделя — от startDate до конца той недели (воскресенье)
+    // Остальные — полные 7-дневные
+    const dayOfWeek = start.getDay(); // 0=вс, 1=пн...
+    const daysLeftInWeek = dayOfWeek === 0 ? 0 : 7 - dayOfWeek; // дней до конца недели (вс)
+    
+    const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
+    
+    // Текущая неделя (остаток)
+    const firstWeekEnd = new Date(start);
+    firstWeekEnd.setDate(firstWeekEnd.getDate() + Math.max(daysLeftInWeek - 1, 0));
+    const firstRatio = Math.max(daysLeftInWeek, 1) / 7;
+    headers.push({
+      label: `Тек. нед`,
+      sublabel: `${fmt(start)}–${fmt(firstWeekEnd)}`,
+      periodLabel: `Текущая неделя (${fmt(start)}–${fmt(firstWeekEnd)})`,
+      ratio: firstRatio
+    });
+    
+    // Следующие полные недели
     for (let i = 0; i < planState.periodCount; i++) {
-      const weekStart = new Date(start);
-      weekStart.setDate(weekStart.getDate() + i * 7);
+      const weekStart = new Date(firstWeekEnd);
+      weekStart.setDate(weekStart.getDate() + 1 + i * 7);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
-      const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
       headers.push({
         label: `Нед ${i + 1}`,
         sublabel: `${fmt(weekStart)}–${fmt(weekEnd)}`,
-        periodLabel: `Неделя ${i + 1} (${fmt(weekStart)}–${fmt(weekEnd)})`
+        periodLabel: `Неделя ${i + 1} (${fmt(weekStart)}–${fmt(weekEnd)})`,
+        ratio: 1
       });
     }
   } else {
     const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-    for (let i = 0; i < planState.periodCount; i++) {
+    
+    // Текущий месяц — остаток дней
+    const daysInCurrentMonth = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+    const daysLeft = daysInCurrentMonth - start.getDate() + 1; // включая сегодня
+    const firstRatio = daysLeft / daysInCurrentMonth;
+    
+    headers.push({
+      label: monthNames[start.getMonth()],
+      sublabel: `ост. ${daysLeft} дн.`,
+      periodLabel: `${monthNames[start.getMonth()]} ${start.getFullYear()} (остаток ${daysLeft} дн.)`,
+      ratio: firstRatio
+    });
+    
+    // Следующие N полных месяцев
+    for (let i = 1; i <= planState.periodCount; i++) {
       const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
       headers.push({
         label: monthNames[d.getMonth()],
         sublabel: String(d.getFullYear()),
-        periodLabel: `${monthNames[d.getMonth()]} ${d.getFullYear()}`
+        periodLabel: `${monthNames[d.getMonth()]} ${d.getFullYear()}`,
+        ratio: 1
       });
     }
   }
@@ -416,6 +450,8 @@ function recalcItem(idx) {
   const item = planState.items[idx];
   item.plan = [];
   
+  const headers = generatePeriodHeaders();
+  
   // Конвертация ввода в штуки для расчёта
   const toUnits = (val) => {
     if (planState.inputUnit === 'boxes') return val * item.qtyPerBox;
@@ -423,10 +459,14 @@ function recalcItem(idx) {
   };
   
   const monthlyUnits = toUnits(item.monthlyConsumption);
+  const weeklyUnits = monthlyUnits / 4.33;
   let carryOver = toUnits(item.stockOnHand) + toUnits(item.stockAtSupplier);
 
-  for (let m = 0; m < planState.periodCount; m++) {
-    const need = planState.periodType === 'weeks' ? monthlyUnits / 4.33 : monthlyUnits;
+  for (let m = 0; m < headers.length; m++) {
+    const ratio = headers[m].ratio;
+    // Базовый расход за полный период × коэффициент
+    const baseNeed = planState.periodType === 'weeks' ? weeklyUnits : monthlyUnits;
+    const need = baseNeed * ratio;
     
     const covered = Math.min(carryOver, need);
     const deficit = need - covered;
@@ -463,7 +503,8 @@ function updatePlanCells(idx) {
 
 function updatePlanTotals() {
   const container = document.getElementById('planTableContainer');
-  for (let mi = 0; mi < planState.periodCount; mi++) {
+  const headers = generatePeriodHeaders();
+  for (let mi = 0; mi < headers.length; mi++) {
     let totalBoxes = 0;
     planState.items.forEach(item => { if (item.plan[mi]) totalBoxes += item.plan[mi].orderBoxes; });
     const cell = container.querySelector(`.plan-total-cell[data-month="${mi}"]`);
@@ -487,7 +528,7 @@ function copyPlanToClipboard() {
 
   let text = `Добрый день!\nПланирование для ${planState.legalEntity}, поставщик: ${planState.supplier}\n\n`;
 
-  for (let mi = 0; mi < planState.periodCount; mi++) {
+  for (let mi = 0; mi < headers.length; mi++) {
     const monthItems = itemsWithPlan.filter(item => item.plan[mi] && item.plan[mi].orderBoxes > 0);
     if (!monthItems.length) continue;
     text += `📅 ${headers[mi].periodLabel}:\n`;
