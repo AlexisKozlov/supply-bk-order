@@ -137,11 +137,32 @@ function renderCalendar() {
   if (suppliers.length) {
     html += '<div class="cal-legend">';
     suppliers.forEach(s => {
-      const daysSince = lastOrderBySupplier[s]
-        ? Math.round((today - lastOrderBySupplier[s]) / 86400000)
-        : null;
-      const urgencyClass = daysSince !== null && daysSince > 14 ? 'cal-legend-urgent' : '';
-      const daysLabel = daysSince !== null ? ` (${daysSince}д)` : '';
+      // Находим ближайшую будущую и последнюю прошлую поставку
+      const supplierOrders = calState.orders.filter(o => o.supplier === s);
+      let nextDelivery = null;
+      let lastDelivery = null;
+      
+      supplierOrders.forEach(o => {
+        const d = new Date(o.delivery_date);
+        if (d >= today) {
+          if (!nextDelivery || d < nextDelivery) nextDelivery = d;
+        } else {
+          if (!lastDelivery || d > lastDelivery) lastDelivery = d;
+        }
+      });
+
+      let daysLabel = '';
+      let urgencyClass = '';
+      
+      if (nextDelivery) {
+        const daysUntil = Math.round((nextDelivery - today) / 86400000);
+        daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
+      } else if (lastDelivery) {
+        const daysAgo = Math.round((today - lastDelivery) / 86400000);
+        daysLabel = ` (${daysAgo}д назад)`;
+        if (daysAgo > 14) urgencyClass = 'cal-legend-urgent';
+      }
+      
       html += `<span class="cal-legend-item ${urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s]}"></span>${s}${daysLabel}</span>`;
     });
     html += '</div>';
@@ -191,19 +212,22 @@ function renderCalendar() {
 
   html += '</div>';
 
-  // Сводка: поставщики без заказа > 14 дней
+  // Сводка: поставщики без заказа > 14 дней (нет будущих поставок и последняя > 14д назад)
   const overdue = suppliers.filter(s => {
-    const days = lastOrderBySupplier[s]
-      ? Math.round((today - lastOrderBySupplier[s]) / 86400000)
-      : 999;
-    return days > 14;
+    const supplierOrders = calState.orders.filter(o => o.supplier === s);
+    const hasFuture = supplierOrders.some(o => new Date(o.delivery_date) >= today);
+    if (hasFuture) return false;
+    const lastDate = lastOrderBySupplier[s];
+    if (!lastDate) return true;
+    return Math.round((today - lastDate) / 86400000) > 14;
   });
 
   if (overdue.length) {
     html += '<div class="cal-overdue">';
     html += `⚠️ Давно без заказа: ${overdue.map(s => {
-      const days = Math.round((today - lastOrderBySupplier[s]) / 86400000);
-      return `<b>${s}</b> (${days} дн.)`;
+      const lastDate = lastOrderBySupplier[s];
+      const days = lastDate ? Math.round((today - lastDate) / 86400000) : '?';
+      return `<b>${s}</b> (${days} дн. назад)`;
     }).join(', ')}`;
     html += '</div>';
   }
