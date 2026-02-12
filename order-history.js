@@ -345,30 +345,19 @@ async function loadPlanHistory(opts) {
     div.className = 'history-card';
     div.innerHTML = `
       <div class="history-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="cursor:pointer;">
+        <span>
           <b>${plan.supplier || '—'}</b> · ${date} · ${periodLabel}
           <span style="color:var(--muted);font-size:12px;">${items.length} позиций · ${nf.format(totalBoxes)} кор</span>
         </span>
         <div style="display:flex;gap:6px;">
-          <button class="btn small load-plan-btn" data-id="${plan.id}"><img src="./icons/copy.png" width="12" height="12" alt=""> Загрузить</button>
+          <button class="btn small load-plan-btn" data-id="${plan.id}"><img src="./icons/edit.png" width="12" height="12" alt=""> Загрузить</button>
           <button class="btn small delete-plan-btn" data-id="${plan.id}" style="background:var(--error);color:white;"><img src="./icons/delete.png" width="12" height="12" alt=""></button>
         </div>
       </div>
-      <div class="history-items hidden" style="margin-top:8px;font-size:12px;color:var(--brown-light);max-height:200px;overflow-y:auto;">
-        ${items.map(i => {
-          const totalB = (i.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0);
-          const totalU = (i.plan || []).reduce((s, p) => s + (p.order_units || 0), 0);
-          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${totalB} кор (${nf.format(totalU)} ${i.unit_of_measure || 'шт'})</div>`;
-        }).join('')}
-      </div>
     `;
-
-    const header = div.querySelector('.history-header span');
-    header.onclick = () => div.querySelector('.history-items').classList.toggle('hidden');
 
     const loadBtn = div.querySelector('.load-plan-btn');
     loadBtn.onclick = () => {
-      // Отправляем событие для загрузки плана в модуль планирования
       document.dispatchEvent(new CustomEvent('history:load-plan', { detail: { plan } }));
       document.getElementById('historyModal')?.classList.add('hidden');
     };

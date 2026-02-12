@@ -837,7 +837,7 @@ function clearManualForm() {
   document.getElementById('m_supplier').value = '';
   document.getElementById('m_box').value = '';
   document.getElementById('m_pallet').value = '';
-  document.getElementById('m_save').checked = false;
+  document.getElementById('m_save').checked = true;
 }
 
 addManualBtn.addEventListener('click', () => {
@@ -1109,15 +1109,24 @@ function setupExcelNavigation(input, rowIndex, columnIndex) {
       e.preventDefault();
       moveToCell(rowIndex - 1, columnIndex);
     }
-    // Стрелка вправо (только если курсор в конце)
-    else if (e.key === 'ArrowRight' && input.selectionStart === input.value.length) {
-      e.preventDefault();
-      moveToCell(rowIndex, columnIndex + 1);
+    // Стрелка вправо — для number инпутов selectionStart не работает, проверяем через Tab-подобное поведение
+    else if (e.key === 'ArrowRight') {
+      // Пробуем получить позицию курсора (работает не везде для type=number)
+      let atEnd = true;
+      try { atEnd = input.selectionStart >= input.value.length; } catch(err) { /* OK */ }
+      if (atEnd) {
+        e.preventDefault();
+        moveToCell(rowIndex, columnIndex + 1);
+      }
     }
-    // Стрелка влево (только если курсор в начале)
-    else if (e.key === 'ArrowLeft' && input.selectionStart === 0) {
-      e.preventDefault();
-      moveToCell(rowIndex, columnIndex - 1);
+    // Стрелка влево
+    else if (e.key === 'ArrowLeft') {
+      let atStart = true;
+      try { atStart = input.selectionStart === 0; } catch(err) { /* OK */ }
+      if (atStart) {
+        e.preventDefault();
+        moveToCell(rowIndex, columnIndex - 1);
+      }
     }
   });
 }
@@ -1190,13 +1199,13 @@ function render() {
   updateFinalSummary();
   
   // #6 Проверка данных — подсветка аномального расхода
-  if (document.getElementById('dataValidation')?.checked) {
+  if (document.getElementById('dataValidation')?.value === 'true') {
     validateConsumptionData();
   }
 }
 
 /* ================= #6 ПРОВЕРКА ДАННЫХ ================= */
-let consumptionCache = null; // { supplier: string, data: Map<sku, avgConsumption> }
+let consumptionCache = null;
 
 async function loadConsumptionHistory(supplier) {
   if (consumptionCache && consumptionCache.supplier === supplier) return consumptionCache.data;
@@ -1208,7 +1217,7 @@ async function loadConsumptionHistory(supplier) {
     .eq('legal_entity', legalEntity)
     .eq('supplier', supplier)
     .order('created_at', { ascending: false })
-    .limit(10);
+    .limit(2);
   
   const avgMap = new Map();
   if (!error && data) {
@@ -1232,32 +1241,45 @@ async function loadConsumptionHistory(supplier) {
 async function validateConsumptionData() {
   const supplier = orderState.settings.supplier;
   if (!supplier) return;
+  if (document.getElementById('dataValidation')?.value !== 'true') return;
   
   const avgMap = await loadConsumptionHistory(supplier);
   if (!avgMap.size) return;
   
   const rows = tbody.querySelectorAll('tr');
   orderState.items.forEach((item, idx) => {
-    if (!item.sku || !item.consumptionPeriod) return;
-    const avg = avgMap.get(item.sku);
-    if (!avg) return;
-    
-    const deviation = Math.abs(item.consumptionPeriod - avg) / avg;
     const row = rows[idx];
     if (!row) return;
-    
     const consumptionInput = row.querySelector('input');
     if (!consumptionInput) return;
     
+    if (!item.sku || !item.consumptionPeriod) {
+      consumptionInput.classList.remove('consumption-warning');
+      consumptionInput.title = '';
+      return;
+    }
+    
+    const avg = avgMap.get(item.sku);
+    if (!avg) {
+      consumptionInput.classList.remove('consumption-warning');
+      consumptionInput.title = '';
+      return;
+    }
+    
+    const deviation = Math.abs(item.consumptionPeriod - avg) / avg;
+    
     if (deviation > 0.25) {
       consumptionInput.classList.add('consumption-warning');
-      consumptionInput.title = `Расход отличается от среднего (${Math.round(avg)}) на ${Math.round(deviation * 100)}%. Проверьте данные.`;
+      consumptionInput.title = `⚠️ Расход сильно отличается от среднего (${nf.format(Math.round(avg))}), проверьте данные`;
     } else {
       consumptionInput.classList.remove('consumption-warning');
       consumptionInput.title = '';
     }
   });
 }
+
+// Экспортируем для вызова из table-renderer
+window._validateConsumptionData = validateConsumptionData;
 
 /* ================= СЧЁТЧИК ПОЗИЦИЙ ================= */
 function updateEditingIndicator() {

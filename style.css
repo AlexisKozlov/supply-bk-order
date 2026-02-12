@@ -2112,3 +2112,38 @@ tbody tr td[colspan] {
   color: white;
   border-color: var(--orange);
 }
+
+/* Locked ячейки планирования */
+.plan-cell-locked {
+  background: #fff8e1 !important;
+  border: 1px dashed var(--orange) !important;
+}
+.plan-result-value.plan-cell-locked {
+  color: #e65100;
+}
+
+/* Паллеты и сброс поколоночно */
+.plan-pallet-period, .plan-reset-cell {
+  display: inline-block;
+  font-size: 10px;
+  cursor: pointer;
+  margin-left: 2px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  vertical-align: middle;
+}
+.plan-pallet-period:hover, .plan-reset-cell:hover {
+  opacity: 1;
+}
+.plan-reset-cell {
+  color: #d32f2f;
+  font-weight: 700;
+}
+
+/* Ячейка результата — курсор для dblclick */
+td.plan-td-result {
+  cursor: pointer;
+}
+td.plan-td-result:hover {
+  background: #fdf9f3;
+}

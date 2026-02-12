@@ -114,9 +114,12 @@
         </select>
       </label>
 
-      <label class="tooltip-wrap checkbox-label" data-tip="Подсветка расхода, если он отличается от среднего по истории более чем на 25%">
-        <input type="checkbox" id="dataValidation" checked />
+      <label class="tooltip-wrap" data-tip="Подсветка расхода, если он отличается от среднего по истории более чем на 25%">
         Проверка данных
+        <select id="dataValidation">
+          <option value="true">Да</option>
+          <option value="false">Нет</option>
+        </select>
       </label>
     </div>
 
@@ -452,7 +455,7 @@
           <option value="Пицца Стар">Пицца Стар</option>
         </select>
       </label>
-      <label style="flex:2;min-width:180px;">
+      <label style="flex:1;min-width:150px;">
         Поставщик
         <select id="planSupplier">
           <option value="">— Выберите поставщика —</option>
@@ -490,9 +493,10 @@
           <option value="boxes">Коробках</option>
         </select>
       </label>
-    </div>
-    <div style="padding:0 16px 14px;">
-      <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
+      <label style="flex:0;min-width:auto;">
+        <span style="visibility:hidden;display:block;font-size:12px;">_</span>
+        <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
+      </label>
     </div>
 
     <!-- Подсказка -->

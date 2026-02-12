@@ -138,6 +138,8 @@ export function renderTable(orderState, tbody, callbacks) {
       updateRow(tr, item, orderState.settings);
       saveDraft();
       saveStateToHistoryDebounced();
+      // #6 Мгновенная проверка данных
+      if (window._validateConsumptionData) window._validateConsumptionData();
     });
     inputs[0].addEventListener('blur', () => saveStateToHistory());
     setupExcelNavigation(inputs[0], rowIndex, 0);
