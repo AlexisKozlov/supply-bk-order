@@ -261,7 +261,7 @@ async function initPlanningUI() {
       planState.items = updatedItems;
       renderPlanTable();
       planState.items.forEach((_, idx) => recalcItem(idx));
-    });
+    }, planState.legalEntity);
   });
   } // end if (!planningUIInitialized)
 }

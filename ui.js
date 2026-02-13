@@ -13,6 +13,7 @@ import { loadOrderHistory as loadHistory } from './order-history.js';
 import { initPlanning } from './planning.js';
 import { showImportDialog } from './import-stock.js';
 import { initDeliveryCalendar } from './delivery-calendar.js';
+import { initShareOrder } from './share-order.js';
 import { saveDraft, loadDraft, clearDraft, isLoadingDraft } from './draft.js';
 import { validateConsumptionData, resetConsumptionCache } from './data-validation.js';
 import { initOrderOperations, saveItemOrder, restoreItemOrder } from './order-operations.js';
@@ -956,6 +957,7 @@ initOrderOperations({
 initModals();
 initPlanning();
 initDeliveryCalendar();
+initShareOrder();
 
 // Загрузка черновика после загрузки поставщиков
 initSuppliers.then(async () => {
@@ -1104,7 +1106,7 @@ if (importStockBtn) {
       render();
       saveDraft();
       saveStateToHistory();
-    });
+    }, orderState.settings.legalEntity);
   });
 }
 

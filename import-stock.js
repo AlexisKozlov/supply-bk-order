@@ -12,11 +12,11 @@ import { showToast } from './modals.js';
  * Парсинг файла Excel/CSV → массив объектов
  * Возвращает: [{ sku, stock, transit, consumption }, ...]
  */
-async function parseFile(file) {
+async function parseFile(file, legalEntity) {
   const ext = file.name.split('.').pop().toLowerCase();
 
   if (ext === 'csv' || ext === 'tsv') {
-    return parseCSV(file, ext === 'tsv' ? '\t' : detectDelimiter);
+    return parseCSV(file, ext === 'tsv' ? '\t' : detectDelimiter, legalEntity);
   }
 
   // Excel
@@ -26,13 +26,13 @@ async function parseFile(file) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-  return mapRows(rows);
+  return mapRows(rows, legalEntity);
 }
 
 /**
  * Парсинг CSV
  */
-function parseCSV(file, delimiterOrDetect) {
+function parseCSV(file, delimiterOrDetect, legalEntity) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -42,7 +42,7 @@ function parseCSV(file, delimiterOrDetect) {
         : detectDelimiter(text);
       const lines = text.split('\n').filter(l => l.trim());
       const rows = lines.map(l => l.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, '')));
-      resolve(mapRows(rows));
+      resolve(mapRows(rows, legalEntity));
     };
     reader.readAsText(file, 'utf-8');
   });
@@ -59,7 +59,27 @@ function detectDelimiter(text) {
  * Маппинг строк таблицы → данные
  * Ищет колонки по названиям заголовков (нечёткий поиск)
  */
-function mapRows(rows) {
+/** Маппинг юр. лиц из файла склада → юр. лица приложения */
+const LEGAL_ENTITY_MAP = {
+  'сбарро':          'Пицца Стар',
+  'додо':            'Пицца Стар',
+  'пицца стар':      'Пицца Стар',
+  'бургер бк':       'Бургер БК',
+  'ооо "бургер бк"': 'Бургер БК',
+  'ооо бургер бк':   'Бургер БК',
+  'воглия матта':    'Воглия Матта',
+};
+
+function mapLegalEntity(raw) {
+  if (!raw) return null;
+  const norm = raw.toLowerCase().replace(/[«»""]/g, '"').trim();
+  for (const [key, value] of Object.entries(LEGAL_ENTITY_MAP)) {
+    if (norm.includes(key)) return value;
+  }
+  return null;
+}
+
+function mapRows(rows, legalEntity) {
   if (rows.length < 2) return [];
 
   // Ищем строку заголовков (первую строку с текстовыми ячейками)
@@ -77,10 +97,11 @@ function mapRows(rows) {
   // Поиск индексов колонок по ключевым словам
   const colMap = {
     sku: findCol(headers, ['артикул', 'арт', 'sku', 'код', 'article', 'code', 'номенклатура']),
-    name: findCol(headers, ['наименование', 'название', 'товар', 'name', 'product', 'номенклатура']),
-    stock: findCol(headers, ['остаток', 'остатки', 'склад', 'stock', 'кол-во', 'количество', 'свобод', 'доступ']),
+    name: findCol(headers, ['наименование товара', 'наименование', 'название', 'товар', 'name', 'product', 'номенклатура']),
+    stock: findCol(headers, ['остатки, кол', 'остатки', 'остаток', 'склад', 'stock', 'кол-во', 'количество', 'свобод', 'доступ']),
     transit: findCol(headers, ['транзит', 'в пути', 'transit', 'ожидаем', 'поставщик', 'резерв']),
-    consumption: findCol(headers, ['расход', 'потребление', 'consumption', 'продажи', 'реализация', 'списание'])
+    consumption: findCol(headers, ['расход', 'потребление', 'consumption', 'продажи', 'реализация', 'списание']),
+    legalEntity: findCol(headers, ['юр лицо', 'юр. лицо', 'юридическое лицо', 'организация', 'legal entity', 'компания', 'фирма'])
   };
 
   // Если не нашли sku — пробуем name как ключ
@@ -117,6 +138,13 @@ function mapRows(rows) {
     }
 
     if (!sku && !name) continue;
+
+    // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
+    if (colMap.legalEntity >= 0 && legalEntity) {
+      const rawEntity = String(row[colMap.legalEntity] || '').trim();
+      const mapped = mapLegalEntity(rawEntity);
+      if (mapped && mapped !== legalEntity) continue;
+    }
 
     const entry = { sku, name };
 
@@ -183,7 +211,7 @@ function parseNum(val) {
  * target: 'order' | 'planning'
  * callback: (matchedData) => void
  */
-export function showImportDialog(target, items, callback) {
+export function showImportDialog(target, items, callback, legalEntity) {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.xlsx,.xls,.csv,.tsv';
@@ -193,7 +221,7 @@ export function showImportDialog(target, items, callback) {
     if (!file) return;
 
     try {
-      const data = await parseFile(file);
+      const data = await parseFile(file, legalEntity);
       if (!data.length) {
         showToast('Пустой файл', 'Не удалось распознать данные', 'error');
         return;
