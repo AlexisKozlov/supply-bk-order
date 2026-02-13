@@ -1115,9 +1115,10 @@ clearOrderBtn.addEventListener('click', async () => {
     item.finalOrder = 0;
   });
 
+  editingOrderId = null;
+  updateEditingIndicator();
   render();
   saveDraft();
-  saveStateToHistory(); // Сохраняем ПОСЛЕ изменения
   showToast('Данные очищены', 'Товары сохранены, данные сброшены', 'success');
 });
 

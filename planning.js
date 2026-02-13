@@ -165,11 +165,12 @@ export function initPlanning() {
   });
 }
 
+let planningUIInitialized = false;
+
 async function initPlanningUI() {
   const legalSelect = document.getElementById('planLegalEntity');
   const supplierSelect = document.getElementById('planSupplier');
   const periodSelect = document.getElementById('planMonths');
-  const loadBtn = document.getElementById('planLoadProducts');
 
   const mainLegal = document.getElementById('legalEntity');
   if (mainLegal) legalSelect.value = mainLegal.value;
@@ -184,44 +185,49 @@ async function initPlanningUI() {
 
   await loadPlanSuppliers(legalSelect.value, supplierSelect);
 
-  legalSelect.onchange = async () => {
-    planState.legalEntity = legalSelect.value;
-    await loadPlanSuppliers(legalSelect.value, supplierSelect);
-    notifyPlanParamsChanged();
-  };
+  // Подписки на события — ТОЛЬКО один раз
+  if (!planningUIInitialized) {
+    planningUIInitialized = true;
 
-  // #2 Отслеживаем изменения параметров
-  supplierSelect.addEventListener('change', notifyPlanParamsChanged);
-  periodSelect.addEventListener('change', () => {
-    if (planState.items.length) {
-      // Период влияет на расчёт — пересчитываем
-      const period = parsePeriod(periodSelect.value);
-      planState.periodType = period.type;
-      planState.periodCount = period.count;
-      renderPlanTable();
-      planState.items.forEach((_, idx) => recalcItem(idx, 0));
-      showToast('Период обновлён', 'Данные пересчитаны', 'info');
-    }
-  });
-  document.getElementById('planStartDate')?.addEventListener('change', () => {
-    if (planState.items.length) {
-      const startDateInput = document.getElementById('planStartDate');
-      planState.startDate = startDateInput.value ? new Date(startDateInput.value) : new Date();
-      renderPlanTable();
-      planState.items.forEach((_, idx) => recalcItem(idx, 0));
-      showToast('Дата обновлена', 'Данные пересчитаны', 'info');
-    }
-  });
-  document.getElementById('planUnit')?.addEventListener('change', () => {
-    if (planState.items.length) {
-      planState.inputUnit = document.getElementById('planUnit').value;
-      renderPlanTable();
-      planState.items.forEach((_, idx) => recalcItem(idx, 0));
-      showToast('Единицы обновлены', 'Данные пересчитаны', 'info');
-    }
-  });
+    legalSelect.addEventListener('change', async () => {
+      planState.legalEntity = legalSelect.value;
+      await loadPlanSuppliers(legalSelect.value, supplierSelect);
+      notifyPlanParamsChanged();
+    });
 
-  setupActionBtn('planLoadProducts', async () => {
+    supplierSelect.addEventListener('change', notifyPlanParamsChanged);
+
+    periodSelect.addEventListener('change', () => {
+      if (planState.items.length) {
+        const period = parsePeriod(periodSelect.value);
+        planState.periodType = period.type;
+        planState.periodCount = period.count;
+        renderPlanTable();
+        planState.items.forEach((_, idx) => recalcItem(idx, 0));
+        showToast('Период обновлён', 'Данные пересчитаны', 'info');
+      }
+    });
+
+    document.getElementById('planStartDate')?.addEventListener('change', () => {
+      if (planState.items.length) {
+        const sdi = document.getElementById('planStartDate');
+        planState.startDate = sdi.value ? new Date(sdi.value) : new Date();
+        renderPlanTable();
+        planState.items.forEach((_, idx) => recalcItem(idx, 0));
+        showToast('Дата обновлена', 'Данные пересчитаны', 'info');
+      }
+    });
+
+    document.getElementById('planUnit')?.addEventListener('change', () => {
+      if (planState.items.length) {
+        planState.inputUnit = document.getElementById('planUnit').value;
+        renderPlanTable();
+        planState.items.forEach((_, idx) => recalcItem(idx, 0));
+        showToast('Единицы обновлены', 'Данные пересчитаны', 'info');
+      }
+    });
+
+    setupActionBtn('planLoadProducts', async () => {
     planState.supplier = supplierSelect.value;
     const period = parsePeriod(periodSelect.value);
     planState.periodType = period.type;
@@ -254,10 +260,10 @@ async function initPlanningUI() {
     showImportDialog('planning', planState.items, (updatedItems) => {
       planState.items = updatedItems;
       renderPlanTable();
-      // Пересчитать все товары
       planState.items.forEach((_, idx) => recalcItem(idx));
     });
   });
+  } // end if (!planningUIInitialized)
 }
 
 function notifyPlanParamsChanged() {
@@ -557,9 +563,16 @@ function recalcItem(idx, fromMonth = 0) {
   const item = planState.items[idx];
   const headers = generatePeriodHeaders();
   
-  // Если план пуст — создаём
-  if (!item.plan.length) {
-    item.plan = headers.map((_, m) => ({ month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }));
+  // Если план пуст или длина не совпадает — пересоздаём с сохранением locked
+  if (!item.plan.length || item.plan.length !== headers.length) {
+    const oldPlan = item.plan || [];
+    item.plan = headers.map((_, m) => {
+      const old = oldPlan[m];
+      if (old && old.locked) {
+        return { ...old, month: m };
+      }
+      return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false };
+    });
   }
   
   const toUnits = (val) => {
