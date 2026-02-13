@@ -1,7 +1,6 @@
 import { orderState } from './state.js';
 import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
-import { setupCalculator } from './calculator.js';
 import { history } from './history.js';
 import { SafetyStockManager } from './safety-stock.js';
 
@@ -43,7 +42,6 @@ const clearDbSearchBtn = document.getElementById('clearDbSearch');
 const databaseList = document.getElementById('databaseList');
 
 const editCardModal = document.getElementById('editCardModal');
-const closeEditCardBtn = document.getElementById('closeEditCard');
 const confirmModal = document.getElementById('confirmModal');
 const buildOrderBtn = document.getElementById('buildOrder');
 const orderSection = document.getElementById('orderSection');
@@ -924,10 +922,6 @@ function rerenderAll() {
       }
     });
 }
-
-render();
-
-
 
 function initModals() {
   const openHistoryBtn = document.getElementById('menuHistory');
