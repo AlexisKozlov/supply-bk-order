@@ -4,6 +4,7 @@
 
 import { setupCalculator } from './calculator.js';
 import { calculateItem } from './calculations.js';
+import { validateConsumptionData } from './data-validation.js';
 
 export function renderTable(orderState, tbody, callbacks) {
   const {
@@ -12,12 +13,53 @@ export function renderTable(orderState, tbody, callbacks) {
     saveStateToHistory,
     updateFinalSummary,
     removeItem,
-    setupExcelNavigation,
     roundToPallet,
     saveItemOrder,
     render,
     openProductForEdit
   } = callbacks;
+
+  // Excel-like навигация по ячейкам (перенесено из ui.js)
+  function setupExcelNavigation(input, rowIndex, columnIndex) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveToCell(rowIndex + 1, columnIndex);
+      }
+      else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveToCell(rowIndex - 1, columnIndex);
+      }
+      else if (e.key === 'ArrowRight') {
+        let atEnd = true;
+        try { atEnd = input.selectionStart >= input.value.length; } catch(err) { /* OK */ }
+        if (atEnd) {
+          e.preventDefault();
+          moveToCell(rowIndex, columnIndex + 1);
+        }
+      }
+      else if (e.key === 'ArrowLeft') {
+        let atStart = true;
+        try { atStart = input.selectionStart === 0; } catch(err) { /* OK */ }
+        if (atStart) {
+          e.preventDefault();
+          moveToCell(rowIndex, columnIndex - 1);
+        }
+      }
+    });
+  }
+
+  function moveToCell(rowIndex, columnIndex) {
+    const rows = tbody.querySelectorAll('tr');
+    if (rowIndex < 0 || rowIndex >= rows.length) return;
+    if (columnIndex < 0 || columnIndex > 4) return;
+    const targetRow = rows[rowIndex];
+    const inputs = targetRow.querySelectorAll('input[type="number"]');
+    if (inputs[columnIndex]) {
+      inputs[columnIndex].focus();
+      inputs[columnIndex].select();
+    }
+  }
 
   tbody.innerHTML = '';
   let draggedIndex = null;
@@ -139,7 +181,7 @@ export function renderTable(orderState, tbody, callbacks) {
       saveDraft();
       saveStateToHistoryDebounced();
       // #6 Мгновенная проверка данных
-      if (window._validateConsumptionData) window._validateConsumptionData();
+      validateConsumptionData(tbody);
     });
     inputs[0].addEventListener('blur', () => saveStateToHistory());
     setupExcelNavigation(inputs[0], rowIndex, 0);
