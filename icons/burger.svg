@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-  <!-- top bun -->
-  <path d="M3.5 11h17" stroke="#D62300" stroke-width="1.5" stroke-linecap="round"/>
-  <path d="M3.5 11a8.5 4 0 0 1 17 0" fill="#F5A623" stroke="#D62300" stroke-width="1.5"/>
-  <!-- sesame seeds -->
-  <circle cx="9" cy="8.2" r="0.8" fill="#fff" opacity="0.85"/>
-  <circle cx="12" cy="7.3" r="0.8" fill="#fff" opacity="0.85"/>
-  <circle cx="15" cy="8.2" r="0.8" fill="#fff" opacity="0.85"/>
-  <!-- lettuce -->
-  <path d="M3.5 11.5c1.5 1.8 4 2.5 8.5 2.5s7-0.7 8.5-2.5" stroke="#4CAF50" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- top bun filled -->
+  <path d="M3.5 12a8.5 4.5 0 0 1 17 0Z" fill="#F5A623" stroke="#fff" stroke-width="0.8"/>
+  <!-- sesame -->
+  <circle cx="9" cy="9" r="0.9" fill="#fff"/>
+  <circle cx="12" cy="8" r="0.9" fill="#fff"/>
+  <circle cx="15" cy="9" r="0.9" fill="#fff"/>
+  <!-- lettuce wave -->
+  <path d="M3 12.5c1 0 1.5 1 2.5 1s1.5-1 2.5-1 1.5 1 2.5 1 1.5-1 2.5-1 1.5 1 2.5 1 1.5-1 2.5-1 1.5 1 2.5 1" fill="none" stroke="#4CAF50" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- cheese -->
+  <rect x="3" y="13.5" width="18" height="1.8" rx="0.4" fill="#FFCA28"/>
   <!-- patty -->
-  <rect x="3.5" y="14" width="17" height="2.5" rx="1.2" fill="#5A2D0C"/>
-  <!-- bottom bun -->
-  <path d="M3.5 17.5h17" stroke="#D62300" stroke-width="1.5" stroke-linecap="round"/>
-  <path d="M3.5 17.5c0 1.8 2.5 3 8.5 3s8.5-1.2 8.5-3" fill="#F5A623" stroke="#D62300" stroke-width="1.5"/>
+  <rect x="3.2" y="15.3" width="17.6" height="2.8" rx="1.4" fill="#5A2D0C" stroke="#fff" stroke-width="0.4"/>
+  <!-- bottom bun filled -->
+  <path d="M3.5 18.5h17c0 2-3 3.2-8.5 3.2S3.5 20.5 3.5 18.5Z" fill="#F5A623" stroke="#fff" stroke-width="0.8"/>
 </svg>
