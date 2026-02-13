@@ -79,38 +79,74 @@ function mapLegalEntity(raw) {
   return null;
 }
 
+/** Ключевые слова заголовков — для точного определения строки с шапкой */
+const HEADER_KEYWORDS = [
+  'артикул', 'наименование', 'остат', 'расход', 'sku', 'stock',
+  'название', 'товар', 'кол-во', 'количество', 'транзит',
+  'организация', 'юр', 'номенклатура', 'заказчик',
+  'единица измерения', 'штрих-код', 'годен', 'склад'
+];
+
+function findHeaderRow(rows) {
+  // Стратегия 1: строка содержит >= 2 известных ключевых слова
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const cells = rows[i].map(c => String(c).toLowerCase().trim());
+    const hits = cells.filter(cell =>
+      HEADER_KEYWORDS.some(kw => cell.includes(kw))
+    ).length;
+    if (hits >= 2) return i;
+  }
+
+  // Стратегия 2: хотя бы 1 ключевое слово + 3 текстовых ячейки
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const cells = rows[i].map(c => String(c).toLowerCase().trim());
+    const hasKeyword = cells.some(cell =>
+      HEADER_KEYWORDS.some(kw => cell.includes(kw))
+    );
+    const textCells = rows[i].filter(c => typeof c === 'string' && c.length > 1).length;
+    if (hasKeyword && textCells >= 3) return i;
+  }
+
+  // Стратегия 3: fallback — первая строка с >= 3 текстовыми ячейками
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const textCells = rows[i].filter(c => typeof c === 'string' && c.length > 1).length;
+    if (textCells >= 3) return i;
+  }
+
+  return 0;
+}
+
 function mapRows(rows, legalEntity) {
   if (rows.length < 2) return [];
 
-  // Ищем строку заголовков (первую строку с текстовыми ячейками)
-  let headerIdx = 0;
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    const textCells = rows[i].filter(c => typeof c === 'string' && c.length > 1).length;
-    if (textCells >= 2) {
-      headerIdx = i;
-      break;
-    }
-  }
+  console.log(`📁 Импорт: ${rows.length} строк в файле`);
 
+  const headerIdx = findHeaderRow(rows);
   const headers = rows[headerIdx].map(h => String(h).toLowerCase().trim());
+  console.log(`📋 Заголовки (строка ${headerIdx}):`, headers.filter(h => h));
 
   // Поиск индексов колонок по ключевым словам
   const colMap = {
-    sku: findCol(headers, ['артикул', 'арт', 'sku', 'код', 'article', 'code', 'номенклатура']),
-    name: findCol(headers, ['наименование товара', 'наименование', 'название', 'товар', 'name', 'product', 'номенклатура']),
-    stock: findCol(headers, ['остатки, кол', 'остатки', 'остаток', 'склад', 'stock', 'кол-во', 'количество', 'свобод', 'доступ']),
-    transit: findCol(headers, ['транзит', 'в пути', 'transit', 'ожидаем', 'поставщик', 'резерв']),
+    sku: findCol(headers, ['артикул', 'арт', 'sku', 'article']),
+    name: findCol(headers, ['наименование товара', 'наименование', 'название', 'номенклатура', 'товар', 'name', 'product']),
+    stock: findCol(headers, ['остатки, кол', 'остатки', 'остаток', 'stock', 'кол-во', 'количество', 'свобод', 'доступ']),
+    transit: findCol(headers, ['транзит', 'в пути', 'transit', 'ожидаем', 'резерв']),
     consumption: findCol(headers, ['расход', 'потребление', 'consumption', 'продажи', 'реализация', 'списание']),
-    legalEntity: findCol(headers, ['юр лицо', 'юр. лицо', 'юридическое лицо', 'организация', 'legal entity', 'компания', 'фирма'])
+    legalEntity: findCol(headers, ['заказчик', 'короткое наименован', 'юр лицо', 'юр. лицо', 'юридическое лицо', 'организация', 'legal entity', 'компания', 'фирма'])
   };
+
+  console.log('🔍 Найдены колонки:', Object.fromEntries(
+    Object.entries(colMap).map(([k, v]) => [k, v >= 0 ? `[${v}] "${headers[v]}"` : '—'])
+  ));
 
   // Если не нашли sku — пробуем name как ключ
   if (colMap.sku === -1 && colMap.name === -1) {
+    console.warn('⚠️ Не найдены колонки артикула или наименования. Заголовки:', headers);
     return [];
   }
 
-  // Парсим данные
-  const data = [];
+  // Парсим ВСЕ строки (без фильтра юр. лица)
+  const allData = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length < 2) continue;
@@ -118,8 +154,7 @@ function mapRows(rows, legalEntity) {
     let sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
     let name = colMap.name >= 0 ? String(row[colMap.name] || '').trim() : '';
 
-    // Если sku и name — одна и та же колонка, или только одна из них
-    // Пробуем извлечь артикул из текста
+    // Пробуем извлечь артикул из текста наименования
     if (!sku && name) {
       const extracted = extractSkuFromText(name);
       sku = extracted.sku;
@@ -131,7 +166,6 @@ function mapRows(rows, legalEntity) {
         sku = extracted.sku;
       }
     } else if (colMap.sku === colMap.name && sku) {
-      // Одна колонка — и sku и name ссылаются на неё
       const extracted = extractSkuFromText(sku);
       sku = extracted.sku;
       name = extracted.name || sku;
@@ -139,50 +173,110 @@ function mapRows(rows, legalEntity) {
 
     if (!sku && !name) continue;
 
-    // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
-    if (colMap.legalEntity >= 0 && legalEntity) {
-      const rawEntity = String(row[colMap.legalEntity] || '').trim();
-      const mapped = mapLegalEntity(rawEntity);
-      if (mapped && mapped !== legalEntity) continue;
-    }
-
     const entry = { sku, name };
 
     if (colMap.stock >= 0) entry.stock = parseNum(row[colMap.stock]);
     if (colMap.transit >= 0) entry.transit = parseNum(row[colMap.transit]);
     if (colMap.consumption >= 0) entry.consumption = parseNum(row[colMap.consumption]);
 
-    data.push(entry);
+    // Сохраняем raw-значение юр. лица для фильтрации ниже
+    if (colMap.legalEntity >= 0) {
+      entry._rawEntity = String(row[colMap.legalEntity] || '').trim();
+    }
+
+    allData.push(entry);
   }
 
-  return data;
+  // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
+  // ВАЖНО: Бургер БК и Воглия Матта — связанные юр. лица, импортируются вместе
+  const LINKED_ENTITIES = {
+    'Бургер БК': ['Бургер БК', 'Воглия Матта'],
+    'Воглия Матта': ['Бургер БК', 'Воглия Матта'],
+    'Пицца Стар': ['Пицца Стар']
+  };
+
+  let data = allData;
+  if (colMap.legalEntity >= 0 && legalEntity && allData.length > 0) {
+    const allowedEntities = LINKED_ENTITIES[legalEntity] || [legalEntity];
+    
+    const filtered = allData.filter(entry => {
+      const mapped = mapLegalEntity(entry._rawEntity);
+      return !mapped || allowedEntities.includes(mapped);
+    });
+
+    if (filtered.length > 0) {
+      data = filtered;
+      console.log(`🏢 Фильтр юр. лица "${legalEntity}" (+ связанные: ${allowedEntities.join(', ')}): ${allData.length} → ${filtered.length} строк`);
+    } else {
+      // Фильтр убрал ВСЕ строки — импортируем без фильтра с предупреждением
+      const entities = [...new Set(allData.map(e => e._rawEntity).filter(Boolean))];
+      console.warn(`⚠️ В файле нет товаров для "${legalEntity}". Найдены юр. лица: ${entities.join(', ')}. Импортируем все.`);
+    }
+  }
+
+  // Убираем служебное поле
+  data.forEach(d => delete d._rawEntity);
+
+  // Агрегация: один товар может быть на нескольких паллетах/ячейках — суммируем остатки
+  const aggregated = aggregateByProduct(data);
+
+  console.log(`📊 Импорт: ${rows.length - headerIdx - 1} строк данных → ${allData.length} распознано → ${aggregated.length} уникальных товаров`);
+
+  return aggregated;
+}
+
+/**
+ * Группировка строк по товару (sku или name), суммирование числовых полей.
+ * Один товар на разных паллетах/ячейках → одна запись с суммой остатков.
+ */
+function aggregateByProduct(data) {
+  const map = new Map();
+
+  for (const entry of data) {
+    // Ключ: SKU (если есть) или нормализованное имя
+    const key = entry.sku
+      ? normSku(entry.sku)
+      : entry.name.toLowerCase().trim();
+
+    if (map.has(key)) {
+      const existing = map.get(key);
+      if (entry.stock !== undefined) existing.stock = (existing.stock || 0) + entry.stock;
+      if (entry.transit !== undefined) existing.transit = (existing.transit || 0) + entry.transit;
+      if (entry.consumption !== undefined) existing.consumption = (existing.consumption || 0) + entry.consumption;
+    } else {
+      map.set(key, { ...entry });
+    }
+  }
+
+  return Array.from(map.values());
 }
 
 /**
  * Извлекает артикул из строки вида:
+ * "2012Д10 Мука хлебопекарная а/с ДОДО 10 кг" → { sku: "2012Д10", name: "Мука хлебопекарная а/с ДОДО 10 кг" }
  * "12345 Бургер Классик" → { sku: "12345", name: "Бургер Классик" }
  * "АРТ-001 Соус BBQ 1кг" → { sku: "АРТ-001", name: "Соус BBQ 1кг" }
  * "Котлета говяжья 150г" → { sku: "", name: "Котлета говяжья 150г" }
  */
 function extractSkuFromText(text) {
   text = text.trim();
-  
-  // Паттерн 1: начинается с артикула (цифры, возможно с буквами/дефисами) + пробел + наименование
-  // Примеры: "12345 Товар", "АРТ-001 Товар", "SKU001 Товар"
-  const match = text.match(/^([A-Za-zА-Яа-я]{0,4}[\-]?\d{2,}[\-\d]*)\s+(.+)$/);
+
+  // Паттерн 1: альфанумерик-код в начале (цифры+буквы, буквы+цифры, с дефисами/подчёркиваниями)
+  // Код: 2-15 символов, обязательно содержит хотя бы одну цифру
+  // Примеры: "2012Д10 Товар", "12345 Товар", "АРТ-001 Товар", "SKU001 Товар", "51097_1 Сыр"
+  const match = text.match(/^([A-Za-zА-Яа-яЁё0-9][-_A-Za-zА-Яа-яЁё0-9.]{1,14})\s+(.{3,})$/);
   if (match) {
-    return { sku: match[1].trim(), name: match[2].trim() };
+    const code = match[1];
+    const rest = match[2].trim();
+    // Код должен содержать цифру и не быть чисто буквенным словом
+    if (/\d/.test(code) && !/^[А-Яа-яЁё]+$/.test(code)) {
+      return { sku: code, name: rest };
+    }
   }
 
-  // Паттерн 2: артикул в начале — чисто цифровой
-  const numMatch = text.match(/^(\d{3,})\s+(.+)$/);
-  if (numMatch) {
-    return { sku: numMatch[1], name: numMatch[2].trim() };
-  }
-
-  // Паттерн 3: наименование потом артикул в скобках: "Товар (12345)"
-  const bracketsMatch = text.match(/^(.+?)\s*\((\d{3,})\)\s*$/);
-  if (bracketsMatch) {
+  // Паттерн 2: наименование потом артикул в скобках: "Товар (12345)"
+  const bracketsMatch = text.match(/^(.+?)\s*\(([A-Za-zА-Яа-яЁё0-9][-_A-Za-zА-Яа-яЁё0-9.]{1,14})\)\s*$/);
+  if (bracketsMatch && /\d/.test(bracketsMatch[2])) {
     return { sku: bracketsMatch[2], name: bracketsMatch[1].trim() };
   }
 
@@ -221,9 +315,10 @@ export function showImportDialog(target, items, callback, legalEntity) {
     if (!file) return;
 
     try {
+      console.log(`🚀 Импорт файла "${file.name}" (${(file.size / 1024).toFixed(0)} KB), юр. лицо: "${legalEntity || 'не задано'}"`);
       const data = await parseFile(file, legalEntity);
       if (!data.length) {
-        showToast('Пустой файл', 'Не удалось распознать данные', 'error');
+        showToast('Нет данных', 'Не удалось распознать товары в файле. Проверьте формат (нужны колонки: наименование товара, остатки)', 'error');
         return;
       }
 
@@ -231,13 +326,13 @@ export function showImportDialog(target, items, callback, legalEntity) {
       const result = matchData(items, data, target);
 
       if (result.matched === 0) {
-        showToast('Нет совпадений', `Из ${data.length} строк файла — 0 совпадений по артикулу`, 'error');
+        showToast('Нет совпадений', `Из ${data.length} товаров файла — 0 совпадений с заказом (${items.length} позиций)`, 'error');
         showImportPreview(data, items, target, callback);
         return;
       }
 
       callback(result.items);
-      showToast('Импорт завершён', `${result.matched} из ${items.length} товаров обновлены`, 'success');
+      showToast('Импорт завершён', `${result.matched} из ${items.length} позиций обновлены (из ${data.length} товаров файла)`, 'success');
     } catch (err) {
       console.error('Import error:', err);
       showToast('Ошибка импорта', err.message || 'Не удалось прочитать файл', 'error');
@@ -275,15 +370,18 @@ function matchData(items, fileData, target) {
 
   const updatedItems = items.map(item => {
     let match = null;
+    let matchMethod = '';
 
     // 1. Точное совпадение по SKU
     if (item.sku) {
       match = skuLookup.get(normSku(item.sku));
+      if (match) matchMethod = 'SKU exact';
     }
 
     // 2. Точное совпадение по имени
     if (!match && item.name) {
       match = nameLookup.get(item.name.toLowerCase().trim());
+      if (match) matchMethod = 'name exact';
     }
 
     // 3. SKU товара содержится в строке файла (или наоборот)
@@ -293,7 +391,7 @@ function matchData(items, fileData, target) {
         normSku(e.combined).includes(normItemSku) ||
         (e.data.sku && normItemSku.includes(normSku(e.data.sku)))
       );
-      if (found) match = found.data;
+      if (found) { match = found.data; matchMethod = 'SKU contains'; }
     }
 
     // 4. Наименование товара содержится в строке файла
@@ -302,12 +400,13 @@ function matchData(items, fileData, target) {
       const found = nameContainsLookup.find(e =>
         e.combined.includes(normName) || normName.includes(e.data.name?.toLowerCase()?.trim())
       );
-      if (found) match = found.data;
+      if (found) { match = found.data; matchMethod = 'name contains'; }
     }
 
     if (!match) return item;
 
     matched++;
+    console.log(`  ✅ [${item.sku || '—'}] ${item.name?.slice(0, 40)} ← файл [${match.sku || '—'}] ост=${match.stock ?? '—'} (${matchMethod})`);
     const updated = { ...item };
 
     if (target === 'order') {
@@ -323,22 +422,30 @@ function matchData(items, fileData, target) {
     return updated;
   });
 
+  const unmatched = items.filter((item, i) => updatedItems[i] === item);
+  if (unmatched.length > 0 && unmatched.length <= 20) {
+    console.log(`❌ Не найдены в файле (${unmatched.length}):`);
+    unmatched.forEach(item => console.log(`  [${item.sku || '—'}] ${item.name || '—'}`));
+  }
+
   return { items: updatedItems, matched };
 }
 
 function normSku(sku) {
-  return String(sku).replace(/[\s\-\.]/g, '').toLowerCase();
+  return String(sku).replace(/[\s\-\_\.]/g, '').toLowerCase();
 }
 
 /**
- * Превью импорта при 0 совпадений — показываем что нашли в файле
+ * Превью импорта при 0 совпадений — показываем что нашли в файле vs что в заказе
  */
-function showImportPreview(fileData, items, target, callback) {
-  // Показываем первые 5 строк из файла для диагностики
-  const preview = fileData.slice(0, 5).map(d =>
-    `${d.sku || '—'} | ${d.name || '—'} | ост: ${d.stock ?? '—'}`
-  ).join('\n');
+function showImportPreview(fileData, items) {
+  console.log(`\n📄 Файл (${fileData.length} товаров, первые 20):`);
+  fileData.slice(0, 20).forEach((d, i) =>
+    console.log(`  ${i + 1}. [${d.sku || '—'}] ${d.name || '—'} | ост: ${d.stock ?? '—'}`)
+  );
 
-  console.log('Import preview (first 5 rows):\n' + preview);
-  console.log('Items SKUs:', items.slice(0, 5).map(i => i.sku).join(', '));
+  console.log(`\n🛒 Заказ (${items.length} позиций, первые 20):`);
+  items.slice(0, 20).forEach((item, i) =>
+    console.log(`  ${i + 1}. [${item.sku || '—'}] ${item.name || '—'}`)
+  );
 }
