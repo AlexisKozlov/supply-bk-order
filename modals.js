@@ -28,7 +28,7 @@ export function showToast(title, message, type = 'info') {
       <div class="toast-title">${title}</div>
       ${message ? `<div class="toast-message">${message}</div>` : ''}
     </div>
-    <button class="toast-close"><img src="./icons/close.png" width="12" height="12" alt=""></button>
+    <button class="toast-close">✕</button>
   `;
 
   const container = document.querySelector('.toast-container');

@@ -93,7 +93,7 @@ export function renderTable(orderState, tbody, callbacks) {
         <div class="pallet-info">-</div>
         <button class="btn small round-to-pallet">Округлить</button>
       </td>
-      <td class="delete-cell"><button class="delete-item-x" title="Удалить"><img src="./icons/close.png" width="12" height="12" alt=""></button></td>
+      <td class="delete-cell"><button class="delete-item-x" title="Удалить">✕</button></td>
     `;
 
     const inputs = tr.querySelectorAll('input[type="number"]');
