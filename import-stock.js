@@ -22,9 +22,56 @@ async function parseFile(file, legalEntity) {
   // Excel
   const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
   const buffer = await file.arrayBuffer();
-  const wb = XLSX.read(buffer, { type: 'array' });
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+  // Определяем полный range листа — SheetJS может обрезать пустые строки
+  const ref = ws['!ref'];
+  console.log(`📑 Sheet ref: ${ref}`);
+
+  // Принудительно расширяем range до всех данных
+  // Используем decode_range для получения реального диапазона
+  let range;
+  if (ref) {
+    range = XLSX.utils.decode_range(ref);
+    // Начинаем с самого начала (row 0)
+    range.s.r = 0;
+    range.s.c = 0;
+  }
+
+  const rows = XLSX.utils.sheet_to_json(ws, { 
+    header: 1, 
+    defval: '',
+    range: range || 0,
+    blankrows: true  // Включаем пустые строки
+  });
+
+  console.log(`📁 Импорт: ${rows.length} строк в файле (ref: ${ref})`);
+
+  // Если SheetJS всё равно вернул мало строк — пробуем альтернативный метод
+  if (rows.length < 50 && ref) {
+    const decoded = XLSX.utils.decode_range(ref);
+    const expectedRows = decoded.e.r - decoded.s.r + 1;
+    
+    if (expectedRows > rows.length * 2) {
+      console.warn(`⚠️ SheetJS вернул ${rows.length} строк, но range указывает на ${expectedRows}. Пробуем альтернативный метод...`);
+      
+      // Альтернативный метод: читаем ячейки напрямую
+      const altRows = [];
+      for (let r = decoded.s.r; r <= decoded.e.r; r++) {
+        const row = [];
+        for (let c = decoded.s.c; c <= decoded.e.c; c++) {
+          const cellRef = XLSX.utils.encode_cell({ r, c });
+          const cell = ws[cellRef];
+          row.push(cell ? (cell.v !== undefined ? cell.v : '') : '');
+        }
+        altRows.push(row);
+      }
+      
+      console.log(`📁 Альтернативный метод: ${altRows.length} строк`);
+      return mapRows(altRows, legalEntity);
+    }
+  }
 
   return mapRows(rows, legalEntity);
 }
@@ -188,25 +235,17 @@ function mapRows(rows, legalEntity) {
   }
 
   // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
-  // ВАЖНО: Бургер БК и Воглия Матта — связанные юр. лица, импортируются вместе
-  const LINKED_ENTITIES = {
-    'Бургер БК': ['Бургер БК', 'Воглия Матта'],
-    'Воглия Матта': ['Бургер БК', 'Воглия Матта'],
-    'Пицца Стар': ['Пицца Стар']
-  };
-
+  // Каждое юр. лицо фильтруется отдельно: Бургер БК, Воглия Матта, Пицца Стар
   let data = allData;
   if (colMap.legalEntity >= 0 && legalEntity && allData.length > 0) {
-    const allowedEntities = LINKED_ENTITIES[legalEntity] || [legalEntity];
-    
     const filtered = allData.filter(entry => {
       const mapped = mapLegalEntity(entry._rawEntity);
-      return !mapped || allowedEntities.includes(mapped);
+      return !mapped || mapped === legalEntity;
     });
 
     if (filtered.length > 0) {
       data = filtered;
-      console.log(`🏢 Фильтр юр. лица "${legalEntity}" (+ связанные: ${allowedEntities.join(', ')}): ${allData.length} → ${filtered.length} строк`);
+      console.log(`🏢 Фильтр юр. лица "${legalEntity}": ${allData.length} → ${filtered.length} строк`);
     } else {
       // Фильтр убрал ВСЕ строки — импортируем без фильтра с предупреждением
       const entities = [...new Set(allData.map(e => e._rawEntity).filter(Boolean))];
