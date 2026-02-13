@@ -353,8 +353,8 @@ async function loadPlanHistory(opts) {
           <span style="color:var(--muted);font-size:12px;">${items.length} позиций · ${nf.format(totalBoxes)} кор</span>
         </span>
         <div style="display:flex;gap:6px;">
-          <button class="btn small load-plan-btn" data-id="${plan.id}"><img src="./icons/edit.png" width="12" height="12" alt=""> Загрузить</button>
-          <button class="btn small delete-plan-btn" data-id="${plan.id}" style="background:var(--error);color:white;"><img src="./icons/delete.png" width="12" height="12" alt=""></button>
+          <button class="btn small load-plan-btn" data-id="${plan.id}"><img src="./icons/edit.svg" width="12" height="12" alt=""> Загрузить</button>
+          <button class="btn small delete-plan-btn" data-id="${plan.id}" style="background:var(--error);color:white;"><img src="./icons/delete.svg" width="12" height="12" alt=""></button>
         </div>
       </div>
     `;

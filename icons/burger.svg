@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- top bun -->
+  <path d="M4 11h16" />
+  <path d="M3.5 11a8.5 4 0 0 1 17 0" />
+  <!-- filling -->
+  <path d="M4 11c1 1 3 2 8 2s7-1 8-2" />
+  <!-- patty -->
+  <rect x="3" y="14" width="18" rx="1" ry="1" height="2.5" fill="currentColor" opacity="0.25"/>
+  <!-- bottom bun -->
+  <path d="M4 17h16" />
+  <path d="M4 17c0 1.5 2 3 8 3s8-1.5 8-3" />
+  <!-- sesame seeds -->
+  <circle cx="9" cy="8" r="0.6" fill="currentColor" />
+  <circle cx="12" cy="7.2" r="0.6" fill="currentColor" />
+  <circle cx="15" cy="8" r="0.6" fill="currentColor" />
+</svg>

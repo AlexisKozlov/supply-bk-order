@@ -15,9 +15,9 @@ export function showToast(title, message, type = 'info') {
   createToastContainer();
   
   const icons = {
-    success: '<img src="./icons/check.png" width="20" height="20" alt="">',
-    error: '<img src="./icons/error.png" width="20" height="20" alt="">',
-    info: '<img src="./icons/info.png" width="20" height="20" alt="">'
+    success: '<img src="./icons/check.svg" width="20" height="20" alt="">',
+    error: '<img src="./icons/error.svg" width="20" height="20" alt="">',
+    info: '<img src="./icons/info.svg" width="20" height="20" alt="">'
   };
 
   const toast = document.createElement('div');
@@ -28,7 +28,7 @@ export function showToast(title, message, type = 'info') {
       <div class="toast-title">${title}</div>
       ${message ? `<div class="toast-message">${message}</div>` : ''}
     </div>
-    <button class="toast-close"><img src="./icons/close.png" width="12" height="12" alt=""></button>
+    <button class="toast-close"><img src="./icons/close.svg" width="12" height="12" alt=""></button>
   `;
 
   const container = document.querySelector('.toast-container');
