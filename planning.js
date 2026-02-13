@@ -8,6 +8,7 @@
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { showImportDialog } from './import-stock.js';
+import { validatePlanConsumption } from './data-validation.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -161,6 +162,7 @@ export function initPlanning() {
     renderPlanTable();
     // Пересчитываем с учётом locked — с начала
     planState.items.forEach((_, idx) => recalcItem(idx, 0));
+    triggerPlanValidation();
     showToast('План загружен', `${plan.supplier} — ${planState.items.length} позиций`, 'success');
   });
 }
@@ -195,7 +197,10 @@ async function initPlanningUI() {
       notifyPlanParamsChanged();
     });
 
-    supplierSelect.addEventListener('change', notifyPlanParamsChanged);
+    supplierSelect.addEventListener('change', () => {
+      resetPlanConsumptionCache();
+      notifyPlanParamsChanged();
+    });
 
     periodSelect.addEventListener('change', () => {
       if (planState.items.length) {
@@ -221,9 +226,24 @@ async function initPlanningUI() {
     document.getElementById('planUnit')?.addEventListener('change', () => {
       if (planState.items.length) {
         planState.inputUnit = document.getElementById('planUnit').value;
+        resetPlanConsumptionCache(); // единицы изменились — сбросить кеш
         renderPlanTable();
         planState.items.forEach((_, idx) => recalcItem(idx, 0));
         showToast('Единицы обновлены', 'Данные пересчитаны', 'info');
+      }
+    });
+
+    // Селектор проверки данных расхода
+    document.getElementById('planDataValidation')?.addEventListener('change', () => {
+      const container = document.getElementById('planTableContainer');
+      if (document.getElementById('planDataValidation').value === 'true') {
+        triggerPlanValidation();
+      } else {
+        // Немедленно убираем все предупреждения
+        container.querySelectorAll('.consumption-warning').forEach(el => {
+          el.classList.remove('consumption-warning');
+          el.title = '';
+        });
       }
     });
 
@@ -247,6 +267,8 @@ async function initPlanningUI() {
     }
     await loadPlanProducts();
     renderPlanTable();
+    // Запускаем проверку данных если включена
+    triggerPlanValidation();
   });
 
   setupActionBtn('planCopyBtn', copyPlanToClipboard);
@@ -261,6 +283,7 @@ async function initPlanningUI() {
       planState.items = updatedItems;
       renderPlanTable();
       planState.items.forEach((_, idx) => recalcItem(idx));
+      triggerPlanValidation();
     }, planState.legalEntity);
   });
   } // end if (!planningUIInitialized)
@@ -270,6 +293,15 @@ function notifyPlanParamsChanged() {
   if (planState.items.length) {
     showToast('Параметры изменены', 'Нажмите «Загрузить товары» для обновления', 'info');
   }
+}
+
+/**
+ * Запуск проверки данных расхода в планировании
+ */
+function triggerPlanValidation() {
+  const container = document.getElementById('planTableContainer');
+  if (!container || !planState.items.length) return;
+  validatePlanConsumption(planState, container);
 }
 
 function setupActionBtn(id, handler) {
@@ -514,6 +546,8 @@ function applyInputValue(input, value) {
   if (input.classList.contains('plan-consumption')) {
     item.monthlyConsumption = value;
     updateConsumptionHint(input, value);
+    // Мгновенная проверка данных
+    triggerPlanValidation();
   } else if (input.classList.contains('plan-stock')) {
     item.stockOnHand = value;
   } else if (input.classList.contains('plan-supplier-stock')) {
