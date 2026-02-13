@@ -45,12 +45,14 @@ export function calculateItem(item, settings) {
       roundUp(calculatedOrder / item.qtyPerBox) * item.qtyPerBox;
   }
 
-  const available = totalStock + (item.finalOrder || 0);
-  const days = safeDivide(available, daily);
+  // === ДАТА «ХВАТИТ ДО» ===
+  // После поставки доступно: остаток к поставке + заказ
+  const availableAfterDelivery = stockAfterDelivery + (item.finalOrder || 0);
+  const daysAfterDelivery = safeDivide(availableAfterDelivery, daily);
 
   const coverageDate =
     daily > 0
-      ? new Date(today.getTime() + days * 86400000)
+      ? new Date(deliveryDate.getTime() + daysAfterDelivery * 86400000)
       : null;
 
   return {
