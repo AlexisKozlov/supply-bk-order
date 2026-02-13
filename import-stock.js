@@ -144,8 +144,8 @@ function mapRows(rows, legalEntity) {
     return [];
   }
 
-  // Парсим данные
-  const data = [];
+  // Парсим ВСЕ строки (без фильтра юр. лица)
+  const allData = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length < 2) continue;
@@ -153,8 +153,7 @@ function mapRows(rows, legalEntity) {
     let sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
     let name = colMap.name >= 0 ? String(row[colMap.name] || '').trim() : '';
 
-    // Если sku и name — одна и та же колонка, или только одна из них
-    // Пробуем извлечь артикул из текста
+    // Пробуем извлечь артикул из текста наименования
     if (!sku && name) {
       const extracted = extractSkuFromText(name);
       sku = extracted.sku;
@@ -166,7 +165,6 @@ function mapRows(rows, legalEntity) {
         sku = extracted.sku;
       }
     } else if (colMap.sku === colMap.name && sku) {
-      // Одна колонка — и sku и name ссылаются на неё
       const extracted = extractSkuFromText(sku);
       sku = extracted.sku;
       name = extracted.name || sku;
@@ -174,26 +172,45 @@ function mapRows(rows, legalEntity) {
 
     if (!sku && !name) continue;
 
-    // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
-    if (colMap.legalEntity >= 0 && legalEntity) {
-      const rawEntity = String(row[colMap.legalEntity] || '').trim();
-      const mapped = mapLegalEntity(rawEntity);
-      if (mapped && mapped !== legalEntity) continue;
-    }
-
     const entry = { sku, name };
 
     if (colMap.stock >= 0) entry.stock = parseNum(row[colMap.stock]);
     if (colMap.transit >= 0) entry.transit = parseNum(row[colMap.transit]);
     if (colMap.consumption >= 0) entry.consumption = parseNum(row[colMap.consumption]);
 
-    data.push(entry);
+    // Сохраняем raw-значение юр. лица для фильтрации ниже
+    if (colMap.legalEntity >= 0) {
+      entry._rawEntity = String(row[colMap.legalEntity] || '').trim();
+    }
+
+    allData.push(entry);
   }
+
+  // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
+  let data = allData;
+  if (colMap.legalEntity >= 0 && legalEntity && allData.length > 0) {
+    const filtered = allData.filter(entry => {
+      const mapped = mapLegalEntity(entry._rawEntity);
+      return !mapped || mapped === legalEntity;
+    });
+
+    if (filtered.length > 0) {
+      data = filtered;
+      console.log(`🏢 Фильтр юр. лица "${legalEntity}": ${allData.length} → ${filtered.length} строк`);
+    } else {
+      // Фильтр убрал ВСЕ строки — импортируем без фильтра с предупреждением
+      const entities = [...new Set(allData.map(e => e._rawEntity).filter(Boolean))];
+      console.warn(`⚠️ В файле нет товаров для "${legalEntity}". Найдены юр. лица: ${entities.join(', ')}. Импортируем все.`);
+    }
+  }
+
+  // Убираем служебное поле
+  data.forEach(d => delete d._rawEntity);
 
   // Агрегация: один товар может быть на нескольких паллетах/ячейках — суммируем остатки
   const aggregated = aggregateByProduct(data);
 
-  console.log(`📊 Импорт: ${rows.length - headerIdx - 1} строк данных → ${data.length} после фильтрации → ${aggregated.length} уникальных товаров`);
+  console.log(`📊 Импорт: ${rows.length - headerIdx - 1} строк данных → ${allData.length} распознано → ${aggregated.length} уникальных товаров`);
 
   return aggregated;
 }
@@ -288,9 +305,10 @@ export function showImportDialog(target, items, callback, legalEntity) {
     if (!file) return;
 
     try {
+      console.log(`🚀 Импорт файла "${file.name}" (${(file.size / 1024).toFixed(0)} KB), юр. лицо: "${legalEntity || 'не задано'}"`);
       const data = await parseFile(file, legalEntity);
       if (!data.length) {
-        showToast('Пустой файл', 'Не удалось распознать данные', 'error');
+        showToast('Нет данных', 'Не удалось распознать товары в файле. Проверьте формат (нужны колонки: наименование товара, остатки)', 'error');
         return;
       }
 
