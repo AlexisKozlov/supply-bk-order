@@ -14,6 +14,8 @@ import { loadOrderHistory as loadHistory } from './order-history.js';
 import { initPlanning } from './planning.js';
 import { showImportDialog } from './import-stock.js';
 import { initDeliveryCalendar } from './delivery-calendar.js';
+import { saveDraft, loadDraft, clearDraft, isLoadingDraft } from './draft.js';
+import { validateConsumptionData, resetConsumptionCache } from './data-validation.js';
 
 let editingOrderId = null; // ID заказа при редактировании (null = новый)
 
@@ -74,7 +76,6 @@ const historyModal = document.getElementById('historyModal');
 const manualModal = document.getElementById('manualModal');
 const closeManualBtn = document.getElementById('closeManual');
 
-let isLoadingDraft = false;
 
 const nf = new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 0
@@ -296,112 +297,6 @@ function loadOrderHistory() {
   loadHistory(getHistoryOpts());
 }
 
-/* ================= АВТОСОХРАНЕНИЕ ЧЕРНОВИКА ================= */
-let saveDraftTimer = null;
-
-function saveDraft() {
-  // Debounce — не чаще 1 раза в 500мс
-  clearTimeout(saveDraftTimer);
-  saveDraftTimer = setTimeout(() => {
-    const draft = {
-      settings: orderState.settings,
-      items: orderState.items,
-      timestamp: new Date().toISOString()
-    };
-    localStorage.setItem('bk_draft', JSON.stringify(draft));
-  }, 500);
-}
-
-async function loadDraft() {
-  const draft = localStorage.getItem('bk_draft');
-  if (!draft) return false;
-
-  try {
-    const data = JSON.parse(draft);
-    
-    // Устанавливаем флаг чтобы не срабатывало событие change поставщика
-    isLoadingDraft = true;
-    
-    // Восстановление настроек
-    if (data.settings.today) {
-      orderState.settings.today = new Date(data.settings.today);
-      document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
-    }
-    if (data.settings.deliveryDate) {
-      orderState.settings.deliveryDate = new Date(data.settings.deliveryDate);
-      document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
-    }
-    if (data.settings.safetyEndDate) {
-      orderState.settings.safetyEndDate = new Date(data.settings.safetyEndDate);
-    }
-    orderState.settings.legalEntity = data.settings.legalEntity || 'Бургер БК';
-    orderState.settings.supplier = data.settings.supplier || '';
-    orderState.settings.periodDays = data.settings.periodDays || 30;
-    orderState.settings.safetyDays = data.settings.safetyDays || 0;
-    orderState.settings.unit = data.settings.unit || 'pieces';
-    orderState.settings.hasTransit = data.settings.hasTransit || false;
-    orderState.settings.showStockColumn = data.settings.showStockColumn || false;
-    
-    document.getElementById('legalEntity').value = orderState.settings.legalEntity;
-    
-    // Загружаем поставщиков для юр.лица, затем устанавливаем значение
-    await loadSuppliers(orderState.settings.legalEntity);
-    document.getElementById('supplierFilter').value = orderState.settings.supplier;
-    
-    document.getElementById('periodDays').value = orderState.settings.periodDays;
-    
-    // Устанавливаем товарный запас
-    if (safetyStockManager) {
-      // ВАЖНО: сначала передаём дату поставки, потом дни запаса
-      if (orderState.settings.deliveryDate) {
-        safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
-      }
-      if (orderState.settings.safetyEndDate) {
-        // Если сохранена конечная дата — восстанавливаем через неё
-        safetyStockManager.endDate = orderState.settings.safetyEndDate;
-        safetyStockManager.calculateDays();
-        safetyStockManager.formatDisplay();
-        orderState.settings.safetyDays = safetyStockManager.getDays();
-      } else {
-        safetyStockManager.setDays(orderState.settings.safetyDays);
-      }
-    }
-    
-    document.getElementById('unit').value = orderState.settings.unit;
-    document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
-    document.getElementById('showStockColumn').value = orderState.settings.showStockColumn ? 'true' : 'false';
-    
-    // Восстановление товаров
-    orderState.items = data.items || [];
-    
-    // Сбрасываем флаг
-    isLoadingDraft = false;
-    updateEntityBadge();
-    
-    if (orderState.items.length > 0) {
-      orderSection.classList.remove('hidden');
-      
-      // Восстанавливаем порядок из Supabase
-      await restoreItemOrder();
-      
-      render();
-      
-      const draftDate = new Date(data.timestamp).toLocaleString('ru-RU');
-      showToast('Черновик загружен', `Восстановлено из ${draftDate}`, 'info');
-      return true;
-    }
-    
-  } catch (e) {
-    isLoadingDraft = false;
-    console.error('Ошибка загрузки черновика:', e);
-  }
-  
-  return false;
-}
-
-function clearDraft() {
-  localStorage.removeItem('bk_draft');
-}
 
 /* ================= ДАТА СЕГОДНЯ ================= */
 const today = new Date();
@@ -500,7 +395,7 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
 
 document.getElementById('unit').addEventListener('change', e => {
   orderState.settings.unit = e.target.value;
-  consumptionCache = null; // сбрасываем кеш — единицы изменились
+  resetConsumptionCache(); // сбрасываем кеш — единицы изменились
   rerenderAll();
   saveDraft();
 });
@@ -523,7 +418,7 @@ document.getElementById('showStockColumn').addEventListener('change', e => {
 // #1 Мгновенное включение/отключение проверки данных
 document.getElementById('dataValidation')?.addEventListener('change', () => {
   if (document.getElementById('dataValidation').value === 'true') {
-    validateConsumptionData();
+    validateConsumptionData(tbody);
   } else {
     // Немедленно убираем все предупреждения
     tbody.querySelectorAll('.consumption-warning').forEach(el => {
@@ -669,7 +564,7 @@ supplierSelect.addEventListener('change', async () => {
   }
   
   orderState.settings.supplier = supplierSelect.value;
-  consumptionCache = null; // сбрасываем кеш проверки данных
+  resetConsumptionCache(); // сбрасываем кеш проверки данных
   orderState.items = [];
   render();
   saveDraft();
@@ -1123,57 +1018,6 @@ clearOrderBtn.addEventListener('click', async () => {
 });
 
 
-/* ================= EXCEL-НАВИГАЦИЯ ================= */
-function setupExcelNavigation(input, rowIndex, columnIndex) {
-  input.addEventListener('keydown', (e) => {
-    // Enter или стрелка вниз
-    if (e.key === 'Enter' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveToCell(rowIndex + 1, columnIndex);
-    }
-    // Стрелка вверх
-    else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveToCell(rowIndex - 1, columnIndex);
-    }
-    // Стрелка вправо — для number инпутов selectionStart не работает, проверяем через Tab-подобное поведение
-    else if (e.key === 'ArrowRight') {
-      // Пробуем получить позицию курсора (работает не везде для type=number)
-      let atEnd = true;
-      try { atEnd = input.selectionStart >= input.value.length; } catch(err) { /* OK */ }
-      if (atEnd) {
-        e.preventDefault();
-        moveToCell(rowIndex, columnIndex + 1);
-      }
-    }
-    // Стрелка влево
-    else if (e.key === 'ArrowLeft') {
-      let atStart = true;
-      try { atStart = input.selectionStart === 0; } catch(err) { /* OK */ }
-      if (atStart) {
-        e.preventDefault();
-        moveToCell(rowIndex, columnIndex - 1);
-      }
-    }
-  });
-}
-
-function moveToCell(rowIndex, columnIndex) {
-  const rows = tbody.querySelectorAll('tr');
-  
-  // Проверка границ (теперь 4 колонки: расход, остаток, транзит, заказ-штуки, заказ-коробки)
-  if (rowIndex < 0 || rowIndex >= rows.length) return;
-  if (columnIndex < 0 || columnIndex > 4) return;
-  
-  const targetRow = rows[rowIndex];
-  const inputs = targetRow.querySelectorAll('input[type="number"]');
-  
-  if (inputs[columnIndex]) {
-    inputs[columnIndex].focus();
-    inputs[columnIndex].select();
-  }
-}
-
 
 /* ================= ТАБЛИЦА ================= */
 function render() {
@@ -1198,7 +1042,6 @@ function render() {
     saveStateToHistory,
     updateFinalSummary,
     removeItem,
-    setupExcelNavigation,
     roundToPallet,
     saveItemOrder,
     render,
@@ -1227,101 +1070,10 @@ function render() {
   
   // #6 Проверка данных — подсветка аномального расхода
   if (document.getElementById('dataValidation')?.value === 'true') {
-    validateConsumptionData();
+    validateConsumptionData(tbody);
   }
 }
 
-/* ================= #6 ПРОВЕРКА ДАННЫХ ================= */
-let consumptionCache = null;
-
-async function loadConsumptionHistory(supplier) {
-  if (consumptionCache && consumptionCache.supplier === supplier && consumptionCache.unit === orderState.settings.unit) {
-    return consumptionCache.data;
-  }
-  
-  const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
-  const { data, error } = await supabase
-    .from('orders')
-    .select('unit, order_items(sku, consumption_period, qty_per_box)')
-    .eq('legal_entity', legalEntity)
-    .eq('supplier', supplier)
-    .order('created_at', { ascending: false })
-    .limit(2);
-  
-  const avgMap = new Map();
-  const currentUnit = orderState.settings.unit; // 'pieces' или 'boxes'
-  
-  if (!error && data) {
-    const bySku = {};
-    data.forEach(order => {
-      const orderUnit = order.unit || 'pieces';
-      (order.order_items || []).forEach(item => {
-        if (!item.sku || !item.consumption_period) return;
-        let val = item.consumption_period;
-        const qtyPerBox = item.qty_per_box || 1;
-        
-        // Нормализуем к текущим единицам
-        if (orderUnit === 'pieces' && currentUnit === 'boxes') {
-          val = val / qtyPerBox; // штуки → коробки
-        } else if (orderUnit === 'boxes' && currentUnit === 'pieces') {
-          val = val * qtyPerBox; // коробки → штуки
-        }
-        
-        if (!bySku[item.sku]) bySku[item.sku] = [];
-        bySku[item.sku].push(val);
-      });
-    });
-    Object.entries(bySku).forEach(([sku, vals]) => {
-      avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length);
-    });
-  }
-  
-  consumptionCache = { supplier, data: avgMap, unit: currentUnit };
-  return avgMap;
-}
-
-async function validateConsumptionData() {
-  const supplier = orderState.settings.supplier;
-  if (!supplier) return;
-  if (document.getElementById('dataValidation')?.value !== 'true') return;
-  
-  const avgMap = await loadConsumptionHistory(supplier);
-  if (!avgMap.size) return;
-  
-  const rows = tbody.querySelectorAll('tr');
-  orderState.items.forEach((item, idx) => {
-    const row = rows[idx];
-    if (!row) return;
-    const consumptionInput = row.querySelector('input');
-    if (!consumptionInput) return;
-    
-    if (!item.sku || !item.consumptionPeriod) {
-      consumptionInput.classList.remove('consumption-warning');
-      consumptionInput.title = '';
-      return;
-    }
-    
-    const avg = avgMap.get(item.sku);
-    if (!avg) {
-      consumptionInput.classList.remove('consumption-warning');
-      consumptionInput.title = '';
-      return;
-    }
-    
-    const deviation = Math.abs(item.consumptionPeriod - avg) / avg;
-    
-    if (deviation > 0.30) {
-      consumptionInput.classList.add('consumption-warning');
-      consumptionInput.title = `⚠️ Расход сильно отличается от среднего (${nf.format(Math.round(avg))}), проверьте данные`;
-    } else {
-      consumptionInput.classList.remove('consumption-warning');
-      consumptionInput.title = '';
-    }
-  });
-}
-
-// Экспортируем для вызова из table-renderer
-window._validateConsumptionData = validateConsumptionData;
 
 /* ================= СЧЁТЧИК ПОЗИЦИЙ ================= */
 function updateEditingIndicator() {
@@ -1544,7 +1296,14 @@ document.addEventListener('history:edit-order', async (e) => {
 
 // Загрузка черновика после загрузки поставщиков
 initSuppliers.then(async () => {
-  await loadDraft();
+  await loadDraft({
+    loadSuppliers,
+    safetyStockManager,
+    restoreItemOrder,
+    render,
+    updateEntityBadge,
+    orderSection
+  });
   updateEntityBadge(); // fallback если черновика нет
   
   // Сохраняем начальное состояние для undo/redo
