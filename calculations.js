@@ -20,15 +20,19 @@ export function calculateItem(item, settings) {
   const transitDays = daysBetween(today, deliveryDate);
   const daily = safeDivide(item.consumptionPeriod, periodDays);
 
-  const baseNeed =
-    daily * transitDays +
-    daily * safetyDays;
-
-  const totalNeed = baseNeed;
-
+  // Расход до поставки — покрывается текущим остатком
+  const consumedBeforeDelivery = daily * transitDays;
+  
   // Учитываем транзит как дополнительный остаток
   const totalStock = item.stock + (item.transit || 0);
-  let calculatedOrder = totalNeed - totalStock;
+  
+  // Остаток к моменту поставки (не может быть отрицательным)
+  const stockAfterDelivery = Math.max(0, totalStock - consumedBeforeDelivery);
+  
+  // Потребность ПОСЛЕ поставки (только период запаса)
+  const needAfterDelivery = daily * safetyDays;
+
+  let calculatedOrder = needAfterDelivery - stockAfterDelivery;
   if (calculatedOrder < 0) calculatedOrder = 0;
 
   /* ===== ОКРУГЛЕНИЕ ===== */
