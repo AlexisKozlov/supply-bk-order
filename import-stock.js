@@ -79,42 +79,6 @@ function mapLegalEntity(raw) {
   return null;
 }
 
-/** Ключевые слова заголовков — для точного определения строки с шапкой */
-const HEADER_KEYWORDS = [
-  'артикул', 'наименование', 'остат', 'расход', 'sku', 'stock',
-  'название', 'товар', 'кол-во', 'количество', 'транзит',
-  'организация', 'юр', 'номенклатура', 'заказчик'
-];
-
-function findHeaderRow(rows) {
-  // Стратегия 1: строка содержит >= 2 известных ключевых слова
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const cells = rows[i].map(c => String(c).toLowerCase().trim());
-    const hits = cells.filter(cell =>
-      HEADER_KEYWORDS.some(kw => cell.includes(kw))
-    ).length;
-    if (hits >= 2) return i;
-  }
-
-  // Стратегия 2: хотя бы 1 ключевое слово + 3 текстовых ячейки
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const cells = rows[i].map(c => String(c).toLowerCase().trim());
-    const hasKeyword = cells.some(cell =>
-      HEADER_KEYWORDS.some(kw => cell.includes(kw))
-    );
-    const textCells = rows[i].filter(c => typeof c === 'string' && c.length > 1).length;
-    if (hasKeyword && textCells >= 3) return i;
-  }
-
-  // Стратегия 3: fallback — первая строка с >= 3 текстовыми ячейками
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const textCells = rows[i].filter(c => typeof c === 'string' && c.length > 1).length;
-    if (textCells >= 3) return i;
-  }
-
-  return 0;
-}
-
 function mapRows(rows, legalEntity) {
   if (rows.length < 2) return [];
 
@@ -131,7 +95,7 @@ function mapRows(rows, legalEntity) {
     stock: findCol(headers, ['остатки, кол', 'остатки', 'остаток', 'stock', 'кол-во', 'количество', 'свобод', 'доступ']),
     transit: findCol(headers, ['транзит', 'в пути', 'transit', 'ожидаем', 'резерв']),
     consumption: findCol(headers, ['расход', 'потребление', 'consumption', 'продажи', 'реализация', 'списание']),
-    legalEntity: findCol(headers, ['заказчик', 'юр лицо', 'юр. лицо', 'юридическое лицо', 'организация', 'legal entity', 'компания', 'фирма'])
+    legalEntity: findCol(headers, ['юр лицо', 'юр. лицо', 'юридическое лицо', 'организация', 'legal entity', 'компания', 'фирма'])
   };
 
   console.log('🔍 Найдены колонки:', Object.fromEntries(
@@ -178,67 +142,10 @@ function mapRows(rows, legalEntity) {
     if (colMap.transit >= 0) entry.transit = parseNum(row[colMap.transit]);
     if (colMap.consumption >= 0) entry.consumption = parseNum(row[colMap.consumption]);
 
-    // Сохраняем raw-значение юр. лица для фильтрации ниже
-    if (colMap.legalEntity >= 0) {
-      entry._rawEntity = String(row[colMap.legalEntity] || '').trim();
-    }
-
-    allData.push(entry);
+    data.push(entry);
   }
 
-  // Фильтрация по юр. лицу (если колонка найдена и legalEntity передан)
-  let data = allData;
-  if (colMap.legalEntity >= 0 && legalEntity && allData.length > 0) {
-    const filtered = allData.filter(entry => {
-      const mapped = mapLegalEntity(entry._rawEntity);
-      return !mapped || mapped === legalEntity;
-    });
-
-    if (filtered.length > 0) {
-      data = filtered;
-      console.log(`🏢 Фильтр юр. лица "${legalEntity}": ${allData.length} → ${filtered.length} строк`);
-    } else {
-      // Фильтр убрал ВСЕ строки — импортируем без фильтра с предупреждением
-      const entities = [...new Set(allData.map(e => e._rawEntity).filter(Boolean))];
-      console.warn(`⚠️ В файле нет товаров для "${legalEntity}". Найдены юр. лица: ${entities.join(', ')}. Импортируем все.`);
-    }
-  }
-
-  // Убираем служебное поле
-  data.forEach(d => delete d._rawEntity);
-
-  // Агрегация: один товар может быть на нескольких паллетах/ячейках — суммируем остатки
-  const aggregated = aggregateByProduct(data);
-
-  console.log(`📊 Импорт: ${rows.length - headerIdx - 1} строк данных → ${allData.length} распознано → ${aggregated.length} уникальных товаров`);
-
-  return aggregated;
-}
-
-/**
- * Группировка строк по товару (sku или name), суммирование числовых полей.
- * Один товар на разных паллетах/ячейках → одна запись с суммой остатков.
- */
-function aggregateByProduct(data) {
-  const map = new Map();
-
-  for (const entry of data) {
-    // Ключ: SKU (если есть) или нормализованное имя
-    const key = entry.sku
-      ? normSku(entry.sku)
-      : entry.name.toLowerCase().trim();
-
-    if (map.has(key)) {
-      const existing = map.get(key);
-      if (entry.stock !== undefined) existing.stock = (existing.stock || 0) + entry.stock;
-      if (entry.transit !== undefined) existing.transit = (existing.transit || 0) + entry.transit;
-      if (entry.consumption !== undefined) existing.consumption = (existing.consumption || 0) + entry.consumption;
-    } else {
-      map.set(key, { ...entry });
-    }
-  }
-
-  return Array.from(map.values());
+  return data;
 }
 
 /**
@@ -250,11 +157,10 @@ function aggregateByProduct(data) {
  */
 function extractSkuFromText(text) {
   text = text.trim();
-
-  // Паттерн 1: альфанумерик-код в начале (цифры+буквы, буквы+цифры, с дефисами)
-  // Код: 2-15 символов, обязательно содержит хотя бы одну цифру
-  // Примеры: "2012Д10 Товар", "12345 Товар", "АРТ-001 Товар", "SKU001 Товар"
-  const match = text.match(/^([A-Za-zА-Яа-яЁё0-9][-A-Za-zА-Яа-яЁё0-9.]{1,14})\s+(.{3,})$/);
+  
+  // Паттерн 1: начинается с артикула (цифры, возможно с буквами/дефисами) + пробел + наименование
+  // Примеры: "12345 Товар", "АРТ-001 Товар", "SKU001 Товар"
+  const match = text.match(/^([A-Za-zА-Яа-я]{0,4}[\-]?\d{2,}[\-\d]*)\s+(.+)$/);
   if (match) {
     const code = match[1];
     const rest = match[2].trim();
@@ -264,9 +170,9 @@ function extractSkuFromText(text) {
     }
   }
 
-  // Паттерн 2: наименование потом артикул в скобках: "Товар (12345)"
-  const bracketsMatch = text.match(/^(.+?)\s*\(([A-Za-zА-Яа-яЁё0-9][-A-Za-zА-Яа-яЁё0-9.]{1,14})\)\s*$/);
-  if (bracketsMatch && /\d/.test(bracketsMatch[2])) {
+  // Паттерн 3: наименование потом артикул в скобках: "Товар (12345)"
+  const bracketsMatch = text.match(/^(.+?)\s*\((\d{3,})\)\s*$/);
+  if (bracketsMatch) {
     return { sku: bracketsMatch[2], name: bracketsMatch[1].trim() };
   }
 
@@ -360,15 +266,18 @@ function matchData(items, fileData, target) {
 
   const updatedItems = items.map(item => {
     let match = null;
+    let matchMethod = '';
 
     // 1. Точное совпадение по SKU
     if (item.sku) {
       match = skuLookup.get(normSku(item.sku));
+      if (match) matchMethod = 'SKU exact';
     }
 
     // 2. Точное совпадение по имени
     if (!match && item.name) {
       match = nameLookup.get(item.name.toLowerCase().trim());
+      if (match) matchMethod = 'name exact';
     }
 
     // 3. SKU товара содержится в строке файла (или наоборот)
@@ -378,7 +287,7 @@ function matchData(items, fileData, target) {
         normSku(e.combined).includes(normItemSku) ||
         (e.data.sku && normItemSku.includes(normSku(e.data.sku)))
       );
-      if (found) match = found.data;
+      if (found) { match = found.data; matchMethod = 'SKU contains'; }
     }
 
     // 4. Наименование товара содержится в строке файла
@@ -387,12 +296,13 @@ function matchData(items, fileData, target) {
       const found = nameContainsLookup.find(e =>
         e.combined.includes(normName) || normName.includes(e.data.name?.toLowerCase()?.trim())
       );
-      if (found) match = found.data;
+      if (found) { match = found.data; matchMethod = 'name contains'; }
     }
 
     if (!match) return item;
 
     matched++;
+    console.log(`  ✅ [${item.sku || '—'}] ${item.name?.slice(0, 40)} ← файл [${match.sku || '—'}] ост=${match.stock ?? '—'} (${matchMethod})`);
     const updated = { ...item };
 
     if (target === 'order') {
@@ -418,7 +328,7 @@ function matchData(items, fileData, target) {
 }
 
 function normSku(sku) {
-  return String(sku).replace(/[\s\-\.]/g, '').toLowerCase();
+  return String(sku).replace(/[\s\-\_\.]/g, '').toLowerCase();
 }
 
 /**
