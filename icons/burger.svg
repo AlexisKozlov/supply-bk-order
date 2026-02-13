@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
   <!-- top bun -->
-  <path d="M4 11h16" />
-  <path d="M3.5 11a8.5 4 0 0 1 17 0" />
-  <!-- filling -->
-  <path d="M4 11c1 1 3 2 8 2s7-1 8-2" />
-  <!-- patty -->
-  <rect x="3" y="14" width="18" rx="1" ry="1" height="2.5" fill="currentColor" opacity="0.25"/>
-  <!-- bottom bun -->
-  <path d="M4 17h16" />
-  <path d="M4 17c0 1.5 2 3 8 3s8-1.5 8-3" />
+  <path d="M3.5 11h17" stroke="#D62300" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M3.5 11a8.5 4 0 0 1 17 0" fill="#F5A623" stroke="#D62300" stroke-width="1.5"/>
   <!-- sesame seeds -->
-  <circle cx="9" cy="8" r="0.6" fill="currentColor" />
-  <circle cx="12" cy="7.2" r="0.6" fill="currentColor" />
-  <circle cx="15" cy="8" r="0.6" fill="currentColor" />
+  <circle cx="9" cy="8.2" r="0.8" fill="#fff" opacity="0.85"/>
+  <circle cx="12" cy="7.3" r="0.8" fill="#fff" opacity="0.85"/>
+  <circle cx="15" cy="8.2" r="0.8" fill="#fff" opacity="0.85"/>
+  <!-- lettuce -->
+  <path d="M3.5 11.5c1.5 1.8 4 2.5 8.5 2.5s7-0.7 8.5-2.5" stroke="#4CAF50" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- patty -->
+  <rect x="3.5" y="14" width="17" height="2.5" rx="1.2" fill="#5A2D0C"/>
+  <!-- bottom bun -->
+  <path d="M3.5 17.5h17" stroke="#D62300" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M3.5 17.5c0 1.8 2.5 3 8.5 3s8.5-1.2 8.5-3" fill="#F5A623" stroke="#D62300" stroke-width="1.5"/>
 </svg>
