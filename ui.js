@@ -352,7 +352,19 @@ async function loadDraft() {
     
     // Устанавливаем товарный запас
     if (safetyStockManager) {
-      safetyStockManager.setDays(orderState.settings.safetyDays);
+      // ВАЖНО: сначала передаём дату поставки, потом дни запаса
+      if (orderState.settings.deliveryDate) {
+        safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
+      }
+      if (orderState.settings.safetyEndDate) {
+        // Если сохранена конечная дата — восстанавливаем через неё
+        safetyStockManager.endDate = orderState.settings.safetyEndDate;
+        safetyStockManager.calculateDays();
+        safetyStockManager.formatDisplay();
+        orderState.settings.safetyDays = safetyStockManager.getDays();
+      } else {
+        safetyStockManager.setDays(orderState.settings.safetyDays);
+      }
     }
     
     document.getElementById('unit').value = orderState.settings.unit;
@@ -1465,7 +1477,10 @@ async function loadOrderIntoForm(order, legalEntity, isEditing = false) {
   document.getElementById('today').value = orderState.settings.today.toISOString().slice(0, 10);
   document.getElementById('deliveryDate').value = orderState.settings.deliveryDate.toISOString().slice(0, 10);
 
-  if (safetyStockManager) safetyStockManager.setDays(orderState.settings.safetyDays);
+  if (safetyStockManager) {
+    safetyStockManager.setDeliveryDate(orderState.settings.deliveryDate);
+    safetyStockManager.setDays(orderState.settings.safetyDays);
+  }
   document.getElementById('periodDays').value = orderState.settings.periodDays;
   document.getElementById('unit').value = orderState.settings.unit;
   document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';

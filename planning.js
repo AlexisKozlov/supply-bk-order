@@ -187,7 +187,39 @@ async function initPlanningUI() {
   legalSelect.onchange = async () => {
     planState.legalEntity = legalSelect.value;
     await loadPlanSuppliers(legalSelect.value, supplierSelect);
+    notifyPlanParamsChanged();
   };
+
+  // #2 Отслеживаем изменения параметров
+  supplierSelect.addEventListener('change', notifyPlanParamsChanged);
+  periodSelect.addEventListener('change', () => {
+    if (planState.items.length) {
+      // Период влияет на расчёт — пересчитываем
+      const period = parsePeriod(periodSelect.value);
+      planState.periodType = period.type;
+      planState.periodCount = period.count;
+      renderPlanTable();
+      planState.items.forEach((_, idx) => recalcItem(idx, 0));
+      showToast('Период обновлён', 'Данные пересчитаны', 'info');
+    }
+  });
+  document.getElementById('planStartDate')?.addEventListener('change', () => {
+    if (planState.items.length) {
+      const startDateInput = document.getElementById('planStartDate');
+      planState.startDate = startDateInput.value ? new Date(startDateInput.value) : new Date();
+      renderPlanTable();
+      planState.items.forEach((_, idx) => recalcItem(idx, 0));
+      showToast('Дата обновлена', 'Данные пересчитаны', 'info');
+    }
+  });
+  document.getElementById('planUnit')?.addEventListener('change', () => {
+    if (planState.items.length) {
+      planState.inputUnit = document.getElementById('planUnit').value;
+      renderPlanTable();
+      planState.items.forEach((_, idx) => recalcItem(idx, 0));
+      showToast('Единицы обновлены', 'Данные пересчитаны', 'info');
+    }
+  });
 
   setupActionBtn('planLoadProducts', async () => {
     planState.supplier = supplierSelect.value;
@@ -226,6 +258,12 @@ async function initPlanningUI() {
       planState.items.forEach((_, idx) => recalcItem(idx));
     });
   });
+}
+
+function notifyPlanParamsChanged() {
+  if (planState.items.length) {
+    showToast('Параметры изменены', 'Нажмите «Загрузить товары» для обновления', 'info');
+  }
 }
 
 function setupActionBtn(id, handler) {
