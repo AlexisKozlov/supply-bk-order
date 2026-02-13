@@ -1,10 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
-  <polyline points="14 2 14 8 20 8"/>
-  <path d="M8 13l3 4"/>
-  <path d="M11 13l-3 4"/>
-  <!-- table grid hint -->
-  <line x1="14" y1="13" x2="17" y2="13"/>
-  <line x1="14" y1="17" x2="17" y2="17"/>
-  <line x1="15.5" y1="13" x2="15.5" y2="17"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="#217346" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="14 2 14 8 20 8" stroke="#217346" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 13l3 4" stroke="#217346" stroke-width="2" stroke-linecap="round"/>
+  <path d="M11 13l-3 4" stroke="#217346" stroke-width="2" stroke-linecap="round"/>
+  <line x1="14" y1="13" x2="17" y2="13" stroke="#4CAF50" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="14" y1="15" x2="17" y2="15" stroke="#4CAF50" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="14" y1="17" x2="17" y2="17" stroke="#4CAF50" stroke-width="1.5" stroke-linecap="round"/>
 </svg>
