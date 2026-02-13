@@ -50,8 +50,8 @@ function renderDatabaseList(products, databaseList) {
         <div class="db-card-supplier">${p.supplier || 'Без поставщика'}</div>
       </div>
       <div class="db-card-actions">
-        <button class="btn small edit-card-btn" data-id="${p.id}"><img src="./icons/edit.svg" width="14" height="14" alt=""> Изменить</button>
-        <button class="btn small delete-card-btn" data-id="${p.id}" style="background:var(--error);color:white;"><img src="./icons/delete.svg" width="14" height="14" alt=""></button>
+        <button class="btn small edit-card-btn" data-id="${p.id}"><img src="./icons/edit.png" width="14" height="14" alt=""> Изменить</button>
+        <button class="btn small delete-card-btn" data-id="${p.id}" style="background:var(--error);color:white;"><img src="./icons/delete.png" width="14" height="14" alt=""></button>
       </div>
     </div>
   `).join('');
