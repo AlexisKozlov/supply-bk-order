@@ -25,53 +25,38 @@ async function parseFile(file, legalEntity) {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
 
-  // Определяем полный range листа — SheetJS может обрезать пустые строки
   const ref = ws['!ref'];
   console.log(`📑 Sheet ref: ${ref}`);
 
-  // Принудительно расширяем range до всех данных
-  // Используем decode_range для получения реального диапазона
-  let range;
-  if (ref) {
-    range = XLSX.utils.decode_range(ref);
-    // Начинаем с самого начала (row 0)
-    range.s.r = 0;
-    range.s.c = 0;
+  // ===== НАДЁЖНЫЙ МЕТОД: сканируем ВСЕ ячейки ws напрямую =====
+  // SheetJS может неверно определять !ref (обрезать файл)
+  // Поэтому находим реальный range по ключам объекта ws
+  let maxRow = 0, maxCol = 0;
+  const cellKeys = Object.keys(ws).filter(k => !k.startsWith('!'));
+  
+  for (const key of cellKeys) {
+    const cell = XLSX.utils.decode_cell(key);
+    if (cell.r > maxRow) maxRow = cell.r;
+    if (cell.c > maxCol) maxCol = cell.c;
   }
 
-  const rows = XLSX.utils.sheet_to_json(ws, { 
-    header: 1, 
-    defval: '',
-    range: range || 0,
-    blankrows: true  // Включаем пустые строки
-  });
+  const totalRows = maxRow + 1;
+  const totalCols = maxCol + 1;
+  console.log(`📊 Реальный размер: ${totalRows} строк × ${totalCols} колонок (ref заявлял: ${ref})`);
 
-  console.log(`📁 Импорт: ${rows.length} строк в файле (ref: ${ref})`);
-
-  // Если SheetJS всё равно вернул мало строк — пробуем альтернативный метод
-  if (rows.length < 50 && ref) {
-    const decoded = XLSX.utils.decode_range(ref);
-    const expectedRows = decoded.e.r - decoded.s.r + 1;
-    
-    if (expectedRows > rows.length * 2) {
-      console.warn(`⚠️ SheetJS вернул ${rows.length} строк, но range указывает на ${expectedRows}. Пробуем альтернативный метод...`);
-      
-      // Альтернативный метод: читаем ячейки напрямую
-      const altRows = [];
-      for (let r = decoded.s.r; r <= decoded.e.r; r++) {
-        const row = [];
-        for (let c = decoded.s.c; c <= decoded.e.c; c++) {
-          const cellRef = XLSX.utils.encode_cell({ r, c });
-          const cell = ws[cellRef];
-          row.push(cell ? (cell.v !== undefined ? cell.v : '') : '');
-        }
-        altRows.push(row);
-      }
-      
-      console.log(`📁 Альтернативный метод: ${altRows.length} строк`);
-      return mapRows(altRows, legalEntity);
+  // Строим массив строк из ячеек
+  const rows = [];
+  for (let r = 0; r <= maxRow; r++) {
+    const row = [];
+    for (let c = 0; c <= maxCol; c++) {
+      const cellRef = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[cellRef];
+      row.push(cell ? (cell.v !== undefined ? cell.v : '') : '');
     }
+    rows.push(row);
   }
+
+  console.log(`📁 Импорт: ${rows.length} строк в файле`);
 
   return mapRows(rows, legalEntity);
 }
