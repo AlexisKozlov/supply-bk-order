@@ -488,6 +488,7 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
 
 document.getElementById('unit').addEventListener('change', e => {
   orderState.settings.unit = e.target.value;
+  consumptionCache = null; // сбрасываем кеш — единицы изменились
   rerenderAll();
   saveDraft();
 });
@@ -504,7 +505,20 @@ document.getElementById('showStockColumn').addEventListener('change', e => {
   orderState.settings.showStockColumn = e.target.value === 'true';
   toggleStockColumn();
   saveDraft();
-  render(); // перерисовываем таблицу
+  render();
+});
+
+// #1 Мгновенное включение/отключение проверки данных
+document.getElementById('dataValidation')?.addEventListener('change', () => {
+  if (document.getElementById('dataValidation').value === 'true') {
+    validateConsumptionData();
+  } else {
+    // Немедленно убираем все предупреждения
+    tbody.querySelectorAll('.consumption-warning').forEach(el => {
+      el.classList.remove('consumption-warning');
+      el.title = '';
+    });
+  }
 });
 
 function toggleTransitColumn() {
@@ -1208,25 +1222,40 @@ function render() {
 let consumptionCache = null;
 
 async function loadConsumptionHistory(supplier) {
-  if (consumptionCache && consumptionCache.supplier === supplier) return consumptionCache.data;
+  if (consumptionCache && consumptionCache.supplier === supplier && consumptionCache.unit === orderState.settings.unit) {
+    return consumptionCache.data;
+  }
   
   const legalEntity = orderState.settings.legalEntity || 'Бургер БК';
   const { data, error } = await supabase
     .from('orders')
-    .select('order_items(sku, consumption_period)')
+    .select('unit, order_items(sku, consumption_period, qty_per_box)')
     .eq('legal_entity', legalEntity)
     .eq('supplier', supplier)
     .order('created_at', { ascending: false })
     .limit(2);
   
   const avgMap = new Map();
+  const currentUnit = orderState.settings.unit; // 'pieces' или 'boxes'
+  
   if (!error && data) {
     const bySku = {};
     data.forEach(order => {
+      const orderUnit = order.unit || 'pieces';
       (order.order_items || []).forEach(item => {
         if (!item.sku || !item.consumption_period) return;
+        let val = item.consumption_period;
+        const qtyPerBox = item.qty_per_box || 1;
+        
+        // Нормализуем к текущим единицам
+        if (orderUnit === 'pieces' && currentUnit === 'boxes') {
+          val = val / qtyPerBox; // штуки → коробки
+        } else if (orderUnit === 'boxes' && currentUnit === 'pieces') {
+          val = val * qtyPerBox; // коробки → штуки
+        }
+        
         if (!bySku[item.sku]) bySku[item.sku] = [];
-        bySku[item.sku].push(item.consumption_period);
+        bySku[item.sku].push(val);
       });
     });
     Object.entries(bySku).forEach(([sku, vals]) => {
@@ -1234,7 +1263,7 @@ async function loadConsumptionHistory(supplier) {
     });
   }
   
-  consumptionCache = { supplier, data: avgMap };
+  consumptionCache = { supplier, data: avgMap, unit: currentUnit };
   return avgMap;
 }
 
