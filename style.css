@@ -2071,20 +2071,7 @@ tbody tr td[colspan] {
 }
 .table-wrap input[type="number"] {
   -moz-appearance: textfield;
-}
-
-/* #6 Чекбокс проверки данных */
-.checkbox-label {
-  display: flex !important;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.checkbox-label input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--orange);
+  appearance: textfield;
 }
 
 /* Подсветка невалидного расхода */
@@ -2146,4 +2133,11 @@ td.plan-td-result {
 }
 td.plan-td-result:hover {
   background: #fdf9f3;
+}
+
+/* #9 Кнопка Очистить — красный фон при hover */
+.btn-clear-order:hover {
+  background: #d32f2f !important;
+  color: white !important;
+  border-color: #c62828 !important;
 }

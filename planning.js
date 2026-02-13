@@ -6,7 +6,7 @@
  */
 
 import { supabase } from './supabase.js';
-import { showToast } from './modals.js';
+import { showToast, customConfirm } from './modals.js';
 import { showImportDialog } from './import-stock.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
@@ -138,7 +138,7 @@ export function initPlanning() {
       supplierEl.value = planState.supplier;
     });
     
-    // Восстанавливаем товары
+    // Восстанавливаем товары с сохранёнными plan данными
     planState.items = (plan.items || []).map(i => ({
       sku: i.sku || '',
       name: i.name || '',
@@ -148,11 +148,19 @@ export function initPlanning() {
       monthlyConsumption: i.monthly_consumption || 0,
       stockOnHand: i.stock_on_hand || 0,
       stockAtSupplier: i.stock_at_supplier || 0,
-      plan: []
+      plan: (i.plan || []).map(p => ({
+        month: p.month,
+        need: 0,
+        deficit: 0,
+        orderBoxes: p.order_boxes || 0,
+        orderUnits: p.order_units || 0,
+        locked: p.locked || false
+      }))
     }));
     
     renderPlanTable();
-    planState.items.forEach((_, idx) => recalcItem(idx));
+    // Пересчитываем с учётом locked — с начала
+    planState.items.forEach((_, idx) => recalcItem(idx, 0));
     showToast('План загружен', `${plan.supplier} — ${planState.items.length} позиций`, 'success');
   });
 }
@@ -714,6 +722,14 @@ async function savePlanToHistory() {
     return;
   }
 
+  // #1 #4 Подтверждение
+  const isUpdate = !!planState.editingPlanId;
+  const confirmMsg = isUpdate
+    ? 'Заменить сохранённый план новыми данными?'
+    : `Сохранить план для ${planState.supplier}?`;
+  const confirmed = await customConfirm(isUpdate ? 'Обновить план?' : 'Сохранить план?', confirmMsg);
+  if (!confirmed) return;
+
   const planData = {
     legal_entity: planState.legalEntity,
     supplier: planState.supplier,
@@ -771,85 +787,60 @@ async function exportPlanToExcel() {
     [`Юр. лицо: ${planState.legalEntity}`],
     [`Дата: ${(planState.startDate || new Date()).toLocaleDateString('ru-RU')}`],
     [`Период: ${planState.periodCount} ${planState.periodType === 'weeks' ? 'нед.' : 'мес.'}`],
-    [] // пустая строка
+    []
   ];
 
-  // === Заголовки таблицы ===
-  const headerRow = ['Арт.', 'Наименование', 'Расход/мес', 'Склад', 'У постав.'];
-  headers.forEach(h => {
-    headerRow.push(`${h.label} (кор)`);
-    headerRow.push(`${h.label} (шт)`);
-  });
-  headerRow.push('ИТОГО кор');
-  headerRow.push('ИТОГО шт');
+  // === Заголовки: Арт., Наименование, Ед., период1, период2, ..., ИТОГО ===
+  const headerRow = ['Арт.', 'Наименование', 'Ед.'];
+  headers.forEach(h => headerRow.push(h.label));
+  headerRow.push('ИТОГО');
   rows.push(headerRow);
 
-  // === Данные ===
+  // === Данные — коробки (единицы) ===
   itemsWithPlan.forEach(item => {
-    const row = [
-      item.sku || '',
-      item.name,
-      item.monthlyConsumption,
-      item.stockOnHand,
-      item.stockAtSupplier
-    ];
+    const unit = item.unitOfMeasure || 'шт';
+    const row = [item.sku || '', item.name, unit];
 
     let totalBoxes = 0;
-    let totalUnits = 0;
     item.plan.forEach(p => {
-      row.push(p.orderBoxes || 0);
-      row.push(p.orderUnits || 0);
-      totalBoxes += p.orderBoxes || 0;
-      totalUnits += p.orderUnits || 0;
+      const boxes = p.orderBoxes || 0;
+      const units = p.orderUnits || 0;
+      row.push(boxes > 0 ? `${boxes} кор (${nf.format(units)} ${unit})` : '');
+      totalBoxes += boxes;
     });
-    row.push(totalBoxes);
-    row.push(totalUnits);
+
+    const totalUnits = totalBoxes * item.qtyPerBox;
+    row.push(`${totalBoxes} кор (${nf.format(totalUnits)} ${unit})`);
     rows.push(row);
   });
 
   // === Итого строка ===
-  const totalsRow = ['', 'ИТОГО', '', '', ''];
+  const totalsRow = ['', 'ИТОГО', ''];
   let grandBoxes = 0;
-  let grandUnits = 0;
   for (let mi = 0; mi < headers.length; mi++) {
     let colBoxes = 0;
-    let colUnits = 0;
     itemsWithPlan.forEach(item => {
-      if (item.plan[mi]) {
-        colBoxes += item.plan[mi].orderBoxes || 0;
-        colUnits += item.plan[mi].orderUnits || 0;
-      }
+      if (item.plan[mi]) colBoxes += item.plan[mi].orderBoxes || 0;
     });
-    totalsRow.push(colBoxes);
-    totalsRow.push(colUnits);
+    totalsRow.push(colBoxes > 0 ? `${nf.format(colBoxes)} кор` : '');
     grandBoxes += colBoxes;
-    grandUnits += colUnits;
   }
-  totalsRow.push(grandBoxes);
-  totalsRow.push(grandUnits);
+  totalsRow.push(`${nf.format(grandBoxes)} кор`);
   rows.push(totalsRow);
 
   // === Создание Excel ===
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
-  // Ширина колонок
   const cols = [
     { wch: 12 },  // арт
     { wch: 40 },  // наименование
-    { wch: 12 },  // расход
-    { wch: 10 },  // склад
-    { wch: 10 }   // у постав
+    { wch: 6 }    // ед
   ];
-  headers.forEach(() => {
-    cols.push({ wch: 10 }); // кор
-    cols.push({ wch: 12 }); // шт
-  });
-  cols.push({ wch: 12 }); // итого кор
-  cols.push({ wch: 12 }); // итого шт
+  headers.forEach(() => cols.push({ wch: 22 }));
+  cols.push({ wch: 22 }); // итого
   ws['!cols'] = cols;
 
-  // Merge шапки
-  const totalCols = 5 + headers.length * 2 + 2;
+  const totalCols = 3 + headers.length + 1;
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } },

@@ -1268,7 +1268,7 @@ async function validateConsumptionData() {
     
     const deviation = Math.abs(item.consumptionPeriod - avg) / avg;
     
-    if (deviation > 0.25) {
+    if (deviation > 0.30) {
       consumptionInput.classList.add('consumption-warning');
       consumptionInput.title = `⚠️ Расход сильно отличается от среднего (${nf.format(Math.round(avg))}), проверьте данные`;
     } else {
@@ -1416,6 +1416,10 @@ initDeliveryCalendar();
 /* ═══════ ЗАГРУЗКА ЗАКАЗА ИЗ ИСТОРИИ/КАЛЕНДАРЯ ═══════ */
 
 async function loadOrderIntoForm(order, legalEntity, isEditing = false) {
+  // #8 Показываем лоадер
+  orderSection.classList.remove('hidden');
+  tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;"><div class="loading-spinner"></div><div style="margin-top:10px;color:var(--muted);">Загрузка заказа...</div></td></tr>`;
+  
   orderState.items = [];
   orderState.settings.legalEntity = legalEntity;
   orderState.settings.supplier = order.supplier || '';

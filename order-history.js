@@ -341,12 +341,15 @@ async function loadPlanHistory(opts) {
       return sum + (item.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0);
     }, 0);
 
+    const startDate = plan.start_date ? new Date(plan.start_date).toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit'}) : '';
+    const startLabel = startDate ? ` с ${startDate}` : '';
+
     const div = document.createElement('div');
     div.className = 'history-card';
     div.innerHTML = `
       <div class="history-header" style="display:flex;justify-content:space-between;align-items:center;">
         <span>
-          <b>${plan.supplier || '—'}</b> · ${date} · ${periodLabel}
+          <b>${plan.supplier || '—'}</b> · ${date} · ${periodLabel}${startLabel}
           <span style="color:var(--muted);font-size:12px;">${items.length} позиций · ${nf.format(totalBoxes)} кор</span>
         </span>
         <div style="display:flex;gap:6px;">
