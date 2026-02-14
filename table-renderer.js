@@ -325,7 +325,7 @@ export function updateRow(tr, item, settings) {
   const dateCell = tr.querySelector('.date');
   if (calc.coverageDate && settings.deliveryDate) {
     const daysDiff = Math.ceil((calc.coverageDate - settings.deliveryDate) / 86400000);
-    dateCell.textContent = `${calc.coverageDate.toLocaleDateString()} (${daysDiff} дн.)`;
+    dateCell.textContent = `${calc.coverageDate.toLocaleDateString('ru-RU')} (${daysDiff} дн.)`;
   } else {
     dateCell.textContent = '-';
   }
@@ -343,8 +343,9 @@ export function updateRow(tr, item, settings) {
   if (stockDisplay && dailyConsumption > 0 && settings.today) {
     const totalStock = item.stock + (item.transit || 0);
     const daysOfCurrentStock = Math.floor(totalStock / dailyConsumption);
+    // Сегодня — первый день потребления, поэтому хватит до today + days
     const stockEndDate = new Date(settings.today.getTime() + daysOfCurrentStock * 86400000);
-    stockDisplay.textContent = `${stockEndDate.toLocaleDateString()} (${daysOfCurrentStock} дн.)`;
+    stockDisplay.textContent = `${stockEndDate.toLocaleDateString('ru-RU')} (${daysOfCurrentStock} дн.)`;
   } else if (stockDisplay) {
     stockDisplay.textContent = '-';
   }

@@ -603,32 +603,31 @@ function clearManualForm() {
   document.getElementById('m_pallet').value = '';
 }
 
-addManualBtn.addEventListener('click', async () => {
-  clearManualForm();
-  document.getElementById('m_legalEntity').value = orderState.settings.legalEntity;
-  
-  // Загружаем список поставщиков в селектор
-  const supplierSelect = document.getElementById('m_supplier');
+/** Загрузить поставщиков в произвольный select */
+async function populateSupplierSelect(selectEl, currentValue) {
   const { data } = await supabase.from('suppliers').select('short_name').order('short_name');
-  supplierSelect.innerHTML = '<option value="">— Выберите поставщика —</option>';
+  selectEl.innerHTML = '<option value="">— Выберите поставщика —</option>';
   if (data) {
     data.forEach(s => {
       const opt = document.createElement('option');
       opt.value = s.short_name;
       opt.textContent = s.short_name;
-      supplierSelect.appendChild(opt);
+      selectEl.appendChild(opt);
     });
   }
-  // Опция "Новый поставщик"
   const newOpt = document.createElement('option');
   newOpt.value = '__new__';
   newOpt.textContent = '＋ Новый поставщик...';
-  supplierSelect.appendChild(newOpt);
+  selectEl.appendChild(newOpt);
+  if (currentValue) selectEl.value = currentValue;
+}
+
+addManualBtn.addEventListener('click', async () => {
+  clearManualForm();
+  document.getElementById('m_legalEntity').value = orderState.settings.legalEntity;
   
-  // Подставляем текущего поставщика если выбран
-  if (orderState.settings.supplier) {
-    supplierSelect.value = orderState.settings.supplier;
-  }
+  const supplierSelect = document.getElementById('m_supplier');
+  await populateSupplierSelect(supplierSelect, orderState.settings.supplier || '');
   
   // Обработчик "Новый поставщик" в селекторе
   supplierSelect.onchange = () => {
@@ -636,32 +635,15 @@ addManualBtn.addEventListener('click', async () => {
       supplierSelect.value = '';
       manualModal.style.display = 'none';
       
-      // Вызываем экспортированную функцию из database.js
       openNewSupplier(document.getElementById('m_legalEntity').value);
       
       const supplierModal = document.getElementById('editSupplierModal');
-      // Следим за закрытием — возвращаемся к товару
       const obs = new MutationObserver(async () => {
         if (supplierModal.classList.contains('hidden')) {
           obs.disconnect();
           manualModal.style.display = '';
-          // Перезагружаем поставщиков
           const newName = document.getElementById('s_shortName').value.trim();
-          const { data: freshData } = await supabase.from('suppliers').select('short_name').order('short_name');
-          supplierSelect.innerHTML = '<option value="">— Выберите поставщика —</option>';
-          if (freshData) {
-            freshData.forEach(s => {
-              const opt = document.createElement('option');
-              opt.value = s.short_name;
-              opt.textContent = s.short_name;
-              supplierSelect.appendChild(opt);
-            });
-          }
-          const nOpt = document.createElement('option');
-          nOpt.value = '__new__';
-          nOpt.textContent = '＋ Новый поставщик...';
-          supplierSelect.appendChild(nOpt);
-          if (newName) supplierSelect.value = newName;
+          await populateSupplierSelect(supplierSelect, newName || '');
         }
       });
       obs.observe(supplierModal, { attributes: true, attributeFilter: ['class'] });
@@ -669,7 +651,7 @@ addManualBtn.addEventListener('click', async () => {
   };
   
   manualModal.classList.remove('hidden');
-  document.getElementById('m_name').focus();
+  document.getElementById('m_sku').focus();
 });
 
 closeManualBtn.addEventListener('click', () => {
@@ -1083,12 +1065,15 @@ document.addEventListener('product:deleted', (e) => {
   const skuStr = sku ? String(sku).trim() : '';
   const before = orderState.items.length;
   orderState.items = orderState.items.filter(item => {
+    // Фильтруем по SKU
     if (skuStr && String(item.sku || '').trim() === skuStr) return false;
-    if (id && String(item.id) === String(id)) return false;
+    // Фильтруем по supabase ID (из базы)
+    if (id && item.supabaseId && String(item.supabaseId) === String(id)) return false;
     return true;
   });
   if (orderState.items.length < before) {
     renderTable(orderState, { removeItem, openEditCardBySku });
+    saveDraft();
     showToast('Товар удалён из заказа', `${skuStr || ''} убран из текущего заказа`, 'info');
   }
 });

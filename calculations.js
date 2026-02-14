@@ -71,7 +71,7 @@ function calculatePallets(item, unit) {
   const boxes =
     unit === 'boxes'
       ? item.finalOrder
-      : item.finalOrder / item.qtyPerBox;
+      : item.finalOrder / (item.qtyPerBox || 1);
 
   return {
     pallets: Math.floor(boxes / item.boxesPerPallet),

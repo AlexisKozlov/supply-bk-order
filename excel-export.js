@@ -23,13 +23,14 @@ export async function exportToExcel(orderState) {
   
   // Подготовка данных - наименование и заказ с единицами
   const dataRows = orderState.items.map(item => {
+    const qpb = item.qtyPerBox || 1;
     const boxes = orderState.settings.unit === 'boxes' 
       ? item.finalOrder 
-      : Math.ceil(item.finalOrder / (item.qtyPerBox || 1));
+      : Math.ceil(item.finalOrder / qpb);
     
     const pieces = orderState.settings.unit === 'pieces'
       ? item.finalOrder
-      : item.finalOrder * (item.qtyPerBox || 1);
+      : item.finalOrder * qpb;
 
     const unit = item.unitOfMeasure || 'шт';
     const boxLabel = `${nf.format(boxes)} кор (${nf.format(Math.round(pieces))} ${unit})`;

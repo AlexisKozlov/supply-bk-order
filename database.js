@@ -423,7 +423,6 @@ async function openEditSupplier(id) {
  * После сохранения — вернётся к карточке с новым поставщиком в селекторе
  */
 function openNewSupplierAndReturn(editCardModal) {
-  // Скрываем карточку товара (но не сбрасываем данные)
   editCardModal.style.display = 'none';
 
   const legalEntity = document.getElementById('e_legalEntity')?.value || 'Бургер БК';
@@ -433,19 +432,13 @@ function openNewSupplierAndReturn(editCardModal) {
     legal_entity: legalEntity
   }, 'create');
 
-  // Перехватываем сохранение поставщика — после него возвращаемся
   const supplierModal = document.getElementById('editSupplierModal');
-  const origClose = supplierModal.dataset._returnMode;
-  supplierModal.dataset._returnMode = 'product-card';
 
-  // Следим за закрытием модалки поставщика
   const observer = new MutationObserver(async () => {
     if (supplierModal.classList.contains('hidden')) {
       observer.disconnect();
-      supplierModal.dataset._returnMode = '';
       editCardModal.style.display = '';
 
-      // Обновляем селектор поставщиков — новый поставщик должен появиться
       const supplierSelect = document.getElementById('e_supplier');
       const newName = document.getElementById('s_shortName').value.trim();
       await loadSupplierOptions(supplierSelect, newName || '');
@@ -543,17 +536,21 @@ function setupSupplierHandlers(editId, mode) {
   };
 
   const cleanup = () => {
-    saveBtn.replaceWith(saveBtn.cloneNode(true));
-    cancelBtn.replaceWith(cancelBtn.cloneNode(true));
-    closeBtn.replaceWith(closeBtn.cloneNode(true));
+    // Порядок важен: сначала удаляем listeners через replaceWith
+    const newSave = saveBtn.cloneNode(true);
+    const newCancel = cancelBtn.cloneNode(true);
+    const newClose = closeBtn.cloneNode(true);
+    saveBtn.replaceWith(newSave);
+    cancelBtn.replaceWith(newCancel);
+    closeBtn.replaceWith(newClose);
   };
 
   // Сохраняем старое имя для обнаружения переименования
   modal.dataset.oldShortName = document.getElementById('s_shortName').value.trim();
 
-  document.getElementById('s_save').addEventListener('click', handleSave);
-  document.getElementById('s_cancel').addEventListener('click', handleClose);
-  document.getElementById('closeEditSupplier').addEventListener('click', handleClose);
+  saveBtn.addEventListener('click', handleSave);
+  cancelBtn.addEventListener('click', handleClose);
+  closeBtn.addEventListener('click', handleClose);
 }
 
 async function deleteSupplier(id) {

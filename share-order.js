@@ -22,7 +22,14 @@ const CHANNELS = [
 let cachedContacts = null;
 let cachedSupplier = '';
 
+// Сбрасываем кеш при обновлении поставщиков
+document.addEventListener('suppliers:updated', () => {
+  cachedContacts = null;
+  cachedSupplier = '';
+});
+
 async function getContacts(supplier) {
+  if (!supplier) return null;
   if (cachedSupplier === supplier && cachedContacts) return cachedContacts;
   cachedContacts = await getSupplierContacts(supplier);
   cachedSupplier = supplier;
@@ -39,13 +46,15 @@ function buildOrderText() {
 
   const lines = orderState.items
     .map(item => {
+      const qpb = item.qtyPerBox || 1;
+      
       const boxes = orderState.settings.unit === 'boxes'
         ? item.finalOrder
-        : item.finalOrder / item.qtyPerBox;
+        : item.finalOrder / qpb;
 
       const pieces = orderState.settings.unit === 'pieces'
         ? item.finalOrder
-        : item.finalOrder * item.qtyPerBox;
+        : item.finalOrder * qpb;
 
       const roundedBoxes = Math.ceil(boxes);
       const roundedPieces = Math.round(pieces);
