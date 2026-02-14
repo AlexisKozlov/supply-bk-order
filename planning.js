@@ -310,6 +310,62 @@ async function initPlanningUI() {
       triggerPlanValidation();
     }, planState.legalEntity);
   });
+
+  // Кнопка "Подставить расход" — средний из последних 2 заказов
+  setupActionBtn('planFillConsumptionBtn', async () => {
+    if (!planState.items.length) {
+      showToast('Нет товаров', 'Сначала загрузите товары поставщика', 'info');
+      return;
+    }
+    if (!planState.supplier) {
+      showToast('Нет поставщика', 'Выберите поставщика', 'error');
+      return;
+    }
+
+    const avgMap = await loadAvgConsumption(planState.supplier, planState.legalEntity, planState.inputUnit);
+    if (!avgMap.size) {
+      showToast('Нет истории', 'Не найдены заказы для этого поставщика', 'info');
+      return;
+    }
+
+    let filled = 0;
+    planState.items.forEach(item => {
+      if (item.sku) {
+        const avg = avgMap.get(item.sku);
+        if (avg && avg > 0) {
+          item.monthlyConsumption = Math.round(avg);
+          filled++;
+        }
+      }
+    });
+
+    renderPlanTable();
+    planState.items.forEach((_, idx) => recalcItem(idx, 0));
+    triggerPlanValidation();
+    showToast('Расход подставлен', `${filled} из ${planState.items.length} позиций из истории заказов`, 'success');
+  });
+
+  // Кнопка "Обнулить всё"
+  setupActionBtn('planClearBtn', async () => {
+    if (!planState.items.length) {
+      showToast('Нет данных', 'Нечего обнулять', 'info');
+      return;
+    }
+
+    const confirmed = await customConfirm('Обнулить все данные?', 'Расход, остатки и рассчитанные заказы будут сброшены. Товары останутся.');
+    if (!confirmed) return;
+
+    planState.items.forEach(item => {
+      item.monthlyConsumption = 0;
+      item.stockOnHand = 0;
+      item.stockAtSupplier = 0;
+      item.plan = [];
+    });
+
+    renderPlanTable();
+    showToast('Данные обнулены', 'Все значения сброшены', 'success');
+  });
+
   } // end if (!planningUIInitialized)
 }
 
@@ -410,7 +466,7 @@ async function loadPlanSuppliers(legalEntity, selectEl) {
 
 async function loadPlanProducts() {
   const container = document.getElementById('planTableContainer');
-  container.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div style="margin-top:8px;color:var(--muted);">Загрузка товаров и расхода...</div></div>';
+  container.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
 
   let query = supabase.from('products').select('*').eq('supplier', planState.supplier).order('name');
   if (planState.legalEntity === 'Пицца Стар') {
@@ -425,28 +481,17 @@ async function loadPlanProducts() {
     return;
   }
 
-  // Загружаем средний расход из последних 2 заказов этому поставщику
-  const avgConsumption = await loadAvgConsumption(planState.supplier, planState.legalEntity, planState.inputUnit);
-
-  planState.items = data.map(p => {
-    const avgVal = p.sku ? (avgConsumption.get(p.sku) || 0) : 0;
-    return {
-      sku: p.sku || '',
-      name: p.name,
-      qtyPerBox: p.qty_per_box || 1,
-      boxesPerPallet: p.boxes_per_pallet || null,
-      unitOfMeasure: p.unit_of_measure || 'шт',
-      monthlyConsumption: Math.round(avgVal),
-      stockOnHand: 0,
-      stockAtSupplier: 0,
-      plan: []
-    };
-  });
-
-  const filledCount = planState.items.filter(i => i.monthlyConsumption > 0).length;
-  if (filledCount > 0) {
-    showToast('Расход подставлен', `Средний расход из истории: ${filledCount} из ${planState.items.length} позиций`, 'info');
-  }
+  planState.items = data.map(p => ({
+    sku: p.sku || '',
+    name: p.name,
+    qtyPerBox: p.qty_per_box || 1,
+    boxesPerPallet: p.boxes_per_pallet || null,
+    unitOfMeasure: p.unit_of_measure || 'шт',
+    monthlyConsumption: 0,
+    stockOnHand: 0,
+    stockAtSupplier: 0,
+    plan: []
+  }));
 }
 
 /* ═══════ RENDER ═══════ */
