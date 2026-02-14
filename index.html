@@ -300,35 +300,75 @@
       <button id="closeDatabase" class="modal-close">✕</button>
     </div>
 
-    <label>
-      Юр. лицо
-      <select id="dbLegalEntity">
-        <option value="Бургер БК">Бургер БК</option>
-        <option value="Воглия Матта">Воглия Матта</option>
-        <option value="Пицца Стар">Пицца Стар</option>
-      </select>
-    </label>
+    <!-- Табы -->
+    <div class="db-tabs">
+      <button class="db-tab active" data-tab="products">Товары</button>
+      <button class="db-tab" data-tab="suppliers">Поставщики</button>
+    </div>
 
-    <section class="search" style="margin:16px 0;">
-      <input id="dbSearch" placeholder="Поиск по карточкам" />
-      <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
-    </section>
+    <!-- ТАБ: ТОВАРЫ -->
+    <div id="dbTabProducts" class="db-tab-content">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+        <label style="flex:1;min-width:140px;">
+          Юр. лицо
+          <select id="dbLegalEntity">
+            <option value="Бургер БК">Бургер БК</option>
+            <option value="Воглия Матта">Воглия Матта</option>
+            <option value="Пицца Стар">Пицца Стар</option>
+          </select>
+        </label>
+        <button id="dbNewProductBtn" class="btn primary" style="height:36px;white-space:nowrap;">+ Новый товар</button>
+      </div>
 
-    <div id="databaseList" style="max-height:60vh;overflow-y:auto;"></div>
+      <section class="search" style="margin:0 0 12px;">
+        <input id="dbSearch" placeholder="Поиск по карточкам" />
+        <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
+      </section>
+
+      <div id="databaseList" style="max-height:55vh;overflow-y:auto;"></div>
+    </div>
+
+    <!-- ТАБ: ПОСТАВЩИКИ -->
+    <div id="dbTabSuppliers" class="db-tab-content hidden">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+        <label style="flex:1;min-width:140px;">
+          Юр. лицо
+          <select id="dbSupplierLegalEntity">
+            <option value="Бургер БК">Бургер БК</option>
+            <option value="Воглия Матта">Воглия Матта</option>
+            <option value="Пицца Стар">Пицца Стар</option>
+          </select>
+        </label>
+        <button id="dbNewSupplierBtn" class="btn primary" style="height:36px;white-space:nowrap;">+ Новый поставщик</button>
+      </div>
+
+      <section class="search" style="margin:0 0 12px;">
+        <input id="dbSupplierSearch" placeholder="Поиск по поставщикам" />
+        <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
+      </section>
+
+      <div id="supplierList" style="max-height:55vh;overflow-y:auto;"></div>
+    </div>
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: РЕДАКТИРОВАНИЕ КАРТОЧКИ ===== -->
+<!-- ===== МОДАЛКА: РЕДАКТИРОВАНИЕ КАРТОЧКИ ТОВАРА ===== -->
 <div id="editCardModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
-      <h2><img src="./icons/edit.png" width="20" height="20" style="vertical-align:-3px;" alt=""> Редактирование карточки</h2>
+      <h2 id="editCardTitle"><img src="./icons/edit.png" width="20" height="20" style="vertical-align:-3px;" alt=""> Редактирование карточки</h2>
       <button id="closeEditCard" class="modal-close">✕</button>
     </div>
 
     <input id="e_name" placeholder="Наименование*" />
     <input id="e_sku" placeholder="Артикул" />
-    <input id="e_supplier" placeholder="Поставщик" />
+    
+    <label>
+      Поставщик
+      <select id="e_supplier">
+        <option value="">— Выберите поставщика —</option>
+      </select>
+    </label>
     
     <label>
       Юр. лицо
@@ -354,6 +394,55 @@
     <div class="actions" style="margin-bottom:0;">
       <button id="e_save" class="btn primary">Сохранить</button>
       <button id="e_cancel" class="btn secondary">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== МОДАЛКА: РЕДАКТИРОВАНИЕ ПОСТАВЩИКА ===== -->
+<div id="editSupplierModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="editSupplierTitle"><img src="./icons/edit.png" width="20" height="20" style="vertical-align:-3px;" alt=""> Поставщик</h2>
+      <button id="closeEditSupplier" class="modal-close">✕</button>
+    </div>
+
+    <input id="s_fullName" placeholder="Полное наименование" />
+    <input id="s_shortName" placeholder="Краткое наименование* (для селекторов)" />
+
+    <label>
+      Юр. лицо
+      <select id="s_legalEntity">
+        <option value="Бургер БК">Бургер БК</option>
+        <option value="Воглия Матта">Воглия Матта</option>
+        <option value="Пицца Стар">Пицца Стар</option>
+      </select>
+    </label>
+
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-light);">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--brown);">Контакты</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <label style="font-size:12px;">
+          WhatsApp (телефон)
+          <input id="s_whatsapp" placeholder="+375291234567" />
+        </label>
+        <label style="font-size:12px;">
+          Telegram (username)
+          <input id="s_telegram" placeholder="@username" />
+        </label>
+        <label style="font-size:12px;">
+          Viber (телефон)
+          <input id="s_viber" placeholder="+375291234567" />
+        </label>
+        <label style="font-size:12px;">
+          Email
+          <input id="s_email" placeholder="supplier@mail.com" type="email" />
+        </label>
+      </div>
+    </div>
+
+    <div class="actions" style="margin-bottom:0;margin-top:16px;">
+      <button id="s_save" class="btn primary">Сохранить</button>
+      <button id="s_cancel" class="btn secondary">Отмена</button>
     </div>
   </div>
 </div>

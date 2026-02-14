@@ -1,10 +1,13 @@
 /**
  * Модуль отправки заказа через мессенджеры
  * share-order.js
+ * 
+ * Подставляет контакты поставщика из suppliers таблицы
  */
 
 import { orderState } from './state.js';
 import { showToast } from './modals.js';
+import { getSupplierContacts } from './database.js';
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
@@ -15,7 +18,18 @@ const CHANNELS = [
   { id: 'email',     label: 'Email',    color: '#8B7355' },
 ];
 
-/** Формирует текст заказа — такой же как при копировании */
+/** Кеш контактов поставщика */
+let cachedContacts = null;
+let cachedSupplier = '';
+
+async function getContacts(supplier) {
+  if (cachedSupplier === supplier && cachedContacts) return cachedContacts;
+  cachedContacts = await getSupplierContacts(supplier);
+  cachedSupplier = supplier;
+  return cachedContacts;
+}
+
+/** Формирует текст заказа */
 function buildOrderText() {
   if (!orderState.items.length) return null;
 
@@ -58,38 +72,59 @@ function buildOrderText() {
   };
 }
 
-/** Открывает ссылку мессенджера */
-function openChannel(channel, order) {
+/** Открывает ссылку мессенджера с контактом поставщика */
+async function openChannel(channel, order) {
   const encoded = encodeURIComponent(order.text);
+  const contacts = await getContacts(order.supplier);
 
   const subject = encodeURIComponent(
     `Заказ ${order.supplier} на ${order.deliveryDate}`
   );
 
   if (channel === 'telegram') {
-    // Telegram не поддерживает deep link с произвольным текстом + выбор адресата
-    // Поэтому: копируем текст в буфер → открываем приложение → пользователь вставляет
     navigator.clipboard.writeText(order.text).then(() => {
-      showToast('Текст скопирован в буфер', 'Выберите чат в Telegram и нажмите Ctrl+V', 'success');
-      // Открываем Telegram — если десктопное приложение установлено, откроется оно
-      window.open('tg://', '_self');
+      const tgContact = contacts?.telegram;
+      if (tgContact) {
+        const username = tgContact.replace(/^@/, '');
+        showToast('Текст скопирован', `Открываю чат с ${tgContact} — нажмите Ctrl+V`, 'success');
+        window.open(`tg://resolve?domain=${username}`, '_self');
+      } else {
+        showToast('Текст скопирован в буфер', 'Выберите чат в Telegram и нажмите Ctrl+V', 'success');
+        window.open('tg://', '_self');
+      }
     }).catch(() => {
       showToast('Ошибка', 'Не удалось скопировать текст', 'error');
     });
     return;
   }
 
-  const urls = {
-    whatsapp: `https://wa.me/?text=${encoded}`,
-    viber:    `viber://forward?text=${encoded}`,
-    email:    `mailto:?subject=${subject}&body=${encoded}`,
-  };
+  if (channel === 'whatsapp') {
+    const phone = contacts?.whatsapp?.replace(/[^+\d]/g, '') || '';
+    const url = phone
+      ? `https://wa.me/${phone}?text=${encoded}`
+      : `https://wa.me/?text=${encoded}`;
+    window.open(url, '_blank');
+    showToast('Отправка', `${order.count} позиций → WhatsApp${phone ? ` (${contacts.whatsapp})` : ''}`, 'success');
+    return;
+  }
 
-  const url = urls[channel];
-  if (!url) return;
+  if (channel === 'viber') {
+    const phone = contacts?.viber?.replace(/[^+\d]/g, '') || '';
+    const url = phone
+      ? `viber://chat?number=${encodeURIComponent(phone)}&text=${encoded}`
+      : `viber://forward?text=${encoded}`;
+    window.open(url, '_blank');
+    showToast('Отправка', `${order.count} позиций → Viber${phone ? ` (${contacts.viber})` : ''}`, 'success');
+    return;
+  }
 
-  window.open(url, '_blank');
-  showToast('Отправка', `${order.count} позиций → ${CHANNELS.find(c => c.id === channel)?.label}`, 'success');
+  if (channel === 'email') {
+    const to = contacts?.email || '';
+    const url = `mailto:${to}?subject=${subject}&body=${encoded}`;
+    window.open(url, '_blank');
+    showToast('Отправка', `${order.count} позиций → Email${to ? ` (${to})` : ''}`, 'success');
+    return;
+  }
 }
 
 /** Инициализация кнопки и дропдауна */
@@ -97,7 +132,6 @@ export function initShareOrder() {
   const btn = document.getElementById('shareOrderBtn');
   if (!btn) return;
 
-  // Создаём дропдаун
   const dropdown = document.createElement('div');
   dropdown.className = 'share-dropdown hidden';
 
@@ -112,12 +146,10 @@ export function initShareOrder() {
   btn.style.position = 'relative';
   btn.appendChild(dropdown);
 
-  // Клик по кнопке — показать/скрыть дропдаун
-  btn.addEventListener('click', (e) => {
+  btn.addEventListener('click', async (e) => {
     const channelBtn = e.target.closest('[data-channel]');
 
     if (channelBtn) {
-      // Клик по пункту мессенджера
       e.stopPropagation();
       dropdown.classList.add('hidden');
 
@@ -126,18 +158,35 @@ export function initShareOrder() {
         showToast('Заказ пуст', 'Добавьте товары в заказ', 'error');
         return;
       }
-      openChannel(channelBtn.dataset.channel, order);
+      await openChannel(channelBtn.dataset.channel, order);
     } else {
-      // Клик по самой кнопке
       if (!orderState.items.length) {
         showToast('Заказ пуст', 'Добавьте товары в заказ', 'error');
         return;
       }
+
+      // Подгружаем контакты и показываем в дропдауне
+      const supplier = orderState.settings.supplier;
+      const contacts = supplier ? await getContacts(supplier) : null;
+      
+      dropdown.querySelectorAll('button[data-channel]').forEach(b => {
+        const ch = b.dataset.channel;
+        const contact = contacts?.[ch] || '';
+        const hint = b.querySelector('.share-contact-hint');
+        if (hint) hint.remove();
+        if (contact) {
+          const span = document.createElement('span');
+          span.className = 'share-contact-hint';
+          span.style.cssText = 'font-size:10px;color:#888;margin-left:auto;';
+          span.textContent = contact.length > 20 ? contact.slice(0, 18) + '…' : contact;
+          b.appendChild(span);
+        }
+      });
+
       dropdown.classList.toggle('hidden');
     }
   });
 
-  // Закрыть при клике вне
   document.addEventListener('click', (e) => {
     if (!btn.contains(e.target)) {
       dropdown.classList.add('hidden');

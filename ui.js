@@ -5,7 +5,7 @@ import { history } from './history.js';
 import { SafetyStockManager } from './safety-stock.js';
 
 import { showToast, customConfirm } from './modals.js';
-import { loadDatabaseProducts, setupDatabaseSearch, openEditCardBySku } from './database.js';
+import { loadDatabaseProducts, setupDatabaseSearch, openEditCardBySku, initDatabaseTabs, initDatabaseButtons, setupSupplierSearch } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
 import { getOrdersAnalytics, renderAnalytics } from './analytics.js';
@@ -1024,6 +1024,9 @@ dbLegalEntitySelect.addEventListener('change', () => {
 });
 
 setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseList);
+initDatabaseTabs();
+initDatabaseButtons();
+setupSupplierSearch();
 
 /* ================= ЗАКРЫТИЕ МОДАЛОК ПО ФОНУ ================= */
 document.querySelectorAll('.modal').forEach(modal => {
