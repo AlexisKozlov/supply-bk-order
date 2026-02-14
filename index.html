@@ -297,6 +297,10 @@
   <div class="modal-box large">
     <div class="modal-header">
       <h2><img src="./icons/base.png" width="20" height="20" style="vertical-align:-3px;" alt=""> База данных <span id="dbCardCount" style="font-weight:400;font-size:14px;color:#8B7355;"></span></h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:12px;">
+        <button id="dbNewProductBtn" class="btn primary" style="height:32px;font-size:12px;white-space:nowrap;display:none;">+ Новый товар</button>
+        <button id="dbNewSupplierBtn" class="btn primary" style="height:32px;font-size:12px;white-space:nowrap;display:none;">+ Новый поставщик</button>
+      </div>
       <button id="closeDatabase" class="modal-close">✕</button>
     </div>
 
@@ -317,7 +321,6 @@
             <option value="Пицца Стар">Пицца Стар</option>
           </select>
         </label>
-        <button id="dbNewProductBtn" class="btn primary" style="height:36px;white-space:nowrap;">+ Новый товар</button>
       </div>
 
       <section class="search" style="margin:0 0 12px;">
@@ -339,7 +342,6 @@
             <option value="Пицца Стар">Пицца Стар</option>
           </select>
         </label>
-        <button id="dbNewSupplierBtn" class="btn primary" style="height:36px;white-space:nowrap;">+ Новый поставщик</button>
       </div>
 
       <section class="search" style="margin:0 0 12px;">
@@ -426,8 +428,8 @@
           <input id="s_whatsapp" placeholder="+375291234567" />
         </label>
         <label style="font-size:12px;">
-          Telegram (username)
-          <input id="s_telegram" placeholder="@username" />
+          Telegram (телефон или @username)
+          <input id="s_telegram" placeholder="+375291234567 или @username" />
         </label>
         <label style="font-size:12px;">
           Viber (телефон)

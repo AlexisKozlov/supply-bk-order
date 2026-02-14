@@ -1104,11 +1104,24 @@ td.delete-cell {
   padding: 2px 6px;
   border-radius: 10px;
   background: #f0f0f0;
-  color: #666;
+  color: #999;
+  font-weight: 600;
 }
-.supplier-contact-badge.filled {
-  background: #e8f5e9;
-  color: #2e7d32;
+.supplier-contact-badge.filled-whatsapp {
+  background: #dcf8c6;
+  color: #25D366;
+}
+.supplier-contact-badge.filled-telegram {
+  background: #d6eefb;
+  color: #0088cc;
+}
+.supplier-contact-badge.filled-viber {
+  background: #ece6fd;
+  color: #7360f2;
+}
+.supplier-contact-badge.filled-email {
+  background: #fdf0e0;
+  color: #c77800;
 }
 .supplier-card-actions {
   display: flex;

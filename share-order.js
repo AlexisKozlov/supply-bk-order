@@ -83,11 +83,19 @@ async function openChannel(channel, order) {
 
   if (channel === 'telegram') {
     navigator.clipboard.writeText(order.text).then(() => {
-      const tgContact = contacts?.telegram;
+      const tgContact = contacts?.telegram?.trim();
       if (tgContact) {
-        const username = tgContact.replace(/^@/, '');
-        showToast('Текст скопирован', `Открываю чат с ${tgContact} — нажмите Ctrl+V`, 'success');
-        window.open(`tg://resolve?domain=${username}`, '_self');
+        if (tgContact.startsWith('+') || /^\d/.test(tgContact)) {
+          // Телефон — открываем по номеру
+          const phone = tgContact.replace(/[^+\d]/g, '');
+          showToast('Текст скопирован', `Открываю чат с ${tgContact} — нажмите Ctrl+V`, 'success');
+          window.open(`tg://resolve?phone=${phone.replace('+', '')}`, '_self');
+        } else {
+          // Username
+          const username = tgContact.replace(/^@/, '');
+          showToast('Текст скопирован', `Открываю чат с @${username} — нажмите Ctrl+V`, 'success');
+          window.open(`tg://resolve?domain=${username}`, '_self');
+        }
       } else {
         showToast('Текст скопирован в буфер', 'Выберите чат в Telegram и нажмите Ctrl+V', 'success');
         window.open('tg://', '_self');
@@ -110,11 +118,20 @@ async function openChannel(channel, order) {
 
   if (channel === 'viber') {
     const phone = contacts?.viber?.replace(/[^+\d]/g, '') || '';
-    const url = phone
-      ? `viber://chat?number=${encodeURIComponent(phone)}&text=${encoded}`
-      : `viber://forward?text=${encoded}`;
-    window.open(url, '_blank');
-    showToast('Отправка', `${order.count} позиций → Viber${phone ? ` (${contacts.viber})` : ''}`, 'success');
+    if (phone) {
+      // Viber не поддерживает предзаполненный текст в chat deep link
+      // Копируем текст + открываем чат с контактом
+      navigator.clipboard.writeText(order.text).then(() => {
+        showToast('Текст скопирован', `Открываю Viber чат с ${contacts.viber} — нажмите Ctrl+V`, 'success');
+        window.open(`viber://chat?number=${encodeURIComponent(phone)}`, '_blank');
+      }).catch(() => {
+        window.open(`viber://forward?text=${encoded}`, '_blank');
+        showToast('Отправка', `${order.count} позиций → Viber`, 'success');
+      });
+    } else {
+      window.open(`viber://forward?text=${encoded}`, '_blank');
+      showToast('Отправка', `${order.count} позиций → Viber (выберите контакт)`, 'success');
+    }
     return;
   }
 

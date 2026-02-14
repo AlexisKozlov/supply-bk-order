@@ -12,6 +12,9 @@ import { showToast, customConfirm } from './modals.js';
 
 export function initDatabaseTabs() {
   const tabs = document.querySelectorAll('.db-tab');
+  const newProductBtn = document.getElementById('dbNewProductBtn');
+  const newSupplierBtn = document.getElementById('dbNewSupplierBtn');
+
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       tabs.forEach(t => t.classList.remove('active'));
@@ -21,13 +24,24 @@ export function initDatabaseTabs() {
       document.getElementById('dbTabProducts').classList.toggle('hidden', tabName !== 'products');
       document.getElementById('dbTabSuppliers').classList.toggle('hidden', tabName !== 'suppliers');
 
+      // Показываем нужную кнопку в заголовке
+      if (newProductBtn) newProductBtn.style.display = tabName === 'products' ? '' : 'none';
+      if (newSupplierBtn) newSupplierBtn.style.display = tabName === 'suppliers' ? '' : 'none';
+
       if (tabName === 'suppliers') {
         const el = document.getElementById('dbSupplierLegalEntity');
         const list = document.getElementById('supplierList');
         loadSuppliers(el, list);
+      } else {
+        // Обновляем счётчик при возврате на товары
+        refreshProducts();
       }
     });
   });
+
+  // Инициально показываем кнопку товаров
+  if (newProductBtn) newProductBtn.style.display = '';
+  if (newSupplierBtn) newSupplierBtn.style.display = 'none';
 }
 
 /* ═══════════════════════════════════════
@@ -123,6 +137,13 @@ async function loadSupplierOptions(selectEl, currentValue) {
       selectEl.appendChild(opt);
     });
   }
+  // Опция создания нового
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '＋ Новый поставщик...';
+  newOpt.style.color = '#c77800';
+  selectEl.appendChild(newOpt);
+
   if (currentValue) selectEl.value = currentValue;
 }
 
@@ -183,6 +204,18 @@ function setupEditCardHandlers(editId, onSaveCallback) {
   const saveBtn = document.getElementById('e_save');
   const cancelBtn = document.getElementById('e_cancel');
   const closeBtn = document.getElementById('closeEditCard');
+  const supplierSelect = document.getElementById('e_supplier');
+
+  // Обработчик "Новый поставщик" в селекторе
+  const handleSupplierChange = () => {
+    if (supplierSelect.value === '__new__') {
+      supplierSelect.value = ''; // сброс
+      // Скрываем карточку товара, открываем создание поставщика
+      // После сохранения — возвращаемся
+      openNewSupplierAndReturn(editCardModal);
+    }
+  };
+  supplierSelect.addEventListener('change', handleSupplierChange);
 
   const handleSave = async () => {
     const name = document.getElementById('e_name').value.trim();
@@ -191,10 +224,11 @@ function setupEditCardHandlers(editId, onSaveCallback) {
       return;
     }
 
+    const supplierVal = supplierSelect.value;
     const productData = {
       name: name,
       sku: document.getElementById('e_sku').value || null,
-      supplier: document.getElementById('e_supplier').value || null,
+      supplier: supplierVal && supplierVal !== '__new__' ? supplierVal : null,
       legal_entity: document.getElementById('e_legalEntity').value,
       qty_per_box: +document.getElementById('e_box').value || null,
       boxes_per_pallet: +document.getElementById('e_pallet').value || null,
@@ -229,6 +263,7 @@ function setupEditCardHandlers(editId, onSaveCallback) {
   };
 
   const cleanup = () => {
+    supplierSelect.removeEventListener('change', handleSupplierChange);
     saveBtn.replaceWith(saveBtn.cloneNode(true));
     cancelBtn.replaceWith(cancelBtn.cloneNode(true));
     closeBtn.replaceWith(closeBtn.cloneNode(true));
@@ -341,7 +376,7 @@ function renderSupplierList(suppliers, container) {
       { key: 'telegram', label: 'TG', val: s.telegram },
       { key: 'viber', label: 'Viber', val: s.viber },
       { key: 'email', label: 'Email', val: s.email },
-    ].map(b => `<span class="supplier-contact-badge${b.val ? ' filled' : ''}">${b.label}</span>`).join('');
+    ].map(b => `<span class="supplier-contact-badge${b.val ? ` filled-${b.key}` : ''}">${b.label}</span>`).join('');
 
     return `
       <div class="supplier-card" data-supplier-id="${s.id}">
@@ -375,6 +410,42 @@ async function openEditSupplier(id) {
   }
 
   fillSupplierModal(data, 'edit');
+}
+
+/**
+ * Открыть создание поставщика из карточки товара
+ * После сохранения — вернётся к карточке с новым поставщиком в селекторе
+ */
+function openNewSupplierAndReturn(editCardModal) {
+  // Скрываем карточку товара (но не сбрасываем данные)
+  editCardModal.style.display = 'none';
+
+  const legalEntity = document.getElementById('e_legalEntity')?.value || 'Бургер БК';
+  fillSupplierModal({
+    id: null, full_name: '', short_name: '',
+    telegram: '', whatsapp: '', viber: '', email: '',
+    legal_entity: legalEntity
+  }, 'create');
+
+  // Перехватываем сохранение поставщика — после него возвращаемся
+  const supplierModal = document.getElementById('editSupplierModal');
+  const origClose = supplierModal.dataset._returnMode;
+  supplierModal.dataset._returnMode = 'product-card';
+
+  // Следим за закрытием модалки поставщика
+  const observer = new MutationObserver(async () => {
+    if (supplierModal.classList.contains('hidden')) {
+      observer.disconnect();
+      supplierModal.dataset._returnMode = '';
+      editCardModal.style.display = '';
+
+      // Обновляем селектор поставщиков — новый поставщик должен появиться
+      const supplierSelect = document.getElementById('e_supplier');
+      const newName = document.getElementById('s_shortName').value.trim();
+      await loadSupplierOptions(supplierSelect, newName || '');
+    }
+  });
+  observer.observe(supplierModal, { attributes: true, attributeFilter: ['class'] });
 }
 
 function openNewSupplier() {
