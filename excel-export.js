@@ -72,10 +72,9 @@ export async function exportToExcel(orderState) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Заказ');
   
-  // Формирование имени файла — дата поставки
-  const fileDate = orderState.settings.deliveryDate
-    ? orderState.settings.deliveryDate.toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+  // Формирование имени файла — дата поставки в формате ДД-ММ-ГГГГ
+  const dd = orderState.settings.deliveryDate || new Date();
+  const fileDate = `${String(dd.getDate()).padStart(2,'0')}-${String(dd.getMonth()+1).padStart(2,'0')}-${dd.getFullYear()}`;
   const filename = `Заказ_${supplier}_${fileDate}.xlsx`;
   
   // Сохранение файла

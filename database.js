@@ -532,6 +532,8 @@ function setupSupplierHandlers(editId, mode) {
     showToast(mode === 'create' ? 'Поставщик создан' : 'Поставщик обновлён', shortName, 'success');
     modal.classList.add('hidden');
     refreshSuppliers();
+    // Уведомляем параметры заказа об обновлении поставщиков
+    document.dispatchEvent(new CustomEvent('suppliers:updated'));
     cleanup();
   };
 
@@ -576,6 +578,7 @@ async function deleteSupplier(id) {
 
   showToast('Поставщик удалён', name, 'success');
   refreshSuppliers();
+  document.dispatchEvent(new CustomEvent('suppliers:updated'));
 }
 
 function refreshSuppliers() {

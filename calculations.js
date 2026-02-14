@@ -50,10 +50,12 @@ export function calculateItem(item, settings) {
   const availableAfterDelivery = stockAfterDelivery + (item.finalOrder || 0);
   const daysAfterDelivery = safeDivide(availableAfterDelivery, daily);
 
-  // День поставки = первый день запаса, поэтому -1
+  // День поставки НЕ считается днём потребления (товар только пришёл)
+  // Первый день потребления — следующий день после поставки
+  // Поэтому: deliveryDate + daysAfterDelivery (полных дней)
   const coverageDate =
     daily > 0 && daysAfterDelivery > 0
-      ? new Date(deliveryDate.getTime() + (daysAfterDelivery - 1) * 86400000)
+      ? new Date(deliveryDate.getTime() + daysAfterDelivery * 86400000)
       : null;
 
   return {

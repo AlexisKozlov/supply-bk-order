@@ -594,8 +594,14 @@ manualAddBtn.addEventListener('click', async () => {
     return;
   }
 
-  addItem(data);
-  showToast('Товар добавлен', 'Товар сохранён в базе данных', 'success');
+  // Добавляем в заказ только если поставщик совпадает с текущим в параметрах
+  const currentSupplier = orderState.settings.supplier;
+  if (data.supplier && currentSupplier && data.supplier === currentSupplier) {
+    addItem(data);
+    showToast('Товар добавлен', 'Сохранён в базу и добавлен в текущий заказ', 'success');
+  } else {
+    showToast('Товар сохранён', 'Сохранён в базу данных (не добавлен в заказ — другой поставщик)', 'success');
+  }
 
   manualModal.classList.add('hidden');
 });
@@ -1094,6 +1100,24 @@ document.addEventListener('product:deleted', (e) => {
   if (orderState.items.length < before) {
     renderTable(orderState, { removeItem, openEditCardBySku });
     showToast('Товар удалён из заказа', `${skuStr || ''} убран из текущего заказа`, 'info');
+  }
+});
+
+// При создании/удалении поставщика — обновляем селектор в параметрах заказа
+document.addEventListener('suppliers:updated', async () => {
+  const currentSupplier = orderState.settings.supplier;
+  const le = document.getElementById('legalEntity').value;
+  await loadSuppliers(le);
+  // Восстанавливаем выбранного поставщика если он ещё существует
+  if (currentSupplier) {
+    const exists = [...supplierSelect.options].some(o => o.value === currentSupplier);
+    if (exists) {
+      supplierSelect.value = currentSupplier;
+    } else {
+      // Поставщик удалён — сбрасываем
+      supplierSelect.value = '';
+      orderState.settings.supplier = '';
+    }
   }
 });
 

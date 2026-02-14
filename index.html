@@ -313,17 +313,14 @@
 
     <!-- ТАБ: ТОВАРЫ -->
     <div id="dbTabProducts" class="db-tab-content">
-      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
-        <label style="flex:0 0 auto;min-width:140px;">
-          Юр. лицо
-          <select id="dbLegalEntity">
-            <option value="Бургер БК">Бургер БК</option>
-            <option value="Воглия Матта">Воглия Матта</option>
-            <option value="Пицца Стар">Пицца Стар</option>
-          </select>
-        </label>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+        <select id="dbLegalEntity" style="flex:0 0 auto;min-width:140px;height:38px;">
+          <option value="Бургер БК">Бургер БК</option>
+          <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
+        </select>
         <section class="search" style="flex:1;min-width:180px;margin:0;">
-          <input id="dbSearch" placeholder="Поиск по карточкам" />
+          <input id="dbSearch" placeholder="Поиск по карточкам" style="height:38px;" />
           <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
@@ -333,17 +330,14 @@
 
     <!-- ТАБ: ПОСТАВЩИКИ -->
     <div id="dbTabSuppliers" class="db-tab-content hidden">
-      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
-        <label style="flex:0 0 auto;min-width:140px;">
-          Юр. лицо
-          <select id="dbSupplierLegalEntity">
-            <option value="Бургер БК">Бургер БК</option>
-            <option value="Воглия Матта">Воглия Матта</option>
-            <option value="Пицца Стар">Пицца Стар</option>
-          </select>
-        </label>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+        <select id="dbSupplierLegalEntity" style="flex:0 0 auto;min-width:140px;height:38px;">
+          <option value="Бургер БК">Бургер БК</option>
+          <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
+        </select>
         <section class="search" style="flex:1;min-width:180px;margin:0;">
-          <input id="dbSupplierSearch" placeholder="Поиск по поставщикам" />
+          <input id="dbSupplierSearch" placeholder="Поиск по поставщикам" style="height:38px;" />
           <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
