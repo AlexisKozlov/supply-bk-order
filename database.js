@@ -125,9 +125,7 @@ async function deleteCard(id) {
   }
 
   // Уведомляем приложение об удалении — для очистки заказа
-  if (product?.sku) {
-    document.dispatchEvent(new CustomEvent('product:deleted', { detail: { sku: product.sku, id } }));
-  }
+  document.dispatchEvent(new CustomEvent('product:deleted', { detail: { sku: product?.sku || '', id } }));
 
   showToast('Карточка удалена', '', 'success');
   refreshProducts();
@@ -456,12 +454,12 @@ function openNewSupplierAndReturn(editCardModal) {
   observer.observe(supplierModal, { attributes: true, attributeFilter: ['class'] });
 }
 
-function openNewSupplier() {
-  const legalEntity = document.getElementById('dbSupplierLegalEntity')?.value || 'Бургер БК';
+export function openNewSupplier(legalEntity) {
+  const le = legalEntity || document.getElementById('dbSupplierLegalEntity')?.value || 'Бургер БК';
   fillSupplierModal({
     id: null, full_name: '', short_name: '',
     telegram: '', whatsapp: '', viber: '', email: '',
-    legal_entity: legalEntity
+    legal_entity: le
   }, 'create');
 }
 

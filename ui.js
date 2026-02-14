@@ -5,7 +5,7 @@ import { history } from './history.js';
 import { SafetyStockManager } from './safety-stock.js';
 
 import { showToast, customConfirm } from './modals.js';
-import { loadDatabaseProducts, setupDatabaseSearch, openEditCardBySku, initDatabaseTabs, initDatabaseButtons, setupSupplierSearch } from './database.js';
+import { loadDatabaseProducts, setupDatabaseSearch, openEditCardBySku, initDatabaseTabs, initDatabaseButtons, setupSupplierSearch, openNewSupplier } from './database.js';
 import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
 import { getOrdersAnalytics, renderAnalytics } from './analytics.js';
@@ -634,6 +634,44 @@ addManualBtn.addEventListener('click', async () => {
     supplierSelect.value = orderState.settings.supplier;
   }
   
+  // Обработчик "Новый поставщик" в селекторе
+  supplierSelect.onchange = () => {
+    if (supplierSelect.value === '__new__') {
+      supplierSelect.value = '';
+      manualModal.style.display = 'none';
+      
+      // Вызываем экспортированную функцию из database.js
+      openNewSupplier(document.getElementById('m_legalEntity').value);
+      
+      const supplierModal = document.getElementById('editSupplierModal');
+      // Следим за закрытием — возвращаемся к товару
+      const obs = new MutationObserver(async () => {
+        if (supplierModal.classList.contains('hidden')) {
+          obs.disconnect();
+          manualModal.style.display = '';
+          // Перезагружаем поставщиков
+          const newName = document.getElementById('s_shortName').value.trim();
+          const { data: freshData } = await supabase.from('suppliers').select('short_name').order('short_name');
+          supplierSelect.innerHTML = '<option value="">— Выберите поставщика —</option>';
+          if (freshData) {
+            freshData.forEach(s => {
+              const opt = document.createElement('option');
+              opt.value = s.short_name;
+              opt.textContent = s.short_name;
+              supplierSelect.appendChild(opt);
+            });
+          }
+          const nOpt = document.createElement('option');
+          nOpt.value = '__new__';
+          nOpt.textContent = '＋ Новый поставщик...';
+          supplierSelect.appendChild(nOpt);
+          if (newName) supplierSelect.value = newName;
+        }
+      });
+      obs.observe(supplierModal, { attributes: true, attributeFilter: ['class'] });
+    }
+  };
+  
   manualModal.classList.remove('hidden');
   document.getElementById('m_name').focus();
 });
@@ -1044,13 +1082,18 @@ setupSupplierSearch();
 
 // Пункт 6: при удалении карточки из базы — удаляем из текущего заказа
 document.addEventListener('product:deleted', (e) => {
-  const { sku } = e.detail;
-  if (!sku || !orderState.items.length) return;
+  const { sku, id } = e.detail;
+  if (!orderState.items.length) return;
+  const skuStr = sku ? String(sku).trim() : '';
   const before = orderState.items.length;
-  orderState.items = orderState.items.filter(item => item.sku !== sku);
+  orderState.items = orderState.items.filter(item => {
+    if (skuStr && String(item.sku || '').trim() === skuStr) return false;
+    if (id && String(item.id) === String(id)) return false;
+    return true;
+  });
   if (orderState.items.length < before) {
     renderTable(orderState, { removeItem, openEditCardBySku });
-    showToast('Товар удалён из заказа', `SKU ${sku} убран из текущего заказа`, 'info');
+    showToast('Товар удалён из заказа', `${skuStr || ''} убран из текущего заказа`, 'info');
   }
 });
 

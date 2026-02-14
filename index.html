@@ -236,8 +236,8 @@
       <button id="closeManual" class="modal-close">✕</button>
     </div>
 
-    <input id="m_name" placeholder="Наименование*" />
     <input id="m_sku" placeholder="Артикул" />
+    <input id="m_name" placeholder="Наименование*" />
     
     <label>
       Поставщик
@@ -314,7 +314,7 @@
     <!-- ТАБ: ТОВАРЫ -->
     <div id="dbTabProducts" class="db-tab-content">
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
-        <label style="flex:1;min-width:140px;">
+        <label style="flex:0 0 auto;min-width:140px;">
           Юр. лицо
           <select id="dbLegalEntity">
             <option value="Бургер БК">Бургер БК</option>
@@ -322,12 +322,11 @@
             <option value="Пицца Стар">Пицца Стар</option>
           </select>
         </label>
+        <section class="search" style="flex:1;min-width:180px;margin:0;">
+          <input id="dbSearch" placeholder="Поиск по карточкам" />
+          <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
+        </section>
       </div>
-
-      <section class="search" style="margin:0 0 8px;">
-        <input id="dbSearch" placeholder="Поиск по карточкам" />
-        <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
-      </section>
 
       <div id="databaseList" style="max-height:55vh;overflow-y:auto;"></div>
     </div>
@@ -335,7 +334,7 @@
     <!-- ТАБ: ПОСТАВЩИКИ -->
     <div id="dbTabSuppliers" class="db-tab-content hidden">
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
-        <label style="flex:1;min-width:140px;">
+        <label style="flex:0 0 auto;min-width:140px;">
           Юр. лицо
           <select id="dbSupplierLegalEntity">
             <option value="Бургер БК">Бургер БК</option>
@@ -343,12 +342,11 @@
             <option value="Пицца Стар">Пицца Стар</option>
           </select>
         </label>
+        <section class="search" style="flex:1;min-width:180px;margin:0;">
+          <input id="dbSupplierSearch" placeholder="Поиск по поставщикам" />
+          <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
+        </section>
       </div>
-
-      <section class="search" style="margin:0 0 8px;">
-        <input id="dbSupplierSearch" placeholder="Поиск по поставщикам" />
-        <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
-      </section>
 
       <div id="supplierList" style="max-height:55vh;overflow-y:auto;"></div>
     </div>
@@ -363,8 +361,8 @@
       <button id="closeEditCard" class="modal-close">✕</button>
     </div>
 
-    <input id="e_name" placeholder="Наименование*" />
     <input id="e_sku" placeholder="Артикул" />
+    <input id="e_name" placeholder="Наименование*" />
     
     <label>
       Поставщик
