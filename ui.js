@@ -556,8 +556,8 @@ manualAddBtn.addEventListener('click', async () => {
     return;
   }
   
-  if (!supplier) {
-    showToast('Введите поставщика', 'Поле обязательно для заполнения', 'error');
+  if (!supplier || supplier === '__new__') {
+    showToast('Выберите поставщика', 'Поле обязательно для заполнения', 'error');
     return;
   }
   
@@ -581,25 +581,21 @@ manualAddBtn.addEventListener('click', async () => {
     unit_of_measure: document.getElementById('m_unit').value || 'шт'
   };
 
-  if (document.getElementById('m_save').checked) {
-    const { data, error } = await supabase
-      .from('products')
-      .insert(product)
-      .select()
-      .single();
+  // Всегда сохраняем в базу
+  const { data, error } = await supabase
+    .from('products')
+    .insert(product)
+    .select()
+    .single();
 
-    if (error) {
-      showToast('Ошибка сохранения', 'Не удалось сохранить товар в базу', 'error');
-      console.error(error);
-      return;
-    }
-
-    addItem(data);
-    showToast('Товар добавлен', 'Товар сохранён в базе данных', 'success');
-  } else {
-    addItem(product);
-    showToast('Товар добавлен', 'Товар добавлен в текущий заказ', 'success');
+  if (error) {
+    showToast('Ошибка сохранения', 'Не удалось сохранить товар в базу', 'error');
+    console.error(error);
+    return;
   }
+
+  addItem(data);
+  showToast('Товар добавлен', 'Товар сохранён в базе данных', 'success');
 
   manualModal.classList.add('hidden');
 });
@@ -607,19 +603,37 @@ manualAddBtn.addEventListener('click', async () => {
 function clearManualForm() {
   document.getElementById('m_name').value = '';
   document.getElementById('m_sku').value = '';
-  document.getElementById('m_supplier').value = '';
   document.getElementById('m_box').value = '';
   document.getElementById('m_pallet').value = '';
-  document.getElementById('m_save').checked = true;
 }
 
-addManualBtn.addEventListener('click', () => {
+addManualBtn.addEventListener('click', async () => {
   clearManualForm();
   document.getElementById('m_legalEntity').value = orderState.settings.legalEntity;
+  
+  // Загружаем список поставщиков в селектор
+  const supplierSelect = document.getElementById('m_supplier');
+  const { data } = await supabase.from('suppliers').select('short_name').order('short_name');
+  supplierSelect.innerHTML = '<option value="">— Выберите поставщика —</option>';
+  if (data) {
+    data.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.short_name;
+      opt.textContent = s.short_name;
+      supplierSelect.appendChild(opt);
+    });
+  }
+  // Опция "Новый поставщик"
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '＋ Новый поставщик...';
+  supplierSelect.appendChild(newOpt);
+  
   // Подставляем текущего поставщика если выбран
   if (orderState.settings.supplier) {
-    document.getElementById('m_supplier').value = orderState.settings.supplier;
+    supplierSelect.value = orderState.settings.supplier;
   }
+  
   manualModal.classList.remove('hidden');
   document.getElementById('m_name').focus();
 });
@@ -1027,6 +1041,18 @@ setupDatabaseSearch(dbSearchInput, clearDbSearchBtn, databaseList);
 initDatabaseTabs();
 initDatabaseButtons();
 setupSupplierSearch();
+
+// Пункт 6: при удалении карточки из базы — удаляем из текущего заказа
+document.addEventListener('product:deleted', (e) => {
+  const { sku } = e.detail;
+  if (!sku || !orderState.items.length) return;
+  const before = orderState.items.length;
+  orderState.items = orderState.items.filter(item => item.sku !== sku);
+  if (orderState.items.length < before) {
+    renderTable(orderState, { removeItem, openEditCardBySku });
+    showToast('Товар удалён из заказа', `SKU ${sku} убран из текущего заказа`, 'info');
+  }
+});
 
 /* ================= ЗАКРЫТИЕ МОДАЛОК ПО ФОНУ ================= */
 document.querySelectorAll('.modal').forEach(modal => {

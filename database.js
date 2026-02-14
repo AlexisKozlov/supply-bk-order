@@ -110,8 +110,11 @@ function renderDatabaseList(products, databaseList) {
 }
 
 async function deleteCard(id) {
-  const confirmed = await customConfirm('Удалить карточку?', 'Карточка будет удалена из базы данных');
+  const confirmed = await customConfirm('Удалить карточку?', 'Карточка будет удалена из базы данных и из текущего заказа');
   if (!confirmed) return;
+
+  // Получаем SKU перед удалением — для удаления из заказа
+  const { data: product } = await supabase.from('products').select('sku').eq('id', id).single();
 
   const { error } = await supabase.from('products').delete().eq('id', id);
 
@@ -119,6 +122,11 @@ async function deleteCard(id) {
     showToast('Ошибка удаления', 'Не удалось удалить карточку', 'error');
     console.error(error);
     return;
+  }
+
+  // Уведомляем приложение об удалении — для очистки заказа
+  if (product?.sku) {
+    document.dispatchEvent(new CustomEvent('product:deleted', { detail: { sku: product.sku, id } }));
   }
 
   showToast('Карточка удалена', '', 'success');

@@ -323,8 +323,8 @@ export function updateRow(tr, item, settings) {
   
   // ===== ДАТА ПОКРЫТИЯ - формат: "дата (дни)" =====
   const dateCell = tr.querySelector('.date');
-  if (calc.coverageDate && settings.today) {
-    const daysDiff = Math.ceil((calc.coverageDate - settings.today) / 86400000);
+  if (calc.coverageDate && settings.deliveryDate) {
+    const daysDiff = Math.ceil((calc.coverageDate - settings.deliveryDate) / 86400000);
     dateCell.textContent = `${calc.coverageDate.toLocaleDateString()} (${daysDiff} дн.)`;
   } else {
     dateCell.textContent = '-';

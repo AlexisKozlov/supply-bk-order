@@ -18,18 +18,25 @@ export async function exportToExcel(orderState) {
     [`Дата прихода: ${deliveryDate}`],
     [`Юридическое лицо: ${legalEntity}`],
     [], // Пустая строка
-    ['Наименование', 'Заказ (коробки)'] // Заголовки таблицы
+    ['Наименование', 'Заказ'] // Заголовки таблицы
   ];
   
-  // Подготовка данных - только наименование и заказ
+  // Подготовка данных - наименование и заказ с единицами
   const dataRows = orderState.items.map(item => {
     const boxes = orderState.settings.unit === 'boxes' 
       ? item.finalOrder 
       : Math.ceil(item.finalOrder / (item.qtyPerBox || 1));
     
+    const pieces = orderState.settings.unit === 'pieces'
+      ? item.finalOrder
+      : item.finalOrder * (item.qtyPerBox || 1);
+
+    const unit = item.unitOfMeasure || 'шт';
+    const boxLabel = `${nf.format(boxes)} кор (${nf.format(Math.round(pieces))} ${unit})`;
+    
     return [
       item.name || '',
-      nf.format(boxes)
+      boxLabel
     ];
   });
   
