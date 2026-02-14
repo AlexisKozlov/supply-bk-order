@@ -41,8 +41,6 @@ body {
   color: var(--brown);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  display: flex;
-  flex-direction: column;
   min-height: 100vh;
 }
 
@@ -110,6 +108,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 28px;
+  min-height: calc(100vh - 180px);
 }
 
 /* ===== CARD ===== */
@@ -1030,7 +1029,7 @@ td.delete-cell {
   border-top: 1px solid var(--border-light);
   padding: 12px 32px;
   text-align: center;
-  margin-top: auto;
+  margin-top: 40px;
 }
 
 .version {
