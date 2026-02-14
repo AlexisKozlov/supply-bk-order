@@ -337,44 +337,34 @@ function validateRequiredSettings() {
 
 /* ================= ПОСТАВЩИКИ ================= */
 async function loadSuppliers(legalEntity) {
-  // Очищаем текущие опции (кроме первой "Все / свободный")
   supplierSelect.innerHTML = '<option value="">Все / свободный</option>';
   historySupplier.innerHTML = '<option value="">Все</option>';
   
-  // Загружаем поставщиков для текущего юр. лица
-  // Бургер БК и Воглия Матта - общие поставщики
-  let query = supabase.from('products').select('supplier, legal_entity');
+  // Загружаем из таблицы suppliers (не products!)
+  let query = supabase.from('suppliers').select('short_name, legal_entity');
   
   if (legalEntity === 'Пицца Стар') {
     query = query.eq('legal_entity', 'Пицца Стар');
   } else {
-    // Для Бургер БК и Воглия Матта - показываем оба
     query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
   }
   
-  const { data, error } = await query;
+  const { data, error } = await query.order('short_name');
   
   if (error || !data) {
     console.error('Ошибка загрузки поставщиков:', error);
     return;
   }
   
-  const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))];
-  
-  // СОРТИРОВКА ПО АЛФАВИТУ
-  suppliers.sort((a, b) => a.localeCompare(b, 'ru'));
-
-  suppliers.forEach(s => {
-    // основной фильтр
+  data.forEach(s => {
     const opt1 = document.createElement('option');
-    opt1.value = s;
-    opt1.textContent = s;
+    opt1.value = s.short_name;
+    opt1.textContent = s.short_name;
     supplierSelect.appendChild(opt1);
 
-    // фильтр истории
     const opt2 = document.createElement('option');
-    opt2.value = s;
-    opt2.textContent = s;
+    opt2.value = s.short_name;
+    opt2.textContent = s.short_name;
     historySupplier.appendChild(opt2);
   });
 }
