@@ -66,9 +66,46 @@ function openChannel(channel, order) {
     `Заказ ${order.supplier} на ${order.deliveryDate}`
   );
 
+  if (channel === 'telegram') {
+    // Пробуем открыть десктопное приложение через tg:// протокол
+    // msg_url с пустым url отправляет только текст
+    const tgUrl = `tg://msg_url?url=&text=${encoded}`;
+    
+    // Создаём скрытый iframe для попытки открыть протокол
+    // Если приложение не установлено — fallback на веб
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    
+    let appOpened = false;
+    
+    // Слушаем потерю фокуса — значит приложение открылось
+    const onBlur = () => { appOpened = true; };
+    window.addEventListener('blur', onBlur);
+    
+    iframe.contentWindow.location.href = tgUrl;
+    
+    // Через 1.5с проверяем: если приложение не открылось — копируем в буфер
+    setTimeout(() => {
+      window.removeEventListener('blur', onBlur);
+      iframe.remove();
+      
+      if (!appOpened) {
+        // Приложение не открылось — копируем текст в буфер
+        navigator.clipboard.writeText(order.text).then(() => {
+          showToast('Текст скопирован', 'Telegram не открылся — текст в буфере, вставьте в чат вручную', 'info');
+        }).catch(() => {
+          showToast('Ошибка', 'Не удалось открыть Telegram', 'error');
+        });
+      }
+    }, 1500);
+    
+    showToast('Отправка', `${order.count} позиций → Telegram`, 'success');
+    return;
+  }
+
   const urls = {
     whatsapp: `https://wa.me/?text=${encoded}`,
-    telegram: `https://t.me/share?url=&text=${encoded}`,
     viber:    `viber://forward?text=${encoded}`,
     email:    `mailto:?subject=${subject}&body=${encoded}`,
   };
