@@ -119,6 +119,7 @@ body {
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-light);
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  animation: fadeSlideUp 0.35s cubic-bezier(.23,1,.32,1) both;
 }
 
 .card:hover {
@@ -510,11 +511,20 @@ td.order-cell input[type="number"] {
   border-radius: 10px;
   border-left: 3px solid var(--orange);
   transition: background 0.18s, box-shadow 0.18s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 #finalSummary > div:hover {
   background: #fff0e0;
   box-shadow: var(--shadow-sm);
+}
+
+#finalSummary > div::before {
+  content: '📦';
+  font-size: 15px;
+  flex-shrink: 0;
 }
 
 /* ===== MANUAL ===== */
@@ -625,6 +635,7 @@ td.order-cell input[type="number"] {
   color: var(--brown);
   border-top: 1px solid var(--border-light);
   background: #fafaf7;
+  animation: expandDown 0.2s ease;
 }
 
 .history-items > div {
@@ -634,6 +645,11 @@ td.order-cell input[type="number"] {
 
 .history-items > div:last-child {
   border-bottom: none;
+}
+
+@keyframes expandDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 800px; }
 }
 
 .history-actions {
@@ -1068,7 +1084,6 @@ td.delete-cell {
   color: var(--orange);
   border-bottom-color: var(--orange);
 }
-.db-tab-content.hidden { display: none; }
 
 /* ===== КАРТОЧКИ ПОСТАВЩИКОВ ===== */
 .supplier-card {
@@ -1570,10 +1585,6 @@ td.delete-cell {
 }
 
 /* ── Плавное появление секций ── */
-.card {
-  animation: fadeSlideUp 0.35s cubic-bezier(.23,1,.32,1) both;
-}
-
 .card:nth-child(1) { animation-delay: 0s; }
 .card:nth-child(2) { animation-delay: 0.06s; }
 .card:nth-child(3) { animation-delay: 0.12s; }
@@ -1672,17 +1683,18 @@ td input[type="number"]:focus {
   box-shadow: 0 3px 10px rgba(76,175,80,0.3);
 }
 
-/* ── Drag handle при перетаскивании строк ── */
+/* ── Drag handle + номер строки ── */
 td:first-child {
   cursor: grab;
   user-select: none;
+  font-size: 11px;
+  color: var(--muted-light);
+  font-weight: 600;
 }
 
 td:first-child:active {
   cursor: grabbing;
 }
-
-/* ── Строка таблицы — микро-анимация при появлении ── */
 tbody tr {
   animation: rowFadeIn 0.2s ease both;
 }
@@ -1692,31 +1704,10 @@ tbody tr {
   to { opacity: 1; }
 }
 
-/* ── Модалки — затемнение кликабельного фона ── */
-.modal::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-}
-
 /* ── Кнопка "В заказ всё" — акцентная ── */
 #allToOrderBtn {
   position: relative;
   font-weight: 700;
-}
-
-/* ── Итоговая секция — красивые карточки ── */
-#finalSummary > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-#finalSummary > div::before {
-  content: '📦';
-  font-size: 15px;
-  flex-shrink: 0;
 }
 
 /* ── Скроллбар в таблице — BK-цвета ── */
@@ -1726,13 +1717,6 @@ tbody tr {
 
 .table-wrap::-webkit-scrollbar-thumb:hover {
   background: var(--orange);
-}
-
-/* ── Номер строки (drag column) ── */
-td:first-child {
-  font-size: 11px;
-  color: var(--muted-light);
-  font-weight: 600;
 }
 
 /* ── Фокус-кольцо для select (accessibility) ── */
@@ -1763,16 +1747,6 @@ select:focus-visible {
 /* ── История заказов — badge дата ── */
 .history-header span b {
   color: var(--brown);
-}
-
-/* ── Плавное разворачивание history-items ── */
-.history-items {
-  animation: expandDown 0.2s ease;
-}
-
-@keyframes expandDown {
-  from { opacity: 0; max-height: 0; }
-  to { opacity: 1; max-height: 800px; }
 }
 
 /* ── Пустое состояние таблицы ── */
@@ -1886,6 +1860,7 @@ tbody tr td[colspan] {
   position: relative;
 }
 
+/* Подсказка расхода за неделю */
 .plan-hint {
   position: absolute;
   bottom: -1px;
@@ -1896,6 +1871,8 @@ tbody tr td[colspan] {
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
+  text-align: center;
+  margin-top: 2px;
 }
 
 .plan-input {
@@ -1982,15 +1959,6 @@ tbody tr td[colspan] {
   z-index: 9998;
 }
 
-/* Подсказка расхода за неделю */
-.plan-hint {
-  font-size: 10px;
-  color: var(--orange);
-  font-weight: 600;
-  margin-top: 2px;
-  text-align: center;
-}
-
 /* ═══════════════════════════════════════════
    КАЛЕНДАРЬ ПОСТАВОК
    ═══════════════════════════════════════════ */
@@ -2012,7 +1980,7 @@ tbody tr td[colspan] {
 }
 
 .cal-nav-btn {
-  background: var(--cream);
+  background: var(--bg-warm);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 6px 12px;
@@ -2179,7 +2147,7 @@ tbody tr td[colspan] {
 
 /* #14 Кнопка округления до паллеты */
 .plan-pallet-btn {
-  background: var(--cream);
+  background: var(--bg-warm);
   border: 1px solid var(--border);
   border-radius: 3px;
   font-size: 10px;
