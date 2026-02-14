@@ -68,7 +68,7 @@ function openChannel(channel, order) {
 
   const urls = {
     whatsapp: `https://wa.me/?text=${encoded}`,
-    telegram: `https://t.me/share/url?url=&text=${encoded}`,
+    telegram: `https://t.me/share?url=&text=${encoded}`,
     viber:    `viber://forward?text=${encoded}`,
     email:    `mailto:?subject=${subject}&body=${encoded}`,
   };

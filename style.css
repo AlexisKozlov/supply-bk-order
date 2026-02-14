@@ -2141,12 +2141,12 @@ td.plan-td-result:hover {
 /* ============= Дропдаун отправки заказа ============= */
 .share-dropdown {
   position: absolute;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 0;
   background: var(--card);
   border-radius: var(--radius-xs);
   box-shadow: var(--shadow-lg);
-  z-index: 200;
+  z-index: 9999;
   min-width: 160px;
   overflow: hidden;
   border: 1px solid var(--border);
