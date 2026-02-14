@@ -8,7 +8,7 @@
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { showImportDialog } from './import-stock.js';
-import { validatePlanConsumption } from './data-validation.js';
+import { validatePlanConsumption, resetConsumptionCache } from './data-validation.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -225,11 +225,35 @@ async function initPlanningUI() {
 
     document.getElementById('planUnit')?.addEventListener('change', () => {
       if (planState.items.length) {
-        planState.inputUnit = document.getElementById('planUnit').value;
-        resetPlanConsumptionCache(); // единицы изменились — сбросить кеш
+        const oldUnit = planState.inputUnit;
+        const newUnit = document.getElementById('planUnit').value;
+        
+        if (oldUnit !== newUnit) {
+          // Конвертируем все введённые значения в новые единицы
+          planState.items.forEach(item => {
+            const qpb = item.qtyPerBox || 1;
+            if (oldUnit === 'pieces' && newUnit === 'boxes') {
+              // штуки → коробки
+              item.monthlyConsumption = item.monthlyConsumption ? Math.round(item.monthlyConsumption / qpb * 100) / 100 : 0;
+              item.stockOnHand = item.stockOnHand ? Math.round(item.stockOnHand / qpb * 100) / 100 : 0;
+              item.stockAtSupplier = item.stockAtSupplier ? Math.round(item.stockAtSupplier / qpb * 100) / 100 : 0;
+            } else if (oldUnit === 'boxes' && newUnit === 'pieces') {
+              // коробки → штуки
+              item.monthlyConsumption = Math.round(item.monthlyConsumption * qpb);
+              item.stockOnHand = Math.round(item.stockOnHand * qpb);
+              item.stockAtSupplier = Math.round(item.stockAtSupplier * qpb);
+            }
+            // Сбрасываем locked периоды — пересчитаем заново
+            item.plan.forEach(p => { p.locked = false; });
+          });
+        }
+        
+        planState.inputUnit = newUnit;
+        resetConsumptionCache(); // единицы изменились — сбросить кеш
         renderPlanTable();
         planState.items.forEach((_, idx) => recalcItem(idx, 0));
-        showToast('Единицы обновлены', 'Данные пересчитаны', 'info');
+        triggerPlanValidation();
+        showToast('Единицы обновлены', `Данные пересчитаны в ${newUnit === 'boxes' ? 'коробки' : 'штуки'}`, 'info');
       }
     });
 
@@ -314,6 +338,56 @@ function setupActionBtn(id, handler) {
 
 /* ═══════ SUPPLIERS / PRODUCTS ═══════ */
 
+/**
+ * Загрузка среднего расхода по SKU из последних 2 заказов поставщику
+ * Возвращает Map<sku, avgConsumption>
+ */
+async function loadAvgConsumption(supplier, legalEntity, currentUnit) {
+  const avgMap = new Map();
+  
+  const { data, error } = await supabase
+    .from('orders')
+    .select('unit, period_days, order_items(sku, consumption_period, qty_per_box)')
+    .eq('legal_entity', legalEntity)
+    .eq('supplier', supplier)
+    .order('created_at', { ascending: false })
+    .limit(2);
+
+  if (error || !data || !data.length) return avgMap;
+
+  const bySku = {};
+  data.forEach(order => {
+    const orderUnit = order.unit || 'pieces';
+    const periodDays = order.period_days || 30;
+    
+    (order.order_items || []).forEach(item => {
+      if (!item.sku || !item.consumption_period) return;
+      let val = item.consumption_period;
+      const qtyPerBox = item.qty_per_box || 1;
+
+      // Нормализуем к месячному расходу (30 дней)
+      const dailyRate = val / periodDays;
+      let monthlyVal = dailyRate * 30;
+
+      // Конвертируем в текущие единицы
+      if (orderUnit === 'pieces' && currentUnit === 'boxes') {
+        monthlyVal = monthlyVal / qtyPerBox;
+      } else if (orderUnit === 'boxes' && currentUnit === 'pieces') {
+        monthlyVal = monthlyVal * qtyPerBox;
+      }
+
+      if (!bySku[item.sku]) bySku[item.sku] = [];
+      bySku[item.sku].push(monthlyVal);
+    });
+  });
+
+  Object.entries(bySku).forEach(([sku, vals]) => {
+    avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length);
+  });
+
+  return avgMap;
+}
+
 async function loadPlanSuppliers(legalEntity, selectEl) {
   selectEl.innerHTML = '<option value="">— Выберите поставщика —</option>';
   let query = supabase.from('products').select('supplier');
@@ -336,7 +410,7 @@ async function loadPlanSuppliers(legalEntity, selectEl) {
 
 async function loadPlanProducts() {
   const container = document.getElementById('planTableContainer');
-  container.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
+  container.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div style="margin-top:8px;color:var(--muted);">Загрузка товаров и расхода...</div></div>';
 
   let query = supabase.from('products').select('*').eq('supplier', planState.supplier).order('name');
   if (planState.legalEntity === 'Пицца Стар') {
@@ -351,17 +425,28 @@ async function loadPlanProducts() {
     return;
   }
 
-  planState.items = data.map(p => ({
-    sku: p.sku || '',
-    name: p.name,
-    qtyPerBox: p.qty_per_box || 1,
-    boxesPerPallet: p.boxes_per_pallet || null,
-    unitOfMeasure: p.unit_of_measure || 'шт',
-    monthlyConsumption: 0,
-    stockOnHand: 0,
-    stockAtSupplier: 0,
-    plan: []
-  }));
+  // Загружаем средний расход из последних 2 заказов этому поставщику
+  const avgConsumption = await loadAvgConsumption(planState.supplier, planState.legalEntity, planState.inputUnit);
+
+  planState.items = data.map(p => {
+    const avgVal = p.sku ? (avgConsumption.get(p.sku) || 0) : 0;
+    return {
+      sku: p.sku || '',
+      name: p.name,
+      qtyPerBox: p.qty_per_box || 1,
+      boxesPerPallet: p.boxes_per_pallet || null,
+      unitOfMeasure: p.unit_of_measure || 'шт',
+      monthlyConsumption: Math.round(avgVal),
+      stockOnHand: 0,
+      stockAtSupplier: 0,
+      plan: []
+    };
+  });
+
+  const filledCount = planState.items.filter(i => i.monthlyConsumption > 0).length;
+  if (filledCount > 0) {
+    showToast('Расход подставлен', `Средний расход из истории: ${filledCount} из ${planState.items.length} позиций`, 'info');
+  }
 }
 
 /* ═══════ RENDER ═══════ */
