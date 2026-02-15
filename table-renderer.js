@@ -5,6 +5,7 @@
 import { setupCalculator } from './calculator.js';
 import { calculateItem } from './calculations.js';
 import { validateConsumptionData } from './data-validation.js';
+import { esc } from './utils.js';
 
 export function renderTable(orderState, tbody, callbacks) {
   const {
@@ -73,7 +74,7 @@ export function renderTable(orderState, tbody, callbacks) {
         <span class="drag-handle" draggable="true" style="cursor:grab;user-select:none;color:#b0ada8;font-size:16px;">⋮⋮</span>
       </td>
       <td class="item-name">
-        ${item.sku ? `<b>${item.sku}</b> ` : ''}${item.name}
+        ${item.sku ? `<b>${esc(item.sku)}</b> ` : ''}${esc(item.name)}
         <div class="shortage-info hidden"></div>
       </td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>

@@ -5,6 +5,7 @@
 
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
+import { esc } from './utils.js';
 
 /* ═══════════════════════════════════════
    ИНИЦИАЛИЗАЦИЯ ТАБОВ
@@ -72,13 +73,6 @@ export async function loadDatabaseProducts(dbLegalEntitySelect, databaseList) {
 
   const countEl = document.getElementById('dbCardCount');
   if (countEl) countEl.textContent = `(${data.length})`;
-}
-
-/** Экранирование HTML для безопасной вставки */
-function esc(str) {
-  const d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML;
 }
 
 function renderDatabaseList(products, databaseList) {

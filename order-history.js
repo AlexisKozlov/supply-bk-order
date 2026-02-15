@@ -6,6 +6,7 @@
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { orderState } from './state.js';
+import { esc } from './utils.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -126,11 +127,11 @@ async function renderOrderHistory(orders, opts) {
       : '';
     const createdStr = createdAt ? `${createdDateStr} ${createdTimeStr}` : '';
     
-    const noteStr = order.note ? ` (${order.note})` : '';
+    const noteStr = order.note ? ` (${esc(order.note)})` : '';
 
     div.innerHTML = `
       <div class="history-header">
-        <span><b>${date}</b> — ${order.supplier}${noteStr}</span>
+        <span><b>${date}</b> — ${esc(order.supplier)}${noteStr}</span>
         <div class="history-actions">
           ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
           <button class="btn small edit-order-btn" style="background:#e3f2fd;color:#1565c0;" title="Редактировать заказ">✏️</button>
@@ -144,7 +145,7 @@ async function renderOrderHistory(orders, opts) {
           const qtyPerBox = i.qty_per_box || (productInfo ? productInfo.qty_per_box : null) || 1;
           const unit = productInfo ? productInfo.unit_of_measure : 'шт';
           const pieces = i.qty_boxes * qtyPerBox;
-          return `<div>${i.sku ? i.sku + ' ' : ''}${i.name} — ${i.qty_boxes} коробок (${nf.format(pieces)} ${unit})</div>`;
+          return `<div>${i.sku ? esc(i.sku) + ' ' : ''}${esc(i.name)} — ${i.qty_boxes} коробок (${nf.format(pieces)} ${unit})</div>`;
         }).join('')}
       </div>
     `;
@@ -358,7 +359,7 @@ async function loadPlanHistory(opts) {
     div.innerHTML = `
       <div class="history-header" style="display:flex;justify-content:space-between;align-items:center;">
         <span>
-          <b>${plan.supplier || '—'}</b> · ${date} · ${periodLabel}${startLabel}
+          <b>${esc(plan.supplier || '—')}</b> · ${date} · ${periodLabel}${startLabel}
           <span style="color:var(--muted);font-size:12px;">${items.length} позиций · ${nf.format(totalBoxes)} кор</span>
         </span>
         <div style="display:flex;gap:6px;">

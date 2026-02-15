@@ -10,6 +10,7 @@
 
 import { supabase } from './supabase.js';
 import { showToast } from './modals.js';
+import { esc } from './utils.js';
 
 const PALETTE = [
   '#F5A623','#4CAF50','#2196F3','#9C27B0',
@@ -47,6 +48,19 @@ export function initDeliveryCalendar() {
 
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+
+  // Навигация по месяцам — один раз
+  document.getElementById('calPrev')?.addEventListener('click', () => {
+    calState.month--;
+    if (calState.month < 0) { calState.month = 11; calState.year--; }
+    loadCalendarData().then(() => renderCalendar());
+  });
+
+  document.getElementById('calNext')?.addEventListener('click', () => {
+    calState.month++;
+    if (calState.month > 11) { calState.month = 0; calState.year++; }
+    loadCalendarData().then(() => renderCalendar());
+  });
 }
 
 /* ═══════ DATA ═══════ */
@@ -202,7 +216,7 @@ function renderCalendar() {
       orders.forEach(o => {
         const color = calState.supplierColors[o.supplier] || '#999';
         const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
-        html += `<div class="cal-order-dot" style="background:${color}" title="${o.supplier}: ${boxes} кор" data-order-id="${o.id}"></div>`;
+        html += `<div class="cal-order-dot" style="background:${color}" title="${esc(o.supplier)}: ${boxes} кор" data-order-id="${o.id}"></div>`;
       });
       html += '</div>';
     }
@@ -227,25 +241,12 @@ function renderCalendar() {
     html += `⚠️ Давно без заказа: ${overdue.map(s => {
       const lastDate = lastOrderBySupplier[s];
       const days = lastDate ? Math.round((today - lastDate) / 86400000) : '?';
-      return `<b>${s}</b> (${days} дн. назад)`;
+      return `<b>${esc(s)}</b> (${days} дн. назад)`;
     }).join(', ')}`;
     html += '</div>';
   }
 
   container.innerHTML = html;
-
-  // Навигация
-  document.getElementById('calPrev')?.addEventListener('click', () => {
-    calState.month--;
-    if (calState.month < 0) { calState.month = 11; calState.year--; }
-    loadCalendarData().then(() => renderCalendar());
-  });
-
-  document.getElementById('calNext')?.addEventListener('click', () => {
-    calState.month++;
-    if (calState.month > 11) { calState.month = 0; calState.year++; }
-    loadCalendarData().then(() => renderCalendar());
-  });
 
   // Клик по точке заказа → загрузить этот заказ
   container.querySelectorAll('.cal-order-dot').forEach(dot => {

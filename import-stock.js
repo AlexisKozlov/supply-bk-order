@@ -7,6 +7,7 @@
  */
 
 import { showToast } from './modals.js';
+import { debug } from './utils.js';
 
 /**
  * Парсинг файла Excel/CSV → массив объектов
@@ -26,7 +27,7 @@ async function parseFile(file, legalEntity) {
   const ws = wb.Sheets[wb.SheetNames[0]];
 
   const ref = ws['!ref'];
-  console.log(`📑 Sheet ref: ${ref}`);
+  debug(`📑 Sheet ref: ${ref}`);
 
   // ===== НАДЁЖНЫЙ МЕТОД: сканируем ВСЕ ячейки ws напрямую =====
   // SheetJS может неверно определять !ref (обрезать файл)
@@ -42,7 +43,7 @@ async function parseFile(file, legalEntity) {
 
   const totalRows = maxRow + 1;
   const totalCols = maxCol + 1;
-  console.log(`📊 Реальный размер: ${totalRows} строк × ${totalCols} колонок (ref заявлял: ${ref})`);
+  debug(`📊 Реальный размер: ${totalRows} строк × ${totalCols} колонок (ref заявлял: ${ref})`);
 
   // Строим массив строк из ячеек
   const rows = [];
@@ -56,7 +57,7 @@ async function parseFile(file, legalEntity) {
     rows.push(row);
   }
 
-  console.log(`📁 Импорт: ${rows.length} строк в файле`);
+  debug(`📁 Импорт: ${rows.length} строк в файле`);
 
   return mapRows(rows, legalEntity);
 }
@@ -151,11 +152,11 @@ function findHeaderRow(rows) {
 function mapRows(rows, legalEntity) {
   if (rows.length < 2) return [];
 
-  console.log(`📁 Импорт: ${rows.length} строк в файле`);
+  debug(`📁 Импорт: ${rows.length} строк в файле`);
 
   const headerIdx = findHeaderRow(rows);
   const headers = rows[headerIdx].map(h => String(h).toLowerCase().trim());
-  console.log(`📋 Заголовки (строка ${headerIdx}):`, headers.filter(h => h));
+  debug(`📋 Заголовки (строка ${headerIdx}):`, headers.filter(h => h));
 
   // Поиск индексов колонок по ключевым словам
   const colMap = {
@@ -167,7 +168,7 @@ function mapRows(rows, legalEntity) {
     legalEntity: findCol(headers, ['заказчик', 'короткое наименован', 'юр лицо', 'юр. лицо', 'юридическое лицо', 'организация', 'legal entity', 'компания', 'фирма'])
   };
 
-  console.log('🔍 Найдены колонки:', Object.fromEntries(
+  debug('🔍 Найдены колонки:', Object.fromEntries(
     Object.entries(colMap).map(([k, v]) => [k, v >= 0 ? `[${v}] "${headers[v]}"` : '—'])
   ));
 
@@ -230,7 +231,7 @@ function mapRows(rows, legalEntity) {
 
     if (filtered.length > 0) {
       data = filtered;
-      console.log(`🏢 Фильтр юр. лица "${legalEntity}": ${allData.length} → ${filtered.length} строк`);
+      debug(`🏢 Фильтр юр. лица "${legalEntity}": ${allData.length} → ${filtered.length} строк`);
     } else {
       // Фильтр убрал ВСЕ строки — импортируем без фильтра с предупреждением
       const entities = [...new Set(allData.map(e => e._rawEntity).filter(Boolean))];
@@ -244,7 +245,7 @@ function mapRows(rows, legalEntity) {
   // Агрегация: один товар может быть на нескольких паллетах/ячейках — суммируем остатки
   const aggregated = aggregateByProduct(data);
 
-  console.log(`📊 Импорт: ${rows.length - headerIdx - 1} строк данных → ${allData.length} распознано → ${aggregated.length} уникальных товаров`);
+  debug(`📊 Импорт: ${rows.length - headerIdx - 1} строк данных → ${allData.length} распознано → ${aggregated.length} уникальных товаров`);
 
   return aggregated;
 }
@@ -339,7 +340,7 @@ export function showImportDialog(target, items, callback, legalEntity) {
     if (!file) return;
 
     try {
-      console.log(`🚀 Импорт файла "${file.name}" (${(file.size / 1024).toFixed(0)} KB), юр. лицо: "${legalEntity || 'не задано'}"`);
+      debug(`🚀 Импорт файла "${file.name}" (${(file.size / 1024).toFixed(0)} KB), юр. лицо: "${legalEntity || 'не задано'}"`);
       const data = await parseFile(file, legalEntity);
       if (!data.length) {
         showToast('Нет данных', 'Не удалось распознать товары в файле. Проверьте формат (нужны колонки: наименование товара, остатки)', 'error');
@@ -430,7 +431,7 @@ function matchData(items, fileData, target) {
     if (!match) return item;
 
     matched++;
-    console.log(`  ✅ [${item.sku || '—'}] ${item.name?.slice(0, 40)} ← файл [${match.sku || '—'}] ост=${match.stock ?? '—'} (${matchMethod})`);
+    debug(`  ✅ [${item.sku || '—'}] ${item.name?.slice(0, 40)} ← файл [${match.sku || '—'}] ост=${match.stock ?? '—'} (${matchMethod})`);
     const updated = { ...item };
 
     if (target === 'order') {
@@ -448,8 +449,8 @@ function matchData(items, fileData, target) {
 
   const unmatched = items.filter((item, i) => updatedItems[i] === item);
   if (unmatched.length > 0 && unmatched.length <= 20) {
-    console.log(`❌ Не найдены в файле (${unmatched.length}):`);
-    unmatched.forEach(item => console.log(`  [${item.sku || '—'}] ${item.name || '—'}`));
+    debug(`❌ Не найдены в файле (${unmatched.length}):`);
+    unmatched.forEach(item => debug(`  [${item.sku || '—'}] ${item.name || '—'}`));
   }
 
   return { items: updatedItems, matched };
@@ -463,13 +464,13 @@ function normSku(sku) {
  * Превью импорта при 0 совпадений — показываем что нашли в файле vs что в заказе
  */
 function showImportPreview(fileData, items) {
-  console.log(`\n📄 Файл (${fileData.length} товаров, первые 20):`);
+  debug(`\n📄 Файл (${fileData.length} товаров, первые 20):`);
   fileData.slice(0, 20).forEach((d, i) =>
-    console.log(`  ${i + 1}. [${d.sku || '—'}] ${d.name || '—'} | ост: ${d.stock ?? '—'}`)
+    debug(`  ${i + 1}. [${d.sku || '—'}] ${d.name || '—'} | ост: ${d.stock ?? '—'}`)
   );
 
-  console.log(`\n🛒 Заказ (${items.length} позиций, первые 20):`);
+  debug(`\n🛒 Заказ (${items.length} позиций, первые 20):`);
   items.slice(0, 20).forEach((item, i) =>
-    console.log(`  ${i + 1}. [${item.sku || '—'}] ${item.name || '—'}`)
+    debug(`  ${i + 1}. [${item.sku || '—'}] ${item.name || '—'}`)
   );
 }
