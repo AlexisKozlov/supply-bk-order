@@ -866,6 +866,7 @@ function render() {
   toggleStockColumn();
   updateItemsCounter();
   updateFinalSummary();
+  updateTableTotals();
   
   // #6 Проверка данных — подсветка аномального расхода
   if (document.getElementById('dataValidation')?.value === 'true') {
@@ -883,6 +884,86 @@ function updateItemsCounter() {
     counter.textContent = '';
   } else {
     counter.textContent = `(${count} поз.)`;
+  }
+}
+
+/* ================= ИТОГО В ТАБЛИЦЕ (tfoot) ================= */
+function updateTableTotals() {
+  const tfoot = document.getElementById('tableTotals');
+  if (!tfoot) return;
+  
+  const items = orderState.items;
+  if (!items.length) {
+    tfoot.style.display = 'none';
+    return;
+  }
+  
+  let totalConsumption = 0;
+  let totalStock = 0;
+  let totalTransit = 0;
+  let totalBoxes = 0;
+  let totalPieces = 0;
+  let totalPallets = 0;
+  let hasOrder = false;
+  
+  items.forEach(item => {
+    totalConsumption += item.consumptionPeriod || 0;
+    totalStock += item.stock || 0;
+    totalTransit += item.transit || 0;
+    
+    const qpb = item.qtyPerBox || 1;
+    let boxes, pieces;
+    
+    if (orderState.settings.unit === 'boxes') {
+      boxes = item.finalOrder || 0;
+      pieces = boxes * qpb;
+    } else {
+      pieces = item.finalOrder || 0;
+      boxes = pieces / qpb;
+    }
+    
+    boxes = Math.ceil(boxes);
+    if (boxes > 0) hasOrder = true;
+    
+    totalBoxes += boxes;
+    totalPieces += Math.round(pieces);
+    
+    if (item.boxesPerPallet && boxes > 0) {
+      totalPallets += boxes / item.boxesPerPallet;
+    }
+  });
+  
+  if (!hasOrder && !totalConsumption && !totalStock) {
+    tfoot.style.display = 'none';
+    return;
+  }
+  
+  tfoot.style.display = '';
+  
+  const nfmt = new Intl.NumberFormat('ru-RU');
+  
+  document.getElementById('totalConsumption').textContent = totalConsumption ? nfmt.format(totalConsumption) : '';
+  document.getElementById('totalStock').textContent = totalStock ? nfmt.format(totalStock) : '';
+  document.getElementById('totalTransit').textContent = totalTransit ? nfmt.format(totalTransit) : '';
+  
+  const orderEl = document.getElementById('totalOrder');
+  if (totalBoxes > 0) {
+    orderEl.innerHTML = `<span style="font-size:14px;">${nfmt.format(totalPieces)}</span> / <span style="font-size:14px;">${nfmt.format(totalBoxes)}</span>`;
+  } else {
+    orderEl.textContent = '';
+  }
+  
+  const palletsEl = document.getElementById('totalPallets');
+  if (totalPallets > 0) {
+    const fullPallets = Math.floor(totalPallets);
+    const remainder = totalPallets - fullPallets;
+    if (remainder > 0.01) {
+      palletsEl.textContent = `${fullPallets}+${Math.round(remainder * 100)}% пал`;
+    } else {
+      palletsEl.textContent = `${fullPallets} пал`;
+    }
+  } else {
+    palletsEl.textContent = '';
   }
 }
 
@@ -918,6 +999,7 @@ function updateFinalSummary() {
   
   if (itemsWithOrder.length === 0) {
     finalSummary.innerHTML = '<div style="color:#8a8a8a;text-align:center;">Нет товаров с заказом</div>';
+    updateTableTotals();
     return;
   }
   
@@ -941,6 +1023,7 @@ function updateFinalSummary() {
   </div>
 `;
   }).join('');
+  updateTableTotals();
 }
 
 /* ================= ПЕРЕРИСОВКА ================= */
@@ -1178,6 +1261,96 @@ if (importStockBtn) {
       saveDraft();
       saveStateToHistory();
     }, orderState.settings.legalEntity);
+  });
+}
+
+/* ================= ПОДСТАВИТЬ ДАННЫЕ ИЗ ПРОШЛОГО ЗАКАЗА ================= */
+const fillFromLastOrderBtn = document.getElementById('fillFromLastOrder');
+if (fillFromLastOrderBtn) {
+  fillFromLastOrderBtn.addEventListener('click', async () => {
+    if (!orderState.items.length) {
+      showToast('Нет товаров', 'Сначала добавьте товары в заказ', 'info');
+      return;
+    }
+    
+    const supplier = orderState.settings.supplier;
+    if (!supplier) {
+      showToast('Выберите поставщика', 'Для подстановки данных нужен выбранный поставщик', 'info');
+      return;
+    }
+    
+    fillFromLastOrderBtn.disabled = true;
+    fillFromLastOrderBtn.textContent = '⏳ Загрузка...';
+    
+    try {
+      // Загружаем последний заказ этому поставщику
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, unit, period_days, order_items(sku, name, consumption_period, stock, transit, qty_per_box)')
+        .eq('supplier', supplier)
+        .eq('legal_entity', orderState.settings.legalEntity)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (error || !data || !data.order_items?.length) {
+        showToast('Нет данных', `Прошлых заказов для «${supplier}» не найдено`, 'info');
+        return;
+      }
+      
+      // Строим lookup по SKU из прошлого заказа
+      const prevMap = new Map();
+      data.order_items.forEach(item => {
+        if (item.sku) prevMap.set(item.sku, item);
+      });
+      
+      const prevUnit = data.unit || 'pieces';
+      const currentUnit = orderState.settings.unit;
+      let filled = 0;
+      
+      orderState.items.forEach(item => {
+        if (!item.sku) return;
+        const prev = prevMap.get(item.sku);
+        if (!prev) return;
+        
+        let consumption = prev.consumption_period || 0;
+        const qpb = item.qtyPerBox || 1;
+        
+        // Конвертация единиц: если прошлый заказ был в других единицах
+        if (prevUnit === 'pieces' && currentUnit === 'boxes') {
+          consumption = Math.round(consumption / qpb);
+        } else if (prevUnit === 'boxes' && currentUnit === 'pieces') {
+          consumption = Math.round(consumption * qpb);
+        }
+        
+        // Подставляем только если поле пустое (=0) — не перезатираем уже введённые данные
+        if (!item.consumptionPeriod && consumption) {
+          item.consumptionPeriod = consumption;
+          filled++;
+        }
+        if (!item.stock && prev.stock) {
+          item.stock = prev.stock;
+        }
+        if (!item.transit && prev.transit) {
+          item.transit = prev.transit;
+        }
+      });
+      
+      if (filled > 0) {
+        render();
+        saveDraft();
+        saveStateToHistory();
+        showToast('Данные подставлены', `Расход заполнен для ${filled} из ${orderState.items.length} товаров`, 'success');
+      } else {
+        showToast('Ничего не подставлено', 'Все поля расхода уже заполнены или совпадений не найдено', 'info');
+      }
+    } catch (err) {
+      console.error('fillFromLastOrder error:', err);
+      showToast('Ошибка', 'Не удалось загрузить прошлый заказ', 'error');
+    } finally {
+      fillFromLastOrderBtn.disabled = false;
+      fillFromLastOrderBtn.textContent = '📋 Из прошлого';
+    }
   });
 }
 

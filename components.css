@@ -699,6 +699,29 @@ tbody tr td[colspan] {
   color: var(--muted);
 }
 
+/* ── Итого в таблице (tfoot) ── */
+#tableTotals {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}
+
+#tableTotals td {
+  border-bottom: none;
+  border-top: 2px solid var(--orange);
+  background: #fdf5e8;
+  padding: 8px 8px;
+}
+
+#tableTotals td.item-name {
+  background: #fdf5e8;
+  font-size: 13px;
+}
+
+#totalOrder {
+  background: #fff3e0 !important;
+}
+
 /* ── Print styles ── */
 @media print {
   .header, .actions, .search, .footer,

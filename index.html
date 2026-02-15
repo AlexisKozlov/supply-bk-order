@@ -148,6 +148,7 @@
         <button id="saveOrder" class="btn primary tooltip-wrap" data-tip="Сохранить заказ в историю" style="padding:4px 10px;"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить</button>
         <button id="exportExcelBtn" class="btn primary tooltip-wrap" data-tip="Экспортировать заказ в Excel" style="padding:4px 10px;"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
         <button id="importStockBtn" class="btn primary tooltip-wrap" data-tip="Импорт остатков из Excel/CSV" style="padding:4px 10px;"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт</button>
+        <button id="fillFromLastOrder" class="btn primary tooltip-wrap" data-tip="Подставить расход и остатки из последнего заказа этому поставщику" style="padding:4px 10px;">📋 Из прошлого</button>
         
         <div style="flex:1;min-width:20px;"></div>
         
@@ -176,6 +177,21 @@
             </tr>
           </thead>
           <tbody id="items"></tbody>
+          <tfoot id="tableTotals" style="display:none;">
+            <tr style="background:#fdf5e8;border-top:2px solid var(--orange);">
+              <td></td>
+              <td class="item-name" style="font-weight:700;font-size:13px;">ИТОГО</td>
+              <td id="totalConsumption" style="font-weight:700;font-size:12px;"></td>
+              <td id="totalStock" style="font-weight:700;font-size:12px;"></td>
+              <td class="transit-col" id="totalTransit" style="font-weight:700;font-size:12px;"></td>
+              <td class="stock-col"></td>
+              <td></td>
+              <td class="order-highlight" id="totalOrder" style="font-weight:700;font-size:13px;"></td>
+              <td></td>
+              <td id="totalPallets" style="font-weight:700;font-size:12px;"></td>
+              <td></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </section>
