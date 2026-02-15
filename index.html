@@ -137,18 +137,14 @@
     <section class="card">
       <h2>Заказ <span id="itemsCounter" style="font-weight:400;font-size:14px;color:#8B7355;"></span></h2>
 
-      <!-- КОМПАКТНОЕ МЕНЮ -->
+      <!-- ВЕРХНЯЯ ПАНЕЛЬ: рабочие инструменты -->
       <div class="order-actions" style="display:flex;gap:6px;margin-bottom:12px;font-size:13px;flex-wrap:wrap;align-items:center;">
         <button id="undoBtn" class="btn secondary tooltip-wrap" disabled data-tip="Отменить (Ctrl+Z)" style="padding:4px 8px;">↶</button>
         <button id="redoBtn" class="btn secondary tooltip-wrap" disabled data-tip="Повторить (Ctrl+Y)" style="padding:4px 8px;">↷</button>
         <button id="allToOrderBtn" class="btn primary tooltip-wrap" data-tip="Перенести расчёт в заказ для всех товаров" style="padding:4px 10px;">В заказ всё</button>
-        <button id="clearOrder" class="btn primary btn-clear-order tooltip-wrap" data-tip="Удалить все товары из текущего заказа" style="padding:4px 10px;">Очистить</button>
-        <button id="copyOrder" class="btn primary tooltip-wrap" data-tip="Скопировать заказ в буфер обмена" style="padding:4px 10px;"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать</button>
-        <button id="shareOrderBtn" class="btn primary tooltip-wrap" data-tip="Отправить заказ поставщику" style="padding:4px 10px;"><img src="./icons/share.svg" width="14" height="14" alt="" style="vertical-align:-2px;"> Отправить</button>
-        <button id="saveOrder" class="btn primary tooltip-wrap" data-tip="Сохранить заказ в историю" style="padding:4px 10px;"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить</button>
-        <button id="exportExcelBtn" class="btn primary tooltip-wrap" data-tip="Экспортировать заказ в Excel" style="padding:4px 10px;"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
+        <button id="fillFromLastOrder" class="btn primary tooltip-wrap" data-tip="Подставить расход из последнего заказа этому поставщику" style="padding:4px 10px;">📋 Подставить расход</button>
         <button id="importStockBtn" class="btn primary tooltip-wrap" data-tip="Импорт остатков из Excel/CSV" style="padding:4px 10px;"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт</button>
-        <button id="fillFromLastOrder" class="btn primary tooltip-wrap" data-tip="Подставить расход и остатки из последнего заказа этому поставщику" style="padding:4px 10px;">📋 Из прошлого</button>
+        <button id="clearOrder" class="btn primary btn-clear-order tooltip-wrap" data-tip="Удалить все товары из текущего заказа" style="padding:4px 10px;">Очистить</button>
         
         <div style="flex:1;min-width:20px;"></div>
         
@@ -177,22 +173,15 @@
             </tr>
           </thead>
           <tbody id="items"></tbody>
-          <tfoot id="tableTotals" style="display:none;">
-            <tr style="background:#fdf5e8;border-top:2px solid var(--orange);">
-              <td></td>
-              <td class="item-name" style="font-weight:700;font-size:13px;">ИТОГО</td>
-              <td id="totalConsumption" style="font-weight:700;font-size:12px;"></td>
-              <td id="totalStock" style="font-weight:700;font-size:12px;"></td>
-              <td class="transit-col" id="totalTransit" style="font-weight:700;font-size:12px;"></td>
-              <td class="stock-col"></td>
-              <td></td>
-              <td class="order-highlight" id="totalOrder" style="font-weight:700;font-size:13px;"></td>
-              <td></td>
-              <td id="totalPallets" style="font-weight:700;font-size:12px;"></td>
-              <td></td>
-            </tr>
-          </tfoot>
         </table>
+      </div>
+
+      <!-- НИЖНЯЯ ПАНЕЛЬ: действия с готовым заказом -->
+      <div class="order-bottom-actions">
+        <button id="saveOrder" class="btn primary tooltip-wrap" data-tip="Сохранить заказ в историю"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить</button>
+        <button id="copyOrder" class="btn primary tooltip-wrap" data-tip="Скопировать заказ в буфер обмена"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать</button>
+        <button id="shareOrderBtn" class="btn primary tooltip-wrap" data-tip="Отправить заказ поставщику"><img src="./icons/share.svg" width="14" height="14" alt="" style="vertical-align:-2px;"> Отправить</button>
+        <button id="exportExcelBtn" class="btn primary tooltip-wrap" data-tip="Экспортировать заказ в Excel"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
       </div>
     </section>
 
