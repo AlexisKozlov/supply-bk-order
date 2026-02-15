@@ -38,7 +38,6 @@ export async function saveItemOrder() {
   const supplier = orderState.settings.supplier || 'all';
   const legalEntity = orderState.settings.legalEntity;
 
-  console.log('💾 Сохранение порядка:', { supplier, legalEntity, items: orderState.items.length });
 
   const { error: deleteError } = await supabase
     .from('item_order')
@@ -57,7 +56,6 @@ export async function saveItemOrder() {
     position: index
   }));
 
-  console.log('📊 Данные для сохранения:', orderData);
 
   if (orderData.length > 0) {
     const { error } = await supabase
@@ -67,7 +65,6 @@ export async function saveItemOrder() {
     if (error) {
       console.error('Ошибка сохранения порядка:', error);
     } else {
-      console.log('✅ Порядок сохранён в Supabase для всех пользователей');
     }
   }
 }
@@ -170,10 +167,11 @@ export function initOrderOperations(deps) {
 
     const itemsToSave = orderState.items
       .map(item => {
+        const qpb = item.qtyPerBox || 1;
         const boxes =
           orderState.settings.unit === 'boxes'
             ? item.finalOrder
-            : item.finalOrder / item.qtyPerBox;
+            : item.finalOrder / qpb;
 
         return {
           sku: item.sku || null,
@@ -276,15 +274,16 @@ export function initOrderOperations(deps) {
 
     const lines = orderState.items
       .map(item => {
+        const qpb = item.qtyPerBox || 1;
         const boxes =
           orderState.settings.unit === 'boxes'
             ? item.finalOrder
-            : item.finalOrder / item.qtyPerBox;
+            : item.finalOrder / qpb;
 
         const pieces =
           orderState.settings.unit === 'pieces'
             ? item.finalOrder
-            : item.finalOrder * item.qtyPerBox;
+            : item.finalOrder * qpb;
 
         const roundedBoxes = Math.ceil(boxes);
         const roundedPieces = Math.round(pieces);
@@ -376,12 +375,21 @@ ${lines.join('\n')}
     document.getElementById('unit').value = orderState.settings.unit;
     document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
 
-    for (const histItem of (order.order_items || [])) {
-      const { data: productData } = await supabase
+    // Batch-загрузка данных о продуктах (вместо N отдельных запросов)
+    const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
+    let productMap = {};
+    if (skus.length > 0) {
+      const { data: productsData } = await supabase
         .from('products')
         .select('*')
-        .eq('sku', histItem.sku)
-        .single();
+        .in('sku', skus);
+      if (productsData) {
+        productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));
+      }
+    }
+
+    for (const histItem of (order.order_items || [])) {
+      const productData = histItem.sku ? productMap[histItem.sku] : null;
 
       const qtyPerBox = (productData && productData.qty_per_box) || histItem.qty_per_box || 1;
 

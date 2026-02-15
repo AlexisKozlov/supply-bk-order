@@ -224,12 +224,21 @@ async function copyOrderToForm(order, legalEntity, opts) {
   document.getElementById('hasTransit').value = orderState.settings.hasTransit ? 'true' : 'false';
   document.getElementById('showStockColumn').value = orderState.settings.showStockColumn ? 'true' : 'false';
 
-  for (const histItem of order.order_items) {
-    const { data: productData } = await supabase
+  // Batch-загрузка продуктов
+  const skus = order.order_items.map(i => i.sku).filter(Boolean);
+  let productMap = {};
+  if (skus.length > 0) {
+    const { data: productsData } = await supabase
       .from('products')
       .select('*')
-      .eq('sku', histItem.sku)
-      .single();
+      .in('sku', skus);
+    if (productsData) {
+      productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));
+    }
+  }
+
+  for (const histItem of order.order_items) {
+    const productData = histItem.sku ? productMap[histItem.sku] : null;
 
     const qtyPerBox = (productData && productData.qty_per_box) || histItem.qty_per_box || 1;
 

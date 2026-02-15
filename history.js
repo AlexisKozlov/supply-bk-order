@@ -11,18 +11,13 @@ class History {
 
   // Сохранить текущее состояние
   push(state) {
-    // Удаляем все состояния после текущего индекса
     this.states = this.states.slice(0, this.currentIndex + 1);
-    
-    // Добавляем новое состояние
     this.states.push(JSON.parse(JSON.stringify(state)));
     
-    // Ограничиваем размер истории
     if (this.states.length > this.maxSize) {
       this.states.shift();
-    } else {
-      this.currentIndex++;
     }
+    this.currentIndex = this.states.length - 1;
   }
 
   // Отменить (вернуться назад)

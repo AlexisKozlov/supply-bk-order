@@ -22,25 +22,39 @@ export function showToast(title, message, type = 'info') {
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
-  toast.innerHTML = `
-    <div class="toast-icon">${icons[type]}</div>
-    <div class="toast-content">
-      <div class="toast-title">${title}</div>
-      ${message ? `<div class="toast-message">${message}</div>` : ''}
-    </div>
-    <button class="toast-close">✕</button>
-  `;
+  
+  const iconDiv = document.createElement('div');
+  iconDiv.className = 'toast-icon';
+  iconDiv.innerHTML = icons[type] || icons.info;
+  
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'toast-content';
+  
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'toast-title';
+  titleDiv.textContent = title;
+  contentDiv.appendChild(titleDiv);
+  
+  if (message) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'toast-message';
+    msgDiv.textContent = message;
+    contentDiv.appendChild(msgDiv);
+  }
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '✕';
+  
+  toast.appendChild(iconDiv);
+  toast.appendChild(contentDiv);
+  toast.appendChild(closeBtn);
 
   const container = document.querySelector('.toast-container');
   container.appendChild(toast);
 
-  toast.querySelector('.toast-close').addEventListener('click', () => {
-    toast.remove();
-  });
-
-  setTimeout(() => {
-    toast.remove();
-  }, 4000);
+  closeBtn.addEventListener('click', () => toast.remove());
+  setTimeout(() => toast.remove(), 4000);
 }
 
 /* ================= CUSTOM CONFIRM ================= */

@@ -74,6 +74,13 @@ export async function loadDatabaseProducts(dbLegalEntitySelect, databaseList) {
   if (countEl) countEl.textContent = `(${data.length})`;
 }
 
+/** Экранирование HTML для безопасной вставки */
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 function renderDatabaseList(products, databaseList) {
   if (!products.length) {
     databaseList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">Карточки не найдены</div>';
@@ -83,9 +90,9 @@ function renderDatabaseList(products, databaseList) {
   databaseList.innerHTML = products.map(p => `
     <div class="db-card" data-product-id="${p.id}">
       <div class="db-card-info">
-        <div class="db-card-sku">${p.sku || '—'}</div>
-        <div class="db-card-name">${p.name}</div>
-        <div class="db-card-supplier">${p.supplier || 'Без поставщика'}</div>
+        <div class="db-card-sku">${esc(p.sku || '—')}</div>
+        <div class="db-card-name">${esc(p.name)}</div>
+        <div class="db-card-supplier">${esc(p.supplier || 'Без поставщика')}</div>
       </div>
       <div class="db-card-actions">
         <button class="btn small edit-card-btn" data-id="${p.id}"><img src="./icons/edit.png" width="14" height="14" alt=""> Изменить</button>
@@ -387,8 +394,8 @@ function renderSupplierList(suppliers, container) {
     return `
       <div class="supplier-card" data-supplier-id="${s.id}">
         <div class="supplier-card-info">
-          <div class="supplier-card-name">${s.short_name}</div>
-          ${s.full_name ? `<div class="supplier-card-fullname">${s.full_name}</div>` : ''}
+          <div class="supplier-card-name">${esc(s.short_name)}</div>
+          ${s.full_name ? `<div class="supplier-card-fullname">${esc(s.full_name)}</div>` : ''}
           <div class="supplier-card-contacts">${badges}</div>
         </div>
         <div class="supplier-card-actions">
