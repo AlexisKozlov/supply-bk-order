@@ -17,6 +17,7 @@ import { initShareOrder } from './share-order.js';
 import { saveDraft, loadDraft, clearDraft, isLoadingDraft } from './draft.js';
 import { validateConsumptionData, resetConsumptionCache } from './data-validation.js';
 import { initOrderOperations, saveItemOrder, restoreItemOrder } from './order-operations.js';
+import { esc } from './utils.js';
 
 /* ================= DOM ================= */
 const undoBtn = document.getElementById('undoBtn');
@@ -936,7 +937,7 @@ function updateFinalSummary() {
 
   return `
   <div>
-    <b>${item.sku ? item.sku + ' ' : ''}${item.name}</b>
+    <b>${item.sku ? esc(item.sku) + ' ' : ''}${esc(item.name)}</b>
     — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(Math.round(pieces))} ${unit})
   </div>
 `;

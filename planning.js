@@ -9,6 +9,7 @@ import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { showImportDialog } from './import-stock.js';
 import { validatePlanConsumption, resetConsumptionCache } from './data-validation.js';
+import { esc } from './utils.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -500,7 +501,7 @@ function renderPlanTable() {
   const container = document.getElementById('planTableContainer');
 
   if (!planState.items.length) {
-    container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--muted);">Нет товаров у поставщика «${planState.supplier}»</div>`;
+    container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--muted);">Нет товаров у поставщика «${esc(planState.supplier)}»</div>`;
     return;
   }
 
@@ -524,12 +525,12 @@ function renderPlanTable() {
   `;
 
   planState.items.forEach((item, idx) => {
-    const skuPrefix = item.sku ? `<b style="color:var(--orange);margin-right:4px;">${item.sku}</b> ` : '';
+    const skuPrefix = item.sku ? `<b style="color:var(--orange);margin-right:4px;">${esc(item.sku)}</b> ` : '';
 
     html += `
       <tr data-idx="${idx}">
         <td class="plan-td-name">
-          <div style="font-weight:600;font-size:13px;color:var(--brown);">${skuPrefix}${item.name}</div>
+          <div style="font-weight:600;font-size:13px;color:var(--brown);">${skuPrefix}${esc(item.name)}</div>
           <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
         </td>
         <td class="plan-td-input">

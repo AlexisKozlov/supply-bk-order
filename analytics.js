@@ -5,6 +5,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { esc } from './utils.js';
 
 /* ─── Палитра для поставщиков ─── */
 const PALETTE = [
@@ -293,7 +294,7 @@ function renderStackedChart(data, chartEl, legendEl, nf) {
     legendEl.innerHTML = suppliers.map(s => `
       <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:#5A2D0C;">
         <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${data.supplierColor[s]};"></span>
-        ${s}
+        ${esc(s)}
       </div>`).join('');
   }
 
@@ -318,7 +319,7 @@ function renderStackedChart(data, chartEl, legendEl, nf) {
         background:${data.supplierColor[sup]};
         border-radius:${isTop?'4px 4px 0 0':'0'};
         flex-shrink:0;
-      " title="${sup}: ${nf(boxes)} кор."></div>`;
+      " title="${esc(sup)}: ${nf(boxes)} кор."></div>`;
       accH += h;
     });
 
