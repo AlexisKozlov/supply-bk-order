@@ -993,176 +993,80 @@ td.order-cell input[type="number"] {
   margin-left: auto;
 }
 
-/* ===== RESPONSIVE: TABLET (768px) ===== */
+/* ===== RESPONSIVE: TABLET & PHONE ===== */
 @media (max-width: 768px) {
-  .container {
-    padding: 0 10px;
-    margin: 10px auto;
-    gap: 12px;
-  }
-
-  .card { padding: 14px 12px; border-radius: 14px; }
+  .container { padding: 0 8px; margin: 10px auto; gap: 12px; }
+  .card { padding: 14px 10px; }
   .settings { grid-template-columns: 1fr 1fr; gap: 8px; }
 
-  .header {
-    padding: 0 10px;
-    gap: 6px;
-    height: 48px;
-    position: relative;
-  }
-
-  .header h1 { font-size: 0; }
+  /* Header — compact */
+  .header { padding: 0 8px; gap: 6px; height: 46px; position: relative; }
+  .header h1 { font-size: 0; margin: 0; }
   .header h1 img { width: 24px; height: 24px; }
   .header-title-text { display: none; }
+  .entity-badge { font-size: 10px; padding: 2px 6px; }
+  .user-badge { font-size: 10px; padding: 2px 6px; }
 
-  /* Бургер-кнопка */
+  /* Бургер-меню */
   .mobile-menu-toggle { display: block; margin-left: 0; }
-
-  /* Выпадающее меню — СКРЫТО по умолчанию */
   .header-menu {
     display: none !important;
     position: absolute;
-    top: 48px;
-    left: 0;
-    right: 0;
+    top: 46px; left: 0; right: 0;
     background: linear-gradient(135deg, var(--red) 0%, #A81D00 100%);
     flex-direction: column;
-    padding: 6px 10px;
+    padding: 4px 8px 8px;
     gap: 2px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.35);
     z-index: 999;
   }
+  .header-menu.open { display: flex !important; }
+  .menu-btn { width: 100%; text-align: left; padding: 11px 12px; font-size: 15px; }
 
-  .header-menu.open {
-    display: flex !important;
-  }
-
-  .menu-btn {
-    width: 100%;
-    text-align: left;
-    padding: 12px 14px;
-    font-size: 15px;
-    border-radius: 8px;
-  }
-
-  .entity-badge { font-size: 10px; padding: 3px 8px; }
-  .user-badge { font-size: 10px; padding: 3px 8px; }
-
-  /* ===== Секция заказа: панель инструментов ===== */
-  .order-actions {
-    flex-direction: column !important;
-    gap: 8px !important;
-  }
-
-  /* Поиск — на всю ширину, сверху */
+  /* Панель инструментов — поиск наверх, кнопки wrap */
   .order-actions .search {
     min-width: 100% !important;
     max-width: 100% !important;
     order: -1;
     flex: unset !important;
-    margin: 0 !important;
   }
-
-  /* Кнопки панели — сетка 3 в ряд */
-  .order-actions .btn {
-    padding: 8px 10px !important;
-    font-size: 12px !important;
-    flex: 1 1 auto;
-  }
-
-  /* Undo/redo скрываем на мобильных */
+  .order-actions > div[style*="flex:1"] { display: none; }
   #undoBtn, #redoBtn { display: none; }
 
-  /* Разделитель скрываем */
-  .order-actions > div[style*="flex:1"] { display: none; }
+  /* Таблица — просто скролл, ничего не скрываем */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
 
-  /* ===== Таблица ===== */
-  .table-wrap {
-    -webkit-overflow-scrolling: touch;
-    margin: 0 -12px;
-    padding: 0 4px;
-  }
+  /* Нижние кнопки — 2 колонки */
+  .order-bottom-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .order-bottom-actions .btn { padding: 11px 8px; font-size: 14px; }
 
-  table { font-size: 12px; min-width: 650px; }
-  table th, table td { padding: 5px 3px; }
-
-  table input[type="number"] {
-    width: 52px !important;
-    font-size: 14px;
-    padding: 4px 2px;
-  }
-
-  /* Скрываем менее важные колонки на планшете */
-  .pallets, th:nth-child(10) { display: none; }
-
-  /* ===== Нижняя панель ===== */
-  .order-bottom-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-
-  .order-bottom-actions .btn {
-    width: 100%;
-    padding: 12px 8px;
-    font-size: 14px;
-  }
-
-  /* ===== Модалки ===== */
+  /* Модалки */
   .modal-box { width: calc(100% - 16px) !important; max-height: 92vh; }
-  .modal-box.large { width: calc(100% - 16px) !important; }
-
+  .modal-box.large { width: calc(100% - 12px) !important; }
   #planningModal .modal-box.large {
     width: calc(100% - 8px) !important;
     max-width: 100% !important;
     height: 95vh !important;
     max-height: 95vh !important;
     padding: 10px !important;
-    border-radius: 12px;
   }
 
   .toast-container { right: 8px; left: 8px; }
   .toast { max-width: 100%; }
-
-  /* История */
   .history-header { padding: 10px; }
-  .history-actions .btn.small { padding: 8px 10px; font-size: 15px; }
   .history-meta { font-size: 10px; }
 }
 
-/* ===== RESPONSIVE: PHONE (480px) ===== */
 @media (max-width: 480px) {
-  .settings { grid-template-columns: 1fr; gap: 6px; }
+  .settings { grid-template-columns: 1fr; }
+  .login-box { width: calc(100% - 24px); padding: 28px 18px; }
 
-  .login-box {
-    width: calc(100% - 24px);
-    padding: 28px 18px 22px;
-  }
+  /* Инпуты — 16px предотвращает zoom на iOS */
+  table input[type="number"] { font-size: 16px !important; min-height: 36px; }
+  input, select { font-size: 16px !important; }
 
-  table { min-width: 550px; font-size: 11px; }
-
-  /* Скрываем ещё колонки */
-  .calc, th:nth-child(7) { display: none; }
-  .stock-col, th:nth-child(6) { display: none !important; }
-  .drag-handle { display: none; }
-  th:nth-child(1), td:first-child { display: none; }
-
-  /* Крупные инпуты для пальцев */
-  table input[type="number"] {
-    font-size: 16px !important;
-    padding: 6px 4px;
-    min-height: 38px;
-  }
-
-  .order-actions .btn { font-size: 11px !important; }
-
-  /* Нижняя панель — одна колонка */
-  .order-bottom-actions {
-    grid-template-columns: 1fr;
-  }
-
-  /* Тултипы скрываем */
-  .tooltip-wrap[data-tip]::after { display: none !important; }
+  /* Нижние кнопки — 1 колонка */
+  .order-bottom-actions { grid-template-columns: 1fr; }
 }
 /* ===== STOCK COLUMN (ЗАПАС) ===== */
 .stock-col {
