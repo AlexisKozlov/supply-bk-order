@@ -462,9 +462,35 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
 });
 
 document.getElementById('unit').addEventListener('change', e => {
-  orderState.settings.unit = e.target.value;
-  resetConsumptionCache(); // сбрасываем кеш — единицы изменились
-  rerenderAll();
+  const oldUnit = orderState.settings.unit;
+  const newUnit = e.target.value;
+  orderState.settings.unit = newUnit;
+  
+  // Конвертируем данные при смене единиц
+  if (oldUnit !== newUnit && orderState.items.length) {
+    orderState.items.forEach(item => {
+      const qpb = item.qtyPerBox || 1;
+      if (oldUnit === 'pieces' && newUnit === 'boxes') {
+        // шт → кор
+        item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
+        item.stock = item.stock ? Math.round(item.stock / qpb * 100) / 100 : 0;
+        item.transit = item.transit ? Math.round(item.transit / qpb * 100) / 100 : 0;
+        item.finalOrder = item.finalOrder ? Math.ceil(item.finalOrder / qpb) : 0;
+      } else if (oldUnit === 'boxes' && newUnit === 'pieces') {
+        // кор → шт
+        item.consumptionPeriod = Math.round(item.consumptionPeriod * qpb);
+        item.stock = Math.round(item.stock * qpb);
+        item.transit = Math.round(item.transit * qpb);
+        item.finalOrder = Math.round(item.finalOrder * qpb);
+      }
+    });
+    // Полный ре-рендер чтобы инпуты обновились
+    render();
+  } else {
+    rerenderAll();
+  }
+  
+  resetConsumptionCache();
   saveDraft();
 });
 
