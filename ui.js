@@ -117,6 +117,34 @@ function updateUserUI(user) {
     userBadge.textContent = user.name;
     userBadge.classList.remove('hidden');
   }
+  // Фильтруем юр.лица по доступным пользователю
+  filterLegalEntities(user);
+}
+
+function filterLegalEntities(user) {
+  const allowed = user?.legal_entities;
+  if (!allowed || !allowed.length) return; // пустой = видит всё
+  
+  const selects = ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity'];
+  selects.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    Array.from(el.options).forEach(opt => {
+      if (opt.value && !allowed.includes(opt.value)) {
+        opt.style.display = 'none';
+        if (el.value === opt.value) el.value = allowed[0];
+      } else {
+        opt.style.display = '';
+      }
+    });
+  });
+  
+  // Устанавливаем первое доступное юр.лицо
+  const mainSelect = document.getElementById('legalEntity');
+  if (mainSelect && allowed.length && !allowed.includes(mainSelect.value)) {
+    mainSelect.value = allowed[0];
+    mainSelect.dispatchEvent(new Event('change'));
+  }
 }
 
 // Клик по имени — toggle dropdown
@@ -208,6 +236,74 @@ if (logoutBtn) {
     if (userDropdown) userDropdown.classList.add('hidden');
     loginPassword.value = '';
     if (loginUserSelect) loginUserSelect.value = '';
+  });
+}
+
+/* ================= СМЕНА ПАРОЛЯ ================= */
+const changePasswordBtn = document.getElementById('changePasswordBtn');
+const changePasswordModal = document.getElementById('changePasswordModal');
+
+if (changePasswordBtn && changePasswordModal) {
+  changePasswordBtn.addEventListener('click', () => {
+    userDropdown?.classList.add('hidden');
+    changePasswordModal.classList.remove('hidden');
+    document.getElementById('currentPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmNewPassword').value = '';
+    document.getElementById('currentPassword').focus();
+  });
+
+  document.getElementById('closeChangePassword')?.addEventListener('click', () => {
+    changePasswordModal.classList.add('hidden');
+  });
+  document.getElementById('cancelChangePassword')?.addEventListener('click', () => {
+    changePasswordModal.classList.add('hidden');
+  });
+  changePasswordModal.addEventListener('click', (e) => {
+    if (e.target === changePasswordModal) changePasswordModal.classList.add('hidden');
+  });
+
+  document.getElementById('confirmChangePassword')?.addEventListener('click', async () => {
+    const currentPwd = document.getElementById('currentPassword').value;
+    const newPwd = document.getElementById('newPassword').value;
+    const confirmPwd = document.getElementById('confirmNewPassword').value;
+
+    if (!currentPwd || !newPwd) {
+      showToast('Заполните все поля', '', 'error');
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      showToast('Пароли не совпадают', 'Новый пароль и подтверждение отличаются', 'error');
+      return;
+    }
+    if (newPwd.length < 3) {
+      showToast('Слишком короткий', 'Минимум 3 символа', 'error');
+      return;
+    }
+
+    const userName = currentUser?.name;
+    if (!userName) {
+      showToast('Ошибка', 'Пользователь не определён', 'error');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('change_user_password', {
+        user_name: userName,
+        old_password: currentPwd,
+        new_password: newPwd
+      });
+
+      if (error || !data?.success) {
+        showToast('Ошибка', data?.error || 'Не удалось сменить пароль', 'error');
+        return;
+      }
+
+      showToast('Пароль изменён', '', 'success');
+      changePasswordModal.classList.add('hidden');
+    } catch(e) {
+      showToast('Ошибка', 'Функция смены пароля недоступна', 'error');
+    }
   });
 }
 
