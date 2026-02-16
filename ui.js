@@ -116,7 +116,7 @@ function updateUserUI(user) {
     userBadge.textContent = user.name;
     userBadge.classList.remove('hidden');
   }
-  if (logoutBtn) logoutBtn.classList.remove('hidden');
+  if (logoutBtn) logoutBtn.style.display = '';
 }
 
 async function doLogin() {
@@ -192,7 +192,7 @@ if (logoutBtn) {
     localStorage.removeItem('bk_logged_in');
     loginOverlay.style.display = '';
     if (userBadge) userBadge.classList.add('hidden');
-    logoutBtn.classList.add('hidden');
+    logoutBtn.style.display = 'none';
     loginPassword.value = '';
     if (loginUserSelect) loginUserSelect.value = '';
   });

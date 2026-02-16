@@ -982,6 +982,17 @@ async function savePlanToHistory() {
   const label = planState.editingPlanId ? 'План обновлён' : 'План сохранён';
   const unitLabel = planState.periodType === 'weeks' ? 'нед.' : 'мес.';
   showToast(label, `${itemsWithPlan.length} позиций на ${planState.periodCount} ${unitLabel}`, 'success');
+  
+  // Лог
+  try {
+    await supabase.from('audit_log').insert({
+      action: planState.editingPlanId ? 'plan_updated' : 'plan_created',
+      entity_type: 'plan',
+      entity_id: null,
+      user_name: currentUser?.name || null,
+      details: { supplier: planState.supplier, items_count: itemsWithPlan.length }
+    });
+  } catch(e) { /* не блокируем */ }
 }
 
 /* ═══════ EXCEL EXPORT ═══════ */

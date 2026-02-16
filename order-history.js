@@ -5,7 +5,7 @@
 
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
-import { orderState } from './state.js';
+import { orderState, currentUser } from './state.js';
 import { esc } from './utils.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
@@ -241,7 +241,10 @@ async function copyOrderToForm(order, legalEntity, opts) {
     }
   }
 
-  for (const histItem of order.order_items) {
+  // Сортируем: заказанные сверху, нулевые снизу
+  const sortedItems = [...order.order_items].sort((a, b) => (b.qty_boxes || 0) - (a.qty_boxes || 0));
+
+  for (const histItem of sortedItems) {
     const productData = histItem.sku ? productMap[histItem.sku] : null;
 
     const qtyPerBox = (productData && productData.qty_per_box) || histItem.qty_per_box || 1;
@@ -309,6 +312,18 @@ async function deleteOrder(orderId, opts) {
   }
 
   showToast('Заказ удалён', '', 'success');
+  
+  // Лог
+  try {
+    await supabase.from('audit_log').insert({
+      action: 'order_deleted',
+      entity_type: 'order',
+      entity_id: orderId,
+      user_name: currentUser?.name || null,
+      details: {}
+    });
+  } catch(e) { /* не блокируем */ }
+  
   loadOrderHistory(opts);
 }
 

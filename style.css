@@ -104,6 +104,18 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  position: relative;
+}
+
+.header-user #logoutBtn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.header-user:hover #logoutBtn {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .user-badge {
@@ -114,6 +126,7 @@ body {
   padding: 5px 12px;
   border-radius: 16px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  cursor: default;
 }
 
 /* ===== LAYOUT ===== */

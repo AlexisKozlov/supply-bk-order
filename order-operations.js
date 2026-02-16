@@ -11,6 +11,19 @@ import { saveDraft, clearDraft } from './draft.js';
 let editingOrderId = null;
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
+/** Записать действие в лог изменений */
+async function auditLog(action, entityType, entityId, details = {}) {
+  try {
+    await supabase.from('audit_log').insert({
+      action,
+      entity_type: entityType,
+      entity_id: entityId,
+      user_name: currentUser?.name || null,
+      details
+    });
+  } catch(e) { /* не блокируем основную работу */ }
+}
+
 function updateEditingIndicator() {
   let badge = document.getElementById('editingBadge');
   if (editingOrderId) {
@@ -165,7 +178,7 @@ export function initOrderOperations(deps) {
 
     if (!confirmed) return;
 
-    const itemsToSave = orderState.items
+    const allItems = orderState.items
       .map(item => {
         const qpb = item.qtyPerBox || 1;
         const boxes =
@@ -176,16 +189,17 @@ export function initOrderOperations(deps) {
         return {
           sku: item.sku || null,
           name: item.name,
-          qty_boxes: Math.ceil(boxes),
+          qty_boxes: Math.ceil(Math.max(0, boxes)),
           qty_per_box: item.qtyPerBox || 1,
           consumption_period: item.consumptionPeriod || 0,
           stock: item.stock || 0,
           transit: item.transit || 0
         };
-      })
-      .filter(i => i.qty_boxes > 0);
+      });
 
-    if (!itemsToSave.length) {
+    const itemsWithOrder = allItems.filter(i => i.qty_boxes > 0);
+
+    if (!itemsWithOrder.length) {
       showToast('Нет позиций с количеством', 'Укажите количество для заказа', 'error');
       return;
     }
@@ -239,7 +253,7 @@ export function initOrderOperations(deps) {
       orderId = order.id;
     }
 
-    const items = itemsToSave.map(i => ({
+    const items = allItems.map(i => ({
       order_id: orderId,
       ...i
     }));
@@ -255,15 +269,32 @@ export function initOrderOperations(deps) {
     }
 
     const actionLabel = editingOrderId ? 'Заказ обновлён' : 'Заказ сохранён';
-    showToast(actionLabel, `Сохранено позиций: ${itemsToSave.length}`, 'success');
+    showToast(actionLabel, `Сохранено: ${itemsWithOrder.length} позиций с заказом`, 'success');
+    
+    // Лог изменений
+    auditLog(
+      editingOrderId ? 'order_updated' : 'order_created',
+      'order',
+      orderId,
+      {
+        supplier: orderState.settings.supplier,
+        legal_entity: orderState.settings.legalEntity,
+        items_count: itemsWithOrder.length,
+        total_items: allItems.length
+      }
+    );
+    
     editingOrderId = null;
     updateEditingIndicator();
     clearDraft();
     
-    // Очищаем форму после успешного сохранения
-    orderState.items = [];
+    // Обнуляем заказы но оставляем товары с расходом
+    orderState.items.forEach(item => {
+      item.finalOrder = 0;
+    });
     render();
     if (updateFinalSummary) updateFinalSummary();
+    saveDraft();
     
     loadOrderHistory();
   });
