@@ -288,8 +288,11 @@ export function initOrderOperations(deps) {
     updateEditingIndicator();
     clearDraft();
     
-    // Обнуляем заказы но оставляем товары с расходом
+    // Обнуляем все данные но оставляем товары в таблице
     orderState.items.forEach(item => {
+      item.consumptionPeriod = 0;
+      item.stock = 0;
+      item.transit = 0;
       item.finalOrder = 0;
     });
     render();

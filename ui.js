@@ -88,6 +88,7 @@ loginPassword.addEventListener('keydown', (e) => {
 
 const loginUserSelect = document.getElementById('loginUser');
 const userBadge = document.getElementById('userBadge');
+const userDropdown = document.getElementById('userDropdown');
 const logoutBtn = document.getElementById('logoutBtn');
 
 // Загружаем список пользователей при старте
@@ -116,8 +117,20 @@ function updateUserUI(user) {
     userBadge.textContent = user.name;
     userBadge.classList.remove('hidden');
   }
-  if (logoutBtn) logoutBtn.style.display = '';
 }
+
+// Клик по имени — toggle dropdown
+if (userBadge) {
+  userBadge.addEventListener('click', (e) => {
+    e.stopPropagation();
+    userDropdown?.classList.toggle('hidden');
+  });
+}
+
+// Закрытие dropdown при клике вне
+document.addEventListener('click', () => {
+  userDropdown?.classList.add('hidden');
+});
 
 async function doLogin() {
   const selectedUser = loginUserSelect?.value;
@@ -192,7 +205,7 @@ if (logoutBtn) {
     localStorage.removeItem('bk_logged_in');
     loginOverlay.style.display = '';
     if (userBadge) userBadge.classList.add('hidden');
-    logoutBtn.style.display = 'none';
+    if (userDropdown) userDropdown.classList.add('hidden');
     loginPassword.value = '';
     if (loginUserSelect) loginUserSelect.value = '';
   });

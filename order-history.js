@@ -139,6 +139,7 @@ async function renderOrderHistory(orders, opts) {
           ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
           <button class="btn small edit-order-btn" style="background:#e3f2fd;color:#1565c0;" title="Редактировать заказ">✏️</button>
           <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
+          <button class="btn small log-order-btn" style="background:#f3e5f5;color:#7b1fa2;" title="Лог изменений">📝</button>
           <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
         </div>
       </div>
@@ -156,6 +157,7 @@ async function renderOrderHistory(orders, opts) {
     const header = div.querySelector('.history-header span');
     const editBtn = div.querySelector('.edit-order-btn');
     const copyBtn = div.querySelector('.copy-order-btn');
+    const logBtn = div.querySelector('.log-order-btn');
     const deleteBtn = div.querySelector('.delete-order-btn');
 
     header.style.cursor = 'pointer';
@@ -178,6 +180,11 @@ async function renderOrderHistory(orders, opts) {
       await copyOrderToForm(order, legalEntity, opts);
     };
 
+    logBtn.onclick = async (e) => {
+      e.stopPropagation();
+      await showOrderLog(order.id, div);
+    };
+
     deleteBtn.onclick = async (e) => {
       e.stopPropagation();
       await deleteOrder(order.id, opts);
@@ -185,6 +192,55 @@ async function renderOrderHistory(orders, opts) {
 
     historyContainer.appendChild(div);
   });
+}
+
+/**
+ * Показать лог изменений для заказа
+ */
+async function showOrderLog(orderId, parentDiv) {
+  // Если лог уже открыт — закрыть
+  const existing = parentDiv.querySelector('.audit-log-panel');
+  if (existing) { existing.remove(); return; }
+  
+  const panel = document.createElement('div');
+  panel.className = 'audit-log-panel';
+  panel.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">Загрузка...</div>';
+  parentDiv.appendChild(panel);
+  
+  try {
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('*')
+      .eq('entity_type', 'order')
+      .eq('entity_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    if (error || !data?.length) {
+      panel.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">Нет записей в логе</div>';
+      return;
+    }
+    
+    const actionLabels = {
+      'order_created': '🆕 Создан',
+      'order_updated': '✏️ Изменён',
+      'order_deleted': '🗑️ Удалён'
+    };
+    
+    panel.innerHTML = data.map(log => {
+      const date = new Date(log.created_at);
+      const dateStr = date.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' });
+      const timeStr = date.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
+      const label = actionLabels[log.action] || log.action;
+      const user = log.user_name ? esc(log.user_name) : '—';
+      const details = log.details?.items_count ? `, ${log.details.items_count} поз.` : '';
+      return `<div style="padding:4px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">
+        <span style="color:#7b1fa2;">${label}</span> · <b>${user}</b> · ${dateStr} ${timeStr}${details}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    panel.innerHTML = '<div style="padding:8px;color:#c62828;font-size:12px;">Ошибка загрузки лога</div>';
+  }
 }
 
 /**
