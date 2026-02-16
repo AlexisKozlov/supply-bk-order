@@ -1316,3 +1316,15 @@ if (analyticsPeriodSelect) {
     await loadAnalytics();
   });
 }
+
+/* ================= ПРЕДУПРЕЖДЕНИЕ ПРИ УХОДЕ СО СТРАНИЦЫ ================= */
+window.addEventListener('beforeunload', (e) => {
+  // Предупреждаем только если есть товары с заполненными данными
+  const hasData = orderState.items.some(item => 
+    item.consumptionPeriod > 0 || item.stock > 0 || item.finalOrder > 0
+  );
+  if (hasData) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});

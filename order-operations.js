@@ -258,6 +258,12 @@ export function initOrderOperations(deps) {
     editingOrderId = null;
     updateEditingIndicator();
     clearDraft();
+    
+    // Очищаем форму после успешного сохранения
+    orderState.items = [];
+    render();
+    if (updateFinalSummary) updateFinalSummary();
+    
     loadOrderHistory();
   });
 
