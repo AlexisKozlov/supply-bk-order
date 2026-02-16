@@ -973,6 +973,13 @@ td.order-cell input[type="number"] {
 }
 
 /* ===== RESPONSIVE ===== */
+/* ===== HEADER MENU (desktop) ===== */
+.header-menu {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
 /* ===== MOBILE MENU TOGGLE ===== */
 .mobile-menu-toggle {
   display: none;
@@ -990,117 +997,119 @@ td.order-cell input[type="number"] {
 @media (max-width: 768px) {
   .container {
     padding: 0 10px;
-    margin: 12px auto;
-    gap: 16px;
+    margin: 10px auto;
+    gap: 12px;
   }
 
-  .card {
-    padding: 14px 12px;
-    border-radius: 14px;
-  }
-
-  .settings {
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
+  .card { padding: 14px 12px; border-radius: 14px; }
+  .settings { grid-template-columns: 1fr 1fr; gap: 8px; }
 
   .header {
-    padding: 0 12px;
-    gap: 8px;
-    flex-wrap: wrap;
+    padding: 0 10px;
+    gap: 6px;
+    height: 48px;
+    position: relative;
   }
 
-  .header h1 { font-size: 16px; }
+  .header h1 { font-size: 0; }
+  .header h1 img { width: 24px; height: 24px; }
   .header-title-text { display: none; }
 
-  /* Бургер-меню */
-  .mobile-menu-toggle { display: block; }
+  /* Бургер-кнопка */
+  .mobile-menu-toggle { display: block; margin-left: 0; }
 
+  /* Выпадающее меню — СКРЫТО по умолчанию */
   .header-menu {
-    display: none;
+    display: none !important;
     position: absolute;
-    top: 100%;
+    top: 48px;
     left: 0;
     right: 0;
     background: linear-gradient(135deg, var(--red) 0%, #A81D00 100%);
     flex-direction: column;
-    padding: 8px 12px;
-    gap: 4px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    padding: 6px 10px;
+    gap: 2px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.35);
     z-index: 999;
   }
 
   .header-menu.open {
-    display: flex;
+    display: flex !important;
   }
 
   .menu-btn {
     width: 100%;
     text-align: left;
-    padding: 10px 14px;
-    font-size: 14px;
+    padding: 12px 14px;
+    font-size: 15px;
+    border-radius: 8px;
   }
 
-  .entity-badge { font-size: 11px; padding: 3px 8px; }
-  .user-badge { font-size: 11px; padding: 3px 8px; }
+  .entity-badge { font-size: 10px; padding: 3px 8px; }
+  .user-badge { font-size: 10px; padding: 3px 8px; }
 
-  /* Кнопки инструментов */
+  /* ===== Секция заказа: панель инструментов ===== */
   .order-actions {
-    gap: 4px !important;
-    font-size: 12px !important;
+    flex-direction: column !important;
+    gap: 8px !important;
   }
 
-  .order-actions .btn {
-    padding: 6px 8px !important;
-    font-size: 11px !important;
-  }
-
+  /* Поиск — на всю ширину, сверху */
   .order-actions .search {
     min-width: 100% !important;
     max-width: 100% !important;
     order: -1;
+    flex: unset !important;
+    margin: 0 !important;
   }
 
-  /* Таблица — горизонтальный скролл */
+  /* Кнопки панели — сетка 3 в ряд */
+  .order-actions .btn {
+    padding: 8px 10px !important;
+    font-size: 12px !important;
+    flex: 1 1 auto;
+  }
+
+  /* Undo/redo скрываем на мобильных */
+  #undoBtn, #redoBtn { display: none; }
+
+  /* Разделитель скрываем */
+  .order-actions > div[style*="flex:1"] { display: none; }
+
+  /* ===== Таблица ===== */
   .table-wrap {
-    overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     margin: 0 -12px;
-    padding: 0 12px;
+    padding: 0 4px;
   }
 
-  table { font-size: 12px; min-width: 700px; }
-
-  table th, table td { padding: 6px 4px; }
+  table { font-size: 12px; min-width: 650px; }
+  table th, table td { padding: 5px 3px; }
 
   table input[type="number"] {
-    width: 55px !important;
-    font-size: 13px;
+    width: 52px !important;
+    font-size: 14px;
     padding: 4px 2px;
   }
 
-  .order-pieces, .order-boxes {
-    width: 50px !important;
-  }
-
-  /* Скрываем менее важные колонки */
+  /* Скрываем менее важные колонки на планшете */
   .pallets, th:nth-child(10) { display: none; }
-  .delete-cell, th:nth-child(11) { width: 30px; }
 
-  /* Нижняя панель */
+  /* ===== Нижняя панель ===== */
   .order-bottom-actions {
-    flex-direction: column;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   .order-bottom-actions .btn {
     width: 100%;
-    padding: 10px;
+    padding: 12px 8px;
     font-size: 14px;
   }
 
-  /* Модалки */
-  .modal-box { width: calc(100% - 16px) !important; max-height: 95vh; }
+  /* ===== Модалки ===== */
+  .modal-box { width: calc(100% - 16px) !important; max-height: 92vh; }
   .modal-box.large { width: calc(100% - 16px) !important; }
 
   #planningModal .modal-box.large {
@@ -1108,52 +1117,52 @@ td.order-cell input[type="number"] {
     max-width: 100% !important;
     height: 95vh !important;
     max-height: 95vh !important;
-    padding: 12px !important;
+    padding: 10px !important;
     border-radius: 12px;
   }
 
-  .toast-container { right: 10px; left: 10px; }
+  .toast-container { right: 8px; left: 8px; }
   .toast { max-width: 100%; }
 
   /* История */
-  .history-header { padding: 10px 10px; }
-  .history-actions .btn.small { padding: 6px 10px; font-size: 14px; }
+  .history-header { padding: 10px; }
+  .history-actions .btn.small { padding: 8px 10px; font-size: 15px; }
+  .history-meta { font-size: 10px; }
 }
 
 /* ===== RESPONSIVE: PHONE (480px) ===== */
 @media (max-width: 480px) {
-  .settings {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
+  .settings { grid-template-columns: 1fr; gap: 6px; }
 
   .login-box {
     width: calc(100% - 24px);
     padding: 28px 18px 22px;
   }
 
-  .header h1 { font-size: 14px; }
+  table { min-width: 550px; font-size: 11px; }
 
-  table { min-width: 600px; font-size: 11px; }
-
-  /* Скрываем колонки расчёт и запас на маленьких экранах */
+  /* Скрываем ещё колонки */
   .calc, th:nth-child(7) { display: none; }
   .stock-col, th:nth-child(6) { display: none !important; }
   .drag-handle { display: none; }
   th:nth-child(1), td:first-child { display: none; }
 
-  /* Делаем инпуты крупнее для пальцев */
+  /* Крупные инпуты для пальцев */
   table input[type="number"] {
-    font-size: 16px !important; /* предотвращает zoom на iOS */
+    font-size: 16px !important;
     padding: 6px 4px;
-    min-height: 36px;
+    min-height: 38px;
   }
 
-  .order-actions .btn { padding: 8px 6px !important; }
-  .order-actions .tooltip-wrap[data-tip]::after { display: none; }
+  .order-actions .btn { font-size: 11px !important; }
 
-  /* finalSummary */
-  #finalSummary { font-size: 13px; }
+  /* Нижняя панель — одна колонка */
+  .order-bottom-actions {
+    grid-template-columns: 1fr;
+  }
+
+  /* Тултипы скрываем */
+  .tooltip-wrap[data-tip]::after { display: none !important; }
 }
 /* ===== STOCK COLUMN (ЗАПАС) ===== */
 .stock-col {
@@ -1243,12 +1252,8 @@ td.delete-cell {
   display: none;
 }
 
-/* ===== HEADER MENU ===== */
-.header-menu {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
+/* ===== HEADER MENU (desktop — перед media queries) ===== */
+/* Уже определено выше */
 
 .menu-btn {
   background: rgba(255,255,255,0.15);
