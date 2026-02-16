@@ -40,6 +40,7 @@ export async function loadOrderHistory(opts) {
       unit,
       note,
       created_at,
+      created_by,
       has_transit,
       show_stock_column,
       order_items (
@@ -128,11 +129,13 @@ async function renderOrderHistory(orders, opts) {
     const createdStr = createdAt ? `${createdDateStr} ${createdTimeStr}` : '';
     
     const noteStr = order.note ? ` (${esc(order.note)})` : '';
+    const authorStr = order.created_by ? `<span style="font-size:11px;color:#2e7d32;margin-right:8px;">👤 ${esc(order.created_by)}</span>` : '';
 
     div.innerHTML = `
       <div class="history-header">
         <span><b>${date}</b> — ${esc(order.supplier)}${noteStr}</span>
         <div class="history-actions">
+          ${authorStr}
           ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
           <button class="btn small edit-order-btn" style="background:#e3f2fd;color:#1565c0;" title="Редактировать заказ">✏️</button>
           <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>

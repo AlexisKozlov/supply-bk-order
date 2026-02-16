@@ -15,7 +15,10 @@
   <div class="login-box">
     <span style="font-size:42px;display:block;margin-bottom:2px;"> <img src="./icons/burger.png" width="28" height="28" alt=""></span>
     <h2>Калькулятор заказа</h2>
-    <p>Введите пароль для входа</p>
+    <p>Выберите пользователя и введите пароль</p>
+    <select id="loginUser" style="width:100%;padding:10px;border:1px solid #d0c9b8;border-radius:8px;font-size:15px;margin-bottom:10px;background:white;">
+      <option value="">Выберите имя...</option>
+    </select>
     <input id="loginPassword" type="password" placeholder="Пароль" autocomplete="current-password" />
     <button id="loginBtn" class="btn primary">Войти</button>
   </div>
@@ -41,6 +44,10 @@
     <button id="menuCalendar" class="menu-btn"><img src="./icons/calendar.png" width="14" height="14" alt=""> Календарь</button>
   </nav>
   <span id="entityBadge" class="entity-badge">Бургер БК</span>
+  <div class="header-user">
+    <span id="userBadge" class="user-badge hidden"></span>
+    <button id="logoutBtn" class="menu-btn hidden" style="font-size:12px;padding:4px 8px;">Выйти</button>
+  </div>
 </header>
 
 <main class="container">
@@ -478,10 +485,19 @@
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
 <script>
-// Проверка авторизации ДО загрузки основного скрипта
 (function() {
-  if (localStorage.getItem('bk_logged_in') === 'true') {
+  var user = localStorage.getItem('bk_user');
+  if (user) {
     document.getElementById('loginOverlay').style.display = 'none';
+    try {
+      var u = JSON.parse(user);
+      var badge = document.getElementById('userBadge');
+      if (badge && u.name) {
+        badge.textContent = u.name;
+        badge.classList.remove('hidden');
+      }
+      document.getElementById('logoutBtn')?.classList.remove('hidden');
+    } catch(e) {}
   }
 })();
 </script>

@@ -3,7 +3,7 @@
  * Сохранение, копирование, очистка, загрузка заказов, порядок позиций
  */
 
-import { orderState } from './state.js';
+import { orderState, currentUser } from './state.js';
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { saveDraft, clearDraft } from './draft.js';
@@ -200,7 +200,8 @@ export function initOrderOperations(deps) {
       legal_entity: orderState.settings.legalEntity,
       note: note || null,
       has_transit: orderState.settings.hasTransit || false,
-      show_stock_column: orderState.settings.showStockColumn || false
+      show_stock_column: orderState.settings.showStockColumn || false,
+      created_by: currentUser?.name || null
     };
 
     let orderId;

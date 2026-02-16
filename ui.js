@@ -1,4 +1,4 @@
-import { orderState } from './state.js';
+import { orderState, currentUser, setCurrentUser, loadCurrentUser } from './state.js';
 import { calculateItem } from './calculations.js';
 import { supabase } from './supabase.js';
 import { history } from './history.js';
@@ -86,29 +86,116 @@ loginPassword.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') doLogin();
 });
 
-function doLogin() {
-  checkPassword(loginPassword.value).then(valid => {
+const loginUserSelect = document.getElementById('loginUser');
+const userBadge = document.getElementById('userBadge');
+const logoutBtn = document.getElementById('logoutBtn');
+
+// Загружаем список пользователей при старте
+(async function loadUserList() {
+  try {
+    const { data } = await supabase.from('users').select('name').order('name');
+    if (data && loginUserSelect) {
+      data.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.name;
+        opt.textContent = u.name;
+        loginUserSelect.appendChild(opt);
+      });
+    }
+  } catch(e) { /* fallback — поле пароля работает без списка */ }
+})();
+
+// Восстанавливаем текущего пользователя
+const storedUser = loadCurrentUser();
+if (storedUser) {
+  updateUserUI(storedUser);
+}
+
+function updateUserUI(user) {
+  if (userBadge && user) {
+    userBadge.textContent = user.name;
+    userBadge.classList.remove('hidden');
+  }
+  if (logoutBtn) logoutBtn.classList.remove('hidden');
+}
+
+async function doLogin() {
+  const selectedUser = loginUserSelect?.value;
+  const pwd = loginPassword.value;
+  
+  if (!selectedUser) {
+    showToast('Выберите пользователя', 'Укажите своё имя из списка', 'error');
+    return;
+  }
+  if (!pwd) {
+    showToast('Введите пароль', '', 'error');
+    return;
+  }
+  
+  try {
+    // Проверяем через RPC функцию (пароль не возвращается клиенту)
+    const { data, error } = await supabase.rpc('check_user_password', {
+      user_name: selectedUser,
+      user_password: pwd
+    });
+    
+    if (error || !data?.success) {
+      // Fallback: проверяем старый пароль из settings
+      const valid = await checkLegacyPassword(pwd);
+      if (valid) {
+        const user = { name: selectedUser || 'Пользователь', role: 'user' };
+        setCurrentUser(user);
+        loginOverlay.style.display = 'none';
+        updateUserUI(user);
+        loadOrderHistory();
+        return;
+      }
+      showToast('Ошибка входа', 'Неверный пароль', 'error');
+      return;
+    }
+    
+    setCurrentUser(data.user);
+    loginOverlay.style.display = 'none';
+    updateUserUI(data.user);
+    loadOrderHistory();
+  } catch(e) {
+    // Полный fallback если RPC не создан
+    const valid = await checkLegacyPassword(pwd);
     if (valid) {
+      const user = { name: selectedUser || 'Пользователь', role: 'user' };
+      setCurrentUser(user);
       loginOverlay.style.display = 'none';
-      localStorage.setItem('bk_logged_in', 'true');
+      updateUserUI(user);
       loadOrderHistory();
     } else {
       showToast('Ошибка входа', 'Неверный пароль', 'error');
     }
-  });
+  }
 }
 
-async function checkPassword(pwd) {
+async function checkLegacyPassword(pwd) {
   try {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('settings')
       .select('value')
       .eq('key', 'order_calculator_password')
       .single();
-    if (data && data.value) return pwd === data.value;
+    if (data?.value) return pwd === data.value;
   } catch (e) { /* fallback */ }
-  // Fallback если Supabase недоступен
   return pwd === '157';
+}
+
+// Выход
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', () => {
+    setCurrentUser(null);
+    localStorage.removeItem('bk_logged_in');
+    loginOverlay.style.display = '';
+    if (userBadge) userBadge.classList.add('hidden');
+    logoutBtn.classList.add('hidden');
+    loginPassword.value = '';
+    if (loginUserSelect) loginUserSelect.value = '';
+  });
 }
 
 

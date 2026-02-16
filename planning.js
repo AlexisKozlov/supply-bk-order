@@ -10,6 +10,7 @@ import { showToast, customConfirm } from './modals.js';
 import { showImportDialog } from './import-stock.js';
 import { validatePlanConsumption, resetConsumptionCache } from './data-validation.js';
 import { esc } from './utils.js';
+import { currentUser } from './state.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -968,6 +969,7 @@ async function savePlanToHistory() {
   } else {
     // INSERT
     planData.created_at = new Date().toISOString();
+    planData.created_by = currentUser?.name || null;
     ({ error } = await supabase.from('plans').insert([planData]));
   }
 
