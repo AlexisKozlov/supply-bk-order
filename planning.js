@@ -157,7 +157,7 @@ export function initPlanning() {
         deficit: 0,
         orderBoxes: p.order_boxes || 0,
         orderUnits: p.order_units || 0,
-        locked: p.locked || false
+        locked: p.locked || (p.order_boxes > 0)  // Ненулевые = locked при загрузке
       }))
     }));
     

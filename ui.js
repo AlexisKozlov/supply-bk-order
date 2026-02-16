@@ -160,6 +160,18 @@ document.addEventListener('click', () => {
   userDropdown?.classList.add('hidden');
 });
 
+async function afterLogin(user) {
+  setCurrentUser(user);
+  loginOverlay.style.display = 'none';
+  updateUserUI(user);
+  
+  // Перезагружаем поставщиков для текущего юр.лица
+  const le = document.getElementById('legalEntity').value;
+  orderState.settings.legalEntity = le;
+  await loadSuppliers(le);
+  loadOrderHistory();
+}
+
 async function doLogin() {
   const selectedUser = loginUserSelect?.value;
   const pwd = loginPassword.value;
@@ -174,40 +186,26 @@ async function doLogin() {
   }
   
   try {
-    // Проверяем через RPC функцию (пароль не возвращается клиенту)
     const { data, error } = await supabase.rpc('check_user_password', {
       user_name: selectedUser,
       user_password: pwd
     });
     
     if (error || !data?.success) {
-      // Fallback: проверяем старый пароль из settings
       const valid = await checkLegacyPassword(pwd);
       if (valid) {
-        const user = { name: selectedUser || 'Пользователь', role: 'user' };
-        setCurrentUser(user);
-        loginOverlay.style.display = 'none';
-        updateUserUI(user);
-        loadOrderHistory();
+        await afterLogin({ name: selectedUser || 'Пользователь', role: 'user' });
         return;
       }
       showToast('Ошибка входа', 'Неверный пароль', 'error');
       return;
     }
     
-    setCurrentUser(data.user);
-    loginOverlay.style.display = 'none';
-    updateUserUI(data.user);
-    loadOrderHistory();
+    await afterLogin(data.user);
   } catch(e) {
-    // Полный fallback если RPC не создан
     const valid = await checkLegacyPassword(pwd);
     if (valid) {
-      const user = { name: selectedUser || 'Пользователь', role: 'user' };
-      setCurrentUser(user);
-      loginOverlay.style.display = 'none';
-      updateUserUI(user);
-      loadOrderHistory();
+      await afterLogin({ name: selectedUser || 'Пользователь', role: 'user' });
     } else {
       showToast('Ошибка входа', 'Неверный пароль', 'error');
     }
@@ -231,6 +229,27 @@ if (logoutBtn) {
   logoutBtn.addEventListener('click', () => {
     setCurrentUser(null);
     localStorage.removeItem('bk_logged_in');
+    
+    // Очищаем данные заказа
+    orderState.items = [];
+    orderState.settings.supplier = '';
+    
+    // Показываем все юр.лица (снимаем фильтр)
+    ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) Array.from(el.options).forEach(opt => { opt.style.display = ''; });
+    });
+    
+    // Очищаем поставщиков
+    const supplierSelect = document.getElementById('supplierFilter');
+    if (supplierSelect) {
+      supplierSelect.innerHTML = '<option value="">Все / свободный</option>';
+    }
+    
+    // Скрываем секцию заказа
+    orderSection?.classList.add('hidden');
+    
+    // UI
     loginOverlay.style.display = '';
     if (userBadge) userBadge.classList.add('hidden');
     if (userDropdown) userDropdown.classList.add('hidden');
