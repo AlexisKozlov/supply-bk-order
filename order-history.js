@@ -128,19 +128,27 @@ async function renderOrderHistory(orders, opts) {
       : '';
     const createdStr = createdAt ? `${createdDateStr} ${createdTimeStr}` : '';
     
-    const noteStr = order.note ? ` (${esc(order.note)})` : '';
-    const authorStr = order.created_by ? `<span style="font-size:11px;color:#2e7d32;margin-right:8px;">👤 ${esc(order.created_by)}</span>` : '';
+    const noteStr = order.note ? esc(order.note) : '';
+    const authorName = order.created_by ? esc(order.created_by) : '';
+
+    // Мета-строка: автор · дата создания · примечание
+    const metaParts = [];
+    if (authorName) metaParts.push(`<span style="color:#2e7d32;">👤 ${authorName}</span>`);
+    if (createdStr) metaParts.push(`<span style="color:#8B7355;">${createdStr}</span>`);
+    if (noteStr) metaParts.push(`<span style="color:#666;font-style:italic;">«${noteStr}»</span>`);
+    const metaHtml = metaParts.length ? `<div class="history-meta">${metaParts.join(' · ')}</div>` : '';
 
     div.innerHTML = `
       <div class="history-header">
-        <span><b>${date}</b> — ${esc(order.supplier)}${noteStr}</span>
+        <div class="history-title">
+          <div><b>${date}</b> — ${esc(order.supplier)}</div>
+          ${metaHtml}
+        </div>
         <div class="history-actions">
-          ${authorStr}
-          ${createdStr ? `<span style="font-size:11px;color:#8B7355;margin-right:8px;">📅 ${createdStr}</span>` : ''}
-          <button class="btn small edit-order-btn" style="background:#e3f2fd;color:#1565c0;" title="Редактировать заказ">✏️</button>
-          <button class="btn small copy-order-btn" style="background:var(--orange);color:var(--brown);" title="Скопировать заказ">📋</button>
-          <button class="btn small log-order-btn" style="background:#f3e5f5;color:#7b1fa2;" title="Лог изменений">📝</button>
-          <button class="btn small delete-order-btn" style="background:#d32f2f;color:white;" title="Удалить заказ">🗑️</button>
+          <button class="btn small edit-order-btn" title="Редактировать">✏️</button>
+          <button class="btn small copy-order-btn" title="Скопировать">📋</button>
+          <button class="btn small log-order-btn" title="Лог изменений">📝</button>
+          <button class="btn small delete-order-btn" title="Удалить">🗑️</button>
         </div>
       </div>
       <div class="history-items hidden">
@@ -154,7 +162,7 @@ async function renderOrderHistory(orders, opts) {
       </div>
     `;
 
-    const header = div.querySelector('.history-header span');
+    const header = div.querySelector('.history-title');
     const editBtn = div.querySelector('.edit-order-btn');
     const copyBtn = div.querySelector('.copy-order-btn');
     const logBtn = div.querySelector('.log-order-btn');

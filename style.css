@@ -669,17 +669,57 @@ td.order-cell input[type="number"] {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-weight: 600;
-  padding: 13px 18px;
+  padding: 10px 14px;
   background: #fdf9f2;
   transition: background 0.18s ease;
-  font-size: 14px;
   cursor: pointer;
+  gap: 10px;
 }
 
 .history-header:hover {
   background: #fff0e0;
 }
+
+.history-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brown);
+}
+
+.history-meta {
+  font-size: 11px;
+  font-weight: 400;
+  color: #999;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.history-actions .btn.small {
+  padding: 4px 8px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: #f5f0e8;
+  transition: background 0.15s;
+}
+
+.history-actions .btn.small:nth-child(1) { background: #e3f2fd; }
+.history-actions .btn.small:nth-child(2) { background: #fff3e0; }
+.history-actions .btn.small:nth-child(3) { background: #f3e5f5; }
+.history-actions .btn.small:nth-child(4) { background: #ffebee; }
+
+.history-actions .btn.small:hover { filter: brightness(0.92); }
 
 .history-items {
   padding: 10px 16px 14px;
