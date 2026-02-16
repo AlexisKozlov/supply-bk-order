@@ -198,7 +198,6 @@ async function renderOrderHistory(orders, opts) {
  * Показать лог изменений для заказа
  */
 async function showOrderLog(orderId, parentDiv) {
-  // Если лог уже открыт — закрыть
   const existing = parentDiv.querySelector('.audit-log-panel');
   if (existing) { existing.remove(); return; }
   
@@ -233,9 +232,23 @@ async function showOrderLog(orderId, parentDiv) {
       const timeStr = date.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
       const label = actionLabels[log.action] || log.action;
       const user = log.user_name ? esc(log.user_name) : '—';
-      const details = log.details?.items_count ? `, ${log.details.items_count} поз.` : '';
-      return `<div style="padding:4px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">
-        <span style="color:#7b1fa2;">${label}</span> · <b>${user}</b> · ${dateStr} ${timeStr}${details}
+      
+      let detailsHtml = '';
+      const changes = log.details?.changes;
+      if (changes?.length) {
+        detailsHtml = '<div style="margin-top:4px;padding-left:12px;">' + changes.map(c => {
+          if (c.type === 'added') return `<div style="color:#2e7d32;">+ ${esc(c.item)}: ${c.boxes} кор</div>`;
+          if (c.type === 'removed') return `<div style="color:#c62828;">− ${esc(c.item)}: ${c.boxes} кор</div>`;
+          if (c.type === 'changed') return `<div style="color:#e65100;">~ ${esc(c.item)}: ${c.diffs.join(', ')}</div>`;
+          return '';
+        }).join('') + '</div>';
+      } else if (log.details?.items_count) {
+        detailsHtml = ` · <span style="color:#888;">${log.details.items_count} поз.</span>`;
+      }
+      
+      return `<div style="padding:6px 0;border-bottom:1px solid #f0e8f5;font-size:12px;">
+        <span style="color:#7b1fa2;font-weight:600;">${label}</span> · <b>${user}</b> · ${dateStr} ${timeStr}
+        ${detailsHtml}
       </div>`;
     }).join('');
   } catch(e) {

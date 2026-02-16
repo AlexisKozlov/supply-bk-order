@@ -221,7 +221,13 @@ export function initOrderOperations(deps) {
     let orderId;
 
     if (editingOrderId) {
-      // РЕЖИМ РЕДАКТИРОВАНИЯ — UPDATE существующего заказа
+      // РЕЖИМ РЕДАКТИРОВАНИЯ — загружаем старые позиции для diff
+      const { data: oldItems } = await supabase
+        .from('order_items')
+        .select('sku, name, qty_boxes, consumption_period, stock')
+        .eq('order_id', editingOrderId);
+      
+      // UPDATE заказа
       const { error } = await supabase
         .from('orders')
         .update(orderData)
@@ -236,6 +242,38 @@ export function initOrderOperations(deps) {
       // Удаляем старые позиции
       await supabase.from('order_items').delete().eq('order_id', editingOrderId);
       orderId = editingOrderId;
+      
+      // Вычисляем diff для лога
+      if (oldItems) {
+        const oldMap = new Map(oldItems.map(i => [i.sku || i.name, i]));
+        const changes = [];
+        
+        allItems.forEach(newItem => {
+          const key = newItem.sku || newItem.name;
+          const old = oldMap.get(key);
+          if (!old) {
+            if (newItem.qty_boxes > 0) changes.push({ item: key, type: 'added', boxes: newItem.qty_boxes });
+          } else {
+            const diffs = [];
+            if (old.qty_boxes !== newItem.qty_boxes) diffs.push(`заказ: ${old.qty_boxes}→${newItem.qty_boxes}`);
+            if (old.consumption_period !== newItem.consumption_period) diffs.push(`расход: ${old.consumption_period}→${newItem.consumption_period}`);
+            if (old.stock !== newItem.stock) diffs.push(`остаток: ${old.stock}→${newItem.stock}`);
+            if (diffs.length) changes.push({ item: key, type: 'changed', diffs });
+            oldMap.delete(key);
+          }
+        });
+        
+        oldMap.forEach((old, key) => {
+          if (old.qty_boxes > 0) changes.push({ item: key, type: 'removed', boxes: old.qty_boxes });
+        });
+        
+        if (changes.length) {
+          auditLog('order_updated', 'order', orderId, {
+            supplier: orderState.settings.supplier,
+            changes
+          });
+        }
+      }
     } else {
       // НОВЫЙ ЗАКАЗ — INSERT
       orderData.created_at = new Date().toISOString();
@@ -271,18 +309,20 @@ export function initOrderOperations(deps) {
     const actionLabel = editingOrderId ? 'Заказ обновлён' : 'Заказ сохранён';
     showToast(actionLabel, `Сохранено: ${itemsWithOrder.length} позиций с заказом`, 'success');
     
-    // Лог изменений
-    auditLog(
-      editingOrderId ? 'order_updated' : 'order_created',
-      'order',
-      orderId,
-      {
-        supplier: orderState.settings.supplier,
-        legal_entity: orderState.settings.legalEntity,
-        items_count: itemsWithOrder.length,
-        total_items: allItems.length
-      }
-    );
+    // Лог изменений (создание нового заказа; update логируется выше с diff)
+    if (!editingOrderId) {
+      auditLog(
+        'order_created',
+        'order',
+        orderId,
+        {
+          supplier: orderState.settings.supplier,
+          legal_entity: orderState.settings.legalEntity,
+          items_count: itemsWithOrder.length,
+          total_items: allItems.length
+        }
+      );
+    }
     
     editingOrderId = null;
     updateEditingIndicator();
