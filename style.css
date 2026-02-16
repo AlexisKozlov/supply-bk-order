@@ -973,60 +973,187 @@ td.order-cell input[type="number"] {
 }
 
 /* ===== RESPONSIVE ===== */
+/* ===== MOBILE MENU TOGGLE ===== */
+.mobile-menu-toggle {
+  display: none;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  font-size: 20px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+/* ===== RESPONSIVE: TABLET (768px) ===== */
 @media (max-width: 768px) {
   .container {
-    padding: 0 14px;
-    margin: 18px auto;
+    padding: 0 10px;
+    margin: 12px auto;
+    gap: 16px;
   }
 
   .card {
-    padding: 18px 20px;
+    padding: 14px 12px;
+    border-radius: 14px;
   }
 
   .settings {
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 8px;
   }
 
-  .actions {
+  .header {
+    padding: 0 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .header h1 { font-size: 16px; }
+  .header-title-text { display: none; }
+
+  /* Бургер-меню */
+  .mobile-menu-toggle { display: block; }
+
+  .header-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, var(--red) 0%, #A81D00 100%);
     flex-direction: column;
+    padding: 8px 12px;
+    gap: 4px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    z-index: 999;
   }
 
-  .btn {
+  .header-menu.open {
+    display: flex;
+  }
+
+  .menu-btn {
     width: 100%;
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 14px;
   }
 
-  .modal-box {
-    width: calc(100% - 28px);
+  .entity-badge { font-size: 11px; padding: 3px 8px; }
+  .user-badge { font-size: 11px; padding: 3px 8px; }
+
+  /* Кнопки инструментов */
+  .order-actions {
+    gap: 4px !important;
+    font-size: 12px !important;
   }
 
-  .modal-box.large {
-    width: calc(100% - 28px);
+  .order-actions .btn {
+    padding: 6px 8px !important;
+    font-size: 11px !important;
   }
 
-  .toast-container {
-    right: 14px;
-    left: 14px;
+  .order-actions .search {
+    min-width: 100% !important;
+    max-width: 100% !important;
+    order: -1;
   }
 
-  .toast {
-    max-width: 100%;
+  /* Таблица — горизонтальный скролл */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
   }
+
+  table { font-size: 12px; min-width: 700px; }
+
+  table th, table td { padding: 6px 4px; }
+
+  table input[type="number"] {
+    width: 55px !important;
+    font-size: 13px;
+    padding: 4px 2px;
+  }
+
+  .order-pieces, .order-boxes {
+    width: 50px !important;
+  }
+
+  /* Скрываем менее важные колонки */
+  .pallets, th:nth-child(10) { display: none; }
+  .delete-cell, th:nth-child(11) { width: 30px; }
+
+  /* Нижняя панель */
+  .order-bottom-actions {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .order-bottom-actions .btn {
+    width: 100%;
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  /* Модалки */
+  .modal-box { width: calc(100% - 16px) !important; max-height: 95vh; }
+  .modal-box.large { width: calc(100% - 16px) !important; }
+
+  #planningModal .modal-box.large {
+    width: calc(100% - 8px) !important;
+    max-width: 100% !important;
+    height: 95vh !important;
+    max-height: 95vh !important;
+    padding: 12px !important;
+    border-radius: 12px;
+  }
+
+  .toast-container { right: 10px; left: 10px; }
+  .toast { max-width: 100%; }
+
+  /* История */
+  .history-header { padding: 10px 10px; }
+  .history-actions .btn.small { padding: 6px 10px; font-size: 14px; }
 }
 
+/* ===== RESPONSIVE: PHONE (480px) ===== */
 @media (max-width: 480px) {
   .settings {
     grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .login-box {
-    width: calc(100% - 32px);
-    padding: 36px 24px 28px;
+    width: calc(100% - 24px);
+    padding: 28px 18px 22px;
   }
 
-  .header h1 {
-    font-size: 18px;
+  .header h1 { font-size: 14px; }
+
+  table { min-width: 600px; font-size: 11px; }
+
+  /* Скрываем колонки расчёт и запас на маленьких экранах */
+  .calc, th:nth-child(7) { display: none; }
+  .stock-col, th:nth-child(6) { display: none !important; }
+  .drag-handle { display: none; }
+  th:nth-child(1), td:first-child { display: none; }
+
+  /* Делаем инпуты крупнее для пальцев */
+  table input[type="number"] {
+    font-size: 16px !important; /* предотвращает zoom на iOS */
+    padding: 6px 4px;
+    min-height: 36px;
   }
+
+  .order-actions .btn { padding: 8px 6px !important; }
+  .order-actions .tooltip-wrap[data-tip]::after { display: none; }
+
+  /* finalSummary */
+  #finalSummary { font-size: 13px; }
 }
 /* ===== STOCK COLUMN (ЗАПАС) ===== */
 .stock-col {
