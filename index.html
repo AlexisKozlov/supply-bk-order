@@ -2,6 +2,9 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <link rel="icon" href="./favicon.ico" type="image/x-icon">
   <title>Калькулятор заказа BK</title>
   <link rel="stylesheet" href="./style.css" />
@@ -33,9 +36,10 @@
     style="vertical-align: -4px;"
     alt=""
   >
-  Калькулятор заказа
+  <span class="header-title-text">Калькулятор заказа</span>
 </h1>
-  <nav class="header-menu">
+  <button id="mobileMenuToggle" class="mobile-menu-toggle">☰</button>
+  <nav class="header-menu" id="headerMenu">
     <button id="menuHistory" class="menu-btn"><img src="./icons/history.png" width="14" height="14" alt=""> История</button>
     <button id="menuDatabase" class="menu-btn"><img src="./icons/base.png" width="14" height="14"  alt=""> База данных</button>
     <button id="addManual" class="menu-btn"><img src="./icons/new-product.png" width="14" height="14" alt=""> Новый товар</button>
@@ -154,6 +158,7 @@
         <button id="allToOrderBtn" class="btn primary tooltip-wrap" data-tip="Перенести расчёт в заказ для всех товаров" style="padding:4px 10px;">В заказ всё</button>
         <button id="fillFromLastOrder" class="btn primary tooltip-wrap" data-tip="Подставить расход из последнего заказа этому поставщику" style="padding:4px 10px;">📋 Подставить расход</button>
         <button id="importStockBtn" class="btn primary tooltip-wrap" data-tip="Импорт остатков из Excel/CSV" style="padding:4px 10px;"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт</button>
+        <button id="load1cBtn" class="btn primary tooltip-wrap" data-tip="Загрузить остатки и расход из 1С" style="padding:4px 10px;">📊 Из 1С</button>
         <button id="clearOrder" class="btn primary btn-clear-order tooltip-wrap" data-tip="Удалить все товары из текущего заказа" style="padding:4px 10px;">Очистить</button>
         
         <div style="flex:1;min-width:20px;"></div>
