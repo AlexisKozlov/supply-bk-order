@@ -1055,6 +1055,16 @@ td.order-cell input[type="number"] {
   .toast { max-width: 100%; }
   .history-header { padding: 10px; }
   .history-meta { font-size: 10px; }
+
+  /* Отключаем sticky товар — мешает горизонтальному скроллу */
+  td.item-name {
+    position: static !important;
+    box-shadow: none !important;
+  }
+  th:first-child {
+    position: static !important;
+    box-shadow: none !important;
+  }
 }
 
 @media (max-width: 480px) {
