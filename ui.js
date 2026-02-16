@@ -1423,6 +1423,105 @@ if (importStockBtn) {
   });
 }
 
+/* ================= ЗАГРУЗКА ИЗ 1С ================= */
+const load1cBtn = document.getElementById('load1cBtn');
+if (load1cBtn) {
+  load1cBtn.addEventListener('click', async () => {
+    if (!orderState.items.length) {
+      showToast('Нет товаров', 'Сначала добавьте товары в заказ', 'info');
+      return;
+    }
+
+    const legalEntity = orderState.settings.legalEntity;
+    const periodDays = orderState.settings.periodDays || 30;
+
+    // Собираем SKU из текущего заказа
+    const skus = orderState.items.map(i => i.sku).filter(Boolean);
+    if (!skus.length) {
+      showToast('Нет артикулов', 'У товаров в заказе нет SKU для сопоставления с 1С', 'error');
+      return;
+    }
+
+    load1cBtn.disabled = true;
+    load1cBtn.textContent = '⏳ Загрузка...';
+
+    try {
+      const { data, error } = await supabase
+        .from('stock_1c')
+        .select('sku, stock, consumption, period_days, updated_at')
+        .eq('legal_entity', legalEntity)
+        .in('sku', skus);
+
+      if (error) {
+        showToast('Ошибка', 'Не удалось загрузить данные из 1С', 'error');
+        console.error(error);
+        return;
+      }
+
+      if (!data?.length) {
+        showToast('Нет данных', `В таблице stock_1c нет данных для «${legalEntity}»`, 'info');
+        return;
+      }
+
+      // Карта SKU → данные 1С
+      const stockMap = new Map(data.map(d => [d.sku, d]));
+
+      // Проверяем свежесть данных
+      let oldestUpdate = null;
+      data.forEach(d => {
+        const t = new Date(d.updated_at);
+        if (!oldestUpdate || t < oldestUpdate) oldestUpdate = t;
+      });
+
+      const hoursAgo = oldestUpdate ? Math.round((Date.now() - oldestUpdate) / 3600000) : null;
+      
+      let filled = 0;
+      const isBoxes = orderState.settings.unit === 'boxes';
+
+      orderState.items.forEach(item => {
+        const d = item.sku ? stockMap.get(item.sku) : null;
+        if (!d) return;
+
+        const qpb = item.qtyPerBox || 1;
+
+        // Остаток: 1С отдаёт в штуках → конвертируем если нужно
+        const stockUnits = d.stock || 0;
+        item.stock = isBoxes ? Math.round(stockUnits / qpb * 100) / 100 : Math.round(stockUnits);
+
+        // Расход: 1С отдаёт за period_days → пересчитываем на periodDays пользователя
+        const consumptionUnits = d.consumption || 0;
+        const srcDays = d.period_days || 30;
+        const dailyConsumption = srcDays > 0 ? consumptionUnits / srcDays : 0;
+        const adjustedConsumption = dailyConsumption * periodDays;
+        item.consumptionPeriod = isBoxes
+          ? Math.round(adjustedConsumption / qpb * 100) / 100
+          : Math.round(adjustedConsumption);
+
+        filled++;
+      });
+
+      render();
+      saveDraft();
+      saveStateToHistory();
+
+      const freshLabel = hoursAgo !== null
+        ? (hoursAgo < 1 ? 'только что' : `${hoursAgo} ч. назад`)
+        : '';
+      showToast(
+        `Данные из 1С загружены`,
+        `${filled} из ${orderState.items.length} позиций${freshLabel ? ' · обновлено ' + freshLabel : ''}`,
+        'success'
+      );
+    } catch (e) {
+      console.error(e);
+      showToast('Ошибка', 'Таблица stock_1c не найдена. Выполните миграцию.', 'error');
+    } finally {
+      load1cBtn.disabled = false;
+      load1cBtn.textContent = '📊 Из 1С';
+    }
+  });
+}
+
 /* ================= ПОДСТАВИТЬ ДАННЫЕ ИЗ ПРОШЛОГО ЗАКАЗА ================= */
 const fillFromLastOrderBtn = document.getElementById('fillFromLastOrder');
 if (fillFromLastOrderBtn) {
