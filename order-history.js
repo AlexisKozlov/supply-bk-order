@@ -449,17 +449,24 @@ async function loadPlanHistory(opts) {
     const startDate = plan.start_date ? new Date(plan.start_date).toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit'}) : '';
     const startLabel = startDate ? ` с ${startDate}` : '';
 
+    // Мета-строка
+    const metaParts = [];
+    if (plan.created_by) metaParts.push(`<span style="color:#2e7d32;">👤 ${esc(plan.created_by)}</span>`);
+    metaParts.push(`<span style="color:#8B7355;">${date}</span>`);
+    metaParts.push(`<span>${items.length} поз. · ${nf.format(totalBoxes)} кор</span>`);
+
     const div = document.createElement('div');
-    div.className = 'history-card';
+    div.className = 'history-order';
     div.innerHTML = `
-      <div class="history-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>
-          <b>${esc(plan.supplier || '—')}</b> · ${date} · ${periodLabel}${startLabel}
-          <span style="color:var(--muted);font-size:12px;">${items.length} позиций · ${nf.format(totalBoxes)} кор</span>
-        </span>
-        <div style="display:flex;gap:6px;">
-          <button class="btn small load-plan-btn" data-id="${plan.id}"><img src="./icons/edit.png" width="12" height="12" alt=""> Загрузить</button>
-          <button class="btn small delete-plan-btn" data-id="${plan.id}" style="background:var(--error);color:white;"><img src="./icons/delete.png" width="12" height="12" alt=""></button>
+      <div class="history-header">
+        <div class="history-title">
+          <div><b>${esc(plan.supplier || '—')}</b> · ${periodLabel}${startLabel}</div>
+          <div class="history-meta">${metaParts.join(' · ')}</div>
+        </div>
+        <div class="history-actions">
+          <button class="btn small load-plan-btn" data-id="${plan.id}" title="Загрузить план">✏️</button>
+          <button class="btn small log-plan-btn" data-id="${plan.id}" title="Лог изменений">📝</button>
+          <button class="btn small delete-plan-btn" data-id="${plan.id}" title="Удалить план">🗑️</button>
         </div>
       </div>
     `;
@@ -468,6 +475,12 @@ async function loadPlanHistory(opts) {
     loadBtn.onclick = () => {
       document.dispatchEvent(new CustomEvent('history:load-plan', { detail: { plan } }));
       document.getElementById('historyModal')?.classList.add('hidden');
+    };
+
+    const logBtn = div.querySelector('.log-plan-btn');
+    logBtn.onclick = async (e) => {
+      e.stopPropagation();
+      await showPlanLog(plan.id, div);
     };
 
     const deleteBtn = div.querySelector('.delete-plan-btn');
@@ -479,10 +492,73 @@ async function loadPlanHistory(opts) {
         showToast('Ошибка', 'Не удалось удалить', 'error');
         return;
       }
+      // Аудит
+      try {
+        await supabase.from('audit_log').insert({
+          action: 'plan_deleted',
+          entity_type: 'plan',
+          entity_id: null,
+          user_name: currentUser?.name || null,
+          details: { supplier: plan.supplier }
+        });
+      } catch(e) { /* не блокируем */ }
       showToast('План удалён', '', 'success');
       loadPlanHistory(opts);
     };
 
     historyContainer.appendChild(div);
   });
+}
+
+/**
+ * Показать лог изменений для плана
+ */
+async function showPlanLog(planId, parentDiv) {
+  const existing = parentDiv.querySelector('.audit-log-panel');
+  if (existing) { existing.remove(); return; }
+  
+  const panel = document.createElement('div');
+  panel.className = 'audit-log-panel';
+  panel.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">Загрузка...</div>';
+  parentDiv.appendChild(panel);
+  
+  try {
+    // Планы не имеют UUID entity_id, ищем по supplier + type
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('*')
+      .eq('entity_type', 'plan')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    
+    // Фильтруем по supplier из details (т.к. entity_id null для планов)
+    const filtered = (data || []).filter(log => {
+      return log.details?.supplier && log.details.supplier === parentDiv.querySelector('.history-title b')?.textContent;
+    });
+    
+    if (error || !filtered.length) {
+      panel.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">Нет записей в логе</div>';
+      return;
+    }
+    
+    const actionLabels = {
+      'plan_created': '🆕 Создан',
+      'plan_updated': '✏️ Изменён',
+      'plan_deleted': '🗑️ Удалён'
+    };
+    
+    panel.innerHTML = filtered.slice(0, 10).map(log => {
+      const date = new Date(log.created_at);
+      const dateStr = date.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' });
+      const timeStr = date.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
+      const label = actionLabels[log.action] || log.action;
+      const user = log.user_name ? esc(log.user_name) : '—';
+      const count = log.details?.items_count ? ` · ${log.details.items_count} поз.` : '';
+      return `<div style="padding:4px 0;border-bottom:1px solid #f0e8f5;font-size:12px;">
+        <span style="color:#7b1fa2;font-weight:600;">${label}</span> · <b>${user}</b> · ${dateStr} ${timeStr}${count}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    panel.innerHTML = '<div style="padding:8px;color:#c62828;font-size:12px;">Ошибка загрузки лога</div>';
+  }
 }
