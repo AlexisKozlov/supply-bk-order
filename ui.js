@@ -1668,3 +1668,27 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = '';
   }
 });
+/* ================= МОБИЛЬНОЕ МЕНЮ ================= */
+const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+const headerMenu = document.getElementById('headerMenu');
+
+if (mobileMenuToggle && headerMenu) {
+  mobileMenuToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    headerMenu.classList.toggle('open');
+  });
+  
+  // Закрытие при клике по кнопке меню
+  headerMenu.querySelectorAll('.menu-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      headerMenu.classList.remove('open');
+    });
+  });
+  
+  // Закрытие при клике вне
+  document.addEventListener('click', (e) => {
+    if (!headerMenu.contains(e.target) && e.target !== mobileMenuToggle) {
+      headerMenu.classList.remove('open');
+    }
+  });
+}
