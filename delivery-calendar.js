@@ -164,12 +164,20 @@ function renderCalendar() {
         else { if (!lastDelivery || d > lastDelivery) lastDelivery = d; }
       });
       let daysLabel = '', urgencyClass = '', sortKey = 999;
+      // Группа 1: прошлые ≤3 дней (sortKey -100...-97)
       if (lastDelivery) {
         const daysAgo = Math.round((today - lastDelivery) / 86400000);
-        if (daysAgo <= 3) { daysLabel = daysAgo === 0 ? ' (сегодня)' : ` (${daysAgo}д назад)`; sortKey = -100 + daysAgo; }
-        else if (!nextDelivery) { daysLabel = ` (${daysAgo}д назад)`; sortKey = 500 + daysAgo; if (daysAgo > 14) urgencyClass = 'cal-legend-urgent'; }
+        if (daysAgo <= 3) {
+          daysLabel = daysAgo === 0 ? ' (сегодня)' : ` (${daysAgo}д назад)`;
+          sortKey = -100 + daysAgo;
+        } else if (!nextDelivery) {
+          daysLabel = ` (${daysAgo}д назад)`;
+          sortKey = 500 + daysAgo;
+          if (daysAgo > 14) urgencyClass = 'cal-legend-urgent';
+        }
       }
-      if (nextDelivery) {
+      // Группа 2: ближайшие будущие ≤10 дней (sortKey 0...10), НО только если нет недавней прошлой
+      if (nextDelivery && sortKey > -50) {
         const daysUntil = Math.round((nextDelivery - today) / 86400000);
         daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
         sortKey = daysUntil <= 10 ? daysUntil : 100 + daysUntil;

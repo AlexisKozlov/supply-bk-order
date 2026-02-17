@@ -1710,7 +1710,17 @@ if (collapseBtn && sidebar) {
     sidebar.classList.toggle('collapsed');
     localStorage.setItem('sidebar_collapsed', sidebar.classList.contains('collapsed'));
   });
-  // Восстановление состояния
+  // Клик на brand icon — разворачивает если collapsed
+  const brandIcon = sidebar.querySelector('.sidebar-brand-icon');
+  if (brandIcon) {
+    brandIcon.addEventListener('click', () => {
+      if (sidebar.classList.contains('collapsed')) {
+        sidebar.classList.remove('collapsed');
+        localStorage.setItem('sidebar_collapsed', 'false');
+      }
+    });
+    brandIcon.style.cursor = 'pointer';
+  }
   if (localStorage.getItem('sidebar_collapsed') === 'true') {
     sidebar.classList.add('collapsed');
   }

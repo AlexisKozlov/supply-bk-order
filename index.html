@@ -351,7 +351,7 @@
           <option value="Пицца Стар">Пицца Стар</option>
         </select>
         <section class="search" style="width:50%;margin:0;">
-          <input id="dbSearch" placeholder="Поиск по карточкам" style="height:38px;" />
+          <input id="dbSearch" placeholder="Поиск по карточкам"  />
           <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
@@ -365,7 +365,7 @@
           <option value="Пицца Стар">Пицца Стар</option>
         </select>
         <section class="search" style="width:50%;margin:0;">
-          <input id="dbSupplierSearch" placeholder="Поиск по поставщикам" style="height:38px;" />
+          <input id="dbSupplierSearch" placeholder="Поиск по поставщикам"  />
           <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
@@ -517,40 +517,40 @@
       <h2 style="font-size:17px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов</h2>
       <button id="closePlanning" class="modal-close">✕</button>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:flex-end;padding:8px 20px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;">
-      <label style="flex:1;min-width:120px;">Юр. лицо
-        <select id="planLegalEntity" style="font-size:12px;">
+    <div style="display:flex;flex-wrap:nowrap;gap:6px;align-items:flex-end;padding:6px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;overflow-x:auto;">
+      <label style="min-width:100px;flex-shrink:1;">Юр. лицо
+        <select id="planLegalEntity" style="font-size:11px;padding:5px 6px;">
           <option value="Бургер БК">Бургер БК</option>
           <option value="Воглия Матта">Воглия Матта</option>
           <option value="Пицца Стар">Пицца Стар</option>
         </select>
       </label>
-      <label style="flex:1;min-width:140px;">Поставщик
-        <select id="planSupplier" style="font-size:12px;"><option value="">— Выберите —</option></select>
+      <label style="min-width:120px;flex:1;">Поставщик
+        <select id="planSupplier" style="font-size:11px;padding:5px 6px;"><option value="">— Выберите —</option></select>
       </label>
-      <label style="flex:0;min-width:100px;">Период
-        <select id="planMonths" style="font-size:12px;">
-          <optgroup label="Недели">
-            <option value="w1">1 нед</option><option value="w2">2 нед</option>
-            <option value="w3">3 нед</option><option value="w4">4 нед</option>
-            <option value="w5">5 нед</option><option value="w6">6 нед</option>
-            <option value="w8">8 нед</option><option value="w10">10 нед</option>
-            <option value="w12">12 нед</option>
+      <label style="min-width:70px;">Период
+        <select id="planMonths" style="font-size:11px;padding:5px 6px;">
+          <optgroup label="Нед">
+            <option value="w1">1н</option><option value="w2">2н</option>
+            <option value="w3">3н</option><option value="w4">4н</option>
+            <option value="w5">5н</option><option value="w6">6н</option>
+            <option value="w8">8н</option><option value="w10">10н</option>
+            <option value="w12">12н</option>
           </optgroup>
-          <optgroup label="Месяцы">
-            <option value="m1">1 мес</option><option value="m2">2 мес</option>
-            <option value="m3" selected>3 мес</option>
+          <optgroup label="Мес">
+            <option value="m1">1м</option><option value="m2">2м</option>
+            <option value="m3" selected>3м</option>
           </optgroup>
         </select>
       </label>
-      <label style="flex:0;min-width:120px;">Начало <input type="date" id="planStartDate" style="font-size:12px;" /></label>
-      <label style="flex:0;min-width:80px;">Ввод
-        <select id="planUnit" style="font-size:12px;"><option value="pieces">Шт</option><option value="boxes">Кор</option></select>
+      <label style="min-width:110px;">Начало <input type="date" id="planStartDate" style="font-size:11px;padding:5px 4px;" /></label>
+      <label style="min-width:55px;">Ввод
+        <select id="planUnit" style="font-size:11px;padding:5px 4px;"><option value="pieces">Шт</option><option value="boxes">Кор</option></select>
       </label>
-      <label style="flex:0;min-width:80px;">Проверка
-        <select id="planDataValidation" style="font-size:12px;"><option value="true">Да</option><option value="false">Нет</option></select>
+      <label style="min-width:65px;">Проверка
+        <select id="planDataValidation" style="font-size:11px;padding:5px 4px;"><option value="true">Да</option><option value="false">Нет</option></select>
       </label>
-      <button id="planLoadProducts" class="btn primary" style="height:30px;font-size:12px;padding:0 14px;white-space:nowrap;">Загрузить</button>
+      <button id="planLoadProducts" class="btn primary" style="height:28px;font-size:11px;padding:0 12px;white-space:nowrap;flex-shrink:0;">Загрузить</button>
     </div>
     <div id="planTableContainer" style="flex:1;overflow:auto;min-height:0;">
       <div style="text-align:center;padding:50px;color:var(--text-muted);">

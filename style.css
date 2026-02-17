@@ -149,21 +149,24 @@ body {
 /* Collapsed sidebar */
 .sidebar.collapsed {
   width: 52px;
+  overflow: hidden;
 }
 .sidebar.collapsed .sidebar-brand-text,
 .sidebar.collapsed .sidebar-section,
-.sidebar.collapsed .sidebar-item span:not(.sidebar-icon),
-.sidebar.collapsed .sidebar-entity-selector label,
+.sidebar.collapsed .sidebar-entity-selector,
 .sidebar.collapsed .sidebar-user-info,
-.sidebar.collapsed .sidebar-version,
-.sidebar.collapsed .sidebar-collapse-btn {
+.sidebar.collapsed .sidebar-version {
   display: none;
 }
 .sidebar.collapsed .sidebar-brand { justify-content: center; padding: 14px 8px; }
+.sidebar.collapsed .sidebar-collapse-btn { display: none; }
 .sidebar.collapsed .sidebar-nav { padding: 0 4px; }
-.sidebar.collapsed .sidebar-item { justify-content: center; padding: 9px 6px; }
-.sidebar.collapsed .sidebar-icon { margin: 0; }
-.sidebar.collapsed .sidebar-entity-selector select { font-size: 9px; padding: 4px; }
+.sidebar.collapsed .sidebar-item {
+  justify-content: center; padding: 9px 6px;
+  font-size: 0; /* скрываем текст */
+  white-space: nowrap;
+}
+.sidebar.collapsed .sidebar-item .sidebar-icon { font-size: 16px; margin: 0; }
 .sidebar.collapsed .sidebar-user { justify-content: center; }
 .sidebar.collapsed .sidebar-bottom { padding: 8px 4px 12px; }
 
