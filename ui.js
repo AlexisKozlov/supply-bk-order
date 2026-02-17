@@ -1705,7 +1705,6 @@ if (mobileMenuToggle && sidebar) {
   const mainArea = document.querySelector('.main-area');
   if (!mainArea) return;
 
-  // Модалки которые должны быть страницами
   const pageModalIds = ['historyModal', 'databaseModal', 'analyticsModal', 'planningModal', 'calendarModal'];
   
   // Перемещаем внутрь main-area и добавляем класс page-modal
@@ -1717,7 +1716,6 @@ if (mobileMenuToggle && sidebar) {
     }
   });
 
-  // Маппинг sidebar кнопок на модалки
   const sidebarMap = {
     'menuHistory': 'historyModal',
     'menuDatabase': 'databaseModal',
@@ -1726,7 +1724,14 @@ if (mobileMenuToggle && sidebar) {
     'menuCalendar': 'calendarModal',
   };
 
-  // Подсветка sidebar при открытии/закрытии модалок
+  function closeAllPageModals(exceptId) {
+    pageModalIds.forEach(id => {
+      if (id !== exceptId) {
+        document.getElementById(id)?.classList.add('hidden');
+      }
+    });
+  }
+
   function updateSidebarActive() {
     const items = document.querySelectorAll('.sidebar-item');
     let anyPageOpen = false;
@@ -1744,33 +1749,41 @@ if (mobileMenuToggle && sidebar) {
       }
     });
 
-    // Если ни одна page-модалка не открыта — подсвечиваем "Новый заказ"
     const navOrder = document.getElementById('navOrder');
     if (navOrder) {
       navOrder.classList.toggle('active', !anyPageOpen);
     }
   }
 
+  // КЛЮЧЕВОЙ ФИК: перехватываем клики sidebar ПЕРЕД модулями (capture phase)
+  Object.entries(sidebarMap).forEach(([btnId, modalId]) => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    
+    btn.addEventListener('click', () => {
+      // Закрываем все другие page-модалки
+      closeAllPageModals(modalId);
+      // Обновляем sidebar через microtask (после того как модуль откроет модалку)
+      setTimeout(updateSidebarActive, 50);
+    }, true); // capture: true — срабатывает ДО обработчиков модулей
+  });
+
   // Наблюдаем за изменениями классов модалок
   pageModalIds.forEach(id => {
     const modal = document.getElementById(id);
     if (!modal) return;
-    
     const observer = new MutationObserver(() => updateSidebarActive());
     observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
   });
 
-  // Кнопка "Новый заказ" — закрывает все page-модалки
+  // Кнопка "Новый заказ"
   const navOrder = document.getElementById('navOrder');
   if (navOrder) {
     navOrder.addEventListener('click', () => {
-      pageModalIds.forEach(id => {
-        document.getElementById(id)?.classList.add('hidden');
-      });
+      closeAllPageModals();
       updateSidebarActive();
     });
   }
 
-  // Начальное состояние
   updateSidebarActive();
 })();
