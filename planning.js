@@ -200,7 +200,6 @@ async function initPlanningUI() {
     });
 
     supplierSelect.addEventListener('change', () => {
-      resetPlanConsumptionCache();
       notifyPlanParamsChanged();
     });
 
@@ -531,8 +530,8 @@ function renderPlanTable() {
     html += `
       <tr data-idx="${idx}">
         <td class="plan-td-name">
-          <div style="font-weight:600;font-size:13px;color:var(--brown);">${skuPrefix}${esc(item.name)}</div>
-          <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
+          <div style="font-weight:600;font-size:13px;color:var(--text);">${skuPrefix}${esc(item.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
         </td>
         <td class="plan-td-input">
           <input type="text" inputmode="numeric" class="plan-input plan-consumption" data-idx="${idx}" data-col="0" value="${item.monthlyConsumption || ''}" placeholder="0">
@@ -810,7 +809,7 @@ function updatePlanCells(idx) {
       cell.innerHTML = `<span class="plan-result-value${lockedClass}">${p.orderBoxes} кор ${palletBtn}${resetBtn}</span><span class="plan-result-sub">${nf.format(p.orderUnits)} ${item.unitOfMeasure}</span>`;
       cell.classList.add('plan-has-value');
     } else {
-      cell.innerHTML = '<span class="plan-result-zero">—</span>';
+      cell.innerHTML = '<span class="plan-result-zero">0</span>';
       cell.classList.remove('plan-has-value');
     }
     

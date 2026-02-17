@@ -151,38 +151,36 @@ function renderCalendar() {
     </div>
   `;
 
-  // Легенда поставщиков
+  // Легенда поставщиков — с сортировкой
   const suppliers = Object.keys(calState.supplierColors);
   if (suppliers.length) {
-    html += '<div class="cal-legend">';
-    suppliers.forEach(s => {
-      // Находим ближайшую будущую и последнюю прошлую поставку
+    // Собираем данные для сортировки
+    const supplierData = suppliers.map(s => {
       const supplierOrders = calState.orders.filter(o => o.supplier === s);
-      let nextDelivery = null;
-      let lastDelivery = null;
-      
+      let nextDelivery = null, lastDelivery = null;
       supplierOrders.forEach(o => {
         const d = new Date(o.delivery_date);
-        if (d >= today) {
-          if (!nextDelivery || d < nextDelivery) nextDelivery = d;
-        } else {
-          if (!lastDelivery || d > lastDelivery) lastDelivery = d;
-        }
+        if (d >= today) { if (!nextDelivery || d < nextDelivery) nextDelivery = d; }
+        else { if (!lastDelivery || d > lastDelivery) lastDelivery = d; }
       });
-
-      let daysLabel = '';
-      let urgencyClass = '';
-      
+      let daysLabel = '', urgencyClass = '', sortKey = 999;
+      if (lastDelivery) {
+        const daysAgo = Math.round((today - lastDelivery) / 86400000);
+        if (daysAgo <= 3) { daysLabel = daysAgo === 0 ? ' (сегодня)' : ` (${daysAgo}д назад)`; sortKey = -100 + daysAgo; }
+        else if (!nextDelivery) { daysLabel = ` (${daysAgo}д назад)`; sortKey = 500 + daysAgo; if (daysAgo > 14) urgencyClass = 'cal-legend-urgent'; }
+      }
       if (nextDelivery) {
         const daysUntil = Math.round((nextDelivery - today) / 86400000);
         daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
-      } else if (lastDelivery) {
-        const daysAgo = Math.round((today - lastDelivery) / 86400000);
-        daysLabel = ` (${daysAgo}д назад)`;
-        if (daysAgo > 14) urgencyClass = 'cal-legend-urgent';
+        sortKey = daysUntil <= 10 ? daysUntil : 100 + daysUntil;
       }
-      
-      html += `<span class="cal-legend-item ${urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s]}"></span>${s}${daysLabel}</span>`;
+      return { name: s, daysLabel, urgencyClass, sortKey };
+    });
+    supplierData.sort((a, b) => a.sortKey - b.sortKey);
+
+    html += '<div class="cal-legend">';
+    supplierData.forEach(s => {
+      html += `<span class="cal-legend-item ${s.urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s.name]}"></span>${s.name}${s.daysLabel}</span>`;
     });
     html += '</div>';
   }
@@ -220,8 +218,9 @@ function renderCalendar() {
       html += '<div class="cal-orders">';
       orders.forEach(o => {
         const color = calState.supplierColors[o.supplier] || '#999';
+        const shortName = o.supplier.length > 8 ? o.supplier.slice(0, 7) + '…' : o.supplier;
         const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
-        html += `<div class="cal-order-dot" style="background:${color}" title="${esc(o.supplier)}: ${boxes} кор" data-order-id="${o.id}"></div>`;
+        html += `<div class="cal-order-tag" style="background:${color}20;color:${color};border:1px solid ${color}40;" title="${esc(o.supplier)}: ${boxes} кор">${shortName}</div>`;
       });
       html += '</div>';
     }

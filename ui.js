@@ -531,13 +531,22 @@ function toggleTransitColumn() {
   const hasTransit = orderState.settings.hasTransit;
   const transitCols = document.querySelectorAll('.transit-col');
   
+  // Проверяем есть ли заполненные значения транзита
+  const hasTransitValues = orderState.items.some(item => item.transit && item.transit > 0);
+  
   transitCols.forEach(col => {
-    if (hasTransit) {
+    if (hasTransit || hasTransitValues) {
       col.classList.remove('hidden');
     } else {
       col.classList.add('hidden');
     }
   });
+  
+  // Если есть значения — принудительно ставим select в "Да"
+  if (hasTransitValues && !hasTransit) {
+    const select = document.getElementById('hasTransit');
+    if (select) { select.value = 'true'; orderState.settings.hasTransit = true; }
+  }
 }
 
 function toggleStockColumn() {
@@ -1693,6 +1702,19 @@ window.addEventListener('beforeunload', (e) => {
 /* ================= МОБИЛЬНОЕ МЕНЮ (SIDEBAR) ================= */
 const mobileMenuToggle = document.getElementById('mobileMenuToggle');
 const sidebar = document.getElementById('sidebar');
+
+/* Collapse/expand sidebar */
+const collapseBtn = document.getElementById('sidebarCollapseBtn');
+if (collapseBtn && sidebar) {
+  collapseBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+    localStorage.setItem('sidebar_collapsed', sidebar.classList.contains('collapsed'));
+  });
+  // Восстановление состояния
+  if (localStorage.getItem('sidebar_collapsed') === 'true') {
+    sidebar.classList.add('collapsed');
+  }
+}
 
 if (mobileMenuToggle && sidebar) {
   mobileMenuToggle.addEventListener('click', (e) => {

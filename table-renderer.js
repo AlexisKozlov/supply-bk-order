@@ -327,7 +327,8 @@ export function updateRow(tr, item, settings) {
   const dateCell = tr.querySelector('.date');
   if (calc.coverageDate && settings.deliveryDate) {
     const daysDiff = Math.ceil((calc.coverageDate - settings.deliveryDate) / 86400000);
-    dateCell.textContent = `${calc.coverageDate.toLocaleDateString('ru-RU')} (${daysDiff} дн.)`;
+    const shortDate = (d) => { const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()).slice(2); return `${dd}.${mm}.${yy}`; };
+    dateCell.textContent = `${shortDate(calc.coverageDate)} (${daysDiff} дн.)`;
   } else {
     dateCell.textContent = '-';
   }
@@ -347,7 +348,8 @@ export function updateRow(tr, item, settings) {
     const daysOfCurrentStock = Math.floor(totalStock / dailyConsumption);
     // Сегодня — первый день потребления, поэтому хватит до today + days
     const stockEndDate = new Date(settings.today.getTime() + daysOfCurrentStock * 86400000);
-    stockDisplay.textContent = `${stockEndDate.toLocaleDateString('ru-RU')} (${daysOfCurrentStock} дн.)`;
+    const shortDate2 = (d) => { const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = String(d.getFullYear()).slice(2); return `${dd}.${mm}.${yy}`; };
+    stockDisplay.textContent = `${shortDate2(stockEndDate)} (${daysOfCurrentStock} дн.)`;
   } else if (stockDisplay) {
     stockDisplay.textContent = '-';
   }

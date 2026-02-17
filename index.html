@@ -40,6 +40,7 @@
         Калькулятор
         <small>Отдел закупок</small>
       </div>
+      <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Свернуть">◀</button>
     </div>
 
     <div class="sidebar-section">Заказы</div>
@@ -186,14 +187,14 @@
           <span class="table-toolbar-title">Заказ</span>
           <span id="itemsCounter" class="table-toolbar-count"></span>
           <div class="table-toolbar-spacer"></div>
-          <button id="undoBtn" class="btn btn-ghost btn-sm" disabled title="Ctrl+Z">↶</button>
-          <button id="redoBtn" class="btn btn-ghost btn-sm" disabled title="Ctrl+Y">↷</button>
-          <div class="table-toolbar-divider"></div>
           <button id="load1cBtn" class="btn btn-ghost btn-sm">📊 Из 1С</button>
           <button id="fillFromLastOrder" class="btn btn-ghost btn-sm">📋 Расход</button>
           <button id="importStockBtn" class="btn btn-ghost btn-sm">📥 Импорт</button>
           <button id="allToOrderBtn" class="btn btn-secondary btn-sm">→ В заказ всё</button>
           <button id="clearOrder" class="btn btn-ghost btn-sm" style="color:var(--error);">🗑 Очистить</button>
+          <div class="table-toolbar-divider"></div>
+          <button id="undoBtn" class="btn btn-ghost btn-sm" disabled title="Ctrl+Z">↶</button>
+          <button id="redoBtn" class="btn btn-ghost btn-sm" disabled title="Ctrl+Y">↷</button>
           <div class="table-toolbar-divider"></div>
           <section class="search toolbar-search">
             <input id="productSearch" placeholder="Поиск товара..." />
@@ -511,49 +512,45 @@
 
 <!-- МОДАЛКА: ПЛАНИРОВАНИЕ -->
 <div id="planningModal" class="modal hidden">
-  <div class="modal-box large" style="padding:24px;">
+  <div class="modal-box large" style="padding:0;">
     <div class="modal-header">
-      <h2 style="font-size:20px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов</h2>
+      <h2 style="font-size:17px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов</h2>
       <button id="closePlanning" class="modal-close">✕</button>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:14px 16px;background:var(--bg);border-radius:8px;margin-bottom:16px;">
-      <label style="flex:1;min-width:140px;">Юр. лицо
-        <select id="planLegalEntity">
+    <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:flex-end;padding:8px 20px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;">
+      <label style="flex:1;min-width:120px;">Юр. лицо
+        <select id="planLegalEntity" style="font-size:12px;">
           <option value="Бургер БК">Бургер БК</option>
           <option value="Воглия Матта">Воглия Матта</option>
           <option value="Пицца Стар">Пицца Стар</option>
         </select>
       </label>
-      <label style="flex:1;min-width:150px;">Поставщик
-        <select id="planSupplier"><option value="">— Выберите поставщика —</option></select>
+      <label style="flex:1;min-width:140px;">Поставщик
+        <select id="planSupplier" style="font-size:12px;"><option value="">— Выберите —</option></select>
       </label>
-      <label style="flex:0;min-width:160px;">Период
-        <select id="planMonths">
+      <label style="flex:0;min-width:100px;">Период
+        <select id="planMonths" style="font-size:12px;">
           <optgroup label="Недели">
-            <option value="w1">1 неделя</option><option value="w2">2 недели</option>
-            <option value="w3">3 недели</option><option value="w4">4 недели</option>
-            <option value="w5">5 недель</option><option value="w6">6 недель</option>
-            <option value="w8">8 недель</option><option value="w10">10 недель</option>
-            <option value="w12">12 недель</option>
+            <option value="w1">1 нед</option><option value="w2">2 нед</option>
+            <option value="w3">3 нед</option><option value="w4">4 нед</option>
+            <option value="w5">5 нед</option><option value="w6">6 нед</option>
+            <option value="w8">8 нед</option><option value="w10">10 нед</option>
+            <option value="w12">12 нед</option>
           </optgroup>
           <optgroup label="Месяцы">
-            <option value="m1">1 месяц</option><option value="m2">2 месяца</option>
-            <option value="m3" selected>3 месяца</option>
+            <option value="m1">1 мес</option><option value="m2">2 мес</option>
+            <option value="m3" selected>3 мес</option>
           </optgroup>
         </select>
       </label>
-      <label style="flex:0;min-width:130px;">Дата начала <input type="date" id="planStartDate" /></label>
-      <label style="flex:0;min-width:100px;">Ввод в
-        <select id="planUnit"><option value="pieces">Штуках</option><option value="boxes">Коробках</option></select>
+      <label style="flex:0;min-width:120px;">Начало <input type="date" id="planStartDate" style="font-size:12px;" /></label>
+      <label style="flex:0;min-width:80px;">Ввод
+        <select id="planUnit" style="font-size:12px;"><option value="pieces">Шт</option><option value="boxes">Кор</option></select>
       </label>
-      <label style="flex:0;min-width:110px;">Проверка
-        <select id="planDataValidation"><option value="true">Да</option><option value="false">Нет</option></select>
+      <label style="flex:0;min-width:80px;">Проверка
+        <select id="planDataValidation" style="font-size:12px;"><option value="true">Да</option><option value="false">Нет</option></select>
       </label>
-      <div style="flex-basis:100%;"></div>
-      <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
-    </div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:0 4px;">
-      Введите расход за месяц, остатки на складе и у поставщика — система автоматически рассчитает объёмы заказа по месяцам.
+      <button id="planLoadProducts" class="btn primary" style="height:30px;font-size:12px;padding:0 14px;white-space:nowrap;">Загрузить</button>
     </div>
     <div id="planTableContainer" style="flex:1;overflow:auto;min-height:0;">
       <div style="text-align:center;padding:50px;color:var(--text-muted);">
