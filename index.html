@@ -16,10 +16,10 @@
 <!-- ===== ВХОД ===== -->
 <div id="loginOverlay" class="login-overlay">
   <div class="login-box">
-    <span style="font-size:42px;display:block;margin-bottom:2px;"> <img src="./icons/burger.png" width="28" height="28" alt=""></span>
+    <div class="login-logo">🍔</div>
     <h2>Калькулятор заказа</h2>
     <p>Выберите пользователя и введите пароль</p>
-    <select id="loginUser" style="width:100%;padding:10px;border:1px solid #d0c9b8;border-radius:8px;font-size:15px;margin-bottom:10px;background:white;">
+    <select id="loginUser">
       <option value="">Выберите имя...</option>
     </select>
     <input id="loginPassword" type="password" placeholder="Пароль" autocomplete="current-password" />
@@ -27,198 +27,243 @@
   </div>
 </div>
 
-<header class="header">
-<h1 align="center">
-  <img
-    src="./icons/burger.png"
-    width="28"
-    height="28"
-    style="vertical-align: -4px;"
-    alt=""
-  >
-  <span class="header-title-text">Калькулятор заказа</span>
-</h1>
-  <button id="mobileMenuToggle" class="mobile-menu-toggle">☰</button>
-  <nav class="header-menu" id="headerMenu">
-    <button id="menuHistory" class="menu-btn"><img src="./icons/history.png" width="14" height="14" alt=""> История</button>
-    <button id="menuDatabase" class="menu-btn"><img src="./icons/base.png" width="14" height="14"  alt=""> База данных</button>
-    <button id="addManual" class="menu-btn"><img src="./icons/new-product.png" width="14" height="14" alt=""> Новый товар</button>
-    <button id="menuAnalytics" class="menu-btn"><img src="./icons/analytics.png" width="14" height="14"  alt=""> Аналитика</button>
-    <button id="menuPlanning" class="menu-btn"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование</button>
-    <button id="menuCalendar" class="menu-btn"><img src="./icons/calendar.png" width="14" height="14" alt=""> Календарь</button>
-  </nav>
-  <span id="entityBadge" class="entity-badge">Бургер БК</span>
-  <div class="user-menu">
-    <span id="userBadge" class="user-badge hidden"></span>
-    <div id="userDropdown" class="user-dropdown hidden">
-      <button id="changePasswordBtn" class="user-dropdown-btn" style="color:var(--brown);">🔑 Сменить пароль</button>
-      <button id="logoutBtn" class="user-dropdown-btn" style="color:#d32f2f;">Выйти</button>
+<!-- ===== APP SHELL ===== -->
+<div class="app-layout">
+
+  <!-- ═══════ SIDEBAR ═══════ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <img src="./icons/burger.png" width="24" height="24" alt="">
+      </div>
+      <div class="sidebar-brand-text">
+        Калькулятор
+        <small>Burger King</small>
+      </div>
     </div>
-  </div>
-</header>
 
-<main class="container">
+    <div class="sidebar-section">Заказы</div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-item active" id="navOrder">
+        <span class="sidebar-icon">📦</span> Новый заказ
+      </button>
+      <button class="sidebar-item" id="menuHistory">
+        <span class="sidebar-icon">📋</span> История
+      </button>
+      <button class="sidebar-item" id="menuPlanning">
+        <span class="sidebar-icon">📊</span> Планирование
+      </button>
+    </nav>
 
-  <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
-  <section class="card">
-    <h2>Параметры заказа</h2>
+    <div class="sidebar-section">Данные</div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-item" id="menuDatabase">
+        <span class="sidebar-icon">🗄️</span> База товаров
+      </button>
+      <button class="sidebar-item" id="addManual">
+        <span class="sidebar-icon">➕</span> Новый товар
+      </button>
+      <button class="sidebar-item" id="menuAnalytics">
+        <span class="sidebar-icon">📈</span> Аналитика
+      </button>
+      <button class="sidebar-item" id="menuCalendar">
+        <span class="sidebar-icon">📅</span> Календарь
+      </button>
+    </nav>
 
-    <div class="settings">
-      <label class="tooltip-wrap" data-tip="Юридическое лицо для которого формируется заказ">
-        Юр. лицо
-        <select id="legalEntity">
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Фильтр товаров по поставщику">
-        Поставщик
-        <select id="supplierFilter">
-          <option value="">Все / свободный</option>
-        </select>
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Дата от которой считается расход товаров">
-        Дата сегодня
-        <input type="date" id="today" />
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Предполагаемая дата поступления товара от поставщика">
-        Дата прихода
-        <input type="date" id="deliveryDate" />
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Количество дней для расчёта среднего дневного расхода">
-        Период расхода (дней)
-        <input type="number" id="periodDays" value="30" />
-      </label>
-
-
-      <label class="tooltip-wrap" data-tip="Желаемый запас товара на складе после поставки (в днях или дата)">
-        Товарный запас
-        <div class="safety-input-wrap">
-          <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" />
-          <button type="button" id="safetyCalendarBtn" class="safety-calendar-icon" title="Выбрать дату окончания запаса">
-            <img src="./icons/calendar.png" width="16" height="16" alt="">
-          </button>
+    <div class="sidebar-bottom">
+      <div class="sidebar-entity">
+        <span id="entityBadge" class="sidebar-entity-badge">Бургер БК</span>
+      </div>
+      <div class="sidebar-user" id="userBadge">
+        <div class="sidebar-avatar" id="userAvatarLetters">—</div>
+        <div class="sidebar-user-info">
+          <div class="sidebar-user-name" id="userNameDisplay">Пользователь</div>
+          <div class="sidebar-user-role">Менеджер</div>
         </div>
-      </label>
-      <label class="tooltip-wrap" data-tip="Единицы измерения для ввода расхода и отображения заказа">
-        Единицы
-        <select id="unit">
-          <option value="pieces">Штуки</option>
-          <option value="boxes">Коробки</option>
-        </select>
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Показывать колонку Транзит (товар в пути) в таблице заказа">
-        Наличие транзита
-        <select id="hasTransit">
-          <option value="false">Нет</option>
-          <option value="true">Да</option>
-        </select>
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Показывать колонку Запас (до какой даты хватит товара) в таблице заказа">
-        Отображение запаса
-        <select id="showStockColumn">
-          <option value="false">Нет</option>
-          <option value="true">Да</option>
-        </select>
-      </label>
-
-      <label class="tooltip-wrap" data-tip="Подсветка расхода, если он отличается от среднего по истории более чем на 25%">
-        Проверка данных
-        <select id="dataValidation">
-          <option value="true">Да</option>
-          <option value="false">Нет</option>
-        </select>
-      </label>
+      </div>
+      <div id="userDropdown" class="user-dropdown hidden">
+        <button id="changePasswordBtn" class="user-dropdown-btn">🔑 Сменить пароль</button>
+        <button id="logoutBtn" class="user-dropdown-btn logout">Выйти</button>
+      </div>
     </div>
+  </aside>
 
-    <!-- КЛЮЧЕВАЯ КНОПКА -->
-    <button id="buildOrder" class="btn primary">
-      <img src="./icons/box.png" width="18" height="18" style="vertical-align:-3px;" alt=""> Сформировать заказ
-    </button>
-  </section>
+  <!-- ═══════ MAIN CONTENT ═══════ -->
+  <div class="main-area">
 
-  <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
-  <div id="orderSection" class="hidden">
+    <!-- ─── Topbar ─── -->
+    <header class="topbar">
+      <button class="mobile-sidebar-toggle" id="mobileMenuToggle">☰</button>
+      <h1 class="topbar-title" id="pageTitle">Новый заказ</h1>
+      <div class="topbar-right">
+        <span class="topbar-badge-entity" id="topbarEntity">Бургер БК</span>
+      </div>
+    </header>
 
-    <!-- ТАБЛИЦА ЗАКАЗА -->
-    <section class="card">
-      <h2>Заказ <span id="itemsCounter" style="font-weight:400;font-size:14px;color:#8B7355;"></span></h2>
+    <!-- ─── Content ─── -->
+    <main class="content-area">
+      <div class="container">
 
-      <!-- ВЕРХНЯЯ ПАНЕЛЬ: рабочие инструменты -->
-      <div class="order-actions" style="display:flex;gap:6px;margin-bottom:12px;font-size:13px;flex-wrap:wrap;align-items:center;">
-        <button id="undoBtn" class="btn secondary tooltip-wrap" disabled data-tip="Отменить (Ctrl+Z)" style="padding:4px 8px;">↶</button>
-        <button id="redoBtn" class="btn secondary tooltip-wrap" disabled data-tip="Повторить (Ctrl+Y)" style="padding:4px 8px;">↷</button>
-        <button id="allToOrderBtn" class="btn primary tooltip-wrap" data-tip="Перенести расчёт в заказ для всех товаров" style="padding:4px 10px;">В заказ всё</button>
-        <button id="fillFromLastOrder" class="btn primary tooltip-wrap" data-tip="Подставить расход из последнего заказа этому поставщику" style="padding:4px 10px;">📋 Подставить расход</button>
-        <button id="importStockBtn" class="btn primary tooltip-wrap" data-tip="Импорт остатков из Excel/CSV" style="padding:4px 10px;"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт</button>
-        <button id="load1cBtn" class="btn primary tooltip-wrap" data-tip="Загрузить остатки и расход из 1С" style="padding:4px 10px;">📊 Из 1С</button>
-        <button id="clearOrder" class="btn primary btn-clear-order tooltip-wrap" data-tip="Удалить все товары из текущего заказа" style="padding:4px 10px;">Очистить</button>
-        
-        <div style="flex:1;min-width:20px;"></div>
-        
-        <section class="search" style="max-width:450px;min-width:280px;margin:0;flex:2;">
-          <input id="productSearch" placeholder="Поиск товара" />
-          <button id="clearSearch" class="search-clear hidden">✕</button>
-          <div id="searchResults" class="search-results"></div>
+        <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
+        <section class="card params-card">
+          <div class="params-bar">
+            <div class="param-group">
+              <label for="legalEntity">Юр. лицо</label>
+              <select id="legalEntity">
+                <option value="Бургер БК">Бургер БК</option>
+                <option value="Воглия Матта">Воглия Матта</option>
+                <option value="Пицца Стар">Пицца Стар</option>
+              </select>
+            </div>
+
+            <div class="param-group">
+              <label for="supplierFilter">Поставщик</label>
+              <select id="supplierFilter">
+                <option value="">Все / свободный</option>
+              </select>
+            </div>
+
+            <div class="param-group">
+              <label for="today">Дата сегодня</label>
+              <input type="date" id="today" />
+            </div>
+
+            <div class="param-group">
+              <label for="deliveryDate">Дата прихода</label>
+              <input type="date" id="deliveryDate" />
+            </div>
+
+            <div class="param-group">
+              <label for="periodDays">Период (дн)</label>
+              <input type="number" id="periodDays" value="30" style="width:80px;" />
+            </div>
+
+            <div class="param-group">
+              <label for="safetyDays">Товарный запас</label>
+              <div class="safety-input-wrap">
+                <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" />
+                <button type="button" id="safetyCalendarBtn" class="safety-calendar-icon" title="Выбрать дату">
+                  <img src="./icons/calendar.png" width="14" height="14" alt="">
+                </button>
+              </div>
+            </div>
+
+            <div class="param-group">
+              <label for="unit">Единицы</label>
+              <select id="unit">
+                <option value="pieces">Штуки</option>
+                <option value="boxes">Коробки</option>
+              </select>
+            </div>
+
+            <div class="param-group">
+              <label for="hasTransit">Транзит</label>
+              <select id="hasTransit">
+                <option value="false">Нет</option>
+                <option value="true">Да</option>
+              </select>
+            </div>
+
+            <div class="param-group">
+              <label for="showStockColumn">Запас</label>
+              <select id="showStockColumn">
+                <option value="false">Нет</option>
+                <option value="true">Да</option>
+              </select>
+            </div>
+
+            <div class="param-group">
+              <label for="dataValidation">Проверка</label>
+              <select id="dataValidation">
+                <option value="true">Да</option>
+                <option value="false">Нет</option>
+              </select>
+            </div>
+          </div>
+
+          <button id="buildOrder" class="btn primary btn-build">
+            <img src="./icons/box.png" width="16" height="16" alt=""> Сформировать заказ
+          </button>
         </section>
-      </div>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th style="width:30px;"></th>
-              <th>Товар</th>
-              <th>Расход</th>
-              <th>Остаток</th>
-              <th class="transit-col">Транзит</th>
-              <th class="stock-col">Запас</th>
-              <th>Расчёт</th>
-              <th>Заказ (шт / кор)</th>
-              <th>Хватит до</th>
-              <th>Паллеты</th>
-              <th style="width:40px;"></th>
-            </tr>
-          </thead>
-          <tbody id="items"></tbody>
-        </table>
-      </div>
+        <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
+        <div id="orderSection" class="hidden">
 
-      <!-- НИЖНЯЯ ПАНЕЛЬ: действия с готовым заказом -->
-      <div class="order-bottom-actions">
-        <button id="saveOrder" class="btn primary tooltip-wrap" data-tip="Сохранить заказ в историю"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить</button>
-        <button id="copyOrder" class="btn primary tooltip-wrap" data-tip="Скопировать заказ в буфер обмена"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать</button>
-        <button id="shareOrderBtn" class="btn primary tooltip-wrap" data-tip="Отправить заказ поставщику"><img src="./icons/share.svg" width="14" height="14" alt="" style="vertical-align:-2px;"> Отправить</button>
-        <button id="exportExcelBtn" class="btn primary tooltip-wrap" data-tip="Экспортировать заказ в Excel"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
-      </div>
-    </section>
+          <div class="table-card">
+            <!-- Toolbar таблицы -->
+            <div class="table-toolbar">
+              <span class="table-toolbar-title">Заказ</span>
+              <span id="itemsCounter" class="table-toolbar-count"></span>
+              <div class="table-toolbar-spacer"></div>
+              <button id="undoBtn" class="btn btn-ghost btn-sm" disabled title="Отменить (Ctrl+Z)">↶</button>
+              <button id="redoBtn" class="btn btn-ghost btn-sm" disabled title="Повторить (Ctrl+Y)">↷</button>
+              <div class="table-toolbar-divider"></div>
+              <button id="load1cBtn" class="btn btn-ghost btn-sm">📊 Из 1С</button>
+              <button id="fillFromLastOrder" class="btn btn-ghost btn-sm">📋 Расход</button>
+              <button id="importStockBtn" class="btn btn-ghost btn-sm">📥 Импорт</button>
+              <button id="allToOrderBtn" class="btn btn-secondary btn-sm">→ В заказ всё</button>
+              <button id="clearOrder" class="btn btn-ghost btn-sm btn-danger">🗑 Очистить</button>
+              <div class="table-toolbar-divider"></div>
+              <section class="search toolbar-search">
+                <input id="productSearch" placeholder="Поиск товара..." />
+                <button id="clearSearch" class="search-clear hidden">✕</button>
+                <div id="searchResults" class="search-results"></div>
+              </section>
+            </div>
 
-    <!-- ИТОГ -->
-    <section class="card">
-      <h2>Итог заказа</h2>
-      <div id="finalSummary"></div>
-    </section>
+            <!-- Таблица -->
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:30px;"></th>
+                    <th>Товар</th>
+                    <th>Расход</th>
+                    <th>Остаток</th>
+                    <th class="transit-col">Транзит</th>
+                    <th class="stock-col">Запас</th>
+                    <th>Расчёт</th>
+                    <th>Заказ (шт / кор)</th>
+                    <th>Хватит до</th>
+                    <th>Паллеты</th>
+                    <th style="width:40px;"></th>
+                  </tr>
+                </thead>
+                <tbody id="items"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ИТОГ -->
+          <div class="card summary-card">
+            <div id="finalSummary"></div>
+          </div>
+
+          <!-- НИЖНЯЯ ПАНЕЛЬ: прибита к низу -->
+          <div class="order-bottom-bar">
+            <button id="saveOrder" class="btn btn-primary"><img src="./icons/save.png" width="14" height="14" alt=""> Сохранить</button>
+            <button id="copyOrder" class="btn btn-secondary"><img src="./icons/copy.png" width="14" height="14" alt=""> Скопировать</button>
+            <button id="shareOrderBtn" class="btn btn-secondary"><img src="./icons/share.svg" width="14" height="14" alt=""> Отправить</button>
+            <button id="exportExcelBtn" class="btn btn-secondary"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
+          </div>
+        </div>
+
+      </div>
+    </main>
 
   </div>
+</div>
 
+<!-- ===== МОДАЛКИ (без изменений — все ID сохранены) ===== -->
 
-</main>
-
-<!-- ===== МОДАЛКА: ИСТОРИЯ ЗАКАЗОВ ===== -->
+<!-- МОДАЛКА: ИСТОРИЯ ЗАКАЗОВ -->
 <div id="historyModal" class="modal hidden">
   <div class="modal-box large">
     <div class="modal-header">
       <h2><img src="./icons/history.png" width="16" height="16" alt=""> История</h2>
       <button id="closeHistory" class="modal-close">✕</button>
     </div>
-
     <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
       <label style="flex:0;min-width:140px;">
         Раздел
@@ -243,51 +288,36 @@
         </select>
       </label>
     </div>
-
     <div id="orderHistory"></div>
   </div>
 </div>
 
-
-<!-- ===== МОДАЛКА: НОВЫЙ ТОВАР (из меню) ===== -->
+<!-- МОДАЛКА: НОВЫЙ ТОВАР -->
 <div id="manualModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
       <h2><img src="./icons/new-product.png" width="16" height="16" alt=""> Новый товар</h2>
       <button id="closeManual" class="modal-close">✕</button>
     </div>
-
     <input id="m_sku" placeholder="Артикул" />
     <input id="m_name" placeholder="Наименование*" />
-    
-    <label>
-      Поставщик
-      <select id="m_supplier">
-        <option value="">— Выберите поставщика —</option>
-      </select>
-    </label>
-    
-    <label>
-      Юр. лицо
+    <label>Поставщик <select id="m_supplier"><option value="">— Выберите поставщика —</option></select></label>
+    <label>Юр. лицо
       <select id="m_legalEntity">
         <option value="Бургер БК">Бургер БК</option>
         <option value="Воглия Матта">Воглия Матта</option>
         <option value="Пицца Стар">Пицца Стар</option>
       </select>
     </label>
-    
     <input id="m_box" type="number" placeholder="Штук в коробке" />
-    <input id="m_pallet" type="number" placeholder="Коробов на паллете" />
-    
-    <label>
-      Единица измерения
+    <input id="m_pallet" type="number" placeholder="Коробок на паллете" />
+    <label>Единица измерения
       <select id="m_unit">
         <option value="шт">штуки</option>
         <option value="л">литры</option>
         <option value="кг">килограммы</option>
       </select>
     </label>
-
     <div class="actions">
       <button id="m_add" class="btn primary">Добавить</button>
       <button id="m_cancel" class="btn secondary">Отмена</button>
@@ -295,16 +325,14 @@
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: ПОДТВЕРЖДЕНИЕ ===== -->
+<!-- МОДАЛКА: ПОДТВЕРЖДЕНИЕ -->
 <div id="confirmModal" class="modal hidden">
   <div class="modal-box" style="max-width:400px;">
     <div class="modal-header">
       <h2 id="confirmTitle">Подтверждение</h2>
       <button id="closeConfirm" class="modal-close">✕</button>
     </div>
-    
-    <p id="confirmMessage" style="margin:0 0 24px;color:#5A2D0C;line-height:1.6;"></p>
-    
+    <p id="confirmMessage" style="margin:0 0 24px;line-height:1.6;"></p>
     <div class="actions">
       <button id="confirmYes" class="btn primary">Да</button>
       <button id="confirmNo" class="btn secondary">Отмена</button>
@@ -312,27 +340,21 @@
   </div>
 </div>
 
-
-
-<!-- ===== МОДАЛКА: БАЗА ДАННЫХ ===== -->
+<!-- МОДАЛКА: БАЗА ДАННЫХ -->
 <div id="databaseModal" class="modal hidden">
   <div class="modal-box large">
     <div class="modal-header">
-      <h2><img src="./icons/base.png" width="20" height="20" style="vertical-align:-3px;" alt=""> База данных <span id="dbCardCount" style="font-weight:400;font-size:14px;color:#8B7355;"></span></h2>
+      <h2><img src="./icons/base.png" width="20" height="20" style="vertical-align:-3px;" alt=""> База данных <span id="dbCardCount" style="font-weight:400;font-size:14px;color:var(--text-muted);"></span></h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:12px;">
         <button id="dbNewProductBtn" class="btn primary" style="height:32px;font-size:12px;white-space:nowrap;display:none;">+ Новый товар</button>
         <button id="dbNewSupplierBtn" class="btn primary" style="height:32px;font-size:12px;white-space:nowrap;display:none;">+ Новый поставщик</button>
       </div>
       <button id="closeDatabase" class="modal-close">✕</button>
     </div>
-
-    <!-- Табы -->
     <div class="db-tabs">
       <button class="db-tab active" data-tab="products">Товары</button>
       <button class="db-tab" data-tab="suppliers">Поставщики</button>
     </div>
-
-    <!-- ТАБ: ТОВАРЫ -->
     <div id="dbTabProducts" class="db-tab-content">
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
         <select id="dbLegalEntity" style="width:50%;height:38px;">
@@ -345,11 +367,8 @@
           <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
-
       <div id="databaseList" style="max-height:55vh;overflow-y:auto;"></div>
     </div>
-
-    <!-- ТАБ: ПОСТАВЩИКИ -->
     <div id="dbTabSuppliers" class="db-tab-content hidden">
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
         <select id="dbSupplierLegalEntity" style="width:50%;height:38px;">
@@ -362,51 +381,37 @@
           <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
-
       <div id="supplierList" style="max-height:55vh;overflow-y:auto;"></div>
     </div>
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: РЕДАКТИРОВАНИЕ КАРТОЧКИ ТОВАРА ===== -->
+<!-- МОДАЛКА: РЕДАКТИРОВАНИЕ КАРТОЧКИ ТОВАРА -->
 <div id="editCardModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
       <h2 id="editCardTitle"><img src="./icons/edit.png" width="20" height="20" style="vertical-align:-3px;" alt=""> Редактирование карточки</h2>
       <button id="closeEditCard" class="modal-close">✕</button>
     </div>
-
     <input id="e_sku" placeholder="Артикул" />
     <input id="e_name" placeholder="Наименование*" />
-    
-    <label>
-      Поставщик
-      <select id="e_supplier">
-        <option value="">— Выберите поставщика —</option>
-      </select>
-    </label>
-    
-    <label>
-      Юр. лицо
+    <label>Поставщик <select id="e_supplier"><option value="">— Выберите поставщика —</option></select></label>
+    <label>Юр. лицо
       <select id="e_legalEntity">
         <option value="Бургер БК">Бургер БК</option>
         <option value="Воглия Матта">Воглия Матта</option>
         <option value="Пицца Стар">Пицца Стар</option>
       </select>
     </label>
-    
     <input id="e_box" type="number" placeholder="Штук в коробке" />
     <input id="e_pallet" type="number" placeholder="Коробок на паллете" />
-    
-    <label>
-      Единица измерения
+    <label>Единица измерения
       <select id="e_unit">
         <option value="шт">штуки</option>
         <option value="л">литры</option>
         <option value="кг">килограммы</option>
       </select>
     </label>
-
     <div class="actions" style="margin-bottom:0;">
       <button id="e_save" class="btn primary">Сохранить</button>
       <button id="e_cancel" class="btn secondary">Отмена</button>
@@ -414,48 +419,31 @@
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: РЕДАКТИРОВАНИЕ ПОСТАВЩИКА ===== -->
+<!-- МОДАЛКА: РЕДАКТИРОВАНИЕ ПОСТАВЩИКА -->
 <div id="editSupplierModal" class="modal hidden">
   <div class="modal-box">
     <div class="modal-header">
       <h2 id="editSupplierTitle"><img src="./icons/edit.png" width="20" height="20" style="vertical-align:-3px;" alt=""> Поставщик</h2>
       <button id="closeEditSupplier" class="modal-close">✕</button>
     </div>
-
     <input id="s_fullName" placeholder="Полное наименование" />
-    <input id="s_shortName" placeholder="Краткое наименование* (для селекторов)" />
-
-    <label>
-      Юр. лицо
+    <input id="s_shortName" placeholder="Краткое наименование*" />
+    <label>Юр. лицо
       <select id="s_legalEntity">
         <option value="Бургер БК">Бургер БК</option>
         <option value="Воглия Матта">Воглия Матта</option>
         <option value="Пицца Стар">Пицца Стар</option>
       </select>
     </label>
-
-    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-light);">
-      <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--brown);">Контакты</div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Контакты</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;">
-        <label style="font-size:12px;min-width:0;">
-          <span>WhatsApp</span>
-          <input id="s_whatsapp" placeholder="+375291234567" style="width:100%;box-sizing:border-box;" />
-        </label>
-        <label style="font-size:12px;min-width:0;">
-          <span>Telegram</span>
-          <input id="s_telegram" placeholder="+375... или @user" style="width:100%;box-sizing:border-box;" />
-        </label>
-        <label style="font-size:12px;min-width:0;">
-          <span>Viber</span>
-          <input id="s_viber" placeholder="+375291234567" style="width:100%;box-sizing:border-box;" />
-        </label>
-        <label style="font-size:12px;min-width:0;">
-          <span>Email</span>
-          <input id="s_email" placeholder="mail@example.com" type="email" style="width:100%;box-sizing:border-box;" />
-        </label>
+        <label style="font-size:12px;min-width:0;"><span>WhatsApp</span><input id="s_whatsapp" placeholder="+375291234567" style="width:100%;box-sizing:border-box;" /></label>
+        <label style="font-size:12px;min-width:0;"><span>Telegram</span><input id="s_telegram" placeholder="+375... или @user" style="width:100%;box-sizing:border-box;" /></label>
+        <label style="font-size:12px;min-width:0;"><span>Viber</span><input id="s_viber" placeholder="+375291234567" style="width:100%;box-sizing:border-box;" /></label>
+        <label style="font-size:12px;min-width:0;"><span>Email</span><input id="s_email" placeholder="mail@example.com" type="email" style="width:100%;box-sizing:border-box;" /></label>
       </div>
     </div>
-
     <div class="actions" style="margin-bottom:0;margin-top:16px;">
       <button id="s_save" class="btn primary">Сохранить</button>
       <button id="s_cancel" class="btn secondary">Отмена</button>
@@ -463,24 +451,15 @@
   </div>
 </div>
 
-
-
-<!-- ===== МОДАЛКА: СОХРАНЕНИЕ ЗАКАЗА ===== -->
+<!-- МОДАЛКА: СОХРАНЕНИЕ ЗАКАЗА -->
 <div id="saveOrderModal" class="modal hidden">
   <div class="modal-box" style="max-width:500px;">
     <div class="modal-header">
       <h2><img src="./icons/save.png" width="20" height="20" style="vertical-align:-3px;" alt=""> Сохранить заказ</h2>
       <button id="closeSaveOrder" class="modal-close">✕</button>
     </div>
-    
-    <p style="margin:0 0 16px;color:#5A2D0C;">Добавьте примечание к заказу (опционально):</p>
-    
-    <textarea 
-      id="orderNote" 
-      placeholder="Например: Срочный заказ, Пробная партия, и т.д." 
-      style="width:100%;min-height:80px;padding:10px;border:1px solid #E5BE9E;border-radius:4px;font-family:inherit;font-size:14px;resize:vertical;margin-bottom:20px;"
-    ></textarea>
-    
+    <p style="margin:0 0 16px;">Добавьте примечание к заказу (опционально):</p>
+    <textarea id="orderNote" placeholder="Например: Срочный заказ, Пробная партия, и т.д." style="width:100%;min-height:80px;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;resize:vertical;margin-bottom:20px;"></textarea>
     <div class="actions" style="margin:0;">
       <button id="confirmSaveOrder" class="btn primary"><img src="./icons/save.png" width="14" height="14" alt=""> Сохранить</button>
       <button id="cancelSaveOrder" class="btn secondary">Отмена</button>
@@ -488,7 +467,7 @@
   </div>
 </div>
 
-<!-- ===== МОДАЛКА: СМЕНА ПАРОЛЯ ===== -->
+<!-- МОДАЛКА: СМЕНА ПАРОЛЯ -->
 <div id="changePasswordModal" class="modal hidden">
   <div class="modal-box" style="max-width:360px;">
     <div class="modal-header">
@@ -505,8 +484,110 @@
   </div>
 </div>
 
+<!-- МОДАЛКА АНАЛИТИКИ -->
+<div id="analyticsModal" class="modal hidden">
+  <div class="modal-box large" style="width:min(1100px,96vw);padding:24px;">
+    <div class="modal-header">
+      <h2 style="font-size:20px;"><img src="./icons/analytics.png" width="16" height="16" alt=""> Аналитика заказов</h2>
+      <button id="closeAnalytics" class="modal-close">✕</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg);border-radius:8px;margin-bottom:20px;">
+      <span style="font-weight:600;font-size:13px;">ПЕРИОД:</span>
+      <select id="analyticsPeriod" style="padding:6px 12px;border-radius:6px;border:1.5px solid var(--border);background:white;font-size:13px;">
+        <option value="7">7 дней</option>
+        <option value="14">14 дней</option>
+        <option value="30" selected>30 дней</option>
+        <option value="60">60 дней</option>
+        <option value="90">90 дней</option>
+      </select>
+      <button id="refreshAnalytics" class="btn btn-secondary btn-sm">Обновить</button>
+    </div>
+    <div id="analyticsContainer" style="max-height:72vh;overflow-y:auto;">
+      <div style="text-align:center;padding:60px;color:var(--text-muted);">
+        <div class="loading-spinner"></div>
+        <div style="margin-top:14px;">Загрузка данных...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- МОДАЛКА: КАЛЕНДАРЬ ПОСТАВОК -->
+<div id="calendarModal" class="modal hidden">
+  <div class="modal-box" style="width:min(720px,96vw);padding:24px;">
+    <div class="modal-header">
+      <h2 style="font-size:20px;"><img src="./icons/calendar.png" width="14" height="14" alt=""> Календарь поставок</h2>
+      <button id="closeCalendar" class="modal-close">✕</button>
+    </div>
+    <div id="calendarContainer"></div>
+  </div>
+</div>
+
+<!-- МОДАЛКА: ПЛАНИРОВАНИЕ -->
+<div id="planningModal" class="modal hidden">
+  <div class="modal-box large" style="padding:24px;">
+    <div class="modal-header">
+      <h2 style="font-size:20px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов</h2>
+      <button id="closePlanning" class="modal-close">✕</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:14px 16px;background:var(--bg);border-radius:8px;margin-bottom:16px;">
+      <label style="flex:1;min-width:140px;">Юр. лицо
+        <select id="planLegalEntity">
+          <option value="Бургер БК">Бургер БК</option>
+          <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
+        </select>
+      </label>
+      <label style="flex:1;min-width:150px;">Поставщик
+        <select id="planSupplier"><option value="">— Выберите поставщика —</option></select>
+      </label>
+      <label style="flex:0;min-width:160px;">Период
+        <select id="planMonths">
+          <optgroup label="Недели">
+            <option value="w1">1 неделя</option><option value="w2">2 недели</option>
+            <option value="w3">3 недели</option><option value="w4">4 недели</option>
+            <option value="w5">5 недель</option><option value="w6">6 недель</option>
+            <option value="w8">8 недель</option><option value="w10">10 недель</option>
+            <option value="w12">12 недель</option>
+          </optgroup>
+          <optgroup label="Месяцы">
+            <option value="m1">1 месяц</option><option value="m2">2 месяца</option>
+            <option value="m3" selected>3 месяца</option>
+          </optgroup>
+        </select>
+      </label>
+      <label style="flex:0;min-width:130px;">Дата начала <input type="date" id="planStartDate" /></label>
+      <label style="flex:0;min-width:100px;">Ввод в
+        <select id="planUnit"><option value="pieces">Штуках</option><option value="boxes">Коробках</option></select>
+      </label>
+      <label style="flex:0;min-width:110px;">Проверка
+        <select id="planDataValidation"><option value="true">Да</option><option value="false">Нет</option></select>
+      </label>
+      <div style="flex-basis:100%;"></div>
+      <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:0 4px;">
+      Введите расход за месяц, остатки на складе и у поставщика — система автоматически рассчитает объёмы заказа по месяцам.
+    </div>
+    <div id="planTableContainer" style="flex:1;overflow:auto;min-height:0;">
+      <div style="text-align:center;padding:50px;color:var(--text-muted);">
+        <div style="font-size:28px;margin-bottom:8px;"><img src="./icons/planning.png" width="64" height="64" alt=""></div>
+        <div style="font-size:14px;">Выберите поставщика и нажмите «Загрузить товары»</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+      <button id="planFillConsumptionBtn" class="btn btn-secondary">📊 Подставить расход</button>
+      <button id="planImportBtn" class="btn btn-secondary"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт остатков</button>
+      <button id="planClearBtn" class="btn btn-danger-outline">🗑 Обнулить всё</button>
+      <div style="flex:1;"></div>
+      <button id="planExcelBtn" class="btn btn-success"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
+      <button id="planCopyBtn" class="btn btn-secondary"><img src="./icons/copy.png" width="14" height="14" alt=""> Скопировать</button>
+      <button id="planSaveBtn" class="btn primary"><img src="./icons/save.png" width="14" height="14" alt=""> Сохранить план</button>
+    </div>
+  </div>
+</div>
+
 <footer class="footer">
-  <span class="version">Версия: <span id="appVersion">1.0.0</span></span>
+  <span class="version">Версия: <span id="appVersion">2.0.0</span></span>
 </footer>
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
@@ -518,149 +599,19 @@
     try {
       var u = JSON.parse(user);
       var badge = document.getElementById('userBadge');
+      var nameEl = document.getElementById('userNameDisplay');
+      var avatarEl = document.getElementById('userAvatarLetters');
       if (badge && u.name) {
-        badge.textContent = u.name;
         badge.classList.remove('hidden');
+        if (nameEl) nameEl.textContent = u.name;
+        if (avatarEl) avatarEl.textContent = u.name.split(' ').map(w=>w[0]).join('').slice(0,2);
       }
     } catch(e) {}
   }
 })();
 </script>
 
-<script type="module" src="./ui.js?v=1.0.0"></script>
-
-<!-- ===== МОДАЛКА АНАЛИТИКИ ===== -->
-<div id="analyticsModal" class="modal hidden">
-  <div class="modal-box large" style="width:min(1100px,96vw);padding:24px;">
-    <div class="modal-header">
-      <h2 style="font-size:20px;"><img src="./icons/analytics.png" width="16" height="16" alt=""> Аналитика заказов</h2>
-      <button id="closeAnalytics" class="modal-close">✕</button>
-    </div>
-    <!-- Контролы периода -->
-    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#fdf9f3;border-radius:8px;margin-bottom:20px;">
-      <span style="font-weight:600;color:#5A2D0C;font-size:13px;">ПЕРИОД:</span>
-      <select id="analyticsPeriod" style="padding:6px 12px;border-radius:6px;border:1px solid #e8e3db;background:white;font-size:13px;">
-        <option value="7">7 дней</option>
-        <option value="14">14 дней</option>
-        <option value="30" selected>30 дней</option>
-        <option value="60">60 дней</option>
-        <option value="90">90 дней</option>
-      </select>
-      <button id="refreshAnalytics" class="btn secondary" style="padding:6px 14px;font-size:13px;"><img src="./icons/update.png" width="14" height="14" alt=""> Обновить</button>
-    </div>
-    <!-- Контент аналитики -->
-    <div id="analyticsContainer" style="max-height:72vh;overflow-y:auto;padding-right:4px;">
-      <div style="text-align:center;padding:60px;color:#999;">
-        <div class="loading-spinner"></div>
-        <div style="margin-top:14px;">Загрузка данных...</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ===== МОДАЛКА: КАЛЕНДАРЬ ПОСТАВОК ===== -->
-<div id="calendarModal" class="modal hidden">
-  <div class="modal-box" style="width:min(720px,96vw);padding:24px;">
-    <div class="modal-header">
-      <h2 style="font-size:20px;"><img src="./icons/calendar.png" width="14" height="14" alt=""> Календарь поставок</h2>
-      <button id="closeCalendar" class="modal-close">✕</button>
-    </div>
-    <div id="calendarContainer"></div>
-  </div>
-</div>
-
-<!-- ===== МОДАЛКА: ПЛАНИРОВАНИЕ ===== -->
-<div id="planningModal" class="modal hidden">
-  <div class="modal-box large" style="padding:24px;">
-    <div class="modal-header">
-      <h2 style="font-size:20px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов</h2>
-      <button id="closePlanning" class="modal-close">✕</button>
-    </div>
-
-    <!-- Контролы -->
-    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;padding:14px 16px;background:#fdf9f3;border-radius:8px;margin-bottom:16px;">
-      <label style="flex:1;min-width:140px;">
-        Юр. лицо
-        <select id="planLegalEntity">
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-      </label>
-      <label style="flex:1;min-width:150px;">
-        Поставщик
-        <select id="planSupplier">
-          <option value="">— Выберите поставщика —</option>
-        </select>
-      </label>
-      <label style="flex:0;min-width:160px;">
-        Период
-        <select id="planMonths">
-          <optgroup label="Недели">
-            <option value="w1">1 неделя</option>
-            <option value="w2">2 недели</option>
-            <option value="w3">3 недели</option>
-            <option value="w4">4 недели</option>
-            <option value="w5">5 недель</option>
-            <option value="w6">6 недель</option>
-            <option value="w8">8 недель</option>
-            <option value="w10">10 недель</option>
-            <option value="w12">12 недель</option>
-          </optgroup>
-          <optgroup label="Месяцы">
-            <option value="m1">1 месяц</option>
-            <option value="m2">2 месяца</option>
-            <option value="m3" selected>3 месяца</option>
-          </optgroup>
-        </select>
-      </label>
-      <label style="flex:0;min-width:130px;">
-        Дата начала
-        <input type="date" id="planStartDate" />
-      </label>
-      <label style="flex:0;min-width:100px;">
-        Ввод в
-        <select id="planUnit">
-          <option value="pieces">Штуках</option>
-          <option value="boxes">Коробках</option>
-        </select>
-      </label>
-      <label style="flex:0;min-width:110px;" class="tooltip-wrap" data-tip="Подсветка расхода, если он отличается от среднего по истории заказов более чем на 30%">
-        Проверка данных
-        <select id="planDataValidation">
-          <option value="true">Да</option>
-          <option value="false">Нет</option>
-        </select>
-      </label>
-      <div style="flex-basis:100%;"></div>
-      <button id="planLoadProducts" class="btn primary" style="height:36px;white-space:nowrap;">Загрузить товары</button>
-    </div>
-
-    <!-- Подсказка -->
-    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;padding:0 4px;">
-      Введите расход за месяц, остатки на складе и у поставщика — система автоматически рассчитает объёмы заказа по месяцам с округлением до коробок.
-    </div>
-
-    <!-- Таблица планирования -->
-    <div id="planTableContainer" style="flex:1;overflow:auto;min-height:0;">
-      <div style="text-align:center;padding:50px;color:var(--muted);">
-        <div style="font-size:28px;margin-bottom:8px;"><img src="./icons/planning.png" width="64" height="64" alt=""></div>
-        <div style="font-size:14px;">Выберите поставщика и нажмите «Загрузить товары»</div>
-      </div>
-    </div>
-
-    <!-- Кнопки действий -->
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-light);">
-      <button id="planFillConsumptionBtn" class="btn secondary" style="background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7;">📊 Подставить расход</button>
-      <button id="planImportBtn" class="btn secondary"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт остатков</button>
-      <button id="planClearBtn" class="btn secondary" style="background:#fff3e0;color:#e65100;border-color:#ffcc80;">🗑 Обнулить всё</button>
-      <div style="flex:1;"></div>
-      <button id="planExcelBtn" class="btn secondary" style="background:#217346;color:white;border-color:#1a5c38;"><img src="./icons/excel.png" width="14" height="14" alt=""> Excel</button>
-      <button id="planCopyBtn" class="btn secondary"><img src="./icons/copy.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Скопировать план</button>
-      <button id="planSaveBtn" class="btn primary"><img src="./icons/save.png" width="14" height="14" alt="" style="vertical-align:-2px;"> Сохранить план</button>
-    </div>
-  </div>
-</div>
+<script type="module" src="./ui.js?v=2.0.0"></script>
 
 </body>
 </html>
