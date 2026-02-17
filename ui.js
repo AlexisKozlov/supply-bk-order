@@ -62,10 +62,8 @@ const analyticsContainer = document.getElementById('analyticsContainer');
 
 /* ================= BADGE ЮР. ЛИЦА ================= */
 function updateEntityBadge() {
-  const badge = document.getElementById('entityBadge');
   const topbarBadge = document.getElementById('topbarEntity');
   const le = orderState.settings.legalEntity || 'Бургер БК';
-  if (badge) badge.textContent = le;
   if (topbarBadge) topbarBadge.textContent = le;
 }
 const historyContainer = document.getElementById('orderHistory');
@@ -1732,9 +1730,18 @@ if (mobileMenuToggle && sidebar) {
     });
   }
 
+  const pageTitles = {
+    'historyModal': 'История',
+    'databaseModal': 'База данных',
+    'analyticsModal': 'Аналитика',
+    'planningModal': 'Планирование',
+    'calendarModal': 'Календарь',
+  };
+
   function updateSidebarActive() {
     const items = document.querySelectorAll('.sidebar-item');
     let anyPageOpen = false;
+    let openTitle = '';
     
     items.forEach(item => {
       const modalId = sidebarMap[item.id];
@@ -1743,6 +1750,7 @@ if (mobileMenuToggle && sidebar) {
         if (modal && !modal.classList.contains('hidden')) {
           item.classList.add('active');
           anyPageOpen = true;
+          openTitle = pageTitles[modalId] || '';
         } else {
           item.classList.remove('active');
         }
@@ -1752,6 +1760,12 @@ if (mobileMenuToggle && sidebar) {
     const navOrder = document.getElementById('navOrder');
     if (navOrder) {
       navOrder.classList.toggle('active', !anyPageOpen);
+    }
+
+    // Обновляем topbar title
+    const pageTitle = document.getElementById('pageTitle');
+    if (pageTitle) {
+      pageTitle.textContent = anyPageOpen ? openTitle : 'Новый заказ';
     }
   }
 
