@@ -326,19 +326,88 @@ body {
 /* ─── Content Area ─── */
 .content-area {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ─── Params Strip (горизонтальная полоса параметров) ─── */
+.params-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: flex-end;
+  padding: 12px 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.params-strip .param-group label {
+  font-size: 9px;
+}
+
+.params-strip .btn-build {
+  margin: 0;
+  padding: 7px 16px;
+  font-size: 12px;
+}
+
+/* ─── Order Page (заполняет всю рабочую область) ─── */
+.order-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.order-page.hidden { display: none !important; }
+
+.order-page .table-toolbar {
+  flex-shrink: 0;
+}
+
+.order-page .table-wrap {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+/* ─── Bottom Bar (прибит к низу, итог + кнопки) ─── */
+.order-bottom-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.bottom-summary {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 200px;
+}
+
+.bottom-summary b { color: var(--accent); }
+
+.bottom-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 /* Когда page-modal открыта, скрываем content и topbar ПОД ней */
 
 .container {
-  max-width: 1440px;
   padding: 20px 24px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 /* ═══════ CARDS ═══════ */
@@ -357,18 +426,9 @@ body {
   margin-bottom: 14px;
 }
 
-/* ─── Params Bar ─── */
-.params-card { padding: 16px 18px; }
-
-.params-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-  align-items: flex-end;
-}
-
+/* ─── Params ─── */
 .param-group {
-  display: flex; flex-direction: column; gap: 3px;
+  display: flex; flex-direction: column; gap: 2px;
   min-width: 0;
 }
 
@@ -416,12 +476,7 @@ select:focus, input:focus, textarea:focus {
 
 .safety-calendar-icon:hover { opacity: 1; }
 
-.btn-build {
-  margin-top: 12px;
-  padding: 10px 28px;
-  font-size: 14px;
-  font-weight: 700;
-}
+
 
 /* ═══════ BUTTONS ═══════ */
 .btn {
@@ -469,22 +524,15 @@ select:focus, input:focus, textarea:focus {
 
 .btn img { vertical-align: -2px; }
 
-/* ═══════ TABLE CARD ═══════ */
-.table-card {
-  background: var(--card);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border-light);
-  overflow: hidden;
-}
+/* ═══════ TABLE ═══════ */
 
 .table-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 8px 20px;
+  background: var(--card);
   border-bottom: 1px solid var(--border-light);
-  background: #FAFAF7;
   flex-wrap: wrap;
 }
 
@@ -690,18 +738,7 @@ input[type="number"]:focus {
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
 
-/* ─── Bottom Actions ─── */
-.order-bottom-bar, .order-bottom-actions {
-  display: flex;
-  gap: 8px;
-  padding: 14px 0 0;
-  flex-wrap: wrap;
-}
 
-/* ─── Summary Card ─── */
-.summary-card {
-  padding: 14px 18px;
-}
 
 /* ═══════ SEARCH ═══════ */
 .search {
