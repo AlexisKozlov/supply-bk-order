@@ -173,6 +173,7 @@ async function afterLogin(user) {
   // Принудительно устанавливаем первое доступное юр.лицо
   const le = document.getElementById('legalEntity').value;
   orderState.settings.legalEntity = le;
+  syncLegalEntityToAll(le);
   await loadSuppliers(le);
   loadOrderHistory();
   
