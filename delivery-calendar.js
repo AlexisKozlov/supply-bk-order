@@ -158,10 +158,9 @@ function renderCalendar() {
     </div>
   `;
 
-  // Легенда поставщиков — с сортировкой
+  // Легенда поставщиков — сортировка: прошлые ≤3д → будущие ≤10д
   const suppliers = Object.keys(calState.supplierColors);
   if (suppliers.length) {
-    // Собираем данные для сортировки
     const supplierData = suppliers.map(s => {
       const supplierOrders = calState.orders.filter(o => o.supplier === s);
       let nextDelivery = null, lastDelivery = null;
@@ -170,34 +169,42 @@ function renderCalendar() {
         if (d >= today) { if (!nextDelivery || d < nextDelivery) nextDelivery = d; }
         else { if (!lastDelivery || d > lastDelivery) lastDelivery = d; }
       });
-      let daysLabel = '', urgencyClass = '', sortKey = 999;
-      // Группа 1: прошлые ≤3 дней (sortKey -100...-97)
+
+      let daysLabel = '', sortKey = 999, show = false;
+
+      // Группа 1: прошлые ≤3 дней назад
       if (lastDelivery) {
         const daysAgo = Math.round((today - lastDelivery) / 86400000);
         if (daysAgo <= 3) {
           daysLabel = daysAgo === 0 ? ' (сегодня)' : ` (${daysAgo}д назад)`;
-          sortKey = -100 + daysAgo;
-        } else if (!nextDelivery) {
-          daysLabel = ` (${daysAgo}д назад)`;
-          sortKey = 500 + daysAgo;
-          if (daysAgo > 14) urgencyClass = 'cal-legend-urgent';
+          sortKey = -100 + daysAgo; // -100, -99, -98, -97
+          show = true;
         }
       }
-      // Группа 2: ближайшие будущие ≤10 дней (sortKey 0...10), НО только если нет недавней прошлой
-      if (nextDelivery && sortKey > -50) {
+
+      // Группа 2: будущие ≤10 дней (только если НЕ попал в группу 1)
+      if (nextDelivery && !show) {
         const daysUntil = Math.round((nextDelivery - today) / 86400000);
-        daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
-        sortKey = daysUntil <= 10 ? daysUntil : 100 + daysUntil;
+        if (daysUntil <= 10) {
+          daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
+          sortKey = daysUntil; // 0...10
+          show = true;
+        }
       }
-      return { name: s, daysLabel, urgencyClass, sortKey };
+
+      return { name: s, daysLabel, sortKey, show };
     });
-    supplierData.sort((a, b) => a.sortKey - b.sortKey);
-    
-    html += '<div class="cal-legend">';
-    supplierData.forEach(s => {
-      html += `<span class="cal-legend-item ${s.urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s.name]}"></span>${s.name}${s.daysLabel}</span>`;
-    });
-    html += '</div>';
+
+    const visible = supplierData.filter(s => s.show);
+    visible.sort((a, b) => a.sortKey - b.sortKey);
+
+    if (visible.length) {
+      html += '<div class="cal-legend">';
+      visible.forEach(s => {
+        html += `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${calState.supplierColors[s.name]}"></span>${s.name}${s.daysLabel}</span>`;
+      });
+      html += '</div>';
+    }
   }
 
   // Сетка календаря

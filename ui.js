@@ -485,11 +485,26 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
   
   render();
   saveDraft();
+
+  // Синхронизируем юр.лицо во все селекторы на других страницах
+  syncLegalEntityToAll(e.target.value);
+
   loadOrderHistory();
 
   // Обновляем активную page-modal
   document.dispatchEvent(new CustomEvent('legal-entity:changed', { detail: { legalEntity: e.target.value } }));
 });
+
+function syncLegalEntityToAll(value) {
+  const selectors = ['historyLegalEntity', 'dbLegalEntity', 'dbSupplierLegalEntity', 'planLegalEntity', 'm_legalEntity'];
+  selectors.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Если есть опция с таким value — выбираем
+    const option = [...el.options].find(o => o.value === value);
+    if (option) el.value = value;
+  });
+}
 
 document.getElementById('unit').addEventListener('change', e => {
   const oldUnit = orderState.settings.unit;
@@ -1857,6 +1872,9 @@ if (mobileMenuToggle && sidebar) {
     btn.addEventListener('click', () => {
       // Закрываем все другие page-модалки
       closeAllPageModals(modalId);
+      // Синхронизируем юр.лицо из sidebar
+      const sidebarLE = document.getElementById('legalEntity');
+      if (sidebarLE) syncLegalEntityToAll(sidebarLE.value);
       // Обновляем sidebar через microtask (после того как модуль откроет модалку)
       setTimeout(updateSidebarActive, 50);
     }, true); // capture: true — срабатывает ДО обработчиков модулей
