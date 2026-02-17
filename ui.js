@@ -1767,6 +1767,12 @@ if (mobileMenuToggle && sidebar) {
     if (pageTitle) {
       pageTitle.textContent = anyPageOpen ? openTitle : 'Новый заказ';
     }
+
+    // Скрываем content-area и topbar когда page-modal открыта
+    const contentArea = document.querySelector('.content-area');
+    const topbar = document.querySelector('.topbar');
+    if (contentArea) contentArea.style.display = anyPageOpen ? 'none' : '';
+    if (topbar) topbar.style.display = anyPageOpen ? 'none' : '';
   }
 
   // КЛЮЧЕВОЙ ФИК: перехватываем клики sidebar ПЕРЕД модулями (capture phase)
