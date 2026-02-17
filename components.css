@@ -896,13 +896,14 @@ tbody tr td[colspan] {
   justify-content: center;
   gap: 16px;
   margin-bottom: 14px;
+  padding: 8px 0;
 }
 
 .cal-nav-title {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
   color: var(--text);
-  min-width: 180px;
+  min-width: 200px;
   text-align: center;
 }
 
@@ -910,16 +911,17 @@ tbody tr td[colspan] {
   background: var(--bg);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 6px 12px;
+  padding: 8px 16px;
   cursor: pointer;
   font-size: 14px;
-  transition: background 0.15s;
+  transition: all 0.15s;
+  font-family: inherit;
 }
 
 .cal-nav-btn:hover {
-  background: var(--orange);
+  background: var(--accent);
   color: white;
-  border-color: var(--orange);
+  border-color: var(--accent);
 }
 
 .cal-legend {
@@ -957,7 +959,14 @@ tbody tr td[colspan] {
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
+  grid-auto-rows: 1fr;
+  gap: 1px;
+  background: var(--border-light);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
 }
 
 .cal-day-header {
@@ -966,14 +975,15 @@ tbody tr td[colspan] {
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  padding: 6px 0;
+  padding: 8px 0;
+  background: var(--bg);
 }
 
 .cal-cell {
-  min-height: 60px;
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  padding: 4px;
+  min-height: 80px;
+  border: none;
+  border-radius: 0;
+  padding: 6px 8px;
   position: relative;
   background: white;
   transition: background 0.1s;
@@ -985,16 +995,15 @@ tbody tr td[colspan] {
 
 .cal-empty {
   background: #fafaf8;
-  border-color: transparent;
 }
 
 .cal-past {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .cal-today {
-  border: 2px solid var(--orange) !important;
-  background: #fff8f0 !important;
+  border: 2px solid var(--accent) !important;
+  background: #FFF5F0 !important;
   opacity: 1 !important;
 }
 
@@ -1050,7 +1059,12 @@ tbody tr td[colspan] {
 }
 
 #calendarModal {
-  z-index: 9997;
+  z-index: auto;
+}
+
+.modal.page-modal #calendarContainer {
+  display: flex;
+  flex-direction: column;
 }
 
 /* #8 Убираем стрелки из number inputs в таблице заказа */

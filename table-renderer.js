@@ -75,6 +75,7 @@ export function renderTable(orderState, tbody, callbacks) {
       </td>
       <td class="item-name">
         ${item.sku ? `<b>${esc(item.sku)}</b> ` : ''}${esc(item.name)}
+        <div class="item-meta">${item.qtyPerBox ? item.qtyPerBox + ' ' + (item.unitOfMeasure || 'шт') + '/кор' : ''}${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
         <div class="shortage-info hidden"></div>
       </td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>

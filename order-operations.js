@@ -30,8 +30,9 @@ function updateEditingIndicator() {
     if (!badge) {
       badge = document.createElement('span');
       badge.id = 'editingBadge';
-      badge.style.cssText = 'background:#fff3e0;color:#e65100;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;margin-left:8px;border:1px solid #ffcc80;';
-      document.querySelector('#orderSection h2')?.appendChild(badge);
+      badge.className = 'editing-badge';
+      const anchor = document.querySelector('.table-toolbar-title') || document.querySelector('#orderSection');
+      anchor?.parentNode?.insertBefore(badge, anchor?.nextSibling);
     }
     badge.textContent = '✏️ Редактирование';
     badge.onclick = () => {

@@ -47,20 +47,25 @@ export function initDeliveryCalendar() {
   });
 
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+  // Не закрываем по клику на фон — page-modal не имеет backdrop
 
-  // Навигация по месяцам — один раз
-  document.getElementById('calPrev')?.addEventListener('click', () => {
-    calState.month--;
-    if (calState.month < 0) { calState.month = 11; calState.year--; }
-    loadCalendarData().then(() => renderCalendar());
-  });
-
-  document.getElementById('calNext')?.addEventListener('click', () => {
-    calState.month++;
-    if (calState.month > 11) { calState.month = 0; calState.year++; }
-    loadCalendarData().then(() => renderCalendar());
-  });
+  // Навигация по месяцам — делегирование через контейнер
+  const calContainer = document.getElementById('calendarContainer');
+  if (calContainer) {
+    calContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('.cal-nav-btn');
+      if (!btn) return;
+      if (btn.id === 'calPrev') {
+        calState.month--;
+        if (calState.month < 0) { calState.month = 11; calState.year--; }
+        loadCalendarData().then(() => renderCalendar());
+      } else if (btn.id === 'calNext') {
+        calState.month++;
+        if (calState.month > 11) { calState.month = 0; calState.year++; }
+        loadCalendarData().then(() => renderCalendar());
+      }
+    });
+  }
 }
 
 /* ═══════ DATA ═══════ */

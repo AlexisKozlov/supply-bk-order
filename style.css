@@ -590,6 +590,17 @@ select:focus, input:focus, textarea:focus {
   flex-wrap: wrap;
 }
 
+/* 2. Нейтральный фон для кнопок toolbar */
+.table-toolbar .btn-ghost {
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 5px 10px;
+}
+
+.table-toolbar .btn-ghost:hover {
+  background: var(--border);
+}
+
 .table-toolbar-title {
   font-size: 14px; font-weight: 700; color: var(--text);
 }
@@ -599,6 +610,24 @@ select:focus, input:focus, textarea:focus {
   background: var(--bg);
   padding: 2px 8px;
   border-radius: 4px;
+}
+
+.editing-badge {
+  background: #FFF3E0;
+  color: #E65100;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #FFCC80;
+  cursor: pointer;
+  margin-left: 4px;
+  animation: pulse-orange 2s infinite;
+}
+
+@keyframes pulse-orange {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(230,81,0,0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(230,81,0,0); }
 }
 
 .table-toolbar-spacer { flex: 1; min-width: 8px; }
@@ -641,7 +670,7 @@ thead {
 
 thead th {
   padding: 9px 10px;
-  text-align: left;
+  text-align: center;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -653,11 +682,15 @@ thead th {
   z-index: 10;
 }
 
+/* Товар — выравнивание влево */
+thead th:nth-child(2) { text-align: left; }
+
 td {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-light);
   font-weight: 500;
   vertical-align: middle;
+  text-align: center;
 }
 
 tbody tr { transition: background 0.1s; }
@@ -687,6 +720,13 @@ th:first-child {
 tbody tr:hover td.item-name { background: #FFF8F0; }
 
 td.item-name b { color: var(--bk-orange); margin-right: 4px; font-weight: 700; }
+
+.item-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 1px;
+}
 
 .shortage-info { font-size: 11px; color: var(--error); margin-top: 2px; }
 
@@ -773,8 +813,8 @@ td.delete-cell { text-align: center; }
 .drag-handle:hover { opacity: 1; }
 
 input[type="number"] {
-  width: 70px;
-  padding: 6px 8px;
+  width: 82px;
+  padding: 6px 4px;
   border: 1.5px solid var(--border);
   border-radius: 6px;
   font-size: 13px;
