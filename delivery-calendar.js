@@ -47,7 +47,14 @@ export function initDeliveryCalendar() {
   });
 
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-  // Не закрываем по клику на фон — page-modal не имеет backdrop
+
+  // Обновляем при смене юр.лица
+  document.addEventListener('legal-entity:changed', async (e) => {
+    if (modal.classList.contains('hidden')) return;
+    calState.legalEntity = e.detail.legalEntity;
+    await loadCalendarData();
+    renderCalendar();
+  });
 
   // Навигация по месяцам — делегирование через контейнер
   const calContainer = document.getElementById('calendarContainer');
@@ -186,11 +193,8 @@ function renderCalendar() {
     });
     supplierData.sort((a, b) => a.sortKey - b.sortKey);
     
-    // Показываем только: прошлые ≤3д и будущие ≤10д
-    const legendData = supplierData.filter(s => s.sortKey <= 10 || s.sortKey < 0);
-
     html += '<div class="cal-legend">';
-    legendData.forEach(s => {
+    supplierData.forEach(s => {
       html += `<span class="cal-legend-item ${s.urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s.name]}"></span>${s.name}${s.daysLabel}</span>`;
     });
     html += '</div>';

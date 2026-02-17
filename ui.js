@@ -243,8 +243,13 @@ if (logoutBtn) {
     orderState.items = [];
     orderState.settings.supplier = '';
     
+    // Закрываем все page-модалки
+    ['historyModal', 'databaseModal', 'analyticsModal', 'planningModal', 'calendarModal'].forEach(id => {
+      document.getElementById(id)?.classList.add('hidden');
+    });
+    
     // Показываем все юр.лица (снимаем фильтр)
-    ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity'].forEach(id => {
+    ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity', 'dbLegalEntity', 'dbSupplierLegalEntity'].forEach(id => {
       const el = document.getElementById(id);
       if (el) Array.from(el.options).forEach(opt => { opt.style.display = ''; });
     });
@@ -255,8 +260,21 @@ if (logoutBtn) {
       supplierSelect.innerHTML = '<option value="">Все / свободный</option>';
     }
     
+    // Очищаем историю и БД
+    const orderHistory = document.getElementById('orderHistory');
+    if (orderHistory) orderHistory.innerHTML = '';
+    const databaseList = document.getElementById('databaseList');
+    if (databaseList) databaseList.innerHTML = '';
+    
     // Скрываем секцию заказа
     orderSection?.classList.add('hidden');
+    finalSummary.innerHTML = '';
+    
+    // Показываем content-area и topbar обратно
+    const contentArea = document.querySelector('.content-area');
+    const topbar = document.querySelector('.topbar');
+    if (contentArea) contentArea.style.display = '';
+    if (topbar) topbar.style.display = '';
     
     // UI
     loginOverlay.style.display = '';
@@ -467,7 +485,10 @@ document.getElementById('legalEntity').addEventListener('change', async e => {
   
   render();
   saveDraft();
-  loadOrderHistory(); // Обновляем историю при смене юр. лица
+  loadOrderHistory();
+
+  // Обновляем активную page-modal
+  document.dispatchEvent(new CustomEvent('legal-entity:changed', { detail: { legalEntity: e.target.value } }));
 });
 
 document.getElementById('unit').addEventListener('change', e => {
