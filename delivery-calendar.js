@@ -185,9 +185,12 @@ function renderCalendar() {
       return { name: s, daysLabel, urgencyClass, sortKey };
     });
     supplierData.sort((a, b) => a.sortKey - b.sortKey);
+    
+    // Показываем только: прошлые ≤3д и будущие ≤10д
+    const legendData = supplierData.filter(s => s.sortKey <= 10 || s.sortKey < 0);
 
     html += '<div class="cal-legend">';
-    supplierData.forEach(s => {
+    legendData.forEach(s => {
       html += `<span class="cal-legend-item ${s.urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s.name]}"></span>${s.name}${s.daysLabel}</span>`;
     });
     html += '</div>';

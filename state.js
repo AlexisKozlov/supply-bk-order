@@ -8,7 +8,8 @@ export const orderState = {
     safetyDays: 0,
     safetyEndDate: null,
     unit: 'pieces',
-    hasTransit: false
+    hasTransit: false,
+    showStockColumn: true
   },
   items: []
 };

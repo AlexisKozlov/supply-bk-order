@@ -130,7 +130,7 @@ function filterLegalEntities(user) {
   const allowed = user?.legal_entities;
   if (!allowed || !allowed.length) return; // пустой = видит всё
   
-  const selects = ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity'];
+  const selects = ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity', 'e_legalEntity', 'dbLegalEntity', 'dbSupplierLegalEntity'];
   selects.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -170,11 +170,15 @@ async function afterLogin(user) {
   loginOverlay.style.display = 'none';
   updateUserUI(user);
   
-  // Перезагружаем поставщиков для текущего юр.лица
+  // Принудительно устанавливаем первое доступное юр.лицо
   const le = document.getElementById('legalEntity').value;
   orderState.settings.legalEntity = le;
   await loadSuppliers(le);
   loadOrderHistory();
+  
+  // Обнуляем предыдущий заказ
+  orderState.items = [];
+  render();
 }
 
 async function doLogin() {

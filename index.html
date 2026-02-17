@@ -59,7 +59,7 @@
     <div class="sidebar-section">Данные</div>
     <nav class="sidebar-nav">
       <button class="sidebar-item" id="menuDatabase">
-        <span class="sidebar-icon">🗄️</span> База товаров
+        <span class="sidebar-icon">🗄️</span> База данных
       </button>
       <button class="sidebar-item" id="addManual">
         <span class="sidebar-icon">➕</span> Новый товар
@@ -161,8 +161,8 @@
         <div class="param-group">
           <label for="showStockColumn">Запас</label>
           <select id="showStockColumn">
-            <option value="false">Нет</option>
             <option value="true">Да</option>
+            <option value="false">Нет</option>
           </select>
         </div>
 
@@ -297,8 +297,10 @@
         <option value="Пицца Стар">Пицца Стар</option>
       </select>
     </label>
-    <input id="m_box" type="number" placeholder="Штук в коробке" />
-    <input id="m_pallet" type="number" placeholder="Коробок на паллете" />
+    <div style="display:flex;gap:10px;">
+      <label style="flex:1;">Штук в коробке <input id="m_box" type="number" placeholder="0" style="width:100%;" /></label>
+      <label style="flex:1;">Коробок на паллете <input id="m_pallet" type="number" placeholder="0" style="width:100%;" /></label>
+    </div>
     <label>Единица измерения
       <select id="m_unit">
         <option value="шт">штуки</option>
@@ -391,8 +393,10 @@
         <option value="Пицца Стар">Пицца Стар</option>
       </select>
     </label>
-    <input id="e_box" type="number" placeholder="Штук в коробке" />
-    <input id="e_pallet" type="number" placeholder="Коробок на паллете" />
+    <div style="display:flex;gap:10px;">
+      <label style="flex:1;">Штук в коробке <input id="e_box" type="number" placeholder="0" style="width:100%;" /></label>
+      <label style="flex:1;">Коробок на паллете <input id="e_pallet" type="number" placeholder="0" style="width:100%;" /></label>
+    </div>
     <label>Единица измерения
       <select id="e_unit">
         <option value="шт">штуки</option>
@@ -558,7 +562,7 @@
         <div style="font-size:14px;">Выберите поставщика и нажмите «Загрузить товары»</div>
       </div>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 20px;border-top:1px solid var(--border);background:var(--card);flex-shrink:0;">
       <button id="planFillConsumptionBtn" class="btn btn-secondary">📊 Подставить расход</button>
       <button id="planImportBtn" class="btn btn-secondary"><img src="./icons/import.png" width="14" height="14" alt=""> Импорт остатков</button>
       <button id="planClearBtn" class="btn btn-danger-outline">🗑 Обнулить всё</button>

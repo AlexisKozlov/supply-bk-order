@@ -716,10 +716,10 @@ tbody tr td[colspan] {
 }
 
 .plan-table {
-  table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  min-width: 800px;
   background: white;
 }
 
@@ -744,9 +744,8 @@ tbody tr td[colspan] {
 
 .plan-th-name {
   text-align: left !important;
-  padding-left: 8px !important;
-  min-width: 150px;
-  max-width: 180px;
+  padding-left: 10px !important;
+  min-width: 200px;
   position: sticky;
   left: 0;
   z-index: 12;
@@ -754,11 +753,11 @@ tbody tr td[colspan] {
 }
 
 .plan-th-num {
-  width: 60px;
+  width: 80px;
 }
 
 .plan-th-month {
-  min-width: 60px;
+  min-width: 100px;
   background: rgba(255,255,255,0.06);
 }
 
@@ -805,10 +804,10 @@ tbody tr td[colspan] {
 }
 
 .plan-input {
-  width: 56px !important;
+  width: 70px !important;
   text-align: center !important;
-  padding: 3px 2px !important;
-  font-size: 11px !important;
+  padding: 4px 3px !important;
+  font-size: 12px !important;
   border-radius: 4px !important;
   border: 1.5px solid var(--border) !important;
   background: #fafaf8 !important;

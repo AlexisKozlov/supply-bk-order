@@ -882,7 +882,7 @@ input[type="number"]:focus {
 
 .search input {
   width: 100%;
-  padding: 8px 14px 8px 36px;
+  padding: 8px 14px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 13px;
@@ -898,16 +898,6 @@ input[type="number"]:focus {
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
 
-.search::before {
-  content: '🔍';
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 13px;
-  pointer-events: none;
-  z-index: 1;
-}
 
 .search-clear {
   position: absolute;
