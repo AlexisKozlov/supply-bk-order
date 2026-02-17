@@ -5,31 +5,6 @@
  */
 
 /* ===== DATABASE LIST ===== */
-/* ===== ТАБЫ БАЗЫ ДАННЫХ ===== */
-.db-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 16px;
-  border-bottom: 2px solid var(--border-light);
-}
-.db-tab {
-  padding: 10px 20px;
-  background: none;
-  border: none;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  transition: all 0.2s;
-}
-.db-tab:hover { color: var(--brown); }
-.db-tab.active {
-  color: var(--orange);
-  border-bottom-color: var(--orange);
-}
-
 /* ===== КАРТОЧКИ ПОСТАВЩИКОВ ===== */
 .supplier-card {
   border: 1px solid var(--border);
@@ -43,17 +18,17 @@
   background: white;
 }
 .supplier-card:hover {
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
 }
 .supplier-card-info { flex: 1; min-width: 0; }
 .supplier-card-name {
   font-size: 14px;
-  color: var(--brown);
+  color: var(--text);
   font-weight: 600;
 }
 .supplier-card-fullname {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 .supplier-card-contacts {
@@ -104,7 +79,7 @@
 }
 
 .db-card:hover {
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow);
   border-color: var(--border);
 }
 
@@ -122,14 +97,14 @@
 
 .db-card-name {
   font-size: 14px;
-  color: var(--brown);
+  color: var(--text);
   font-weight: 600;
   margin: 2px 0;
 }
 
 .db-card-supplier {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .db-card-actions {
@@ -483,7 +458,7 @@
   bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%) scale(0.92);
-  background: var(--brown);
+  background: var(--text);
   color: #fff;
   font-size: 12px;
   font-weight: 500;
@@ -516,7 +491,7 @@
   left: 50%;
   transform: translateX(-50%) scale(0.92);
   border: 5px solid transparent;
-  border-top-color: var(--brown);
+  border-top-color: var(--text);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -582,18 +557,6 @@ td input[type="number"]:focus {
   z-index: 2;
 }
 
-/* ── Полоса прогресса в header ── */
-.header::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  background: linear-gradient(90deg, var(--orange), var(--red), var(--orange));
-  width: 100%;
-  opacity: 0.6;
-}
-
 /* ── Кнопки undo/redo ── */
 #undoBtn, #redoBtn {
   font-size: 16px;
@@ -607,7 +570,7 @@ td input[type="number"]:focus {
 #undoBtn:not(:disabled):hover,
 #redoBtn:not(:disabled):hover {
   background: var(--orange);
-  color: var(--brown);
+  color: var(--text);
   border-color: var(--orange);
   transform: scale(1.08);
 }
@@ -633,7 +596,7 @@ td:first-child {
   cursor: grab;
   user-select: none;
   font-size: 11px;
-  color: var(--muted-light);
+  color: var(--border-light);
   font-weight: 600;
 }
 
@@ -673,7 +636,7 @@ select:focus-visible {
 /* ── Счётчик позиций — badge-стиль ── */
 #itemsCounter:not(:empty) {
   background: rgba(245,166,35,0.15);
-  color: var(--brown);
+  color: var(--text);
   padding: 2px 10px;
   border-radius: 12px;
   font-weight: 600;
@@ -691,12 +654,12 @@ select:focus-visible {
 
 /* ── История заказов — badge дата ── */
 .history-header span b {
-  color: var(--brown);
+  color: var(--text);
 }
 
 /* ── Пустое состояние таблицы ── */
 tbody tr td[colspan] {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 /* ── Нижняя панель действий с заказом ── */
@@ -716,12 +679,16 @@ tbody tr td[colspan] {
 
 /* ── Print styles ── */
 @media print {
-  .header, .actions, .search, .footer,
+  .sidebar, .topbar, .actions, .search, .footer,
   .btn, #undoBtn, #redoBtn, #allToOrderBtn,
   #clearOrder, #exportExcelBtn, td.delete-cell,
-  .menu-btn, .entity-badge { 
+  .table-toolbar, .order-bottom-bar, .order-bottom-actions { 
     display: none !important; 
   }
+  
+  .app-layout { display: block; }
+  .main-area { overflow: visible; }
+  .content-area { overflow: visible; }
   
   .card { 
     box-shadow: none; 
@@ -757,7 +724,7 @@ tbody tr td[colspan] {
 }
 
 .plan-table thead {
-  background: linear-gradient(90deg, #4e2709, var(--brown), #4e2709);
+  background: linear-gradient(90deg, #4e2709, var(--text), #4e2709);
   color: white;
   position: sticky;
   top: 0;
@@ -782,7 +749,7 @@ tbody tr td[colspan] {
   position: sticky;
   left: 0;
   z-index: 12;
-  background: linear-gradient(90deg, #4e2709, var(--brown));
+  background: linear-gradient(90deg, #4e2709, var(--text));
 }
 
 .plan-th-num {
@@ -840,7 +807,7 @@ tbody tr td[colspan] {
   text-align: center !important;
   padding: 5px 4px !important;
   font-size: 13px !important;
-  border-radius: var(--radius-xs) !important;
+  border-radius: 4px !important;
   border: 1.5px solid var(--border) !important;
   background: #fafaf8 !important;
   font-weight: 500 !important;
@@ -867,19 +834,19 @@ tbody tr td[colspan] {
 .plan-result-value {
   display: block;
   font-weight: 700;
-  color: var(--brown);
+  color: var(--text);
   font-size: 15px;
 }
 
 .plan-result-sub {
   display: block;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--text-muted);
   margin-top: 1px;
 }
 
 .plan-result-zero {
-  color: var(--muted-light);
+  color: var(--border-light);
 }
 
 /* Totals row */
@@ -892,12 +859,12 @@ tbody tr td[colspan] {
   padding: 10px 8px;
   font-weight: 700;
   font-size: 14px;
-  color: var(--brown);
+  color: var(--text);
 }
 
 .plan-total-cell.plan-has-value {
   background: rgba(245,166,35,0.12);
-  color: var(--red);
+  color: var(--accent);
   font-size: 16px;
 }
 
@@ -934,13 +901,13 @@ tbody tr td[colspan] {
 .cal-nav-title {
   font-size: 18px;
   font-weight: 700;
-  color: var(--brown);
+  color: var(--text);
   min-width: 180px;
   text-align: center;
 }
 
 .cal-nav-btn {
-  background: var(--bg-warm);
+  background: var(--bg);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 6px 12px;
@@ -997,7 +964,7 @@ tbody tr td[colspan] {
   text-align: center;
   font-size: 11px;
   font-weight: 700;
-  color: var(--muted);
+  color: var(--text-muted);
   text-transform: uppercase;
   padding: 6px 0;
 }
@@ -1045,7 +1012,7 @@ tbody tr td[colspan] {
 .cal-day-num {
   font-size: 12px;
   font-weight: 600;
-  color: var(--brown);
+  color: var(--text);
 }
 
 .cal-has-orders {
@@ -1078,7 +1045,7 @@ tbody tr td[colspan] {
   border-radius: var(--radius-sm);
   border-left: 4px solid var(--orange);
   font-size: 13px;
-  color: var(--brown);
+  color: var(--text);
   line-height: 1.5;
 }
 
@@ -1107,13 +1074,13 @@ tbody tr td[colspan] {
 
 /* #14 Кнопка округления до паллеты */
 .plan-pallet-btn {
-  background: var(--bg-warm);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 3px;
   font-size: 10px;
   padding: 1px 5px;
   cursor: pointer;
-  color: var(--brown);
+  color: var(--text);
   transition: all 0.15s;
   margin-left: 4px;
 }
@@ -1164,7 +1131,7 @@ td.plan-td-result:hover {
   bottom: calc(100% + 4px);
   left: 0;
   background: var(--card);
-  border-radius: var(--radius-xs);
+  border-radius: 4px;
   box-shadow: var(--shadow-lg);
   z-index: 9999;
   min-width: 160px;
@@ -1183,7 +1150,7 @@ td.plan-td-result:hover {
   font-size: 13px;
   font-weight: 500;
   font-family: inherit;
-  color: var(--brown);
+  color: var(--text);
   text-align: left;
   transition: background 0.15s;
 }
