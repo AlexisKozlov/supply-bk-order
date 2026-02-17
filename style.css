@@ -197,17 +197,40 @@ body {
   border-top: 1px solid rgba(255,255,255,0.08);
 }
 
-.sidebar-entity {
-  padding: 6px 8px 8px;
+.sidebar-entity-selector {
+  padding: 6px 8px 10px;
 }
 
-.sidebar-entity-badge {
-  display: inline-block;
-  font-size: 10px; font-weight: 700;
-  color: var(--bk-orange);
-  background: rgba(255,135,50,0.1);
-  padding: 3px 10px;
-  border-radius: 4px;
+.sidebar-entity-selector label {
+  display: block;
+  font-size: 9px; font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255,255,255,0.25);
+  margin-bottom: 4px;
+}
+
+.sidebar-entity-selector select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  color: white;
+  background: var(--sidebar-hover);
+  cursor: pointer;
+}
+
+.sidebar-entity-selector select:focus {
+  border-color: var(--bk-orange);
+  outline: none;
+}
+
+.sidebar-entity-selector select option {
+  background: var(--sidebar-bg);
+  color: white;
 }
 
 .sidebar-user {
@@ -779,54 +802,38 @@ input[type="number"]:focus {
   background: var(--bg);
   backdrop-filter: none;
   z-index: 50;
+  display: flex;
   align-items: stretch;
   justify-content: stretch;
+  overflow: hidden;
 }
 
-.modal.page-modal .modal-box {
+.modal.page-modal .modal-box,
+.modal.page-modal .modal-box.large {
   width: 100% !important;
   max-width: 100% !important;
-  height: 100%;
-  max-height: 100%;
+  height: 100% !important;
+  max-height: 100% !important;
   border-radius: 0;
   box-shadow: none;
   background: var(--bg);
   display: flex;
   flex-direction: column;
   animation: none;
-}
-
-.modal.page-modal .modal-box.large {
-  width: 100% !important;
-  max-width: 100% !important;
+  padding: 0;
+  overflow: hidden;
 }
 
 .modal.page-modal .modal-header {
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  padding: 12px 24px;
+  padding: 14px 24px;
   margin-bottom: 0;
   flex-shrink: 0;
 }
 
-.modal.page-modal .modal-header h2 {
-  font-size: 17px;
-}
-
-.modal.page-modal .modal-close {
-  background: var(--bg);
-}
-
-/* Контент page-модалки */
-.modal.page-modal .modal-box > *:not(.modal-header) {
-  padding-left: 24px;
-  padding-right: 24px;
-}
-
-.modal.page-modal .modal-box > div[style*="overflow"] {
-  flex: 1;
-  min-height: 0;
-}
+.modal.page-modal .modal-header h2 { font-size: 17px; }
+.modal.page-modal .modal-close { background: var(--bg); }
 
 .modal-box {
   background: white;
@@ -904,17 +911,6 @@ input[type="number"]:focus {
   display: flex;
   gap: 8px;
   margin-top: 16px;
-}
-
-/* ─── Planning Modal ─── */
-#planningModal .modal-box.large {
-  width: 98vw !important;
-  max-width: 1600px !important;
-  height: 90vh;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden !important;
 }
 
 /* ═══════ HISTORY ═══════ */
