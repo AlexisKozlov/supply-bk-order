@@ -72,8 +72,13 @@
     </nav>
 
     <div class="sidebar-bottom">
-      <div class="sidebar-entity">
-        <span id="entityBadge" class="sidebar-entity-badge">Бургер БК</span>
+      <div class="sidebar-entity-selector">
+        <label>Юр. лицо</label>
+        <select id="legalEntity">
+          <option value="Бургер БК">Бургер БК</option>
+          <option value="Воглия Матта">Воглия Матта</option>
+          <option value="Пицца Стар">Пицца Стар</option>
+        </select>
       </div>
       <div class="sidebar-user" id="userBadge">
         <div class="sidebar-avatar" id="userAvatarLetters">—</div>
@@ -96,9 +101,6 @@
     <header class="topbar">
       <button class="mobile-sidebar-toggle" id="mobileMenuToggle">☰</button>
       <h1 class="topbar-title" id="pageTitle">Новый заказ</h1>
-      <div class="topbar-right">
-        <span class="topbar-badge-entity" id="topbarEntity">Бургер БК</span>
-      </div>
     </header>
 
     <!-- ─── Content ─── -->
@@ -108,15 +110,6 @@
         <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
         <section class="card params-card">
           <div class="params-bar">
-            <div class="param-group">
-              <label for="legalEntity">Юр. лицо</label>
-              <select id="legalEntity">
-                <option value="Бургер БК">Бургер БК</option>
-                <option value="Воглия Матта">Воглия Матта</option>
-                <option value="Пицца Стар">Пицца Стар</option>
-              </select>
-            </div>
-
             <div class="param-group">
               <label for="supplierFilter">Поставщик</label>
               <select id="supplierFilter">
