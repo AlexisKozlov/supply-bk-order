@@ -63,7 +63,10 @@ const analyticsContainer = document.getElementById('analyticsContainer');
 /* ================= BADGE ЮР. ЛИЦА ================= */
 function updateEntityBadge() {
   const badge = document.getElementById('entityBadge');
-  if (badge) badge.textContent = orderState.settings.legalEntity || 'Бургер БК';
+  const topbarBadge = document.getElementById('topbarEntity');
+  const le = orderState.settings.legalEntity || 'Бургер БК';
+  if (badge) badge.textContent = le;
+  if (topbarBadge) topbarBadge.textContent = le;
 }
 const historyContainer = document.getElementById('orderHistory');
 const historySupplier = document.getElementById('historySupplier');
@@ -114,7 +117,11 @@ if (storedUser) {
 
 function updateUserUI(user) {
   if (userBadge && user) {
-    userBadge.textContent = user.name;
+    // Новый layout: обновляем элементы внутри sidebar-user
+    const nameEl = document.getElementById('userNameDisplay');
+    const avatarEl = document.getElementById('userAvatarLetters');
+    if (nameEl) nameEl.textContent = user.name;
+    if (avatarEl) avatarEl.textContent = user.name.split(' ').map(w => w[0]).join('').slice(0, 2);
     userBadge.classList.remove('hidden');
   }
   // Фильтруем юр.лица по доступным пользователю
@@ -1668,27 +1675,27 @@ window.addEventListener('beforeunload', (e) => {
     e.returnValue = '';
   }
 });
-/* ================= МОБИЛЬНОЕ МЕНЮ ================= */
+/* ================= МОБИЛЬНОЕ МЕНЮ (SIDEBAR) ================= */
 const mobileMenuToggle = document.getElementById('mobileMenuToggle');
-const headerMenu = document.getElementById('headerMenu');
+const sidebar = document.getElementById('sidebar');
 
-if (mobileMenuToggle && headerMenu) {
+if (mobileMenuToggle && sidebar) {
   mobileMenuToggle.addEventListener('click', (e) => {
     e.stopPropagation();
-    headerMenu.classList.toggle('open');
+    sidebar.classList.toggle('open');
   });
   
-  // Закрытие при клике по кнопке меню
-  headerMenu.querySelectorAll('.menu-btn').forEach(btn => {
+  // Закрытие при клике по кнопке sidebar
+  sidebar.querySelectorAll('.sidebar-item').forEach(btn => {
     btn.addEventListener('click', () => {
-      headerMenu.classList.remove('open');
+      sidebar.classList.remove('open');
     });
   });
   
-  // Закрытие при клике вне
+  // Закрытие при клике вне sidebar
   document.addEventListener('click', (e) => {
-    if (!headerMenu.contains(e.target) && e.target !== mobileMenuToggle) {
-      headerMenu.classList.remove('open');
+    if (!sidebar.contains(e.target) && e.target !== mobileMenuToggle) {
+      sidebar.classList.remove('open');
     }
   });
 }
