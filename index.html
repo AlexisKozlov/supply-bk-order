@@ -91,6 +91,7 @@
         <button id="changePasswordBtn" class="user-dropdown-btn">🔑 Сменить пароль</button>
         <button id="logoutBtn" class="user-dropdown-btn logout">Выйти</button>
       </div>
+      <div class="sidebar-version">v<span id="appVersion">2.0.0</span></div>
     </div>
   </aside>
 
@@ -360,7 +361,7 @@
           <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
-      <div id="databaseList" style="max-height:55vh;overflow-y:auto;"></div>
+      <div id="databaseList" ></div>
     </div>
     <div id="dbTabSuppliers" class="db-tab-content hidden">
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
@@ -374,7 +375,7 @@
           <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
       </div>
-      <div id="supplierList" style="max-height:55vh;overflow-y:auto;"></div>
+      <div id="supplierList" ></div>
     </div>
   </div>
 </div>
@@ -495,7 +496,7 @@
       </select>
       <button id="refreshAnalytics" class="btn btn-secondary btn-sm">Обновить</button>
     </div>
-    <div id="analyticsContainer" style="max-height:72vh;overflow-y:auto;">
+    <div id="analyticsContainer" >
       <div style="text-align:center;padding:60px;color:var(--text-muted);">
         <div class="loading-spinner"></div>
         <div style="margin-top:14px;">Загрузка данных...</div>
@@ -579,9 +580,7 @@
   </div>
 </div>
 
-<footer class="footer">
-  <span class="version">Версия: <span id="appVersion">2.0.0</span></span>
-</footer>
+
 
 <!-- ===== ПРОВЕРКА АВТОРИЗАЦИИ ===== -->
 <script>
