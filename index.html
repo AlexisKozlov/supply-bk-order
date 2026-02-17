@@ -106,136 +106,128 @@
 
     <!-- ─── Content ─── -->
     <main class="content-area">
-      <div class="container">
 
-        <!-- ===== ПАРАМЕТРЫ ЗАКАЗА ===== -->
-        <section class="card params-card">
-          <div class="params-bar">
-            <div class="param-group">
-              <label for="supplierFilter">Поставщик</label>
-              <select id="supplierFilter">
-                <option value="">Все / свободный</option>
-              </select>
-            </div>
+      <!-- ===== ПАРАМЕТРЫ ЗАКАЗА (полоса сверху) ===== -->
+      <div class="params-strip">
+        <div class="param-group">
+          <label for="supplierFilter">Поставщик</label>
+          <select id="supplierFilter">
+            <option value="">Все / свободный</option>
+          </select>
+        </div>
 
-            <div class="param-group">
-              <label for="today">Дата сегодня</label>
-              <input type="date" id="today" />
-            </div>
+        <div class="param-group">
+          <label for="today">Сегодня</label>
+          <input type="date" id="today" />
+        </div>
 
-            <div class="param-group">
-              <label for="deliveryDate">Дата прихода</label>
-              <input type="date" id="deliveryDate" />
-            </div>
+        <div class="param-group">
+          <label for="deliveryDate">Приход</label>
+          <input type="date" id="deliveryDate" />
+        </div>
 
-            <div class="param-group">
-              <label for="periodDays">Период (дн)</label>
-              <input type="number" id="periodDays" value="30" style="width:80px;" />
-            </div>
+        <div class="param-group">
+          <label for="periodDays">Период</label>
+          <input type="number" id="periodDays" value="30" style="width:65px;" />
+        </div>
 
-            <div class="param-group">
-              <label for="safetyDays">Товарный запас</label>
-              <div class="safety-input-wrap">
-                <input type="text" id="safetyDays" placeholder="14 / до 18.02.26" />
-                <button type="button" id="safetyCalendarBtn" class="safety-calendar-icon" title="Выбрать дату">
-                  <img src="./icons/calendar.png" width="14" height="14" alt="">
-                </button>
-              </div>
-            </div>
-
-            <div class="param-group">
-              <label for="unit">Единицы</label>
-              <select id="unit">
-                <option value="pieces">Штуки</option>
-                <option value="boxes">Коробки</option>
-              </select>
-            </div>
-
-            <div class="param-group">
-              <label for="hasTransit">Транзит</label>
-              <select id="hasTransit">
-                <option value="false">Нет</option>
-                <option value="true">Да</option>
-              </select>
-            </div>
-
-            <div class="param-group">
-              <label for="showStockColumn">Запас</label>
-              <select id="showStockColumn">
-                <option value="false">Нет</option>
-                <option value="true">Да</option>
-              </select>
-            </div>
-
-            <div class="param-group">
-              <label for="dataValidation">Проверка</label>
-              <select id="dataValidation">
-                <option value="true">Да</option>
-                <option value="false">Нет</option>
-              </select>
-            </div>
+        <div class="param-group">
+          <label for="safetyDays">Запас</label>
+          <div class="safety-input-wrap">
+            <input type="text" id="safetyDays" placeholder="14 / до 18.02" />
+            <button type="button" id="safetyCalendarBtn" class="safety-calendar-icon" title="Выбрать дату">
+              <img src="./icons/calendar.png" width="14" height="14" alt="">
+            </button>
           </div>
+        </div>
 
-          <button id="buildOrder" class="btn primary btn-build">
-            <img src="./icons/box.png" width="16" height="16" alt=""> Сформировать заказ
-          </button>
-        </section>
+        <div class="param-group">
+          <label for="unit">Единицы</label>
+          <select id="unit">
+            <option value="pieces">Штуки</option>
+            <option value="boxes">Коробки</option>
+          </select>
+        </div>
 
-        <!-- ===== ЗАКАЗ (СКРЫТ ДО КНОПКИ) ===== -->
-        <div id="orderSection" class="hidden">
+        <div class="param-group">
+          <label for="hasTransit">Транзит</label>
+          <select id="hasTransit">
+            <option value="false">Нет</option>
+            <option value="true">Да</option>
+          </select>
+        </div>
 
-          <div class="table-card">
-            <!-- Toolbar таблицы -->
-            <div class="table-toolbar">
-              <span class="table-toolbar-title">Заказ</span>
-              <span id="itemsCounter" class="table-toolbar-count"></span>
-              <div class="table-toolbar-spacer"></div>
-              <button id="undoBtn" class="btn btn-ghost btn-sm" disabled title="Отменить (Ctrl+Z)">↶</button>
-              <button id="redoBtn" class="btn btn-ghost btn-sm" disabled title="Повторить (Ctrl+Y)">↷</button>
-              <div class="table-toolbar-divider"></div>
-              <button id="load1cBtn" class="btn btn-ghost btn-sm">📊 Из 1С</button>
-              <button id="fillFromLastOrder" class="btn btn-ghost btn-sm">📋 Расход</button>
-              <button id="importStockBtn" class="btn btn-ghost btn-sm">📥 Импорт</button>
-              <button id="allToOrderBtn" class="btn btn-secondary btn-sm">→ В заказ всё</button>
-              <button id="clearOrder" class="btn btn-ghost btn-sm" style="color:var(--error);">🗑 Очистить</button>
-              <div class="table-toolbar-divider"></div>
-              <section class="search toolbar-search">
-                <input id="productSearch" placeholder="Поиск товара..." />
-                <button id="clearSearch" class="search-clear hidden">✕</button>
-                <div id="searchResults" class="search-results"></div>
-              </section>
-            </div>
+        <div class="param-group">
+          <label for="showStockColumn">Запас</label>
+          <select id="showStockColumn">
+            <option value="false">Нет</option>
+            <option value="true">Да</option>
+          </select>
+        </div>
 
-            <!-- Таблица -->
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style="width:30px;"></th>
-                    <th>Товар</th>
-                    <th>Расход</th>
-                    <th>Остаток</th>
-                    <th class="transit-col">Транзит</th>
-                    <th class="stock-col">Запас</th>
-                    <th>Расчёт</th>
-                    <th>Заказ (шт / кор)</th>
-                    <th>Хватит до</th>
-                    <th>Паллеты</th>
-                    <th style="width:40px;"></th>
-                  </tr>
-                </thead>
-                <tbody id="items"></tbody>
-              </table>
-            </div>
-          </div>
+        <div class="param-group">
+          <label for="dataValidation">Проверка</label>
+          <select id="dataValidation">
+            <option value="true">Да</option>
+            <option value="false">Нет</option>
+          </select>
+        </div>
 
-          <!-- ИТОГ -->
-          <div class="card summary-card">
-            <div id="finalSummary"></div>
-          </div>
+        <button id="buildOrder" class="btn primary btn-build">
+          <img src="./icons/box.png" width="14" height="14" alt=""> Сформировать
+        </button>
+      </div>
 
-          <!-- НИЖНЯЯ ПАНЕЛЬ: прибита к низу -->
-          <div class="order-bottom-bar">
+      <!-- ===== ЗАКАЗ ===== -->
+      <div id="orderSection" class="hidden order-page">
+
+        <!-- Toolbar -->
+        <div class="table-toolbar">
+          <span class="table-toolbar-title">Заказ</span>
+          <span id="itemsCounter" class="table-toolbar-count"></span>
+          <div class="table-toolbar-spacer"></div>
+          <button id="undoBtn" class="btn btn-ghost btn-sm" disabled title="Ctrl+Z">↶</button>
+          <button id="redoBtn" class="btn btn-ghost btn-sm" disabled title="Ctrl+Y">↷</button>
+          <div class="table-toolbar-divider"></div>
+          <button id="load1cBtn" class="btn btn-ghost btn-sm">📊 Из 1С</button>
+          <button id="fillFromLastOrder" class="btn btn-ghost btn-sm">📋 Расход</button>
+          <button id="importStockBtn" class="btn btn-ghost btn-sm">📥 Импорт</button>
+          <button id="allToOrderBtn" class="btn btn-secondary btn-sm">→ В заказ всё</button>
+          <button id="clearOrder" class="btn btn-ghost btn-sm" style="color:var(--error);">🗑 Очистить</button>
+          <div class="table-toolbar-divider"></div>
+          <section class="search toolbar-search">
+            <input id="productSearch" placeholder="Поиск товара..." />
+            <button id="clearSearch" class="search-clear hidden">✕</button>
+            <div id="searchResults" class="search-results"></div>
+          </section>
+        </div>
+
+        <!-- Таблица -->
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:30px;"></th>
+                <th>Товар</th>
+                <th>Расход</th>
+                <th>Остаток</th>
+                <th class="transit-col">Транзит</th>
+                <th class="stock-col">Запас</th>
+                <th>Расчёт</th>
+                <th>Заказ (шт / кор)</th>
+                <th>Хватит до</th>
+                <th>Паллеты</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="items"></tbody>
+          </table>
+        </div>
+
+        <!-- Bottom bar: итог + действия — прибит к низу -->
+        <div class="order-bottom-bar">
+          <div id="finalSummary" class="bottom-summary"></div>
+          <div class="bottom-actions">
             <button id="saveOrder" class="btn btn-primary"><img src="./icons/save.png" width="14" height="14" alt=""> Сохранить</button>
             <button id="copyOrder" class="btn btn-secondary"><img src="./icons/copy.png" width="14" height="14" alt=""> Скопировать</button>
             <button id="shareOrderBtn" class="btn btn-secondary"><img src="./icons/share.svg" width="14" height="14" alt=""> Отправить</button>
@@ -244,6 +236,7 @@
         </div>
 
       </div>
+
     </main>
 
   </div>
