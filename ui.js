@@ -1164,13 +1164,17 @@ function updateFinalSummary() {
   });
   
   if (itemsWithOrder.length === 0) {
-    finalSummary.innerHTML = '<div style="color:#8a8a8a;text-align:center;">Нет товаров с заказом</div>';
+    finalSummary.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">Нет товаров с заказом</span>';
     return;
   }
-  
-  finalSummary.innerHTML = itemsWithOrder.map(item => {
+
+  // Считаем итоги
+  let totalBoxes = 0;
+  let totalPallets = 0;
+  const detailLines = [];
+
+  itemsWithOrder.forEach(item => {
     let boxes, pieces;
-    
     if (orderState.settings.unit === 'boxes') {
       boxes = item.finalOrder;
       pieces = item.finalOrder * (item.qtyPerBox || 1);
@@ -1178,16 +1182,29 @@ function updateFinalSummary() {
       boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
       pieces = item.finalOrder;
     }
-    
-    const unit = item.unitOfMeasure || 'шт';
+    boxes = Math.ceil(boxes);
+    totalBoxes += boxes;
 
-  return `
-  <div>
-    <b>${item.sku ? esc(item.sku) + ' ' : ''}${esc(item.name)}</b>
-    — ${nf.format(Math.ceil(boxes))} коробок (${nf.format(Math.round(pieces))} ${unit})
-  </div>
-`;
-  }).join('');
+    if (item.boxesPerPallet && item.boxesPerPallet > 0) {
+      totalPallets += boxes / item.boxesPerPallet;
+    }
+
+    const unit = item.unitOfMeasure || 'шт';
+    detailLines.push(`<b>${item.sku ? esc(item.sku) + ' ' : ''}${esc(item.name)}</b> — ${nf.format(boxes)} кор. (${nf.format(Math.round(pieces))} ${unit})`);
+  });
+
+  totalPallets = Math.round(totalPallets * 100) / 100;
+
+  // Компактная сводка
+  finalSummary.innerHTML = `
+    <span class="summary-stat"><strong>${itemsWithOrder.length}</strong> поз.</span>
+    <span class="summary-divider">·</span>
+    <span class="summary-stat"><strong>${nf.format(totalBoxes)}</strong> кор.</span>
+    <span class="summary-divider">·</span>
+    <span class="summary-stat"><strong>${totalPallets}</strong> пал.</span>
+    <button class="btn btn-ghost btn-sm summary-details-btn" onclick="this.nextElementSibling.classList.toggle('hidden')">▾ Подробнее</button>
+    <div class="summary-details-panel hidden">${detailLines.join('<br>')}</div>
+  `;
 }
 
 /* ================= ПЕРЕРИСОВКА ================= */
