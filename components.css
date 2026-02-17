@@ -1061,7 +1061,9 @@ tbody tr td[colspan] {
 }
 
 .cal-order-tag:hover {
-  filter: brightness(0.9);
+  filter: brightness(0.85);
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .cal-overdue {

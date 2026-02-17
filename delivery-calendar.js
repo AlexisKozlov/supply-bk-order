@@ -228,7 +228,7 @@ function renderCalendar() {
         const color = calState.supplierColors[o.supplier] || '#999';
         const shortName = o.supplier.length > 8 ? o.supplier.slice(0, 7) + '…' : o.supplier;
         const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
-        html += `<div class="cal-order-tag" style="background:${color}20;color:${color};border:1px solid ${color}40;" title="${esc(o.supplier)}: ${boxes} кор">${shortName}</div>`;
+        html += `<div class="cal-order-tag" style="background:${color}20;color:${color};border:1px solid ${color}40;" title="${esc(o.supplier)}: ${boxes} кор" data-order-id="${o.id}">${shortName}</div>`;
       });
       html += '</div>';
     }
@@ -260,11 +260,11 @@ function renderCalendar() {
 
   container.innerHTML = html;
 
-  // Клик по точке заказа → загрузить этот заказ
-  container.querySelectorAll('.cal-order-dot').forEach(dot => {
-    dot.style.cursor = 'pointer';
-    dot.addEventListener('click', async () => {
-      const orderId = dot.dataset.orderId;
+  // Клик по тегу заказа → загрузить этот заказ
+  container.querySelectorAll('.cal-order-tag').forEach(tag => {
+    tag.style.cursor = 'pointer';
+    tag.addEventListener('click', async () => {
+      const orderId = tag.dataset.orderId;
       if (!orderId) return;
 
       // Загружаем полный заказ
