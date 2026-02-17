@@ -367,6 +367,11 @@ body {
 
 .order-page .table-toolbar {
   flex-shrink: 0;
+  margin: 0 16px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  border: 1px solid var(--border-light);
+  border-bottom: none;
+  background: #FAFAF7;
 }
 
 .order-page .table-wrap {
@@ -374,6 +379,11 @@ body {
   min-height: 0;
   max-height: none;
   overflow: auto;
+  margin: 0 16px;
+  border: 1px solid var(--border-light);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--card);
 }
 
 /* ─── Bottom Bar (прибит к низу, итог + кнопки) ─── */
@@ -389,14 +399,58 @@ body {
 }
 
 .bottom-summary {
-  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  min-width: 200px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
 }
 
-.bottom-summary b { color: var(--accent); }
+.summary-stat strong {
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.summary-divider {
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.summary-details-btn {
+  margin-left: 8px;
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+}
+
+.summary-details-btn:hover { color: var(--accent) !important; }
+
+.summary-details-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.8;
+  max-height: 300px;
+  overflow-y: auto;
+  min-width: 400px;
+  max-width: 600px;
+  z-index: 100;
+}
+
+.summary-details-panel b {
+  color: var(--accent);
+}
 
 .bottom-actions {
   display: flex;
@@ -875,16 +929,14 @@ input[type="number"]:focus {
 .modal.page-modal .modal-close { background: var(--bg); }
 
 /* Контент: всё кроме header скроллится вместе */
-.modal.page-modal .modal-box > *:not(.modal-header) {
+.modal.page-modal .modal-box > *:not(.modal-header):not(.db-tabs):not(.db-tab-content) {
   flex-shrink: 0;
   padding-left: 24px;
   padding-right: 24px;
 }
 
-/* Последний div в modal-box = основной скролл-контейнер */
+/* Основные скролл-контейнеры page-модалок */
 .modal.page-modal #orderHistory,
-.modal.page-modal #databaseList,
-.modal.page-modal #supplierList,
 .modal.page-modal #analyticsContainer,
 .modal.page-modal #calendarContainer,
 .modal.page-modal #planTableContainer {
@@ -893,6 +945,33 @@ input[type="number"]:focus {
   overflow-y: auto !important;
   padding-left: 24px;
   padding-right: 24px;
+}
+
+/* БД: промежуточные контейнеры тоже flex */
+.modal.page-modal .db-tabs {
+  flex-shrink: 0;
+  padding: 0 24px;
+}
+
+.modal.page-modal .db-tab-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px;
+}
+
+.modal.page-modal .db-tab-content.hidden { display: none; }
+
+.modal.page-modal .db-tab-content > div:first-child {
+  flex-shrink: 0;
+}
+
+.modal.page-modal #databaseList,
+.modal.page-modal #supplierList {
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
 }
 
 .modal-box {
