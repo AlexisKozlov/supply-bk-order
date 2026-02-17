@@ -1699,3 +1699,78 @@ if (mobileMenuToggle && sidebar) {
     }
   });
 }
+
+/* ================= PAGE-МОДАЛКИ (модалки как страницы) ================= */
+(function() {
+  const mainArea = document.querySelector('.main-area');
+  if (!mainArea) return;
+
+  // Модалки которые должны быть страницами
+  const pageModalIds = ['historyModal', 'databaseModal', 'analyticsModal', 'planningModal', 'calendarModal'];
+  
+  // Перемещаем внутрь main-area и добавляем класс page-modal
+  pageModalIds.forEach(id => {
+    const modal = document.getElementById(id);
+    if (modal) {
+      modal.classList.add('page-modal');
+      mainArea.appendChild(modal);
+    }
+  });
+
+  // Маппинг sidebar кнопок на модалки
+  const sidebarMap = {
+    'menuHistory': 'historyModal',
+    'menuDatabase': 'databaseModal',
+    'menuAnalytics': 'analyticsModal',
+    'menuPlanning': 'planningModal',
+    'menuCalendar': 'calendarModal',
+  };
+
+  // Подсветка sidebar при открытии/закрытии модалок
+  function updateSidebarActive() {
+    const items = document.querySelectorAll('.sidebar-item');
+    let anyPageOpen = false;
+    
+    items.forEach(item => {
+      const modalId = sidebarMap[item.id];
+      if (modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal && !modal.classList.contains('hidden')) {
+          item.classList.add('active');
+          anyPageOpen = true;
+        } else {
+          item.classList.remove('active');
+        }
+      }
+    });
+
+    // Если ни одна page-модалка не открыта — подсвечиваем "Новый заказ"
+    const navOrder = document.getElementById('navOrder');
+    if (navOrder) {
+      navOrder.classList.toggle('active', !anyPageOpen);
+    }
+  }
+
+  // Наблюдаем за изменениями классов модалок
+  pageModalIds.forEach(id => {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    
+    const observer = new MutationObserver(() => updateSidebarActive());
+    observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+  });
+
+  // Кнопка "Новый заказ" — закрывает все page-модалки
+  const navOrder = document.getElementById('navOrder');
+  if (navOrder) {
+    navOrder.addEventListener('click', () => {
+      pageModalIds.forEach(id => {
+        document.getElementById(id)?.classList.add('hidden');
+      });
+      updateSidebarActive();
+    });
+  }
+
+  // Начальное состояние
+  updateSidebarActive();
+})();
