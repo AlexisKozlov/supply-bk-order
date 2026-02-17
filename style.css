@@ -263,6 +263,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  position: relative; /* для page-modal */
 }
 
 /* ─── Topbar ─── */
@@ -336,26 +337,27 @@ body {
 .params-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px 10px;
   align-items: flex-end;
 }
 
 .param-group {
   display: flex; flex-direction: column; gap: 3px;
+  min-width: 0;
 }
 
 .param-group label {
-  font-size: 10px; font-weight: 700; color: var(--text-muted);
+  font-size: 9px; font-weight: 700; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.4px;
 }
 
 .param-group select,
 .param-group input,
 select, input[type="date"], input[type="number"], input[type="text"], input[type="password"] {
-  padding: 8px 12px;
+  padding: 7px 10px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 12px;
   font-family: inherit;
   font-weight: 500;
   color: var(--text);
@@ -368,6 +370,8 @@ select:focus, input:focus, textarea:focus {
   outline: none;
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
+
+.required { border-color: var(--error) !important; box-shadow: 0 0 0 2px rgba(211,47,47,0.1) !important; }
 
 .safety-input-wrap {
   display: flex; align-items: center; gap: 0;
@@ -388,9 +392,8 @@ select:focus, input:focus, textarea:focus {
 
 .btn-build {
   margin-top: 12px;
-  width: 100%;
-  padding: 12px;
-  font-size: 15px;
+  padding: 10px 28px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -573,6 +576,74 @@ td.order-highlight {
   font-weight: 700;
 }
 
+/* ─── Table action buttons ─── */
+.btn.small {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.round-to-pallet {
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: all var(--transition);
+}
+
+.round-to-pallet:hover { background: var(--orange-bg); color: var(--orange); border-color: var(--orange); }
+
+.calc-to-order {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--green-bg);
+  color: var(--green);
+  border: 1px solid #C8E6C9;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.calc-to-order:hover { background: #C8E6C9; }
+
+.delete-item-x {
+  width: 26px; height: 26px;
+  border: none;
+  background: var(--bg);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition);
+}
+
+.delete-item-x:hover { background: #FFEBEE; color: var(--error); }
+
+td.delete-cell { text-align: center; }
+
+.drag-handle {
+  cursor: grab;
+  user-select: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  opacity: 0.4;
+  transition: opacity var(--transition);
+}
+
+.drag-handle:hover { opacity: 1; }
+
 input[type="number"] {
   width: 70px;
   padding: 6px 8px;
@@ -688,6 +759,8 @@ input[type="number"]:focus {
 .search-results div:hover { background: var(--bg); }
 
 /* ═══════ MODALS ═══════ */
+
+/* Обычные модалки (подтверждение, ред. карточки, сохранение) */
 .modal {
   position: fixed;
   inset: 0;
@@ -697,6 +770,62 @@ input[type="number"]:focus {
   justify-content: center;
   z-index: 9998;
   backdrop-filter: blur(4px);
+}
+
+/* PAGE-МОДАЛКИ: отображаются как страницы внутри main-area */
+.modal.page-modal {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  backdrop-filter: none;
+  z-index: 50;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.modal.page-modal .modal-box {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  animation: none;
+}
+
+.modal.page-modal .modal-box.large {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.modal.page-modal .modal-header {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.modal.page-modal .modal-header h2 {
+  font-size: 17px;
+}
+
+.modal.page-modal .modal-close {
+  background: var(--bg);
+}
+
+/* Контент page-модалки */
+.modal.page-modal .modal-box > *:not(.modal-header) {
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.modal.page-modal .modal-box > div[style*="overflow"] {
+  flex: 1;
+  min-height: 0;
 }
 
 .modal-box {
@@ -939,13 +1068,8 @@ input[type="number"]:focus {
 .footer {
   background: var(--card);
   border-top: 1px solid var(--border-light);
-  padding: 10px 24px;
+  padding: 8px 24px;
   text-align: center;
-  position: fixed;
-  bottom: 0;
-  right: 0;
-  left: 210px;
-  z-index: 1;
 }
 
 .version { font-size: 11px; color: var(--text-muted); font-weight: 600; }
