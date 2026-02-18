@@ -1,11 +1,6 @@
 /**
  * Календарь поставок
  * delivery-calendar.js
- * 
- * Визуальный месячный календарь:
- * - Даты поставок из истории заказов
- * - Цветовая разметка по поставщикам
- * - Индикация просроченных / скоро заказ
  */
 
 import { supabase } from './supabase.js';
@@ -39,14 +34,13 @@ export function initDeliveryCalendar() {
 
   btn.addEventListener('click', async () => {
     modal.classList.remove('hidden');
-    // Берём юр.лицо из основного интерфейса
     const mainLegal = document.getElementById('legalEntity');
     if (mainLegal) calState.legalEntity = mainLegal.value;
     await loadCalendarData();
     renderCalendar();
   });
 
-  closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+  closeBtn?.addEventListener('click', () => modal.classList.add('hidden'));
 
   // Обновляем при смене юр.лица
   document.addEventListener('legal-entity:changed', async (e) => {
@@ -56,17 +50,17 @@ export function initDeliveryCalendar() {
     renderCalendar();
   });
 
-  // Навигация по месяцам — делегирование через контейнер
+  // Навигация — делегирование (кнопки создаются динамически в innerHTML)
   const calContainer = document.getElementById('calendarContainer');
   if (calContainer) {
     calContainer.addEventListener('click', (e) => {
-      const btn = e.target.closest('.cal-nav-btn');
-      if (!btn) return;
-      if (btn.id === 'calPrev') {
+      const navBtn = e.target.closest('.cal-nav-btn');
+      if (!navBtn) return;
+      if (navBtn.id === 'calPrev') {
         calState.month--;
         if (calState.month < 0) { calState.month = 11; calState.year--; }
         loadCalendarData().then(() => renderCalendar());
-      } else if (btn.id === 'calNext') {
+      } else if (navBtn.id === 'calNext') {
         calState.month++;
         if (calState.month > 11) { calState.month = 0; calState.year++; }
         loadCalendarData().then(() => renderCalendar());
@@ -78,7 +72,6 @@ export function initDeliveryCalendar() {
 /* ═══════ DATA ═══════ */
 
 async function loadCalendarData() {
-  // Загружаем заказы за 3 месяца назад и 2 месяца вперёд (по delivery_date)
   const from = new Date(calState.year, calState.month - 2, 1);
   const to = new Date(calState.year, calState.month + 3, 0);
 
@@ -98,7 +91,6 @@ async function loadCalendarData() {
 
   calState.orders = data || [];
 
-  // Назначаем цвета поставщикам
   const suppliers = [...new Set(calState.orders.map(o => o.supplier).filter(Boolean))];
   suppliers.sort((a, b) => a.localeCompare(b, 'ru'));
   calState.supplierColors = {};
@@ -118,16 +110,13 @@ function renderCalendar() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Первый день месяца
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
   const daysInMonth = lastDay.getDate();
 
-  // День недели первого числа (0=Вс → нужно сдвинуть для Пн-старта)
   let startDay = firstDay.getDay();
-  startDay = startDay === 0 ? 6 : startDay - 1; // Пн=0
+  startDay = startDay === 0 ? 6 : startDay - 1;
 
-  // Группируем заказы по дате
   const ordersByDate = {};
   calState.orders.forEach(o => {
     const d = o.delivery_date?.slice(0, 10);
@@ -136,7 +125,6 @@ function renderCalendar() {
     ordersByDate[d].push(o);
   });
 
-  // Последний заказ по поставщику для расчёта "дней без заказа"
   const lastOrderBySupplier = {};
   calState.orders.forEach(o => {
     const d = new Date(o.delivery_date);
@@ -158,7 +146,7 @@ function renderCalendar() {
     </div>
   `;
 
-  // Легенда поставщиков — сортировка: прошлые ≤3д → будущие ≤10д
+  // Легенда — прошлые ≤3д → будущие ≤10д
   const suppliers = Object.keys(calState.supplierColors);
   if (suppliers.length) {
     const supplierData = suppliers.map(s => {
@@ -172,22 +160,20 @@ function renderCalendar() {
 
       let daysLabel = '', sortKey = 999, show = false;
 
-      // Группа 1: прошлые ≤3 дней назад
       if (lastDelivery) {
         const daysAgo = Math.round((today - lastDelivery) / 86400000);
         if (daysAgo <= 3) {
           daysLabel = daysAgo === 0 ? ' (сегодня)' : ` (${daysAgo}д назад)`;
-          sortKey = -100 + daysAgo; // -100, -99, -98, -97
+          sortKey = -100 + daysAgo;
           show = true;
         }
       }
 
-      // Группа 2: будущие ≤10 дней (только если НЕ попал в группу 1)
       if (nextDelivery && !show) {
         const daysUntil = Math.round((nextDelivery - today) / 86400000);
         if (daysUntil <= 10) {
           daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
-          sortKey = daysUntil; // 0...10
+          sortKey = daysUntil;
           show = true;
         }
       }
@@ -207,20 +193,11 @@ function renderCalendar() {
     }
   }
 
-  // Сетка календаря
+  // Сетка
   html += '<div class="cal-grid">';
+  DAY_NAMES.forEach(d => { html += `<div class="cal-day-header">${d}</div>`; });
+  for (let i = 0; i < startDay; i++) { html += '<div class="cal-cell cal-empty"></div>'; }
 
-  // Заголовки дней
-  DAY_NAMES.forEach(d => {
-    html += `<div class="cal-day-header">${d}</div>`;
-  });
-
-  // Пустые ячейки до первого дня
-  for (let i = 0; i < startDay; i++) {
-    html += '<div class="cal-cell cal-empty"></div>';
-  }
-
-  // Дни месяца
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const cellDate = new Date(year, month, day);
@@ -246,13 +223,11 @@ function renderCalendar() {
       });
       html += '</div>';
     }
-
     html += '</div>';
   }
-
   html += '</div>';
 
-  // Сводка: поставщики без заказа > 14 дней (нет будущих поставок и последняя > 14д назад)
+  // Сводка
   const overdue = suppliers.filter(s => {
     const supplierOrders = calState.orders.filter(o => o.supplier === s);
     const hasFuture = supplierOrders.some(o => new Date(o.delivery_date) >= today);
@@ -267,21 +242,19 @@ function renderCalendar() {
     html += `⚠️ Давно без заказа: ${overdue.map(s => {
       const lastDate = lastOrderBySupplier[s];
       const days = lastDate ? Math.round((today - lastDate) / 86400000) : '?';
-      return `<b>${esc(s)}</b> (${days} дн. назад)`;
+      return `<b>${esc(s)}</b> (${days} дн.)`;
     }).join(', ')}`;
     html += '</div>';
   }
 
   container.innerHTML = html;
 
-  // Клик по тегу заказа → загрузить этот заказ
+  // Клик по тегу → загрузить заказ
   container.querySelectorAll('.cal-order-tag').forEach(tag => {
-    tag.style.cursor = 'pointer';
     tag.addEventListener('click', async () => {
       const orderId = tag.dataset.orderId;
       if (!orderId) return;
 
-      // Загружаем полный заказ
       const { data: order, error } = await supabase
         .from('orders')
         .select('*, order_items(*)')
@@ -293,12 +266,10 @@ function renderCalendar() {
         return;
       }
 
-      // Отправляем событие — ui.js слушает и загружает заказ
       document.dispatchEvent(new CustomEvent('calendar:load-order', {
         detail: { order, legalEntity: calState.legalEntity }
       }));
 
-      // Закрываем календарь
       document.getElementById('calendarModal')?.classList.add('hidden');
     });
   });
