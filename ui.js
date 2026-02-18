@@ -563,7 +563,7 @@ document.getElementById('unit').addEventListener('change', e => {
   // Конвертируем данные при смене единиц
   if (oldUnit !== newUnit && orderState.items.length) {
     orderState.items.forEach(item => {
-      const qpb = item.qtyPerBox || 1;
+      const qpb = item.multiplicity || item.qtyPerBox || 1;
       if (oldUnit === 'pieces' && newUnit === 'boxes') {
         // шт → кор
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
@@ -1239,10 +1239,11 @@ function updateItemsCounter() {
 function roundToPallet(item) {
   if (!item.boxesPerPallet) return;
 
+  const eQpb = item.multiplicity || item.qtyPerBox || 1;
   const boxes =
     orderState.settings.unit === 'boxes'
       ? item.finalOrder
-      : item.finalOrder / item.qtyPerBox;
+      : item.finalOrder / eQpb;
 
   const pallets = Math.ceil(boxes / item.boxesPerPallet);
   const roundedBoxes = pallets * item.boxesPerPallet;
@@ -1250,17 +1251,18 @@ function roundToPallet(item) {
   item.finalOrder =
     orderState.settings.unit === 'boxes'
       ? roundedBoxes
-      : roundedBoxes * item.qtyPerBox;
+      : roundedBoxes * eQpb;
 }
 
 /* ================= ИТОГ В КОРОБКАХ ================= */
 function updateFinalSummary() {
   const itemsWithOrder = orderState.items.filter(item => {
     let boxes;
+    const eQpb = item.multiplicity || item.qtyPerBox || 1;
     if (orderState.settings.unit === 'boxes') {
       boxes = item.finalOrder;
     } else {
-      boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      boxes = Math.ceil(item.finalOrder / eQpb);
     }
     return boxes >= 1;
   });
@@ -1277,11 +1279,12 @@ function updateFinalSummary() {
 
   itemsWithOrder.forEach(item => {
     let boxes, pieces;
+    const eQpb = item.multiplicity || item.qtyPerBox || 1;
     if (orderState.settings.unit === 'boxes') {
       boxes = item.finalOrder;
-      pieces = item.finalOrder * (item.qtyPerBox || 1);
+      pieces = item.finalOrder * eQpb;
     } else {
-      boxes = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+      boxes = Math.ceil(item.finalOrder / eQpb);
       pieces = item.finalOrder;
     }
     boxes = Math.ceil(boxes);

@@ -46,7 +46,7 @@ function buildOrderText() {
 
   const lines = orderState.items
     .map(item => {
-      const qpb = item.qtyPerBox || 1;
+      const qpb = item.multiplicity || item.qtyPerBox || 1;
       
       const boxes = orderState.settings.unit === 'boxes'
         ? item.finalOrder

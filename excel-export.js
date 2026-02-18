@@ -23,7 +23,7 @@ export async function exportToExcel(orderState) {
   
   // Подготовка данных - наименование и заказ с единицами
   const dataRows = orderState.items.map(item => {
-    const qpb = item.qtyPerBox || 1;
+    const qpb = item.multiplicity || item.qtyPerBox || 1;
     const boxes = orderState.settings.unit === 'boxes' 
       ? item.finalOrder 
       : Math.ceil(item.finalOrder / qpb);
