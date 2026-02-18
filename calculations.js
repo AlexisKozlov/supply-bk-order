@@ -36,25 +36,23 @@ export function calculateItem(item, settings) {
   if (calculatedOrder < 0) calculatedOrder = 0;
 
   /* ===== ОКРУГЛЕНИЕ С УЧЁТОМ КРАТНОСТИ ===== */
+  // multiplicity = кол-во штук в одной «упаковке» (коробке)
+  // Для штучных товаров с кратностью:
+  //   В штуках: заказ округляется вверх до кратного multiplicity
+  //   В коробках: заказ уже идёт в коробках, просто ceil
   const mult = item.multiplicity || 0;
+  const effectiveBox = mult > 0 ? mult : (item.qtyPerBox || 0);
   
   if (unit === 'boxes') {
-    if (mult > 0) {
-      // В режиме коробок: кратность = мин. количество коробок
-      calculatedOrder = Math.ceil(calculatedOrder / mult) * mult;
-    } else {
-      calculatedOrder = roundUp(calculatedOrder);
-    }
+    // В режиме коробок — всегда целые коробки
+    calculatedOrder = roundUp(calculatedOrder);
   }
 
   if (unit === 'pieces') {
-    if (mult > 0) {
-      // Кратность задана: округляем до кратности (= шт в коробе для штучных)
-      calculatedOrder = Math.ceil(calculatedOrder / mult) * mult;
-    } else if (item.qtyPerBox) {
-      // Нет кратности: по коробкам
+    if (effectiveBox > 0) {
+      // Округляем до целых коробок (кратность или qtyPerBox)
       calculatedOrder =
-        roundUp(calculatedOrder / item.qtyPerBox) * item.qtyPerBox;
+        roundUp(calculatedOrder / effectiveBox) * effectiveBox;
     }
   }
 

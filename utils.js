@@ -31,12 +31,10 @@ export function syncEntityFromMain(...selectorIds) {
   const val = mainLegal.value;
   selectorIds.forEach(id => {
     const el = document.getElementById(id);
-    if (el) {
-      // Проверяем, есть ли такой option
-      const optionExists = Array.from(el.options).some(o => o.value === val);
-      if (optionExists) {
-        el.value = val;
-      }
+    if (!el || !el.options) return;
+    const optionExists = Array.from(el.options).some(o => o.value === val);
+    if (optionExists) {
+      el.value = val;
     }
   });
 }
