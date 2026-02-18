@@ -1094,27 +1094,68 @@ input[type="number"]:focus {
 .modal-box input,
 .modal-box select,
 .modal-box textarea {
-  width: 100%;
+  width: 100% !important;
+  min-width: 0 !important;
   padding: 10px 14px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 14px;
+  font-size: 13px;
   font-family: inherit;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   color: var(--text);
+  background: var(--card);
+  line-height: 1.4;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.modal-box input:focus,
+.modal-box select:focus,
+.modal-box textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
 
 .modal-box label {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 10px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .modal-box label select,
 .modal-box label input {
   margin-top: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.modal-row-2 {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.modal-row-2 .modal-field {
+  flex: 1;
+}
+
+.modal-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.modal-row-2 input {
+  margin-bottom: 0 !important;
 }
 
 .actions {
