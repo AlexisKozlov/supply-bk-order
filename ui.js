@@ -1,6 +1,6 @@
 import { orderState, currentUser, setCurrentUser, loadCurrentUser } from './state.js';
 import { calculateItem } from './calculations.js';
-import { supabase } from './supabase.js';
+import { supabase, setApiKey } from './supabase.js';
 import { history } from './history.js';
 import { SafetyStockManager } from './safety-stock.js';
 
@@ -92,12 +92,13 @@ const userBadge = document.getElementById('userBadge');
 const userDropdown = document.getElementById('userDropdown');
 const logoutBtn = document.getElementById('logoutBtn');
 
-// Загружаем список пользователей при старте
+// Загружаем список пользователей при старте (через RPC — работает без API ключа)
 (async function loadUserList() {
   try {
-    const { data } = await supabase.from('users').select('name').order('name');
-    if (data && loginUserSelect) {
-      data.forEach(u => {
+    const { data } = await supabase.rpc('get_user_list');
+    const users = Array.isArray(data) ? data : [];
+    if (users.length && loginUserSelect) {
+      users.forEach(u => {
         const opt = document.createElement('option');
         opt.value = u.name;
         opt.textContent = u.name;
@@ -202,8 +203,9 @@ async function doLogin() {
     });
     
     if (error || !data?.success) {
-      const valid = await checkLegacyPassword(pwd);
-      if (valid) {
+      // Пробуем legacy пароль
+      const legacyResult = await checkLegacyPassword(pwd);
+      if (legacyResult) {
         await afterLogin({ name: selectedUser || 'Пользователь', role: 'user' });
         return;
       }
@@ -211,10 +213,15 @@ async function doLogin() {
       return;
     }
     
+    // Сохраняем API ключ из ответа RPC
+    if (data.api_key) {
+      setApiKey(data.api_key);
+    }
+    
     await afterLogin(data.user);
   } catch(e) {
-    const valid = await checkLegacyPassword(pwd);
-    if (valid) {
+    const legacyResult = await checkLegacyPassword(pwd);
+    if (legacyResult) {
       await afterLogin({ name: selectedUser || 'Пользователь', role: 'user' });
     } else {
       showToast('Ошибка входа', 'Неверный пароль', 'error');
@@ -224,13 +231,14 @@ async function doLogin() {
 
 async function checkLegacyPassword(pwd) {
   try {
-    const { data } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'order_calculator_password')
-      .single();
-    if (data?.value) return pwd === data.value;
+    // Сначала пробуем RPC (работает без RLS, SECURITY DEFINER)
+    const { data, error } = await supabase.rpc('check_legacy_password', { pwd });
+    if (!error && data?.success) {
+      if (data.api_key) setApiKey(data.api_key);
+      return true;
+    }
   } catch (e) { /* fallback */ }
+  // Хардкод-fallback на случай если RPC ещё не создана
   return pwd === '157';
 }
 
@@ -239,6 +247,7 @@ if (logoutBtn) {
   logoutBtn.addEventListener('click', () => {
     setCurrentUser(null);
     localStorage.removeItem('bk_logged_in');
+    localStorage.removeItem('bk_api_key');
     
     // Очищаем данные заказа
     orderState.items = [];
