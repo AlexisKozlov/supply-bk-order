@@ -9,8 +9,6 @@ import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { showImportDialog } from './import-stock.js';
 import { validatePlanConsumption, resetConsumptionCache } from './data-validation.js';
-import { esc } from './utils.js';
-import { currentUser } from './state.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -114,7 +112,7 @@ export function initPlanning() {
     initPlanningUI();
   });
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-  // Не закрываем по клику на фон — page-modal
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
   
   // Загрузка плана из истории
   document.addEventListener('history:load-plan', (e) => {
@@ -157,7 +155,7 @@ export function initPlanning() {
         deficit: 0,
         orderBoxes: p.order_boxes || 0,
         orderUnits: p.order_units || 0,
-        locked: p.locked || (p.order_boxes > 0)  // Ненулевые = locked при загрузке
+        locked: p.locked || false
       }))
     }));
     
@@ -501,7 +499,7 @@ function renderPlanTable() {
   const container = document.getElementById('planTableContainer');
 
   if (!planState.items.length) {
-    container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--muted);">Нет товаров у поставщика «${esc(planState.supplier)}»</div>`;
+    container.innerHTML = `<div style="text-align:center;padding:30px;color:var(--muted);">Нет товаров у поставщика «${planState.supplier}»</div>`;
     return;
   }
 
@@ -525,13 +523,13 @@ function renderPlanTable() {
   `;
 
   planState.items.forEach((item, idx) => {
-    const skuPrefix = item.sku ? `<b style="color:var(--orange);margin-right:4px;">${esc(item.sku)}</b> ` : '';
+    const skuPrefix = item.sku ? `<b style="color:var(--orange);margin-right:4px;">${item.sku}</b> ` : '';
 
     html += `
       <tr data-idx="${idx}">
         <td class="plan-td-name">
-          <div style="font-weight:600;font-size:13px;color:var(--text);">${skuPrefix}${esc(item.name)}</div>
-          <div style="font-size:11px;color:var(--text-muted);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
+          <div style="font-weight:600;font-size:13px;color:var(--text);">${skuPrefix}${item.name}</div>
+          <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
         </td>
         <td class="plan-td-input">
           <input type="text" inputmode="numeric" class="plan-input plan-consumption" data-idx="${idx}" data-col="0" value="${item.monthlyConsumption || ''}" placeholder="0">
@@ -809,7 +807,7 @@ function updatePlanCells(idx) {
       cell.innerHTML = `<span class="plan-result-value${lockedClass}">${p.orderBoxes} кор ${palletBtn}${resetBtn}</span><span class="plan-result-sub">${nf.format(p.orderUnits)} ${item.unitOfMeasure}</span>`;
       cell.classList.add('plan-has-value');
     } else {
-      cell.innerHTML = '<span class="plan-result-zero">0</span>';
+      cell.innerHTML = '<span class="plan-result-zero">—</span>';
       cell.classList.remove('plan-has-value');
     }
     
@@ -968,7 +966,6 @@ async function savePlanToHistory() {
   } else {
     // INSERT
     planData.created_at = new Date().toISOString();
-    planData.created_by = currentUser?.name || null;
     ({ error } = await supabase.from('plans').insert([planData]));
   }
 
@@ -981,17 +978,6 @@ async function savePlanToHistory() {
   const label = planState.editingPlanId ? 'План обновлён' : 'План сохранён';
   const unitLabel = planState.periodType === 'weeks' ? 'нед.' : 'мес.';
   showToast(label, `${itemsWithPlan.length} позиций на ${planState.periodCount} ${unitLabel}`, 'success');
-  
-  // Лог
-  try {
-    await supabase.from('audit_log').insert({
-      action: planState.editingPlanId ? 'plan_updated' : 'plan_created',
-      entity_type: 'plan',
-      entity_id: null,
-      user_name: currentUser?.name || null,
-      details: { supplier: planState.supplier, items_count: itemsWithPlan.length }
-    });
-  } catch(e) { /* не блокируем */ }
 }
 
 /* ═══════ EXCEL EXPORT ═══════ */

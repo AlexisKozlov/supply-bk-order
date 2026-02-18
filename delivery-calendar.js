@@ -47,32 +47,20 @@ export function initDeliveryCalendar() {
   });
 
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
 
-  // Обновляем при смене юр.лица
-  document.addEventListener('legal-entity:changed', async (e) => {
-    if (modal.classList.contains('hidden')) return;
-    calState.legalEntity = e.detail.legalEntity;
-    await loadCalendarData();
-    renderCalendar();
+  // Навигация по месяцам — один раз
+  document.getElementById('calPrev')?.addEventListener('click', () => {
+    calState.month--;
+    if (calState.month < 0) { calState.month = 11; calState.year--; }
+    loadCalendarData().then(() => renderCalendar());
   });
 
-  // Навигация по месяцам — делегирование через контейнер
-  const calContainer = document.getElementById('calendarContainer');
-  if (calContainer) {
-    calContainer.addEventListener('click', (e) => {
-      const btn = e.target.closest('.cal-nav-btn');
-      if (!btn) return;
-      if (btn.id === 'calPrev') {
-        calState.month--;
-        if (calState.month < 0) { calState.month = 11; calState.year--; }
-        loadCalendarData().then(() => renderCalendar());
-      } else if (btn.id === 'calNext') {
-        calState.month++;
-        if (calState.month > 11) { calState.month = 0; calState.year++; }
-        loadCalendarData().then(() => renderCalendar());
-      }
-    });
-  }
+  document.getElementById('calNext')?.addEventListener('click', () => {
+    calState.month++;
+    if (calState.month > 11) { calState.month = 0; calState.year++; }
+    loadCalendarData().then(() => renderCalendar());
+  });
 }
 
 /* ═══════ DATA ═══════ */
@@ -158,53 +146,52 @@ function renderCalendar() {
     </div>
   `;
 
-  // Легенда поставщиков — сортировка: прошлые ≤3д → будущие ≤10д
+  // Легенда поставщиков
   const suppliers = Object.keys(calState.supplierColors);
   if (suppliers.length) {
-    const supplierData = suppliers.map(s => {
+    html += '<div class="cal-legend">';
+    suppliers.forEach(s => {
+      // Находим ближайшую будущую и последнюю прошлую поставку
       const supplierOrders = calState.orders.filter(o => o.supplier === s);
-      let nextDelivery = null, lastDelivery = null;
+      let nextDelivery = null;
+      let lastDelivery = null;
+      
       supplierOrders.forEach(o => {
         const d = new Date(o.delivery_date);
-        if (d >= today) { if (!nextDelivery || d < nextDelivery) nextDelivery = d; }
-        else { if (!lastDelivery || d > lastDelivery) lastDelivery = d; }
+        if (d >= today) {
+          if (!nextDelivery || d < nextDelivery) nextDelivery = d;
+        } else {
+          if (!lastDelivery || d > lastDelivery) lastDelivery = d;
+        }
       });
 
-      let daysLabel = '', sortKey = 999, show = false;
-
-      // Группа 1: прошлые ≤3 дней назад
-      if (lastDelivery) {
-        const daysAgo = Math.round((today - lastDelivery) / 86400000);
-        if (daysAgo <= 3) {
-          daysLabel = daysAgo === 0 ? ' (сегодня)' : ` (${daysAgo}д назад)`;
-          sortKey = -100 + daysAgo; // -100, -99, -98, -97
-          show = true;
-        }
-      }
-
-      // Группа 2: будущие ≤10 дней (только если НЕ попал в группу 1)
-      if (nextDelivery && !show) {
+      let daysLabel = '';
+      let urgencyClass = '';
+      
+      if (nextDelivery) {
         const daysUntil = Math.round((nextDelivery - today) / 86400000);
-        if (daysUntil <= 10) {
-          daysLabel = daysUntil === 0 ? ' (сегодня)' : ` (→${daysUntil}д)`;
-          sortKey = daysUntil; // 0...10
-          show = true;
+        if (daysUntil === 0) {
+          daysLabel = ' (сегодня)';
+          urgencyClass = 'cal-legend-soon';
+        } else if (daysUntil <= 10) {
+          daysLabel = ` (→${daysUntil}д)`;
+          urgencyClass = 'cal-legend-soon';
+        } else {
+          daysLabel = ` (→${daysUntil}д)`;
+        }
+      } else if (lastDelivery) {
+        const daysAgo = Math.round((today - lastDelivery) / 86400000);
+        daysLabel = ` (${daysAgo}д назад)`;
+        if (daysAgo <= 3) {
+          urgencyClass = 'cal-legend-recent';
+        } else {
+          urgencyClass = 'cal-legend-urgent';
         }
       }
-
-      return { name: s, daysLabel, sortKey, show };
+      
+      html += `<span class="cal-legend-item ${urgencyClass}"><span class="cal-legend-dot" style="background:${calState.supplierColors[s]}"></span>${s}${daysLabel}</span>`;
     });
-
-    const visible = supplierData.filter(s => s.show);
-    visible.sort((a, b) => a.sortKey - b.sortKey);
-
-    if (visible.length) {
-      html += '<div class="cal-legend">';
-      visible.forEach(s => {
-        html += `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${calState.supplierColors[s.name]}"></span>${s.name}${s.daysLabel}</span>`;
-      });
-      html += '</div>';
-    }
+    html += '</div>';
   }
 
   // Сетка календаря
@@ -240,9 +227,8 @@ function renderCalendar() {
       html += '<div class="cal-orders">';
       orders.forEach(o => {
         const color = calState.supplierColors[o.supplier] || '#999';
-        const shortName = o.supplier.length > 8 ? o.supplier.slice(0, 7) + '…' : o.supplier;
         const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
-        html += `<div class="cal-order-tag" style="background:${color}20;color:${color};border:1px solid ${color}40;" title="${esc(o.supplier)}: ${boxes} кор" data-order-id="${o.id}">${shortName}</div>`;
+        html += `<div class="cal-order-dot" style="background:${color}" title="${esc(o.supplier)}: ${boxes} кор" data-order-id="${o.id}"></div>`;
       });
       html += '</div>';
     }
@@ -252,14 +238,17 @@ function renderCalendar() {
 
   html += '</div>';
 
-  // Сводка: поставщики без заказа > 14 дней (нет будущих поставок и последняя > 14д назад)
+  // Сводка: поставщики без заказа > 3 дней (нет будущих поставок в ближайшие 10 дней и последняя > 3д назад)
   const overdue = suppliers.filter(s => {
     const supplierOrders = calState.orders.filter(o => o.supplier === s);
-    const hasFuture = supplierOrders.some(o => new Date(o.delivery_date) >= today);
-    if (hasFuture) return false;
+    const hasFutureSoon = supplierOrders.some(o => {
+      const d = new Date(o.delivery_date);
+      return d >= today && Math.round((d - today) / 86400000) <= 10;
+    });
+    if (hasFutureSoon) return false;
     const lastDate = lastOrderBySupplier[s];
     if (!lastDate) return true;
-    return Math.round((today - lastDate) / 86400000) > 14;
+    return Math.round((today - lastDate) / 86400000) > 3;
   });
 
   if (overdue.length) {
@@ -274,11 +263,11 @@ function renderCalendar() {
 
   container.innerHTML = html;
 
-  // Клик по тегу заказа → загрузить этот заказ
-  container.querySelectorAll('.cal-order-tag').forEach(tag => {
-    tag.style.cursor = 'pointer';
-    tag.addEventListener('click', async () => {
-      const orderId = tag.dataset.orderId;
+  // Клик по точке заказа → загрузить этот заказ
+  container.querySelectorAll('.cal-order-dot').forEach(dot => {
+    dot.style.cursor = 'pointer';
+    dot.addEventListener('click', async () => {
+      const orderId = dot.dataset.orderId;
       if (!orderId) return;
 
       // Загружаем полный заказ

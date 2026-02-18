@@ -82,8 +82,8 @@ const nf = new Intl.NumberFormat('ru-RU', {
 /* showToast и customConfirm импортированы из modals.js */
 
 
-loginBtn.addEventListener('click', doLogin);
-loginPassword.addEventListener('keydown', (e) => {
+loginBtn?.addEventListener('click', doLogin);
+loginPassword?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') doLogin();
 });
 
@@ -678,7 +678,7 @@ async function loadSuppliers(legalEntity) {
 // Инициализация при загрузке
 const initSuppliers = loadSuppliers(orderState.settings.legalEntity);
 
-historySupplier.addEventListener('change', loadOrderHistory);
+if (historySupplier) historySupplier.addEventListener('change', loadOrderHistory);
 
 const historyLegalEntity = document.getElementById('historyLegalEntity');
 if (historyLegalEntity) {

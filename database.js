@@ -5,7 +5,7 @@
 
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
-import { esc } from './utils.js';
+import { esc, syncEntityFromMain } from './utils.js';
 
 /* ═══════════════════════════════════════
    ИНИЦИАЛИЗАЦИЯ ТАБОВ
@@ -50,6 +50,9 @@ export function initDatabaseTabs() {
    ═══════════════════════════════════════ */
 
 export async function loadDatabaseProducts(dbLegalEntitySelect, databaseList) {
+  // Синхронизируем юр.лицо из основного селектора при первом открытии
+  syncEntityFromMain('dbLegalEntity', 'dbSupplierLegalEntity');
+  
   databaseList.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
   const legalEntity = dbLegalEntitySelect.value;

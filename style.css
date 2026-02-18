@@ -680,8 +680,6 @@ select:focus, input:focus, textarea:focus {
   margin: 0 !important;
 }
 
-.btn-danger { color: var(--error); }
-
 /* ─── Table ─── */
 .table-wrap {
   overflow-x: auto;
@@ -863,8 +861,7 @@ input[type="number"] {
   transition: border-color var(--transition);
 }
 
-/* Авто-расширение для больших чисел */
-input[type="number"]:valid { field-sizing: content; max-width: 100px; }
+/* Авто-расширение через JS, не CSS */
 
 input[type="number"]:focus {
   border-color: var(--accent);
