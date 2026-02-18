@@ -260,15 +260,7 @@
           <option value="plans">Планирование</option>
         </select>
       </label>
-      <label style="flex:1;">
-        Юр. лицо
-        <select id="historyLegalEntity">
-          <option value="">Все</option>
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-      </label>
+      <input type="hidden" id="historyLegalEntity" value="" />
       <label style="flex:1;">
         Поставщик
         <select id="historySupplier">
@@ -307,13 +299,20 @@
         <input id="m_pallet" type="number" placeholder="0" />
       </div>
     </div>
-    <label>Единица измерения
-      <select id="m_unit">
-        <option value="шт">штуки</option>
-        <option value="л">литры</option>
-        <option value="кг">килограммы</option>
-      </select>
-    </label>
+    <div class="modal-row-2">
+      <div class="modal-field">
+        <span class="modal-field-label">Кратность заказа</span>
+        <input id="m_multiplicity" type="number" placeholder="0" title="Минимальная партия заказа. 0 = по коробкам" />
+      </div>
+      <div class="modal-field">
+        <span class="modal-field-label">Единица измерения</span>
+        <select id="m_unit">
+          <option value="шт">штуки</option>
+          <option value="л">литры</option>
+          <option value="кг">килограммы</option>
+        </select>
+      </div>
+    </div>
     <div class="actions">
       <button id="m_add" class="btn primary">Добавить</button>
       <button id="m_cancel" class="btn secondary">Отмена</button>
@@ -353,12 +352,8 @@
     </div>
     <div id="dbTabProducts" class="db-tab-content">
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
-        <select id="dbLegalEntity" style="width:50%;">
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-        <section class="search" style="width:50%;margin:0;">
+        <input type="hidden" id="dbLegalEntity" value="Бургер БК" />
+        <section class="search" style="width:100%;margin:0;">
           <input id="dbSearch" placeholder="Поиск по карточкам"  />
           <button id="clearDbSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
@@ -367,12 +362,8 @@
     </div>
     <div id="dbTabSuppliers" class="db-tab-content hidden">
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
-        <select id="dbSupplierLegalEntity" style="width:50%;">
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-        <section class="search" style="width:50%;margin:0;">
+        <input type="hidden" id="dbSupplierLegalEntity" value="Бургер БК" />
+        <section class="search" style="width:100%;margin:0;">
           <input id="dbSupplierSearch" placeholder="Поиск по поставщикам"  />
           <button id="clearDbSupplierSearch" class="search-clear hidden" title="Очистить">✕</button>
         </section>
@@ -409,13 +400,20 @@
         <input id="e_pallet" type="number" placeholder="0" />
       </div>
     </div>
-    <label>Единица измерения
-      <select id="e_unit">
-        <option value="шт">штуки</option>
-        <option value="л">литры</option>
-        <option value="кг">килограммы</option>
-      </select>
-    </label>
+    <div class="modal-row-2">
+      <div class="modal-field">
+        <span class="modal-field-label">Кратность заказа</span>
+        <input id="e_multiplicity" type="number" placeholder="0" title="Минимальная партия заказа. 0 = по коробкам" />
+      </div>
+      <div class="modal-field">
+        <span class="modal-field-label">Единица измерения</span>
+        <select id="e_unit">
+          <option value="шт">штуки</option>
+          <option value="л">литры</option>
+          <option value="кг">килограммы</option>
+        </select>
+      </div>
+    </div>
     <div class="actions" style="margin-bottom:0;">
       <button id="e_save" class="btn primary">Сохранить</button>
       <button id="e_cancel" class="btn secondary">Отмена</button>
@@ -534,13 +532,7 @@
       <button id="closePlanning" class="modal-close">✕</button>
     </div>
     <div style="display:flex;flex-wrap:nowrap;gap:6px;align-items:flex-end;padding:6px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;overflow-x:auto;">
-      <label style="min-width:100px;flex-shrink:1;">Юр. лицо
-        <select id="planLegalEntity" style="font-size:11px;padding:5px 6px;">
-          <option value="Бургер БК">Бургер БК</option>
-          <option value="Воглия Матта">Воглия Матта</option>
-          <option value="Пицца Стар">Пицца Стар</option>
-        </select>
-      </label>
+      <input type="hidden" id="planLegalEntity" value="Бургер БК" />
       <label style="min-width:120px;flex:1;">Поставщик
         <select id="planSupplier" style="font-size:11px;padding:5px 6px;"><option value="">— Выберите —</option></select>
       </label>

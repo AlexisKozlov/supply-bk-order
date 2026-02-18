@@ -175,6 +175,7 @@ export async function openEditCard(id, onSaveCallback) {
   document.getElementById('e_legalEntity').value = data.legal_entity || 'Бургер БК';
   document.getElementById('e_box').value = data.qty_per_box || '';
   document.getElementById('e_pallet').value = data.boxes_per_pallet || '';
+  document.getElementById('e_multiplicity').value = data.multiplicity || '';
   document.getElementById('e_unit').value = data.unit_of_measure || 'шт';
 
   // Загружаем поставщиков в селектор
@@ -198,6 +199,7 @@ export async function openNewProductCard() {
   document.getElementById('e_legalEntity').value = document.getElementById('dbLegalEntity')?.value || 'Бургер БК';
   document.getElementById('e_box').value = '';
   document.getElementById('e_pallet').value = '';
+  document.getElementById('e_multiplicity').value = '';
   document.getElementById('e_unit').value = 'шт';
 
   await loadSupplierOptions(document.getElementById('e_supplier'), '');
@@ -242,6 +244,7 @@ function setupEditCardHandlers(editId, onSaveCallback) {
       legal_entity: document.getElementById('e_legalEntity').value,
       qty_per_box: +document.getElementById('e_box').value || null,
       boxes_per_pallet: +document.getElementById('e_pallet').value || null,
+      multiplicity: +document.getElementById('e_multiplicity').value || 0,
       unit_of_measure: document.getElementById('e_unit').value
     };
 

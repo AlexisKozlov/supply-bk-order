@@ -75,7 +75,7 @@ export function renderTable(orderState, tbody, callbacks) {
       </td>
       <td class="item-name">
         ${item.sku ? `<b>${esc(item.sku)}</b> ` : ''}${esc(item.name)}
-        <div class="item-meta">${item.qtyPerBox ? item.qtyPerBox + ' ' + (item.unitOfMeasure || 'шт') + '/кор' : ''}${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
+        <div class="item-meta">${item.qtyPerBox ? item.qtyPerBox + ' ' + (item.unitOfMeasure || 'шт') + '/кор' : ''}${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}${item.multiplicity ? ' · кратн.' + item.multiplicity : ''}</div>
         <div class="shortage-info hidden"></div>
       </td>
       <td><input type="number" value="${item.consumptionPeriod}"></td>
@@ -153,15 +153,17 @@ export function renderTable(orderState, tbody, callbacks) {
       updateFinalSummary();
     });
 
+    const effectiveQpb = item.multiplicity || item.qtyPerBox || 1;
+
     function syncOrderInputs(fromPieces) {
       if (fromPieces) {
         const pieces = +orderPiecesInput.value || 0;
-        const boxes = item.qtyPerBox ? Math.ceil(pieces / item.qtyPerBox) : 0;
+        const boxes = effectiveQpb ? Math.ceil(pieces / effectiveQpb) : 0;
         orderBoxesInput.value = boxes;
         item.finalOrder = orderState.settings.unit === 'pieces' ? pieces : boxes;
       } else {
         const boxes = +orderBoxesInput.value || 0;
-        const pieces = boxes * (item.qtyPerBox || 1);
+        const pieces = boxes * effectiveQpb;
         orderPiecesInput.value = pieces;
         item.finalOrder = orderState.settings.unit === 'pieces' ? pieces : boxes;
       }
@@ -170,10 +172,10 @@ export function renderTable(orderState, tbody, callbacks) {
     // Инициализация значений
     if (orderState.settings.unit === 'pieces') {
       orderPiecesInput.value = item.finalOrder || 0;
-      orderBoxesInput.value = item.qtyPerBox ? Math.ceil((item.finalOrder || 0) / item.qtyPerBox) : 0;
+      orderBoxesInput.value = effectiveQpb ? Math.ceil((item.finalOrder || 0) / effectiveQpb) : 0;
     } else {
       orderBoxesInput.value = item.finalOrder || 0;
-      orderPiecesInput.value = (item.finalOrder || 0) * (item.qtyPerBox || 1);
+      orderPiecesInput.value = (item.finalOrder || 0) * effectiveQpb;
     }
 
     // Обработчики input
@@ -213,10 +215,10 @@ export function renderTable(orderState, tbody, callbacks) {
         
         if (orderState.settings.unit === 'pieces') {
           orderPiecesInput.value = item.finalOrder;
-          orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+          orderBoxesInput.value = effectiveQpb ? Math.ceil(item.finalOrder / effectiveQpb) : 0;
         } else {
           orderBoxesInput.value = item.finalOrder;
-          orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+          orderPiecesInput.value = item.finalOrder * effectiveQpb;
         }
         
         updateRow(tr, item, orderState.settings);
@@ -249,10 +251,10 @@ export function renderTable(orderState, tbody, callbacks) {
       
       if (orderState.settings.unit === 'pieces') {
         orderPiecesInput.value = item.finalOrder;
-        orderBoxesInput.value = item.qtyPerBox ? Math.ceil(item.finalOrder / item.qtyPerBox) : 0;
+        orderBoxesInput.value = effectiveQpb ? Math.ceil(item.finalOrder / effectiveQpb) : 0;
       } else {
         orderBoxesInput.value = item.finalOrder;
-        orderPiecesInput.value = item.finalOrder * (item.qtyPerBox || 1);
+        orderPiecesInput.value = item.finalOrder * effectiveQpb;
       }
       
       updateRow(tr, item, orderState.settings);
@@ -308,13 +310,12 @@ export function updateRow(tr, item, settings) {
   
   // ===== РАСЧЁТ ЗАКАЗА - формат: "4 кор (48 шт)" или "4 кор" =====
   const calcValue = tr.querySelector('.calc-value');
+  const eQpb = item.multiplicity || item.qtyPerBox || 1;
   if (calc.calculatedOrder > 0) {
-    if (settings.unit === 'pieces' && item.qtyPerBox) {
-      // Единицы = штуки → показываем "X кор (Y шт)"
-      const boxes = Math.ceil(calc.calculatedOrder / item.qtyPerBox);
-      calcValue.textContent = `${boxes} кор (${Math.round(calc.calculatedOrder)} шт)`;
+    if (settings.unit === 'pieces' && eQpb > 1) {
+      const boxes = Math.ceil(calc.calculatedOrder / eQpb);
+      calcValue.textContent = `${boxes} кор (${Math.round(calc.calculatedOrder)} ${item.unitOfMeasure || 'шт'})`;
     } else if (settings.unit === 'boxes') {
-      // Единицы = коробки → показываем "X кор"
       calcValue.textContent = `${Math.round(calc.calculatedOrder)} кор`;
     } else {
       calcValue.textContent = Math.round(calc.calculatedOrder).toString();
@@ -374,9 +375,9 @@ export function updateRow(tr, item, settings) {
       if (settings.unit === 'boxes') {
         // расход и остаток введены в коробках → deficit тоже в коробках
         deficitText = `${Math.ceil(deficit)} кор.`;
-      } else if (item.qtyPerBox) {
+      } else if (eQpb > 1) {
         // расход и остаток в штуках → deficit в штуках, коробки в скобках
-        const deficitBoxes = Math.ceil(deficit / item.qtyPerBox);
+        const deficitBoxes = Math.ceil(deficit / eQpb);
         deficitText = `${Math.ceil(deficit)} ${unit} (${deficitBoxes} кор.)`;
       } else {
         deficitText = `${Math.ceil(deficit)} ${unit}`;

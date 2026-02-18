@@ -168,8 +168,12 @@ document.addEventListener('click', () => {
 
 async function afterLogin(user) {
   setCurrentUser(user);
-  loginOverlay.style.display = 'none';
   updateUserUI(user);
+  
+  // Показываем приветственный экран
+  await showWelcomeScreen(user);
+  
+  loginOverlay.style.display = 'none';
   
   // Принудительно устанавливаем первое доступное юр.лицо
   const le = document.getElementById('legalEntity').value;
@@ -181,6 +185,36 @@ async function afterLogin(user) {
   // Обнуляем предыдущий заказ
   orderState.items = [];
   render();
+}
+
+function showWelcomeScreen(user) {
+  return new Promise(resolve => {
+    const le = document.getElementById('legalEntity')?.value || '';
+    const name = user.name || 'Пользователь';
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'welcome-overlay';
+    overlay.innerHTML = `
+      <div class="welcome-content">
+        <div class="welcome-avatar">${initials}</div>
+        <div class="welcome-name">${name}</div>
+        <div class="welcome-entity">${le}</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    // Запускаем анимацию появления
+    requestAnimationFrame(() => overlay.classList.add('welcome-visible'));
+    
+    setTimeout(() => {
+      overlay.classList.add('welcome-fade');
+      setTimeout(() => {
+        overlay.remove();
+        resolve();
+      }, 400);
+    }, 1400);
+  });
 }
 
 async function doLogin() {
@@ -510,9 +544,14 @@ function syncLegalEntityToAll(value) {
   selectors.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    // Если есть опция с таким value — выбираем
-    const option = [...el.options].find(o => o.value === value);
-    if (option) el.value = value;
+    if (el.tagName === 'INPUT') {
+      // hidden input — просто ставим value
+      el.value = value;
+    } else {
+      // select — проверяем есть ли option
+      const option = [...el.options].find(o => o.value === value);
+      if (option) el.value = value;
+    }
   });
 }
 
@@ -840,6 +879,7 @@ manualAddBtn.addEventListener('click', async () => {
   const supplier = document.getElementById('m_supplier').value.trim();
   const qtyPerBox = document.getElementById('m_box').value.trim();
   const boxesPerPallet = document.getElementById('m_pallet').value.trim();
+  const multiplicity = document.getElementById('m_multiplicity').value.trim();
 
   // Проверка всех обязательных полей
   if (!name) {
@@ -874,6 +914,7 @@ manualAddBtn.addEventListener('click', async () => {
     legal_entity: document.getElementById('m_legalEntity').value,
     qty_per_box: +qtyPerBox,
     boxes_per_pallet: +boxesPerPallet,
+    multiplicity: +multiplicity || 0,
     unit_of_measure: document.getElementById('m_unit').value || 'шт'
   };
 
@@ -907,6 +948,7 @@ function clearManualForm() {
   document.getElementById('m_sku').value = '';
   document.getElementById('m_box').value = '';
   document.getElementById('m_pallet').value = '';
+  document.getElementById('m_multiplicity').value = '';
 }
 
 /** Загрузить поставщиков в произвольный select */
@@ -990,6 +1032,7 @@ function addItem(p, skipRender = false) {
     transit: 0,
     qtyPerBox: p.qty_per_box || 1,
     boxesPerPallet: p.boxes_per_pallet || null,
+    multiplicity: p.multiplicity || 0,
     unitOfMeasure: p.unit_of_measure || 'шт',
     finalOrder: 0
   });

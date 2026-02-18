@@ -35,14 +35,27 @@ export function calculateItem(item, settings) {
   let calculatedOrder = needAfterDelivery - stockAfterDelivery;
   if (calculatedOrder < 0) calculatedOrder = 0;
 
-  /* ===== ОКРУГЛЕНИЕ ===== */
+  /* ===== ОКРУГЛЕНИЕ С УЧЁТОМ КРАТНОСТИ ===== */
+  const mult = item.multiplicity || 0;
+  
   if (unit === 'boxes') {
-    calculatedOrder = roundUp(calculatedOrder);
+    if (mult > 0) {
+      // В режиме коробок: кратность = мин. количество коробок
+      calculatedOrder = Math.ceil(calculatedOrder / mult) * mult;
+    } else {
+      calculatedOrder = roundUp(calculatedOrder);
+    }
   }
 
-  if (unit === 'pieces' && item.qtyPerBox) {
-    calculatedOrder =
-      roundUp(calculatedOrder / item.qtyPerBox) * item.qtyPerBox;
+  if (unit === 'pieces') {
+    if (mult > 0) {
+      // Кратность задана: округляем до кратности (= шт в коробе для штучных)
+      calculatedOrder = Math.ceil(calculatedOrder / mult) * mult;
+    } else if (item.qtyPerBox) {
+      // Нет кратности: по коробкам
+      calculatedOrder =
+        roundUp(calculatedOrder / item.qtyPerBox) * item.qtyPerBox;
+    }
   }
 
   // === ДАТА «ХВАТИТ ДО» ===
@@ -68,10 +81,11 @@ export function calculateItem(item, settings) {
 function calculatePallets(item, unit) {
   if (!item.boxesPerPallet || !item.finalOrder) return null;
 
+  const effectiveQpb = item.multiplicity || item.qtyPerBox || 1;
   const boxes =
     unit === 'boxes'
       ? item.finalOrder
-      : item.finalOrder / (item.qtyPerBox || 1);
+      : item.finalOrder / effectiveQpb;
 
   return {
     pallets: Math.floor(boxes / item.boxesPerPallet),
