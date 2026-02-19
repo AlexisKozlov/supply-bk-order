@@ -24,7 +24,8 @@ class QueryBuilder {
   }
 
   select(c, o) {
-    this._sel = c ? c.replace(/\s+/g, ' ').trim() : '*';
+    // Нормализуем: убираем переносы, лишние пробелы, пробел перед (
+    this._sel = c ? c.replace(/\s+/g, ' ').replace(/(\w)\s+\(/g, '$1(').trim() : '*';
     if (o?.count) this._countMode = o.count;
     if (o?.head) this._head = true;
     return this;
