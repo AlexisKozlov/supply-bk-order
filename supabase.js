@@ -1,248 +1,137 @@
-/**
- * supabase.js — API клиент
- * Заменяет Supabase SDK, сохраняя тот же интерфейс:
- *   supabase.from('table').select('*').eq('col', val)...
- *
- * Все вызовы идут на /api/{table}
- */
-
 const API_BASE = '/api';
-
-function getApiKey() {
-  return localStorage.getItem('bk_api_key') || '';
-}
-
+function getApiKey() { return localStorage.getItem('bk_api_key') || ''; }
 function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
-  const key = getApiKey();
-  if (key) h['X-API-Key'] = key;
+  const k = getApiKey();
+  if (k) h['X-API-Key'] = k;
   return h;
 }
 
-// ═══════ QUERY BUILDER ═══════
-
 class QueryBuilder {
-  constructor(table) {
-    this._table = table;
-    this._select = '*';
-    this._filters = {};
-    this._order = null;
-    this._limit = null;
+  constructor(t) {
+    this._t = t;
+    this._sel = '*';
+    this._f = {};
+    this._or = null;
+    this._ord = null;
+    this._lim = null;
     this._single = false;
-    this._maybeSingle = false;
+    this._maybe = false;
     this._method = 'GET';
     this._body = null;
-    this._countMode = null;
     this._head = false;
+    this._countMode = null;
   }
 
-  select(cols, opts) {
-    this._select = cols || '*';
-    if (opts?.count) this._countMode = opts.count;
-    if (opts?.head) this._head = true;
+  select(c, o) {
+    this._sel = c ? c.replace(/\s+/g, ' ').trim() : '*';
+    if (o?.count) this._countMode = o.count;
+    if (o?.head) this._head = true;
     return this;
   }
 
-  insert(data) {
-    this._method = 'POST';
-    this._body = Array.isArray(data) ? data : [data];
+  insert(d) { this._method = 'POST'; this._body = Array.isArray(d) ? d : [d]; return this; }
+  update(d) { this._method = 'PATCH'; this._body = d; return this; }
+  upsert(d) { this._method = 'POST'; this._body = Array.isArray(d) ? d : [d]; return this; }
+  delete() { this._method = 'DELETE'; return this; }
+
+  eq(c, v) { this._f[c] = `eq.${v}`; return this; }
+  neq(c, v) { this._f[c] = `neq.${v}`; return this; }
+  gt(c, v) { this._f[c] = `gt.${v}`; return this; }
+  gte(c, v) { this._f[c] = `gte.${v}`; return this; }
+  lt(c, v) { this._f[c] = `lt.${v}`; return this; }
+  lte(c, v) { this._f[c] = `lte.${v}`; return this; }
+  in(c, v) { this._f[c] = `in.(${v.join(',')})`; return this; }
+  is(c, v) { this._f[c] = `eq.${v}`; return this; }
+  not(c, op, v) { this._f[c] = `neq.${v}`; return this; }
+  ilike(c, v) { this._f[c] = `ilike.${v}`; return this; }
+  or(conditions) { this._or = conditions; return this; }
+
+  order(c, o) {
+    const dir = o?.ascending === false ? 'desc' : 'asc';
+    this._ord = `${c}.${dir}`;
     return this;
   }
 
-  update(data) {
-    this._method = 'PATCH';
-    this._body = data;
-    return this;
-  }
+  limit(n) { this._lim = n; return this; }
+  single() { this._single = true; return this; }
+  maybeSingle() { this._single = true; this._maybe = true; return this; }
 
-  upsert(data) {
-    this._method = 'POST';
-    this._body = Array.isArray(data) ? data : [data];
-    this._upsert = true;
-    return this;
-  }
+  then(res, rej) { this._run().then(res, rej); }
 
-  delete() {
-    this._method = 'DELETE';
-    return this;
-  }
-
-  eq(col, val) {
-    this._filters[col] = `eq.${val}`;
-    return this;
-  }
-
-  neq(col, val) {
-    this._filters[col] = `neq.${val}`;
-    return this;
-  }
-
-  gte(col, val) {
-    this._filters[col] = `gte.${val}`;
-    return this;
-  }
-
-  lte(col, val) {
-    this._filters[col] = `lte.${val}`;
-    return this;
-  }
-
-  in(col, values) {
-    this._filters[col] = `in.(${values.join(',')})`;
-    return this;
-  }
-
-  order(col, opts) {
-    const dir = opts?.ascending === false ? 'desc' : 'asc';
-    this._order = `${col}.${dir}`;
-    return this;
-  }
-
-  limit(n) {
-    this._limit = n;
-    return this;
-  }
-
-  single() {
-    this._single = true;
-    return this;
-  }
-
-  maybeSingle() {
-    this._single = true;
-    this._maybeSingle = true;
-    return this;
-  }
-
-  // Thenable — позволяет использовать await
-  then(resolve, reject) {
-    this._execute().then(resolve, reject);
-  }
-
-  async _execute() {
-    let url = `${API_BASE}/${this._table}`;
-    const params = new URLSearchParams();
-
-    for (const [col, val] of Object.entries(this._filters)) {
-      params.set(col, val);
-    }
-
-    if (this._select !== '*') params.set('select', this._select);
-    if (this._order) params.set('order', this._order);
-    if (this._limit) params.set('limit', String(this._limit));
-
-    const qs = params.toString();
-    const fullUrl = `${url}${qs ? '?' + qs : ''}`;
+  async _run() {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(this._f)) p.set(k, v);
+    if (this._sel !== '*') p.set('select', this._sel);
+    if (this._ord) p.set('order', this._ord);
+    if (this._lim) p.set('limit', String(this._lim));
+    if (this._or) p.set('or', this._or);
+    const qs = p.toString();
+    const url = `${API_BASE}/${this._t}${qs ? '?' + qs : ''}`;
 
     try {
       if (this._method === 'GET') {
-        const resp = await fetch(fullUrl, { headers: buildHeaders() });
-
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          return { data: null, error: err.error || resp.statusText };
-        }
-
-        let data = await resp.json();
-
-        if (this._head) {
-          return { data: null, count: Array.isArray(data) ? data.length : 0, error: null };
-        }
-
+        const r = await fetch(url, { headers: buildHeaders() });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+        let d = await r.json();
+        if (Array.isArray(d)) d = d.map(row => parseJsonFields(row));
+        else if (d && typeof d === 'object') d = parseJsonFields(d);
+        if (this._head) return { data: null, count: Array.isArray(d) ? d.length : 0, error: null };
         if (this._single) {
-          if (Array.isArray(data)) data = data[0] || null;
-          if (!data && !this._maybeSingle) return { data: null, error: 'Row not found' };
+          if (Array.isArray(d)) d = d[0] || null;
+          if (!d && !this._maybe) return { data: null, error: 'Row not found' };
         }
-
-        return { data, error: null };
+        return { data: d, error: null };
       }
 
       if (this._method === 'POST') {
-        const sendBody = this._body.length === 1 ? this._body[0] : this._body;
-        const resp = await fetch(fullUrl, {
-          method: 'POST',
-          headers: buildHeaders(),
-          body: JSON.stringify(sendBody)
-        });
-
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          return { data: null, error: err.error || resp.statusText };
-        }
-
-        const data = await resp.json();
-        return { data, error: null };
+        const b = this._body.length === 1 ? this._body[0] : this._body;
+        const r = await fetch(url, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(b) });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+        let d = await r.json();
+        if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
+        return { data: d, error: null };
       }
 
-      if (this._method === 'PATCH' || this._method === 'PUT') {
-        const resp = await fetch(fullUrl, {
-          method: 'PATCH',
-          headers: buildHeaders(),
-          body: JSON.stringify(this._body)
-        });
-
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          return { data: null, error: err.error || resp.statusText };
-        }
-
-        const data = await resp.json();
-        return { data: Array.isArray(data) ? data : [data], error: null };
+      if (this._method === 'PATCH') {
+        const r = await fetch(url, { method: 'PATCH', headers: buildHeaders(), body: JSON.stringify(this._body) });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+        let d = await r.json();
+        if (Array.isArray(d)) d = d.map(parseJsonFields);
+        return { data: Array.isArray(d) ? d : [d], error: null };
       }
 
       if (this._method === 'DELETE') {
-        const resp = await fetch(fullUrl, {
-          method: 'DELETE',
-          headers: buildHeaders()
-        });
-
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          return { data: null, error: err.error || resp.statusText };
-        }
-
-        const data = await resp.json();
-        return { data, error: null };
+        const r = await fetch(url, { method: 'DELETE', headers: buildHeaders() });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+        return { data: await r.json(), error: null };
       }
-
-    } catch (e) {
-      return { data: null, error: e.message };
-    }
+    } catch (e) { return { data: null, error: e.message }; }
   }
 }
 
-// ═══════ RPC ═══════
-async function rpc(fnName, params = {}) {
+function parseJsonFields(row) {
+  if (!row || typeof row !== 'object') return row;
+  const jsonCols = ['items', 'legal_entities', 'details', 'sku_order', 'analogs', 'data', 'order_items'];
+  for (const col of jsonCols) {
+    if (col in row && typeof row[col] === 'string') {
+      try { row[col] = JSON.parse(row[col]); } catch (e) { /* keep string */ }
+    }
+  }
+  return row;
+}
+
+async function rpc(fn, params = {}) {
   try {
-    const resp = await fetch(`${API_BASE}/rpc/${fnName}`, {
-      method: 'POST',
-      headers: buildHeaders(),
-      body: JSON.stringify(params)
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      return { data: null, error: err.error || resp.statusText };
-    }
-
-    const data = await resp.json();
-    return { data, error: null };
-  } catch (e) {
-    return { data: null, error: e.message };
-  }
+    const r = await fetch(`${API_BASE}/rpc/${fn}`, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+    return { data: await r.json(), error: null };
+  } catch (e) { return { data: null, error: e.message }; }
 }
-
-// ═══════ EXPORT ═══════
 
 export const supabase = {
-  from(table) {
-    return new QueryBuilder(table);
-  },
-  rpc(fnName, params) {
-    return rpc(fnName, params);
-  }
+  from(t) { return new QueryBuilder(t); },
+  rpc(fn, p) { return rpc(fn, p); }
 };
 
-export function setApiKey(key) {
-  localStorage.setItem('bk_api_key', key);
-}
+export function setApiKey(k) { localStorage.setItem('bk_api_key', k); }
