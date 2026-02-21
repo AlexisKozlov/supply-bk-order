@@ -13,6 +13,26 @@ export function safeDivide(a, b) {
   return a / b;
 }
 
+/**
+ * Конверсия единиц шт↔кор (переключатель в UI).
+ * Используется ТОЛЬКО qty_per_box. multiplicity НЕ участвует.
+ * Молоко (qty_per_box=1): 12000 шт = 12000 кор
+ * Тар тар (qty_per_box=1000): 10000 шт = 10 кор
+ */
+export function getQpb(item) {
+  return item.qtyPerBox || 1;
+}
+
+/**
+ * Количество учётных единиц (кор 1С) в одной ФИЗИЧЕСКОЙ коробке.
+ * Молоко: multiplicity=12, т.е. физ. коробка = 12 учётных коробок (12 литров)
+ * Тар тар: multiplicity=3, т.е. физ. коробка = 3 учётных коробки (3000 шт)
+ * Для товаров без кратности: 1 (учётная коробка = физическая)
+ */
+export function getMultiplicity(item) {
+  return item.multiplicity || 1;
+}
+
 /** Экранирование HTML — защита от XSS при вставке через innerHTML */
 const _escDiv = document.createElement('div');
 export function esc(str) {

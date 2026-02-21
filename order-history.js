@@ -145,6 +145,7 @@ async function renderOrderHistory(orders, opts) {
           ${metaHtml}
         </div>
         <div class="history-actions">
+          <button class="btn small view-order-btn" title="Просмотр">👁</button>
           <button class="btn small edit-order-btn" title="Редактировать">✏️</button>
           <button class="btn small copy-order-btn" title="Скопировать">📋</button>
           <button class="btn small log-order-btn" title="Лог изменений">📝</button>
@@ -163,6 +164,7 @@ async function renderOrderHistory(orders, opts) {
     `;
 
     const header = div.querySelector('.history-title');
+    const viewBtn = div.querySelector('.view-order-btn');
     const editBtn = div.querySelector('.edit-order-btn');
     const copyBtn = div.querySelector('.copy-order-btn');
     const logBtn = div.querySelector('.log-order-btn');
@@ -171,6 +173,14 @@ async function renderOrderHistory(orders, opts) {
     header.style.cursor = 'pointer';
     header.onclick = () => {
       div.querySelector('.history-items').classList.toggle('hidden');
+    };
+
+    viewBtn.onclick = async (e) => {
+      e.stopPropagation();
+      document.dispatchEvent(new CustomEvent('history:view-order', {
+        detail: { order, legalEntity }
+      }));
+      opts.callbacks.historyModal.classList.add('hidden');
     };
 
     editBtn.onclick = async (e) => {
@@ -454,6 +464,7 @@ async function loadPlanHistory(opts) {
     if (plan.created_by) metaParts.push(`<span style="color:#2e7d32;">👤 ${esc(plan.created_by)}</span>`);
     metaParts.push(`<span style="color:#8B7355;">${date}</span>`);
     metaParts.push(`<span>${items.length} поз. · ${nf.format(totalBoxes)} кор</span>`);
+    if (plan.note) metaParts.push(`<span style="color:#666;font-style:italic;">«${esc(plan.note)}»</span>`);
 
     const div = document.createElement('div');
     div.className = 'history-order';
@@ -464,12 +475,19 @@ async function loadPlanHistory(opts) {
           <div class="history-meta">${metaParts.join(' · ')}</div>
         </div>
         <div class="history-actions">
-          <button class="btn small load-plan-btn" data-id="${plan.id}" title="Загрузить план">✏️</button>
+          <button class="btn small view-plan-btn" data-id="${plan.id}" title="Просмотр">👁</button>
+          <button class="btn small load-plan-btn" data-id="${plan.id}" title="Редактировать">✏️</button>
           <button class="btn small log-plan-btn" data-id="${plan.id}" title="Лог изменений">📝</button>
           <button class="btn small delete-plan-btn" data-id="${plan.id}" title="Удалить план">🗑️</button>
         </div>
       </div>
     `;
+
+    const viewPlanBtn = div.querySelector('.view-plan-btn');
+    viewPlanBtn.onclick = () => {
+      document.dispatchEvent(new CustomEvent('history:view-plan', { detail: { plan } }));
+      document.getElementById('historyModal')?.classList.add('hidden');
+    };
 
     const loadBtn = div.querySelector('.load-plan-btn');
     loadBtn.onclick = () => {
@@ -523,18 +541,15 @@ async function showPlanLog(planId, parentDiv) {
   parentDiv.appendChild(panel);
   
   try {
-    // Планы не имеют UUID entity_id, ищем по supplier + type
     const { data, error } = await supabase
       .from('audit_log')
       .select('*')
       .eq('entity_type', 'plan')
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(50);
     
-    // Фильтруем по supplier из details (т.к. entity_id null для планов)
-    const filtered = (data || []).filter(log => {
-      return log.details?.supplier && log.details.supplier === parentDiv.querySelector('.history-title b')?.textContent;
-    });
+    // Фильтруем строго по entity_id плана
+    const filtered = (data || []).filter(log => log.entity_id === planId);
     
     if (error || !filtered.length) {
       panel.innerHTML = '<div style="padding:8px;color:#999;font-size:12px;">Нет записей в логе</div>';
@@ -547,15 +562,32 @@ async function showPlanLog(planId, parentDiv) {
       'plan_deleted': '🗑️ Удалён'
     };
     
-    panel.innerHTML = filtered.slice(0, 10).map(log => {
+    panel.innerHTML = filtered.slice(0, 15).map(log => {
       const date = new Date(log.created_at);
       const dateStr = date.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' });
       const timeStr = date.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' });
       const label = actionLabels[log.action] || log.action;
       const user = log.user_name ? esc(log.user_name) : '—';
       const count = log.details?.items_count ? ` · ${log.details.items_count} поз.` : '';
+      
+      // Детали изменений
+      let changesHtml = '';
+      const changes = log.details?.changes;
+      if (changes && changes.length) {
+        changesHtml = '<div style="margin:2px 0 4px 16px;font-size:11px;color:#555;">' +
+          changes.slice(0, 8).map(c => {
+            if (c.type === 'added') return `<div style="color:#2e7d32;">+ ${esc(c.item)} (${c.boxes} кор)</div>`;
+            if (c.type === 'removed') return `<div style="color:#c62828;">− ${esc(c.item)} (${c.boxes} кор)</div>`;
+            if (c.type === 'changed') return `<div>⟳ ${esc(c.item)}: ${c.diffs.join(', ')}</div>`;
+            return '';
+          }).join('') +
+          (changes.length > 8 ? `<div style="color:#999;">...и ещё ${changes.length - 8}</div>` : '') +
+          '</div>';
+      }
+      
       return `<div style="padding:4px 0;border-bottom:1px solid #f0e8f5;font-size:12px;">
         <span style="color:#7b1fa2;font-weight:600;">${label}</span> · <b>${user}</b> · ${dateStr} ${timeStr}${count}
+        ${changesHtml}
       </div>`;
     }).join('');
   } catch(e) {

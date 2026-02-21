@@ -85,7 +85,7 @@
         <div class="sidebar-avatar" id="userAvatarLetters">—</div>
         <div class="sidebar-user-info">
           <div class="sidebar-user-name" id="userNameDisplay">Пользователь</div>
-          <div class="sidebar-user-role">Менеджер</div>
+          <div class="sidebar-user-role" id="userRoleDisplay">Сотрудник</div>
         </div>
       </div>
       <div id="userDropdown" class="user-dropdown hidden">
@@ -117,23 +117,23 @@
           </select>
         </div>
 
-        <div class="param-group">
-          <label for="today">Сегодня</label>
+        <div class="param-group param-tip" data-tip="Текущая дата. От неё считается суточный расход и срок до прихода товара.">
+          <label for="today">Сегодня <span class="param-q">?</span></label>
           <input type="date" id="today" />
         </div>
 
-        <div class="param-group">
-          <label for="deliveryDate">Приход</label>
+        <div class="param-group param-tip" data-tip="Ожидаемая дата прихода товара. Определяет, сколько дней нужно покрыть запасом до и после поставки.">
+          <label for="deliveryDate">Приход <span class="param-q">?</span></label>
           <input type="date" id="deliveryDate" />
         </div>
 
-        <div class="param-group">
-          <label for="periodDays">Период</label>
+        <div class="param-group param-tip" data-tip="Число дней, за которые введён расход в колонке «Расход». Обычно 30 (месяц). Используется для расчёта суточного потребления.">
+          <label for="periodDays">Период <span class="param-q">?</span></label>
           <input type="number" id="periodDays" value="30" style="width:65px;" />
         </div>
 
-        <div class="param-group">
-          <label for="safetyDays">Запас</label>
+        <div class="param-group param-tip" data-tip="Запас в днях, который должен остаться после поставки. Введите число (14) или дату (до 18.02). Именно этот запас покрывает заказ.">
+          <label for="safetyDays">Запас <span class="param-q">?</span></label>
           <div class="safety-input-wrap">
             <input type="text" id="safetyDays" placeholder="14 / до 18.02" />
             <button type="button" id="safetyCalendarBtn" class="safety-calendar-icon" title="Выбрать дату">
@@ -142,32 +142,32 @@
           </div>
         </div>
 
-        <div class="param-group">
-          <label for="unit">Единицы</label>
+        <div class="param-group param-tip" data-tip="Единицы ввода расхода и остатка: штуки или коробки. Влияет на округление заказа до целых коробок.">
+          <label for="unit">Единицы <span class="param-q">?</span></label>
           <select id="unit">
             <option value="pieces">Штуки</option>
             <option value="boxes">Коробки</option>
           </select>
         </div>
 
-        <div class="param-group">
-          <label for="hasTransit">Транзит</label>
+        <div class="param-group param-tip" data-tip="Включить колонку «Транзит» — товар уже отгруженный поставщиком, но ещё не поступивший. Транзит учитывается в расчёте как дополнительный остаток.">
+          <label for="hasTransit">Транзит <span class="param-q">?</span></label>
           <select id="hasTransit">
             <option value="false">Нет</option>
             <option value="true">Да</option>
           </select>
         </div>
 
-        <div class="param-group">
-          <label for="showStockColumn">Запас</label>
+        <div class="param-group param-tip" data-tip="Показывать колонку с датой, до которой хватит текущего остатка (без нового заказа).">
+          <label for="showStockColumn">Запас <span class="param-q">?</span></label>
           <select id="showStockColumn">
             <option value="true">Да</option>
             <option value="false">Нет</option>
           </select>
         </div>
 
-        <div class="param-group">
-          <label for="dataValidation">Проверка</label>
+        <div class="param-group param-tip" data-tip="Автоматически проверять расход по истории. Предупреждает, если введённый расход сильно отличается от нормы.">
+          <label for="dataValidation">Проверка <span class="param-q">?</span></label>
           <select id="dataValidation">
             <option value="true">Да</option>
             <option value="false">Нет</option>
@@ -215,7 +215,7 @@
                 <th class="transit-col">Транзит</th>
                 <th class="stock-col">Запас</th>
                 <th>Расчёт</th>
-                <th>Заказ (шт / кор)</th>
+                <th>Заказ (шт / физ.кор)</th>
                 <th>Хватит до</th>
                 <th>Паллеты</th>
                 <th style="width:40px;"></th>
@@ -528,7 +528,7 @@
 <div id="planningModal" class="modal hidden">
   <div class="modal-box large" style="padding:0;">
     <div class="modal-header">
-      <h2 style="font-size:17px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов</h2>
+      <h2 style="font-size:17px;"><img src="./icons/planning.png" width="14" height="14" alt=""> Планирование заказов <span id="planBadge"></span></h2>
       <button id="closePlanning" class="modal-close">✕</button>
     </div>
     <div style="display:flex;flex-wrap:nowrap;gap:6px;align-items:flex-end;padding:6px 16px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;overflow-x:auto;">
@@ -591,10 +591,12 @@
       var badge = document.getElementById('userBadge');
       var nameEl = document.getElementById('userNameDisplay');
       var avatarEl = document.getElementById('userAvatarLetters');
+      var roleEl = document.getElementById('userRoleDisplay');
       if (badge && u.name) {
         badge.classList.remove('hidden');
         if (nameEl) nameEl.textContent = u.name;
         if (avatarEl) avatarEl.textContent = u.name.split(' ').map(w=>w[0]).join('').slice(0,2);
+        if (roleEl) roleEl.textContent = u.display_role || 'Сотрудник';
       }
     } catch(e) {}
   }
@@ -602,6 +604,112 @@
 </script>
 
 <script type="module" src="./ui.js?v=2.0.0"></script>
+
+<script>
+/* ===== Универсальный менеджер тултипов (position:fixed, не выходит за края) ===== */
+(function() {
+  const popup = document.createElement('div');
+  popup.className = 'tip-popup';
+  popup.style.display = 'none';
+  document.body.appendChild(popup);
+
+  let currentTarget = null;
+
+  function getContent(el) {
+    // 1) param-q — вопросик в параметре, берём data-tip с родительского param-group
+    if (el.closest('.param-q') || el.classList.contains('param-q')) {
+      const group = el.closest('[data-tip]');
+      if (group) return { text: group.dataset.tip, isHtml: false };
+    }
+
+    // 2) calc-wrap — внутренний .calc-tip
+    const calcWrap = el.closest('.calc-wrap');
+    if (calcWrap) {
+      const tip = calcWrap.querySelector('.calc-tip');
+      if (tip) return { html: tip.innerHTML, isHtml: true };
+    }
+
+    // 3) plan-period-tip — внутренний .plan-tip
+    const planWrap = el.closest('.plan-period-tip');
+    if (planWrap) {
+      const tip = planWrap.querySelector('.plan-tip');
+      if (tip) return { html: tip.innerHTML, isHtml: true };
+    }
+
+    return null;
+  }
+
+  function showTip(el, content, e) {
+    if (content.isHtml) {
+      // Конвертируем calc-tip/plan-tip классы в универсальные tip- классы
+      let html = content.html
+        .replace(/calc-tip-row|plan-tip-row/g, 'tip-row')
+        .replace(/calc-tip-lbl|plan-tip-lbl/g, 'tip-lbl')
+        .replace(/calc-tip-val|plan-tip-val/g, 'tip-val')
+        .replace(/calc-tip-hr|plan-tip-hr/g, 'tip-hr');
+      popup.innerHTML = html;
+    } else {
+      popup.textContent = content.text;
+    }
+    popup.style.display = 'block';
+    positionTip(e);
+  }
+
+  function positionTip(e) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const pw = popup.offsetWidth;
+    const ph = popup.offsetHeight;
+    const gap = 8;
+
+    // Попробуем показать снизу от курсора
+    let top = e.clientY + gap;
+    let left = e.clientX;
+
+    // Если выходит снизу — показываем сверху
+    if (top + ph > vh - 8) {
+      top = e.clientY - ph - gap;
+    }
+
+    // Не выходим за правый край
+    if (left + pw > vw - 8) {
+      left = vw - pw - 8;
+    }
+    // Не выходим за левый край
+    if (left < 8) left = 8;
+
+    popup.style.top = top + 'px';
+    popup.style.left = left + 'px';
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    if (popup.style.display !== 'none') {
+      positionTip(e);
+    }
+  });
+
+  document.addEventListener('mouseover', function(e) {
+    const content = getContent(e.target);
+    if (content) {
+      currentTarget = e.target;
+      showTip(e.target, content, e);
+    }
+  });
+
+  document.addEventListener('mouseout', function(e) {
+    // Скрываем только если вышли за пределы триггера
+    const paramQ = e.target.closest('.param-q');
+    const calcWrap = e.target.closest('.calc-wrap');
+    const planWrap = e.target.closest('.plan-period-tip');
+    const trigger = paramQ || calcWrap || planWrap;
+
+    if (trigger && !trigger.contains(e.relatedTarget)) {
+      popup.style.display = 'none';
+      currentTarget = null;
+    }
+  });
+})();
+</script>
 
 </body>
 </html>

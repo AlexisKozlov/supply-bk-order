@@ -229,6 +229,7 @@ body {
   margin-top: auto;
   padding: 8px 8px 12px;
   border-top: 1px solid rgba(255,255,255,0.08);
+  position: relative;
 }
 
 .sidebar-entity-selector {
@@ -292,12 +293,15 @@ body {
 
 /* User dropdown */
 .user-dropdown {
+  position: absolute;
+  bottom: 68px;
+  left: 6px;
+  right: 6px;
   background: white;
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lg);
-  margin: 4px 6px 0;
+  box-shadow: 0 -2px 16px rgba(0,0,0,0.2);
   overflow: hidden;
-  z-index: 100;
+  z-index: 1000;
 }
 
 .user-dropdown-btn {
@@ -660,6 +664,63 @@ select:focus, input:focus, textarea:focus {
   animation: pulse-orange 2s infinite;
 }
 
+/* Режим просмотра — синий бейдж */
+.view-only-mode .editing-badge,
+.view-only-mode ~ .editing-badge {
+  background: #E3F2FD;
+  color: #1565C0;
+  border-color: #90CAF9;
+  animation: pulse-blue 2s infinite;
+}
+
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(21,101,192,0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(21,101,192,0); }
+}
+
+/* Блокировка ввода в режиме просмотра заказа */
+/* 1. Блокируем ВСЕ интерактивные элементы внутри content-area */
+.view-only-mode input,
+.view-only-mode select,
+.view-only-mode textarea,
+.view-only-mode button,
+.view-only-mode .btn,
+.view-only-mode .drag-handle,
+.view-only-mode .inline-add-row {
+  pointer-events: none !important;
+  opacity: 0.4;
+}
+/* 2. Разрешаем: селекторы отображения (шт/кор, транзит, запас, проверка) */
+.view-only-mode #unit,
+.view-only-mode #hasTransit,
+.view-only-mode #showStockColumn,
+.view-only-mode #dataValidation {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+/* 3. Разрешаем: кнопки экспорта/копирования/поделиться + дочерние share dropdown */
+.view-only-mode #copyOrder,
+.view-only-mode #shareOrderBtn,
+.view-only-mode #shareOrderBtn *,
+.view-only-mode #exportExcelBtn {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+/* 4. Разрешаем: бейдж просмотра (чтобы выйти) */
+.view-only-mode .editing-badge {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+/* 5. Разрешаем: клик по названию товара и кнопку "Подробнее" */
+.view-only-mode .item-name {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+.view-only-mode .summary-details-btn {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+
 @keyframes pulse-orange {
   0%, 100% { box-shadow: 0 0 0 0 rgba(230,81,0,0.2); }
   50% { box-shadow: 0 0 0 6px rgba(230,81,0,0); }
@@ -691,7 +752,7 @@ select:focus, input:focus, textarea:focus {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 thead {
@@ -762,7 +823,7 @@ td.item-name b { color: var(--bk-orange); margin-right: 4px; font-weight: 700; }
   margin-top: 1px;
 }
 
-.shortage-info { font-size: 11px; color: var(--error); margin-top: 2px; }
+.shortage-info { font-size: 10px; color: var(--error); margin-top: 2px; }
 
 /* Transit / Stock columns */
 .transit-col { display: table-cell; }
@@ -770,7 +831,7 @@ td.item-name b { color: var(--bk-orange); margin-right: 4px; font-weight: 700; }
 .stock-col { display: table-cell; }
 .stock-col.hidden { display: none; }
 
-td.stock-display { font-size: 12px; color: var(--text); font-weight: 600; }
+td.stock-display { font-size: 11px; color: var(--text); font-weight: 600; }
 
 /* Order highlight */
 td.order-highlight {
@@ -852,7 +913,7 @@ input[type="number"] {
   padding: 6px 4px;
   border: 1.5px solid var(--border);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   text-align: center;
   font-family: inherit;
@@ -1487,4 +1548,130 @@ input[type="number"]:focus {
 @keyframes welcomeSlide {
   from { opacity: 0; transform: translateY(20px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+/* Inline add row */
+.inline-add-row td { border-top: 1px dashed #e0e0e0 !important; background: #fafbfc; }
+.inline-add-row:hover td { background: #f5f6f8; }
+.inline-add-input::placeholder { color: #bbb; }
+.inline-add-results div:last-child { border-bottom: none !important; }
+
+/* Режим просмотра планирования */
+.plan-view-only .plan-input,
+.plan-view-only .plan-edit-input,
+.plan-view-only .plan-td-result,
+.plan-view-only select,
+.plan-view-only input {
+  pointer-events: none !important;
+  opacity: 0.7;
 }
+.plan-view-only #planSaveBtn,
+.plan-view-only #planClearBtn,
+.plan-view-only #planImportBtn,
+.plan-view-only #planFillConsumptionBtn,
+.plan-view-only #planLoadBtn,
+.plan-view-only #planLoadProducts,
+.plan-view-only .plan-order-btn {
+  pointer-events: none !important;
+  opacity: 0.3;
+}
+/* Разрешаем переключение шт/кор в просмотре плана */
+.plan-view-only #planUnit {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+/* Разрешаем бейдж просмотра/редактирования */
+.plan-view-only #planBadge {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+/* Разрешаем кнопки экспорта в просмотре */
+.plan-view-only #planExcelBtn,
+.plan-view-only #planCopyBtn {
+  pointer-events: auto !important;
+  opacity: 1 !important;
+}
+
+/* Бейдж просмотра в планировании — синий */
+.plan-badge-view {
+  background: #E3F2FD !important;
+  color: #1565C0 !important;
+  border-color: #90CAF9 !important;
+  animation: pulse-blue 2s infinite !important;
+}
+
+/* ===== ТУЛТИПЫ ДЛЯ ПАРАМЕТРОВ ===== */
+/* Иконка ? рядом с названием параметра */
+.param-q {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--brown-light, #9e8070);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  opacity: 0.55;
+  vertical-align: middle;
+  margin-left: 2px;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.param-q:hover {
+  opacity: 1;
+}
+
+/* ===== ТУЛТИПЫ (универсальные, через JS fixed-позиционирование) ===== */
+.tip-popup {
+  position: fixed;
+  z-index: 999999;
+  min-width: 220px;
+  max-width: 280px;
+  background: #2c2825;
+  color: #f5f0eb;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.55;
+  padding: 8px 12px;
+  border-radius: 7px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.38);
+  pointer-events: none;
+  white-space: normal;
+}
+.tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.tip-row:last-child { margin-bottom: 0; }
+.tip-lbl { color: #b0ada8; }
+.tip-val { font-weight: 600; white-space: nowrap; }
+.tip-hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.15);
+  margin: 5px 0;
+}
+
+/* Элементы с тултипом — курсор */
+[data-tip], .calc-wrap, .plan-period-tip {
+  cursor: default;
+}
+
+/* Старые классы — оставляем пустыми для совместимости */
+.param-tip { position: relative; }
+.calc-wrap { position: relative; display: inline-block; }
+.calc-wrap .calc-tip { display: none; }
+.plan-period-tip { position: relative; }
+.plan-period-tip .plan-tip { display: none; }
+.calc-tip-row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.calc-tip-lbl { color: #b0ada8; }
+.calc-tip-val { font-weight: 600; white-space: nowrap; }
+.calc-tip-hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 5px 0; }
+.plan-tip-row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.plan-tip-lbl { color: #b0ada8; }
+.plan-tip-val { font-weight: 600; white-space: nowrap; }
+.plan-tip-hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 5px 0; }

@@ -1,4 +1,4 @@
-import { daysBetween, roundUp, safeDivide } from './utils.js';
+import { daysBetween, roundUp, safeDivide, getQpb, getMultiplicity } from './utils.js';
 
 export function calculateItem(item, settings) {
   const {
@@ -24,7 +24,7 @@ export function calculateItem(item, settings) {
   const consumedBeforeDelivery = daily * transitDays;
   
   // Учитываем транзит как дополнительный остаток
-  const totalStock = item.stock + (item.transit || 0);
+  const totalStock = (item.stock || 0) + (item.transit || 0);
   
   // Остаток к моменту поставки (не может быть отрицательным)
   const stockAfterDelivery = Math.max(0, totalStock - consumedBeforeDelivery);
@@ -35,39 +35,32 @@ export function calculateItem(item, settings) {
   let calculatedOrder = needAfterDelivery - stockAfterDelivery;
   if (calculatedOrder < 0) calculatedOrder = 0;
 
-  /* ===== ОКРУГЛЕНИЕ С УЧЁТОМ КРАТНОСТИ ===== */
-  // multiplicity = кол-во штук в одной «упаковке» (коробке)
-  // Для штучных товаров с кратностью:
-  //   В штуках: заказ округляется вверх до кратного multiplicity
-  //   В коробках: заказ уже идёт в коробках, просто ceil
-  const mult = item.multiplicity || 0;
-  const effectiveBox = mult > 0 ? mult : (item.qtyPerBox || 0);
+  /* ===== ОКРУГЛЕНИЕ ДО ФИЗИЧЕСКОЙ КОРОБКИ ===== */
+  // В штуках: округляем до qty_per_box × multiplicity (= физ. коробка в штуках)
+  // В учётных коробках: округляем до multiplicity (= физ. коробка в учётных кор)
+  const mult = getMultiplicity(item);
+  const qpb = getQpb(item);
   
   if (unit === 'boxes') {
-    // В режиме коробок — всегда целые коробки
-    calculatedOrder = roundUp(calculatedOrder);
-  }
-
-  if (unit === 'pieces') {
-    if (effectiveBox > 0) {
-      // Округляем до целых коробок (кратность или qtyPerBox)
-      calculatedOrder =
-        roundUp(calculatedOrder / effectiveBox) * effectiveBox;
+    // Округляем учётные коробки до multiplicity (= 1 физическая коробка)
+    calculatedOrder = roundUp(calculatedOrder / mult) * mult;
+  } else {
+    // Округляем штуки до физической коробки (qpb × mult)
+    const physBoxInPieces = qpb * mult;
+    if (physBoxInPieces > 0) {
+      calculatedOrder = roundUp(calculatedOrder / physBoxInPieces) * physBoxInPieces;
     }
   }
 
   // === ДАТА «ХВАТИТ ДО» ===
-  // После поставки доступно: остаток к поставке + заказ
   const availableAfterDelivery = stockAfterDelivery + (item.finalOrder || 0);
   const daysAfterDelivery = safeDivide(availableAfterDelivery, daily);
 
-  // День поставки НЕ считается днём потребления (товар только пришёл)
-  // Первый день потребления — следующий день после поставки
-  // Поэтому: deliveryDate + daysAfterDelivery (полных дней)
-  const coverageDate =
-    daily > 0 && daysAfterDelivery > 0
-      ? new Date(deliveryDate.getTime() + daysAfterDelivery * 86400000)
-      : null;
+  let coverageDate = null;
+  if (daily > 0 && daysAfterDelivery > 0) {
+    coverageDate = new Date(deliveryDate);
+    coverageDate.setDate(coverageDate.getDate() + daysAfterDelivery);
+  }
 
   return {
     calculatedOrder,
@@ -79,14 +72,19 @@ export function calculateItem(item, settings) {
 function calculatePallets(item, unit) {
   if (!item.boxesPerPallet || !item.finalOrder) return null;
 
-  const effectiveQpb = item.multiplicity || item.qtyPerBox || 1;
-  const boxes =
+  const qpb = getQpb(item);
+  const mult = getMultiplicity(item);
+  
+  // Приводим finalOrder к физическим коробкам
+  // В штуках: finalOrder / (qpb * mult)
+  // В учётных коробках: finalOrder / mult
+  const physBoxes =
     unit === 'boxes'
-      ? item.finalOrder
-      : item.finalOrder / effectiveQpb;
+      ? item.finalOrder / mult
+      : item.finalOrder / (qpb * mult);
 
   return {
-    pallets: Math.floor(boxes / item.boxesPerPallet),
-    boxesLeft: Math.ceil(boxes % item.boxesPerPallet)
+    pallets: Math.floor(physBoxes / item.boxesPerPallet),
+    boxesLeft: Math.ceil(physBoxes % item.boxesPerPallet)
   };
 }

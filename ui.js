@@ -10,14 +10,14 @@ import { renderTable, updateRow } from './table-renderer.js';
 import { exportToExcel, canExportExcel } from './excel-export.js';
 import { getOrdersAnalytics, renderAnalytics } from './analytics.js';
 import { loadOrderHistory as loadHistory } from './order-history.js';
-import { initPlanning } from './planning.js';
+import { initPlanning, resetPlanningUI } from './planning.js';
 import { showImportDialog } from './import-stock.js';
 import { initDeliveryCalendar } from './delivery-calendar.js';
 import { initShareOrder } from './share-order.js';
 import { saveDraft, loadDraft, clearDraft, isLoadingDraft } from './draft.js';
 import { validateConsumptionData, resetConsumptionCache } from './data-validation.js';
 import { initOrderOperations, saveItemOrder, restoreItemOrder } from './order-operations.js';
-import { esc } from './utils.js';
+import { esc, getQpb, getMultiplicity } from './utils.js';
 
 /* ================= DOM ================= */
 const undoBtn = document.getElementById('undoBtn');
@@ -116,14 +116,14 @@ if (storedUser) {
 
 function updateUserUI(user) {
   if (userBadge && user) {
-    // Новый layout: обновляем элементы внутри sidebar-user
     const nameEl = document.getElementById('userNameDisplay');
     const avatarEl = document.getElementById('userAvatarLetters');
+    const roleEl = document.getElementById('userRoleDisplay');
     if (nameEl) nameEl.textContent = user.name;
     if (avatarEl) avatarEl.textContent = user.name.split(' ').map(w => w[0]).join('').slice(0, 2);
+    if (roleEl) roleEl.textContent = user.display_role || 'Сотрудник';
     userBadge.classList.remove('hidden');
   }
-  // Фильтруем юр.лица по доступным пользователю
   filterLegalEntities(user);
 }
 
@@ -131,18 +131,27 @@ function filterLegalEntities(user) {
   const allowed = user?.legal_entities;
   if (!allowed || !allowed.length) return; // пустой = видит всё
   
-  const selects = ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity', 'e_legalEntity', 'dbLegalEntity', 'dbSupplierLegalEntity'];
+  const selects = ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity', 'e_legalEntity', 'dbLegalEntity', 'dbSupplierLegalEntity', 's_legalEntity'];
   selects.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    Array.from(el.options).forEach(opt => {
-      if (opt.value && !allowed.includes(opt.value)) {
-        opt.style.display = 'none';
-        if (el.value === opt.value) el.value = allowed[0];
-      } else {
-        opt.style.display = '';
+    
+    if (el.tagName === 'SELECT' && el.options) {
+      // Для <select> — скрываем недоступные опции
+      Array.from(el.options).forEach(opt => {
+        if (opt.value && !allowed.includes(opt.value)) {
+          opt.style.display = 'none';
+          if (el.value === opt.value) el.value = allowed[0];
+        } else {
+          opt.style.display = '';
+        }
+      });
+    } else if (el.tagName === 'INPUT') {
+      // Для <input type="hidden"> — ставим первое доступное значение
+      if (el.value && !allowed.includes(el.value)) {
+        el.value = allowed[0];
       }
-    });
+    }
   });
   
   // Устанавливаем первое доступное юр.лицо
@@ -169,6 +178,10 @@ document.addEventListener('click', () => {
 async function afterLogin(user) {
   setCurrentUser(user);
   updateUserUI(user);
+  
+  // Сбрасываем данные предыдущего пользователя
+  resetPlanningUI();
+  orderState.items = [];
   
   // Показываем приветственный экран
   await showWelcomeScreen(user);
@@ -278,14 +291,20 @@ async function checkLegacyPassword(pwd) {
 
 // Выход
 if (logoutBtn) {
-  logoutBtn.addEventListener('click', () => {
+  logoutBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    
     setCurrentUser(null);
     localStorage.removeItem('bk_logged_in');
     localStorage.removeItem('bk_api_key');
+    localStorage.removeItem('bk_user');
     
     // Очищаем данные заказа
     orderState.items = [];
     orderState.settings.supplier = '';
+    
+    // Сбрасываем планирование
+    resetPlanningUI();
     
     // Закрываем все page-модалки
     ['historyModal', 'databaseModal', 'analyticsModal', 'planningModal', 'calendarModal'].forEach(id => {
@@ -295,7 +314,12 @@ if (logoutBtn) {
     // Показываем все юр.лица (снимаем фильтр)
     ['legalEntity', 'historyLegalEntity', 'planLegalEntity', 'm_legalEntity', 'dbLegalEntity', 'dbSupplierLegalEntity'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) Array.from(el.options).forEach(opt => { opt.style.display = ''; });
+      if (!el) return;
+      if (el.tagName === 'SELECT' && el.options) {
+        Array.from(el.options).forEach(opt => { opt.style.display = ''; });
+      } else if (el.tagName === 'INPUT') {
+        el.value = '';
+      }
     });
     
     // Очищаем поставщиков
@@ -321,12 +345,46 @@ if (logoutBtn) {
     if (topbar) topbar.style.display = '';
     
     // UI
-    loginOverlay.style.display = '';
     if (userBadge) userBadge.classList.add('hidden');
     if (userDropdown) userDropdown.classList.add('hidden');
     loginPassword.value = '';
     if (loginUserSelect) loginUserSelect.value = '';
+    
+    // Экран "До свидания"
+    showGoodbyeScreen();
   });
+}
+
+function showGoodbyeScreen() {
+  const overlay = loginOverlay;
+  if (!overlay) return;
+  
+  // Показываем overlay с экраном прощания
+  overlay.style.display = '';
+  const loginBox = overlay.querySelector('.login-box');
+  if (loginBox) loginBox.style.display = 'none';
+  
+  // Создаём goodbye-экран
+  let goodbye = overlay.querySelector('.goodbye-screen');
+  if (!goodbye) {
+    goodbye = document.createElement('div');
+    goodbye.className = 'goodbye-screen';
+    goodbye.innerHTML = `
+      <div style="font-size:48px;margin-bottom:12px;">👋</div>
+      <h2 style="font-size:22px;font-weight:800;color:white;margin:0 0 8px;">До свидания!</h2>
+      <p style="font-size:14px;color:rgba(255,255,255,0.7);margin:0;">Вы вышли из системы</p>
+    `;
+    goodbye.style.cssText = 'text-align:center;animation:fadeIn 0.3s ease;';
+    overlay.appendChild(goodbye);
+  } else {
+    goodbye.style.display = '';
+  }
+  
+  // Через 1.5 сек показываем форму логина
+  setTimeout(() => {
+    goodbye.style.display = 'none';
+    if (loginBox) loginBox.style.display = '';
+  }, 1500);
 }
 
 /* ================= СМЕНА ПАРОЛЯ ================= */
@@ -452,8 +510,11 @@ function bindSetting(id, key, isDate = false) {
     
     // Валидация дат
     if (isDate && key === 'deliveryDate') {
-      const today = orderState.settings.today || new Date();
-      if (newValue < today) {
+      const todayBase = orderState.settings.today || new Date();
+      // Сравниваем строки дат (YYYY-MM-DD) — = сегодня разрешено, только строго раньше — нет
+      const todayStr = todayBase.toISOString().slice(0, 10);
+      const deliveryStr = e.target.value;
+      if (deliveryStr < todayStr) {
         showToast('Некорректная дата', 'Дата прихода не может быть раньше сегодняшней', 'error');
         e.target.value = orderState.settings.deliveryDate?.toISOString().slice(0, 10) || '';
         return;
@@ -563,7 +624,7 @@ document.getElementById('unit').addEventListener('change', e => {
   // Конвертируем данные при смене единиц
   if (oldUnit !== newUnit && orderState.items.length) {
     orderState.items.forEach(item => {
-      const qpb = item.multiplicity || item.qtyPerBox || 1;
+      const qpb = getQpb(item);
       if (oldUnit === 'pieces' && newUnit === 'boxes') {
         // шт → кор
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
@@ -578,13 +639,14 @@ document.getElementById('unit').addEventListener('change', e => {
         item.finalOrder = Math.round(item.finalOrder * qpb);
       }
     });
-    // Полный ре-рендер чтобы инпуты обновились
+    // Сначала сбрасываем кеш, потом рендерим (иначе валидация возьмёт старый кеш)
+    resetConsumptionCache();
     render();
   } else {
+    resetConsumptionCache();
     rerenderAll();
   }
   
-  resetConsumptionCache();
   saveDraft();
 });
 
@@ -685,23 +747,23 @@ async function loadSuppliers(legalEntity) {
   supplierSelect.innerHTML = '<option value="">Все / свободный</option>';
   historySupplier.innerHTML = '<option value="">Все</option>';
   
-  // Загружаем из таблицы suppliers (не products!)
-  let query = supabase.from('suppliers').select('short_name, legal_entity');
-  
-  if (legalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
-  }
-  
-  const { data, error } = await query.order('short_name');
+  // Запрашиваем ВСЕХ поставщиков (без условий)
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('short_name, legal_entity')
+    .order('short_name');
   
   if (error || !data) {
     console.error('Ошибка загрузки поставщиков:', error);
     return;
   }
   
-  data.forEach(s => {
+  // Фильтруем на клиенте в зависимости от выбранного юрлица
+  const filtered = legalEntity === 'Пицца Стар'
+    ? data.filter(s => s.legal_entity === 'Пицца Стар')
+    : data.filter(s => s.legal_entity === 'Бургер БК' || s.legal_entity === 'Воглия Матта');
+  
+  filtered.forEach(s => {
     const opt1 = document.createElement('option');
     opt1.value = s.short_name;
     opt1.textContent = s.short_name;
@@ -823,53 +885,39 @@ if (searchInput) {
 }
 
 async function searchProducts(q) {
-  let query = supabase
-    .from('products')
-    .select('*')
-    .limit(10);
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', '10');
+  params.set('legal_entity', orderState.settings.legalEntity || '');
+  if (supplierSelect.value) params.set('supplier', supplierSelect.value);
 
-  // Фильтр по юр. лицу
-  const currentLegalEntity = orderState.settings.legalEntity;
-  if (currentLegalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
-  }
-
-  // если выбран поставщик — ищем только по нему
-  if (supplierSelect.value) {
-    query = query.eq('supplier', supplierSelect.value);
-  }
-
-  // Поиск одновременно по SKU и по имени
-  query = query.or(`sku.ilike.%${q}%,name.ilike.%${q}%`);
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error('Ошибка поиска:', error);
-    return;
-  }
-
-  searchResults.innerHTML = '';
-
-  if (!data.length) {
-    searchResults.innerHTML =
-      '<div style="color:#999">Ничего не найдено</div>';
-    return;
-  }
-
-  data.forEach(p => {
-    const div = document.createElement('div');
-    div.textContent = `${p.sku} ${p.name}`;
-    div.addEventListener('click', () => {
-      addItem(p);
-      searchResults.innerHTML = '';
-      searchInput.value = '';
-      if (clearSearchBtn) clearSearchBtn.classList.add('hidden');
+  try {
+    const r = await fetch(`/api/search_products?${params.toString()}`, {
+      headers: { 'X-API-Key': localStorage.getItem('bk_api_key') || '' }
     });
-    searchResults.appendChild(div);
-  });
+    const data = await r.json();
+
+    searchResults.innerHTML = '';
+
+    if (!data.length) {
+      searchResults.innerHTML = '<div style="color:#999">Ничего не найдено</div>';
+      return;
+    }
+
+    data.forEach(p => {
+      const div = document.createElement('div');
+      div.textContent = `${p.sku} ${p.name}`;
+      div.addEventListener('click', () => {
+        addItem(p);
+        searchResults.innerHTML = '';
+        searchInput.value = '';
+        if (clearSearchBtn) clearSearchBtn.classList.add('hidden');
+      });
+      searchResults.appendChild(div);
+    });
+  } catch (err) {
+    console.error('Ошибка поиска:', err);
+  }
 }
 
 /* ================= РУЧНОЙ ТОВАР ================= */
@@ -1168,6 +1216,91 @@ if (allToOrderBtn) {
 
 
 /* ================= ТАБЛИЦА ================= */
+/* ================= СТРОКА ДОБАВЛЕНИЯ ТОВАРА ПО АРТИКУЛУ ================= */
+let _inlineSearchTimer = null;
+function renderInlineAddRow(tbody) {
+  // Показываем строку только для "Все / свободный" (пустой supplier)
+  if (orderState.settings.supplier) return;
+  const addRow = document.createElement('tr');
+  addRow.className = 'inline-add-row';
+  addRow.innerHTML = `
+    <td colspan="11" style="padding:6px 10px;position:relative;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:#999;font-size:16px;">＋</span>
+        <input type="text" class="inline-add-input" placeholder="Введите артикул или название для добавления..." 
+               style="border:none;outline:none;background:transparent;flex:1;font-size:13px;padding:4px 0;color:#333;" />
+        <div class="inline-add-results" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:200px;overflow-y:auto;"></div>
+      </div>
+    </td>
+  `;
+  tbody.appendChild(addRow);
+
+  const input = addRow.querySelector('.inline-add-input');
+  const results = addRow.querySelector('.inline-add-results');
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(_inlineSearchTimer);
+    if (q.length < 2) { results.style.display = 'none'; results.innerHTML = ''; return; }
+    _inlineSearchTimer = setTimeout(() => inlineSearchProducts(q, results, input), 300);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { results.style.display = 'none'; input.value = ''; }
+  });
+
+  // Закрытие по клику вне
+  document.addEventListener('click', (e) => {
+    if (!addRow.contains(e.target)) { results.style.display = 'none'; }
+  }, { once: false });
+}
+
+async function inlineSearchProducts(q, resultsEl, inputEl) {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', '10');
+  params.set('legal_entity', orderState.settings.legalEntity || '');
+  const currentSupplier = orderState.settings.supplier;
+  if (currentSupplier) params.set('supplier', currentSupplier);
+
+  try {
+    const r = await fetch(`/api/search_products?${params.toString()}`, {
+      headers: { 'X-API-Key': localStorage.getItem('bk_api_key') || '' }
+    });
+    const data = await r.json();
+
+    resultsEl.innerHTML = '';
+    if (!data || !data.length) {
+      resultsEl.innerHTML = '<div style="padding:10px;color:#999;font-size:13px;">Ничего не найдено</div>';
+      resultsEl.style.display = 'block';
+      return;
+    }
+
+    data.forEach(p => {
+      const alreadyAdded = orderState.items.some(item => item.sku === p.sku);
+      const div = document.createElement('div');
+      div.style.cssText = 'padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;';
+      div.innerHTML = `<span>${p.sku} — ${p.name}</span>${alreadyAdded ? '<span style="color:#999;font-size:11px;">уже добавлен</span>' : '<span style="color:#4CAF50;font-size:11px;">+ добавить</span>'}`;
+      if (!alreadyAdded) {
+        div.addEventListener('mouseenter', () => div.style.background = '#f5f5f5');
+        div.addEventListener('mouseleave', () => div.style.background = '');
+        div.addEventListener('click', () => {
+          addItem(p);
+          resultsEl.style.display = 'none';
+          inputEl.value = '';
+        });
+      } else {
+        div.style.opacity = '0.6';
+        div.style.cursor = 'default';
+      }
+      resultsEl.appendChild(div);
+    });
+    resultsEl.style.display = 'block';
+  } catch (err) {
+    console.error('Ошибка inline поиска:', err);
+  }
+}
+
 function render() {
   // Пустое состояние
   if (orderState.items.length === 0) {
@@ -1176,9 +1309,10 @@ function render() {
         <td colspan="11" style="text-align:center;padding:40px 20px;color:#8a8a8a;">
           <div style="font-size:32px;margin-bottom:8px;">📦</div>
           <div style="font-size:14px;font-weight:600;margin-bottom:4px;">Нет товаров в заказе</div>
-          <div style="font-size:13px;">Выберите поставщика или найдите товар через поиск</div>
+          <div style="font-size:13px;">Выберите поставщика или добавьте товар ниже по артикулу</div>
         </td>
       </tr>`;
+    renderInlineAddRow(tbody);
     updateItemsCounter();
     updateFinalSummary();
     return;
@@ -1209,6 +1343,9 @@ function render() {
       });
     }
   });
+
+  // Строка добавления товара по артикулу (только для "Все / свободный")
+  renderInlineAddRow(tbody);
   
   // Применяем видимость колонок после рендера
   toggleTransitColumn();
@@ -1239,32 +1376,40 @@ function updateItemsCounter() {
 function roundToPallet(item) {
   if (!item.boxesPerPallet) return;
 
-  const eQpb = item.multiplicity || item.qtyPerBox || 1;
-  const boxes =
-    orderState.settings.unit === 'boxes'
-      ? item.finalOrder
-      : item.finalOrder / eQpb;
+  const qpb = getQpb(item);
+  const mult = getMultiplicity(item);
+  
+  // Приводим к физическим коробкам
+  let physBoxes;
+  if (orderState.settings.unit === 'boxes') {
+    physBoxes = item.finalOrder / mult;
+  } else {
+    physBoxes = item.finalOrder / (qpb * mult);
+  }
 
-  const pallets = Math.ceil(boxes / item.boxesPerPallet);
-  const roundedBoxes = pallets * item.boxesPerPallet;
+  const pallets = Math.ceil(physBoxes / item.boxesPerPallet);
+  const roundedPhysBoxes = pallets * item.boxesPerPallet;
 
-  item.finalOrder =
-    orderState.settings.unit === 'boxes'
-      ? roundedBoxes
-      : roundedBoxes * eQpb;
+  // Обратно в текущие единицы
+  if (orderState.settings.unit === 'boxes') {
+    item.finalOrder = roundedPhysBoxes * mult;
+  } else {
+    item.finalOrder = roundedPhysBoxes * qpb * mult;
+  }
 }
 
 /* ================= ИТОГ В КОРОБКАХ ================= */
 function updateFinalSummary() {
   const itemsWithOrder = orderState.items.filter(item => {
-    let boxes;
-    const eQpb = item.multiplicity || item.qtyPerBox || 1;
+    const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
+    let physBoxes;
     if (orderState.settings.unit === 'boxes') {
-      boxes = item.finalOrder;
+      physBoxes = item.finalOrder / mult;
     } else {
-      boxes = Math.ceil(item.finalOrder / eQpb);
+      physBoxes = item.finalOrder / (qpb * mult);
     }
-    return boxes >= 1;
+    return physBoxes >= 1;
   });
   
   if (itemsWithOrder.length === 0) {
@@ -1278,24 +1423,25 @@ function updateFinalSummary() {
   const detailLines = [];
 
   itemsWithOrder.forEach(item => {
-    let boxes, pieces;
-    const eQpb = item.multiplicity || item.qtyPerBox || 1;
+    const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
+    let physBoxes, pieces;
+    
     if (orderState.settings.unit === 'boxes') {
-      boxes = item.finalOrder;
-      pieces = item.finalOrder * eQpb;
+      physBoxes = Math.ceil(item.finalOrder / mult);
+      pieces = item.finalOrder * qpb;
     } else {
-      boxes = Math.ceil(item.finalOrder / eQpb);
+      physBoxes = Math.ceil(item.finalOrder / (qpb * mult));
       pieces = item.finalOrder;
     }
-    boxes = Math.ceil(boxes);
-    totalBoxes += boxes;
+    totalBoxes += physBoxes;
 
     if (item.boxesPerPallet && item.boxesPerPallet > 0) {
-      totalPallets += boxes / item.boxesPerPallet;
+      totalPallets += physBoxes / item.boxesPerPallet;
     }
 
     const unit = item.unitOfMeasure || 'шт';
-    detailLines.push(`<b>${item.sku ? esc(item.sku) + ' ' : ''}${esc(item.name)}</b> — ${nf.format(boxes)} кор. (${nf.format(Math.round(pieces))} ${unit})`);
+    detailLines.push(`<b>${item.sku ? esc(item.sku) + ' ' : ''}${esc(item.name)}</b> — ${nf.format(physBoxes)} кор. (${nf.format(Math.round(pieces))} ${unit})`);
   });
 
   totalPallets = Math.round(totalPallets * 100) / 100;
@@ -1910,7 +2056,13 @@ if (mobileMenuToggle && sidebar) {
     // Обновляем topbar title
     const pageTitle = document.getElementById('pageTitle');
     if (pageTitle) {
-      pageTitle.textContent = anyPageOpen ? openTitle : 'Новый заказ';
+      if (anyPageOpen) {
+        pageTitle.textContent = openTitle;
+      } else {
+        // Если есть badge редактирования — показываем "Редактирование заказа"
+        const editBadge = document.getElementById('editingBadge');
+        pageTitle.textContent = editBadge ? 'Редактирование заказа' : 'Новый заказ';
+      }
     }
 
     // Скрываем content-area и topbar когда page-modal открыта
@@ -1931,6 +2083,15 @@ if (mobileMenuToggle && sidebar) {
       // Синхронизируем юр.лицо из sidebar
       const sidebarLE = document.getElementById('legalEntity');
       if (sidebarLE) syncLegalEntityToAll(sidebarLE.value);
+      
+      // Если открываем планирование — сбрасываем view-only
+      if (btnId === 'menuPlanning') {
+        const planModal = document.getElementById('planningModal');
+        if (planModal?.classList.contains('plan-view-only')) {
+          document.dispatchEvent(new CustomEvent('planning:reset'));
+        }
+      }
+      
       // Обновляем sidebar через microtask (после того как модуль откроет модалку)
       setTimeout(updateSidebarActive, 50);
     }, true); // capture: true — срабатывает ДО обработчиков модулей
@@ -1949,9 +2110,37 @@ if (mobileMenuToggle && sidebar) {
   if (navOrder) {
     navOrder.addEventListener('click', () => {
       closeAllPageModals();
+      // Сбрасываем режим просмотра заказа
+      const contentArea = document.querySelector('.content-area');
+      if (contentArea?.classList.contains('view-only-mode')) {
+        contentArea.classList.remove('view-only-mode');
+        document.dispatchEvent(new CustomEvent('order:force-reset'));
+      }
       updateSidebarActive();
     });
   }
 
   updateSidebarActive();
+
+  // Сброс заказа из order-operations (при сбросе редактирования)
+  document.addEventListener('order:reset', () => {
+    clearDraft();
+    render();
+    updateFinalSummary();
+  });
+
+  // Принудительный сброс заказа (из sidebar)
+  document.addEventListener('order:force-reset', () => {
+    clearDraft();
+    orderState.items.length = 0;
+    orderState.settings.supplier = '';
+    const supplierSelect = document.getElementById('supplierFilter');
+    if (supplierSelect) supplierSelect.value = '';
+    render();
+    updateFinalSummary();
+    const pageTitle = document.getElementById('pageTitle');
+    if (pageTitle) pageTitle.textContent = 'Новый заказ';
+    const badge = document.getElementById('editingBadge');
+    if (badge) badge.remove();
+  });
 })();

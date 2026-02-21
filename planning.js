@@ -6,9 +6,11 @@
  */
 
 import { supabase } from './supabase.js';
-import { showToast, customConfirm } from './modals.js';
+import { showToast, customConfirm, customPrompt } from './modals.js';
 import { showImportDialog } from './import-stock.js';
 import { validatePlanConsumption, resetConsumptionCache } from './data-validation.js';
+import { currentUser } from './state.js';
+import { getQpb, getMultiplicity } from './utils.js';
 
 const nf = new Intl.NumberFormat('ru-RU');
 
@@ -20,8 +22,54 @@ let planState = {
   inputUnit: 'pieces',
   startDate: null,
   editingPlanId: null, // ID плана при редактировании
+  viewOnly: false,
   items: []
 };
+
+/** Обновляет бейдж просмотра/редактирования в шапке планирования */
+function updatePlanBadge() {
+  const badge = document.getElementById('planBadge');
+  if (!badge) return;
+  
+  if (planState.viewOnly) {
+    badge.className = 'editing-badge plan-badge-view';
+    badge.textContent = '👁 Просмотр';
+    badge.title = 'Нажмите чтобы закрыть просмотр';
+    badge.style.cursor = 'pointer';
+    badge.onclick = async () => {
+      const confirmed = await customConfirm('Закрыть просмотр?', 'Данные плана будут очищены.');
+      if (!confirmed) return;
+      resetPlanState();
+    };
+  } else if (planState.editingPlanId) {
+    badge.className = 'editing-badge';
+    badge.textContent = '✏️ Редактирование';
+    badge.title = 'Нажмите чтобы сбросить';
+    badge.style.cursor = 'pointer';
+    badge.onclick = async () => {
+      const confirmed = await customConfirm('Сбросить редактирование?', 'Данные плана будут очищены.');
+      if (!confirmed) return;
+      resetPlanState();
+    };
+  } else {
+    badge.className = '';
+    badge.textContent = '';
+    badge.onclick = null;
+  }
+}
+
+/** Полный сброс планирования */
+function resetPlanState() {
+  planState.editingPlanId = null;
+  planState.viewOnly = false;
+  planState.items = [];
+  planState.supplier = '';
+  const supplierEl = document.getElementById('planSupplier');
+  if (supplierEl) supplierEl.value = '';
+  document.getElementById('planningModal')?.classList.remove('plan-view-only');
+  renderPlanTable();
+  updatePlanBadge();
+}
 
 function parsePeriod(val) {
   if (val.startsWith('w')) return { type: 'weeks', count: parseInt(val.slice(1)) };
@@ -114,12 +162,19 @@ export function initPlanning() {
   closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
   
+  // Сброс планирования из sidebar
+  document.addEventListener('planning:reset', () => {
+    resetPlanState();
+  });
+  
   // Загрузка плана из истории
-  document.addEventListener('history:load-plan', (e) => {
+  document.addEventListener('history:load-plan', async (e) => {
     const { plan } = e.detail;
     if (!plan) return;
     
+    document.getElementById('planningModal')?.classList.remove('plan-view-only');
     modal.classList.remove('hidden');
+    await initPlanningUI();
     
     planState.legalEntity = plan.legal_entity || 'Бургер БК';
     planState.supplier = plan.supplier || '';
@@ -127,6 +182,7 @@ export function initPlanning() {
     planState.periodCount = plan.period_count || 3;
     planState.startDate = plan.start_date ? new Date(plan.start_date) : new Date();
     planState.editingPlanId = plan.id || null; // #4 режим редактирования
+    planState.viewOnly = false;
     
     document.getElementById('planLegalEntity').value = planState.legalEntity;
     const periodSelect = document.getElementById('planMonths');
@@ -146,6 +202,7 @@ export function initPlanning() {
       qtyPerBox: i.qty_per_box || 1,
       boxesPerPallet: i.boxes_per_pallet || null,
       unitOfMeasure: i.unit_of_measure || 'шт',
+      multiplicity: i.multiplicity || 1,
       monthlyConsumption: i.monthly_consumption || 0,
       stockOnHand: i.stock_on_hand || 0,
       stockAtSupplier: i.stock_at_supplier || 0,
@@ -163,16 +220,83 @@ export function initPlanning() {
     // Пересчитываем с учётом locked — с начала
     planState.items.forEach((_, idx) => recalcItem(idx, 0));
     triggerPlanValidation();
+    updatePlanBadge();
     showToast('План загружен', `${plan.supplier} — ${planState.items.length} позиций`, 'success');
+  });
+
+  // Просмотр плана из истории (только чтение)
+  document.addEventListener('history:view-plan', async (e) => {
+    const { plan } = e.detail;
+    if (!plan) return;
+    
+    modal.classList.remove('hidden');
+    await initPlanningUI();
+    
+    planState.legalEntity = plan.legal_entity || 'Бургер БК';
+    planState.supplier = plan.supplier || '';
+    planState.periodType = plan.period_type || 'months';
+    planState.periodCount = plan.period_count || 3;
+    planState.startDate = plan.start_date ? new Date(plan.start_date) : new Date();
+    planState.editingPlanId = null; // НЕ редактирование
+    planState.viewOnly = true;
+    
+    document.getElementById('planLegalEntity').value = planState.legalEntity;
+    const periodSelect = document.getElementById('planMonths');
+    periodSelect.value = planState.periodType === 'weeks' ? `w${planState.periodCount}` : `m${planState.periodCount}`;
+    document.getElementById('planStartDate').value = planState.startDate.toISOString().slice(0, 10);
+    
+    const supplierEl = document.getElementById('planSupplier');
+    loadPlanSuppliers(planState.legalEntity, supplierEl).then(() => {
+      supplierEl.value = planState.supplier;
+    });
+    
+    planState.items = (plan.items || []).map(i => ({
+      sku: i.sku || '', name: i.name || '',
+      qtyPerBox: i.qty_per_box || 1, boxesPerPallet: i.boxes_per_pallet || null,
+      unitOfMeasure: i.unit_of_measure || 'шт', multiplicity: i.multiplicity || 1,
+      monthlyConsumption: i.monthly_consumption || 0,
+      stockOnHand: i.stock_on_hand || 0, stockAtSupplier: i.stock_at_supplier || 0,
+      plan: (i.plan || []).map(p => ({
+        month: p.month, need: 0, deficit: 0,
+        orderBoxes: p.order_boxes || 0, orderUnits: p.order_units || 0, locked: p.locked || false
+      }))
+    }));
+    
+    renderPlanTable();
+    planState.items.forEach((_, idx) => recalcItem(idx, 0));
+    
+    // Блокируем ввод
+    document.getElementById('planningModal')?.classList.add('plan-view-only');
+    updatePlanBadge();
+    showToast('Просмотр плана', `${plan.supplier} — ${planState.items.length} позиций`, 'info');
   });
 }
 
 let planningUIInitialized = false;
 
-async function initPlanningUI() {
-  const legalSelect = document.getElementById('planLegalEntity');
+export function resetPlanningUI() {
+  planningUIInitialized = false;
+  planState.editingPlanId = null;
+  planState.viewOnly = false;
+  planState.items = [];
+  planState.supplier = '';
+  document.getElementById('planningModal')?.classList.remove('plan-view-only');
+  // Очищаем DOM таблицы планирования
+  const container = document.getElementById('planTableContainer');
+  if (container) container.innerHTML = '';
+  // Сбрасываем поставщика
   const supplierSelect = document.getElementById('planSupplier');
-  const periodSelect = document.getElementById('planMonths');
+  if (supplierSelect) supplierSelect.innerHTML = '<option value="">— Выберите поставщика —</option>';
+  updatePlanBadge();
+}
+
+// Хранилище обработчиков для безопасной переинициализации
+const _planHandlers = {};
+
+async function initPlanningUI() {
+  let legalSelect = document.getElementById('planLegalEntity');
+  let supplierSelect = document.getElementById('planSupplier');
+  let periodSelect = document.getElementById('planMonths');
 
   const mainLegal = document.getElementById('legalEntity');
   if (mainLegal) legalSelect.value = mainLegal.value;
@@ -187,23 +311,33 @@ async function initPlanningUI() {
 
   await loadPlanSuppliers(legalSelect.value, supplierSelect);
 
-  // Подписки на события — ТОЛЬКО один раз
   if (!planningUIInitialized) {
     planningUIInitialized = true;
 
-    legalSelect.addEventListener('change', async () => {
-      planState.legalEntity = legalSelect.value;
-      await loadPlanSuppliers(legalSelect.value, supplierSelect);
+    // Безопасная привязка: снимает старый handler, ставит новый
+    function setupSelect(id, handler) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      if (_planHandlers[id]) el.removeEventListener('change', _planHandlers[id]);
+      _planHandlers[id] = handler;
+      el.addEventListener('change', handler);
+      return el;
+    }
+
+    setupSelect('planLegalEntity', async () => {
+      const el = document.getElementById('planLegalEntity');
+      planState.legalEntity = el.value;
+      await loadPlanSuppliers(el.value, document.getElementById('planSupplier'));
       notifyPlanParamsChanged();
     });
 
-    supplierSelect.addEventListener('change', () => {
+    setupSelect('planSupplier', () => {
       notifyPlanParamsChanged();
     });
 
-    periodSelect.addEventListener('change', () => {
+    setupSelect('planMonths', () => {
       if (planState.items.length) {
-        const period = parsePeriod(periodSelect.value);
+        const period = parsePeriod(document.getElementById('planMonths').value);
         planState.periodType = period.type;
         planState.periodCount = period.count;
         renderPlanTable();
@@ -212,7 +346,7 @@ async function initPlanningUI() {
       }
     });
 
-    document.getElementById('planStartDate')?.addEventListener('change', () => {
+    setupSelect('planStartDate', () => {
       if (planState.items.length) {
         const sdi = document.getElementById('planStartDate');
         planState.startDate = sdi.value ? new Date(sdi.value) : new Date();
@@ -222,33 +356,28 @@ async function initPlanningUI() {
       }
     });
 
-    document.getElementById('planUnit')?.addEventListener('change', () => {
+    setupSelect('planUnit', () => {
       if (planState.items.length) {
         const oldUnit = planState.inputUnit;
         const newUnit = document.getElementById('planUnit').value;
         
         if (oldUnit !== newUnit) {
-          // Конвертируем все введённые значения в новые единицы
+          // Данные stockOnHand/stockAtSupplier ВСЕГДА хранятся в штуках
+          // monthlyConsumption хранится в текущих единицах ввода — конвертируем только его
           planState.items.forEach(item => {
-            const qpb = item.qtyPerBox || 1;
+            const qpb = getQpb(item);
             if (oldUnit === 'pieces' && newUnit === 'boxes') {
-              // штуки → коробки
               item.monthlyConsumption = item.monthlyConsumption ? Math.round(item.monthlyConsumption / qpb * 100) / 100 : 0;
-              item.stockOnHand = item.stockOnHand ? Math.round(item.stockOnHand / qpb * 100) / 100 : 0;
-              item.stockAtSupplier = item.stockAtSupplier ? Math.round(item.stockAtSupplier / qpb * 100) / 100 : 0;
             } else if (oldUnit === 'boxes' && newUnit === 'pieces') {
-              // коробки → штуки
               item.monthlyConsumption = Math.round(item.monthlyConsumption * qpb);
-              item.stockOnHand = Math.round(item.stockOnHand * qpb);
-              item.stockAtSupplier = Math.round(item.stockAtSupplier * qpb);
             }
-            // Сбрасываем locked периоды — пересчитаем заново
+            // stockOnHand и stockAtSupplier НЕ конвертируем — они всегда в штуках
             item.plan.forEach(p => { p.locked = false; });
           });
         }
         
         planState.inputUnit = newUnit;
-        resetConsumptionCache(); // единицы изменились — сбросить кеш
+        resetConsumptionCache();
         renderPlanTable();
         planState.items.forEach((_, idx) => recalcItem(idx, 0));
         triggerPlanValidation();
@@ -256,14 +385,12 @@ async function initPlanningUI() {
       }
     });
 
-    // Селектор проверки данных расхода
-    document.getElementById('planDataValidation')?.addEventListener('change', () => {
+    setupSelect('planDataValidation', () => {
       const container = document.getElementById('planTableContainer');
       if (document.getElementById('planDataValidation').value === 'true') {
         triggerPlanValidation();
       } else {
-        // Немедленно убираем все предупреждения
-        container.querySelectorAll('.consumption-warning').forEach(el => {
+        container?.querySelectorAll('.consumption-warning').forEach(el => {
           el.classList.remove('consumption-warning');
           el.title = '';
         });
@@ -275,6 +402,8 @@ async function initPlanningUI() {
     const period = parsePeriod(periodSelect.value);
     planState.periodType = period.type;
     planState.periodCount = period.count;
+    planState.editingPlanId = null; // Новая загрузка = новый план
+    planState.viewOnly = false;
 
     // Дата начала
     const startDateInput = document.getElementById('planStartDate');
@@ -288,8 +417,10 @@ async function initPlanningUI() {
       showToast('Выберите поставщика', 'Для планирования нужен конкретный поставщик', 'error');
       return;
     }
+    document.getElementById('planningModal')?.classList.remove('plan-view-only');
     await loadPlanProducts();
     renderPlanTable();
+    updatePlanBadge();
     // Запускаем проверку данных если включена
     triggerPlanValidation();
   });
@@ -303,6 +434,15 @@ async function initPlanningUI() {
       return;
     }
     showImportDialog('planning', planState.items, (updatedItems) => {
+      // Импорт записывает значения в текущих единицах ввода,
+      // но stockOnHand/stockAtSupplier должны храниться в штуках
+      if (planState.inputUnit === 'boxes') {
+        updatedItems.forEach(item => {
+          const qpb = getQpb(item);
+          if (item.stockOnHand) item.stockOnHand = item.stockOnHand * qpb;
+          if (item.stockAtSupplier) item.stockAtSupplier = item.stockAtSupplier * qpb;
+        });
+      }
       planState.items = updatedItems;
       renderPlanTable();
       planState.items.forEach((_, idx) => recalcItem(idx));
@@ -402,13 +542,17 @@ async function loadAvgConsumption(supplier, legalEntity, currentUnit) {
   
   const { data, error } = await supabase
     .from('orders')
-    .select('unit, period_days, order_items(sku, consumption_period, qty_per_box)')
+    .select('*, order_items(sku, consumption_period, qty_per_box)')
     .eq('legal_entity', legalEntity)
     .eq('supplier', supplier)
     .order('created_at', { ascending: false })
     .limit(2);
 
-  if (error || !data || !data.length) return avgMap;
+  if (error || !data || !data.length) {
+    console.warn('loadAvgConsumption: нет данных', { supplier, legalEntity, error, data });
+    return avgMap;
+  }
+  console.log('loadAvgConsumption: найдено заказов:', data.length, 'с order_items:', data.map(d => (d.order_items||[]).length));
 
   const bySku = {};
   data.forEach(order => {
@@ -424,11 +568,18 @@ async function loadAvgConsumption(supplier, legalEntity, currentUnit) {
       const dailyRate = val / periodDays;
       let monthlyVal = dailyRate * 30;
 
-      // Конвертируем в текущие единицы
-      if (orderUnit === 'pieces' && currentUnit === 'boxes') {
-        monthlyVal = monthlyVal / qtyPerBox;
-      } else if (orderUnit === 'boxes' && currentUnit === 'pieces') {
+      // Шаг 1: приводим к штукам (базовые единицы)
+      if (orderUnit === 'boxes') {
         monthlyVal = monthlyVal * qtyPerBox;
+      }
+      // Теперь monthlyVal всегда в штуках
+      
+      // Шаг 2: конвертируем из штук в нужные единицы
+      if (currentUnit === 'boxes') {
+        // Ищем текущий qpb из planState.items
+        const planItem = planState.items.find(pi => pi.sku === item.sku);
+        const currentQpb = planItem ? getQpb(planItem) : qtyPerBox;
+        monthlyVal = monthlyVal / currentQpb;
       }
 
       if (!bySku[item.sku]) bySku[item.sku] = [];
@@ -445,20 +596,26 @@ async function loadAvgConsumption(supplier, legalEntity, currentUnit) {
 
 async function loadPlanSuppliers(legalEntity, selectEl) {
   selectEl.innerHTML = '<option value="">— Выберите поставщика —</option>';
-  let query = supabase.from('products').select('supplier');
-  if (legalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
+  
+  // Запрашиваем ВСЕХ поставщиков
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('short_name, legal_entity');
+  
+  if (error || !data) {
+    console.error('Ошибка загрузки поставщиков для планирования:', error);
+    return;
   }
-  const { data, error } = await query;
-  if (error || !data) return;
-
-  const suppliers = [...new Set(data.map(p => p.supplier).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
-  suppliers.forEach(s => {
+  
+  // Фильтруем на клиенте
+  const filtered = legalEntity === 'Пицца Стар'
+    ? data.filter(s => s.legal_entity === 'Пицца Стар')
+    : data.filter(s => s.legal_entity === 'Бургер БК' || s.legal_entity === 'Воглия Матта');
+  
+  filtered.forEach(s => {
     const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
+    opt.value = s.short_name;
+    opt.textContent = s.short_name;
     selectEl.appendChild(opt);
   });
 }
@@ -467,32 +624,31 @@ async function loadPlanProducts() {
   const container = document.getElementById('planTableContainer');
   container.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div></div>';
 
-  let query = supabase.from('products').select('*').eq('supplier', planState.supplier).order('name');
-  if (planState.legalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
-  }
-
-  const { data, error } = await query;
-  if (error || !data) {
-    container.innerHTML = '<div style="text-align:center;color:var(--error);">Ошибка загрузки</div>';
-    return;
-  }
-
-  planState.items = data.map(p => ({
+  // Запрашиваем ВСЕ товары поставщика (поставщик уже выбран)
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('supplier', planState.supplier) // eq работает, оставляем
+    .order('name');
+  
+  // Фильтруем по юрлицу на клиенте
+  const filtered = planState.legalEntity === 'Пицца Стар'
+    ? data.filter(p => p.legal_entity === 'Пицца Стар')
+    : data.filter(p => p.legal_entity === 'Бургер БК' || p.legal_entity === 'Воглия Матта');
+  
+  planState.items = filtered.map(p => ({
     sku: p.sku || '',
     name: p.name,
     qtyPerBox: p.qty_per_box || 1,
     boxesPerPallet: p.boxes_per_pallet || null,
     unitOfMeasure: p.unit_of_measure || 'шт',
+    multiplicity: p.multiplicity || 1,  // ← ДОБАВИТЬ ЭТУ СТРОКУ
     monthlyConsumption: 0,
     stockOnHand: 0,
     stockAtSupplier: 0,
     plan: []
-  }));
+}));
 }
-
 /* ═══════ RENDER ═══════ */
 
 function renderPlanTable() {
@@ -525,24 +681,31 @@ function renderPlanTable() {
   planState.items.forEach((item, idx) => {
     const skuPrefix = item.sku ? `<b style="color:var(--orange);margin-right:4px;">${item.sku}</b> ` : '';
 
-    html += `
-      <tr data-idx="${idx}">
-        <td class="plan-td-name">
-          <div style="font-weight:600;font-size:13px;color:var(--text);">${skuPrefix}${item.name}</div>
-          <div style="font-size:11px;color:var(--brown-light);">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}</div>
-        </td>
-        <td class="plan-td-input">
-          <input type="text" inputmode="numeric" class="plan-input plan-consumption" data-idx="${idx}" data-col="0" value="${item.monthlyConsumption || ''}" placeholder="0">
-        </td>
-        <td class="plan-td-input">
-          <input type="text" inputmode="numeric" class="plan-input plan-stock" data-idx="${idx}" data-col="1" value="${item.stockOnHand || ''}" placeholder="0">
-        </td>
-        <td class="plan-td-input">
-          <input type="text" inputmode="numeric" class="plan-input plan-supplier-stock" data-idx="${idx}" data-col="2" value="${item.stockAtSupplier || ''}" placeholder="0">
-        </td>
-        ${headers.map((h, mi) => `<td class="plan-td-result" data-idx="${idx}" data-month="${mi}">—</td>`).join('')}
-      </tr>
-    `;
+html += `
+  <tr data-idx="${idx}">
+    <!-- Наименование товара -->
+    <td class="plan-td-name">
+      <div style="font-weight:600;font-size:13px;color:var(--text);">${skuPrefix}${item.name}</div>
+      <div style="font-size:11px;color:var(--text-muted);font-weight:500;">${item.qtyPerBox} ${item.unitOfMeasure}/кор${item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : ''}${item.multiplicity ? ' · кратн.' + item.multiplicity : ''}</div>
+    </td>
+    
+    <!-- Расход/мес - всегда в выбранных единицах -->
+    <td class="plan-td-input">
+      <input type="text" inputmode="numeric" class="plan-input plan-consumption" data-idx="${idx}" data-col="0" value="${item.monthlyConsumption || ''}" placeholder="0">
+    </td>
+    
+    <!-- Склад - преобразуем в зависимости от единиц (через qty_per_box) -->
+    <td class="plan-td-input">
+      <input type="text" inputmode="numeric" class="plan-input plan-stock" data-idx="${idx}" data-col="1" value="${planState.inputUnit === 'boxes' ? Math.ceil(item.stockOnHand / getQpb(item)) : item.stockOnHand || ''}" placeholder="0">
+    </td>
+    
+    <!-- У поставщика - преобразуем в зависимости от единиц -->
+    <td class="plan-td-input">
+      <input type="text" inputmode="numeric" class="plan-input plan-supplier-stock" data-idx="${idx}" data-col="2" value="${planState.inputUnit === 'boxes' ? Math.ceil(item.stockAtSupplier / getQpb(item)) : item.stockAtSupplier || ''}" placeholder="0">
+    </td>
+    ${headers.map((h, mi) => `<td class="plan-td-result" data-idx="${idx}" data-month="${mi}">—</td>`).join('')}
+  </tr>
+`;
   });
 
   html += `
@@ -667,21 +830,23 @@ function evaluateAndApply(input) {
 /**
  * Применяет числовое значение к state и пересчитывает
  */
+let _planValidationTimer = null;
 function applyInputValue(input, value) {
   const idx = parseInt(input.dataset.idx);
   const item = planState.items[idx];
   if (!item) return;
+  const qpb = getQpb(item);
 
   if (input.classList.contains('plan-consumption')) {
     item.monthlyConsumption = value;
-    updateConsumptionHint(input, value);
-    // Мгновенная проверка данных
-    triggerPlanValidation();
-  } else if (input.classList.contains('plan-stock')) {
-    item.stockOnHand = value;
-  } else if (input.classList.contains('plan-supplier-stock')) {
-    item.stockAtSupplier = value;
-  }
+    // Дебаунс проверки данных — 300мс после последнего ввода
+    clearTimeout(_planValidationTimer);
+    _planValidationTimer = setTimeout(() => triggerPlanValidation(), 300);
+} else if (input.classList.contains('plan-stock')) {
+    item.stockOnHand = planState.inputUnit === 'boxes' ? value * qpb : value;
+} else if (input.classList.contains('plan-supplier-stock')) {
+    item.stockAtSupplier = planState.inputUnit === 'boxes' ? value * qpb : value;
+}
   
   recalcItem(idx);
 }
@@ -738,26 +903,35 @@ function recalcItem(idx, fromMonth = 0) {
     });
   }
   
-  const toUnits = (val) => {
-    if (planState.inputUnit === 'boxes') return val * item.qtyPerBox;
+  // qpb — конверсия шт↔кор (учётная коробка 1С)
+  // mult — кратность (учётных коробок в физической коробке)
+  // physBox = qpb * mult — штук в одной физической коробке
+  const qpb = getQpb(item);
+  const mult = getMultiplicity(item);
+  const physBoxInUnits = qpb * mult; // размер физ. коробки в штуках
+  
+  // Конвертируем из текущих единиц UI в штуки
+  const toBaseUnits = (val) => {
+    if (planState.inputUnit === 'boxes') return val * qpb;
     return val;
   };
   
-  const monthlyUnits = toUnits(item.monthlyConsumption);
+  const monthlyUnits = toBaseUnits(item.monthlyConsumption);
   const weeklyUnits = monthlyUnits / 4.33;
   
-  // Считаем carryOver до fromMonth
-  let carryOver = toUnits(item.stockOnHand) + toUnits(item.stockAtSupplier);
+  // Считаем carryOver до fromMonth (всё в штуках)
+  // stockOnHand/stockAtSupplier уже в штуках (конвертируются при вводе)
+  let carryOver = item.stockOnHand + item.stockAtSupplier;
   for (let m = 0; m < fromMonth && m < headers.length; m++) {
     const ratio = headers[m].ratio;
     const baseNeed = planState.periodType === 'weeks' ? weeklyUnits : monthlyUnits;
     const need = baseNeed * ratio;
-    const orderUnits = item.plan[m].orderBoxes * item.qtyPerBox;
-    carryOver = carryOver - need + orderUnits;
+    // orderBoxes — физические коробки, orderUnits — штуки
+    carryOver = carryOver - need + (item.plan[m].orderUnits || 0);
     if (carryOver < 0) carryOver = 0;
   }
 
-  for (let m = fromMonth; m < headers.length; m++) {
+for (let m = fromMonth; m < headers.length; m++) {
     const ratio = headers[m].ratio;
     const baseNeed = planState.periodType === 'weeks' ? weeklyUnits : monthlyUnits;
     const need = baseNeed * ratio;
@@ -766,20 +940,36 @@ function recalcItem(idx, fromMonth = 0) {
     const deficit = need - covered;
     
     if (item.plan[m].locked) {
-      // Locked — не пересчитываем orderBoxes, но обновляем need/deficit
-      item.plan[m].need = Math.round(need);
-      item.plan[m].deficit = Math.round(deficit);
-      item.plan[m].orderUnits = item.plan[m].orderBoxes * item.qtyPerBox;
-      carryOver = carryOver - need + item.plan[m].orderUnits;
+        // Locked — не пересчитываем orderBoxes, но обновляем need/deficit
+        item.plan[m].need = Math.round(need);
+        item.plan[m].deficit = Math.round(deficit);
+        // orderBoxes — физические коробки, пересчитываем orderUnits
+        item.plan[m].orderUnits = item.plan[m].orderBoxes * physBoxInUnits;
+        carryOver = carryOver - need + item.plan[m].orderUnits;
     } else {
-      const orderBoxes = item.qtyPerBox ? Math.ceil(deficit / item.qtyPerBox) : 0;
-      const orderUnits = orderBoxes * item.qtyPerBox;
-      item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes, orderUnits, locked: false };
-      carryOver = carryOver - need + orderUnits;
+        let orderBoxes = 0;  // ФИЗИЧЕСКИЕ коробки
+        let orderUnits = 0;  // штуки (базовые единицы)
+        
+        if (deficit > 0 && physBoxInUnits > 0) {
+            // Округляем вверх до целых физических коробок
+            orderBoxes = Math.ceil(deficit / physBoxInUnits);
+            orderUnits = orderBoxes * physBoxInUnits;
+        }
+        
+        item.plan[m] = { 
+            month: m, 
+            need: Math.round(need), 
+            deficit: Math.round(deficit), 
+            orderBoxes, 
+            orderUnits, 
+            locked: false 
+        };
+        carryOver = carryOver - need + orderUnits;
     }
     if (carryOver < 0) carryOver = 0;
-  }
+}
 
+  // Обновляем отображение в DOM
   updatePlanCells(idx);
   updatePlanTotals();
 }
@@ -787,12 +977,29 @@ function recalcItem(idx, fromMonth = 0) {
 function updatePlanCells(idx) {
   const item = planState.items[idx];
   const container = document.getElementById('planTableContainer');
+  const headers = generatePeriodHeaders();
 
   item.plan.forEach((p, mi) => {
     const cell = container.querySelector(`td.plan-td-result[data-idx="${idx}"][data-month="${mi}"]`);
     if (!cell) return;
     
     const lockedClass = p.locked ? ' plan-cell-locked' : '';
+    
+    // Тултип периода
+    const h = headers[mi];
+    const lockedNote = p.locked ? '<div style="color:#f0a060;margin-top:4px;">✎ Значение задано вручную</div>' : '';
+    let tipHtml = '';
+    if (p.orderBoxes > 0 || p.need > 0) {
+      tipHtml = `
+        <div class="plan-tip-row"><span class="plan-tip-lbl">Период:</span><span class="plan-tip-val">${h ? h.periodLabel : ''}</span></div>
+        <div class="plan-tip-row"><span class="plan-tip-lbl">Потребность:</span><span class="plan-tip-val">${nf.format(p.need)} ${item.unitOfMeasure}</span></div>
+        <div class="plan-tip-row"><span class="plan-tip-lbl">Дефицит:</span><span class="plan-tip-val">${nf.format(p.deficit)} ${item.unitOfMeasure}</span></div>
+        <hr class="plan-tip-hr">
+        <div class="plan-tip-row"><span class="plan-tip-lbl">К заказу:</span><span class="plan-tip-val">${p.orderBoxes} кор / ${nf.format(p.orderUnits)} ${item.unitOfMeasure}</span></div>
+        ${lockedNote}
+      `;
+    }
+    const tipDiv = tipHtml ? `<div class="plan-tip">${tipHtml}</div>` : '';
     
     if (p.orderBoxes > 0) {
       // #8 Кнопка паллеты на каждый период (кроме текущего = mi 0)
@@ -804,7 +1011,9 @@ function updatePlanCells(idx) {
       }
       const resetBtn = p.locked ? `<span class="plan-reset-cell" data-idx="${idx}" data-month="${mi}" title="Сбросить ручное значение">✕</span>` : '';
       
-      cell.innerHTML = `<span class="plan-result-value${lockedClass}">${p.orderBoxes} кор ${palletBtn}${resetBtn}</span><span class="plan-result-sub">${nf.format(p.orderUnits)} ${item.unitOfMeasure}</span>`;
+      // orderBoxes = физические коробки, orderUnits = штуки
+      const baseUnitDisplay = `${nf.format(p.orderUnits)} ${item.unitOfMeasure}`;
+cell.innerHTML = `<span class="plan-period-tip plan-result-value${lockedClass}">${p.orderBoxes} кор ${palletBtn}${resetBtn}${tipDiv}</span><span class="plan-result-sub">${baseUnitDisplay}</span>`;
       cell.classList.add('plan-has-value');
     } else {
       cell.innerHTML = '<span class="plan-result-zero">—</span>';
@@ -842,8 +1051,9 @@ function bindCellHandlers(idx, container) {
       
       const applyEdit = () => {
         const newVal = parseInt(input.value) || 0;
-        p.orderBoxes = newVal;
-        p.orderUnits = newVal * item.qtyPerBox;
+        const physBoxInUnits = getQpb(item) * getMultiplicity(item);
+        p.orderBoxes = newVal;  // физические коробки
+        p.orderUnits = newVal * physBoxInUnits;  // штуки
         p.locked = true;
         // Пересчитываем только СЛЕДУЮЩИЕ периоды
         recalcItem(idx, mi + 1);
@@ -867,7 +1077,7 @@ function bindCellHandlers(idx, container) {
       
       const pallets = Math.ceil(p.orderBoxes / item.boxesPerPallet);
       p.orderBoxes = pallets * item.boxesPerPallet;
-      p.orderUnits = p.orderBoxes * item.qtyPerBox;
+      p.orderUnits = p.orderBoxes * getQpb(item) * getMultiplicity(item);
       p.locked = true;
       // Пересчитываем следующие
       recalcItem(idx, mi + 1);
@@ -936,7 +1146,6 @@ async function savePlanToHistory() {
     return;
   }
 
-  // #1 #4 Подтверждение
   const isUpdate = !!planState.editingPlanId;
   const confirmMsg = isUpdate
     ? 'Заменить сохранённый план новыми данными?'
@@ -944,15 +1153,19 @@ async function savePlanToHistory() {
   const confirmed = await customConfirm(isUpdate ? 'Обновить план?' : 'Сохранить план?', confirmMsg);
   if (!confirmed) return;
 
+  // Опциональное примечание
+  const note = await customPrompt('Примечание к плану', 'Необязательно...');
+
   const planData = {
     legal_entity: planState.legalEntity,
     supplier: planState.supplier,
     period_type: planState.periodType,
     period_count: planState.periodCount,
     start_date: planState.startDate ? planState.startDate.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    note: note || null,
     items: itemsWithPlan.map(item => ({
       sku: item.sku, name: item.name, qty_per_box: item.qtyPerBox,
-      boxes_per_pallet: item.boxesPerPallet,
+      boxes_per_pallet: item.boxesPerPallet, multiplicity: item.multiplicity || 1,
       unit_of_measure: item.unitOfMeasure, monthly_consumption: item.monthlyConsumption,
       stock_on_hand: item.stockOnHand, stock_at_supplier: item.stockAtSupplier,
       plan: item.plan.map(p => ({ month: p.month, order_boxes: p.orderBoxes, order_units: p.orderUnits, locked: p.locked || false }))
@@ -960,12 +1173,17 @@ async function savePlanToHistory() {
   };
 
   let error;
-  if (planState.editingPlanId) {
-    // UPDATE
+  let oldItems = null;
+
+  if (isUpdate) {
+    // Загружаем старый план для diff
+    const { data: oldPlan } = await supabase.from('plans').select('items').eq('id', planState.editingPlanId).maybeSingle();
+    oldItems = oldPlan?.items || [];
+
+    // НЕ перезаписываем created_by при обновлении
     ({ error } = await supabase.from('plans').update(planData).eq('id', planState.editingPlanId));
   } else {
-    // INSERT
-    planData.created_at = new Date().toISOString();
+    planData.created_by = currentUser?.name || null;
     ({ error } = await supabase.from('plans').insert([planData]));
   }
 
@@ -975,9 +1193,68 @@ async function savePlanToHistory() {
     return;
   }
   
-  const label = planState.editingPlanId ? 'План обновлён' : 'План сохранён';
+  // Аудит
+  try {
+    const auditDetails = {
+      supplier: planState.supplier,
+      legal_entity: planState.legalEntity,
+      items_count: itemsWithPlan.length,
+      period: `${planState.periodCount} ${planState.periodType === 'weeks' ? 'нед.' : 'мес.'}`
+    };
+
+    if (isUpdate && oldItems) {
+      // Вычисляем diff
+      const oldMap = new Map(oldItems.map(i => [i.sku || i.name, i]));
+      const changes = [];
+
+      itemsWithPlan.forEach(newItem => {
+        const key = newItem.sku || newItem.name;
+        const old = oldMap.get(key);
+        if (!old) {
+          const totalBoxes = newItem.plan.reduce((s, p) => s + (p.orderBoxes || p.order_boxes || 0), 0);
+          if (totalBoxes > 0) changes.push({ item: key, type: 'added', boxes: totalBoxes });
+        } else {
+          const diffs = [];
+          if ((old.monthly_consumption || 0) !== newItem.monthlyConsumption) {
+            diffs.push(`расход: ${old.monthly_consumption || 0}→${newItem.monthlyConsumption}`);
+          }
+          // Сравниваем коробки по периодам
+          const oldPlanArr = old.plan || [];
+          newItem.plan.forEach((p, mi) => {
+            const oldBoxes = oldPlanArr[mi]?.order_boxes || 0;
+            const newBoxes = p.orderBoxes || 0;
+            if (oldBoxes !== newBoxes) {
+              diffs.push(`пер.${mi + 1}: ${oldBoxes}→${newBoxes} кор`);
+            }
+          });
+          if (diffs.length) changes.push({ item: key, type: 'changed', diffs });
+          oldMap.delete(key);
+        }
+      });
+
+      oldMap.forEach((old, key) => {
+        const totalBoxes = (old.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0);
+        if (totalBoxes > 0) changes.push({ item: key, type: 'removed', boxes: totalBoxes });
+      });
+
+      if (changes.length) auditDetails.changes = changes;
+    }
+
+    await supabase.from('audit_log').insert({
+      action: isUpdate ? 'plan_updated' : 'plan_created',
+      entity_type: 'plan',
+      entity_id: planState.editingPlanId || null,
+      user_name: currentUser?.name || null,
+      details: auditDetails
+    });
+  } catch (e) { /* не критично */ }
+
+  const label = isUpdate ? 'План обновлён' : 'План сохранён';
   const unitLabel = planState.periodType === 'weeks' ? 'нед.' : 'мес.';
   showToast(label, `${itemsWithPlan.length} позиций на ${planState.periodCount} ${unitLabel}`, 'success');
+
+  // Сброс после сохранения
+  resetPlanState();
 }
 
 /* ═══════ EXCEL EXPORT ═══════ */
@@ -995,7 +1272,6 @@ async function exportPlanToExcel() {
   const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
   const headers = generatePeriodHeaders();
 
-  // === Шапка ===
   const rows = [
     [`Планирование заказов — ${planState.supplier}`],
     [`Юр. лицо: ${planState.legalEntity}`],
@@ -1004,31 +1280,29 @@ async function exportPlanToExcel() {
     []
   ];
 
-  // === Заголовки: Арт., Наименование, Ед., период1, период2, ..., ИТОГО ===
   const headerRow = ['Арт.', 'Наименование', 'Ед.'];
   headers.forEach(h => headerRow.push(h.label));
   headerRow.push('ИТОГО');
   rows.push(headerRow);
 
-  // === Данные — коробки (единицы) ===
   itemsWithPlan.forEach(item => {
     const unit = item.unitOfMeasure || 'шт';
     const row = [item.sku || '', item.name, unit];
 
     let totalBoxes = 0;
+    let totalUnits = 0;
     item.plan.forEach(p => {
       const boxes = p.orderBoxes || 0;
       const units = p.orderUnits || 0;
       row.push(boxes > 0 ? `${boxes} кор (${nf.format(units)} ${unit})` : '');
       totalBoxes += boxes;
+      totalUnits += units;
     });
 
-    const totalUnits = totalBoxes * item.qtyPerBox;
     row.push(`${totalBoxes} кор (${nf.format(totalUnits)} ${unit})`);
     rows.push(row);
   });
 
-  // === Итого строка ===
   const totalsRow = ['', 'ИТОГО', ''];
   let grandBoxes = 0;
   for (let mi = 0; mi < headers.length; mi++) {
@@ -1042,16 +1316,15 @@ async function exportPlanToExcel() {
   totalsRow.push(`${nf.format(grandBoxes)} кор`);
   rows.push(totalsRow);
 
-  // === Создание Excel ===
   const ws = XLSX.utils.aoa_to_sheet(rows);
 
   const cols = [
-    { wch: 12 },  // арт
-    { wch: 40 },  // наименование
-    { wch: 6 }    // ед
+    { wch: 12 },
+    { wch: 40 },
+    { wch: 6 }
   ];
   headers.forEach(() => cols.push({ wch: 22 }));
-  cols.push({ wch: 22 }); // итого
+  cols.push({ wch: 22 });
   ws['!cols'] = cols;
 
   const totalCols = 3 + headers.length + 1;

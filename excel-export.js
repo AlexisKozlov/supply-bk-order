@@ -2,6 +2,8 @@
  * Модуль экспорта заказа в Excel
  */
 
+import { getQpb, getMultiplicity } from './utils.js';
+
 export async function exportToExcel(orderState) {
   // Динамический импорт SheetJS
   const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
@@ -23,17 +25,22 @@ export async function exportToExcel(orderState) {
   
   // Подготовка данных - наименование и заказ с единицами
   const dataRows = orderState.items.map(item => {
-    const qpb = item.multiplicity || item.qtyPerBox || 1;
-    const boxes = orderState.settings.unit === 'boxes' 
-      ? item.finalOrder 
-      : Math.ceil(item.finalOrder / qpb);
+    const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
+    
+    let physBoxes;
+    if (orderState.settings.unit === 'boxes') {
+      physBoxes = Math.ceil(item.finalOrder / mult);
+    } else {
+      physBoxes = Math.ceil(item.finalOrder / (qpb * mult));
+    }
     
     const pieces = orderState.settings.unit === 'pieces'
       ? item.finalOrder
       : item.finalOrder * qpb;
 
     const unit = item.unitOfMeasure || 'шт';
-    const boxLabel = `${nf.format(boxes)} кор (${nf.format(Math.round(pieces))} ${unit})`;
+    const boxLabel = `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`;
     
     return [
       item.name || '',

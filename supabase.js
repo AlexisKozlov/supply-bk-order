@@ -24,7 +24,7 @@ class QueryBuilder {
   }
 
   select(c, o) {
-    // Нормализуем: убираем переносы, лишние пробелы, пробел перед (
+    // �����������: ������� ��������, ������ �������, ������ ����� (
     this._sel = c ? c.replace(/\s+/g, ' ').replace(/(\w)\s+\(/g, '$1(').trim() : '*';
     if (o?.count) this._countMode = o.count;
     if (o?.head) this._head = true;
@@ -66,9 +66,14 @@ class QueryBuilder {
     if (this._sel !== '*') p.set('select', this._sel);
     if (this._ord) p.set('order', this._ord);
     if (this._lim) p.set('limit', String(this._lim));
-    if (this._or) p.set('or', this._or);
-    const qs = p.toString();
+    // or передаём вручную чтобы не ломать кодирование запятых и спецсимволов
+    let qs = p.toString();
+    if (this._or) {
+      const orEncoded = encodeURIComponent(this._or).replace(/%2C/gi, ',').replace(/%2A/gi, '*');
+      qs += (qs ? '&' : '') + 'or=' + orEncoded;
+    }
     const url = `${API_BASE}/${this._t}${qs ? '?' + qs : ''}`;
+    console.log('🔍 Supabase URL:', url);
 
     try {
       if (this._method === 'GET') {

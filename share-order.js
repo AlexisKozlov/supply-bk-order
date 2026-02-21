@@ -8,6 +8,7 @@
 import { orderState } from './state.js';
 import { showToast } from './modals.js';
 import { getSupplierContacts } from './database.js';
+import { getQpb, getMultiplicity } from './utils.js';
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
@@ -46,17 +47,23 @@ function buildOrderText() {
 
   const lines = orderState.items
     .map(item => {
-      const qpb = item.multiplicity || item.qtyPerBox || 1;
+      const qpb = getQpb(item);
+      const mult = getMultiplicity(item);
       
-      const boxes = orderState.settings.unit === 'boxes'
-        ? item.finalOrder
-        : item.finalOrder / qpb;
+      // Физические коробки
+      let physBoxes;
+      if (orderState.settings.unit === 'boxes') {
+        physBoxes = item.finalOrder / mult;
+      } else {
+        physBoxes = item.finalOrder / (qpb * mult);
+      }
 
+      // Штуки
       const pieces = orderState.settings.unit === 'pieces'
         ? item.finalOrder
         : item.finalOrder * qpb;
 
-      const roundedBoxes = Math.ceil(boxes);
+      const roundedBoxes = Math.ceil(physBoxes);
       const roundedPieces = Math.round(pieces);
 
       if (roundedBoxes <= 0) return null;

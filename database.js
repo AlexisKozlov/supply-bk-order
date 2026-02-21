@@ -6,6 +6,7 @@
 import { supabase } from './supabase.js';
 import { showToast, customConfirm } from './modals.js';
 import { esc, syncEntityFromMain } from './utils.js';
+import { currentUser } from './state.js';
 
 /* ═══════════════════════════════════════
    ИНИЦИАЛИЗАЦИЯ ТАБОВ
@@ -50,32 +51,33 @@ export function initDatabaseTabs() {
    ═══════════════════════════════════════ */
 
 export async function loadDatabaseProducts(dbLegalEntitySelect, databaseList) {
-  // Синхронизируем юр.лицо из основного селектора при первом открытии
   syncEntityFromMain('dbLegalEntity', 'dbSupplierLegalEntity');
   
   databaseList.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
   const legalEntity = dbLegalEntitySelect.value;
 
-  let query = supabase.from('products').select('*').order('name');
-  if (legalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
-  }
-
-  const { data, error } = await query;
-
+  // Запрашиваем ВСЕ товары
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('name');
+  
   if (error) {
     databaseList.innerHTML = '<div style="text-align:center;color:var(--error);">Ошибка загрузки</div>';
     console.error(error);
     return;
   }
+  
+  // Фильтруем на клиенте
+  const filtered = legalEntity === 'Пицца Стар'
+    ? data.filter(p => p.legal_entity === 'Пицца Стар')
+    : data.filter(p => p.legal_entity === 'Бургер БК' || p.legal_entity === 'Воглия Матта');
 
-  renderDatabaseList(data, databaseList);
+  renderDatabaseList(filtered, databaseList);
 
   const countEl = document.getElementById('dbCardCount');
-  if (countEl) countEl.textContent = `(${data.length})`;
+  if (countEl) countEl.textContent = `(${filtered.length})`;
 }
 
 function renderDatabaseList(products, databaseList) {
@@ -357,24 +359,28 @@ async function loadSuppliers(legalEntitySelect, supplierList) {
   supplierList.innerHTML = '<div style="text-align:center;padding:20px;"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
 
   const legalEntity = legalEntitySelect.value;
-  let query = supabase.from('suppliers').select('*').order('short_name');
-  if (legalEntity === 'Пицца Стар') {
-    query = query.eq('legal_entity', 'Пицца Стар');
-  } else {
-    query = query.in('legal_entity', ['Бургер БК', 'Воглия Матта']);
-  }
-
-  const { data, error } = await query;
+  
+  // Запрашиваем ВСЕХ поставщиков
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('*')
+    .order('short_name');
+  
   if (error) {
     supplierList.innerHTML = '<div style="text-align:center;color:var(--error);">Ошибка загрузки</div>';
     console.error(error);
     return;
   }
-
-  renderSupplierList(data, supplierList);
+  
+  // Фильтруем на клиенте
+  const filtered = legalEntity === 'Пицца Стар'
+    ? data.filter(s => s.legal_entity === 'Пицца Стар')
+    : data.filter(s => s.legal_entity === 'Бургер БК' || s.legal_entity === 'Воглия Матта');
+  
+  renderSupplierList(filtered, supplierList);
 
   const countEl = document.getElementById('dbCardCount');
-  if (countEl) countEl.textContent = `(${data.length})`;
+  if (countEl) countEl.textContent = `(${filtered.length})`;
 }
 
 function renderSupplierList(suppliers, container) {
@@ -473,6 +479,20 @@ function fillSupplierModal(data, mode) {
   document.getElementById('s_fullName').value = data.full_name || '';
   document.getElementById('s_shortName').value = data.short_name || '';
   document.getElementById('s_legalEntity').value = data.legal_entity || 'Бургер БК';
+  
+  // Скрываем юр. лица недоступные пользователю
+  const s_le = document.getElementById('s_legalEntity');
+  const allowed = currentUser?.legal_entities;
+  if (s_le && allowed && allowed.length) {
+    Array.from(s_le.options).forEach(opt => {
+      if (opt.value && !allowed.includes(opt.value)) {
+        opt.style.display = 'none';
+        if (s_le.value === opt.value) s_le.value = allowed[0];
+      } else {
+        opt.style.display = '';
+      }
+    });
+  }
   document.getElementById('s_whatsapp').value = data.whatsapp || '';
   document.getElementById('s_telegram').value = data.telegram || '';
   document.getElementById('s_viber').value = data.viber || '';

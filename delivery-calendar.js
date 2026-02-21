@@ -217,9 +217,9 @@ function renderCalendar() {
       html += '<div class="cal-orders">';
       orders.forEach(o => {
         const color = calState.supplierColors[o.supplier] || '#999';
-        const shortName = o.supplier.length > 8 ? o.supplier.slice(0, 7) + '…' : o.supplier;
-        const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
-        html += `<div class="cal-order-tag" style="background:${color}20;color:${color};border:1px solid ${color}40;" title="${esc(o.supplier)}: ${boxes} кор" data-order-id="${o.id}">${shortName}</div>`;
+        const shortName = o.supplier.length > 6 ? o.supplier.slice(0, 5) + '…' : o.supplier;
+        const itemCount = (o.order_items || []).length;
+        html += `<div class="cal-order-tag" style="background:${color}20;color:${color};border:1px solid ${color}40;" title="${esc(o.supplier)} — ${itemCount} поз." data-order-id="${o.id}">${shortName}</div>`;
       });
       html += '</div>';
     }

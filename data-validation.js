@@ -6,6 +6,7 @@
 
 import { orderState } from './state.js';
 import { supabase } from './supabase.js';
+import { getQpb } from './utils.js';
 
 let consumptionCache = null;
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -20,7 +21,7 @@ export function resetConsumptionCache() {
  * @param {string} legalEntity — юр. лицо
  * @param {string} currentUnit — текущие единицы ('pieces' | 'boxes')
  */
-async function loadConsumptionHistory(supplier, legalEntity, currentUnit) {
+async function loadConsumptionHistory(supplier, legalEntity, currentUnit, multiplicityMap = null) {
   // Кеш: supplier + unit + legalEntity
   if (consumptionCache 
       && consumptionCache.supplier === supplier 
@@ -32,7 +33,7 @@ async function loadConsumptionHistory(supplier, legalEntity, currentUnit) {
   const entity = legalEntity || orderState.settings.legalEntity || 'Бургер БК';
   const { data, error } = await supabase
     .from('orders')
-    .select('unit, order_items(sku, consumption_period, qty_per_box)')
+    .select('*, order_items(sku, consumption_period, qty_per_box)')
     .eq('legal_entity', entity)
     .eq('supplier', supplier)
     .order('created_at', { ascending: false })
@@ -40,30 +41,41 @@ async function loadConsumptionHistory(supplier, legalEntity, currentUnit) {
 
   const avgMap = new Map();
 
-  if (!error && data) {
-    const bySku = {};
-    data.forEach(order => {
-      const orderUnit = order.unit || 'pieces';
-      (order.order_items || []).forEach(item => {
-        if (!item.sku || !item.consumption_period) return;
-        let val = item.consumption_period;
-        const qtyPerBox = item.qty_per_box || 1;
-
-        // Нормализуем к текущим единицам
-        if (orderUnit === 'pieces' && currentUnit === 'boxes') {
-          val = val / qtyPerBox;
-        } else if (orderUnit === 'boxes' && currentUnit === 'pieces') {
-          val = val * qtyPerBox;
-        }
-
-        if (!bySku[item.sku]) bySku[item.sku] = [];
-        bySku[item.sku].push(val);
-      });
-    });
-    Object.entries(bySku).forEach(([sku, vals]) => {
-      avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length);
-    });
+  if (error || !data || !data.length) {
+    console.warn('data-validation: нет заказов', { supplier, entity, error });
+    consumptionCache = { supplier, legalEntity: entity, data: avgMap, unit: currentUnit };
+    return avgMap;
   }
+
+  const bySku = {};
+  data.forEach(order => {
+    const orderUnit = order.unit || 'pieces';
+    const periodDays = order.period_days || 30;
+    
+    (order.order_items || []).forEach(item => {
+      if (!item.sku || !item.consumption_period) return;
+      let val = item.consumption_period;
+      // Используем multiplicity из текущих товаров (если есть), иначе qty_per_box из заказа
+      const effectiveQpb = (multiplicityMap && multiplicityMap.get(item.sku)) || item.qty_per_box || 1;
+
+      // Нормализуем к месячному расходу (30 дней)
+      const dailyRate = val / periodDays;
+      let monthlyVal = dailyRate * 30;
+
+      // Конвертируем в текущие единицы
+      if (orderUnit === 'pieces' && currentUnit === 'boxes') {
+        monthlyVal = monthlyVal / effectiveQpb;
+      } else if (orderUnit === 'boxes' && currentUnit === 'pieces') {
+        monthlyVal = monthlyVal * effectiveQpb;
+      }
+
+      if (!bySku[item.sku]) bySku[item.sku] = [];
+      bySku[item.sku].push(monthlyVal);
+    });
+  });
+  Object.entries(bySku).forEach(([sku, vals]) => {
+    avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length);
+  });
 
   consumptionCache = { supplier, legalEntity: entity, data: avgMap, unit: currentUnit };
   return avgMap;
@@ -77,7 +89,13 @@ export async function validateConsumptionData(tbody) {
   if (!supplier) return;
   if (document.getElementById('dataValidation')?.value !== 'true') return;
 
-  const avgMap = await loadConsumptionHistory(supplier, orderState.settings.legalEntity, orderState.settings.unit);
+  // Строим карту qtyPerBox из текущих товаров заказа
+  const qpbMap = new Map();
+  orderState.items.forEach(item => {
+    if (item.sku) qpbMap.set(item.sku, getQpb(item));
+  });
+
+  const avgMap = await loadConsumptionHistory(supplier, orderState.settings.legalEntity, orderState.settings.unit, qpbMap);
   if (!avgMap.size) return;
 
   const rows = tbody.querySelectorAll('tr');
@@ -123,11 +141,15 @@ export async function validatePlanConsumption(planState, container) {
   const validationSelect = document.getElementById('planDataValidation');
   if (validationSelect && validationSelect.value !== 'true') return;
 
-  // Для планирования расход вводится за месяц
-  // В истории заказов — расход за период (обычно 30 дней)
-  // Нормализуем: считаем среднемесячный из истории
   const currentUnit = planState.inputUnit || 'pieces';
-  const avgMap = await loadConsumptionHistory(planState.supplier, planState.legalEntity, currentUnit);
+  
+  // Строим карту multiplicity из текущих товаров планирования
+  const multiplicityMap = new Map();
+  planState.items.forEach(item => {
+    if (item.sku) multiplicityMap.set(item.sku, getQpb(item));
+  });
+  
+  const avgMap = await loadConsumptionHistory(planState.supplier, planState.legalEntity, currentUnit, multiplicityMap);
   if (!avgMap.size) return;
 
   planState.items.forEach((item, idx) => {

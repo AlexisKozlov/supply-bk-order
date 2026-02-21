@@ -56,7 +56,13 @@ function processData(orders, prevOrders, days) {
     const dayKey = raw.toISOString().slice(0, 10);
     const dayLabel = raw.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
     const sup = order.supplier || 'Без поставщика';
-    const boxes = (order.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
+    
+    // ПРАВИЛЬНЫЙ ПОДСЧЁТ КОРОБОК
+    const boxes = (order.order_items || []).reduce((s, i) => {
+      // Преобразуем строку в число, если нужно
+      const qty = parseFloat(String(i.qty_boxes || '0').replace(',', '.')) || 0;
+      return s + qty;
+    }, 0);
 
     if (!dayMap[dayKey]) dayMap[dayKey] = { dayKey, dayLabel, total: 0, bySupplier: {} };
     dayMap[dayKey].total += boxes;
@@ -79,7 +85,10 @@ function processData(orders, prevOrders, days) {
   const supMap = {};
   orders.forEach(o => {
     const sup = o.supplier || 'Без поставщика';
-    const boxes = (o.order_items || []).reduce((s, i) => s + (i.qty_boxes || 0), 0);
+    const boxes = (o.order_items || []).reduce((s, i) => {
+      const qty = parseFloat(String(i.qty_boxes || '0').replace(',', '.')) || 0;
+      return s + qty;
+    }, 0);
     if (!supMap[sup]) supMap[sup] = { supplier: sup, orders: 0, boxes: 0, color: supplierColor[sup] };
     supMap[sup].orders++;
     supMap[sup].boxes += boxes;
@@ -91,14 +100,22 @@ function processData(orders, prevOrders, days) {
     (o.order_items || []).forEach(item => {
       const key = item.sku || item.name || '?';
       if (!prodMap[key]) prodMap[key] = { sku: item.sku, name: item.name, boxes: 0, orders: 0 };
-      prodMap[key].boxes += item.qty_boxes || 0;
+      const qty = parseFloat(String(item.qty_boxes || '0').replace(',', '.')) || 0;
+      prodMap[key].boxes += qty;
       prodMap[key].orders++;
     });
   });
 
-  const totalBoxes  = orders.reduce((s, o) => s + (o.order_items||[]).reduce((ss,i)=>ss+(i.qty_boxes||0),0), 0);
+  const totalBoxes  = orders.reduce((s, o) => s + (o.order_items||[]).reduce((ss,i) => {
+    const qty = parseFloat(String(i.qty_boxes || '0').replace(',', '.')) || 0;
+    return ss + qty;
+  }, 0), 0);
+  
   const totalOrders = orders.length;
-  const prevBoxes   = prevOrders.reduce((s,o)=>s+(o.order_items||[]).reduce((ss,i)=>ss+(i.qty_boxes||0),0),0);
+  const prevBoxes   = prevOrders.reduce((s,o) => s + (o.order_items||[]).reduce((ss,i) => {
+    const qty = parseFloat(String(i.qty_boxes || '0').replace(',', '.')) || 0;
+    return ss + qty;
+  }, 0), 0);
   const prevCount   = prevOrders.length;
 
   return {
@@ -121,7 +138,7 @@ export function renderAnalytics(data, container) {
     return;
   }
 
-  const nf = n => new Intl.NumberFormat('ru-RU').format(n);
+  const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
   const badge = (val) => {
     if (val === null) return '';
@@ -136,11 +153,11 @@ export function renderAnalytics(data, container) {
   container.innerHTML = `
     <!-- ── КАРТОЧКИ ── -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
-      ${statCard('#F5A623','#E09615', nf(data.totals.orders), 'Всего заказов',
+      ${statCard('#F5A623','#E09615', nf.format(data.totals.orders), 'Всего заказов',
           data.deltaOrders !== null
             ? `vs прошлый период &nbsp;${badge(data.deltaOrders)}`
             : 'Нет данных за прошлый период')}
-      ${statCard('#F5A623','#E09615', nf(data.totals.boxes), 'Всего коробок',
+      ${statCard('#F5A623','#E09615', nf.format(data.totals.boxes), 'Всего коробок',
           data.deltaBoxes !== null
             ? `vs прошлый период &nbsp;${badge(data.deltaBoxes)}`
             : 'Нет данных за прошлый период')}
@@ -172,13 +189,13 @@ export function renderAnalytics(data, container) {
           <div style="display:grid;grid-template-columns:160px 1fr auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f5f0ea;">
             <div style="display:flex;align-items:center;gap:8px;">
               <span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${s.color};flex-shrink:0;"></span>
-              <span style="font-weight:600;color:#5A2D0C;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.supplier}</span>
+              <span style="font-weight:600;color:#5A2D0C;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(s.supplier)}</span>
             </div>
             <div style="height:16px;background:#f0ece5;border-radius:8px;overflow:hidden;">
               <div style="height:100%;width:${pct.toFixed(1)}%;background:${s.color};border-radius:8px;transition:width .5s;"></div>
             </div>
             <div style="text-align:right;white-space:nowrap;">
-              <span style="font-weight:700;color:#5A2D0C;font-size:13px;">${nf(s.boxes)} кор.</span>
+              <span style="font-weight:700;color:#5A2D0C;font-size:13px;">${nf.format(s.boxes)} кор.</span>
               <span style="font-size:12px;color:#888;margin-left:8px;">${s.orders} заказ. · ${pct.toFixed(1)}%</span>
             </div>
           </div>`;
@@ -244,7 +261,7 @@ function cmpBar(label, val, max, color, nf) {
   <div style="margin-bottom:8px;">
     <div style="display:flex;justify-content:space-between;font-size:12px;color:#666;margin-bottom:3px;">
       <span>${label}</span>
-      <span style="font-weight:700;color:#5A2D0C;">${nf(val)}</span>
+      <span style="font-weight:700;color:#5A2D0C;">${nf.format(val)}</span>
     </div>
     <div style="height:14px;background:#f0ece5;border-radius:7px;overflow:hidden;">
       <div style="height:100%;width:${pct}%;background:${color};border-radius:7px;transition:width .6s;"></div>
@@ -274,7 +291,7 @@ function topProductsHTML(products, nf) {
         </div>
       </div>
       <div style="text-align:right;">
-        <div style="font-weight:700;color:#5A2D0C;font-size:14px;">${nf(p.boxes)} кор.</div>
+        <div style="font-weight:700;color:#5A2D0C;font-size:14px;">${nf.format(p.boxes)} кор.</div>
         <div style="font-size:12px;color:#888;">${p.orders} заказов</div>
       </div>
     </div>`;
@@ -319,7 +336,7 @@ function renderStackedChart(data, chartEl, legendEl, nf) {
         background:${data.supplierColor[sup]};
         border-radius:${isTop?'4px 4px 0 0':'0'};
         flex-shrink:0;
-      " title="${esc(sup)}: ${nf(boxes)} кор."></div>`;
+      " title="${esc(sup)}: ${nf.format(boxes)} кор."></div>`;
       accH += h;
     });
 
@@ -332,8 +349,8 @@ function renderStackedChart(data, chartEl, legendEl, nf) {
     <div style="
       flex:1;min-width:${data.days.length > 20 ? 20 : 36}px;max-width:60px;
       display:flex;flex-direction:column;align-items:center;
-    " title="${day.dayLabel}: ${nf(day.total)} кор.">
-      ${day.total > 0 ? `<div style="font-size:9px;font-weight:700;color:#5A2D0C;margin-bottom:2px;white-space:nowrap;">${nf(day.total)}</div>` : '<div style="height:14px;"></div>'}
+    " title="${day.dayLabel}: ${nf.format(day.total)} кор.">
+      ${day.total > 0 ? `<div style="font-size:9px;font-weight:700;color:#5A2D0C;margin-bottom:2px;white-space:nowrap;">${nf.format(day.total)}</div>` : '<div style="height:14px;"></div>'}
       <div style="
         width:85%;display:flex;flex-direction:column;justify-content:flex-end;
         height:${CHART_H}px;
