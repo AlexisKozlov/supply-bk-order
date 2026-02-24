@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { reactive, ref, computed } from 'vue';
+import { reactive, ref, computed, watch } from 'vue';
 import { calculateItem } from '@/lib/calculations.js';
 import { getQpb, getMultiplicity } from '@/lib/utils.js';
 import { db } from '@/lib/apiClient.js';
@@ -34,7 +34,7 @@ export const useOrderStore = defineStore('order', () => {
   const userStore = useUserStore();
 
   const settings = reactive({
-    legalEntity: 'Бургер БК',
+    legalEntity: localStorage.getItem('bk_legal_entity') || 'Бургер БК',
     supplier: '',
     today: null,
     deliveryDate: null,
@@ -45,6 +45,10 @@ export const useOrderStore = defineStore('order', () => {
     hasTransit: false,
     showStockColumn: true,
     note: '',
+  });
+
+  watch(() => settings.legalEntity, (le) => {
+    try { localStorage.setItem('bk_legal_entity', le); } catch(e) { /* noop */ }
   });
 
   const items = ref([]);

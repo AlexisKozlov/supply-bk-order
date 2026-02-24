@@ -4,6 +4,7 @@
  */
 
 import { db } from './apiClient.js';
+import { toLocalDateStr } from './utils.js';
 
 const PALETTE = [
   '#F5A623','#4CAF50','#2196F3','#9C27B0',
@@ -54,7 +55,7 @@ function processData(orders, prevOrders, days) {
   const dayMap = {};
   orders.forEach(order => {
     const raw = new Date(order.created_at);
-    const dayKey = raw.toISOString().slice(0, 10);
+    const dayKey = toLocalDateStr(raw);
     const dayLabel = raw.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
     const sup = order.supplier || 'Без поставщика';
     const boxes = sumBoxes(order.order_items);
@@ -67,7 +68,7 @@ function processData(orders, prevOrders, days) {
   const allDays = [];
   for (let i = 0; i < days; i++) {
     const d = new Date(startD); d.setDate(d.getDate() + i);
-    const key = d.toISOString().slice(0, 10);
+    const key = toLocalDateStr(d);
     const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
     allDays.push(dayMap[key] || { dayKey: key, dayLabel: label, total: 0, bySupplier: {} });
   }

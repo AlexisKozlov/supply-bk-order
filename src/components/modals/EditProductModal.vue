@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('close')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box">
         <div class="modal-header">
           <h2><BkIcon v-if="mode === 'create'" name="add" size="sm"/> <BkIcon v-else name="edit" size="sm"/> {{ mode === 'create' ? 'Новый товар' : 'Редактирование карточки' }}</h2>
-          <button class="modal-close" @click="$emit('close')"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
         </div>
 
         <input v-model="form.sku" placeholder="Артикул" />
@@ -56,18 +56,28 @@
           <button class="btn primary" @click="submit" :disabled="saving">
             {{ saving ? 'Сохранение...' : (mode === 'create' ? 'Создать' : 'Сохранить') }}
           </button>
-          <button class="btn secondary" @click="$emit('close')">Отмена</button>
+          <button class="btn secondary" @click="tryClose">Отмена</button>
         </div>
       </div>
     </div>
+
+    <ConfirmModal
+      v-if="showConfirmClose"
+      title="Закрыть без сохранения?"
+      message="Введённые данные будут потеряны."
+      @confirm="$emit('close')"
+      @cancel="showConfirmClose = false"
+    />
   </Teleport>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { applyEntityFilter } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 
 
 const props = defineProps({
@@ -82,6 +92,9 @@ const toast  = useToastStore();
 const saving = ref(false);
 const mode   = ref(props.productId || props.sku ? 'edit' : 'create');
 let   editId = null;
+let   initialized = false;
+let   initialForm = null;
+const showConfirmClose = ref(false);
 
 const supplierOptions = ref([]);
 
@@ -93,16 +106,36 @@ const form = ref({
 });
 
 onMounted(async () => {
-  await loadSupplierOptions();
   if (props.productId || props.sku) {
     await loadProduct();
   }
+  await loadSupplierOptions();
+  initialized = true;
+  initialForm = JSON.stringify(form.value);
 });
 
+function isDirty() {
+  return JSON.stringify(form.value) !== initialForm;
+}
+
+function tryClose() {
+  if (isDirty()) { showConfirmClose.value = true; return; }
+  emit('close');
+}
+
 async function loadSupplierOptions() {
-  const { data } = await db.from('suppliers').select('short_name').order('short_name');
+  let query = db.from('suppliers').select('short_name').order('short_name');
+  query = applyEntityFilter(query, form.value.legal_entity);
+  const { data } = await query;
   supplierOptions.value = (data || []).map(s => s.short_name);
 }
+
+// Перезагрузить поставщиков при смене юр. лица (только после инициализации)
+watch(() => form.value.legal_entity, () => {
+  if (!initialized) return;
+  form.value.supplier = '';
+  loadSupplierOptions();
+});
 
 async function loadProduct() {
   let query = db.from('products').select('*');

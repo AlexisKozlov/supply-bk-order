@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('close')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box" style="width:480px;">
         <div class="modal-header">
           <h2><BkIcon v-if="product" name="edit" size="sm"/> <BkIcon v-else name="add" size="sm"/> {{ product ? 'Редактирование карточки' : 'Новый товар' }}</h2>
-          <button class="modal-close" @click="$emit('close')"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
         </div>
 
         <div class="modal-row-2" style="grid-template-columns: 1fr 3fr;">
@@ -64,10 +64,18 @@
           <button class="btn primary" @click="save" :disabled="saving">
             {{ saving ? 'Сохранение...' : (product ? 'Сохранить' : 'Создать') }}
           </button>
-          <button class="btn secondary" @click="$emit('close')">Отмена</button>
+          <button class="btn secondary" @click="tryClose">Отмена</button>
         </div>
       </div>
     </div>
+
+    <ConfirmModal
+      v-if="showConfirmClose"
+      title="Закрыть без сохранения?"
+      message="Введённые данные будут потеряны."
+      @confirm="$emit('close')"
+      @cancel="showConfirmClose = false"
+    />
 
     <!-- Вложенная модалка создания поставщика -->
     <EditSupplierModal
@@ -79,10 +87,12 @@
   </Teleport>
 </template>
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { applyEntityFilter } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
 
 
@@ -95,7 +105,10 @@ const toast = useToastStore();
 const saving = ref(false);
 const supplierOptions = ref([]);
 const showNewSupplier = ref(false);
+const showConfirmClose = ref(false);
 const prevSupplier = ref('');
+let initialized = false;
+let initialForm = null;
 
 const form = ref({
   sku: '', name: '', supplier: '', legal_entity: props.legalEntity,
@@ -122,12 +135,32 @@ onMounted(async () => {
     });
   }
   await loadSuppliers();
+  initialized = true;
+  initialForm = JSON.stringify(form.value);
 });
 
+function isDirty() {
+  return JSON.stringify(form.value) !== initialForm;
+}
+
+function tryClose() {
+  if (isDirty()) { showConfirmClose.value = true; return; }
+  emit('close');
+}
+
 async function loadSuppliers() {
-  const { data } = await db.from('suppliers').select('short_name').order('short_name');
+  let query = db.from('suppliers').select('short_name').order('short_name');
+  query = applyEntityFilter(query, form.value.legal_entity);
+  const { data } = await query;
   supplierOptions.value = (data || []).map(s => s.short_name);
 }
+
+// Перезагрузить поставщиков при смене юр. лица (только после инициализации)
+watch(() => form.value.legal_entity, () => {
+  if (!initialized) return;
+  form.value.supplier = '';
+  loadSuppliers();
+});
 
 function onSupplierChange() {
   if (form.value.supplier === '__new_supplier__') {
@@ -150,8 +183,10 @@ async function onSupplierCreated() {
   // Перезагружаем список поставщиков
   await loadSuppliers();
   // Выбираем последнего созданного (он будет последним по алфавиту или найдём новый)
-  // Получим самого нового поставщика
-  const { data } = await db.from('suppliers').select('short_name').order('created_at', { ascending: false }).limit(1);
+  // Получим самого нового поставщика для текущего юр. лица
+  let q = db.from('suppliers').select('short_name').order('created_at', { ascending: false }).limit(1);
+  q = applyEntityFilter(q, form.value.legal_entity);
+  const { data } = await q;
   if (data && data.length) {
     form.value.supplier = data[0].short_name;
   }

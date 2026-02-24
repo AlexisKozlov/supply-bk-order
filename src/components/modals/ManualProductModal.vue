@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('close')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box">
         <div class="modal-header">
           <h2><BkIcon name="add" size="sm"/> Новый товар</h2>
-          <button class="modal-close" @click="$emit('close')"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
         </div>
 
         <input v-model="form.sku" placeholder="Артикул" />
@@ -57,10 +57,18 @@
           <button class="btn primary" @click="submit" :disabled="saving">
             {{ saving ? 'Сохранение...' : 'Добавить' }}
           </button>
-          <button class="btn secondary" @click="$emit('close')">Отмена</button>
+          <button class="btn secondary" @click="tryClose">Отмена</button>
         </div>
       </div>
     </div>
+
+    <ConfirmModal
+      v-if="showConfirmClose"
+      title="Закрыть без сохранения?"
+      message="Введённые данные будут потеряны."
+      @confirm="$emit('close')"
+      @cancel="showConfirmClose = false"
+    />
   </Teleport>
 </template>
 
@@ -70,6 +78,7 @@ import { db } from '@/lib/apiClient.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 
 
 const props = defineProps({
@@ -81,6 +90,8 @@ const emit = defineEmits(['close', 'added']);
 const supplierStore = useSupplierStore();
 const toast         = useToastStore();
 const saving        = ref(false);
+const showConfirmClose = ref(false);
+let   initialForm   = null;
 
 const form = ref({
   sku: '',
@@ -97,7 +108,17 @@ const suppliers = computed(() => supplierStore.getSuppliersForEntity(form.value.
 
 onMounted(async () => {
   await supplierStore.loadSuppliers(form.value.legal_entity);
+  initialForm = JSON.stringify(form.value);
 });
+
+function isDirty() {
+  return JSON.stringify(form.value) !== initialForm;
+}
+
+function tryClose() {
+  if (isDirty()) { showConfirmClose.value = true; return; }
+  emit('close');
+}
 
 async function submit() {
   if (!form.value.name) { toast.error('Введите наименование', ''); return; }

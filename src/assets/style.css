@@ -826,8 +826,7 @@ select:focus, input:focus, textarea:focus {
 /* 2. Разрешаем: селекторы отображения (шт/кор, транзит, запас, проверка) */
 .view-only-mode #unit,
 .view-only-mode #hasTransit,
-.view-only-mode #showStockColumn,
-.view-only-mode #dataValidation {
+.view-only-mode #showStockColumn {
   pointer-events: auto !important;
   opacity: 1 !important;
 }
@@ -839,8 +838,9 @@ select:focus, input:focus, textarea:focus {
   opacity: 1 !important;
 }
 /* Сохранить остаётся disabled в просмотре — handled by :disabled attr */
-/* 4. Разрешаем: кнопку развернуть/свернуть */
-.view-only-mode .fullscreen-toggle-btn {
+/* 4. Разрешаем: кнопку развернуть/свернуть и компакт */
+.view-only-mode .fullscreen-toggle-btn,
+.view-only-mode .compact-toggle {
   pointer-events: auto !important;
   opacity: 1 !important;
 }

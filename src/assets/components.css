@@ -607,8 +607,8 @@ td input[type="number"]:focus {
   box-shadow: 0 3px 10px rgba(76,175,80,0.3);
 }
 
-/* ── Drag handle + номер строки ── */
-td:first-child {
+/* ── Drag handle + номер строки (только таблица заказа, не планирования) ── */
+.order-table:not(.plan-table) > tbody > tr > td:first-child {
   cursor: grab;
   user-select: none;
   font-size: 11px;
@@ -616,7 +616,7 @@ td:first-child {
   font-weight: 600;
 }
 
-td:first-child:active {
+.order-table:not(.plan-table) > tbody > tr > td:first-child:active {
   cursor: grabbing;
 }
 tbody tr {
@@ -1739,6 +1739,7 @@ td.plan-td-result:hover {
 .view-only-mode .toolbar-finish .btn,
 .view-only-mode .toolbar-finish .share-dropdown button,
 .view-only-mode .fullscreen-toggle-btn,
+.view-only-mode .compact-toggle,
 .view-only-mode .summary-details-btn {
   pointer-events: auto !important;
   opacity: 1 !important;

@@ -1,5 +1,5 @@
 import { db } from './apiClient.js';
-import { getQpb, getMultiplicity } from './utils.js';
+import { getQpb, getMultiplicity, toLocalDateStr } from './utils.js';
 
 /**
  * Сохранить или обновить заказ в БД.
@@ -32,8 +32,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
 
   const orderData = {
     supplier:          settings.supplier || 'Свободный',
-    delivery_date:     settings.deliveryDate ? settings.deliveryDate.toISOString().slice(0, 10) : null,
-    today_date:        settings.today       ? settings.today.toISOString().slice(0, 10)        : null,
+    delivery_date:     toLocalDateStr(settings.deliveryDate),
+    today_date:        toLocalDateStr(settings.today),
     safety_days:       settings.safetyDays  || 0,
     period_days:       settings.periodDays  || 30,
     unit:              settings.unit        || 'pieces',

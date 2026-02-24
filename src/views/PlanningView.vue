@@ -42,13 +42,6 @@
             <option :value="30">30 дней</option>
           </select>
         </div>
-        <div class="setting-group">
-          <label>Проверка данных</label>
-          <select v-model="dataValidation" @change="onValidationChange">
-            <option value="false">Выкл</option>
-            <option value="true">Вкл</option>
-          </select>
-        </div>
       </div>
     </div>
 
@@ -81,12 +74,13 @@
             <th v-for="h in periodHeaders" :key="h.label" class="plan-th-month" :title="compactPlan ? h.label + ' ' + h.sublabel : ''">
               {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
             </th>
+            <th class="plan-th-total">Итого</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="(item, idx) in items" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item) }">
             <td class="plan-td-name" style="text-align:left;" :title="compactPlan ? planMetaTooltip(item) : ''" @dblclick="openProductEdit(item)">
-              <div style="font-weight:600;color:var(--text);cursor:pointer;" :style="compactPlan ? 'font-size:12px' : 'font-size:13px'">
+              <div style="font-weight:600;color:var(--text);" :style="compactPlan ? 'font-size:12px' : 'font-size:13px'">
                 <b v-if="item.sku" style="color:var(--bk-orange);margin-right:4px;">{{ item.sku }}</b>{{ item.name }}
               </div>
               <div v-if="!compactPlan" style="font-size:11px;color:var(--text-muted);font-weight:500;">{{ item.qtyPerBox }} {{ item.unitOfMeasure || 'шт' }}/кор{{ item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : '' }}{{ item.multiplicity > 1 ? ' · кратн.' + item.multiplicity : '' }}</div>
@@ -128,17 +122,15 @@
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
             </td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr class="plan-totals">
-            <td class="plan-td-name" style="text-align:right;padding-right:12px;font-weight:700;">ИТОГО коробок:</td>
-            <td colspan="3"></td>
-            <td v-for="(_, m) in periodHeaders" :key="m" class="plan-total-cell" :class="{ 'plan-has-value': periodTotalBoxes(m) > 0 }">
-              {{ periodTotalBoxes(m) > 0 ? nf.format(periodTotalBoxes(m)) : '—' }}
+            <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }">
+              <template v-if="itemTotalBoxes(item) > 0">
+                <span class="plan-total-boxes">{{ nf.format(itemTotalBoxes(item)) }} кор</span>
+                <span class="plan-total-units">{{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }}</span>
+              </template>
+              <span v-else class="plan-result-zero">—</span>
             </td>
           </tr>
-        </tfoot>
+        </tbody>
       </table>
     </div>
 
@@ -194,7 +186,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
-import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, toLocalDateStr } from '@/lib/utils.js';
 import { importFromFile } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
@@ -213,10 +205,9 @@ const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
 const supplier = ref('');
 const periodValue = ref('m3');
-const startDateStr = ref(new Date().toISOString().slice(0, 10));
+const startDateStr = ref(toLocalDateStr(new Date()));
 const inputUnit = ref('pieces');
 const consumptionPeriodDays = ref(30);
-const dataValidation = ref('true');
 const items = ref([]);
 const suppLoading = ref(false);
 const load1cLoading = ref(false);
@@ -445,6 +436,8 @@ function roundToPallet(idx, m) {
 function resetCell(idx, m) { snapshot(); items.value[idx].plan[m].locked = false; recalcItem(idx, m); _savePlanDraft(); }
 
 function itemHasOrder(item) { return item.plan.some(p => p.orderBoxes > 0); }
+function itemTotalBoxes(item) { return item.plan.reduce((s, p) => s + (p.orderBoxes || 0), 0); }
+function itemTotalUnits(item) { return item.plan.reduce((s, p) => s + (p.orderUnits || 0), 0); }
 function periodTotalBoxes(m) { return items.value.reduce((s, i) => s + (i.plan[m]?.orderBoxes || 0), 0); }
 const itemsWithPlan = computed(() => items.value.filter(i => i.plan.some(p => p.orderBoxes > 0)));
 
@@ -470,9 +463,8 @@ function onUnitChange(e) {
 // ─── Validation (#7 fix — uses inputUnit.value which is already updated) ──
 let _vTimer = null;
 function triggerValidation() { clearTimeout(_vTimer); _vTimer = setTimeout(runValidation, 300); }
-function onValidationChange() { if (dataValidation.value === 'true') triggerValidation(); else items.value.forEach(i => { i._cw = false; i._ct = ''; }); }
 async function runValidation() {
-  if (dataValidation.value !== 'true' || !supplier.value || !items.value.length) return;
+  if (!supplier.value || !items.value.length) return;
   const avgMap = await loadAvgConsumption();
   if (!avgMap.size) return;
   items.value.forEach(item => {
@@ -779,7 +771,7 @@ async function loadPlanFromHistory(planId) {
   orderStore.settings.legalEntity = plan.legal_entity || 'Бургер БК';
   supplier.value = plan.supplier || '';
   periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
-  startDateStr.value = plan.start_date || new Date().toISOString().slice(0, 10);
+  startDateStr.value = plan.start_date || toLocalDateStr(new Date());
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
   editingPlanId.value = plan.id;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
@@ -832,9 +824,11 @@ onMounted(async () => {
 .plan-pallet-period, .plan-reset-cell { display: inline-block; font-size: 10px; cursor: pointer; margin-left: 2px; opacity: 0.5; transition: opacity 0.15s; vertical-align: middle; }
 .plan-pallet-period:hover, .plan-reset-cell:hover { opacity: 1; }
 .plan-reset-cell { color: #d32f2f; font-weight: 700; }
-.plan-totals { background: #fdf9f2; border-top: 2px solid var(--bk-orange); }
-.plan-totals td { padding: 10px 8px; font-weight: 700; font-size: 13px; color: var(--text); }
-.plan-total-cell.plan-has-value { background: rgba(245,166,35,0.12); color: var(--accent); font-size: 15px; }
+.plan-th-total { min-width: 70px; background: rgba(245,166,35,0.15) !important; }
+.plan-td-total { text-align: center; min-width: 80px; border-left: 2px solid var(--bk-orange); padding: 4px 6px; }
+.plan-td-total.plan-has-value { background: rgba(245,166,35,0.08); }
+.plan-total-boxes { display: block; font-weight: 700; font-size: 13px; color: var(--bk-brown); }
+.plan-total-units { display: block; font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 .consumption-warning { color: #d32f2f !important; font-weight: 700 !important; border-color: #d32f2f !important; background: #ffebee !important; }
 
 /* (#4) Sticky name column — solid bg to prevent bleed-through */

@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('close')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box">
         <div class="modal-header">
           <h2><BkIcon v-if="supplier" name="edit" size="sm"/> <BkIcon v-else name="add" size="sm"/> {{ supplier ? 'Редактирование поставщика' : 'Новый поставщик' }}</h2>
-          <button class="modal-close" @click="$emit('close')"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
         </div>
 
         <input v-model="form.short_name" placeholder="Краткое наименование*" />
@@ -44,10 +44,18 @@
           <button class="btn primary" @click="save" :disabled="saving">
             {{ saving ? 'Сохранение...' : (supplier ? 'Сохранить' : 'Создать') }}
           </button>
-          <button class="btn secondary" @click="$emit('close')">Отмена</button>
+          <button class="btn secondary" @click="tryClose">Отмена</button>
         </div>
       </div>
     </div>
+
+    <ConfirmModal
+      v-if="showConfirmClose"
+      title="Закрыть без сохранения?"
+      message="Введённые данные будут потеряны."
+      @confirm="$emit('close')"
+      @cancel="showConfirmClose = false"
+    />
   </Teleport>
 </template>
 
@@ -56,6 +64,7 @@ import { ref, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 
 
 const props = defineProps({
@@ -65,7 +74,9 @@ const props = defineProps({
 const emit = defineEmits(['close', 'saved']);
 const toast = useToastStore();
 const saving = ref(false);
+const showConfirmClose = ref(false);
 const oldShortName = ref('');
+let initialForm = null;
 
 const form = ref({
   short_name: '', full_name: '', legal_entity: props.legalEntity,
@@ -85,7 +96,17 @@ onMounted(() => {
     });
     oldShortName.value = props.supplier.short_name || '';
   }
+  initialForm = JSON.stringify(form.value);
 });
+
+function isDirty() {
+  return JSON.stringify(form.value) !== initialForm;
+}
+
+function tryClose() {
+  if (isDirty()) { showConfirmClose.value = true; return; }
+  emit('close');
+}
 
 async function save() {
   if (!form.value.short_name.trim()) { toast.error('Введите краткое наименование', ''); return; }

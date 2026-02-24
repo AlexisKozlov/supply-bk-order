@@ -63,13 +63,6 @@
             <option value="false">Скрыть</option>
           </select>
         </div>
-        <div class="setting-group">
-          <label>Проверка данных</label>
-          <select :value="dataValidationEnabled ? 'true' : 'false'" @change="(e) => dataValidationEnabled = e.target.value === 'true'">
-            <option value="false">Выкл</option>
-            <option value="true">Вкл</option>
-          </select>
-        </div>
       </div>
     </div>
 
@@ -123,7 +116,7 @@
         </div>
       </div>
 
-      <OrderTable :data-validation-enabled="dataValidationEnabled" :compact="compactMode" @edit-product="openProductForEdit"/>
+      <OrderTable :data-validation-enabled="true" :compact="compactMode" @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
       <div class="toolbar-row toolbar-finish">
@@ -225,7 +218,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { importFromFile } from '@/lib/importStock.js';
 import OrderTable from '@/components/order/OrderTable.vue';
@@ -247,7 +240,6 @@ const userStore     = useUserStore();
 const orderVisible          = ref(true);
 const settingsCollapsed     = ref(false);
 const supplierLoading       = ref(false);
-const dataValidationEnabled = ref(true);
 const showShareDropdown     = ref(false);
 const showManualModal       = ref(false);
 const showSaveModal         = ref(false);
@@ -269,8 +261,8 @@ let   searchTimer           = null;
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
-const todayStr    = computed(() => { const d = orderStore.settings.today; return d instanceof Date && !isNaN(d) ? d.toISOString().slice(0,10) : ''; });
-const deliveryStr = computed(() => { const d = orderStore.settings.deliveryDate; return d instanceof Date && !isNaN(d) ? d.toISOString().slice(0,10) : ''; });
+const todayStr    = computed(() => toLocalDateStr(orderStore.settings.today));
+const deliveryStr = computed(() => toLocalDateStr(orderStore.settings.deliveryDate));
 const paramsReady = computed(() => orderStore.settings.today && orderStore.settings.deliveryDate && orderStore.settings.safetyDays > 0);
 
 const safetyDate = computed(() => {
@@ -280,7 +272,7 @@ const safetyDate = computed(() => {
   const d = new Date(delivery); d.setDate(d.getDate() + days); return d;
 });
 const safetyDateDisplay = computed(() => safetyDate.value ? safetyDate.value.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' }) : '');
-const safetyDateStr = computed(() => safetyDate.value ? safetyDate.value.toISOString().slice(0,10) : '');
+const safetyDateStr = computed(() => toLocalDateStr(safetyDate.value));
 
 function onSafetyDaysChange(e) {
   const v = +e.target.value || 0;
@@ -416,7 +408,7 @@ function onTodayChange(e) {
 
 function onDeliveryChange(e) {
   const base = orderStore.settings.today || new Date();
-  if (e.target.value < base.toISOString().slice(0,10)) {
+  if (e.target.value < toLocalDateStr(base)) {
     toast.error('Некорректная дата', 'Дата прихода не может быть раньше сегодняшней');
     e.target.value = deliveryStr.value; return;
   }

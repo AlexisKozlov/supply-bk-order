@@ -43,6 +43,11 @@ export function getMultiplicity(item) {
   return item.multiplicity || 1;
 }
 
+export function toLocalDateStr(d) {
+  if (!(d instanceof Date) || isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function debug(...args) {
   try { if (localStorage.getItem('BK_DEBUG') === 'true') console.log(...args); } catch(e) { /* noop */ }
 }

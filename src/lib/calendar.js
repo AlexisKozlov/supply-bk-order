@@ -4,6 +4,7 @@
  */
 
 import { db } from './apiClient.js';
+import { toLocalDateStr } from './utils.js';
 
 const PALETTE = [
   '#F5A623','#4CAF50','#2196F3','#9C27B0',
@@ -22,8 +23,8 @@ export async function loadCalendarData(year, month, legalEntity) {
     .from('orders')
     .select('id, supplier, delivery_date, created_at, order_items(sku, name, qty_boxes)')
     .eq('legal_entity', legalEntity)
-    .gte('delivery_date', from.toISOString().slice(0, 10))
-    .lte('delivery_date', to.toISOString().slice(0, 10))
+    .gte('delivery_date', toLocalDateStr(from))
+    .lte('delivery_date', toLocalDateStr(to))
     .order('delivery_date', { ascending: true });
 
   if (error) { console.error('Calendar data error:', error); return { orders: [], supplierColors: {} }; }
