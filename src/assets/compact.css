@@ -1,0 +1,164 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPACT MODE — Supply Department Order Calculator
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Toggle button ─── */
+.compact-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.compact-toggle:hover {
+  border-color: var(--bk-orange);
+  color: var(--bk-orange);
+  background: var(--orange-bg);
+}
+.compact-toggle.active {
+  background: var(--bk-orange);
+  color: white;
+  border-color: var(--bk-orange);
+}
+
+/* ─── Table cells ─── */
+.compact-mode .order-table td {
+  padding: 3px 6px;
+}
+.compact-mode .order-table thead th {
+  padding: 6px 6px;
+  font-size: 9px;
+  letter-spacing: 0.3px;
+}
+
+/* ─── Item name cell ─── */
+.compact-mode td.item-name {
+  font-size: 12px;
+  padding-left: 8px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+/* ─── Shortage compact: inline icon with native title ─── */
+.shortage-compact {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--error);
+  vertical-align: middle;
+  cursor: help;
+}
+
+/* ─── Drag handle: hidden ─── */
+.compact-mode .drag-handle {
+  display: none;
+}
+.compact-mode td:first-child {
+  width: 4px !important;
+  padding: 0 2px !important;
+}
+
+/* ─── Inputs: smaller ─── */
+.compact-mode .order-table input[type="number"] {
+  padding: 2px 4px;
+  font-size: 12px;
+  height: 26px;
+}
+
+/* ─── Calc cell: clickable value, hide button ─── */
+.compact-mode .calc .calc-to-order {
+  display: none;
+}
+.compact-mode .calc .calc-value {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+  transition: background 0.15s;
+  font-size: 11px;
+}
+.compact-mode .calc .calc-value:hover {
+  background: var(--green-bg);
+}
+
+/* ─── Pallets cell: hide button, show on hover ─── */
+.compact-mode td.pallets .round-to-pallet {
+  display: none;
+}
+.compact-mode td.pallets:hover .round-to-pallet {
+  display: inline-block;
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  white-space: nowrap;
+  font-size: 9px;
+  padding: 2px 6px;
+}
+.compact-mode td.pallets {
+  position: relative;
+  font-size: 11px;
+}
+.compact-mode td.pallets .pallet-info {
+  font-size: 11px;
+}
+
+/* ─── Coverage date / Stock: cursor hint for title ─── */
+.compact-mode td.date {
+  font-size: 11px;
+  cursor: help;
+}
+.compact-mode td.stock-display {
+  font-size: 10px;
+  cursor: help;
+}
+
+/* ─── Order cell: tighter ─── */
+.compact-mode td.order-highlight {
+  padding: 3px 4px;
+}
+.compact-mode td.order-highlight input {
+  width: 60px !important;
+}
+
+/* ─── Delete button ─── */
+.compact-mode .delete-item-x {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+.compact-mode td.delete-cell {
+  padding: 0 2px;
+}
+
+/* ─── Final summary: smaller ─── */
+.compact-mode .final-summary {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+/* ─── Transit column ─── */
+.compact-mode .transit-col input {
+  width: 60px;
+}
+
+/* ─── Row hover states preserved ─── */
+.compact-mode .order-table tbody tr { transition: background 0.08s; }
+.compact-mode .order-table tbody tr:hover { background: #FFF8F0; }
+.compact-mode .order-table tbody tr.has-order:hover { background: rgba(45,80,22,0.06); }
+
+/* ─── Empty row ─── */
+.compact-mode .order-empty-cell {
+  padding: 16px 10px;
+}
+
+/* ─── Plan compact: toggle button already styled above (.compact-toggle) ─── */

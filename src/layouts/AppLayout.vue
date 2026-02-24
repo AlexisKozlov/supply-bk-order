@@ -1,0 +1,347 @@
+<template>
+  <div class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, open: sidebarOpen }">
+      <div class="sidebar-brand">
+        <router-link :to="{ name: 'home' }" class="sidebar-brand-icon" title="На главную">🍔</router-link>
+        <div class="sidebar-brand-text" v-if="!sidebarCollapsed">
+          Supply Department
+          <small>Отдел закупок</small>
+        </div>
+        <button class="sidebar-collapse-btn" @click="toggleSidebar" title="Свернуть/Раскрыть">
+          <BkIcon v-if="sidebarCollapsed" name="menu" size="sm" light/>
+          <BkIcon v-else name="chevronLeft" size="sm" light/>
+        </button>
+      </div>
+
+      <div class="sidebar-section" v-if="!sidebarCollapsed">Заказы</div>
+      <div class="sidebar-nav-scroll">
+      <nav class="sidebar-nav">
+        <router-link :to="{ name: 'order' }" class="sidebar-item" :class="{ active: currentRoute === 'order' }">
+          <span class="sidebar-icon"><BkIcon name="order" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Новый заказ</span>
+        </router-link>
+        <router-link :to="{ name: 'history' }" class="sidebar-item" :class="{ active: currentRoute === 'history' }">
+          <span class="sidebar-icon"><BkIcon name="history" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">История</span>
+        </router-link>
+        <router-link :to="{ name: 'planning' }" class="sidebar-item" :class="{ active: currentRoute === 'planning' }">
+          <span class="sidebar-icon"><BkIcon name="planning" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Планирование</span>
+        </router-link>
+      </nav>
+
+      <div class="sidebar-section" v-if="!sidebarCollapsed">Данные</div>
+      <nav class="sidebar-nav">
+        <router-link :to="{ name: 'database', query: { action: 'new-product' } }" class="sidebar-item">
+          <span class="sidebar-icon"><BkIcon name="add" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Новый товар</span>
+        </router-link>
+        <router-link :to="{ name: 'database' }" class="sidebar-item" :class="{ active: currentRoute === 'database' }">
+          <span class="sidebar-icon"><BkIcon name="database" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">База данных</span>
+        </router-link>
+      </nav>
+
+      <div class="sidebar-section" v-if="!sidebarCollapsed">Отчёты</div>
+      <nav class="sidebar-nav">
+        <router-link :to="{ name: 'analytics' }" class="sidebar-item" :class="{ active: currentRoute === 'analytics' }">
+          <span class="sidebar-icon"><BkIcon name="analytics" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Аналитика</span>
+        </router-link>
+        <router-link :to="{ name: 'calendar' }" class="sidebar-item" :class="{ active: currentRoute === 'calendar' }">
+          <span class="sidebar-icon"><BkIcon name="calendar" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Календарь</span>
+        </router-link>
+      </nav>
+      </div>
+
+      <!-- Юр. лицо (над пользователем, внизу) -->
+      <div class="sidebar-entity-selector" v-if="!sidebarCollapsed">
+        <label>Юр. лицо</label>
+        <select :value="orderStore.settings.legalEntity" @change="onLegalEntityChange">
+          <option v-for="le in availableEntities" :key="le" :value="le">{{ le }}</option>
+        </select>
+      </div>
+
+      <!-- User section at bottom -->
+      <div class="sidebar-bottom" v-if="userStore.currentUser">
+        <!-- Dropdown menu -->
+        <div v-if="showUserMenu" class="user-dropdown" :class="{ 'user-dropdown-wide': sidebarCollapsed }">
+          <button class="user-dropdown-btn" @click="showChangePassword = true; showUserMenu = false;">
+            <BkIcon name="key" size="sm" light/> Сменить пароль
+          </button>
+          <button class="user-dropdown-btn logout" @click="showLogoutConfirm = true; showUserMenu = false;">
+            <BkIcon name="redo" size="sm"/> Выйти
+          </button>
+        </div>
+
+        <div class="sidebar-user" @click="toggleUserMenu">
+          <div class="user-avatar-letters">{{ userInitials }}</div>
+          <div class="user-info" v-if="!sidebarCollapsed">
+            <div class="user-name">{{ userStore.currentUser.name }}</div>
+            <div class="user-role">{{ userStore.currentUser.display_role || 'Сотрудник' }}</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-wrapper">
+      <!-- Мобильный оверлей -->
+      <div class="sidebar-overlay" :class="{ visible: sidebarOpen }" @click="sidebarOpen = false"></div>
+
+      <!-- Мобильный topbar -->
+      <header class="topbar topbar-mobile-only">
+        <button class="mobile-sidebar-toggle" @click="sidebarOpen = !sidebarOpen">☰</button>
+      </header>
+
+      <!-- PAGE CONTENT -->
+      <main class="content-area">
+        <RouterView />
+      </main>
+    </div>
+
+    <!-- Welcome overlay -->
+    <div
+      v-if="showWelcome"
+      class="welcome-overlay"
+      :class="{ 'welcome-visible': welcomeVisible, 'welcome-fade': welcomeFade }"
+    >
+      <div class="welcome-content">
+        <div class="welcome-avatar">{{ userInitials }}</div>
+        <div class="welcome-name">Добро пожаловать, {{ userStore.currentUser?.name }}!</div>
+        <div class="welcome-entity">{{ orderStore.settings.legalEntity }}</div>
+      </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <Teleport to="body">
+      <div v-if="showChangePassword" class="modal" @click.self="showChangePassword = false">
+        <div class="modal-box" style="max-width: 380px;">
+          <h3 style="margin-bottom: 16px;">Сменить пароль</h3>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <input v-model="pwdOld" type="password" placeholder="Текущий пароль" autocomplete="current-password" />
+            <input v-model="pwdNew" type="password" placeholder="Новый пароль" autocomplete="new-password" />
+            <input v-model="pwdConfirm" type="password" placeholder="Подтвердите новый пароль" autocomplete="new-password" />
+            <div v-if="pwdError" style="color: var(--error); font-size: 13px;">{{ pwdError }}</div>
+            <div v-if="pwdSuccess" style="color: var(--green); font-size: 13px;">{{ pwdSuccess }}</div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+            <button class="btn" @click="showChangePassword = false; resetPwdForm()">Отмена</button>
+            <button class="btn primary" @click="changePassword" :disabled="pwdLoading">
+              {{ pwdLoading ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Logout Confirm Modal -->
+    <Teleport to="body">
+      <div v-if="showLogoutConfirm" class="modal" @click.self="showLogoutConfirm = false">
+        <div class="modal-box" style="max-width: 380px;">
+          <h3 style="margin-bottom: 8px;">Выйти из аккаунта?</h3>
+          <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Вы уверены, что хотите выйти?</p>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn" @click="showLogoutConfirm = false">Отмена</button>
+            <button class="btn primary" style="background:var(--error);" @click="confirmLogout">Выйти</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Entity Change Confirm Modal -->
+    <Teleport to="body">
+      <div v-if="showEntityConfirm" class="modal" @click.self="cancelEntityChange">
+        <div class="modal-box" style="max-width: 400px;">
+          <h3 style="margin-bottom: 8px;">Сменить юридическое лицо?</h3>
+          <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 6px;">
+            Переход на <b>{{ pendingEntity }}</b>
+          </p>
+          <p style="color: var(--error); font-size: 13px; margin-bottom: 20px;">
+            Текущие данные и заполненные параметры будут сброшены.
+          </p>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn" @click="cancelEntityChange">Отмена</button>
+            <button class="btn primary" @click="confirmEntityChange">Сменить</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
+import { db } from '@/lib/apiClient.js';
+import BkIcon from '@/components/ui/BkIcon.vue';
+
+
+const router = useRouter();
+const route = useRoute();
+const userStore = useUserStore();
+const orderStore = useOrderStore();
+
+const sidebarCollapsed = ref(false);
+const sidebarOpen = ref(false);
+const showUserMenu = ref(false);
+const showChangePassword = ref(false);
+const showLogoutConfirm = ref(false);
+
+const showWelcome = ref(false);
+const welcomeVisible = ref(false);
+const welcomeFade = ref(false);
+
+const pwdOld = ref('');
+const pwdNew = ref('');
+const pwdConfirm = ref('');
+const pwdError = ref('');
+const pwdSuccess = ref('');
+const pwdLoading = ref(false);
+
+router.afterEach(() => { sidebarOpen.value = false; });
+
+const currentRoute = computed(() => route.name);
+
+const availableEntities = computed(() => {
+  const allowed = userStore.getAllowedEntities();
+  const all = ['Бургер БК', 'Воглия Матта', 'Пицца Стар'];
+  if (!allowed || allowed.length === 0) return all;
+  return all.filter(e => allowed.includes(e));
+});
+
+const userInitials = computed(() => {
+  const name = userStore.currentUser?.name || '';
+  return name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+});
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+}
+
+onMounted(() => {
+  const allowed = userStore.getAllowedEntities();
+  if (allowed && allowed.length > 0 && !allowed.includes(orderStore.settings.legalEntity)) {
+    orderStore.settings.legalEntity = allowed[0];
+  }
+
+  const justLoggedIn = sessionStorage.getItem('bk_just_logged_in');
+  if (justLoggedIn) {
+    sessionStorage.removeItem('bk_just_logged_in');
+    showWelcome.value = true;
+    requestAnimationFrame(() => { welcomeVisible.value = true; });
+    setTimeout(() => { welcomeFade.value = true; }, 1800);
+    setTimeout(() => { showWelcome.value = false; welcomeVisible.value = false; welcomeFade.value = false; }, 2300);
+  }
+
+  document.addEventListener('click', handleOutsideClick);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleOutsideClick);
+});
+
+function handleOutsideClick(e) {
+  if (showUserMenu.value && !e.target.closest('.sidebar-bottom')) {
+    showUserMenu.value = false;
+  }
+}
+
+function toggleUserMenu() {
+  showUserMenu.value = !showUserMenu.value;
+}
+
+const showEntityConfirm = ref(false);
+const pendingEntity = ref('');
+
+function onLegalEntityChange(e) {
+  const le = e.target.value;
+  const isOrderPage = route.name === 'order';
+  const isPlanningPage = route.name === 'planning';
+  // Если на странице заказа и есть данные — подтвердить
+  if (isOrderPage && orderStore.items.some(i => i.consumptionPeriod > 0 || i.stock > 0 || i.finalOrder > 0)) {
+    pendingEntity.value = le;
+    showEntityConfirm.value = true;
+    e.target.value = orderStore.settings.legalEntity;
+    return;
+  }
+  // Если на странице планирования — предупредить (данные планирования сбросятся через watcher)
+  if (isPlanningPage) {
+    pendingEntity.value = le;
+    showEntityConfirm.value = true;
+    e.target.value = orderStore.settings.legalEntity;
+    return;
+  }
+  applyEntityChange(le);
+}
+
+function confirmEntityChange() {
+  showEntityConfirm.value = false;
+  applyEntityChange(pendingEntity.value);
+}
+
+function cancelEntityChange() {
+  showEntityConfirm.value = false;
+  pendingEntity.value = '';
+}
+
+function applyEntityChange(le) {
+  orderStore.settings.legalEntity = le;
+  // Сброс данных если на странице заказа
+  if (route.name === 'order') {
+    orderStore.resetOrder();
+  } else {
+    orderStore.settings.supplier = '';
+  }
+}
+
+function resetPwdForm() {
+  pwdOld.value = '';
+  pwdNew.value = '';
+  pwdConfirm.value = '';
+  pwdError.value = '';
+  pwdSuccess.value = '';
+}
+
+async function changePassword() {
+  pwdError.value = '';
+  pwdSuccess.value = '';
+  if (!pwdOld.value || !pwdNew.value) { pwdError.value = 'Заполните все поля'; return; }
+  if (pwdNew.value !== pwdConfirm.value) { pwdError.value = 'Пароли не совпадают'; return; }
+  if (pwdNew.value.length < 3) { pwdError.value = 'Пароль слишком короткий'; return; }
+
+  pwdLoading.value = true;
+  try {
+    const { data } = await db.rpc('change_user_password', {
+      user_name: userStore.currentUser.name,
+      old_password: pwdOld.value,
+      new_password: pwdNew.value,
+    });
+    if (data?.success) {
+      pwdSuccess.value = 'Пароль успешно изменён';
+      setTimeout(() => { showChangePassword.value = false; resetPwdForm(); }, 1500);
+    } else if (data?.error === 'wrong_password') {
+      pwdError.value = 'Неверный текущий пароль';
+    } else {
+      pwdError.value = 'Ошибка при смене пароля';
+    }
+  } catch {
+    pwdError.value = 'Ошибка соединения';
+  } finally {
+    pwdLoading.value = false;
+  }
+}
+
+function confirmLogout() {
+  showLogoutConfirm.value = false;
+  localStorage.removeItem('bk_draft');
+  userStore.logout();
+  router.replace({ name: 'home' });
+}
+</script>

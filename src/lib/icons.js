@@ -1,0 +1,153 @@
+/**
+ * BK Brand Icon Pack — Full Color, SOLID, HIGH CONTRAST
+ * No more opacity tricks — every icon is bold and clearly visible
+ */
+
+export const icons = {
+  // ─── Navigation / Modules ───
+  burger: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="7" width="20" height="12" rx="4" fill="#FDBD10" stroke="#D62700" stroke-width="1.5"/><path d="M4 13h16" stroke="#502314" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="10.5" r="1.2" fill="#4CAF50"/><circle cx="11" cy="10" r="1.2" fill="#D62700"/><circle cx="15" cy="10.5" r="1.2" fill="#FF8733"/></svg>`,
+
+  home: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" fill="#FFE0B2" stroke="#D62700" stroke-width="1.8"/><path d="M3 12l9-8 9 8" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="15" width="6" height="5" rx=".5" fill="#FF8733"/></svg>`,
+
+  order: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="2.5" fill="#FFF3E0" stroke="#D62700" stroke-width="1.8"/><rect x="3" y="5" width="18" height="5" rx="2.5" fill="#FF8733"/><path d="M9 2v5M15 2v5" stroke="#D62700" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="3" rx="1" fill="#D62700"/><rect x="13" y="13" width="5" height="3" rx="1" fill="#FF8733"/></svg>`,
+
+  planning: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="13" width="4" height="8" rx="1.5" fill="#FDBD10" stroke="#D62700" stroke-width=".8"/><rect x="10" y="8" width="4" height="13" rx="1.5" fill="#FF8733" stroke="#D62700" stroke-width=".8"/><rect x="17" y="3" width="4" height="18" rx="1.5" fill="#D62700"/></svg>`,
+
+  calendar: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="17" rx="2.5" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><rect x="3" y="5" width="18" height="6" rx="2.5" fill="#D62700"/><path d="M8 2.5v4M16 2.5v4" stroke="#FF8733" stroke-width="2" stroke-linecap="round"/><circle cx="8" cy="16" r="2" fill="#D62700"/><circle cx="12" cy="16" r="2" fill="#FF8733"/><circle cx="16" cy="16" r="2" fill="#FDBD10"/></svg>`,
+
+  analytics: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 19l5-7 4 3 6-10 3 4" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="12" r="3" fill="#FF8733"/><circle cx="18" cy="5" r="3" fill="#D62700"/></svg>`,
+
+  history: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#FFF3E0" stroke="#D62700" stroke-width="1.8"/><polyline points="12 7 12 12 16 14.5" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="1.5" fill="#FF8733"/></svg>`,
+
+  database: `<svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="8.5" ry="3.5" fill="#FFE0B2" stroke="#D62700" stroke-width="1.8"/><path d="M3.5 6v5.5c0 1.9 3.8 3.5 8.5 3.5s8.5-1.6 8.5-3.5V6" stroke="#D62700" stroke-width="1.8"/><path d="M3.5 11.5V17c0 1.9 3.8 3.5 8.5 3.5s8.5-1.6 8.5-3.5v-5.5" stroke="#D62700" stroke-width="1.8"/><ellipse cx="12" cy="11.5" rx="8.5" ry="3.5" fill="#FF8733" opacity=".2"/></svg>`,
+
+  search: `<svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" fill="#FFF8E1" stroke="#D62700" stroke-width="2"/><line x1="16" y1="16" x2="21" y2="21" stroke="#D62700" stroke-width="3" stroke-linecap="round"/></svg>`,
+
+  modules: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="2" fill="#D62700"/><rect x="13" y="3" width="8" height="8" rx="2" fill="#FF8733"/><rect x="3" y="13" width="8" height="8" rx="2" fill="#FF8733"/><rect x="13" y="13" width="8" height="8" rx="2" fill="#FDBD10"/></svg>`,
+
+  // ─── Actions ───
+  save: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.5"/><path d="M8 12l2.5 3L16 9" stroke="#D62300" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 7h16" stroke="#FF8733" stroke-width="1" opacity="0.3"/></svg>`,
+
+  send: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+
+  import: `<svg viewBox="0 0 24 24" fill="none" stroke="#1976D2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+
+  copy: `<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="12" height="12" rx="2" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.8"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="#D62700" stroke-width="1.8"/></svg>`,
+
+  link: `<svg viewBox="0 0 24 24" fill="none" stroke="#1976D2" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>`,
+
+  edit: `<svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="#FF8733" stroke-width="1.8"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" fill="#FF8733" stroke="#D62700" stroke-width="1.8"/></svg>`,
+
+  delete: `<svg viewBox="0 0 24 24" fill="none"><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" fill="#FFEBEE" stroke="#D62700" stroke-width="1.8"/><path d="M3 6h18" stroke="#D62700" stroke-width="2" stroke-linecap="round"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" stroke="#D62700" stroke-width="1.8"/><line x1="10" y1="10" x2="10" y2="17" stroke="#D62700" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="10" x2="14" y2="17" stroke="#D62700" stroke-width="2" stroke-linecap="round"/></svg>`,
+
+  add: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/><line x1="12" y1="8" x2="12" y2="16" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round"/><line x1="8" y1="12" x2="16" y2="12" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
+  close: `<svg viewBox="0 0 24 24" fill="none"><line x1="16" y1="8" x2="8" y2="16" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><line x1="8" y1="8" x2="16" y2="16" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
+  undo: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>`,
+
+  redo: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>`,
+
+  // ─── Status / UI ───
+  eye: `<svg viewBox="0 0 24 24" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" fill="#E3F2FD" stroke="#1976D2" stroke-width="1.8"/><circle cx="12" cy="12" r="3.5" fill="#1976D2"/></svg>`,
+
+  key: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/><circle cx="7.5" cy="16.5" r="2" fill="#FF8733"/></svg>`,
+
+  user: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="7" r="4" fill="#FF8733" stroke="#D62700" stroke-width="1.5"/><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" fill="#FFE0B2" stroke="#D62700" stroke-width="1.5"/></svg>`,
+
+  factory: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 20V8l5 4V8l5 4V4h4a1 1 0 011 1v15" fill="#FFE0B2" stroke="#D62700" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 20h20" stroke="#D62700" stroke-width="2" stroke-linecap="round"/></svg>`,
+
+  building: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><circle cx="9" cy="7" r="1.2" fill="#D62700"/><circle cx="15" cy="7" r="1.2" fill="#D62700"/><circle cx="9" cy="12" r="1.2" fill="#FF8733"/><circle cx="15" cy="12" r="1.2" fill="#FF8733"/><rect x="10" y="18" width="4" height="4" fill="#D62700"/></svg>`,
+
+  loading: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4"/><path d="M12 18v4" opacity=".3"/><path d="M4.93 4.93l2.83 2.83" opacity=".8"/><path d="M16.24 16.24l2.83 2.83" opacity=".2"/><path d="M2 12h4" opacity=".6"/><path d="M18 12h4" opacity=".4"/><path d="M4.93 19.07l2.83-2.83" opacity=".4"/><path d="M16.24 7.76l2.83-2.83" opacity=".7"/></svg>`,
+
+  warning: `<svg viewBox="0 0 24 24" fill="none"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.8"/><line x1="12" y1="9" x2="12" y2="14" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1.5" fill="#D62700"/></svg>`,
+
+  success: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.8"/><polyline points="8 12 11 15 16 9" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+
+  error: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#FFEBEE" stroke="#D62700" stroke-width="1.8"/><line x1="15" y1="9" x2="9" y2="15" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><line x1="9" y1="9" x2="15" y2="15" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
+  note: `<svg viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.8"/><path d="M14 2v6h6" fill="#FFE0B2" stroke="#FF8733" stroke-width="1.5"/><line x1="8" y1="13" x2="16" y2="13" stroke="#D62700" stroke-width="1.5" stroke-linecap="round"/><line x1="8" y1="17" x2="13" y2="17" stroke="#D62700" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+
+  // ─── Arrows / Chevrons ───
+  chevronRight: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
+  chevronDown: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`,
+  chevronLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
+  chevronUp: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`,
+  arrowUp: `<svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`,
+  arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>`,
+  arrowRight: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
+  arrowLeftRight: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 8 3 12 7 16"/><polyline points="17 8 21 12 17 16"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
+
+  // ─── Misc ───
+  expand: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`,
+
+  collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`,
+
+  fire: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 22c4-3 8-7 8-12a8 8 0 00-16 0c0 5 4 9 8 12z" fill="#FFE0B2" stroke="#D62700" stroke-width="1.5"/><path d="M12 22c-1.5-1.5-3-3.5-3-6a3 3 0 016 0c0 2.5-1.5 4.5-3 6z" fill="#D62700"/></svg>`,
+
+  bulb: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z" fill="#FFF8E1" stroke="#FF8733" stroke-width="1.8"/><path d="M9 18h6M10 22h4" stroke="#FF8733" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="10" r="2" fill="#FDBD10"/></svg>`,
+
+  ruler: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="9" width="18" height="6" rx="1.5" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.5"/><line x1="7" y1="9" x2="7" y2="12.5" stroke="#D62700" stroke-width="1.5" stroke-linecap="round"/><line x1="11" y1="9" x2="11" y2="14" stroke="#D62700" stroke-width="1.5" stroke-linecap="round"/><line x1="15" y1="9" x2="15" y2="12.5" stroke="#D62700" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+
+  wave: `<svg viewBox="0 0 24 24" fill="none"><path d="M2 12c2-3 4-5 6-5s4 4 6 4 4-4 6-4" stroke="#FF8733" stroke-width="3" stroke-linecap="round"/></svg>`,
+
+  lightning: `<svg viewBox="0 0 24 24" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10" fill="#FDBD10" stroke="#FF8733" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+
+  chartUp: `<svg viewBox="0 0 24 24" fill="none" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+
+  chartDown: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>`,
+
+  menu: `<svg viewBox="0 0 24 24" fill="none"><line x1="3" y1="6" x2="21" y2="6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="12" x2="21" y2="12" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="18" x2="21" y2="18" stroke="#FDBD10" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
+  package: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="14" rx="2" fill="#FFE0B2" stroke="#D62700" stroke-width="1.8"/><path d="M3 7l9-5 9 5" fill="#FF8733" stroke="#D62700" stroke-width="1.5" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="12" stroke="#D62700" stroke-width="1.2"/></svg>`,
+
+  oneC: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="4" fill="#FFDD2D" stroke="#F5A623" stroke-width="1"/><text x="12" y="17" font-family="Arial,sans-serif" font-weight="900" font-size="14" fill="#D62300" text-anchor="middle">1C</text></svg>`,
+
+  excel: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="2" width="18" height="20" rx="2.5" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/><rect x="3" y="2" width="18" height="5" rx="2.5" fill="#4CAF50"/><path d="M8 11l3.5 4L8 19" stroke="#2E7D32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 11l-3.5 4L16 19" stroke="#2E7D32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+
+/**
+ * Light variant — for dark backgrounds (sidebar)
+ * Cream/white outlines, bright fills
+ */
+export const iconsLight = {
+  order: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="17" rx="3" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/><rect x="3" y="4" width="18" height="5" rx="3" fill="#4FC3F7"/><rect x="6.5" y="13" width="4" height="3" rx=".8" fill="#81D4FA"/><rect x="13" y="13" width="4" height="3" rx=".8" fill="#4FC3F7"/><path d="M9 1.5v4M15 1.5v4" stroke="#FFF" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+
+  history: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="rgba(255,255,255,0.1)" stroke="#A5D6A7" stroke-width="1.5"/><polyline points="12 7 12 12 15.5 14" stroke="#A5D6A7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="1.5" fill="#66BB6A"/></svg>`,
+
+  planning: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="12" width="4" height="9" rx="1.5" fill="#CE93D8"/><rect x="10" y="7" width="4" height="14" rx="1.5" fill="#AB47BC"/><rect x="17" y="3" width="4" height="18" rx="1.5" fill="#7B1FA2"/></svg>`,
+
+  add: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="rgba(76,175,80,0.2)" stroke="#81C784" stroke-width="1.2"/><line x1="12" y1="7" x2="12" y2="17" stroke="#81C784" stroke-width="2.5" stroke-linecap="round"/><line x1="7" y1="12" x2="17" y2="12" stroke="#81C784" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
+  database: `<svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="8" ry="3.5" fill="rgba(255,255,255,0.12)" stroke="#90CAF9" stroke-width="1.3"/><path d="M4 6v5.5c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5V6" stroke="#90CAF9" stroke-width="1.3"/><path d="M4 11.5V17c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5v-5.5" stroke="#64B5F6" stroke-width="1.3"/></svg>`,
+
+  analytics: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 18l5-6 4 3 6-9 3 3" stroke="#FFD54F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="12" r="2.5" fill="#FFA726"/><circle cx="21" cy="6" r="2.5" fill="#FFD54F"/></svg>`,
+
+  calendar: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" fill="rgba(255,255,255,0.1)" stroke="#EF9A9A" stroke-width="1.3"/><rect x="3" y="5" width="18" height="5" rx="3" fill="#EF5350" opacity="0.7"/><path d="M8 2.5v4M16 2.5v4" stroke="#EF9A9A" stroke-width="1.5" stroke-linecap="round"/><circle cx="8.5" cy="15" r="1.8" fill="#EF9A9A"/><circle cx="12" cy="15" r="1.8" fill="#FFCDD2"/><circle cx="15.5" cy="15" r="1.8" fill="rgba(255,255,255,0.3)"/></svg>`,
+
+  key: `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/><circle cx="7.5" cy="16.5" r="2" fill="#FFD54F"/></svg>`,
+
+  menu: `<svg viewBox="0 0 24 24" fill="none"><line x1="3" y1="6" x2="21" y2="6" stroke="rgba(255,255,255,0.8)" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="12" x2="21" y2="12" stroke="rgba(255,255,255,0.55)" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="18" x2="21" y2="18" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
+  chevronLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
+};
+
+/**
+ * Emoji → icon name mapping
+ */
+export const emojiMap = {
+  '📦': 'order', '📋': 'history', '📊': 'planning', '📈': 'analytics',
+  '📅': 'calendar', '🗄️': 'database', '🗄': 'database', '🔍': 'search',
+  '🧩': 'modules', '📝': 'note', '🗑️': 'delete', '🗑': 'delete',
+  '✏️': 'edit', '✏': 'edit', '👁': 'eye', '💾': 'save',
+  '📤': 'send', '📁': 'import', '🔗': 'link', '➕': 'add',
+  '⚠️': 'warning', '⚠': 'warning', '✕': 'close', '↩': 'undo',
+  '↪': 'redo', '▸': 'chevronRight', '▾': 'chevronDown', '🔑': 'key',
+  '🏭': 'factory', '⏳': 'loading', '✅': 'success', '❌': 'error',
+  '👋': 'wave', '🔒': 'lock', '📐': 'ruler', '💡': 'bulb',
+  '🔥': 'fire', '👤': 'user', '🏠': 'home', '🏢': 'building',
+  '☰': 'menu', '▲': 'arrowUp', '▼': 'arrowDown', '▶': 'chevronRight',
+  '◀': 'chevronLeft', '⬆': 'arrowUp', '📉': 'chartDown', '✓': 'success',
+  '⚡': 'lightning', '↔': 'arrowLeftRight', '←': 'chevronLeft', '→': 'arrowRight',
+};
