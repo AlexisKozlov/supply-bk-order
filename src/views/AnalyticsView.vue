@@ -27,7 +27,7 @@
     </div>
 
     <div v-if="loading" style="text-align:center;padding:60px;">
-      <div class="loading-spinner"></div>
+      <BurgerSpinner text="Загрузка..." />
     </div>
     <div v-else-if="!data" style="text-align:center;padding:60px;color:var(--text-muted);">Нет данных за выбранный период</div>
 
@@ -209,6 +209,7 @@ import { useRouter } from 'vue-router';
 import { getOrdersAnalytics } from '@/lib/analytics.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';

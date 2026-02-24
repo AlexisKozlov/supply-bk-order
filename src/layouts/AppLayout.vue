@@ -19,16 +19,16 @@
       <div class="sidebar-nav-scroll">
       <nav class="sidebar-nav">
         <router-link :to="{ name: 'order' }" class="sidebar-item" :class="{ active: currentRoute === 'order' }">
-          <span class="sidebar-icon"><BkIcon name="order" size="sm" light/></span>
+          <span class="sidebar-icon"><BkIcon name="package" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">Новый заказ</span>
-        </router-link>
-        <router-link :to="{ name: 'history' }" class="sidebar-item" :class="{ active: currentRoute === 'history' }">
-          <span class="sidebar-icon"><BkIcon name="history" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">История</span>
         </router-link>
         <router-link :to="{ name: 'planning' }" class="sidebar-item" :class="{ active: currentRoute === 'planning' }">
           <span class="sidebar-icon"><BkIcon name="planning" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">Планирование</span>
+        </router-link>
+        <router-link :to="{ name: 'history' }" class="sidebar-item" :class="{ active: currentRoute === 'history' }">
+          <span class="sidebar-icon"><BkIcon name="history" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">История</span>
         </router-link>
       </nav>
 

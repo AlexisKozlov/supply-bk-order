@@ -121,7 +121,7 @@
       <!-- Кнопки завершения — под таблицей справа -->
       <div class="toolbar-row toolbar-finish">
         <div class="toolbar-spacer"></div>
-        <button class="btn primary" @click="openSaveModal" :disabled="!itemsWithOrderCount || orderStore.viewOnlyMode"><BkIcon name="save" size="sm"/> Сохранить</button>
+        <button class="btn primary" @click="openSaveModal" :disabled="!itemsWithOrderCount || orderStore.viewOnlyMode"><BkIcon name="save" size="sm"/> {{ orderStore.editingOrderId ? 'Обновить заказ' : 'Сохранить' }}</button>
         <button class="btn" @click="copyOrderToClipboard" :disabled="!orderStore.items.length"><BkIcon name="copy" size="sm"/> Скопировать заказ</button>
         <button class="btn" @click="showOrderResult" :disabled="!orderStore.items.length"><BkIcon name="planning" size="sm"/> Результат заказа</button>
         <div style="position:relative;display:inline-block;">
@@ -609,6 +609,8 @@ function onManualAdded(product) {
     toast.success('Товар сохранён', 'Сохранён в базу (другой поставщик)');
   }
   showManualModal.value = false;
+  supplierStore.invalidate();
+  supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   draftStore.save();
 }
 
@@ -622,6 +624,8 @@ function openProductForEdit(sku) {
 async function onCardSaved() {
   const product = editCardModal.value.product;
   editCardModal.value.show = false;
+  supplierStore.invalidate();
+  supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (!product?.id) return;
   try {
     const { data } = await db.from('products').select('*').eq('id', product.id).single();
@@ -704,7 +708,13 @@ async function share(channel) {
     else window.open(`viber://forward?text=${encoded}`, '_blank');
     return;
   }
-  if (channel === 'email') { const to = contacts?.email || ''; window.open(`mailto:${to}?subject=${encodeURIComponent(`Заказ ${supplier} на ${deliveryDate}`)}&body=${encoded}`, '_blank'); }
+  if (channel === 'email') {
+    const to = contacts?.email || '';
+    const subject = encodeURIComponent(`Заказ ${supplier} на ${deliveryDate}`);
+    const body = encoded;
+    // outlook: URI scheme открывает именно десктопный Outlook
+    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+  }
 }
 
 // ─── Импорт из файла ─────────────────────────────────────────────────────────

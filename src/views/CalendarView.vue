@@ -32,7 +32,7 @@
       </span>
     </div>
 
-    <div v-if="loading" style="text-align:center;padding:60px;"><div class="loading-spinner"></div></div>
+    <div v-if="loading" style="text-align:center;padding:60px;"><BurgerSpinner text="Загрузка..." /></div>
 
     <!-- Сетка -->
     <div v-else class="cal-grid-wrap">
@@ -109,6 +109,7 @@ import { useRouter } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { db } from '@/lib/apiClient.js';
 import { loadCalendarData, buildCalendarGrid, MONTH_NAMES, DAY_NAMES } from '@/lib/calendar.js';
 import BkIcon from '@/components/ui/BkIcon.vue';

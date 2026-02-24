@@ -29,7 +29,7 @@
 
     <!-- Loading -->
     <div v-if="historyStore.loading" class="loading-state" style="text-align:center;padding:40px;">
-      <div class="loading-spinner"></div>
+      <BurgerSpinner text="Загрузка..." />
     </div>
 
     <!-- Empty -->
@@ -161,7 +161,7 @@
             <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="xs"/></button>
           </div>
           <div class="log-modal-body">
-            <div v-if="logModal.loading" style="text-align:center;padding:24px;"><div class="loading-spinner"></div></div>
+            <div v-if="logModal.loading" style="text-align:center;padding:24px;"><BurgerSpinner size="sm" /></div>
             <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в логе</div>
             <div v-else class="log-entries">
               <div v-for="log in logModal.entries" :key="log.id" class="log-entry">
@@ -209,6 +209,7 @@ import { useRouter } from 'vue-router';
 import { useHistoryStore } from '@/stores/historyStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';

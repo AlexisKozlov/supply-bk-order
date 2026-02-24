@@ -24,7 +24,8 @@ export async function exportToExcel(items, settings) {
       : Math.ceil(item.finalOrder / (qpb * mult));
     const pieces = settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
     const unit = item.unitOfMeasure || 'шт';
-    return [item.name || '', `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`];
+    const nameWithSku = item.sku ? `${item.sku} ${item.name || ''}` : (item.name || '');
+    return [nameWithSku, `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`];
   });
 
   const allRows = [...headerRows, ...dataRows];

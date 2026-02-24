@@ -13,7 +13,7 @@
       </div>
     </div>
 
-    <div v-if="loading" style="text-align:center;padding:40px;"><div class="loading-spinner"></div></div>
+    <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
     <div v-else-if="!filtered.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
     <div v-else class="db-list">
       <div v-for="s in filtered" :key="s.id" class="supplier-card">
@@ -51,6 +51,7 @@ import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { getEntityGroup } from '@/lib/utils.js';
 import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';

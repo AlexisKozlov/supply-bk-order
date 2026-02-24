@@ -131,6 +131,8 @@ export const iconsLight = {
   menu: `<svg viewBox="0 0 24 24" fill="none"><line x1="3" y1="6" x2="21" y2="6" stroke="rgba(255,255,255,0.8)" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="12" x2="21" y2="12" stroke="rgba(255,255,255,0.55)" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="18" x2="21" y2="18" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/></svg>`,
 
   chevronLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
+
+  package: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="14" rx="2" fill="rgba(255,255,255,0.12)" stroke="#FFCC80" stroke-width="1.5"/><path d="M3 7l9-5 9 5" fill="#FF8733" opacity="0.4" stroke="#FFCC80" stroke-width="1.3" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="12" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/></svg>`,
 };
 
 /**

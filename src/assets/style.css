@@ -1581,6 +1581,51 @@ input[type="number"]:focus {
 
   .modal-box { width: calc(100% - 16px) !important; }
   .modal-box.large { width: calc(100% - 16px) !important; }
+
+  /* Мобильная раскладка: снимаем жёсткий flex, даём скролл */
+  .order-view,
+  .planning-view {
+    overflow: auto;
+  }
+  .order-section {
+    overflow: visible;
+    height: auto;
+    flex: none;
+  }
+  .order-table-wrapper {
+    overflow-x: auto;
+    overflow-y: visible;
+    height: auto;
+    flex: none;
+    max-height: none;
+  }
+
+  /* Тулбар заказа/плана — перенос строк */
+  .order-toolbar {
+    flex-wrap: wrap;
+  }
+  .order-toolbar .search-bar {
+    width: 100%;
+    flex-shrink: 1;
+  }
+  .order-toolbar .search-bar input {
+    min-width: 0 !important;
+    width: 100%;
+  }
+  .order-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  /* Панель кнопок завершения */
+  .toolbar-finish {
+    padding: 10px 0;
+    justify-content: center;
+  }
+  .toolbar-finish .toolbar-spacer {
+    display: none;
+  }
 }
 
 @media (max-width: 480px) {

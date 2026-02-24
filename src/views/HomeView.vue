@@ -113,6 +113,22 @@
       </div>
     </Teleport>
 
+    <!-- Burger Loader -->
+    <Teleport to="body">
+      <Transition name="burger-loader">
+        <div v-if="showLoader" class="burger-loader-overlay">
+          <div class="burger-loader">
+            <div class="burger-layer bun-top"></div>
+            <div class="burger-layer lettuce"></div>
+            <div class="burger-layer cheese"></div>
+            <div class="burger-layer patty"></div>
+            <div class="burger-layer bun-bottom"></div>
+          </div>
+          <div class="burger-loader-text">{{ loaderText }}</div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- Logout confirm -->
     <Teleport to="body">
       <div v-if="showLogoutConfirm" class="modal" @click.self="showLogoutConfirm = false">
@@ -305,9 +321,20 @@ async function openLogin() {
   if (userList.value.length === 0) userList.value = await userStore.fetchUserList();
 }
 
+const showLoader = ref(false);
+const loaderText = ref('Готовим...');
+
+const loaderTexts = ['Готовим...', 'Собираем бургер...', 'Почти готово!'];
+
 function goTo(name, query) {
   if (!userStore.isAuthenticated) { loginRedirectTo.value = '/' + name; openLogin(); return; }
-  router.push(query ? { name, query } : { name });
+  showLoader.value = true;
+  loaderText.value = loaderTexts[0];
+  setTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
+  setTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
+  setTimeout(() => {
+    router.push(query ? { name, query } : { name });
+  }, 1400);
 }
 
 function stubModule(name) { toast.info('В разработке', `${name} — скоро будет доступен`); }
@@ -322,8 +349,14 @@ async function doLogin() {
     showLoginModal.value = false;
     const redirect = loginRedirectTo.value;
     loginRedirectTo.value = null;
-    if (redirect && redirect !== '/' && redirect !== '/login') router.push(redirect);
-    else router.push({ name: 'order' });
+    showLoader.value = true;
+    loaderText.value = loaderTexts[0];
+    setTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
+    setTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
+    setTimeout(() => {
+      if (redirect && redirect !== '/' && redirect !== '/login') router.push(redirect);
+      else router.push({ name: 'order' });
+    }, 1400);
   } catch (e) { loginError.value = e.message || 'Неверный пароль'; }
   finally { loginLoading.value = false; }
 }
@@ -460,4 +493,109 @@ function confirmLogout() {
   .p-dock { padding: 10px 18px; gap: 0; }
   .p-dock-slot { width: 60px; }
 }
+
+/* ═══ BURGER LOADER ═══ */
+.burger-loader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: linear-gradient(135deg, #2C1810 0%, #502314 50%, #8B5E34 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+}
+
+.burger-loader {
+  position: relative;
+  width: 120px;
+  height: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+}
+
+.burger-layer {
+  border-radius: 6px;
+  opacity: 0;
+  transform: translateY(-60px) scale(0.7);
+}
+
+.bun-top {
+  width: 90px; height: 28px;
+  background: linear-gradient(180deg, #F5A623 0%, #D4881A 100%);
+  border-radius: 45px 45px 4px 4px;
+  animation: burger-drop 0.35s ease forwards 0.15s;
+  box-shadow: inset 0 -3px 0 rgba(0,0,0,0.1);
+  position: relative;
+}
+.bun-top::after {
+  content: '';
+  position: absolute;
+  top: 5px; left: 20px;
+  width: 6px; height: 5px;
+  background: rgba(255,255,255,0.5);
+  border-radius: 50%;
+  box-shadow: 15px 2px 0 rgba(255,255,255,0.4), 30px -1px 0 rgba(255,255,255,0.3), 45px 3px 0 rgba(255,255,255,0.35);
+}
+
+.lettuce {
+  width: 96px; height: 10px;
+  background: #4CAF50;
+  border-radius: 2px;
+  animation: burger-drop 0.35s ease forwards 0.4s;
+  clip-path: polygon(0% 50%, 5% 0%, 12% 60%, 20% 10%, 28% 55%, 35% 5%, 43% 50%, 50% 0%, 58% 55%, 65% 8%, 73% 50%, 80% 5%, 88% 55%, 95% 10%, 100% 50%, 100% 100%, 0% 100%);
+}
+
+.cheese {
+  width: 94px; height: 10px;
+  background: #FDBD10;
+  border-radius: 2px;
+  animation: burger-drop 0.35s ease forwards 0.6s;
+  clip-path: polygon(0% 0%, 100% 0%, 100% 60%, 92% 100%, 75% 60%, 58% 100%, 42% 60%, 25% 100%, 8% 60%, 0% 100%);
+}
+
+.patty {
+  width: 88px; height: 18px;
+  background: linear-gradient(180deg, #6D3A1F 0%, #4A2510 100%);
+  border-radius: 4px;
+  animation: burger-drop 0.35s ease forwards 0.8s;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,0.08), inset 0 -2px 0 rgba(0,0,0,0.2);
+}
+
+.bun-bottom {
+  width: 92px; height: 16px;
+  background: linear-gradient(180deg, #D4881A 0%, #C47A15 100%);
+  border-radius: 4px 4px 20px 20px;
+  animation: burger-drop 0.35s ease forwards 0.1s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+@keyframes burger-drop {
+  0%   { opacity: 0; transform: translateY(-60px) scale(0.7) rotate(-5deg); }
+  60%  { opacity: 1; transform: translateY(4px) scale(1.05) rotate(1deg); }
+  80%  { transform: translateY(-2px) scale(0.98) rotate(0deg); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+}
+
+.burger-loader-text {
+  color: rgba(255,255,255,0.9);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  animation: text-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes text-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.burger-loader-enter-active { animation: loaderFadeIn 0.3s ease; }
+.burger-loader-leave-active { animation: loaderFadeOut 0.3s ease; }
+@keyframes loaderFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loaderFadeOut { from { opacity: 1; } to { opacity: 0; } }
 </style>

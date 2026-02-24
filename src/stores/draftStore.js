@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, toRaw } from 'vue';
 import { useOrderStore } from './orderStore.js';
 
 const DRAFT_KEY = 'bk_draft';
@@ -25,17 +25,14 @@ export const useDraftStore = defineStore('draft', () => {
   }
 
   function _doSave(orderStore) {
-    // Не сохраняем если нет данных
-    const hasData = orderStore.items.some(i => i.consumptionPeriod > 0 || i.stock > 0 || i.transit > 0 || i.finalOrder > 0);
-    if (!hasData) return;
+    // Не сохраняем если нет товаров
+    if (!orderStore.items || orderStore.items.length === 0) return;
+    // JSON.stringify автоматически конвертирует Date → ISO строки
     const draft = {
-      settings: { ...orderStore.settings },
-      items: orderStore.items,
+      settings: JSON.parse(JSON.stringify(toRaw(orderStore.settings))),
+      items: JSON.parse(JSON.stringify(toRaw(orderStore.items))),
       timestamp: new Date().toISOString(),
     };
-    if (draft.settings.today instanceof Date) draft.settings.today = draft.settings.today.toISOString();
-    if (draft.settings.deliveryDate instanceof Date) draft.settings.deliveryDate = draft.settings.deliveryDate.toISOString();
-    if (draft.settings.safetyEndDate instanceof Date) draft.settings.safetyEndDate = draft.settings.safetyEndDate.toISOString();
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   }
 
@@ -112,15 +109,15 @@ export const useDraftStore = defineStore('draft', () => {
     if (planState.viewOnly || planState.editingPlanId) return;
     clearTimeout(_planTimer);
     _planTimer = setTimeout(() => {
-      // Не сохраняем если нет данных
-      const hasData = (planState.items || []).some(i => i.monthlyConsumption > 0 || i.stockOnHand > 0 || i.stockAtSupplier > 0 || (i.plan && i.plan.some(p => p.orderBoxes > 0)));
-      if (!hasData) return;
+      // Не сохраняем если нет товаров
+      if (!planState.items || planState.items.length === 0) return;
       const draft = {
         supplier: planState.supplier,
         periodValue: planState.periodValue,
         startDateStr: planState.startDateStr,
         inputUnit: planState.inputUnit,
-        items: planState.items,
+        consumptionPeriodDays: planState.consumptionPeriodDays,
+        items: JSON.parse(JSON.stringify(toRaw(planState.items))),
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(PLAN_DRAFT_KEY, JSON.stringify(draft));

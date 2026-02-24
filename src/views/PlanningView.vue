@@ -61,7 +61,7 @@
 
     <!-- Таблица -->
     <div v-if="!supplier" style="text-align:center;padding:40px;color:var(--text-muted);">Выберите поставщика</div>
-    <div v-else-if="suppLoading" style="text-align:center;padding:40px;"><div class="loading-spinner"></div></div>
+    <div v-else-if="suppLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
     <div v-else-if="!items.length" style="text-align:center;padding:40px;color:var(--text-muted);">Нет товаров у «{{ supplier }}»</div>
     <div v-else class="order-table-wrapper" :class="{ 'plan-compact': compactPlan }">
       <table class="order-table plan-table">
@@ -71,6 +71,7 @@
             <th>{{ compactPlan ? 'Расх.' : consumptionColumnLabel }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Склад' : 'Склад' }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Пост.' : 'У постав.' }} ({{ unitLabel }})</th>
+            <th class="plan-th-reserve">Запас<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">дней</small></th>
             <th v-for="h in periodHeaders" :key="h.label" class="plan-th-month" :title="compactPlan ? h.label + ' ' + h.sublabel : ''">
               {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
             </th>
@@ -88,6 +89,7 @@
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="item.monthlyConsumption || ''" :class="{ 'consumption-warning': item._cw }" :title="item._ct || ''" @change="e => onInput(idx, 'consumption', e.target.value)" @focus="e => onCalcFocus(e, idx, 'consumption')" @keydown="e => onCalcKeydown(e, idx, 'consumption')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockOnHand')" @change="e => onInput(idx, 'stock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'stock')" @keydown="e => onCalcKeydown(e, idx, 'stock')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockAtSupplier')" @change="e => onInput(idx, 'supplierStock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'supplierStock')" @keydown="e => onCalcKeydown(e, idx, 'supplierStock')" :disabled="viewOnly" placeholder="0"/></td>
+            <td class="plan-td-reserve" :class="reserveDaysClass(item)">{{ reserveDaysText(item) }}</td>
             <!-- Период 0 — readonly -->
             <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
               <template v-if="item.plan[0]?.orderBoxes > 0">
@@ -137,7 +139,7 @@
     <!-- Кнопки завершения -->
     <div v-if="items.length" class="toolbar-row toolbar-finish" style="margin-top:12px;" v-show="!isFullscreen">
       <div class="toolbar-spacer"></div>
-      <button class="btn primary" @click="savePlan" :disabled="!itemsWithPlan.length || viewOnly"><BkIcon name="save" size="sm"/> Сохранить план</button>
+      <button class="btn primary" @click="savePlan" :disabled="!itemsWithPlan.length || viewOnly"><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</button>
       <button class="btn" @click="copyPlanToClipboard" :disabled="!itemsWithPlan.length"><BkIcon name="history" size="sm"/> Копировать</button>
       <button class="btn" @click="exportExcel" :disabled="!itemsWithPlan.length"><BkIcon name="excel" size="sm"/> Excel</button>
     </div>
@@ -183,6 +185,7 @@ import { useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
@@ -223,6 +226,7 @@ const saving = ref(false); // { idx, m } for inline edit (#6)
 const isFullscreen = ref(false);
 const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 let _prevPlanItems = null;
+let _loadedNote = '';
 let _consumptionCache = null;
 
 // ─── Calculator for plan inputs (#3) ──────────────────────────────────────
@@ -435,6 +439,29 @@ function roundToPallet(idx, m) {
 }
 function resetCell(idx, m) { snapshot(); items.value[idx].plan[m].locked = false; recalcItem(idx, m); _savePlanDraft(); }
 
+function reserveDays(item) {
+  const qpb = getQpb(item);
+  const toBase = (v) => inputUnit.value === 'boxes' ? v * qpb : v;
+  const periodDays = consumptionPeriodDays.value || 30;
+  const daily = toBase(item.monthlyConsumption) / periodDays;
+  if (!daily || daily <= 0) return null;
+  const totalStock = (item.stockOnHand || 0) + (item.stockAtSupplier || 0);
+  if (totalStock <= 0) return 0;
+  return Math.round(totalStock / daily);
+}
+function reserveDaysText(item) {
+  const d = reserveDays(item);
+  if (d === null) return '—';
+  return d;
+}
+function reserveDaysClass(item) {
+  const d = reserveDays(item);
+  if (d === null) return '';
+  if (d <= 3) return 'reserve-danger';
+  if (d <= 7) return 'reserve-warning';
+  return 'reserve-ok';
+}
+
 function itemHasOrder(item) { return item.plan.some(p => p.orderBoxes > 0); }
 function itemTotalBoxes(item) { return item.plan.reduce((s, p) => s + (p.orderBoxes || 0), 0); }
 function itemTotalUnits(item) { return item.plan.reduce((s, p) => s + (p.orderUnits || 0), 0); }
@@ -581,6 +608,8 @@ async function openProductEdit(item) {
 }
 async function onCardSaved() {
   const product = editCardModal.value.product; editCardModal.value.show = false;
+  supplierStore.invalidate();
+  supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (!product?.sku) return;
   try {
     const { data } = await db.from('products').select('*').eq('sku', product.sku).single();
@@ -699,7 +728,7 @@ function onConsumptionPeriodChange() {
 // ─── Сохранение ────────────────────────────────────────────────────────────
 async function savePlan() {
   if (!itemsWithPlan.value.length) { toast.error('Нет данных', ''); return; }
-  saveNote.value = '';
+  saveNote.value = editingPlanId.value ? _loadedNote : '';
   showSaveModal.value = true;
   nextTick(() => setTimeout(() => saveNoteInput.value?.focus(), 50));
 }
@@ -759,7 +788,7 @@ async function copyPlanToClipboard() {
 }
 
 function resetPlan() {
-  editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null;
+  editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null; _loadedNote = '';
   items.value.forEach(i => { i.plan = []; i.monthlyConsumption = 0; i.stockOnHand = 0; i.stockAtSupplier = 0; });
   undoStack.value = []; redoStack.value = [];
   recalcAll(); draftStore.clearPlanDraft();
@@ -774,6 +803,7 @@ async function loadPlanFromHistory(planId) {
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
   editingPlanId.value = plan.id;
+  _loadedNote = plan.note || '';
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   _prevPlanItems = JSON.parse(JSON.stringify(plan.items || []));
   items.value = (plan.items || []).map(i => ({
@@ -830,6 +860,13 @@ onMounted(async () => {
 .plan-total-boxes { display: block; font-weight: 700; font-size: 13px; color: var(--bk-brown); }
 .plan-total-units { display: block; font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 .consumption-warning { color: #d32f2f !important; font-weight: 700 !important; border-color: #d32f2f !important; background: #ffebee !important; }
+
+/* Колонка запаса (дней) */
+.plan-th-reserve { min-width: 50px; text-align: center; }
+.plan-td-reserve { text-align: center; font-weight: 700; font-size: 13px; color: var(--text-muted); border-right: 2px solid var(--border-light); }
+.plan-td-reserve.reserve-danger { color: #d32f2f; background: #ffebee; }
+.plan-td-reserve.reserve-warning { color: #e65100; background: #fff3e0; }
+.plan-td-reserve.reserve-ok { color: #2e7d32; }
 
 /* (#4) Sticky name column — solid bg to prevent bleed-through */
 .plan-th-name { text-align: left !important; padding-left: 10px !important; min-width: 200px; position: sticky; left: 0; z-index: 22; background: inherit; }

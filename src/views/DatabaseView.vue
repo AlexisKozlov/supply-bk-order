@@ -28,7 +28,7 @@
 
     <!-- Товары -->
     <div v-if="activeTab==='products'">
-      <div v-if="loading" style="text-align:center;padding:40px;"><div class="loading-spinner"></div></div>
+      <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredProducts.length" style="text-align:center;padding:40px;color:var(--text-muted);">Карточки не найдены</div>
       <div v-else class="db-grid">
         <div v-for="p in filteredProducts" :key="p.id" class="db-card" @click="editProduct(p)">
@@ -54,7 +54,7 @@
 
     <!-- Поставщики -->
     <div v-if="activeTab==='suppliers'">
-      <div v-if="loading" style="text-align:center;padding:40px;"><div class="loading-spinner"></div></div>
+      <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
       <div v-else class="db-grid">
         <div v-for="s in filteredSuppliers" :key="s.id" class="db-card" @click="editSupplier(s)">
@@ -88,6 +88,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroup } from '@/lib/utils.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
