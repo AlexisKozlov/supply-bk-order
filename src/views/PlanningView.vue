@@ -36,6 +36,13 @@
           </select>
         </div>
         <div class="setting-group">
+          <label>Период расхода</label>
+          <select v-model.number="consumptionPeriodDays" @change="onConsumptionPeriodChange" :disabled="viewOnly">
+            <option :value="7">7 дней</option><option :value="14">14 дней</option><option :value="21">21 день</option>
+            <option :value="30">30 дней</option>
+          </select>
+        </div>
+        <div class="setting-group">
           <label>Проверка данных</label>
           <select v-model="dataValidation" @change="onValidationChange">
             <option value="false">Выкл</option>
@@ -68,7 +75,7 @@
         <thead>
           <tr>
             <th class="plan-th-name">Товар</th>
-            <th>{{ compactPlan ? 'Расх.' : 'Расход/мес' }} ({{ unitLabel }})</th>
+            <th>{{ compactPlan ? 'Расх.' : consumptionColumnLabel }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Склад' : 'Склад' }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Пост.' : 'У постав.' }} ({{ unitLabel }})</th>
             <th v-for="h in periodHeaders" :key="h.label" class="plan-th-month" :title="compactPlan ? h.label + ' ' + h.sublabel : ''">
@@ -161,6 +168,7 @@
             <div>Поставщик: <b>{{ supplier }}</b></div>
             <div>Позиций с заказом: <b>{{ itemsWithPlan.length }}</b></div>
             <div>Период: <b>{{ periodCount }} {{ periodType === 'weeks' ? 'нед.' : 'мес.' }}</b></div>
+            <div>Расход за: <b>{{ consumptionPeriodDays }} дн.</b></div>
           </div>
           <div v-if="editingPlanId" style="margin-bottom:12px;padding:8px 12px;background:#FFF3E0;border-radius:6px;font-size:13px;color:#E65100;">
             <BkIcon name="warning" size="sm"/> Существующий план будет перезаписан
@@ -207,6 +215,7 @@ const supplier = ref('');
 const periodValue = ref('m3');
 const startDateStr = ref(new Date().toISOString().slice(0, 10));
 const inputUnit = ref('pieces');
+const consumptionPeriodDays = ref(30);
 const dataValidation = ref('true');
 const items = ref([]);
 const suppLoading = ref(false);
@@ -320,6 +329,11 @@ function redo() {
 
 const suppliers = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
 const unitLabel = computed(() => inputUnit.value === 'boxes' ? 'кор' : 'шт');
+const consumptionColumnLabel = computed(() => {
+  const d = consumptionPeriodDays.value;
+  if (d === 30) return 'Расход/мес';
+  return `Расход/${d}дн`;
+});
 const periodType = computed(() => periodValue.value.startsWith('w') ? 'weeks' : 'months');
 const periodCount = computed(() => parseInt(periodValue.value.slice(1)));
 const startDate = computed(() => new Date(startDateStr.value));
@@ -386,7 +400,9 @@ function recalcItem(idx, fromMonth = 0) {
   }
   const qpb = getQpb(item); const mult = getMultiplicity(item); const pbu = qpb * mult;
   const toBase = (v) => inputUnit.value === 'boxes' ? v * qpb : v;
-  const mu = toBase(item.monthlyConsumption); const wu = mu / 4.33;
+  const periodDays = consumptionPeriodDays.value || 30;
+  const daily = toBase(item.monthlyConsumption) / periodDays;
+  const mu = daily * 30; const wu = daily * 7;
   let co = item.stockOnHand + item.stockAtSupplier;
   for (let m = 0; m < fromMonth && m < headers.length; m++) { co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m].orderUnits || 0); if (co < 0) co = 0; }
   for (let m = fromMonth; m < headers.length; m++) {
@@ -469,17 +485,18 @@ async function runValidation() {
   });
 }
 async function loadAvgConsumption() {
-  if (_consumptionCache && _consumptionCache.supplier === supplier.value && _consumptionCache.unit === inputUnit.value) return _consumptionCache.data;
+  if (_consumptionCache && _consumptionCache.supplier === supplier.value && _consumptionCache.unit === inputUnit.value && _consumptionCache.periodDays === consumptionPeriodDays.value) return _consumptionCache.data;
   const { data, error } = await db.from('orders').select('*, order_items(sku, consumption_period, qty_per_box)')
     .eq('legal_entity', orderStore.settings.legalEntity).eq('supplier', supplier.value).order('created_at', { ascending: false }).limit(2);
   const avgMap = new Map();
-  if (error || !data?.length) { _consumptionCache = { supplier: supplier.value, unit: inputUnit.value, data: avgMap }; return avgMap; }
+  const targetPeriod = consumptionPeriodDays.value || 30;
+  if (error || !data?.length) { _consumptionCache = { supplier: supplier.value, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap }; return avgMap; }
   const bySku = {};
   data.forEach(order => {
     const oUnit = order.unit || 'pieces'; const pd = order.period_days || 30;
     (order.order_items || []).forEach(oi => {
       if (!oi.sku || !oi.consumption_period) return;
-      let mv = (oi.consumption_period / pd) * 30;
+      let mv = (oi.consumption_period / pd) * targetPeriod;
       const eqpb = items.value.find(i => i.sku === oi.sku)?.qtyPerBox || oi.qty_per_box || 1;
       if (oUnit === 'pieces' && inputUnit.value === 'boxes') mv /= eqpb;
       else if (oUnit === 'boxes' && inputUnit.value === 'pieces') mv *= eqpb;
@@ -488,7 +505,7 @@ async function loadAvgConsumption() {
     });
   });
   Object.entries(bySku).forEach(([sku, vals]) => { avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length); });
-  _consumptionCache = { supplier: supplier.value, unit: inputUnit.value, data: avgMap };
+  _consumptionCache = { supplier: supplier.value, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap };
   return avgMap;
 }
 
@@ -522,10 +539,10 @@ async function loadFrom1c() {
       const qpb = getQpb(item);
       // stock_1c всегда в штуках → stockOnHand хранится в штуках
       item.stockOnHand = Math.round(d.stock || 0);
-      // consumption → месячный расход в текущих единицах
-      const daily = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
-      const monthly = daily * 30;
-      item.monthlyConsumption = inputUnit.value === 'boxes' ? Math.round(monthly / qpb * 100) / 100 : Math.round(monthly);
+      // consumption → расход за выбранный период в текущих единицах
+      const dailyC = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
+      const periodConsumption = dailyC * (consumptionPeriodDays.value || 30);
+      item.monthlyConsumption = inputUnit.value === 'boxes' ? Math.round(periodConsumption / qpb * 100) / 100 : Math.round(periodConsumption);
       f++;
     });
     recalcAll(); triggerValidation(); _savePlanDraft();
@@ -645,7 +662,7 @@ async function exportExcel() {
 }
 
 function _savePlanDraft() {
-  draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, inputUnit: inputUnit.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
+  draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
 }
 
 // ─── Загрузка товаров (#3 — порядок из item_order) ────────────────────────
@@ -681,6 +698,11 @@ async function restoreItemOrder() {
 
 function onParamsChange() { supplierStore.loadSuppliers(orderStore.settings.legalEntity); recalcAll(); _savePlanDraft(); }
 function onPeriodChange() { items.value.forEach(i => { i.plan = []; }); recalcAll(); }
+function onConsumptionPeriodChange() {
+  _consumptionCache = null;
+  items.value.forEach(i => { i.plan = []; });
+  recalcAll(); triggerValidation(); _savePlanDraft();
+}
 
 // ─── Сохранение ────────────────────────────────────────────────────────────
 async function savePlan() {
@@ -696,6 +718,7 @@ async function confirmSave() {
   const planData = {
     legal_entity: orderStore.settings.legalEntity, supplier: supplier.value,
     period_type: periodType.value, period_count: periodCount.value, start_date: startDateStr.value,
+    consumption_period_days: consumptionPeriodDays.value || 30,
     note: saveNote.value.trim() || null,
     items: itemsWithPlan.value.map(i => ({
       sku: i.sku, name: i.name, qty_per_box: i.qtyPerBox, boxes_per_pallet: i.boxesPerPallet,
@@ -757,6 +780,7 @@ async function loadPlanFromHistory(planId) {
   supplier.value = plan.supplier || '';
   periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
   startDateStr.value = plan.start_date || new Date().toISOString().slice(0, 10);
+  consumptionPeriodDays.value = plan.consumption_period_days || 30;
   editingPlanId.value = plan.id;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   _prevPlanItems = JSON.parse(JSON.stringify(plan.items || []));
@@ -784,7 +808,7 @@ onMounted(async () => {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
       const ok = await new Promise(r => { confirmModal.value = { show: true, title: 'Восстановить черновик?', message: `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`, resolve: r }; });
-      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); inputUnit.value = d.inputUnit || 'pieces'; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
+      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); inputUnit.value = d.inputUnit || 'pieces'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }
