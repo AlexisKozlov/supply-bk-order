@@ -6,7 +6,7 @@
     <!-- Header -->
     <header class="p-header">
       <div class="p-header-left">
-        <div class="p-logo"><span>🍔</span></div>
+        <div class="p-logo"><svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="#F5A623"/><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="url(#ht)"/><ellipse cx="20" cy="18" rx="2" ry="1.8" fill="#F9E4B7" opacity=".8"/><ellipse cx="30" cy="14" rx="1.8" ry="1.5" fill="#F9E4B7" opacity=".7"/><ellipse cx="40" cy="17" rx="2.2" ry="1.7" fill="#F9E4B7" opacity=".75"/><ellipse cx="26" cy="22" rx="1.5" ry="1.3" fill="#F9E4B7" opacity=".6"/><ellipse cx="36" cy="22" rx="1.6" ry="1.4" fill="#F9E4B7" opacity=".65"/><rect x="6" y="30" width="52" height="6" rx="3" fill="#4CAF50"/><path d="M6 33q3-3 6.5 0t6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0" stroke="#388E3C" stroke-width="1.5" fill="none"/><path d="M7 36h50l2 5H5l2-5z" fill="#FDBD10"/><path d="M7 41h50v1q-3 4-6 4H13q-3 0-6-4v-1z" fill="#FDBD10" opacity=".3"/><rect x="6" y="42" width="52" height="9" rx="2" fill="#6D3A1F"/><rect x="6" y="42" width="52" height="9" rx="2" fill="url(#hpt)"/><rect x="7" y="51" width="50" height="7" rx="4" fill="#D4881A"/><rect x="7" y="51" width="50" height="7" rx="4" fill="url(#hbb)"/><defs><linearGradient id="ht" x1="32" y1="10" x2="32" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#F5C547" offset="0"/><stop stop-color="#D4881A" offset="1"/></linearGradient><linearGradient id="hpt" x1="32" y1="42" x2="32" y2="51" gradientUnits="userSpaceOnUse"><stop stop-color="#8B4513"/><stop stop-color="#4A2510" offset="1"/></linearGradient><linearGradient id="hbb" x1="32" y1="51" x2="32" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#E8A430"/><stop stop-color="#C47A15" offset="1"/></linearGradient></defs></svg></div>
         <div class="p-brand">
           <h1>Supply Department</h1>
           <small>Портал закупок</small>
@@ -82,7 +82,7 @@
         <div class="login-card">
           <div class="login-left">
             <div class="login-brand">
-              <span class="login-brand-icon">🍔</span>
+              <span class="login-brand-icon"><svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" width="40" height="40"><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="#F5A623"/><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="url(#lt)"/><ellipse cx="20" cy="18" rx="2" ry="1.8" fill="#F9E4B7" opacity=".8"/><ellipse cx="30" cy="14" rx="1.8" ry="1.5" fill="#F9E4B7" opacity=".7"/><ellipse cx="40" cy="17" rx="2.2" ry="1.7" fill="#F9E4B7" opacity=".75"/><ellipse cx="26" cy="22" rx="1.5" ry="1.3" fill="#F9E4B7" opacity=".6"/><ellipse cx="36" cy="22" rx="1.6" ry="1.4" fill="#F9E4B7" opacity=".65"/><rect x="6" y="30" width="52" height="6" rx="3" fill="#4CAF50"/><path d="M6 33q3-3 6.5 0t6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0" stroke="#388E3C" stroke-width="1.5" fill="none"/><path d="M7 36h50l2 5H5l2-5z" fill="#FDBD10"/><path d="M7 41h50v1q-3 4-6 4H13q-3 0-6-4v-1z" fill="#FDBD10" opacity=".3"/><rect x="6" y="42" width="52" height="9" rx="2" fill="#6D3A1F"/><rect x="6" y="42" width="52" height="9" rx="2" fill="url(#lpt)"/><rect x="7" y="51" width="50" height="7" rx="4" fill="#D4881A"/><rect x="7" y="51" width="50" height="7" rx="4" fill="url(#lbb)"/><defs><linearGradient id="lt" x1="32" y1="10" x2="32" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#F5C547" offset="0"/><stop stop-color="#D4881A" offset="1"/></linearGradient><linearGradient id="lpt" x1="32" y1="42" x2="32" y2="51" gradientUnits="userSpaceOnUse"><stop stop-color="#8B4513"/><stop stop-color="#4A2510" offset="1"/></linearGradient><linearGradient id="lbb" x1="32" y1="51" x2="32" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#E8A430"/><stop stop-color="#C47A15" offset="1"/></linearGradient></defs></svg></span>
               <div class="login-brand-title">Supply Department</div>
               <div class="login-brand-sub">Портал закупок</div>
             </div>
@@ -376,14 +376,14 @@ function confirmLogout() {
 .p-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 36px; position: relative; z-index: 2; background: rgba(44,26,14,.5); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
 .p-header-left { display: flex; align-items: center; gap: 14px; }
 .p-logo { width: 46px; height: 46px; border-radius: 50%; background: linear-gradient(135deg, #D62700, #FF8733); display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 16px rgba(214,39,0,.2); }
-.p-brand h1 { font-size: 17px; font-weight: 900; color: #F5E6D0; }
-.p-brand small { display: block; font-size: 9px; font-weight: 700; color: rgba(245,166,35,.5); text-transform: uppercase; letter-spacing: 2px; margin-top: 1px; }
+.p-brand h1 { font-size: 17px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }
+.p-brand small { display: block; font-size: 9px; font-weight: 700; color: rgba(245,166,35,.7); text-transform: uppercase; letter-spacing: 2px; margin-top: 1px; }
 .p-header-right { display: flex; align-items: center; gap: 14px; position: relative; }
-.p-entity { font-size: 10px; font-weight: 700; color: rgba(245,230,208,.4); background: rgba(255,255,255,.05); padding: 5px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.06); }
+.p-entity { font-size: 10px; font-weight: 700; color: rgba(245,230,208,.6); background: rgba(255,255,255,.07); padding: 5px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); }
 .p-user { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 5px 14px 5px 5px; border-radius: 24px; transition: .15s; }
 .p-user:hover { background: rgba(255,255,255,.05); }
 .p-av { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #D62700, #FF8733); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; }
-.p-uname { font-size: 12px; font-weight: 600; color: rgba(245,230,208,.45); }
+.p-uname { font-size: 12px; font-weight: 600; color: rgba(245,230,208,.65); }
 .p-login-btn { padding: 8px 20px; border-radius: 10px; border: 2px solid rgba(214,39,0,.4); background: rgba(214,39,0,.15); color: rgba(255,200,160,.8); font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
 .p-login-btn:hover { background: #D62700; color: #fff; box-shadow: 0 4px 16px rgba(214,39,0,.25); }
 .p-user-dropdown { position: absolute; top: 100%; right: 0; margin-top: 6px; background: #2C1A0E; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 100; }
@@ -393,9 +393,9 @@ function confirmLogout() {
 /* Body */
 .p-body { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; z-index: 1; padding: 0 36px; gap: 36px; min-height: 0; }
 .p-greeting { text-align: center; flex-shrink: 0; }
-.p-greeting h2 { font-size: 30px; font-weight: 900; color: #F5E6D0; line-height: 1.15; }
+.p-greeting h2 { font-size: 30px; font-weight: 900; color: #F5E6D0; line-height: 1.15; font-family: 'Flame', 'Sora', sans-serif; }
 .p-greeting h2 em { font-style: normal; color: #FF8733; }
-.p-greeting p { font-size: 12px; color: rgba(245,230,208,.2); margin-top: 6px; font-weight: 500; }
+.p-greeting p { font-size: 12px; color: rgba(245,230,208,.45); margin-top: 6px; font-weight: 500; }
 
 /* Dock — slot/item pattern for stable hover */
 .p-dock { display: flex; gap: 0; padding: 16px 28px; background: rgba(255,255,255,.035); border-radius: 22px; border: 1px solid rgba(255,255,255,.05); align-items: flex-end; flex-shrink: 0; }
@@ -411,13 +411,13 @@ function confirmLogout() {
 .p-dock-item.p-dock-hovered .p-dock-icon { box-shadow: 0 10px 28px rgba(0,0,0,.25); }
 .p-dock-icon :deep(svg) { width: 100%; height: 100%; }
 .p-dock-stub .p-dock-icon { background: rgba(250,246,239,.4); border-style: dashed; border-color: rgba(80,35,20,.08); }
-.p-dock-label { font-size: 9px; font-weight: 700; color: rgba(245,230,208,.4); opacity: 0; transition: opacity .18s; white-space: nowrap; text-align: center; }
+.p-dock-label { font-size: 9px; font-weight: 700; color: rgba(245,230,208,.65); opacity: 0; transition: opacity .18s; white-space: nowrap; text-align: center; }
 .p-dock-item.p-dock-hovered .p-dock-label { opacity: 1; }
 .p-dock-tag { position: absolute; top: -6px; right: -4px; font-size: 7px; font-weight: 800; text-transform: uppercase; background: rgba(214,39,0,.12); color: #D62700; padding: 1px 5px; border-radius: 4px; letter-spacing: .3px; }
 
 /* Actions */
 .p-actions { display: flex; gap: 10px; flex-shrink: 0; }
-.p-btn { padding: 11px 22px; border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: .2s; border: 1.5px solid rgba(255,255,255,.08); background: rgba(255,255,255,.04); color: rgba(245,230,208,.5); display: flex; align-items: center; gap: 7px; }
+.p-btn { padding: 11px 22px; border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: .2s; border: 1.5px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); color: rgba(245,230,208,.7); display: flex; align-items: center; gap: 7px; }
 .p-btn:hover { border-color: rgba(255,255,255,.15); color: #F5E6D0; background: rgba(255,255,255,.07); }
 .p-btn-primary { border-color: rgba(214,39,0,.3); background: rgba(214,39,0,.12); color: rgba(255,200,160,.8); }
 .p-btn-primary:hover { background: #D62700; color: #fff; box-shadow: 0 4px 20px rgba(214,39,0,.25); transform: translateY(-1px); }
@@ -426,9 +426,9 @@ function confirmLogout() {
 
 /* Footer */
 .p-footer { padding: 14px 36px; display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1; border-top: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
-.p-footer-ver { font-size: 9px; color: rgba(245,230,208,.12); }
-.p-footer-btn { background: none; border: none; color: rgba(245,230,208,.2); font-size: 11px; font-family: inherit; cursor: pointer; font-weight: 500; }
-.p-footer-btn:hover { color: rgba(245,230,208,.5); }
+.p-footer-ver { font-size: 9px; color: rgba(245,230,208,.3); }
+.p-footer-btn { background: none; border: none; color: rgba(245,230,208,.4); font-size: 11px; font-family: inherit; cursor: pointer; font-weight: 500; }
+.p-footer-btn:hover { color: rgba(245,230,208,.7); }
 
 /* Login modal */
 .login-overlay { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.65); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; }
@@ -436,7 +436,7 @@ function confirmLogout() {
 .login-left { width: 200px; flex-shrink: 0; background: linear-gradient(160deg, #502314, #3A1A0C); display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
 .login-brand { text-align: center; }
 .login-brand-icon { font-size: 36px; display: block; margin-bottom: 10px; }
-.login-brand-title { font-size: 18px; font-weight: 900; color: #F5E6D0; }
+.login-brand-title { font-size: 18px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }
 .login-brand-sub { font-size: 9px; font-weight: 700; color: rgba(245,166,35,.5); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
 .login-right { flex: 1; background: #FFFBF5; padding: 32px; position: relative; }
 .login-close { position: absolute; top: 12px; right: 14px; background: none; border: none; font-size: 18px; color: #A08870; cursor: pointer; }

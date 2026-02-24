@@ -97,9 +97,10 @@ body {
 
 .login-box h2 {
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 400;
   color: var(--bk-brown);
   margin-bottom: 4px;
+  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
 }
 
 .login-box p {
@@ -229,7 +230,7 @@ body {
 
 .sidebar-brand-text {
   font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
-  font-size: 15px; font-weight: 700; color: #FFF;
+  font-size: 15px; font-weight: 400; color: #FFF;
   line-height: 1.15;
   letter-spacing: 0.3px;
 }
