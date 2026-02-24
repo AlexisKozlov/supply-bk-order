@@ -92,7 +92,7 @@
                         <td class="ht-items-sku">{{ item.sku || '—' }}</td>
                         <td class="ht-items-name">{{ item.name }}</td>
                         <td class="ht-items-qty">{{ Math.round(item.qty_boxes) }}</td>
-                        <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1))) }}</td>
+                        <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1) * (item.multiplicity || 1))) }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -342,7 +342,21 @@ async function load() {
 }
 
 // --- Actions ---
-function toggleItems(id) { expandedOrders.value.has(id) ? expandedOrders.value.delete(id) : expandedOrders.value.add(id); }
+async function toggleItems(id) {
+  if (expandedOrders.value.has(id)) { expandedOrders.value.delete(id); return; }
+  expandedOrders.value.add(id);
+  // Подгрузка multiplicity из products для старых заказов (fallback)
+  const order = historyStore.orders.find(o => o.id === id);
+  if (!order?.order_items?.length) return;
+  const needFetch = order.order_items.some(i => i.multiplicity == null && i.sku);
+  if (!needFetch) return;
+  const skus = order.order_items.map(i => i.sku).filter(Boolean);
+  if (!skus.length) return;
+  const { data } = await db.from('products').select('sku, multiplicity').in('sku', skus);
+  if (!data) return;
+  const multMap = Object.fromEntries(data.map(p => [p.sku, p.multiplicity || 1]));
+  order.order_items.forEach(i => { if (i.multiplicity == null && i.sku) i.multiplicity = multMap[i.sku] || 1; });
+}
 function togglePlanItems(id) { expandedPlans.value.has(id) ? expandedPlans.value.delete(id) : expandedPlans.value.add(id); }
 
 async function viewOrder(order) {
