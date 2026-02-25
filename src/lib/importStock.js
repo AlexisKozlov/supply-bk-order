@@ -296,8 +296,12 @@ function matchData(items, fileData, target) {
     return { words, data: d };
   });
 
+  // Track used file entries for fuzzy matches to prevent double-matching
+  const usedFuzzy = new Set();
+
   const updatedItems = items.map(item => {
     let match = null;
+    let isFuzzy = false;
 
     // 1. Exact SKU match (normalized, with leading-zero tolerance)
     if (item.sku) {
@@ -310,16 +314,17 @@ function matchData(items, fileData, target) {
       }
     }
 
-    // 2. Exact name match
-    if (!match && item.name) match = nameLookup.get(item.name.toLowerCase().trim());
+    // 2. Exact name match (skip for analysis — only SKU matching)
+    if (!match && item.name && target !== 'analysis') match = nameLookup.get(item.name.toLowerCase().trim());
 
-    // 3. Word-overlap fuzzy name match (≥60% words overlap, ≥2 words)
-    if (!match && item.name) {
+    // 3. Word-overlap fuzzy name match (≥60% words overlap, ≥2 words; skip for analysis)
+    if (!match && item.name && target !== 'analysis') {
       const itemWords = `${item.sku || ''} ${item.name}`.toLowerCase()
         .replace(/[,."'()\/\\]/g, ' ').split(/\s+/).filter(w => w.length > 2);
       if (itemWords.length >= 2) {
         let bestScore = 0, bestMatch = null;
         for (const entry of wordIndex) {
+          if (usedFuzzy.has(entry.data)) continue;
           let overlap = 0;
           for (const w of itemWords) {
             if (entry.words.some(ew => ew === w || (w.length > 4 && ew.includes(w)) || (ew.length > 4 && w.includes(ew)))) {
@@ -332,17 +337,21 @@ function matchData(items, fileData, target) {
             bestMatch = entry.data;
           }
         }
-        if (bestMatch) match = bestMatch;
+        if (bestMatch) { match = bestMatch; isFuzzy = true; }
       }
     }
 
     if (!match) return item;
+    if (isFuzzy) usedFuzzy.add(match);
     matched++;
     const updated = { ...item };
     if (target === 'order') {
       if (match.stock !== undefined) updated.stock = match.stock;
       if (match.transit !== undefined) updated.transit = match.transit;
       if (match.consumption !== undefined) updated.consumptionPeriod = match.consumption;
+    } else if (target === 'analysis') {
+      if (match.stock !== undefined) updated.stock = match.stock;
+      if (match.consumption !== undefined) updated.consumption = match.consumption;
     } else {
       if (match.stock !== undefined) updated.stockOnHand = match.stock;
       if (match.transit !== undefined) updated.stockAtSupplier = match.transit;

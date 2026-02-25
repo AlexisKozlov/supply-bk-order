@@ -60,6 +60,20 @@
           </div>
         </div>
 
+        <div class="modal-row-2" style="margin-top:4px;">
+          <div class="modal-field" style="flex:1;">
+            <span class="modal-field-label">Группа аналогов</span>
+            <input v-model="form.analog_group" placeholder="Название группы" />
+          </div>
+          <div class="modal-field" style="width:100px;flex-shrink:0;">
+            <span class="modal-field-label">Активная</span>
+            <select v-model="form.is_active">
+              <option :value="true">Да</option>
+              <option :value="false">Нет</option>
+            </select>
+          </div>
+        </div>
+
         <div class="actions" style="display:flex;gap:8px;margin-top:12px;">
           <button class="btn primary" @click="save" :disabled="saving">
             {{ saving ? 'Сохранение...' : (product ? 'Сохранить' : 'Создать') }}
@@ -113,6 +127,7 @@ let initialForm = null;
 const form = ref({
   sku: '', name: '', supplier: '', legal_entity: props.legalEntity,
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
+  analog_group: '', is_active: true,
 });
 
 function onKey(e) {
@@ -128,6 +143,8 @@ onMounted(async () => {
         legal_entity: data.legal_entity || props.legalEntity,
         qty_per_box: data.qty_per_box || '', boxes_per_pallet: data.boxes_per_pallet || '',
         multiplicity: data.multiplicity || '', unit_of_measure: data.unit_of_measure || 'шт',
+        analog_group: data.analog_group || '',
+        is_active: data.is_active !== undefined ? !!data.is_active : true,
       });
     }
   } else if (props.product) {
@@ -136,6 +153,8 @@ onMounted(async () => {
       supplier: props.product.supplier || '', legal_entity: props.product.legal_entity || props.legalEntity,
       qty_per_box: props.product.qty_per_box || '', boxes_per_pallet: props.product.boxes_per_pallet || '',
       multiplicity: props.product.multiplicity || '', unit_of_measure: props.product.unit_of_measure || 'шт',
+      analog_group: props.product.analog_group || '',
+      is_active: props.product.is_active !== undefined ? !!props.product.is_active : true,
     });
   }
   await loadSuppliers();
@@ -207,6 +226,8 @@ async function save() {
       legal_entity: form.value.legal_entity, qty_per_box: Math.round(+form.value.qty_per_box) || null,
       boxes_per_pallet: Math.round(+form.value.boxes_per_pallet) || null, multiplicity: Math.round(+form.value.multiplicity) || 0,
       unit_of_measure: form.value.unit_of_measure || 'шт',
+      analog_group: form.value.analog_group || null,
+      is_active: form.value.is_active ? 1 : 0,
     };
     let error;
     if (props.product) { ({ error } = await db.from('products').update(payload).eq('id', props.product.id)); }

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════
-   КАЛЬКУЛЯТОР ЗАКАЗА BK — v2.0
+   ПОРТАЛ ЗАКУПОК BK — v2.0
    Burger King Style: Sidebar Layout
    ═══════════════════════════════════════ */
 
@@ -494,7 +494,8 @@ body {
 /* Views with internal flex layout (table + buttons) — don't scroll whole page */
 .content-area > .order-view,
 .content-area > .planning-view,
-.content-area > .calendar-view {
+.content-area > .calendar-view,
+.content-area > .analysis-view {
   overflow: hidden;
   scrollbar-gutter: auto;
 }

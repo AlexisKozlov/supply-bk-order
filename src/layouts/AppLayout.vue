@@ -54,6 +54,10 @@
           <span class="sidebar-icon"><BkIcon name="calendar" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">Календарь</span>
         </router-link>
+        <router-link :to="{ name: 'analysis' }" class="sidebar-item" :class="{ active: currentRoute === 'analysis' }">
+          <span class="sidebar-icon"><BkIcon name="ruler" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Анализ</span>
+        </router-link>
       </nav>
       </div>
 

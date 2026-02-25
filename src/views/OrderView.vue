@@ -350,6 +350,22 @@ onMounted(async () => {
     } catch (e) {
       toast.error('Ошибка загрузки заказа', e.message || '');
     }
+  } else if (route.query.supplier) {
+    // Загрузка товаров поставщика (переход из анализа и т.д.)
+    const sup = route.query.supplier;
+    orderStore.settings.supplier = sup;
+    orderStore.items = [];
+    supplierLoading.value = true;
+    try {
+      const { data } = await db.from('products').select('*').eq('supplier', sup).eq('is_active', 1);
+      (data || []).forEach(p => orderStore.addItem(p, true));
+      await orderStore.restoreItemOrder();
+      draftStore.save();
+      orderVisible.value = true;
+      toast.success('Поставщик загружен', `${sup} — ${orderStore.items.length} товаров`);
+    } catch { toast.error('Ошибка', 'Не удалось загрузить товары'); }
+    finally { supplierLoading.value = false; }
+    router.replace({ name: 'order' });
   } else if (orderStore.items.length > 0) {
     // Если данные уже загружены (из истории/редактирования) — не перезаписываем черновиком
     orderVisible.value = true;
@@ -406,7 +422,7 @@ async function onSupplierChange(e) {
   if (!newSupplier) return;
   supplierLoading.value = true;
   try {
-    const { data } = await db.from('products').select('*').eq('supplier', newSupplier);
+    const { data } = await db.from('products').select('*').eq('supplier', newSupplier).eq('is_active', 1);
     (data || []).forEach(p => orderStore.addItem(p, true));
     await orderStore.restoreItemOrder();
     draftStore.save();
@@ -663,7 +679,8 @@ function buildOrderText() {
     const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
     const pieces = orderStore.settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
     const rb = Math.ceil(physBoxes); if (rb <= 0) return null;
-    return { text: `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${item.unitOfMeasure || 'шт'})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit: item.unitOfMeasure || 'шт' };
+    const unit = item.unitOfMeasure || 'шт';
+    return { text: `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit, qpb };
   }).filter(Boolean);
   return { lines, deliveryDate };
 }
@@ -672,7 +689,7 @@ async function copyOrderToClipboard() {
   if (!orderStore.items.length) { toast.error('Заказ пуст', ''); return; }
   const { lines, deliveryDate } = buildOrderText(); if (!lines.length) { toast.error('Нет позиций с заказом', ''); return; }
   const le = orderStore.settings.legalEntity || '';
-  const text = `Добрый день!\nПросьба поставить для юр. лица ${le}, на дату - ${deliveryDate}:\n\n${lines.map(l => l.text).join('\n')}\n\nСпасибо!`;
+  const text = `Добрый день!\nПросьба отгрузить товар для ${le}, дата поставки - ${deliveryDate}:\n\n${lines.map(l => l.text).join('\n')}\n\nСпасибо!`;
   await copyToClipboard(text); toast.success('Скопировано!', `${lines.length} позиций в буфере обмена`);
 }
 
@@ -697,12 +714,13 @@ async function share(channel) {
     const pieces    = orderStore.settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
     const rb = Math.ceil(physBoxes);
     if (rb <= 0) return null;
-    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${item.unitOfMeasure || 'шт'})`;
+    const unit = item.unitOfMeasure || 'шт';
+    return `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`;
   }).filter(Boolean);
   if (!lines.length) { toast.error('Нет позиций для отправки', ''); return; }
   const le       = orderStore.settings.legalEntity || '';
   const supplier = orderStore.settings.supplier    || '';
-  const text = `Добрый день!\nПросьба поставить для юр. лица ${le}, на дату - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;
+  const text = `Добрый день!\nПросьба отгрузить товар для ${le}, дата поставки - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;
   const encoded = encodeURIComponent(text);
   let contacts = null;
   if (supplier) contacts = await supplierStore.getSupplierContacts(supplier, orderStore.settings.legalEntity);
@@ -777,12 +795,26 @@ async function clearOrder() {
 async function exitViewMode() {
   const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Закрыть просмотр?', message:'Заказ будет очищен.', resolve }; });
   if (!ok) return;
-  orderStore.resetOrder(); orderVisible.value = false;
+  orderStore.resetOrder();
+  orderStore.settings.today = new Date();
+  orderStore.settings.deliveryDate = null;
+  orderStore.settings.safetyDays = 0;
+  orderStore.settings.note = '';
+  settingsExpanded.value = true;
+  draftStore.clear();
+  if (route.query.orderId) router.replace({ name: 'order' });
 }
 
 async function exitEditMode() {
   const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Сбросить редактирование?', message:'Заказ будет очищен.', resolve }; });
   if (!ok) return;
-  orderStore.resetOrder(); orderVisible.value = false;
+  orderStore.resetOrder();
+  orderStore.settings.today = new Date();
+  orderStore.settings.deliveryDate = null;
+  orderStore.settings.safetyDays = 0;
+  orderStore.settings.note = '';
+  settingsExpanded.value = true;
+  draftStore.clear();
+  if (route.query.orderId) router.replace({ name: 'order' });
 }
 </script>

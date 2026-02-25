@@ -22,11 +22,12 @@ export async function exportToExcel(items, settings) {
     const physBoxes = settings.unit === 'boxes'
       ? Math.ceil(item.finalOrder / mult)
       : Math.ceil(item.finalOrder / (qpb * mult));
+    if (physBoxes <= 0) return null;
     const pieces = settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
     const unit = item.unitOfMeasure || 'шт';
     const nameWithSku = item.sku ? `${item.sku} ${item.name || ''}` : (item.name || '');
     return [nameWithSku, `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`];
-  });
+  }).filter(Boolean);
 
   const allRows = [...headerRows, ...dataRows];
   const ws = XLSX.utils.aoa_to_sheet(allRows);

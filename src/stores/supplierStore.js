@@ -50,8 +50,20 @@ export const useSupplierStore = defineStore('supplier', () => {
             unique.push(s);
           }
         }
-        suppliersByEntity.value[cacheKey] = unique;
-        return unique;
+
+        // Убрать поставщиков, у которых все товары неактивны
+        let prodQuery = db.from('products').select('supplier').eq('is_active', 1);
+        if (entities.length === 1) {
+          prodQuery = prodQuery.eq('legal_entity', entities[0]);
+        } else {
+          prodQuery = prodQuery.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
+        }
+        const { data: activeProducts } = await prodQuery;
+        const activeSuppliers = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
+        const filtered = unique.filter(s => activeSuppliers.has(s.short_name));
+
+        suppliersByEntity.value[cacheKey] = filtered;
+        return filtered;
       }
       return [];
     } finally {

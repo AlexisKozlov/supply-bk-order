@@ -17,6 +17,7 @@ const routes = [
       { path: 'planning', name: 'planning', component: () => import('@/views/PlanningView.vue') },
       { path: 'analytics', name: 'analytics', component: () => import('@/views/AnalyticsView.vue') },
       { path: 'calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue') },
+      { path: 'analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue') },
       { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue') },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
     ],

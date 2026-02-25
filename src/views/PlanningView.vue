@@ -719,7 +719,7 @@ async function loadProducts() {
   if (!supplier.value) { items.value = []; return; }
   suppLoading.value = true;
   try {
-    const { data, error } = await db.from('products').select('*').eq('supplier', supplier.value).order('name');
+    const { data, error } = await db.from('products').select('*').eq('supplier', supplier.value).eq('is_active', 1).order('name');
     if (error) { toast.error('Ошибка', ''); return; }
     const group = getEntityGroup(orderStore.settings.legalEntity);
     items.value = (data || []).filter(p => group.includes(p.legal_entity)).map(p => ({

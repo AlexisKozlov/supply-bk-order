@@ -192,7 +192,7 @@ const dockModules = [
   { key: 'history',   name: 'История',         svg: svgIcons.history },
   { key: 'database',  name: 'База товаров',    svg: svgIcons.database },
   { key: 'search',    name: 'Поиск карточек',  svg: svgIcons.search, dim: true },
-  { key: 'analysis',  name: 'Анализ',          svg: svgIcons.analysis, dim: true },
+  { key: 'analysis',  name: 'Анализ',          svg: svgIcons.analysis },
 ];
 
 const userInitials = computed(() => {

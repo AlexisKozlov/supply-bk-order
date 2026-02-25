@@ -135,6 +135,7 @@ if ($endpoint === 'search_products') {
         $params[] = $supplier;
     }
     
+    $where[] = "`is_active` = 1";
     $sql = "SELECT * FROM `products` WHERE " . implode(' AND ', $where) . " LIMIT " . $limit;
     $s = $pdo->prepare($sql);
     $s->execute($params);
@@ -187,7 +188,7 @@ if ($endpoint === 'rpc') {
 if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','api_keys'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','api_keys','analysis_data'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found: '.$endpoint], 404); }
 $table = $endpoint;
 

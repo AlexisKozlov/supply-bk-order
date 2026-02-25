@@ -398,11 +398,10 @@ async function copyOrder(order) {
     const mult = prod.multiplicity || 1;
     const pieces = Math.round(boxes * qpb * mult);
     const unit = prod.unit_of_measure || 'шт';
-    const name = `${item.sku ? item.sku + '  ' : ''}${item.name}`;
-    return `${name} - ${boxes} коробок (${nf.format(pieces)} ${unit})`;
+    return `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${boxes} коробок (${nf.format(pieces)} ${unit})`;
   }).filter(Boolean);
   if (!lines.length) { toast.error('Нет позиций', ''); return; }
-  const text = `Добрый день!\nПросьба поставить для юр. лица ${order.legal_entity}, на дату - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;
+  const text = `Добрый день!\nПросьба отгрузить товар для ${order.legal_entity}, дата поставки - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;
   await copyToClipboard(text);
   toast.success('Скопировано!', `${lines.length} позиций`);
 }
