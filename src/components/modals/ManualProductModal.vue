@@ -4,7 +4,7 @@
       <div class="modal-box">
         <div class="modal-header">
           <h2><BkIcon name="add" size="sm"/> Новый товар</h2>
-          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <input v-model="form.sku" placeholder="Артикул" />
@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -106,10 +106,15 @@ const form = ref({
 
 const suppliers = computed(() => supplierStore.getSuppliersForEntity(form.value.legal_entity));
 
+function onKey(e) {
+  if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
+}
 onMounted(async () => {
+  document.addEventListener('keydown', onKey);
   await supplierStore.loadSuppliers(form.value.legal_entity);
   initialForm = JSON.stringify(form.value);
 });
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 function isDirty() {
   return JSON.stringify(form.value) !== initialForm;

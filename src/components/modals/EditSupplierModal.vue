@@ -4,7 +4,7 @@
       <div class="modal-box">
         <div class="modal-header">
           <h2><BkIcon v-if="supplier" name="edit" size="sm"/> <BkIcon v-else name="add" size="sm"/> {{ supplier ? 'Редактирование поставщика' : 'Новый поставщик' }}</h2>
-          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <input v-model="form.short_name" placeholder="Краткое наименование*" />
@@ -60,7 +60,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -83,7 +83,11 @@ const form = ref({
   whatsapp: '', telegram: '', viber: '', email: '',
 });
 
+function onKey(e) {
+  if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
+}
 onMounted(() => {
+  document.addEventListener('keydown', onKey);
   if (props.supplier) {
     Object.assign(form.value, {
       short_name: props.supplier.short_name || '',
@@ -98,6 +102,7 @@ onMounted(() => {
   }
   initialForm = JSON.stringify(form.value);
 });
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 function isDirty() {
   return JSON.stringify(form.value) !== initialForm;

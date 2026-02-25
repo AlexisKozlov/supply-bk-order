@@ -6,17 +6,28 @@
       <span v-else-if="editingPlanId" class="editing-badge" style="cursor:pointer" @click="resetPlan"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
-    <!-- Настройки -->
-    <div class="settings-panel" v-show="!isFullscreen">
-      <div class="settings-row">
-        <div class="setting-group">
+    <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
+    <div class="params-block" :class="{ open: settingsExpanded }">
+      <div class="params-summary" @click="toggleSettings">
+        <BkIcon name="gear" size="sm" class="params-icon"/>
+        <span class="ps-chip"><b>{{ supplier || 'Не выбран' }}</b></span>
+        <span class="ps-chip">{{ periodLabel }}</span>
+        <span class="ps-chip">с {{ startDateDisplay }}</span>
+        <span class="ps-chip">{{ inputUnit === 'boxes' ? 'коробки' : 'штуки' }}</span>
+        <span class="ps-chip">расход/{{ consumptionPeriodDays }}дн</span>
+        <span class="params-toggle-hint">
+          <BkIcon :name="settingsExpanded ? 'chevronUp' : 'chevronDown'" size="xs"/>
+        </span>
+      </div>
+      <div v-if="settingsExpanded" class="params-fields">
+        <div class="pf-group">
           <label>Поставщик</label>
           <select v-model="supplier" @change="loadProducts" :disabled="suppLoading || viewOnly">
             <option value="">— Выберите —</option>
             <option v-for="s in suppliers" :key="s.short_name" :value="s.short_name">{{ s.short_name }}</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Период</label>
           <select v-model="periodValue" @change="onPeriodChange" :disabled="viewOnly">
             <option value="w1">1 неделя</option><option value="w2">2 недели</option><option value="w4">4 недели</option>
@@ -24,29 +35,32 @@
             <option value="m1">1 месяц</option><option value="m2">2 месяца</option><option value="m3">3 месяца</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Дата начала</label>
           <input type="date" v-model="startDateStr" @change="onParamsChange" :disabled="viewOnly"/>
         </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Единицы</label>
           <select :value="inputUnit" @change="onUnitChange">
             <option value="pieces">Штуки</option>
             <option value="boxes">Коробки</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Период расхода</label>
           <select v-model.number="consumptionPeriodDays" @change="onConsumptionPeriodChange" :disabled="viewOnly">
             <option :value="7">7 дней</option><option :value="14">14 дней</option><option :value="21">21 день</option>
             <option :value="30">30 дней</option>
           </select>
         </div>
+        <div v-if="showCollapseHint" class="params-collapse-hint" @click="settingsExpanded = false; showCollapseHint = false;">
+          Параметры заполнены — нажмите чтобы свернуть ▲
+        </div>
       </div>
     </div>
 
-    <!-- Тулбар как в заказе (#1) -->
-    <div v-if="items.length" class="order-toolbar" style="margin-bottom:6px;">
+    <!-- Тулбар: действия -->
+    <div class="order-toolbar" v-if="items.length">
       <div class="order-actions">
         <button class="btn small" :disabled="!canUndo || viewOnly" @click="undo" title="Отменить"><BkIcon name="undo" size="sm"/></button>
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
@@ -110,7 +124,7 @@
                     <span v-if="!viewOnly && item.boxesPerPallet && item.plan[m].orderBoxes % item.boxesPerPallet !== 0" class="plan-pallet-period"
                       :title="`До ${Math.ceil(item.plan[m].orderBoxes / item.boxesPerPallet)} пал (${Math.ceil(item.plan[m].orderBoxes / item.boxesPerPallet) * item.boxesPerPallet} кор)`"
                       @click.stop="roundToPallet(idx, m)">⬆</span>
-                    <span v-if="!viewOnly && item.plan[m]?.locked" class="plan-reset-cell" title="Сбросить" @click.stop="resetCell(idx, m)"><BkIcon name="close" size="xs"/></span>
+                    <span v-if="!viewOnly && item.plan[m]?.locked" class="plan-reset-cell" title="Сбросить" @click.stop="resetCell(idx, m)"><BkIcon name="close" size="sm"/></span>
                   </span>
                   <span v-if="!compactPlan" class="plan-result-sub">{{ nf.format(item.plan[m].orderUnits) }} {{ item.unitOfMeasure }}</span>
                 </template>
@@ -156,7 +170,7 @@
         <div class="modal-box" style="max-width:420px;">
           <div class="modal-header">
             <h2><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</h2>
-            <button class="modal-close" @click="showSaveModal = false"><BkIcon name="close" size="xs"/></button>
+            <button class="modal-close" @click="showSaveModal = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div style="margin-bottom:16px;color:#555;font-size:14px;">
             <div>Поставщик: <b>{{ supplier }}</b></div>
@@ -213,6 +227,7 @@ const inputUnit = ref('pieces');
 const consumptionPeriodDays = ref(30);
 const items = ref([]);
 const suppLoading = ref(false);
+const settingsExpanded = ref(false);
 const load1cLoading = ref(false);
 const editingPlanId = ref(null);
 const viewOnly = ref(false);
@@ -324,6 +339,19 @@ function redo() {
 
 const suppliers = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
 const unitLabel = computed(() => inputUnit.value === 'boxes' ? 'кор' : 'шт');
+const periodLabel = computed(() => {
+  const map = { w1:'1 нед', w2:'2 нед', w4:'4 нед', w6:'6 нед', w8:'8 нед', w12:'12 нед', m1:'1 мес', m2:'2 мес', m3:'3 мес' };
+  return map[periodValue.value] || periodValue.value;
+});
+const startDateDisplay = computed(() => {
+  const d = new Date(startDateStr.value);
+  return !isNaN(d) ? d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+});
+function toggleSettings() {
+  if (settingsExpanded.value && !supplier.value) return; // не закрывать без поставщика
+  settingsExpanded.value = !settingsExpanded.value;
+}
+
 const consumptionColumnLabel = computed(() => {
   const d = consumptionPeriodDays.value;
   if (d === 30) return 'Расход/мес';
@@ -820,8 +848,11 @@ async function loadPlanFromHistory(planId) {
 }
 
 watch(() => orderStore.settings.legalEntity, async () => { await supplierStore.loadSuppliers(orderStore.settings.legalEntity); supplier.value = ''; items.value = []; });
+const showCollapseHint = ref(false);
+watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
 
 onMounted(async () => {
+  if (!supplier.value) settingsExpanded.value = true;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (route.query.planId) {
     await loadPlanFromHistory(route.query.planId);

@@ -4,7 +4,7 @@
       <div class="modal-box" style="width:480px;">
         <div class="modal-header">
           <h2><BkIcon v-if="product" name="edit" size="sm"/> <BkIcon v-else name="add" size="sm"/> {{ product ? 'Редактирование карточки' : 'Новый товар' }}</h2>
-          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <div class="modal-row-2" style="grid-template-columns: 1fr 3fr;">
@@ -87,7 +87,7 @@
   </Teleport>
 </template>
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -115,7 +115,11 @@ const form = ref({
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
 });
 
+function onKey(e) {
+  if (e.key === 'Escape' && !showConfirmClose.value && !showNewSupplier.value) tryClose();
+}
 onMounted(async () => {
+  document.addEventListener('keydown', onKey);
   if (props.product?.id) {
     const { data } = await db.from('products').select('*').eq('id', props.product.id).single();
     if (data) {
@@ -138,6 +142,7 @@ onMounted(async () => {
   initialized = true;
   initialForm = JSON.stringify(form.value);
 });
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 function isDirty() {
   return JSON.stringify(form.value) !== initialForm;

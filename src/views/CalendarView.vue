@@ -74,7 +74,7 @@
         <div class="modal-box" style="max-width:440px;">
           <div class="modal-header">
             <h2>{{ preview.supplier }}</h2>
-            <button class="modal-close" @click="preview.show = false"><BkIcon name="close" size="xs"/></button>
+            <button class="modal-close" @click="preview.show = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="cal-preview-meta">
             <span>Поставка: <b>{{ preview.deliveryDate }}</b></span>

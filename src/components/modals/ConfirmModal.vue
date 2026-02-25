@@ -14,6 +14,15 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue';
+
 defineProps({ title: String, message: String });
-defineEmits(['confirm', 'cancel']);
+const emit = defineEmits(['confirm', 'cancel']);
+
+function onKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); emit('confirm'); }
+  else if (e.key === 'Escape') { emit('cancel'); }
+}
+onMounted(() => document.addEventListener('keydown', onKey));
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 </script>

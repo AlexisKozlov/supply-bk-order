@@ -7,62 +7,110 @@
       <span v-else-if="orderStore.editingOrderId" class="editing-badge" style="cursor:pointer" @click="exitEditMode"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
-    <!-- Настройки -->
-    <div class="settings-panel" v-show="!isFullscreen">
-      <div class="settings-header">
-        <button class="settings-toggle" @click="onToggleSettings">
-          <BkIcon :name="settingsCollapsed ? 'chevronRight' : 'chevronDown'" size="xs"/> Параметры
-        </button>
+    <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
+    <div v-if="orderVisible" class="params-block" :class="{ open: settingsExpanded }">
+      <div class="params-summary" @click="toggleSettings">
+        <BkIcon name="gear" size="sm" class="params-icon"/>
+        <span class="ps-chip"><b>{{ orderStore.settings.supplier || 'Не выбран' }}</b></span>
+        <span class="ps-chip" :class="{ 'ps-warn': !orderStore.settings.today }">{{ todayDisplay || 'Сегодня?' }}</span>
+        <span class="ps-dot">→</span>
+        <span class="ps-chip" :class="{ 'ps-warn': !orderStore.settings.deliveryDate }">{{ deliveryDisplay || 'Приход?' }}</span>
+        <span class="ps-chip" :class="{ 'ps-warn': !orderStore.settings.safetyDays }">запас {{ orderStore.settings.safetyDays || '?' }} дн.</span>
+        <span class="ps-chip">{{ orderStore.settings.unit === 'boxes' ? 'коробки' : 'штуки' }}</span>
+        <span class="params-toggle-hint">
+          <BkIcon :name="settingsExpanded ? 'chevronUp' : 'chevronDown'" size="xs"/>
+        </span>
       </div>
-      <div class="settings-row" v-show="!settingsCollapsed">
-
-        <div class="setting-group">
+      <div v-if="settingsExpanded" class="params-fields">
+        <div class="pf-group">
           <label>Поставщик</label>
           <select :value="orderStore.settings.supplier" @change="onSupplierChange" :disabled="supplierLoading || orderStore.viewOnlyMode">
             <option value="">Все / свободный</option>
             <option v-for="s in suppliers" :key="s.short_name" :value="s.short_name">{{ s.short_name }}</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Сегодня</label>
           <input type="date" :value="todayStr" :class="{ 'param-required-pulse': !orderStore.settings.today }" @change="onTodayChange" :disabled="orderStore.viewOnlyMode"/>
         </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Дата прихода</label>
           <input type="date" :value="deliveryStr" :class="{ 'param-required-pulse': !orderStore.settings.deliveryDate }" @change="onDeliveryChange" :disabled="orderStore.viewOnlyMode"/>
         </div>
-        <div class="setting-group">
-          <label>Период (дн.)</label>
-          <input type="number" :value="orderStore.settings.periodDays" @change="(e) => { orderStore.settings.periodDays = +e.target.value || 30; draftStore.save(); }" :disabled="orderStore.viewOnlyMode"/>
-        </div>
-        <div class="setting-group">
+        <div class="pf-group">
           <label>Запас (дн.) <small v-if="safetyDateDisplay" style="font-weight:400;color:var(--text-muted);">– {{ safetyDateDisplay }}</small></label>
           <div style="display:flex;gap:4px;align-items:center;">
             <input type="number" :value="orderStore.settings.safetyDays" :class="{ 'param-required-pulse': !orderStore.settings.safetyDays }" @change="onSafetyDaysChange" style="width:60px;" :disabled="orderStore.viewOnlyMode"/>
-            <input type="date" :value="safetyDateStr" @change="onSafetyDateChange" :min="deliveryStr" style="width:130px;" :disabled="orderStore.viewOnlyMode"/>
+            <input type="date" :value="safetyDateStr" @change="onSafetyDateChange" :min="deliveryStr" style="flex:1;" :disabled="orderStore.viewOnlyMode"/>
           </div>
         </div>
-        <div class="setting-group setting-group-units">
+        <div class="pf-group pf-narrow">
+          <label>Период (дн.)</label>
+          <input type="number" :value="orderStore.settings.periodDays" @change="(e) => { orderStore.settings.periodDays = +e.target.value || 30; draftStore.save(); }" :disabled="orderStore.viewOnlyMode"/>
+        </div>
+        <div class="pf-group pf-narrow">
           <label>Единицы</label>
           <select :value="orderStore.settings.unit" @change="onUnitChange">
             <option value="pieces">Штуки</option>
             <option value="boxes">Коробки</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="pf-group pf-narrow">
           <label>Транзит</label>
           <select :value="orderStore.settings.hasTransit ? 'true' : 'false'" @change="(e) => { orderStore.settings.hasTransit = e.target.value === 'true'; draftStore.save(); }" :disabled="orderStore.viewOnlyMode">
             <option value="false">Нет</option>
             <option value="true">Да</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="pf-group pf-narrow">
           <label>Запас</label>
           <select :value="orderStore.settings.showStockColumn ? 'true' : 'false'" @change="(e) => { orderStore.settings.showStockColumn = e.target.value === 'true'; draftStore.save(); }" :disabled="orderStore.viewOnlyMode">
             <option value="true">Показать</option>
             <option value="false">Скрыть</option>
           </select>
         </div>
+        <div v-if="showCollapseHint" class="params-collapse-hint" @click="settingsExpanded = false; showCollapseHint = false;">
+          Параметры заполнены — нажмите чтобы свернуть ▲
+        </div>
+      </div>
+    </div>
+
+    <!-- Тулбар: поиск + действия -->
+    <div v-if="orderVisible" class="order-toolbar">
+      <div class="search-bar" v-if="!orderStore.viewOnlyMode" style="position:relative;display:flex;align-items:center;gap:8px;">
+        <div style="position:relative;display:inline-block;">
+          <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
+            @input="onSearchInput" ref="searchInputRef" style="width:280px;max-width:360px;padding-right:28px;"/>
+          <button v-if="searchQuery" @click="clearSearch"
+            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;"><BkIcon name="close" size="xs"/></button>
+          <div v-if="searchResults.length || (searchQuery.length >= 2 && searchDone)"
+            style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
+            <div v-for="p in searchResults" :key="p.id||p.sku"
+              @click="addFromSearch(p)"
+              style="padding:5px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;"
+              onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background=''">
+              <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
+            </div>
+            <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
+          </div>
+        </div>
+      </div>
+      <div class="order-actions">
+        <button class="btn small" :disabled="!orderStore.canUndo || orderStore.viewOnlyMode" @click="orderStore.undo" title="Отменить"><BkIcon name="undo" size="sm"/></button>
+        <button class="btn small" :disabled="!orderStore.canRedo || orderStore.viewOnlyMode" @click="orderStore.redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
+        <button class="compact-toggle" :class="{ active: compactMode }" @click="toggleCompact" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
+        <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
+        <button class="btn small" :disabled="orderStore.viewOnlyMode" @click="orderStore.applyAllCalculated" title="Все рассчитанные → В заказ">Все→Заказ</button>
+        <button class="btn small" :disabled="fillLoading || orderStore.viewOnlyMode" @click="fillFromLastOrder" title="Загрузить расход из последнего заказа">
+          <BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расход
+        </button>
+        <button class="btn small" :disabled="load1cLoading || orderStore.viewOnlyMode" @click="loadFrom1c" title="Загрузить из 1С">
+          <BkIcon v-if="load1cLoading" name="loading" size="sm"/><BkIcon v-else name="oneC" size="sm"/> 1С
+        </button>
+        <button class="btn small" :disabled="importLoading || orderStore.viewOnlyMode" @click="importFromExcel" title="Импорт из файла">
+          <BkIcon v-if="importLoading" name="loading" size="sm"/><BkIcon v-else name="import" size="sm"/> Импорт
+        </button>
+        <button class="btn small danger" :disabled="orderStore.viewOnlyMode" @click="clearOrder" title="Очистить данные">Очистить</button>
       </div>
     </div>
 
@@ -73,46 +121,7 @@
       <div v-if="!paramsReady && !orderStore.viewOnlyMode" class="order-lock-overlay" @click.stop>
         <div class="order-lock-msg">
           <BkIcon name="warning" size="sm"/>
-          Заполните все параметры: Сегодня, Дата прихода, Запас (дн.)
-        </div>
-      </div>
-
-      <!-- Поиск + кнопки работы с заказом -->
-      <div class="order-toolbar">
-        <div class="search-bar" v-if="!orderStore.viewOnlyMode" style="position:relative;display:flex;align-items:center;gap:8px;">
-          <div style="position:relative;display:inline-block;">
-            <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
-              @input="onSearchInput" ref="searchInputRef" style="min-width:360px;padding-right:28px;"/>
-            <button v-if="searchQuery" @click="clearSearch"
-              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;"><BkIcon name="close" size="xs"/></button>
-            <div v-if="searchResults.length || (searchQuery.length >= 2 && searchDone)"
-              style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
-              <div v-for="p in searchResults" :key="p.id||p.sku"
-                @click="addFromSearch(p)"
-                style="padding:5px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;"
-                onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background=''">
-                <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
-              </div>
-              <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
-            </div>
-          </div>
-        </div>
-        <div class="order-actions">
-          <button class="btn small" :disabled="!orderStore.canUndo || orderStore.viewOnlyMode" @click="orderStore.undo" title="Отменить"><BkIcon name="undo" size="sm"/></button>
-          <button class="btn small" :disabled="!orderStore.canRedo || orderStore.viewOnlyMode" @click="orderStore.redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
-          <button class="compact-toggle" :class="{ active: compactMode }" @click="toggleCompact" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
-          <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
-          <button class="btn small" :disabled="orderStore.viewOnlyMode" @click="orderStore.applyAllCalculated" title="Все рассчитанные → В заказ">Все→Заказ</button>
-          <button class="btn small" :disabled="fillLoading || orderStore.viewOnlyMode" @click="fillFromLastOrder" title="Загрузить расход из последнего заказа">
-            <BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расход
-          </button>
-          <button class="btn small" :disabled="load1cLoading || orderStore.viewOnlyMode" @click="loadFrom1c" title="Загрузить из 1С">
-            <BkIcon v-if="load1cLoading" name="loading" size="sm"/><BkIcon v-else name="oneC" size="sm"/> 1С
-          </button>
-          <button class="btn small" :disabled="importLoading || orderStore.viewOnlyMode" @click="importFromExcel" title="Импорт из файла">
-            <BkIcon v-if="importLoading" name="loading" size="sm"/><BkIcon v-else name="import" size="sm"/> Импорт
-          </button>
-          <button class="btn small danger" :disabled="orderStore.viewOnlyMode" @click="clearOrder" title="Очистить данные">Очистить</button>
+          Заполните параметры: раскройте панель выше и укажите дату прихода и запас
         </div>
       </div>
 
@@ -161,7 +170,7 @@
         <div class="modal-box order-result-modal">
           <div class="modal-header">
             <h2><BkIcon name="planning" size="sm"/> Результат заказа</h2>
-            <button class="modal-close" @click="orderResultModal.show = false"><BkIcon name="close" size="xs"/></button>
+            <button class="modal-close" @click="orderResultModal.show = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <!-- Result summary cards -->
           <div class="or-summary">
@@ -238,7 +247,7 @@ const toast         = useToastStore();
 const userStore     = useUserStore();
 
 const orderVisible          = ref(true);
-const settingsCollapsed     = ref(false);
+const settingsExpanded      = ref(false);
 const supplierLoading       = ref(false);
 const showShareDropdown     = ref(false);
 const showManualModal       = ref(false);
@@ -264,6 +273,13 @@ const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 const todayStr    = computed(() => toLocalDateStr(orderStore.settings.today));
 const deliveryStr = computed(() => toLocalDateStr(orderStore.settings.deliveryDate));
 const paramsReady = computed(() => orderStore.settings.today && orderStore.settings.deliveryDate && orderStore.settings.safetyDays > 0);
+const todayDisplay = computed(() => orderStore.settings.today instanceof Date && !isNaN(orderStore.settings.today) ? orderStore.settings.today.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '');
+const deliveryDisplay = computed(() => orderStore.settings.deliveryDate instanceof Date && !isNaN(orderStore.settings.deliveryDate) ? orderStore.settings.deliveryDate.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '');
+
+function toggleSettings() {
+  if (settingsExpanded.value && !paramsReady.value) return; // не закрывать пока не заполнено
+  settingsExpanded.value = !settingsExpanded.value;
+}
 
 const safetyDate = computed(() => {
   const delivery = orderStore.settings.deliveryDate;
@@ -287,16 +303,7 @@ function onSafetyDateChange(e) {
   orderStore.settings.safetyDays = Math.max(0, Math.round((target - delivery) / 86400000));
   draftStore.save();
 }
-function onToggleSettings() {
-  if (!settingsCollapsed.value) {
-    const s = orderStore.settings;
-    if (!s.today || !s.deliveryDate) {
-      toast.error('Заполните параметры', 'Укажите даты «Сегодня» и «Дата прихода»');
-      return;
-    }
-  }
-  settingsCollapsed.value = !settingsCollapsed.value;
-}
+
 const suppliers   = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
 
 const itemsWithOrderCount = computed(() => {
@@ -308,6 +315,12 @@ const itemsWithOrderCount = computed(() => {
   }).length;
 });
 
+// Показать подсказку «можно скрыть» когда параметры заполнены
+const showCollapseHint = ref(false);
+watch(paramsReady, (ready) => {
+  if (ready && settingsExpanded.value) { showCollapseHint.value = true; setTimeout(() => { showCollapseHint.value = false; }, 4000); }
+});
+
 // ─── Init ──────────────────────────────────────────────────────────────────────
 // Перезагружать поставщиков при смене юр. лица в сайдбаре
 watch(() => orderStore.settings.legalEntity, async (le) => {
@@ -316,6 +329,8 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 
 onMounted(async () => {
   if (!orderStore.settings.today) orderStore.settings.today = new Date();
+  // Авто-открытие параметров если обязательные поля не заполнены
+  if (!paramsReady.value) settingsExpanded.value = true;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
 
   // Загрузка заказа по ID из query params
@@ -340,7 +355,7 @@ onMounted(async () => {
     orderVisible.value = true;
   } else {
     const draft = draftStore.hasDraft();
-    if (draft) {
+    if (draft && draft.legalEntity === orderStore.settings.legalEntity) {
       const ok = await new Promise(resolve => {
         confirmModal.value = {
           show: true,

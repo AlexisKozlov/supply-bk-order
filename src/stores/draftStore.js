@@ -96,7 +96,11 @@ export const useDraftStore = defineStore('draft', () => {
     try {
       const data = JSON.parse(raw);
       if (!data.items || data.items.length === 0) return null;
-      return { date: new Date(data.timestamp).toLocaleString('ru-RU'), itemsCount: data.items.length };
+      return {
+        date: new Date(data.timestamp).toLocaleString('ru-RU'),
+        itemsCount: data.items.length,
+        legalEntity: data.settings?.legalEntity || '',
+      };
     } catch { return null; }
   }
 

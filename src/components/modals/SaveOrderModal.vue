@@ -4,7 +4,7 @@
       <div class="modal-box save-modal">
         <div class="modal-header">
           <h2><BkIcon name="save" size="sm"/> {{ isEditing ? 'Обновить заказ' : 'Сохранить заказ' }}</h2>
-          <button class="modal-close" @click="$emit('cancel')"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="$emit('cancel')"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <!-- Summary cards -->
@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const props = defineProps({
@@ -87,7 +87,14 @@ const deliveryDateStr = computed(() => {
   if (!props.deliveryDate) return '—';
   return new Date(props.deliveryDate).toLocaleDateString('ru-RU');
 });
-onMounted(() => setTimeout(() => noteInput.value?.focus(), 50));
+function onKey(e) {
+  if (e.key === 'Escape') emit('cancel');
+}
+onMounted(() => {
+  document.addEventListener('keydown', onKey);
+  setTimeout(() => noteInput.value?.focus(), 50);
+});
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 function doConfirm() { emit('confirm', note.value.trim()); }
 </script>
 

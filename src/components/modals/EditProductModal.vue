@@ -4,7 +4,7 @@
       <div class="modal-box">
         <div class="modal-header">
           <h2><BkIcon v-if="mode === 'create'" name="add" size="sm"/> <BkIcon v-else name="edit" size="sm"/> {{ mode === 'create' ? 'Новый товар' : 'Редактирование карточки' }}</h2>
-          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="xs"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <input v-model="form.sku" placeholder="Артикул" />
@@ -72,7 +72,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -105,7 +105,11 @@ const form = ref({
   multiplicity: '', unit_of_measure: 'шт',
 });
 
+function onKey(e) {
+  if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
+}
 onMounted(async () => {
+  document.addEventListener('keydown', onKey);
   if (props.productId || props.sku) {
     await loadProduct();
   }
@@ -113,6 +117,7 @@ onMounted(async () => {
   initialized = true;
   initialForm = JSON.stringify(form.value);
 });
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 function isDirty() {
   return JSON.stringify(form.value) !== initialForm;

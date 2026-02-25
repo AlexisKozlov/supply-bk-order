@@ -158,7 +158,7 @@
         <div class="modal-box log-modal-box">
           <div class="modal-header">
             <h2><BkIcon name="note" size="sm"/> Лог изменений</h2>
-            <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="xs"/></button>
+            <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="log-modal-body">
             <div v-if="logModal.loading" style="text-align:center;padding:24px;"><BurgerSpinner size="sm" /></div>

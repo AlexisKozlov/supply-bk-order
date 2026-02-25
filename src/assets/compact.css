@@ -7,28 +7,26 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 10px;
+  padding: 5px 10px;
   font-size: 11px;
   font-weight: 600;
-  border-radius: 4px;
-  border: 1.5px solid var(--bk-orange);
-  background: white;
-  color: var(--bk-orange);
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--text);
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.15s;
+  transition: all var(--transition);
   white-space: nowrap;
 }
 .compact-toggle:hover {
-  background: var(--orange-bg);
-  color: var(--bk-brown);
-  border-color: var(--bk-brown);
+  transform: translateY(-1px);
+  background: var(--bg);
 }
 .compact-toggle.active {
-  background: var(--bk-orange);
-  color: white;
+  background: var(--bk-cream);
   border-color: var(--bk-orange);
-  box-shadow: 0 1px 3px rgba(245,166,35,0.3);
+  color: var(--bk-brown);
 }
 
 /* ─── Table cells ─── */
