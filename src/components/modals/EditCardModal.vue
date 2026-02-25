@@ -223,7 +223,7 @@ async function save() {
   try {
     const payload = {
       name: form.value.name, sku: form.value.sku || null, supplier: form.value.supplier || null,
-      legal_entity: form.value.legal_entity, qty_per_box: Math.round(+form.value.qty_per_box) || null,
+      legal_entity: form.value.legal_entity, qty_per_box: +form.value.qty_per_box || null,
       boxes_per_pallet: Math.round(+form.value.boxes_per_pallet) || null, multiplicity: Math.round(+form.value.multiplicity) || 0,
       unit_of_measure: form.value.unit_of_measure || 'шт',
       analog_group: form.value.analog_group || null,

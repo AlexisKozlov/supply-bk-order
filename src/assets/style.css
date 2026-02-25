@@ -2491,3 +2491,24 @@ button:disabled .bk-icon-wrap svg {
   }
 }
 
+/* ═══════════════════════════════════════
+   VIEWER PLACEHOLDER
+   ═══════════════════════════════════════ */
+.viewer-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+}
+.viewer-placeholder-inner {
+  text-align: center;
+  padding: 48px 32px;
+  background: var(--card);
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  max-width: 420px;
+}
+.viewer-placeholder-inner .bk-icon { font-size: 48px; color: var(--text-muted); margin-bottom: 12px; }
+.viewer-placeholder-inner h2 { margin: 0 0 8px; font-size: 20px; color: var(--text); }
+.viewer-placeholder-inner p { margin: 0 0 20px; font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+

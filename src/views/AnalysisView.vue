@@ -45,11 +45,11 @@
 
     <!-- Тулбар -->
     <div class="anv-toolbar" v-if="items.length">
-      <button class="btn small" @click="doImport" :disabled="importLoading || savingData">
+      <button v-if="!isViewer" class="btn small" @click="doImport" :disabled="importLoading || savingData">
         <BkIcon v-if="importLoading" name="loading" size="sm"/>
         <BkIcon v-else name="import" size="sm"/> Импорт
       </button>
-      <button class="btn small" @click="loadFrom1c" :disabled="load1cLoading || savingData">
+      <button v-if="!isViewer" class="btn small" @click="loadFrom1c" :disabled="load1cLoading || savingData">
         <BkIcon v-if="load1cLoading" name="loading" size="sm"/>
         <BkIcon v-else name="oneC" size="sm"/> 1С
       </button>
@@ -116,7 +116,7 @@
                     <span class="anv-days" :class="daysClass(group.groupDays)">{{ formatDays(group.groupDays) }}</span>
                   </td>
                   <td class="anv-action-cell" @click.stop>
-                    <button v-if="group.groupDays !== Infinity && group.groupDays < 7 && group.mainSupplier" class="anv-order-btn" @click="goToOrder(group.mainSupplier)" title="Заказать">
+                    <button v-if="!isViewer && group.groupDays !== Infinity && group.groupDays < 7 && group.mainSupplier" class="anv-order-btn" @click="goToOrder(group.mainSupplier)" title="Заказать">
                       <BkIcon name="package" size="xs"/>
                     </button>
                   </td>
@@ -170,7 +170,7 @@
               <span>{{ g.name }}</span>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="anv-days anv-days-sm anv-d-red">{{ formatDays(g.groupDays) }}</span>
-                <button v-if="g.mainSupplier" class="anv-order-btn anv-order-btn-sm" @click.stop="goToOrder(g.mainSupplier)" title="Заказать"><BkIcon name="package" size="xs"/></button>
+                <button v-if="!isViewer && g.mainSupplier" class="anv-order-btn anv-order-btn-sm" @click.stop="goToOrder(g.mainSupplier)" title="Заказать"><BkIcon name="package" size="xs"/></button>
               </div>
             </div>
           </div>
@@ -183,7 +183,7 @@
               <span>{{ g.name }}</span>
               <div style="display:flex;align-items:center;gap:4px;">
                 <span class="anv-days anv-days-sm anv-d-orange">{{ formatDays(g.groupDays) }}</span>
-                <button v-if="g.mainSupplier" class="anv-order-btn anv-order-btn-sm" @click.stop="goToOrder(g.mainSupplier)" title="Заказать"><BkIcon name="package" size="xs"/></button>
+                <button v-if="!isViewer && g.mainSupplier" class="anv-order-btn anv-order-btn-sm" @click.stop="goToOrder(g.mainSupplier)" title="Заказать"><BkIcon name="package" size="xs"/></button>
               </div>
             </div>
           </div>
@@ -227,6 +227,7 @@ const router = useRouter();
 const orderStore = useOrderStore();
 const userStore = useUserStore();
 const toast = useToastStore();
+const isViewer = computed(() => userStore.isViewer);
 
 const periodDays = ref(30);
 const unit = ref('pieces');
@@ -438,11 +439,9 @@ const groupsWithData = computed(() => {
   const arr = Array.from(map.values());
   for (const g of arr) {
     g.groupDays = calcDays(g.rawTotalStock, g.rawTotalConsumption);
-    const avgQpb = g.items.length > 0
-      ? g.items.reduce((s, i) => s + i.qtyPerBox, 0) / g.items.length
-      : 1;
-    g.totalStock = toUnit(g.rawTotalStock, avgQpb);
-    g.totalConsumption = toUnit(g.rawTotalConsumption, avgQpb);
+    // Суммируем уже сконвертированные значения каждого товара (вместо среднего qpb)
+    g.totalStock = Math.round(g.items.reduce((s, i) => s + i.displayStock, 0) * 10) / 10;
+    g.totalConsumption = Math.round(g.items.reduce((s, i) => s + i.displayConsumption, 0) * 10) / 10;
     g.items.sort((a, b) => a.daysOfStock - b.daysOfStock);
     // Основной поставщик — самый частый
     const sc = g.supplierCounts;
@@ -541,13 +540,7 @@ async function doImport() {
     if (!result) return;
     if (result.error) { toast.error('Ошибка импорта', result.error); return; }
     const imported = result.items;
-    if (isBoxes.value) {
-      imported.forEach(item => {
-        const qpb = item.qtyPerBox || 1;
-        if (item.stock) item.stock = Math.round(item.stock / qpb);
-        if (item.consumption) item.consumption = Math.round(item.consumption / qpb);
-      });
-    }
+    // Данные из importFromFile уже в штуках — сохраняем как есть (без конвертации)
     items.value = imported;
     toast.success('Импорт завершён', `Сопоставлено: ${result.matched} из ${items.value.length}`);
     saveDataToDB();
@@ -580,11 +573,10 @@ async function loadFrom1c() {
     items.value.forEach(item => {
       const d = item.sku ? stockMap.get(item.sku) : null;
       if (!d) return;
-      const qpb = item.qtyPerBox || 1;
-      item.stock = isBoxes.value ? Math.round(d.stock / qpb) : Math.round(d.stock || 0);
+      // Всегда храним в штуках — конвертация в коробки только при отображении (toUnit)
+      item.stock = Math.round(d.stock || 0);
       const daily = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
-      const adj = daily * periodDays.value;
-      item.consumption = isBoxes.value ? Math.round(adj / qpb) : Math.round(adj);
+      item.consumption = Math.round(daily * periodDays.value);
       filled++;
     });
 

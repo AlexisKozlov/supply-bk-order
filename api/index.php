@@ -50,7 +50,12 @@ $subpoint = $parts[1] ?? null;
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
-function respond($d, $c = 200) { http_response_code($c); echo json_encode($d, JSON_UNESCAPED_UNICODE); exit; }
+function respond($d, $c = 200) { http_response_code($c); echo json_encode($d, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION); exit; }
+function cleanNumeric($rows) {
+    $decimal = ['qty_per_box'];
+    foreach ($rows as &$r) { foreach ($decimal as $col) { if (isset($r[$col])) $r[$col] = +$r[$col]; } }
+    return $rows;
+}
 function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0x0fff)|0x4000,mt_rand(0,0x3fff)|0x8000,mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff)); }
 
 function checkApiKey($pdo) {
@@ -139,7 +144,7 @@ if ($endpoint === 'search_products') {
     $sql = "SELECT * FROM `products` WHERE " . implode(' AND ', $where) . " LIMIT " . $limit;
     $s = $pdo->prepare($sql);
     $s->execute($params);
-    respond($s->fetchAll());
+    respond(cleanNumeric($s->fetchAll()));
 }
 
 // ═══ RPC ═══
@@ -159,7 +164,10 @@ if ($endpoint === 'rpc') {
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
         $displayRole = $u['display_role'] ?? null;
-        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le],'api_key'=>$s2->fetchColumn()]);
+        $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
+        $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
+        foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
+        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le],'api_key'=>$s2->fetchColumn(),'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
@@ -181,6 +189,12 @@ if ($endpoint === 'rpc') {
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$newPwd, $name]);
         respond(['success'=>true]);
     }
+    if ($fn === 'check_maintenance') {
+        $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
+        $rows = $s->fetchAll(); $mm = 'false'; $msg = '';
+        foreach ($rows as $r) { if ($r['key'] === 'maintenance_mode') $mm = $r['value']; if ($r['key'] === 'maintenance_message') $msg = $r['value']; }
+        respond(['maintenance_mode' => $mm === 'true', 'maintenance_message' => $msg ?: null]);
+    }
     respond(['error'=>'Unknown RPC: '.$fn], 404);
 }
 
@@ -188,7 +202,9 @@ if ($endpoint === 'rpc') {
 if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','api_keys','analysis_data'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data'];
+// Защита: users — только чтение (без password), запись только через RPC
+$readOnly = ['audit_log','search_logs'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found: '.$endpoint], 404); }
 $table = $endpoint;
 
@@ -242,18 +258,24 @@ if ($method === 'GET') {
 
     $s = $pdo->prepare($sql); $s->execute($params); $data = $s->fetchAll();
 
-    if ($hasSubSelect && $subTable) {
+    if ($hasSubSelect && $subTable && in_array($subTable, $allowed)) {
         $fk = $table === 'orders' ? 'order_id' : 'id';
         foreach ($data as &$row) { $s2 = $pdo->prepare("SELECT $subCols FROM `$subTable` WHERE `$fk`=?"); $s2->execute([$row['id']]); $row[$subTable] = $s2->fetchAll(); }
     }
+    if ($table === 'products') $data = cleanNumeric($data);
+    // Скрыть пароль при чтении users
+    if ($table === 'users') { foreach ($data as &$r) { unset($r['password']); } }
     respond($data);
 }
 
 if ($method === 'POST') {
+    if (empty($body)) respond(['error' => 'Empty body'], 400);
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
         if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
+        // Валидация имён колонок
+        foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
         $cols = array_keys($rec); $ph = implode(',', array_fill(0, count($cols), '?')); $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
         try {
             $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph)"); $s->execute(array_values($rec));
@@ -268,10 +290,14 @@ if ($method === 'POST') {
 
 if ($method === 'PATCH' || $method === 'PUT') {
     $where = []; $params = [];
-    foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset'])) continue; parseFilter($k, $v, $where, $params, $pdo, $table); }
+    foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; parseFilter($k, $v, $where, $params, $pdo, $table); }
+    if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params);
     if ($subpoint) { $where = ["`id`=?"]; $params = [$subpoint]; }
     if (!$where) respond(['error'=>'No filters'], 400);
+    if (empty($body)) respond(['error' => 'Empty body'], 400);
     foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($body[$jc]) && is_array($body[$jc])) $body[$jc] = json_encode($body[$jc], JSON_UNESCAPED_UNICODE); }
+    // Валидация имён колонок
+    foreach (array_keys($body) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
     $set = []; $sp = [];
     foreach ($body as $c => $v) { $set[] = "`$c`=?"; $sp[] = $v; }
     $all = array_merge($sp, $params);
@@ -287,7 +313,7 @@ if ($method === 'PATCH' || $method === 'PUT') {
 if ($method === 'DELETE') {
     $where = []; $params = [];
     if ($subpoint) { $where[] = "`id`=?"; $params[] = $subpoint; }
-    else { foreach ($_GET as $k => $v) { parseFilter($k, $v, $where, $params, $pdo, $table); } }
+    else { foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params); }
     if (!$where) respond(['error'=>'No filters'], 400);
     $s = $pdo->prepare("DELETE FROM `$table` WHERE " . implode(' AND ', $where)); $s->execute($params);
     respond(['deleted' => $s->rowCount()]);

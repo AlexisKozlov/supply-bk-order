@@ -54,7 +54,7 @@ async function doLogin() {
   error.value = '';
   loading.value = true;
   try {
-    await userStore.login(selectedUser.value, password.value);
+    const user = await userStore.login(selectedUser.value, password.value);
     // Mark as just logged in for welcome screen
     sessionStorage.setItem('bk_just_logged_in', '1');
     // Redirect to intended page or default
@@ -62,7 +62,7 @@ async function doLogin() {
     if (redirect && redirect !== '/login') {
       router.push(redirect);
     } else {
-      router.push({ name: 'order' });
+      router.push({ name: user?.role === 'viewer' ? 'history' : 'order' });
     }
   } catch (e) {
     error.value = e.message || 'Неверный пароль';

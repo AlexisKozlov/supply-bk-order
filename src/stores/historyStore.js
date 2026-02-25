@@ -17,25 +17,31 @@ export const useHistoryStore = defineStore('history', () => {
     loading.value = true;
     error.value = null;
 
-    let query = db
-      .from('orders')
-      .select(`id, delivery_date, today_date, supplier, legal_entity,
-               safety_days, period_days, unit, note, created_at, created_by,
-               has_transit, show_stock_column,
-               order_items(sku, name, qty_boxes, qty_per_box, consumption_period, stock, transit)`)
-      .order('delivery_date', { ascending: false })
-      .limit(50);
+    try {
+      let query = db
+        .from('orders')
+        .select(`id, delivery_date, today_date, supplier, legal_entity,
+                 safety_days, period_days, unit, note, created_at, created_by,
+                 has_transit, show_stock_column,
+                 order_items(sku, name, qty_boxes, qty_per_box, consumption_period, stock, transit)`)
+        .order('delivery_date', { ascending: false })
+        .limit(50);
 
-    if (legalEntity) query = query.eq('legal_entity', legalEntity);
-    if (supplier)    query = query.eq('supplier', supplier);
+      if (legalEntity) query = query.eq('legal_entity', legalEntity);
+      if (supplier)    query = query.eq('supplier', supplier);
 
-    const { data, error: err } = await query;
-    loading.value = false;
+      const { data, error: err } = await query;
 
-    if (err) { error.value = err.message; return []; }
+      if (err) { error.value = err; return []; }
 
-    orders.value = data || [];
-    return orders.value;
+      orders.value = data || [];
+      return orders.value;
+    } catch (e) {
+      error.value = e.message || 'Ошибка загрузки';
+      return [];
+    } finally {
+      loading.value = false;
+    }
   }
 
   // ─── Загрузить историю планов ─────────────────────────────────────────────
@@ -43,14 +49,21 @@ export const useHistoryStore = defineStore('history', () => {
 
   async function loadPlans({ legalEntity, supplier = '' } = {}) {
     loading.value = true;
-    let query = db.from('plans').select('*').order('created_at', { ascending: false }).limit(50);
-    if (legalEntity) query = query.eq('legal_entity', legalEntity);
-    if (supplier)    query = query.eq('supplier', supplier);
-    const { data, error: err } = await query;
-    loading.value = false;
-    if (err) { error.value = err.message; return []; }
-    plans.value = data || [];
-    return plans.value;
+    error.value = null;
+    try {
+      let query = db.from('plans').select('*').order('created_at', { ascending: false }).limit(50);
+      if (legalEntity) query = query.eq('legal_entity', legalEntity);
+      if (supplier)    query = query.eq('supplier', supplier);
+      const { data, error: err } = await query;
+      if (err) { error.value = err; return []; }
+      plans.value = data || [];
+      return plans.value;
+    } catch (e) {
+      error.value = e.message || 'Ошибка загрузки';
+      return [];
+    } finally {
+      loading.value = false;
+    }
   }
 
   // ─── Удалить заказ ────────────────────────────────────────────────────────

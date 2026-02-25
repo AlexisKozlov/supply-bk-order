@@ -39,8 +39,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     unit:              settings.unit        || 'pieces',
     legal_entity:      settings.legalEntity,
     note:              note || null,
-    has_transit:       String(settings.hasTransit || false),
-    show_stock_column: String(settings.showStockColumn || false),
+    has_transit:       settings.hasTransit ? 1 : 0,
+    show_stock_column: settings.showStockColumn ? 1 : 0,
   };
 
   let orderId;
@@ -62,7 +62,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       .eq('order_id', editingOrderId);
 
     const { error } = await db.from('orders').update(orderData).eq('id', editingOrderId);
-    if (error) return { error: 'Не удалось обновить заказ: ' + error.message };
+    if (error) return { error: 'Не удалось обновить заказ: ' + error };
 
     await db.from('order_items').delete().eq('order_id', editingOrderId);
     orderId = editingOrderId;
@@ -111,7 +111,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     orderData.created_by = userName || null;
     orderData.created_at = new Date().toISOString();
     const { data: order, error } = await db.from('orders').insert(orderData).select().single();
-    if (error) return { error: 'Не удалось сохранить заказ: ' + error.message };
+    if (error) return { error: 'Не удалось сохранить заказ: ' + error };
     orderId = order.id;
     auditAction  = 'order_created';
     auditDetails = { supplier: settings.supplier, legal_entity: settings.legalEntity, items_count: itemsWithOrder.length, total_items: allItems.length };
@@ -121,7 +121,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
   const { error: itemsError } = await db.from('order_items').insert(
     itemsWithOrder.map(i => ({ order_id: orderId, ...i }))
   );
-  if (itemsError) return { error: 'Не удалось сохранить состав заказа: ' + itemsError.message };
+  if (itemsError) return { error: 'Не удалось сохранить состав заказа: ' + itemsError };
 
   // Аудит-лог (не блокируем)
   try {

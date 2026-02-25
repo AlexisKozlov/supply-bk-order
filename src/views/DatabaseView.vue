@@ -11,10 +11,10 @@
           <span class="db-at-switch"><span class="db-at-knob"></span></span>
           Без группы аналогов <span class="db-at-count">{{ noAnalogCount }}</span>
         </button>
-        <button class="btn primary" @click="openNew('product')" style="font-size:14px;padding:8px 18px;">+ Новый товар</button>
-        <button class="btn secondary" @click="showImportModal = true" style="font-size:14px;padding:8px 18px;">Импорт из Excel</button>
+        <button v-if="!isViewer" class="btn primary" @click="openNew('product')" style="font-size:11px;padding:5px 12px;">+ Товар</button>
+        <button v-if="!isViewer" class="btn secondary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт</button>
       </div>
-      <button v-else-if="activeTab==='suppliers'" class="btn primary" @click="openNew('supplier')" style="font-size:14px;padding:8px 18px;">+ Новый поставщик</button>
+      <button v-else-if="activeTab==='suppliers' && !isViewer" class="btn primary" @click="openNew('supplier')" style="font-size:11px;padding:5px 12px;">+ Поставщик</button>
     </div>
 
     <!-- Табы -->
@@ -45,7 +45,7 @@
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredProducts.length" style="text-align:center;padding:40px;color:var(--text-muted);">Карточки не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="p in filteredProducts" :key="p.id" class="db-card" :class="{ 'db-card-inactive': p.is_active === 0 || p.is_active === '0' }" @click="editProduct(p)">
+        <div v-for="p in filteredProducts" :key="p.id" class="db-card" :class="{ 'db-card-inactive': p.is_active === 0 || p.is_active === '0' }" @click="!isViewer && editProduct(p)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
             <div class="db-card-title">
               <span v-if="p.sku" class="db-card-sku">{{ p.sku }}</span>
@@ -59,7 +59,7 @@
             <span v-if="p.multiplicity > 1">×{{ p.multiplicity }}</span>
             <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">неактивна</span>
           </div>
-          <div class="db-card-btns">
+          <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="editProduct(p)"><BkIcon name="edit" size="sm"/></button>
             <button class="db-card-btn db-card-btn-del" @click.stop="deleteProduct(p)"><BkIcon name="delete" size="sm"/></button>
           </div>
@@ -72,7 +72,7 @@
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="s in filteredSuppliers" :key="s.id" class="db-card" @click="editSupplier(s)">
+        <div v-for="s in filteredSuppliers" :key="s.id" class="db-card" @click="!isViewer && editSupplier(s)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
             <span class="db-card-supplier-name">{{ s.short_name }}</span>
             <span v-if="s.full_name" style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ s.full_name }}</span>
@@ -83,7 +83,7 @@
             <span class="db-contact vb" :class="{ active: s.viber }">Viber</span>
             <span class="db-contact em" :class="{ active: s.email }">Email</span>
           </div>
-          <div class="db-card-btns">
+          <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="editSupplier(s)"><BkIcon name="edit" size="sm"/></button>
             <button class="db-card-btn db-card-btn-del" @click.stop="deleteSupplier(s)"><BkIcon name="delete" size="sm"/></button>
           </div>
@@ -103,14 +103,14 @@
               <span class="analog-group-name">{{ group.name }}</span>
               <span class="db-tab-count">{{ group.items.length }}</span>
             </div>
-            <button class="db-card-btn" @click.stop="editAnalogGroup(group)" title="Переименовать группу"><BkIcon name="edit" size="sm"/></button>
+            <button v-if="!isViewer" class="db-card-btn" @click.stop="editAnalogGroup(group)" title="Переименовать группу"><BkIcon name="edit" size="sm"/></button>
           </div>
           <div v-if="expandedGroups.has(group.name)" class="analog-group-items">
-            <div v-for="p in group.items" :key="p.id" class="analog-item" @click="editProduct(p)">
+            <div v-for="p in group.items" :key="p.id" class="analog-item" @click="!isViewer && editProduct(p)" :style="isViewer ? 'cursor:default' : ''">
               <span v-if="p.sku" class="db-card-sku">{{ p.sku }}</span>
               <span class="db-card-name" style="flex:1;">{{ p.name }}</span>
               <span style="font-size:11px;color:var(--text-muted);">{{ p.supplier || '—' }}</span>
-              <button class="db-card-btn db-card-btn-del" @click.stop="removeFromGroup(p)" title="Убрать из группы"><BkIcon name="close" size="xs"/></button>
+              <button v-if="!isViewer" class="db-card-btn db-card-btn-del" @click.stop="removeFromGroup(p)" title="Убрать из группы"><BkIcon name="close" size="xs"/></button>
             </div>
           </div>
         </div>
@@ -149,6 +149,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -163,8 +164,10 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 const route = useRoute();
 const router = useRouter();
 const toast = useToastStore();
+const userStore = useUserStore();
 const supplierStore = useSupplierStore();
 const orderStore = useOrderStore();
+const isViewer = computed(() => userStore.isViewer);
 
 const activeTab = ref('products');
 const searchQuery = ref('');
@@ -229,8 +232,8 @@ watch(() => route.query, (q) => {
 });
 
 watch(() => orderStore.settings.legalEntity, () => {
-  if (activeTab.value === 'products') loadProducts();
-  else loadSuppliers();
+  if (activeTab.value === 'products' || activeTab.value === 'analogs') loadProducts();
+  if (activeTab.value === 'suppliers' || activeTab.value === 'analogs') loadSuppliers();
 });
 
 onMounted(() => {

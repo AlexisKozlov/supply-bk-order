@@ -4,8 +4,12 @@ import { db, setApiKey } from '@/lib/apiClient.js';
 
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref(null);
+  const maintenanceMode = ref(false);
+  const maintenanceMessage = ref('');
 
   const isAuthenticated = computed(() => !!currentUser.value);
+  const isAdmin = computed(() => currentUser.value?.role === 'admin');
+  const isViewer = computed(() => currentUser.value?.role === 'viewer');
 
   function restoreSession() {
     try {
@@ -35,6 +39,12 @@ export const useUserStore = defineStore('user', () => {
       const user = data.user || { name, role: 'user' };
       currentUser.value = user;
       localStorage.setItem('bk_user', JSON.stringify(user));
+      if (data.maintenance_mode !== undefined) {
+        maintenanceMode.value = !!data.maintenance_mode;
+      }
+      if (data.maintenance_message !== undefined) {
+        maintenanceMessage.value = data.maintenance_message || '';
+      }
       return user;
     }
 
@@ -43,6 +53,8 @@ export const useUserStore = defineStore('user', () => {
 
   function logout() {
     currentUser.value = null;
+    maintenanceMode.value = false;
+    maintenanceMessage.value = '';
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -58,13 +70,26 @@ export const useUserStore = defineStore('user', () => {
     return allowed;
   }
 
+  async function checkMaintenance() {
+    try {
+      const { data } = await db.rpc('check_maintenance');
+      maintenanceMode.value = !!data?.maintenance_mode;
+      maintenanceMessage.value = data?.maintenance_message || '';
+    } catch (e) { /* noop */ }
+  }
+
   return {
     currentUser,
     isAuthenticated,
+    isAdmin,
+    isViewer,
+    maintenanceMode,
+    maintenanceMessage,
     restoreSession,
     fetchUserList,
     login,
     logout,
     getAllowedEntities,
+    checkMaintenance,
   };
 });

@@ -6,8 +6,18 @@
       <span v-else-if="editingPlanId" class="editing-badge" style="cursor:pointer" @click="resetPlan"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
+    <!-- Viewer заглушка -->
+    <div v-if="isViewer && !viewOnly && !editingPlanId" class="viewer-placeholder">
+      <div class="viewer-placeholder-inner">
+        <BkIcon name="eye" size="lg"/>
+        <h2>Режим просмотра</h2>
+        <p>Вы можете просматривать сохранённые планы через раздел <b>История</b>.</p>
+        <button class="btn primary" @click="$router.push({ name: 'history' })"><BkIcon name="history" size="sm"/> Перейти в историю</button>
+      </div>
+    </div>
+
     <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
-    <div class="params-block" :class="{ open: settingsExpanded }">
+    <div v-if="!(isViewer && !viewOnly && !editingPlanId)" class="params-block" :class="{ open: settingsExpanded }">
       <div class="params-summary" @click="toggleSettings">
         <BkIcon name="gear" size="sm" class="params-icon"/>
         <span class="ps-chip"><b>{{ supplier || 'Не выбран' }}</b></span>
@@ -60,7 +70,7 @@
     </div>
 
     <!-- Тулбар: действия -->
-    <div class="order-toolbar" v-if="items.length">
+    <div class="order-toolbar" v-if="items.length && !(isViewer && !viewOnly && !editingPlanId)">
       <div class="order-actions">
         <button class="btn small" :disabled="!canUndo || viewOnly" @click="undo" title="Отменить"><BkIcon name="undo" size="sm"/></button>
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
@@ -74,7 +84,8 @@
     </div>
 
     <!-- Таблица -->
-    <div v-if="!supplier" style="text-align:center;padding:40px;color:var(--text-muted);">Выберите поставщика</div>
+    <div v-if="isViewer && !viewOnly && !editingPlanId"></div>
+    <div v-else-if="!supplier" style="text-align:center;padding:40px;color:var(--text-muted);">Выберите поставщика</div>
     <div v-else-if="suppLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
     <div v-else-if="!items.length" style="text-align:center;padding:40px;color:var(--text-muted);">Нет товаров у «{{ supplier }}»</div>
     <div v-else class="order-table-wrapper" :class="{ 'plan-compact': compactPlan }">
@@ -153,7 +164,7 @@
     <!-- Кнопки завершения -->
     <div v-if="items.length" class="toolbar-row toolbar-finish" style="margin-top:12px;" v-show="!isFullscreen">
       <div class="toolbar-spacer"></div>
-      <button class="btn primary" @click="savePlan" :disabled="!itemsWithPlan.length || viewOnly"><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</button>
+      <button v-if="!isViewer" class="btn primary" @click="savePlan" :disabled="!itemsWithPlan.length || viewOnly"><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</button>
       <button class="btn" @click="copyPlanToClipboard" :disabled="!itemsWithPlan.length"><BkIcon name="history" size="sm"/> Копировать</button>
       <button class="btn" @click="exportExcel" :disabled="!itemsWithPlan.length"><BkIcon name="excel" size="sm"/> Excel</button>
     </div>
@@ -220,6 +231,7 @@ const draftStore = useDraftStore();
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
+const isViewer = computed(() => userStore.isViewer);
 const supplier = ref('');
 const periodValue = ref('m3');
 const startDateStr = ref(toLocalDateStr(new Date()));

@@ -34,7 +34,7 @@
 
       <div class="sidebar-section" v-if="!sidebarCollapsed">Данные</div>
       <nav class="sidebar-nav">
-        <router-link :to="{ name: 'database', query: { action: 'new-product' } }" class="sidebar-item">
+        <router-link v-if="!userStore.isViewer" :to="{ name: 'database', query: { action: 'new-product' } }" class="sidebar-item">
           <span class="sidebar-icon"><BkIcon name="add" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">Новый товар</span>
         </router-link>
@@ -59,6 +59,16 @@
           <span v-if="!sidebarCollapsed">Анализ</span>
         </router-link>
       </nav>
+
+      <template v-if="userStore.isAdmin">
+        <div class="sidebar-section" v-if="!sidebarCollapsed">Администрирование</div>
+        <nav class="sidebar-nav">
+          <router-link :to="{ name: 'admin' }" class="sidebar-item" :class="{ active: currentRoute === 'admin' }">
+            <span class="sidebar-icon"><BkIcon name="gear" size="sm" light/></span>
+            <span v-if="!sidebarCollapsed">Админ панель</span>
+          </router-link>
+        </nav>
+      </template>
       </div>
 
       <!-- Юр. лицо (над пользователем, внизу) -->
@@ -73,6 +83,9 @@
       <div class="sidebar-bottom" v-if="userStore.currentUser">
         <!-- Dropdown menu -->
         <div v-if="showUserMenu" class="user-dropdown" :class="{ 'user-dropdown-wide': sidebarCollapsed }">
+          <button v-if="userStore.isAdmin" class="user-dropdown-btn" @click="goToAdmin">
+            <BkIcon name="gear" size="sm" light/> Админ панель
+          </button>
           <button class="user-dropdown-btn" @click="showChangePassword = true; showUserMenu = false;">
             <BkIcon name="key" size="sm" light/> Сменить пароль
           </button>
@@ -209,7 +222,10 @@ const pwdError = ref('');
 const pwdSuccess = ref('');
 const pwdLoading = ref(false);
 
-router.afterEach(() => { sidebarOpen.value = false; });
+router.afterEach(() => {
+  sidebarOpen.value = false;
+  if (!userStore.isAdmin) userStore.checkMaintenance();
+});
 
 const currentRoute = computed(() => route.name);
 
@@ -245,10 +261,18 @@ onMounted(() => {
   }
 
   document.addEventListener('click', handleOutsideClick);
+
+  // Периодическая проверка тех. работ (каждые 60 сек)
+  if (!userStore.isAdmin) {
+    userStore.checkMaintenance();
+    maintenanceTimer = setInterval(() => userStore.checkMaintenance(), 60000);
+  }
 });
 
+let maintenanceTimer = null;
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
+  if (maintenanceTimer) clearInterval(maintenanceTimer);
 });
 
 function handleOutsideClick(e) {
@@ -259,6 +283,11 @@ function handleOutsideClick(e) {
 
 function toggleUserMenu() {
   showUserMenu.value = !showUserMenu.value;
+}
+
+function goToAdmin() {
+  showUserMenu.value = false;
+  router.push({ name: 'admin' });
 }
 
 const showEntityConfirm = ref(false);

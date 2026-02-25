@@ -19,6 +19,7 @@ const routes = [
       { path: 'calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue') },
       { path: 'analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue') },
       { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue') },
+      { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
     ],
   },
@@ -51,5 +52,8 @@ router.beforeEach((to) => {
   }
   if (to.meta.requiresAuth && !userStore.isAuthenticated) {
     return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
+  }
+  if (to.meta.requiresAdmin && userStore.currentUser?.role !== 'admin') {
+    return { name: 'order' };
   }
 });

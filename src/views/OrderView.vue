@@ -7,8 +7,18 @@
       <span v-else-if="orderStore.editingOrderId" class="editing-badge" style="cursor:pointer" @click="exitEditMode"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
+    <!-- Viewer заглушка: viewer не может создавать/редактировать заказы -->
+    <div v-if="isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId" class="viewer-placeholder">
+      <div class="viewer-placeholder-inner">
+        <BkIcon name="eye" size="lg"/>
+        <h2>Режим просмотра</h2>
+        <p>Вы можете просматривать сохранённые заказы через раздел <b>История</b>.</p>
+        <button class="btn primary" @click="$router.push({ name: 'history' })"><BkIcon name="history" size="sm"/> Перейти в историю</button>
+      </div>
+    </div>
+
     <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
-    <div v-if="orderVisible" class="params-block" :class="{ open: settingsExpanded }">
+    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="params-block" :class="{ open: settingsExpanded }">
       <div class="params-summary" @click="toggleSettings">
         <BkIcon name="gear" size="sm" class="params-icon"/>
         <span class="ps-chip"><b>{{ orderStore.settings.supplier || 'Не выбран' }}</b></span>
@@ -50,7 +60,7 @@
         </div>
         <div class="pf-group pf-narrow">
           <label>Единицы</label>
-          <select :value="orderStore.settings.unit" @change="onUnitChange">
+          <select :value="orderStore.settings.unit" @change="onUnitChange" :disabled="orderStore.viewOnlyMode">
             <option value="pieces">Штуки</option>
             <option value="boxes">Коробки</option>
           </select>
@@ -76,7 +86,7 @@
     </div>
 
     <!-- Тулбар: поиск + действия -->
-    <div v-if="orderVisible" class="order-toolbar">
+    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="order-toolbar">
       <div class="search-bar" v-if="!orderStore.viewOnlyMode" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
           <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
@@ -115,7 +125,7 @@
     </div>
 
     <!-- Секция заказа -->
-    <div v-if="orderVisible" class="order-section" :class="{ 'view-only-mode': orderStore.viewOnlyMode, 'order-locked': !paramsReady && !orderStore.viewOnlyMode }">
+    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="order-section" :class="{ 'view-only-mode': orderStore.viewOnlyMode, 'order-locked': !paramsReady && !orderStore.viewOnlyMode }">
 
       <!-- Overlay when params not filled -->
       <div v-if="!paramsReady && !orderStore.viewOnlyMode" class="order-lock-overlay" @click.stop>
@@ -130,7 +140,7 @@
       <!-- Кнопки завершения — под таблицей справа -->
       <div class="toolbar-row toolbar-finish">
         <div class="toolbar-spacer"></div>
-        <button class="btn primary" @click="openSaveModal" :disabled="!itemsWithOrderCount || orderStore.viewOnlyMode"><BkIcon name="save" size="sm"/> {{ orderStore.editingOrderId ? 'Обновить заказ' : 'Сохранить' }}</button>
+        <button v-if="!isViewer" class="btn primary" @click="openSaveModal" :disabled="!itemsWithOrderCount || orderStore.viewOnlyMode"><BkIcon name="save" size="sm"/> {{ orderStore.editingOrderId ? 'Обновить заказ' : 'Сохранить' }}</button>
         <button class="btn" @click="copyOrderToClipboard" :disabled="!orderStore.items.length"><BkIcon name="copy" size="sm"/> Скопировать заказ</button>
         <button class="btn" @click="showOrderResult" :disabled="!orderStore.items.length"><BkIcon name="planning" size="sm"/> Результат заказа</button>
         <div style="position:relative;display:inline-block;">
@@ -246,6 +256,7 @@ const supplierStore = useSupplierStore();
 const toast         = useToastStore();
 const userStore     = useUserStore();
 
+const isViewer = computed(() => userStore.isViewer);
 const orderVisible          = ref(true);
 const settingsExpanded      = ref(false);
 const supplierLoading       = ref(false);
@@ -677,8 +688,8 @@ function buildOrderText() {
   const lines = orderStore.items.map(item => {
     const qpb = getQpb(item); const mult = getMultiplicity(item);
     const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
-    const pieces = orderStore.settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
     const rb = Math.ceil(physBoxes); if (rb <= 0) return null;
+    const pieces = rb * qpb;
     const unit = item.unitOfMeasure || 'шт';
     return { text: `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit, qpb };
   }).filter(Boolean);
@@ -711,9 +722,9 @@ async function share(channel) {
   const lines = orderStore.items.map(item => {
     const qpb = getQpb(item); const mult = getMultiplicity(item);
     const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
-    const pieces    = orderStore.settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
     const rb = Math.ceil(physBoxes);
     if (rb <= 0) return null;
+    const pieces = rb * qpb;
     const unit = item.unitOfMeasure || 'шт';
     return `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`;
   }).filter(Boolean);

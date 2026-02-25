@@ -225,7 +225,7 @@ export const useOrderStore = defineStore('order', () => {
     settings.safetyDays = parseInt(order.safety_days) || 0;
     settings.periodDays = parseInt(order.period_days) || 30;
     settings.unit = order.unit || 'pieces';
-    settings.hasTransit = order.has_transit === true || order.has_transit === 'true' || order.has_transit === '1';
+    settings.hasTransit = order.has_transit === true || order.has_transit === 'true' || order.has_transit === '1' || order.has_transit === 1;
     settings.showStockColumn = true; // всегда показываем запас при просмотре
     settings.note = order.note || '';
 

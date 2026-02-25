@@ -27,6 +27,12 @@
       </div>
     </header>
 
+    <!-- Maintenance banner -->
+    <div v-if="isMaintenance" class="p-maint-banner">
+      <svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="10" cy="10" r="8" stroke="#FDBD10" stroke-width="1.5"/><path d="M10 6v5" stroke="#FDBD10" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="13.5" r="1" fill="#FDBD10"/></svg>
+      <span>{{ maintenanceBannerText }}</span>
+    </div>
+
     <!-- Body — centered content -->
     <div class="p-body">
       <!-- Greeting -->
@@ -150,6 +156,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 
@@ -172,6 +179,16 @@ const password = ref('');
 const loginError = ref('');
 const loginLoading = ref(false);
 const userList = ref([]);
+const isMaintenance = ref(false);
+const maintenanceBannerText = ref('');
+
+async function checkMaintenanceForHome() {
+  try {
+    const { data } = await db.rpc('check_maintenance');
+    isMaintenance.value = !!data?.maintenance_mode;
+    maintenanceBannerText.value = data?.maintenance_message || 'Ведутся технические работы. Вход может быть ограничен.';
+  } catch { /* noop */ }
+}
 
 const svgIcons = {
   order: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="6" width="24" height="22" rx="3" stroke="#502314" stroke-width="2"/><path d="M4 12h24" stroke="#502314" stroke-width="2"/><path d="M12 2v6M20 2v6" stroke="#502314" stroke-width="2" stroke-linecap="round"/><rect x="9" y="16" width="6" height="4" rx="1" fill="#D62700" opacity=".8"/><rect x="17" y="16" width="6" height="4" rx="1" fill="#FF8733" opacity=".6"/><rect x="9" y="22" width="6" height="3" rx="1" fill="#FF8733" opacity=".4"/></svg>`,
@@ -211,6 +228,7 @@ onMounted(async () => {
   }
   document.addEventListener('click', handleOutsideClick);
   initEmberGlow();
+  checkMaintenanceForHome();
 });
 onBeforeUnmount(() => {
   showLoader.value = false;
@@ -379,6 +397,19 @@ function confirmLogout() {
 .portal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display: block; }
 
 .p-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 36px; position: relative; z-index: 2; background: rgba(44,26,14,.5); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,.04); flex-shrink: 0; }
+
+/* Maintenance banner */
+.p-maint-banner {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 10px 24px;
+  background: linear-gradient(90deg, rgba(253,189,16,.12), rgba(214,39,0,.1), rgba(253,189,16,.12));
+  border-bottom: 1px solid rgba(253,189,16,.15);
+  font-size: 13px; font-weight: 500; color: #FDBD10;
+  backdrop-filter: blur(8px);
+  animation: mntBannerIn .4s ease;
+}
+@keyframes mntBannerIn { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }
 .p-header-left { display: flex; align-items: center; gap: 14px; }
 .p-logo { width: 46px; height: 46px; border-radius: 50%; background: linear-gradient(135deg, #D62700, #FF8733); display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 16px rgba(214,39,0,.2); }
 .p-brand h1 { font-size: 17px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }

@@ -258,6 +258,7 @@ function parseCSV(file, delimiter, legalEntity) {
       const rows = lines.map(l => l.split(delim).map(c => c.trim().replace(/^["']|["']$/g, '')));
       resolve(mapRows(rows, legalEntity));
     };
+    reader.onerror = () => resolve([]);
     reader.readAsText(file, 'utf-8');
   });
 }

@@ -71,11 +71,11 @@
               <td class="ht-td ht-td-center ht-td-created">{{ formatDateTime(order.created_at) }}</td>
               <td class="ht-td ht-td-center" @click.stop>
                 <button class="ht-act" title="Просмотр" @click="viewOrder(order)"><BkIcon name="eye" size="sm"/></button>
-                <button class="ht-act" title="Редактировать" @click="editOrder(order)"><BkIcon name="edit" size="sm"/></button>
+                <button v-if="!isViewer" class="ht-act" title="Редактировать" @click="editOrder(order)"><BkIcon name="edit" size="sm"/></button>
                 <button class="ht-act" title="Скопировать" @click="copyOrder(order)"><BkIcon name="copy" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyOrderLink(order)"><BkIcon name="link" size="sm"/></button>
                 <button class="ht-act" title="Лог" @click="openLogModal(order.id, 'order')"><BkIcon name="note" size="sm"/></button>
-                <button class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
+                <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
             <!-- Expanded: items (note removed — already shown in table column) -->
@@ -131,10 +131,10 @@
               <td class="ht-td ht-td-center ht-td-created">{{ formatDate(plan.created_at) }}</td>
               <td class="ht-td ht-td-center" @click.stop>
                 <button class="ht-act" title="Просмотр" @click="viewPlan(plan)"><BkIcon name="eye" size="sm"/></button>
-                <button class="ht-act" title="Редактировать" @click="loadPlan(plan)"><BkIcon name="edit" size="sm"/></button>
+                <button v-if="!isViewer" class="ht-act" title="Редактировать" @click="loadPlan(plan)"><BkIcon name="edit" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyPlanLink(plan)"><BkIcon name="link" size="sm"/></button>
                 <button class="ht-act" title="Лог" @click="openLogModal(plan.id, 'plan')"><BkIcon name="note" size="sm"/></button>
-                <button class="ht-act ht-act-danger" title="Удалить" @click="deletePlan(plan)"><BkIcon name="delete" size="sm"/></button>
+                <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deletePlan(plan)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
             <tr v-if="expandedPlans.has(plan.id)" class="ht-detail-row">
@@ -212,6 +212,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { copyToClipboard, getQpb, getMultiplicity } from '@/lib/utils.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
@@ -222,8 +223,10 @@ const orderStore    = useOrderStore();
 const supplierStore = useSupplierStore();
 const draftStore    = useDraftStore();
 const toast         = useToastStore();
+const userStore     = useUserStore();
 const router        = useRouter();
 
+const isViewer = computed(() => userStore.isViewer);
 const filterType        = ref('orders');
 const filterSupplier    = ref('');
 const filterAuthor      = ref('');
