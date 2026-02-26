@@ -4,14 +4,20 @@
  * Работает и для заказа, и для планирования
  */
 
+import { db } from '@/lib/apiClient.js';
+
 const LEGAL_ENTITY_MAP = {
-  'сбарро':          'Пицца Стар',
-  'додо':            'Пицца Стар',
-  'пицца стар':      'Пицца Стар',
-  'бургер бк':       'Бургер БК',
-  'ооо "бургер бк"': 'Бургер БК',
-  'ооо бургер бк':   'Бургер БК',
-  'воглия матта':    'Воглия Матта',
+  'сбарро':              'ООО "Пицца Стар"',
+  'додо':                'ООО "Пицца Стар"',
+  'пицца стар':          'ООО "Пицца Стар"',
+  'ооо "пицца стар"':    'ООО "Пицца Стар"',
+  'ооо пицца стар':      'ООО "Пицца Стар"',
+  'бургер бк':           'ООО "Бургер БК"',
+  'ооо "бургер бк"':     'ООО "Бургер БК"',
+  'ооо бургер бк':       'ООО "Бургер БК"',
+  'воглия матта':        'ООО "Воглия Матта"',
+  'ооо "воглия матта"':  'ООО "Воглия Матта"',
+  'ооо воглия матта':    'ООО "Воглия Матта"',
 };
 
 const HEADER_KEYWORDS = [
@@ -272,7 +278,7 @@ function detectDelimiter(text) {
 
 // ─── Маппинг данных файла → items ──────────────────────────────────────────
 
-function matchData(items, fileData, target) {
+async function matchData(items, fileData, target, unit) {
   let matched = 0;
 
   // Build SKU lookup with multiple normalization variants
@@ -363,6 +369,105 @@ function matchData(items, fileData, target) {
     }
     return updated;
   });
+  // ─── Фаза аналогов (только для order и planning) ──────────────────────
+  const analogMerges = [];
+  if (target !== 'analysis') {
+    try {
+      // 1. Собрать SKU всех позиций заказа/плана
+      const itemSkus = new Set(items.map(i => i.sku).filter(Boolean));
+
+      // 2. Запросить analog_group для всех SKU позиций
+      if (itemSkus.size > 0) {
+        const skuList = [...itemSkus];
+        const { data: products } = await db.from('products')
+          .select('sku,name,analog_group')
+          .in('sku', skuList);
+
+        if (products?.length) {
+          // Карта SKU → analog_group
+          const skuToGroup = new Map();
+          const skuToName = new Map();
+          const groups = new Set();
+          for (const p of products) {
+            if (p.analog_group) {
+              skuToGroup.set(p.sku, p.analog_group);
+              skuToName.set(p.sku, p.name);
+              groups.add(p.analog_group);
+            }
+          }
+          // 3. Запросить все продукты с analog_group и отфильтровать на клиенте
+          // (in() не работает с запятыми в значениях, напр. «Стакан Пепси 0,5л»)
+          if (groups.size > 0) {
+            const { data: allAnalogProducts } = await db.from('products')
+              .select('sku,name,analog_group,qty_per_box')
+              .neq('analog_group', '');
+            const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
+
+            // Карта group → [sku, ...], SKU → qtyPerBox
+            const groupToSkus = new Map();
+            const analogSkuToName = new Map();
+            const analogSkuToQpb = new Map();
+            if (groupProducts.length) {
+              for (const p of groupProducts) {
+                if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);
+                groupToSkus.get(p.analog_group).push(p.sku);
+                analogSkuToName.set(p.sku, p.name);
+                analogSkuToQpb.set(p.sku, p.qty_per_box || 1);
+              }
+            }
+
+            // 4. Для каждого item — собрать доступные аналоги (без применения)
+            for (let idx = 0; idx < updatedItems.length; idx++) {
+              const item = updatedItems[idx];
+              if (!item.sku) continue;
+              const group = skuToGroup.get(item.sku);
+              if (!group) continue;
+              const analogs = groupToSkus.get(group);
+              if (!analogs) continue;
+
+              const foundAnalogs = [];
+              for (const analogSku of analogs) {
+                if (analogSku === item.sku) continue;
+                if (itemSkus.has(analogSku)) continue;
+
+                const normKey = normSku(analogSku);
+                const fileEntry = skuLookup.get(normKey)
+                  || skuLookup.get(normKey.replace(/^0+(\d+)/, '$1'));
+                if (!fileEntry) continue;
+
+                const analogQpb = analogSkuToQpb.get(analogSku) || 1;
+                const itemQpb = item.qtyPerBox || 1;
+                const needConvert = unit === 'boxes' && analogQpb !== itemQpb && itemQpb > 0;
+                const ratio = needConvert ? analogQpb / itemQpb : 1;
+                const convertVal = (v) => Math.round(v * ratio);
+
+                foundAnalogs.push({
+                  sku: analogSku,
+                  name: analogSkuToName.get(analogSku) || '',
+                  stock: convertVal(fileEntry.stock ?? 0),
+                  transit: convertVal(fileEntry.transit ?? 0),
+                  consumption: convertVal(fileEntry.consumption ?? 0),
+                  _fileEntry: fileEntry,
+                  checked: true,
+                });
+              }
+
+              if (foundAnalogs.length > 0) {
+                analogMerges.push({
+                  itemSku: item.sku,
+                  itemName: item.name || skuToName.get(item.sku) || item.sku,
+                  itemIdx: idx,
+                  analogs: foundAnalogs,
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[importStock] Ошибка при обработке аналогов:', err);
+    }
+  }
   // Collect file entries that didn't match any item (only with SKU)
   const unmatchedFile = fileData.filter(d => d.sku && !matchedFileEntries.has(d)).map(d => ({
     sku: d.sku,
@@ -370,7 +475,36 @@ function matchData(items, fileData, target) {
     stock: d.stock ?? 0,
     consumption: d.consumption ?? 0,
   }));
-  return { items: updatedItems, matched, unmatchedFile };
+  return { items: updatedItems, matched, unmatchedFile, analogMerges };
+}
+
+/**
+ * Применить выбранные аналоги к позициям заказа/плана.
+ * Вызывается из View после подтверждения пользователем в модалке.
+ * @param {Array} storeItems — реактивные позиции из стора (orderStore.items / items.value)
+ * @param {Array} analogMerges — массив из результата импорта (с checked-флагами)
+ * @param {'order'|'planning'} target
+ */
+export function applyAnalogMerges(storeItems, analogMerges, target) {
+  let applied = 0;
+  for (const merge of analogMerges) {
+    const item = storeItems[merge.itemIdx];
+    if (!item) continue;
+    for (const a of merge.analogs) {
+      if (!a.checked) continue;
+      if (target === 'order') {
+        if (a.stock) item.stock = (item.stock || 0) + a.stock;
+        if (a.transit) item.transit = (item.transit || 0) + a.transit;
+        if (a.consumption) item.consumptionPeriod = (item.consumptionPeriod || 0) + a.consumption;
+      } else {
+        if (a.stock) item.stockOnHand = (item.stockOnHand || 0) + a.stock;
+        if (a.transit) item.stockAtSupplier = (item.stockAtSupplier || 0) + a.transit;
+        if (a.consumption) item.monthlyConsumption = (item.monthlyConsumption || 0) + a.consumption;
+      }
+      applied++;
+    }
+  }
+  return applied;
 }
 
 // ─── Публичный API ─────────────────────────────────────────────────────────
@@ -380,9 +514,10 @@ function matchData(items, fileData, target) {
  * @param {'order'|'planning'} target
  * @param {Array} items — текущие позиции
  * @param {string} legalEntity
+ * @param {string} [unit] — текущая единица измерения ('boxes'|'pieces') для конвертации аналогов
  * @returns {Promise<{items, matched, total}|null>}
  */
-export function importFromFile(target, items, legalEntity) {
+export function importFromFile(target, items, legalEntity, unit) {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -400,7 +535,7 @@ export function importFromFile(target, items, legalEntity) {
           resolve({ items, matched: 0, total: 0, error: `Не удалось распознать товары в файле "${file.name}". Проверьте формат файла.` });
           return;
         }
-        const result = matchData(items, data, target);
+        const result = await matchData(items, data, target, unit);
         console.log(`[importStock] File: ${file.name}, parsed: ${data.length} items, matched: ${result.matched}/${items.length}, legalEntity: ${legalEntity}`);
         if (result.matched < items.length) {
           const unmatched = items.filter((item, idx) => {
@@ -417,7 +552,7 @@ export function importFromFile(target, items, legalEntity) {
             data.slice(0, 5).forEach(d => console.log(`  sku=${d.sku || '?'} name="${(d.name || '?').slice(0, 40)}" stock=${d.stock ?? '-'}`));
           }
         }
-        resolve({ items: result.items, matched: result.matched, total: data.length, unmatchedFile: result.unmatchedFile || [] });
+        resolve({ items: result.items, matched: result.matched, total: data.length, unmatchedFile: result.unmatchedFile || [], analogMerges: result.analogMerges || [] });
       } catch (err) {
         console.error('[importStock] Error:', err);
         resolve({ items, matched: 0, total: 0, error: err.message || 'Не удалось прочитать файл' });

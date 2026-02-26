@@ -57,7 +57,7 @@
             <span>{{ p.qty_per_box || '?' }} {{ p.unit_of_measure || 'шт' }}/кор</span>
             <span v-if="p.boxes_per_pallet">{{ p.boxes_per_pallet }}/пал</span>
             <span v-if="p.multiplicity > 1">×{{ p.multiplicity }}</span>
-            <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">неактивна</span>
+            <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">скрыта</span>
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="editProduct(p)"><BkIcon name="edit" size="sm"/></button>
@@ -137,8 +137,8 @@
       </div>
     </Teleport>
 
-    <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" :legal-entity="orderStore.settings.legalEntity" @close="editCardModal.show = false" @saved="onProductSaved" />
-    <EditSupplierModal v-if="editSupplierModal.show" :supplier="editSupplierModal.supplier" :legal-entity="orderStore.settings.legalEntity" @close="editSupplierModal.show = false" @saved="onSupplierSaved" />
+    <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" @close="editCardModal.show = false" @saved="onProductSaved" />
+    <EditSupplierModal v-if="editSupplierModal.show" :supplier="editSupplierModal.supplier" @close="editSupplierModal.show = false" @saved="onSupplierSaved" />
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message" @confirm="confirmModal.resolve(true); confirmModal.show = false" @cancel="confirmModal.resolve(false); confirmModal.show = false" />
     <ImportCardsModal v-if="showImportModal" :legal-entity="orderStore.settings.legalEntity" :existing-products="products" @close="showImportModal = false" @saved="onImportSaved" />
   </div>

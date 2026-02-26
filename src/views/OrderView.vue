@@ -4,6 +4,7 @@
     <div class="page-header">
       <h1 class="page-title">{{ orderStore.pageTitle }}</h1>
       <span v-if="orderStore.viewOnlyMode" class="editing-badge" style="cursor:pointer" @click="exitViewMode"><BkIcon name="eye" size="sm"/> Просмотр</span>
+      <button v-if="orderStore.viewOnlyMode && orderStore.editingOrderId" class="btn small" style="margin-left:4px;" @click="openLogModal" title="Лог изменений"><BkIcon name="note" size="sm"/> Лог</button>
       <span v-else-if="orderStore.editingOrderId" class="editing-badge" style="cursor:pointer" @click="exitEditMode"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
@@ -97,8 +98,7 @@
             style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
             <div v-for="p in searchResults" :key="p.id||p.sku"
               @click="addFromSearch(p)"
-              style="padding:5px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;"
-              onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background=''">
+              class="search-result-item">
               <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
             </div>
             <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
@@ -170,11 +170,48 @@
       @confirm="onSaveConfirm"
       @cancel="showSaveModal = false"
     />
-    <ManualProductModal v-if="showManualModal" :legal-entity="orderStore.settings.legalEntity" :current-supplier="orderStore.settings.supplier" @close="showManualModal = false" @added="onManualAdded"/>
-    <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" :legal-entity="orderStore.settings.legalEntity" @close="editCardModal.show = false" @saved="onCardSaved"/>
+    <ManualProductModal v-if="showManualModal" :current-supplier="orderStore.settings.supplier" @close="showManualModal = false" @added="onManualAdded"/>
+    <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" @close="editCardModal.show = false" @saved="onCardSaved"/>
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
-      @confirm="confirmModal.resolve(true); confirmModal.show = false"
-      @cancel="confirmModal.resolve(false); confirmModal.show = false"/>
+      @confirm="onConfirmOk"
+      @cancel="onConfirmCancel"/>
+    <AnalogMergeModal v-if="analogMergeModal.show" :merges="analogMergeModal.merges" @apply="onAnalogApply" @skip="onAnalogSkip"/>
+    <!-- Log Modal -->
+    <Teleport to="body">
+      <div v-if="logModal.show" class="modal" @click.self="logModal.show = false">
+        <div class="modal-box" style="max-width:560px;">
+          <div class="modal-header">
+            <h2><BkIcon name="note" size="sm"/> Лог изменений</h2>
+            <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div style="max-height:450px;overflow-y:auto;padding:0 20px 16px;">
+            <div v-if="logModal.loading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в логе</div>
+            <div v-else class="log-entries">
+              <div v-for="log in logModal.entries" :key="log.id" class="log-entry">
+                <div class="log-entry-head">
+                  <span class="log-badge" :class="logBadgeClass(log.action)">{{ logBadgeLabel(log.action) }}</span>
+                  <span class="log-author">{{ log.user_name || '—' }}</span>
+                  <span class="log-date">{{ formatLogDate(log.created_at) }}</span>
+                </div>
+                <div v-if="log.details?.param_changes?.length" class="log-params">
+                  <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="log-param-chip">{{ pc.label }}: {{ pc.from }} → {{ pc.to }}</span>
+                </div>
+                <div v-if="log.details?.note" class="log-note-line">{{ log.details.note }}</div>
+                <div v-if="log.details?.items_count" class="log-meta">{{ log.details.items_count }} позиций</div>
+                <div v-if="log.details?.changes?.length" class="log-changes">
+                  <span v-for="(c, ci) in log.details.changes" :key="ci" class="log-ch-chip" :class="{ 'log-ch-add': c.type==='added', 'log-ch-del': c.type==='removed', 'log-ch-upd': c.type==='changed' }">
+                    <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
+                    <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
+                    <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
     <Teleport to="body">
       <div v-if="orderResultModal.show" class="modal" @click.self="orderResultModal.show = false">
         <div class="modal-box order-result-modal">
@@ -239,12 +276,14 @@ import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
 import { saveOrder } from '@/lib/saveOrder.js';
-import { importFromFile } from '@/lib/importStock.js';
+import { importFromFile, applyAnalogMerges } from '@/lib/importStock.js';
 import OrderTable from '@/components/order/OrderTable.vue';
 import SaveOrderModal from '@/components/modals/SaveOrderModal.vue';
 import ManualProductModal from '@/components/modals/ManualProductModal.vue';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import AnalogMergeModal from '@/components/modals/AnalogMergeModal.vue';
+import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 
@@ -273,7 +312,9 @@ const searchResults         = ref([]);
 const searchDone            = ref(false);
 const searchInputRef        = ref(null);
 const editCardModal         = ref({ show: false, product: null });
-const confirmModal          = ref({ show: false, title: '', message: '', resolve: null });
+const analogMergeModal      = ref({ show: false, merges: [] });
+const logModal              = ref({ show: false, loading: false, entries: [] });
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 const orderResultModal      = ref({ show: false, text: '', supplier: '', deliveryDate: '', lines: [] });
 const isFullscreen          = ref(false);
 const compactMode           = ref(localStorage.getItem('bk_compact_mode') === '1');
@@ -390,14 +431,7 @@ onMounted(async () => {
   } else {
     const draft = draftStore.hasDraft();
     if (draft && draft.legalEntity === orderStore.settings.legalEntity) {
-      const ok = await new Promise(resolve => {
-        confirmModal.value = {
-          show: true,
-          title: 'Восстановить черновик?',
-          message: `Найден черновик от ${draft.date} (${draft.itemsCount} позиций). Восстановить?`,
-          resolve
-        };
-      });
+      const ok = await confirmAction('Восстановить черновик?', `Найден черновик от ${draft.date} (${draft.itemsCount} позиций). Восстановить?`);
       if (ok) {
         const result = await draftStore.load((le) => supplierStore.loadSuppliers(le));
         if (result?.loaded) {
@@ -417,6 +451,24 @@ onUnmounted(() => {
   clearTimeout(searchTimer);
 });
 
+// Реактивная навигация: если query изменился когда компонент уже смонтирован
+watch(() => route.query.orderId, async (newId) => {
+  if (!newId) return;
+  try {
+    const { data: order, error } = await db.from('orders').select('*, order_items(*)').eq('id', newId).single();
+    if (!error && order) {
+      const isView = route.query.mode === 'view';
+      const isEdit = route.query.mode === 'edit';
+      await orderStore.loadOrderIntoForm(order, order.legal_entity, isEdit, isView);
+      orderVisible.value = true;
+    } else {
+      toast.error('Заказ не найден', '');
+    }
+  } catch (e) {
+    toast.error('Ошибка загрузки заказа', e.message || '');
+  }
+});
+
 function closeShareDropdown(e) {
   if (!e.target.closest('.share-dropdown')) showShareDropdown.value = false;
 }
@@ -433,7 +485,7 @@ async function onSupplierChange(e) {
   const newSupplier = e.target.value;
   const hasData = orderStore.items.some(i => i.consumptionPeriod > 0 || i.stock > 0 || i.transit > 0 || i.finalOrder > 0);
   if (hasData) {
-    const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Сменить поставщика?', message:'Текущий заказ с заполненными данными будет сброшен.', resolve }; });
+    const ok = await confirmAction('Сменить поставщика?', 'Текущий заказ с заполненными данными будет сброшен.');
     if (!ok) return;
   }
   orderStore.settings.supplier = newSupplier;
@@ -668,6 +720,33 @@ function clearSearch() {
   searchInputRef.value?.focus();
 }
 
+// ─── Лог изменений ────────────────────────────────────────────────────────────
+async function openLogModal() {
+  const id = orderStore.editingOrderId;
+  if (!id) return;
+  logModal.value = { show: true, loading: true, entries: [] };
+  const { data } = await db.from('audit_log').select('*')
+    .eq('entity_id', id).eq('entity_type', 'order')
+    .order('created_at', { ascending: false }).limit(50);
+  logModal.value.entries = data || [];
+  logModal.value.loading = false;
+}
+function logBadgeLabel(action) {
+  return { order_created:'Создан', order_updated:'Изменён', order_deleted:'Удалён' }[action] || action;
+}
+function logBadgeClass(action) {
+  if (action.includes('created')) return 'log-badge-created';
+  if (action.includes('updated')) return 'log-badge-updated';
+  if (action.includes('deleted')) return 'log-badge-deleted';
+  return '';
+}
+function formatLogDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 // ─── Ручной товар ─────────────────────────────────────────────────────────────
 function onManualAdded(product) {
   if (product.supplier === orderStore.settings.supplier) {
@@ -684,6 +763,7 @@ function onManualAdded(product) {
 
 // ─── Редактирование карточки ──────────────────────────────────────────────────
 function openProductForEdit(sku) {
+  if (orderStore.viewOnlyMode || isViewer.value) return;
   const item = orderStore.items.find(i => i.sku === sku);
   if (!item) return;
   editCardModal.value = { show: true, product: { id: item.productId, sku: item.sku, name: item.name } };
@@ -792,7 +872,7 @@ async function importFromExcel() {
   if (!orderStore.items.length) { toast.error('Нет товаров', 'Сначала добавьте товары'); return; }
   importLoading.value = true;
   try {
-    const result = await importFromFile('order', orderStore.items, orderStore.settings.legalEntity);
+    const result = await importFromFile('order', orderStore.items, orderStore.settings.legalEntity, orderStore.settings.unit);
     if (!result) return; // отмена
     if (result.error) { toast.error('Ошибка импорта', result.error); return; }
     if (result.matched === 0) { toast.info('Нет совпадений', `Из ${result.total} товаров файла — 0 совпадений с заказом`); return; }
@@ -807,8 +887,22 @@ async function importFromExcel() {
     orderStore.bumpDataVersion();
     draftStore.save();
     toast.success('Импорт завершён', `${result.matched} из ${orderStore.items.length} позиций обновлены`);
+    if (result.analogMerges?.length) {
+      analogMergeModal.value = { show: true, merges: result.analogMerges, target: 'order' };
+    }
   } finally { importLoading.value = false; }
 }
+function onAnalogApply() {
+  const { merges } = analogMergeModal.value;
+  const applied = applyAnalogMerges(orderStore.items, merges, 'order');
+  analogMergeModal.value.show = false;
+  if (applied > 0) {
+    orderStore.bumpDataVersion();
+    draftStore.save();
+    toast.success('Аналоги применены', `${applied} аналогов добавлены`);
+  }
+}
+function onAnalogSkip() { analogMergeModal.value.show = false; }
 
 // ─── Excel ────────────────────────────────────────────────────────────────────
 async function exportExcel() {
@@ -819,14 +913,14 @@ async function exportExcel() {
 
 // ─── Очистить ─────────────────────────────────────────────────────────────────
 async function clearOrder() {
-  const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Очистить данные?', message:'Заполненные данные (расход, остаток, транзит, заказ) будут сброшены. Товары останутся.', resolve }; });
+  const ok = await confirmAction('Очистить данные?', 'Заполненные данные (расход, остаток, транзит, заказ) будут сброшены. Товары останутся.');
   if (!ok) return;
   orderStore.clearAllData();
   draftStore.save();
 }
 
 async function exitViewMode() {
-  const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Закрыть просмотр?', message:'Заказ будет очищен.', resolve }; });
+  const ok = await confirmAction('Закрыть просмотр?', 'Заказ будет очищен.');
   if (!ok) return;
   orderStore.resetOrder();
   orderStore.settings.today = new Date();
@@ -839,7 +933,7 @@ async function exitViewMode() {
 }
 
 async function exitEditMode() {
-  const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Сбросить редактирование?', message:'Заказ будет очищен.', resolve }; });
+  const ok = await confirmAction('Сбросить редактирование?', 'Заказ будет очищен.');
   if (!ok) return;
   orderStore.resetOrder();
   orderStore.settings.today = new Date();
@@ -851,3 +945,25 @@ async function exitEditMode() {
   if (route.query.orderId) router.replace({ name: 'order' });
 }
 </script>
+
+<style scoped>
+.log-entries { display: flex; flex-direction: column; }
+.log-entry { padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+.log-entry:last-child { border-bottom: none; }
+.log-entry-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.log-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+.log-badge-created { background: #E8F5E9; color: #2E7D32; }
+.log-badge-updated { background: #FFF3E0; color: #E65100; }
+.log-badge-deleted { background: #FFEBEE; color: #C62828; }
+.log-author { font-weight: 600; font-size: 12px; color: var(--text); }
+.log-date { font-size: 11px; color: var(--text-muted); }
+.log-note-line { font-size: 11px; color: var(--text-secondary); font-style: italic; margin-top: 3px; }
+.log-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.log-params { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.log-param-chip { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; background: #EDE7F6; color: #4A148C; font-weight: 500; }
+.log-changes { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.log-ch-chip { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 1.5; }
+.log-ch-add { background: #E8F5E9; color: #2E7D32; }
+.log-ch-del { background: #FFEBEE; color: #C62828; }
+.log-ch-upd { background: #FFF8E1; color: #5D4037; }
+</style>

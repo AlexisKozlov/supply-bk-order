@@ -165,6 +165,7 @@ const COLUMN_MAP = {
   'количество штук в блоке':           'block_qty',
   'количество блоков в коробе':        'case_blocks',
   'активная':                          'active',
+  'видимость':                         'active',
   'группа аналогов (new)':             'analog_group',
   'группа аналогов':                   'analog_group',
 };

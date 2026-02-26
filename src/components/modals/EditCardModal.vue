@@ -28,11 +28,11 @@
             </select>
           </div>
           <div class="modal-field">
-            <span class="modal-field-label">Юр. лицо</span>
-            <select v-model="form.legal_entity">
-              <option value="Бургер БК">Бургер БК</option>
-              <option value="Воглия Матта">Воглия Матта</option>
-              <option value="Пицца Стар">Пицца Стар</option>
+            <span class="modal-field-label">Ед. измерения</span>
+            <select v-model="form.unit_of_measure">
+              <option value="шт">штуки</option>
+              <option value="л">литры</option>
+              <option value="кг">килограммы</option>
             </select>
           </div>
         </div>
@@ -50,28 +50,18 @@
             <span class="modal-field-label">Кратность</span>
             <input v-model.number="form.multiplicity" type="number" placeholder="0" title="0 = по коробкам" />
           </div>
-          <div class="modal-field">
-            <span class="modal-field-label">Ед. измерения</span>
-            <select v-model="form.unit_of_measure">
-              <option value="шт">штуки</option>
-              <option value="л">литры</option>
-              <option value="кг">килограммы</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="modal-row-2" style="margin-top:4px;">
-          <div class="modal-field" style="flex:1;">
-            <span class="modal-field-label">Группа аналогов</span>
-            <input v-model="form.analog_group" placeholder="Название группы" />
-          </div>
           <div class="modal-field" style="width:100px;flex-shrink:0;">
-            <span class="modal-field-label">Активная</span>
+            <span class="modal-field-label">Видимость</span>
             <select v-model="form.is_active">
               <option :value="true">Да</option>
               <option :value="false">Нет</option>
             </select>
           </div>
+        </div>
+
+        <div class="modal-field" style="margin-top:4px;">
+          <span class="modal-field-label">Группа аналогов</span>
+          <input v-model="form.analog_group" placeholder="Название группы" />
         </div>
 
         <div class="actions" style="display:flex;gap:8px;margin-top:12px;">
@@ -94,25 +84,26 @@
     <!-- Вложенная модалка создания поставщика -->
     <EditSupplierModal
       v-if="showNewSupplier"
-      :legalEntity="form.legal_entity"
       @close="closeNewSupplier"
       @saved="onSupplierCreated"
     />
   </Teleport>
 </template>
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
+import { useFormDirty } from '@/composables/useFormDirty.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
 
+const orderStore = useOrderStore();
 
 const props = defineProps({
   product: { type: Object, default: null },
-  legalEntity: { type: String, default: 'Бургер БК' },
 });
 const emit = defineEmits(['close', 'saved']);
 const toast = useToastStore();
@@ -121,14 +112,13 @@ const supplierOptions = ref([]);
 const showNewSupplier = ref(false);
 const showConfirmClose = ref(false);
 const prevSupplier = ref('');
-let initialized = false;
-let initialForm = null;
 
 const form = ref({
-  sku: '', name: '', supplier: '', legal_entity: props.legalEntity,
+  sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
   analog_group: '', is_active: true,
 });
+const { saveSnapshot, isDirty } = useFormDirty(form);
 
 function onKey(e) {
   if (e.key === 'Escape' && !showConfirmClose.value && !showNewSupplier.value) tryClose();
@@ -140,7 +130,7 @@ onMounted(async () => {
     if (data) {
       Object.assign(form.value, {
         sku: data.sku || '', name: data.name || '', supplier: data.supplier || '',
-        legal_entity: data.legal_entity || props.legalEntity,
+        legal_entity: data.legal_entity || form.value.legal_entity,
         qty_per_box: data.qty_per_box || '', boxes_per_pallet: data.boxes_per_pallet || '',
         multiplicity: data.multiplicity || '', unit_of_measure: data.unit_of_measure || 'шт',
         analog_group: data.analog_group || '',
@@ -150,7 +140,7 @@ onMounted(async () => {
   } else if (props.product) {
     Object.assign(form.value, {
       sku: props.product.sku || '', name: props.product.name || '',
-      supplier: props.product.supplier || '', legal_entity: props.product.legal_entity || props.legalEntity,
+      supplier: props.product.supplier || '', legal_entity: props.product.legal_entity || form.value.legal_entity,
       qty_per_box: props.product.qty_per_box || '', boxes_per_pallet: props.product.boxes_per_pallet || '',
       multiplicity: props.product.multiplicity || '', unit_of_measure: props.product.unit_of_measure || 'шт',
       analog_group: props.product.analog_group || '',
@@ -158,14 +148,9 @@ onMounted(async () => {
     });
   }
   await loadSuppliers();
-  initialized = true;
-  initialForm = JSON.stringify(form.value);
+  saveSnapshot();
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
-
-function isDirty() {
-  return JSON.stringify(form.value) !== initialForm;
-}
 
 function tryClose() {
   if (isDirty()) { showConfirmClose.value = true; return; }
@@ -178,13 +163,6 @@ async function loadSuppliers() {
   const { data } = await query;
   supplierOptions.value = (data || []).map(s => s.short_name);
 }
-
-// Перезагрузить поставщиков при смене юр. лица (только после инициализации)
-watch(() => form.value.legal_entity, () => {
-  if (!initialized) return;
-  form.value.supplier = '';
-  loadSuppliers();
-});
 
 function onSupplierChange() {
   if (form.value.supplier === '__new_supplier__') {

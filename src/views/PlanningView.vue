@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">Планирование</h1>
       <span v-if="viewOnly" class="editing-badge" style="cursor:pointer;background:#E3F2FD;color:#1565C0;border-color:#90CAF9;" @click="resetPlan"><BkIcon name="eye" size="sm"/> Просмотр</span>
+      <button v-if="viewOnly && editingPlanId" class="btn small" style="margin-left:4px;" @click="openLogModal" title="Лог изменений"><BkIcon name="note" size="sm"/> Лог</button>
       <span v-else-if="editingPlanId" class="editing-badge" style="cursor:pointer" @click="resetPlan"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
@@ -170,10 +171,11 @@
     </div>
 
     <!-- Модалки -->
-    <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" :legal-entity="orderStore.settings.legalEntity" @close="editCardModal.show = false" @saved="onCardSaved"/>
+    <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" @close="editCardModal.show = false" @saved="onCardSaved"/>
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
-      @confirm="confirmModal.resolve(true); confirmModal.show = false"
-      @cancel="confirmModal.resolve(false); confirmModal.show = false"/>
+      @confirm="onConfirmOk"
+      @cancel="onConfirmCancel"/>
+    <AnalogMergeModal v-if="analogMergeModal.show" :merges="analogMergeModal.merges" @apply="onAnalogApply" @skip="onAnalogSkip"/>
 
     <!-- Модалка сохранения плана -->
     <Teleport to="body">
@@ -201,6 +203,40 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Log Modal -->
+    <Teleport to="body">
+      <div v-if="logModal.show" class="modal" @click.self="logModal.show = false">
+        <div class="modal-box" style="max-width:560px;">
+          <div class="modal-header">
+            <h2><BkIcon name="note" size="sm"/> Лог изменений</h2>
+            <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div style="max-height:450px;overflow-y:auto;padding:0 20px 16px;">
+            <div v-if="logModal.loading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в логе</div>
+            <div v-else class="log-entries">
+              <div v-for="log in logModal.entries" :key="log.id" class="log-entry">
+                <div class="log-entry-head">
+                  <span class="log-badge" :class="logBadgeClass(log.action)">{{ logBadgeLabel(log.action) }}</span>
+                  <span class="log-author">{{ log.user_name || '—' }}</span>
+                  <span class="log-date">{{ formatLogDate(log.created_at) }}</span>
+                </div>
+                <div v-if="log.details?.note" class="log-note-line">{{ log.details.note }}</div>
+                <div v-if="log.details?.items_count" class="log-meta">{{ log.details.items_count }} позиций</div>
+                <div v-if="log.details?.changes?.length" class="log-changes">
+                  <span v-for="(c, ci) in log.details.changes" :key="ci" class="log-ch-chip" :class="{ 'log-ch-add': c.type==='added', 'log-ch-del': c.type==='removed', 'log-ch-upd': c.type==='changed' }">
+                    <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
+                    <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
+                    <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -215,10 +251,12 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, toLocalDateStr } from '@/lib/utils.js';
-import { importFromFile } from '@/lib/importStock.js';
+import { importFromFile, applyAnalogMerges } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import AnalogMergeModal from '@/components/modals/AnalogMergeModal.vue';
+import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 
@@ -243,8 +281,10 @@ const settingsExpanded = ref(false);
 const load1cLoading = ref(false);
 const editingPlanId = ref(null);
 const viewOnly = ref(false);
-const confirmModal = ref({ show: false, title: '', message: '', resolve: null });
+const logModal = ref({ show: false, loading: false, entries: [] });
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 const editCardModal = ref({ show: false, product: null });
+const analogMergeModal = ref({ show: false, merges: [] });
 const editingCell = ref(null);
 const showSaveModal = ref(false);
 const saveNote = ref('');
@@ -253,6 +293,7 @@ const saving = ref(false); // { idx, m } for inline edit (#6)
 const isFullscreen = ref(false);
 const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 let _prevPlanItems = null;
+let _loadedCreatedBy = null;
 let _loadedNote = '';
 let _consumptionCache = null;
 
@@ -612,14 +653,14 @@ async function loadFrom1c() {
 
 // ─── Очистить / Импорт ───────────────────────────────────────────────────
 async function clearAll() {
-  const ok = await new Promise(r => { confirmModal.value = { show: true, title: 'Обнулить данные?', message: 'Расход, остатки и расчёты будут сброшены.', resolve: r }; });
+  const ok = await confirmAction('Обнулить данные?', 'Расход, остатки и расчёты будут сброшены.');
   if (!ok) return;
   snapshot();
   items.value.forEach(i => { i.monthlyConsumption = 0; i.stockOnHand = 0; i.stockAtSupplier = 0; i.plan = []; });
   recalcAll(); _savePlanDraft(); toast.success('Обнулено', '');
 }
 async function doImport() {
-  const result = await importFromFile('planning', items.value, orderStore.settings.legalEntity);
+  const result = await importFromFile('planning', items.value, orderStore.settings.legalEntity, inputUnit.value);
   if (!result) return;
   if (result.error) { toast.error('Ошибка', result.error); return; }
   if (result.matched === 0) { toast.info('0 совпадений', ''); return; }
@@ -632,7 +673,20 @@ async function doImport() {
   });
   recalcAll(); triggerValidation(); _savePlanDraft();
   toast.success('Импорт', `${result.matched} обновлены`);
+  if (result.analogMerges?.length) {
+    analogMergeModal.value = { show: true, merges: result.analogMerges };
+  }
 }
+function onAnalogApply() {
+  const { merges } = analogMergeModal.value;
+  const applied = applyAnalogMerges(items.value, merges, 'planning');
+  analogMergeModal.value.show = false;
+  if (applied > 0) {
+    recalcAll(); _savePlanDraft();
+    toast.success('Аналоги применены', `${applied} аналогов добавлены`);
+  }
+}
+function onAnalogSkip() { analogMergeModal.value.show = false; }
 
 // ─── Edit product card (#2) ───────────────────────────────────────────────
 async function openProductEdit(item) {
@@ -813,6 +867,29 @@ async function confirmSave() {
     }
     await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || null, user_name: userStore.currentUser?.name || null, details: ld });
   } catch (_) {}
+  // Уведомление только при редактировании чужого плана
+  if (editingPlanId.value && _loadedCreatedBy && _loadedCreatedBy !== userStore.currentUser?.name) {
+    try {
+      const changes = ld.changes || [];
+      const lines = [];
+      changes.forEach(c => {
+        if (c.type === 'added') lines.push(`+ ${c.item} (${c.boxes} кор.)`);
+        else if (c.type === 'removed') lines.push(`− ${c.item} (${c.boxes} кор.)`);
+        else if (c.type === 'changed') lines.push(`${c.item}: ${c.diffs.join(', ')}`);
+      });
+      await db.from('notifications').insert({
+        type: 'plan',
+        title: `${userStore.currentUser?.name} изменил ваш план: ${supplier.value}`,
+        message: lines.join('\n') || 'Изменения в плане',
+        entity_type: 'plan',
+        entity_id: editingPlanId.value,
+        legal_entity: orderStore.settings.legalEntity,
+        created_by: userStore.currentUser?.name || null,
+        target_user: _loadedCreatedBy,
+        read_by: JSON.stringify([userStore.currentUser?.name || '']),
+      });
+    } catch(_) {}
+  }
   toast.success(editingPlanId.value ? 'План обновлён' : 'План сохранён', `${itemsWithPlan.value.length} позиций`);
   showSaveModal.value = false;
   draftStore.clearPlanDraft(); resetPlan();
@@ -827,8 +904,35 @@ async function copyPlanToClipboard() {
   await copyToClipboard(text); toast.success('Скопировано!', '');
 }
 
+// ─── Лог изменений ────────────────────────────────────────────────────────────
+async function openLogModal() {
+  const id = editingPlanId.value;
+  if (!id) return;
+  logModal.value = { show: true, loading: true, entries: [] };
+  const { data } = await db.from('audit_log').select('*')
+    .eq('entity_id', id).eq('entity_type', 'plan')
+    .order('created_at', { ascending: false }).limit(50);
+  logModal.value.entries = data || [];
+  logModal.value.loading = false;
+}
+function logBadgeLabel(action) {
+  return { plan_created:'Создан', plan_updated:'Изменён', plan_deleted:'Удалён' }[action] || action;
+}
+function logBadgeClass(action) {
+  if (action.includes('created')) return 'log-badge-created';
+  if (action.includes('updated')) return 'log-badge-updated';
+  if (action.includes('deleted')) return 'log-badge-deleted';
+  return '';
+}
+function formatLogDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 function resetPlan() {
-  editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null; _loadedNote = '';
+  editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null; _loadedCreatedBy = null; _loadedNote = '';
   items.value.forEach(i => { i.plan = []; i.monthlyConsumption = 0; i.stockOnHand = 0; i.stockAtSupplier = 0; });
   undoStack.value = []; redoStack.value = [];
   recalcAll(); draftStore.clearPlanDraft();
@@ -837,12 +941,13 @@ function resetPlan() {
 async function loadPlanFromHistory(planId) {
   const { data: plan, error } = await db.from('plans').select('*').eq('id', planId).single();
   if (error || !plan) { toast.error('Ошибка', ''); return; }
-  orderStore.settings.legalEntity = plan.legal_entity || 'Бургер БК';
+  orderStore.settings.legalEntity = plan.legal_entity || 'ООО "Бургер БК"';
   supplier.value = plan.supplier || '';
   periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
   editingPlanId.value = plan.id;
+  _loadedCreatedBy = plan.created_by || null;
   _loadedNote = plan.note || '';
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   _prevPlanItems = JSON.parse(JSON.stringify(plan.items || []));
@@ -868,19 +973,45 @@ onMounted(async () => {
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (route.query.planId) {
     await loadPlanFromHistory(route.query.planId);
-    if (route.query.mode === 'view') { viewOnly.value = true; editingPlanId.value = null; }
+    if (route.query.mode === 'view') { viewOnly.value = true; }
   } else {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
-      const ok = await new Promise(r => { confirmModal.value = { show: true, title: 'Восстановить черновик?', message: `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`, resolve: r }; });
+      const ok = await confirmAction('Восстановить черновик?', `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`);
       if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); inputUnit.value = d.inputUnit || 'pieces'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }
 });
+
+// Реактивная навигация: если query изменился когда компонент уже смонтирован
+watch(() => route.query.planId, async (newId) => {
+  if (!newId) return;
+  await loadPlanFromHistory(newId);
+  if (route.query.mode === 'view') { viewOnly.value = true; }
+});
 </script>
 
 <style scoped>
+/* Log modal */
+.log-entries { display: flex; flex-direction: column; }
+.log-entry { padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+.log-entry:last-child { border-bottom: none; }
+.log-entry-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.log-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+.log-badge-created { background: #E8F5E9; color: #2E7D32; }
+.log-badge-updated { background: #FFF3E0; color: #E65100; }
+.log-badge-deleted { background: #FFEBEE; color: #C62828; }
+.log-author { font-weight: 600; font-size: 12px; color: var(--text); }
+.log-date { font-size: 11px; color: var(--text-muted); }
+.log-note-line { font-size: 11px; color: var(--text-secondary); font-style: italic; margin-top: 3px; }
+.log-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.log-changes { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.log-ch-chip { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 1.5; }
+.log-ch-add { background: #E8F5E9; color: #2E7D32; }
+.log-ch-del { background: #FFEBEE; color: #C62828; }
+.log-ch-upd { background: #FFF8E1; color: #5D4037; }
+
 .plan-td-input input { -moz-appearance: textfield; width: 72px; text-align: center; }
 .plan-td-input input::-webkit-outer-spin-button, .plan-td-input input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .plan-calc-input { -moz-appearance: textfield !important; }
