@@ -34,9 +34,9 @@ const routes = [
     redirect: { name: 'home' },
   },
   {
-    path: '/share',
-    name: 'share',
-    component: () => import('@/views/ShareView.vue'),
+    path: '/search-cards',
+    name: 'search-cards',
+    component: () => import('@/views/CardsSearchView.vue'),
   },
 ];
 

@@ -232,6 +232,41 @@ if ($endpoint === 'rpc') {
         $s = $pdo->query("SELECT user_name, page, last_seen FROM user_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE ORDER BY last_seen DESC");
         respond($s->fetchAll());
     }
+    // Гостевой heartbeat (без авторизации)
+    if ($fn === 'guest_heartbeat') {
+        $sid = $body['session_id'] ?? '';
+        $page = $body['page'] ?? 'search-cards';
+        if ($sid) {
+            $s = $pdo->prepare("INSERT INTO guest_presence (session_id, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
+            $s->execute([$sid, $page]);
+        }
+        respond(['success' => true]);
+    }
+    if ($fn === 'get_guest_count') {
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM guest_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE");
+        respond($s->fetch());
+    }
+    // Логирование поиска карточек (без авторизации)
+    if ($fn === 'log_card_search') {
+        $q = $body['query'] ?? '';
+        $found = $body['found'] ?? false;
+        $matchType = $body['match_type'] ?? null;
+        $matchedId = $body['matched_card_id'] ?? null;
+        if ($q) {
+            $s = $pdo->prepare("INSERT INTO search_logs (query, found, match_type, matched_card_id, created_at) VALUES (?, ?, ?, ?, NOW())");
+            $s->execute([$q, $found ? 1 : 0, $matchType, $matchedId]);
+        }
+        respond(['success' => true]);
+    }
+    if ($fn === 'get_cards') {
+        $s = $pdo->query("SELECT id, name, analogs FROM cards ORDER BY name");
+        respond($s->fetchAll());
+    }
+    if ($fn === 'get_cards_last_update') {
+        $s = $pdo->prepare("SELECT `value` FROM settings WHERE `key`='last_update'"); $s->execute();
+        $row = $s->fetch();
+        respond($row ?: ['value' => null]);
+    }
     if ($fn === 'check_maintenance') {
         $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
         $rows = $s->fetchAll(); $mm = 'false'; $msg = '';

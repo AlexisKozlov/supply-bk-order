@@ -49,7 +49,7 @@
           class="p-dock-slot"
           @mouseenter="hoveredIdx = i"
           @mouseleave="hoveredIdx = null"
-          @click="m.dim ? stubModule(m.name) : goTo(m.key, m.query)"
+          @click="m.dim ? stubModule(m.name) : m.public ? goPublic(m.key) : goTo(m.key, m.query)"
         >
           <div
             class="p-dock-item"
@@ -209,7 +209,7 @@ const dockModules = [
   { key: 'analytics', name: 'Аналитика',       svg: svgIcons.analytics },
   { key: 'history',   name: 'История',         svg: svgIcons.history },
   { key: 'database',  name: 'База товаров',    svg: svgIcons.database },
-  { key: 'search',    name: 'Поиск карточек',  svg: svgIcons.search, dim: true },
+  { key: 'search',    name: 'Поиск карточек',  svg: svgIcons.search, public: true },
   { key: 'analysis',  name: 'Анализ',          svg: svgIcons.analysis },
 ];
 
@@ -363,6 +363,11 @@ function goTo(name, query) {
 }
 
 function stubModule(name) { toast.info('В разработке', `${name} — скоро будет доступен`); }
+
+function goPublic(key) {
+  const routes = { search: '/search-cards' };
+  router.push(routes[key] || '/' + key);
+}
 
 async function doLogin() {
   if (!selectedUser.value) return;
