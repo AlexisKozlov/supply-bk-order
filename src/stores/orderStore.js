@@ -274,11 +274,16 @@ export const useOrderStore = defineStore('order', () => {
     } catch (e) { /* не блокируем */ }
   }
 
+  // Счётчик для принудительного пересчёта валидации (инкрементировать при массовом обновлении данных)
+  const dataVersion = ref(0);
+  function bumpDataVersion() { dataVersion.value++; }
+
   return {
-    settings, items, editingOrderId, viewOnlyMode,
+    settings, items, editingOrderId, viewOnlyMode, dataVersion,
     canUndo, canRedo, pageTitle, finalSummary,
     addItem, removeItem, updateItemField, applyAllCalculated,
     moveItem, clearItems, resetOrder, undo, redo,
     saveItemOrder, restoreItemOrder, loadOrderIntoForm, auditLog,
+    bumpDataVersion,
   };
 });

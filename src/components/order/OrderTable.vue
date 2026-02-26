@@ -176,7 +176,7 @@ async function loadConsumptionHistory() {
   avgConsumptionMap.value = map;
 }
 
-watch(() => [settings.value.supplier, settings.value.unit, settings.value.legalEntity, props.dataValidationEnabled], () => {
+watch(() => [settings.value.supplier, settings.value.unit, settings.value.legalEntity, props.dataValidationEnabled, orderStore.items.length, orderStore.dataVersion], () => {
   if (props.dataValidationEnabled) loadConsumptionHistory();
 }, { immediate: true });
 </script>

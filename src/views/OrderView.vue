@@ -570,6 +570,7 @@ async function fillFromLastOrder() {
     });
 
     if (filled > 0) {
+      orderStore.bumpDataVersion();
       draftStore.save();
       toast.success('Расход подставлен', `Заполнено: ${filled} из ${orderStore.items.length} товаров`);
     } else {
@@ -615,6 +616,7 @@ async function loadFrom1c() {
       filled++;
     });
 
+    orderStore.bumpDataVersion();
     draftStore.save();
     const hoursAgo = oldestUpdate ? Math.round((Date.now() - oldestUpdate) / 3600000) : null;
     const freshLabel = hoursAgo !== null ? (hoursAgo < 1 ? 'только что' : `${hoursAgo} ч. назад`) : '';
@@ -802,6 +804,7 @@ async function importFromExcel() {
       if (updated.transit !== item.transit) item.transit = updated.transit;
       if (updated.consumptionPeriod !== item.consumptionPeriod) item.consumptionPeriod = updated.consumptionPeriod;
     });
+    orderStore.bumpDataVersion();
     draftStore.save();
     toast.success('Импорт завершён', `${result.matched} из ${orderStore.items.length} позиций обновлены`);
   } finally { importLoading.value = false; }
