@@ -103,6 +103,13 @@
           </template>
         </tbody>
       </table>
+      <div class="ht-load-more-wrap">
+        <span class="ht-shown-count">Показано {{ sortedOrders.length }} заказов</span>
+        <button v-if="historyStore.hasMoreOrders" class="ht-load-more-btn" :disabled="historyStore.loadingMore" @click="loadMore">
+          <BurgerSpinner v-if="historyStore.loadingMore" size="xs" />
+          <template v-else>Загрузить ещё</template>
+        </button>
+      </div>
     </div>
 
     <!-- PLANS TABLE -->
@@ -150,6 +157,13 @@
           </template>
         </tbody>
       </table>
+      <div class="ht-load-more-wrap">
+        <span class="ht-shown-count">Показано {{ filteredPlans.length }} планов</span>
+        <button v-if="historyStore.hasMorePlans" class="ht-load-more-btn" :disabled="historyStore.loadingMore" @click="loadMorePlansBtn">
+          <BurgerSpinner v-if="historyStore.loadingMore" size="xs" />
+          <template v-else>Загрузить ещё</template>
+        </button>
+      </div>
     </div>
 
     <!-- LOG MODAL -->
@@ -343,6 +357,12 @@ watch(() => orderStore.settings.legalEntity, async () => {
 });
 async function load() {
   await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value });
+}
+async function loadMore() {
+  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value });
+}
+async function loadMorePlansBtn() {
+  await historyStore.loadMorePlans({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value });
 }
 
 // --- Actions ---
@@ -556,6 +576,24 @@ function confirmAction(title, message) { return new Promise(resolve => { confirm
 .log-ch-add { background: #E8F5E9; color: #2E7D32; }
 .log-ch-del { background: #FFEBEE; color: #C62828; }
 .log-ch-upd { background: #FFF8E1; color: #5D4037; }
+
+/* Load more */
+.ht-load-more-wrap {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 12px 16px; border-top: 1px solid var(--border-light);
+}
+.ht-shown-count {
+  font-size: 12px; color: var(--text-muted); font-weight: 500;
+}
+.ht-load-more-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 20px; border: 1.5px solid var(--bk-orange); border-radius: 8px;
+  background: transparent; color: var(--bk-orange);
+  font-size: 13px; font-weight: 700; font-family: inherit;
+  cursor: pointer; transition: all 0.15s;
+}
+.ht-load-more-btn:hover:not(:disabled) { background: var(--bk-orange); color: white; }
+.ht-load-more-btn:disabled { opacity: 0.6; cursor: wait; }
 
 @media (max-width: 768px) {
   .ht-td-created, .ht-td-note { display: none; }

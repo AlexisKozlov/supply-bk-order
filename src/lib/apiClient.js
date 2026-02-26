@@ -18,6 +18,7 @@ class QueryBuilder {
     this._or = null;
     this._ord = null;
     this._lim = null;
+    this._off = 0;
     this._single = false;
     this._maybe = false;
     this._method = 'GET';
@@ -57,6 +58,7 @@ class QueryBuilder {
   }
 
   limit(n)       { this._lim = n;             return this; }
+  offset(n)      { this._off = n;             return this; }
   single()       { this._single = true;        return this; }
   maybeSingle()  { this._single = true; this._maybe = true; return this; }
 
@@ -68,6 +70,7 @@ class QueryBuilder {
     if (this._sel !== '*') p.set('select', this._sel);
     if (this._ord) p.set('order', this._ord);
     if (this._lim) p.set('limit', String(this._lim));
+    if (this._off) p.set('offset', String(this._off));
     let qs = p.toString();
     if (this._or) {
       const orEncoded = encodeURIComponent(this._or).replace(/%2C/gi, ',').replace(/%2A/gi, '*');
