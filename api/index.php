@@ -219,6 +219,19 @@ if ($endpoint === 'rpc') {
         $pdo->prepare("UPDATE notifications SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?) WHERE id IN ($ph) AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))")->execute(array_merge([$user], $ids, [$user]));
         respond(['success' => true]);
     }
+    if ($fn === 'heartbeat') {
+        $userName = $body['user_name'] ?? '';
+        $page = $body['page'] ?? '';
+        if ($userName) {
+            $s = $pdo->prepare("INSERT INTO user_presence (user_name, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
+            $s->execute([$userName, $page]);
+        }
+        respond(['success' => true]);
+    }
+    if ($fn === 'get_online_users') {
+        $s = $pdo->query("SELECT user_name, page, last_seen FROM user_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE ORDER BY last_seen DESC");
+        respond($s->fetchAll());
+    }
     if ($fn === 'check_maintenance') {
         $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
         $rows = $s->fetchAll(); $mm = 'false'; $msg = '';

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && ln -sf /var/www/bk-calc/api /var/www/bk-calc/dist/api",
     "preview": "vite preview"
   },
   "dependencies": {

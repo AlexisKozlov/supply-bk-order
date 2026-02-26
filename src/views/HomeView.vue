@@ -173,6 +173,7 @@ const loginRedirectTo = ref(null);
 const hoveredIdx = ref(null);
 const bgCanvas = ref(null);
 let bgRaf = null;
+let bgResize = null;
 
 const selectedUser = ref('');
 const password = ref('');
@@ -237,6 +238,7 @@ onBeforeUnmount(() => {
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
   if (bgRaf) cancelAnimationFrame(bgRaf);
+  if (bgResize) window.removeEventListener('resize', bgResize);
 });
 
 function initEmberGlow() {
@@ -251,7 +253,8 @@ function initEmberGlow() {
     h = c.height = p.clientHeight;
   };
   resize();
-  window.addEventListener('resize', resize);
+  bgResize = resize;
+  window.addEventListener('resize', bgResize);
 
   const orbs = [
     { x: 0.3, y: 0.7, r: 300, rgb: [180,30,0], sp: 0.4, ph: 0 },

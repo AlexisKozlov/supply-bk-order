@@ -9,6 +9,10 @@
       <button class="adm-tab" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">
         <BkIcon name="user" size="sm"/> Пользователи <span class="adm-tab-count" :class="{ active: activeTab === 'users' }">{{ users.length }}</span>
       </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'online' }" @click="activeTab = 'online'">
+        <BkIcon name="eye" size="sm"/> Онлайн
+        <span class="adm-tab-count" :class="{ active: activeTab === 'online' }">{{ onlineUsers.length }}</span>
+      </button>
       <button class="adm-tab" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
         <BkIcon name="warning" size="sm"/> Тех. работы
         <span v-if="maintenanceOn" class="adm-tab-dot"></span>
@@ -53,6 +57,36 @@
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Онлайн ═══ -->
+    <div v-if="activeTab === 'online'" class="adm-section">
+      <div class="adm-toolbar">
+        <div class="adm-toolbar-info">{{ onlineUsers.length }} {{ onlineWord }} онлайн</div>
+        <button class="btn" @click="loadOnlineUsers" :disabled="onlineLoading">
+          <BkIcon name="redo" size="sm"/> Обновить
+        </button>
+      </div>
+
+      <div v-if="onlineLoading && !onlineUsers.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!onlineUsers.length" class="adm-empty">Нет пользователей онлайн</div>
+
+      <div v-else class="adm-user-list">
+        <div v-for="u in onlineUsers" :key="u.user_name" class="adm-user-row" style="cursor:default;">
+          <div class="adm-user-avatar adm-avatar-online">
+            {{ initials(u.user_name) }}
+            <span class="adm-online-dot"></span>
+          </div>
+          <div class="adm-user-info">
+            <div class="adm-user-name">
+              {{ u.user_name }}
+              <span v-if="u.user_name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
+            </div>
+            <div class="adm-user-meta">{{ u.page || '—' }}</div>
+          </div>
+          <div class="adm-online-time">{{ formatOnlineTime(u.last_seen) }}</div>
         </div>
       </div>
     </div>
@@ -163,7 +197,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -189,6 +223,47 @@ const maintenanceOn = ref(false);
 const maintenanceSaving = ref(false);
 const maintenanceMsg = ref('');
 const maintenanceMsgSaving = ref(false);
+
+// ═══ Онлайн-пользователи ═══
+const onlineUsers = ref([]);
+const onlineLoading = ref(false);
+let onlineTimer = null;
+
+const onlineWord = computed(() => {
+  const n = onlineUsers.value.length;
+  if (n % 10 === 1 && n % 100 !== 11) return 'пользователь';
+  if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'пользователя';
+  return 'пользователей';
+});
+
+async function loadOnlineUsers() {
+  onlineLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_online_users');
+    onlineUsers.value = data || [];
+  } catch { /* noop */ }
+  finally { onlineLoading.value = false; }
+}
+
+function formatOnlineTime(str) {
+  if (!str) return '';
+  // MySQL возвращает datetime без таймзоны — сервер в UTC+3 (Москва)
+  const d = new Date(str.replace(' ', 'T') + '+03:00');
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diff < 10) return 'только что';
+  if (diff < 60) return `${diff} сек назад`;
+  if (diff < 120) return '1 мин назад';
+  return `${Math.floor(diff / 60)} мин назад`;
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'online') {
+    loadOnlineUsers();
+    onlineTimer = setInterval(loadOnlineUsers, 15000);
+  } else {
+    if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
+  }
+});
 
 const usersWord = computed(() => {
   const n = users.value.length;
@@ -316,7 +391,8 @@ async function toggleMaintenance() {
   } finally { maintenanceSaving.value = false; }
 }
 
-onMounted(() => { loadUsers(); loadSettings(); });
+onMounted(() => { loadUsers(); loadSettings(); loadOnlineUsers(); });
+onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 </script>
 
 <style scoped>
@@ -493,6 +569,19 @@ onMounted(() => { loadUsers(); loadSettings(); });
   background: var(--bg);
 }
 .adm-maint-textarea:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(245,166,35,.1); }
+
+/* ═══ Online ═══ */
+.adm-avatar-online {
+  position: relative;
+}
+.adm-online-dot {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #4CAF50; border: 2px solid var(--card);
+}
+.adm-online-time {
+  font-size: 12px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap;
+}
 
 /* ═══ Responsive ═══ */
 @media (max-width: 600px) {

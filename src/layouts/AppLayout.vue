@@ -273,9 +273,31 @@ const pwdError = ref('');
 const pwdSuccess = ref('');
 const pwdLoading = ref(false);
 
+// ═══ Heartbeat (онлайн-присутствие) ═══
+const pageNames = {
+  order: 'Новый заказ',
+  planning: 'Планирование',
+  history: 'История',
+  analytics: 'Аналитика',
+  calendar: 'Календарь',
+  analysis: 'Анализ',
+  database: 'База данных',
+  admin: 'Админ панель',
+};
+
+function sendHeartbeat() {
+  const name = userStore.currentUser?.name;
+  if (!name) return;
+  const page = pageNames[route.name] || route.name || '';
+  db.rpc('heartbeat', { user_name: name, page }).catch(() => {});
+}
+
+let heartbeatTimer = null;
+
 router.afterEach(() => {
   sidebarOpen.value = false;
   if (!userStore.isAdmin) userStore.checkMaintenance();
+  sendHeartbeat();
 });
 
 const currentRoute = computed(() => route.name);
@@ -317,6 +339,10 @@ onMounted(() => {
 
   notificationStore.startPolling();
 
+  // Heartbeat — онлайн-присутствие (каждые 30 сек)
+  sendHeartbeat();
+  heartbeatTimer = setInterval(sendHeartbeat, 30000);
+
   // Периодическая проверка тех. работ (каждые 60 сек)
   if (!userStore.isAdmin) {
     userStore.checkMaintenance();
@@ -327,6 +353,7 @@ onMounted(() => {
 let maintenanceTimer = null;
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
   notificationStore.stopPolling();
 });

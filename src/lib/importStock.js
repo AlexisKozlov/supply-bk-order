@@ -299,6 +299,8 @@ function matchData(items, fileData, target) {
 
   // Track used file entries for fuzzy matches to prevent double-matching
   const usedFuzzy = new Set();
+  // Track which file entries got matched
+  const matchedFileEntries = new Set();
 
   const updatedItems = items.map(item => {
     let match = null;
@@ -344,6 +346,7 @@ function matchData(items, fileData, target) {
 
     if (!match) return item;
     if (isFuzzy) usedFuzzy.add(match);
+    matchedFileEntries.add(match);
     matched++;
     const updated = { ...item };
     if (target === 'order') {
@@ -360,7 +363,14 @@ function matchData(items, fileData, target) {
     }
     return updated;
   });
-  return { items: updatedItems, matched };
+  // Collect file entries that didn't match any item (only with SKU)
+  const unmatchedFile = fileData.filter(d => d.sku && !matchedFileEntries.has(d)).map(d => ({
+    sku: d.sku,
+    name: d.name || '',
+    stock: d.stock ?? 0,
+    consumption: d.consumption ?? 0,
+  }));
+  return { items: updatedItems, matched, unmatchedFile };
 }
 
 // ─── Публичный API ─────────────────────────────────────────────────────────
@@ -407,7 +417,7 @@ export function importFromFile(target, items, legalEntity) {
             data.slice(0, 5).forEach(d => console.log(`  sku=${d.sku || '?'} name="${(d.name || '?').slice(0, 40)}" stock=${d.stock ?? '-'}`));
           }
         }
-        resolve({ items: result.items, matched: result.matched, total: data.length });
+        resolve({ items: result.items, matched: result.matched, total: data.length, unmatchedFile: result.unmatchedFile || [] });
       } catch (err) {
         console.error('[importStock] Error:', err);
         resolve({ items, matched: 0, total: 0, error: err.message || 'Не удалось прочитать файл' });

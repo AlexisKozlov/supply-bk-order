@@ -208,6 +208,42 @@
         </div>
       </aside>
     </div>
+
+    <!-- Модалка ненайденных позиций -->
+    <Teleport to="body">
+      <div v-if="showUnmatched" class="anv-modal-overlay" @click.self="showUnmatched = false">
+        <div class="anv-modal">
+          <div class="anv-modal-header">
+            <span class="anv-modal-title">Не сопоставлено: {{ unmatchedItems.length }}</span>
+            <button class="anv-modal-close" @click="showUnmatched = false">&times;</button>
+          </div>
+          <div class="anv-modal-desc">Позиции из файла, для которых не найден артикул в базе товаров</div>
+          <div class="anv-modal-body">
+            <table class="anv-modal-table">
+              <thead>
+                <tr>
+                  <th>Артикул</th>
+                  <th>Наименование</th>
+                  <th style="text-align:right">Остаток</th>
+                  <th style="text-align:right">Расход</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(u, idx) in unmatchedItems" :key="idx">
+                  <td class="anv-sku">{{ u.sku || '—' }}</td>
+                  <td>{{ u.name || '—' }}</td>
+                  <td style="text-align:right">{{ u.stock ? nf(u.stock) : '—' }}</td>
+                  <td style="text-align:right">{{ u.consumption ? nf(u.consumption) : '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="anv-modal-footer">
+            <button class="btn small" @click="showUnmatched = false">Закрыть</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -252,7 +288,9 @@ function toggleCompact() {
 }
 
 function localNow() {
-  return new Date().toISOString();
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function formatTimeAgo(date) {
@@ -367,6 +405,7 @@ async function saveDataToDB() {
     lastUpdate.label = formatTimeAgo(new Date());
   } catch (e) {
     console.error('[analysis] Ошибка сохранения:', e);
+    toast.error('Ошибка', 'Не удалось сохранить данные анализа');
   } finally {
     savingData.value = false;
   }
@@ -532,6 +571,10 @@ function nf(n) {
   return n.toLocaleString('ru-RU');
 }
 
+// Ненайденные позиции после импорта
+const unmatchedItems = ref([]);
+const showUnmatched = ref(false);
+
 // Импорт — только по артикулу
 async function doImport() {
   importLoading.value = true;
@@ -542,8 +585,15 @@ async function doImport() {
     const imported = result.items;
     // Данные из importFromFile уже в штуках — сохраняем как есть (без конвертации)
     items.value = imported;
-    toast.success('Импорт завершён', `Сопоставлено: ${result.matched} из ${items.value.length}`);
-    saveDataToDB();
+    toast.success('Импорт завершён', `Сопоставлено: ${result.matched} из ${result.total} (файл)`);
+    await saveDataToDB();
+    // Показать ненайденные
+    if (result.unmatchedFile?.length) {
+      unmatchedItems.value = result.unmatchedFile;
+      showUnmatched.value = true;
+    } else {
+      unmatchedItems.value = [];
+    }
   } finally {
     importLoading.value = false;
   }
@@ -583,7 +633,7 @@ async function loadFrom1c() {
     const hoursAgo = oldestUpdate ? Math.round((Date.now() - oldestUpdate) / 3600000) : null;
     const freshLabel = hoursAgo !== null ? (hoursAgo < 1 ? 'только что' : `${hoursAgo} ч. назад`) : '';
     toast.success('Данные из 1С', `${filled} из ${items.value.length} позиций${freshLabel ? ' · ' + freshLabel : ''}`);
-    saveDataToDB();
+    await saveDataToDB();
   } catch {
     toast.error('Ошибка', 'Таблица stock_1c не найдена');
   } finally {
@@ -964,5 +1014,89 @@ onMounted(() => { loadProducts(); });
 @media (max-width: 480px) {
   .anv-sidebar { flex-direction: column; }
   .anv-card { min-width: 0; }
+}
+
+/* ═══ Модалка ненайденных ═══ */
+.anv-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.anv-modal {
+  background: white;
+  border-radius: 12px;
+  width: 640px;
+  max-width: 95vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.anv-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 0;
+}
+.anv-modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.anv-modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--text-muted);
+  line-height: 1;
+  padding: 0 4px;
+}
+.anv-modal-close:hover { color: var(--text); }
+.anv-modal-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 18px 10px;
+}
+.anv-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 18px;
+  min-height: 0;
+}
+.anv-modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.anv-modal-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: white;
+}
+.anv-modal-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-secondary);
+}
+.anv-modal-table tbody tr:hover td {
+  background: var(--bk-yellow-light, #FFF8ED);
+}
+.anv-modal-footer {
+  padding: 10px 18px 14px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>
