@@ -140,13 +140,13 @@ if ($endpoint === 'search_products') {
     $params[] = "%{$q}%";
     
     // Фильтр по юр. лицу
-    if ($le === 'Пицца Стар') {
-        $where[] = "`legal_entity` = ?";
-        $params[] = 'Пицца Стар';
+    if ($le && (strpos($le, 'Пицца Стар') !== false || $le === 'Пицца Стар')) {
+        $where[] = "`legal_entity` LIKE ?";
+        $params[] = '%Пицца Стар%';
     } elseif ($le) {
-        $where[] = "`legal_entity` IN (?, ?)";
-        $params[] = 'Бургер БК';
-        $params[] = 'Воглия Матта';
+        $where[] = "(`legal_entity` LIKE ? OR `legal_entity` LIKE ?)";
+        $params[] = '%Бургер БК%';
+        $params[] = '%Воглия Матта%';
     }
     
     // Фильтр по поставщику
@@ -269,6 +269,26 @@ if ($endpoint === 'rpc') {
         $row = $s->fetch();
         respond($row ?: ['value' => null]);
     }
+    if ($fn === 'send_broadcast') {
+        $userName = $body['user_name'] ?? '';
+        $title = $body['title'] ?? 'Важное сообщение';
+        $message = $body['message'] ?? '';
+        if (!$userName || !$message) respond(['success' => false, 'error' => 'missing params'], 400);
+        // Проверяем роль admin
+        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$userName]); $u = $s->fetch();
+        if (!$u || $u['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $pdo->prepare("INSERT INTO notifications (type, title, message, created_by, read_by, created_at) VALUES ('broadcast', ?, ?, ?, '[]', NOW())")
+            ->execute([$title, $message, $userName]);
+        $id = $pdo->lastInsertId();
+        respond(['success' => true, 'id' => $id]);
+    }
+    if ($fn === 'get_active_broadcasts') {
+        $userName = $body['user_name'] ?? '';
+        if (!$userName) respond([]);
+        $s = $pdo->prepare("SELECT id, title, message, created_by, created_at FROM notifications WHERE type='broadcast' AND created_at > NOW() - INTERVAL 24 HOUR AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?)) ORDER BY created_at DESC LIMIT 5");
+        $s->execute([$userName]);
+        respond($s->fetchAll());
+    }
     if ($fn === 'check_maintenance') {
         $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
         $rows = $s->fetchAll(); $mm = 'false'; $msg = '';
@@ -318,10 +338,12 @@ if ($method === 'GET') {
         $sel = trim(preg_replace('/,?\s*\w+\([^)]+\)/', '', $sel), ', ');
         if (!$sel) $sel = '*';
     }
-    // Валидация основных колонок SELECT
+    // Валидация основных колонок SELECT + обёртка в обратные кавычки
     if ($sel !== '*') {
         $selCols = array_map('trim', explode(',', $sel));
-        foreach ($selCols as $sc) { if (!preg_match('/^[a-zA-Z_]\w*$/', $sc)) { $sel = '*'; break; } }
+        $valid = true;
+        foreach ($selCols as $sc) { if (!preg_match('/^[a-zA-Z_]\w*$/', $sc)) { $valid = false; break; } }
+        $sel = $valid ? implode(',', array_map(fn($c) => "`$c`", $selCols)) : '*';
     }
 
     $sql = "SELECT $sel FROM `$table`";
@@ -376,10 +398,10 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    if (empty($body)) respond(['error' => 'Empty body'], 400);
+    if (!is_array($body) || count($body) === 0) respond(['error' => 'Empty body'], 400);
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
@@ -402,7 +424,7 @@ if ($method === 'PATCH' || $method === 'PUT') {
     if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params);
     if ($subpoint) { $where = ["`id`=?"]; $params = [$subpoint]; }
     if (!$where) respond(['error'=>'No filters'], 400);
-    if (empty($body)) respond(['error' => 'Empty body'], 400);
+    if (!is_array($body) || count($body) === 0) respond(['error' => 'Empty body'], 400);
     foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($body[$jc]) && is_array($body[$jc])) $body[$jc] = json_encode($body[$jc], JSON_UNESCAPED_UNICODE); }
     // Валидация имён колонок
     foreach (array_keys($body) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }

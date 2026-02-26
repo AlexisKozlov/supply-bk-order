@@ -85,7 +85,7 @@ body {
 }
 
 .login-box {
-  background: white;
+  background: var(--card);
   border-radius: 20px;
   padding: 40px 36px 32px;
   width: 380px;
@@ -147,6 +147,7 @@ body {
   flex-shrink: 0;
   overflow: hidden;
   height: 100vh;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-brand {
@@ -385,7 +386,7 @@ body {
   bottom: 68px;
   left: 6px;
   right: 6px;
-  background: white;
+  background: var(--card);
   border-radius: var(--radius-sm);
   box-shadow: 0 -2px 16px rgba(0,0,0,0.2);
   overflow: hidden;
@@ -420,6 +421,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
@@ -711,7 +713,7 @@ select:focus, input:focus, textarea:focus {
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: transform 0.1s ease, box-shadow 0.15s ease, background var(--transition), border-color var(--transition), color var(--transition);
   white-space: nowrap;
   background: var(--card);
   color: var(--text);
@@ -719,7 +721,7 @@ select:focus, input:focus, textarea:focus {
 }
 
 .btn:hover { transform: translateY(-1px); background: var(--bg); }
-.btn:active { transform: translateY(0); }
+.btn:active { transform: scale(0.97) translateY(0); }
 .btn:disabled { cursor: not-allowed; transform: none; }
 .btn.small { padding: 5px 10px; font-size: 11px; }
 
@@ -729,7 +731,8 @@ select:focus, input:focus, textarea:focus {
   box-shadow: 0 2px 8px rgba(214,35,0,0.2);
 }
 
-.btn.primary:hover, .btn-primary:hover { background: var(--accent-hover); }
+.btn.primary:hover, .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(214,35,0,0.25); }
+.btn.primary:active, .btn-primary:active { transform: scale(0.97) translateY(0); box-shadow: 0 2px 8px rgba(214,35,0,0.2); }
 
 .btn.secondary, .btn-secondary {
   background: var(--card);
@@ -935,7 +938,7 @@ td.item-name {
   padding-left: 14px;
   position: sticky;
   left: 0;
-  background: white;
+  background: var(--card);
   z-index: 5;
   box-shadow: 2px 0 6px rgba(44,24,16,0.04);
   font-size: 13px;
@@ -1062,7 +1065,7 @@ input[type="number"] {
 
 input[type="number"]:focus {
   border-color: var(--accent);
-  background: white;
+  background: var(--card);
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
 
@@ -1152,7 +1155,9 @@ input[type="number"]:focus {
   justify-content: center;
   z-index: 9998;
   backdrop-filter: blur(4px);
+  animation: backdropIn 0.2s ease;
 }
+@keyframes backdropIn { from { background-color: rgba(0,0,0,0); backdrop-filter: blur(0); } to { background-color: rgba(44,24,16,0.5); backdrop-filter: blur(4px); } }
 
 /* PAGE-МОДАЛКИ: заменяют content-area внутри main-area */
 .modal.page-modal {
@@ -1240,7 +1245,7 @@ input[type="number"]:focus {
 }
 
 .modal-box {
-  background: white;
+  background: var(--card);
   border-radius: 14px;
   padding: 20px;
   width: 460px;
@@ -1918,6 +1923,14 @@ input[type="number"]:focus {
   min-width: 200px !important;
   width: 100%;
 }
+.search-result-item {
+  padding: 5px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+.search-result-item:hover {
+  background: #f5f5f5;
+}
 .order-actions {
   display: flex;
   gap: 4px;
@@ -2437,7 +2450,7 @@ button:disabled .bk-icon-wrap svg {
   font-weight: 600;
   font-family: inherit;
   color: var(--text);
-  background: #fff;
+  background: var(--card);
   width: 100%;
   box-sizing: border-box;
   transition: border-color 0.15s;
@@ -2511,4 +2524,18 @@ button:disabled .bk-icon-wrap svg {
 .viewer-placeholder-inner .bk-icon { font-size: 48px; color: var(--text-muted); margin-bottom: 12px; }
 .viewer-placeholder-inner h2 { margin: 0 0 8px; font-size: 20px; color: var(--text); }
 .viewer-placeholder-inner p { margin: 0 0 20px; font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+/* ═══════ PAGE TRANSITIONS ═══════ */
+.page-enter-active { animation: pageIn 0.25s ease; }
+.page-leave-active { animation: pageOut 0.15s ease; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pageOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* ═══════ TABLE ROW ANIMATIONS (reserved) ═══════ */
+
+/* ═══════ PARAMS EXPAND ANIMATION ═══════ */
+.params-fields-animated { animation: expandIn 0.2s ease; }
+@keyframes expandIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ═══════ TABLE ROW ANIMATIONS (unused — removed TransitionGroup) ═══════ */
 

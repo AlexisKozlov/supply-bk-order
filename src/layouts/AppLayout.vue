@@ -136,7 +136,11 @@
 
       <!-- PAGE CONTENT -->
       <main class="content-area">
-        <RouterView />
+        <router-view v-slot="{ Component }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :key="route.path" />
+          </Transition>
+        </router-view>
       </main>
     </div>
 
@@ -216,23 +220,36 @@
             <h2><BkIcon name="bell" size="sm"/> Уведомления</h2>
             <button class="modal-close" @click="showNotifications = false"><BkIcon name="close" size="sm"/></button>
           </div>
-          <div style="max-height: 400px; overflow-y: auto; padding: 0 20px 16px;">
-            <div v-if="notificationStore.loading && !notificationStore.notifications.length" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
-            <div v-else-if="!notificationStore.notifications.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет уведомлений</div>
+          <div class="notif-list">
+            <div v-if="notificationStore.loading && !notificationStore.notifications.length" class="notif-empty">Загрузка...</div>
+            <div v-else-if="!notificationStore.notifications.length" class="notif-empty">Нет уведомлений</div>
             <div v-else>
-              <div v-for="n in notificationStore.notifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n) }">
-                <div class="notif-title">{{ n.title }}</div>
-                <div v-if="n.message" class="notif-message">{{ n.message }}</div>
-                <div class="notif-meta">{{ n.created_by || '' }} · {{ formatNotifDate(n.created_at) }}</div>
+              <div v-for="n in notificationStore.notifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n), 'notif-clickable': n.entity_id }" @click="goToNotifEntity(n)">
+                <div class="notif-icon-col">
+                  <div class="notif-icon" :class="n.entity_type === 'plan' ? 'notif-icon-plan' : 'notif-icon-order'">
+                    <BkIcon :name="n.entity_type === 'plan' ? 'planning' : 'package'" size="sm"/>
+                  </div>
+                </div>
+                <div class="notif-body">
+                  <div class="notif-title">{{ n.title }}</div>
+                  <div v-if="n.message" class="notif-message">{{ n.message }}</div>
+                  <div class="notif-meta">
+                    {{ formatNotifDate(n.created_at) }}
+                    <span v-if="n.entity_id" class="notif-link">Открыть →</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <div v-if="notificationStore.unreadCount > 0" style="display:flex;justify-content:center;padding:8px 20px 16px;">
+          <div v-if="notificationStore.unreadCount > 0" class="notif-actions">
             <button class="btn primary" @click="notificationStore.markAllRead()">Прочитать все</button>
           </div>
         </div>
       </div>
     </Teleport>
+
+    <!-- Broadcast Popup -->
+    <BroadcastPopup />
 
   </div>
 </template>
@@ -245,6 +262,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useNotificationStore } from '@/stores/notificationStore.js';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import BroadcastPopup from '@/components/BroadcastPopup.vue';
 
 
 const router = useRouter();
@@ -258,8 +276,9 @@ const isOffline = ref(!navigator.onLine);
 function handleOnline() { isOffline.value = false; }
 function handleOffline() { isOffline.value = true; }
 
-const sidebarCollapsed = ref(false);
+const sidebarCollapsed = ref(localStorage.getItem('bk_sidebar_collapsed') === 'true');
 const sidebarOpen = ref(false);
+
 const showUserMenu = ref(false);
 const showChangePassword = ref(false);
 const showLogoutConfirm = ref(false);
@@ -288,6 +307,7 @@ const pageNames = {
 };
 
 function sendHeartbeat() {
+  if (isOffline.value) return;
   const name = userStore.currentUser?.name;
   if (!name) return;
   const page = pageNames[route.name] || route.name || '';
@@ -295,6 +315,7 @@ function sendHeartbeat() {
 }
 
 let heartbeatTimer = null;
+let maintenanceTimer = null;
 
 router.afterEach(() => {
   sidebarOpen.value = false;
@@ -306,7 +327,7 @@ const currentRoute = computed(() => route.name);
 
 const availableEntities = computed(() => {
   const allowed = userStore.getAllowedEntities();
-  const all = ['Бургер БК', 'Воглия Матта', 'Пицца Стар'];
+  const all = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
   if (!allowed || allowed.length === 0) return all;
   return all.filter(e => allowed.includes(e));
 });
@@ -318,6 +339,7 @@ const userInitials = computed(() => {
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
+  localStorage.setItem('bk_sidebar_collapsed', sidebarCollapsed.value);
 }
 
 onMounted(() => {
@@ -352,7 +374,6 @@ onMounted(() => {
   }
 });
 
-let maintenanceTimer = null;
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
   window.removeEventListener('online', handleOnline);
@@ -367,6 +388,19 @@ function isUnread(n) {
   if (!name) return false;
   const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
   return !readBy.includes(name);
+}
+
+function goToNotifEntity(n) {
+  if (!n.entity_id) return;
+  showNotifications.value = false;
+  if (!isUnread(n)) { /* уже прочитано */ } else {
+    notificationStore.markRead([n.id]);
+  }
+  if (n.entity_type === 'plan') {
+    router.push({ path: '/planning', query: { planId: n.entity_id, mode: 'view' } });
+  } else {
+    router.push({ name: 'order', query: { orderId: n.entity_id, mode: 'view' } });
+  }
 }
 
 function formatNotifDate(str) {
@@ -514,14 +548,34 @@ function confirmLogout() {
 }
 
 /* Notification modal items */
+.notif-list { max-height: 420px; overflow-y: auto; padding: 0 20px 12px; }
+.notif-empty { text-align: center; padding: 32px 0; color: var(--text-muted); font-size: 13px; }
+.notif-actions { display: flex; justify-content: center; padding: 8px 20px 16px; }
 .notif-item {
-  padding: 10px 0; border-bottom: 1px solid var(--border-light);
+  display: flex; gap: 10px; padding: 10px 0;
+  border-bottom: 1px solid var(--border-light);
 }
 .notif-item:last-child { border-bottom: none; }
-.notif-unread { background: #FFF8E1; margin: 0 -20px; padding: 10px 20px; }
-.notif-title { font-weight: 600; font-size: 13px; color: var(--text); }
-.notif-message { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-.notif-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.notif-unread { background: #FFF8E1; margin: 0 -20px; padding: 10px 20px; border-radius: 6px; }
+.notif-icon-col { flex-shrink: 0; padding-top: 1px; }
+.notif-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.notif-icon-order { background: #E3F2FD; color: #1565C0; }
+.notif-icon-plan { background: #F3E5F5; color: #7B1FA2; }
+.notif-body { flex: 1; min-width: 0; }
+.notif-title { font-weight: 600; font-size: 13px; color: var(--text); line-height: 1.3; }
+.notif-message {
+  font-size: 12px; color: var(--text-secondary); margin-top: 4px;
+  white-space: pre-line; line-height: 1.5;
+  background: var(--bg-secondary, #f5f5f5); border-radius: 6px;
+  padding: 6px 8px;
+}
+.notif-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+.notif-clickable { cursor: pointer; border-radius: 8px; transition: background 0.15s; }
+.notif-clickable:hover { background: var(--bg-secondary, #f5f5f5); }
+.notif-link { color: var(--bk-orange, #E87A1E); font-weight: 600; margin-left: auto; }
 
 /* Offline banner */
 .offline-banner {

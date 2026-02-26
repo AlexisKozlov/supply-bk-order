@@ -32,7 +32,7 @@
           <BkIcon :name="settingsExpanded ? 'chevronUp' : 'chevronDown'" size="xs"/>
         </span>
       </div>
-      <div v-if="settingsExpanded" class="params-fields">
+      <div v-if="settingsExpanded" class="params-fields params-fields-animated">
         <div class="pf-group">
           <label>Поставщик</label>
           <select :value="orderStore.settings.supplier" @change="onSupplierChange" :disabled="supplierLoading || orderStore.viewOnlyMode">
@@ -903,6 +903,7 @@ function onAnalogApply() {
   }
 }
 function onAnalogSkip() { analogMergeModal.value.show = false; }
+
 
 // ─── Excel ────────────────────────────────────────────────────────────────────
 async function exportExcel() {
