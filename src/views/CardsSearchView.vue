@@ -1,6 +1,30 @@
 <template>
   <div class="cards-page">
 
+    <!-- Тех. работы -->
+    <div v-if="maintenanceMode" class="mnt-overlay">
+      <div class="mnt-bg">
+        <div class="mnt-orb mnt-orb-1"></div>
+        <div class="mnt-orb mnt-orb-2"></div>
+      </div>
+      <div class="mnt-card">
+        <div class="mnt-icon">
+          <svg viewBox="0 0 64 64" width="40" height="40" fill="none">
+            <path d="M32 8L32 36" stroke="#FDBD10" stroke-width="5" stroke-linecap="round">
+              <animate attributeName="opacity" values="1;.4;1" dur="2s" repeatCount="indefinite"/>
+            </path>
+            <circle cx="32" cy="48" r="4" fill="#FDBD10">
+              <animate attributeName="opacity" values="1;.4;1" dur="2s" repeatCount="indefinite"/>
+            </circle>
+          </svg>
+        </div>
+        <h1 class="mnt-title">Технические работы</h1>
+        <p class="mnt-msg" v-if="maintenanceMessage">{{ maintenanceMessage }}</p>
+        <p class="mnt-msg" v-else>Система временно недоступна.<br>Мы проводим плановое обслуживание и скоро вернёмся.</p>
+        <router-link to="/" class="mnt-home">← На главную</router-link>
+      </div>
+    </div>
+
     <!-- Hero-секция с поиском -->
     <header class="hero">
       <!-- Меню по центру -->
@@ -21,7 +45,7 @@
 
         <!-- Поиск -->
         <div class="search-wrap" ref="searchWrapRef">
-          <p v-if="loading" class="hero-status">Загрузка базы...</p>
+          <div v-if="loading" class="hero-status"><span class="hero-spinner"></span> Загрузка базы...</div>
           <p v-else-if="loadError" class="hero-status hero-error">{{ loadError }}</p>
           <div v-else class="search-box">
             <div class="search-field">
@@ -163,6 +187,10 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             Редактировать
           </button>
+          <button class="tab-btn" :class="{ active: adminTab === 'audit' }" @click="adminTab = 'audit'">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+            Аудит
+          </button>
         </div>
 
         <!-- Вкладка: Добавить -->
@@ -234,6 +262,89 @@
             </form>
           </div>
         </div>
+
+        <!-- Вкладка: Аудит -->
+        <div v-if="adminTab === 'audit'" class="tab-content">
+          <div v-if="auditLoading && !auditLogs.length" class="audit-loading">
+            <div class="audit-loading-spinner"></div>
+            Загрузка статистики...
+          </div>
+          <template v-else-if="auditLoaded">
+            <!-- Статистика в одну строку -->
+            <div class="audit-summary">
+              <div class="summary-item">
+                <span class="summary-num">{{ auditStats.total }}</span>
+                <span class="summary-text">запросов</span>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-item summary-found">
+                <span class="summary-num">{{ auditStats.found }}</span>
+                <span class="summary-text">найдено</span>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-item summary-notfound">
+                <span class="summary-num">{{ auditStats.notFound }}</span>
+                <span class="summary-text">не найдено</span>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-item">
+                <span class="summary-num">{{ auditStats.total ? Math.round(auditStats.found / auditStats.total * 100) : 0 }}%</span>
+                <span class="summary-text">успех</span>
+              </div>
+            </div>
+
+            <!-- Топ-5 запросов -->
+            <div v-if="auditStats.topQueries.length" class="audit-top-card">
+              <div class="top-card-header">
+                <span class="top-card-title">Топ-5 запросов</span>
+                <span class="top-card-hint">за последние {{ auditLimit }} записей</span>
+              </div>
+              <div class="top-card-list">
+                <div v-for="(item, i) in auditStats.topQueries" :key="item.query" class="top-card-row">
+                  <span class="top-card-medal" :class="'medal-' + (i + 1)">{{ i + 1 }}</span>
+                  <span class="top-card-query">{{ item.query }}</span>
+                  <div class="top-card-bar-wrap">
+                    <div class="top-card-bar" :style="{ width: (item.count / auditStats.topQueries[0].count * 100) + '%' }"></div>
+                  </div>
+                  <span class="top-card-count">{{ item.count }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!auditStats.topQueries.length" class="audit-empty">Нет данных для отображения</div>
+
+            <!-- Список всех запросов -->
+            <div class="audit-log-section">
+              <div class="audit-log-header">
+                <span class="audit-log-title">Все запросы</span>
+                <div class="audit-log-filters">
+                  <select v-model="auditFilter.status" class="audit-mini-select">
+                    <option value="">Все</option>
+                    <option value="found">Найдено</option>
+                    <option value="notfound">Не найдено</option>
+                  </select>
+                </div>
+              </div>
+              <div class="audit-log-list">
+                <div v-for="log in filteredAuditLogs" :key="log.id" class="audit-log-row">
+                  <span class="audit-log-dot" :class="log.found ? 'dot-found' : 'dot-notfound'"></span>
+                  <span class="audit-log-query">{{ log.query }}</span>
+                  <span v-if="log.match_type" class="audit-log-type">{{ formatMatchType(log.match_type) }}</span>
+                  <span class="audit-log-date">{{ formatAuditDate(log.created_at) }}</span>
+                </div>
+                <div v-if="!filteredAuditLogs.length" class="audit-empty">Нет записей</div>
+              </div>
+              <button
+                v-if="auditLogs.length >= auditLimit"
+                class="audit-load-more"
+                :disabled="auditLoading"
+                @click="loadMoreAuditLogs"
+              >
+                {{ auditLoading ? 'Загрузка...' : 'Ещё' }}
+              </button>
+            </div>
+          </template>
+        </div>
       </div>
     </Transition>
 
@@ -270,9 +381,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useUserStore } from '../stores/userStore'
 
 const API_BASE = '/api'
+const userStore = useUserStore()
 
 // --- Состояние ---
 const allCards = ref([])
@@ -284,6 +397,10 @@ const loadError = ref('')
 const lastUpdate = ref('')
 const copiedId = ref(null)
 const guestCount = ref(0)
+
+// Тех. работы
+const maintenanceMode = ref(false)
+const maintenanceMessage = ref('')
 
 // Toast
 const toastVisible = ref(false)
@@ -307,6 +424,18 @@ const showAC = ref(false)
 const acIndex = ref(-1)
 const searchInputEl = ref(null)
 const searchWrapRef = ref(null)
+
+// --- Проверка тех. работ ---
+let maintenanceTimer = null
+async function checkMaintenance() {
+  try {
+    const res = await fetch(`${API_BASE}/rpc/check_maintenance`, { method: 'POST' })
+    if (!res.ok) return
+    const data = await res.json()
+    maintenanceMode.value = !!data?.maintenance_mode
+    maintenanceMessage.value = data?.maintenance_message || ''
+  } catch { /* ignore */ }
+}
 
 // --- Нормализация (точная копия оригинала) ---
 function normalize(str) {
@@ -465,7 +594,7 @@ function doSearch() {
 
   searched.value = true
   const q = normalize(queryRaw)
-  const articleMatch = queryRaw.match(/\d{5,}/)
+  const articleMatch = queryRaw.match(/\d{5,}(?:-\d+)?/)
 
   if (articleMatch) {
     // --- Режим артикула ---
@@ -489,11 +618,9 @@ function doSearch() {
     if (foundCard) {
       results.value = [{ ...foundCard, reason }]
       logSearch(queryRaw, true, 'article', foundCard.id)
-    } else {
-      results.value = []
-      logSearch(queryRaw, false, 'article', null)
+      return
     }
-    return
+    // Артикул не найден — продолжаем текстовый поиск (не выходим)
   }
 
   // --- Текстовый поиск ---
@@ -797,6 +924,130 @@ async function deleteCard() {
   }
 }
 
+// ═══════════════════════════════
+// АУДИТ ЛОГОВ ПОИСКА
+// ═══════════════════════════════
+
+const auditLogs = ref([])
+const auditLoading = ref(false)
+const auditLoaded = ref(false)
+const auditLimit = ref(50)
+const auditFilter = ref({ text: '', status: '', dateFrom: '', dateTo: '' })
+const auditStats = ref({ total: 0, found: 0, notFound: 0, topQueries: [] })
+
+async function loadAuditLogs() {
+  auditLoading.value = true
+  try {
+    let url = `${API_BASE}/search_logs?order=created_at.desc&limit=${auditLimit.value}`
+    if (auditFilter.value.dateFrom) {
+      url += `&created_at=gte.${auditFilter.value.dateFrom}T00:00:00`
+    }
+    if (auditFilter.value.dateTo) {
+      url += `&created_at=lte.${auditFilter.value.dateTo}T23:59:59`
+    }
+    const res = await fetch(url, { headers: adminHeaders() })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    // MySQL отдаёт found как "0"/"1" (строка), приводим к boolean
+    for (const row of data) {
+      row.found = !!Number(row.found)
+    }
+    auditLogs.value = data
+    computeAuditStats(data)
+    auditLoaded.value = true
+  } catch (e) {
+    showToast('Ошибка загрузки логов: ' + e.message, 'error')
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+async function loadMoreAuditLogs() {
+  auditLimit.value += 50
+  await loadAuditLogs()
+}
+
+function computeAuditStats(logs) {
+  const total = logs.length
+  const found = logs.filter(l => l.found).length
+  const notFound = total - found
+
+  // Топ запросов
+  const freq = {}
+  for (const l of logs) {
+    const q = (l.query || '').toLowerCase().trim()
+    if (q) freq[q] = (freq[q] || 0) + 1
+  }
+  const topQueries = Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([query, count]) => ({ query, count }))
+
+  auditStats.value = { total, found, notFound, topQueries }
+}
+
+const filteredAuditLogs = computed(() => {
+  let logs = auditLogs.value
+  const text = auditFilter.value.text.toLowerCase().trim()
+  if (text) {
+    logs = logs.filter(l => (l.query || '').toLowerCase().includes(text))
+  }
+  if (auditFilter.value.status === 'found') {
+    logs = logs.filter(l => l.found)
+  } else if (auditFilter.value.status === 'notfound') {
+    logs = logs.filter(l => !l.found)
+  }
+  return logs
+})
+
+function formatMatchType(type) {
+  const map = {
+    article: 'по артикулу',
+    analog: 'по аналогу',
+    direct: 'точное совпадение',
+    full: 'артикул + название',
+    partial_id: 'часть артикула',
+    name: 'по названию'
+  }
+  return map[type] || type
+}
+
+function formatAuditDate(str) {
+  if (!str) return ''
+  const d = new Date(str)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${dd}.${mm} ${hh}:${min}`
+}
+
+// Lazy-load аудита при первом переключении
+watch(() => adminTab.value, (tab) => {
+  if (tab === 'audit' && !auditLoaded.value) {
+    loadAuditLogs()
+  }
+})
+
+// Перезагрузка при изменении фильтров дат
+watch(() => [auditFilter.value.dateFrom, auditFilter.value.dateTo], () => {
+  if (auditLoaded.value) {
+    auditLimit.value = 50
+    loadAuditLogs()
+  }
+})
+
+// Авто-логин из сессии основного сайта
+function tryAutoLogin() {
+  if (userStore.isAuthenticated) {
+    const storedKey = localStorage.getItem('bk_api_key')
+    if (storedKey) {
+      isAdmin.value = true
+      adminApiKey.value = storedKey
+    }
+  }
+}
+
 // ESC закрывает панель
 function handleKeydown(e) {
   if (e.key === 'Escape') {
@@ -806,9 +1057,12 @@ function handleKeydown(e) {
 }
 
 onMounted(() => {
+  checkMaintenance()
+  maintenanceTimer = setInterval(checkMaintenance, 60000)
   loadCards()
   loadLastUpdate()
   loadUserList()
+  tryAutoLogin()
   sendGuestHeartbeat()
   heartbeatInterval = setInterval(sendGuestHeartbeat, 30000)
   document.addEventListener('click', handleClickOutside)
@@ -820,6 +1074,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeydown)
   if (toastTimer) clearTimeout(toastTimer)
   if (heartbeatInterval) clearInterval(heartbeatInterval)
+  if (maintenanceTimer) clearInterval(maintenanceTimer)
 })
 </script>
 
@@ -953,7 +1208,16 @@ onBeforeUnmount(() => {
   color: rgba(255,255,255,0.6);
   font-size: 0.88rem;
   text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
 }
+.hero-spinner {
+  display: inline-block; width: 18px; height: 18px;
+  border: 2.5px solid rgba(255,255,255,0.2);
+  border-top-color: #FDBD10;
+  border-radius: 50%;
+  animation: hero-spin 0.7s linear infinite;
+}
+@keyframes hero-spin { to { transform: rotate(360deg); } }
 .hero-error {
   color: #FF6B6B;
 }
@@ -1567,6 +1831,284 @@ select.field-input {
   flex-wrap: wrap;
 }
 
+/* ═══ AUDIT TAB ═══ */
+.audit-loading {
+  text-align: center;
+  padding: 40px 0;
+  color: #9B8B7E;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.audit-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #F0EBE4;
+  border-top-color: #D62300;
+  border-radius: 50%;
+  animation: hero-spin 0.7s linear infinite;
+}
+
+/* Сводка */
+.audit-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  background: linear-gradient(135deg, #faf8f5, #f5f0e8);
+  border: 1px solid #F0EBE4;
+  border-radius: 14px;
+  padding: 16px 8px;
+  margin-bottom: 16px;
+}
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  gap: 2px;
+}
+.summary-num {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #2C1810;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.summary-text {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #9B8B7E;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.summary-found .summary-num { color: #2E7D32; }
+.summary-notfound .summary-num { color: #C62828; }
+.summary-divider {
+  width: 1px;
+  height: 32px;
+  background: #E8E0D6;
+  flex-shrink: 0;
+}
+
+/* Топ-5 карточка */
+.audit-top-card {
+  background: #fff;
+  border: 1px solid #F0EBE4;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.top-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #2C1810, #4A3228);
+}
+.top-card-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.top-card-hint {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.5);
+  font-weight: 500;
+}
+.top-card-list {
+  display: flex;
+  flex-direction: column;
+}
+.top-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid #F5F0EA;
+  transition: background 0.15s;
+}
+.top-card-row:last-child {
+  border-bottom: none;
+}
+.top-card-row:hover {
+  background: #faf8f5;
+}
+.top-card-medal {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  background: #F0EBE4;
+  color: #6B5344;
+}
+.medal-1 {
+  background: linear-gradient(135deg, #FFD700, #FFC107);
+  color: #5D4200;
+  box-shadow: 0 2px 6px rgba(255,193,7,0.3);
+}
+.medal-2 {
+  background: linear-gradient(135deg, #E0E0E0, #BDBDBD);
+  color: #424242;
+}
+.medal-3 {
+  background: linear-gradient(135deg, #FFAB76, #FF8A50);
+  color: #5D3200;
+}
+.top-card-query {
+  flex: 1;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #2C1810;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.top-card-bar-wrap {
+  width: 60px;
+  height: 6px;
+  background: #F0EBE4;
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.top-card-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #D62300, #FF6B35);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.top-card-count {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #D62300;
+  font-variant-numeric: tabular-nums;
+  min-width: 24px;
+  text-align: right;
+}
+
+/* Список запросов */
+.audit-log-section {
+  margin-top: 16px;
+}
+.audit-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.audit-log-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6B5344;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.audit-mini-select {
+  padding: 4px 8px;
+  border: 1px solid #E8E0D6;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  color: #6B5344;
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+}
+.audit-mini-select:focus {
+  border-color: #D62300;
+}
+.audit-log-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid #F0EBE4;
+  border-radius: 10px;
+  background: #fff;
+}
+.audit-log-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #F5F0EA;
+  font-size: 0.82rem;
+  transition: background 0.12s;
+}
+.audit-log-row:last-child {
+  border-bottom: none;
+}
+.audit-log-row:hover {
+  background: #faf8f5;
+}
+.audit-log-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-found { background: #4CAF50; }
+.dot-notfound { background: #EF5350; }
+.audit-log-query {
+  flex: 1;
+  font-weight: 600;
+  color: #2C1810;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.audit-log-type {
+  font-size: 0.68rem;
+  color: #9B8B7E;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.audit-log-date {
+  font-size: 0.68rem;
+  color: #c4b5a6;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.audit-load-more {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed #E8E0D6;
+  border-radius: 8px;
+  background: transparent;
+  color: #6B5344;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.audit-load-more:hover {
+  border-color: #D62300;
+  color: #D62300;
+  background: rgba(214,35,0,0.03);
+}
+.audit-load-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.audit-empty {
+  text-align: center;
+  padding: 32px 0;
+  color: #9B8B7E;
+  font-size: 0.85rem;
+}
+
 /* ═══ FOOTER ═══ */
 .page-footer {
   position: fixed;
@@ -1676,5 +2218,79 @@ select.field-input {
 @media (min-width: 641px) {
   .search-btn-text { display: inline; }
   .search-btn-icon { display: none; }
+}
+
+/* ═══ Тех. работы — оверлей ═══ */
+.mnt-overlay {
+  position: fixed; inset: 0; z-index: 99999;
+  background: #1A0E09;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.mnt-bg { position: absolute; inset: 0; overflow: hidden; }
+.mnt-orb {
+  position: absolute; border-radius: 50%; filter: blur(80px);
+  animation: mnt-float 8s ease-in-out infinite;
+}
+.mnt-orb-1 {
+  width: 400px; height: 400px; top: -10%; left: -5%;
+  background: radial-gradient(circle, rgba(214,39,0,.15) 0%, transparent 70%);
+}
+.mnt-orb-2 {
+  width: 350px; height: 350px; bottom: -10%; right: -5%;
+  background: radial-gradient(circle, rgba(245,166,35,.12) 0%, transparent 70%);
+  animation-delay: -3s;
+}
+@keyframes mnt-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-20px, 30px) scale(0.95); }
+}
+.mnt-card {
+  position: relative; z-index: 1;
+  background: rgba(40, 22, 14, 0.8);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(253, 189, 16, 0.12);
+  border-radius: 24px;
+  padding: 48px 40px 36px;
+  max-width: 440px; width: 90%;
+  text-align: center;
+  box-shadow: 0 24px 80px rgba(0,0,0,.5);
+  animation: mnt-in .6s ease;
+}
+@keyframes mnt-in {
+  from { opacity: 0; transform: translateY(20px) scale(.97); }
+  to { opacity: 1; transform: none; }
+}
+.mnt-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 80px; height: 80px; border-radius: 50%;
+  background: rgba(253, 189, 16, 0.06);
+  border: 2px solid rgba(253, 189, 16, 0.2);
+  margin-bottom: 24px;
+}
+.mnt-title {
+  font-family: 'Flame', sans-serif;
+  font-size: 26px; font-weight: 700;
+  color: #FDBD10; margin: 0 0 12px;
+}
+.mnt-msg {
+  font-size: 15px; line-height: 1.6;
+  color: rgba(245, 230, 208, 0.65);
+  margin: 0 0 24px;
+}
+.mnt-home {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 28px; border-radius: 12px;
+  border: 1.5px solid rgba(245, 230, 208, 0.15);
+  background: rgba(245, 230, 208, 0.04);
+  color: rgba(245, 230, 208, 0.5);
+  font-size: 13px; font-weight: 600;
+  text-decoration: none; transition: all .2s;
+}
+.mnt-home:hover {
+  border-color: rgba(253, 189, 16, 0.4);
+  color: #FDBD10;
+  background: rgba(253, 189, 16, 0.06);
 }
 </style>
