@@ -1,25 +1,28 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 
+const APP_TITLE = 'Портал закупок';
+
 const routes = [
   {
     path: '/',
     name: 'home',
     component: () => import('@/views/HomeView.vue'),
+    meta: { title: 'Главная' },
   },
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      { path: 'order', name: 'order', component: () => import('@/views/OrderView.vue') },
-      { path: 'history', name: 'history', component: () => import('@/views/HistoryView.vue') },
-      { path: 'planning', name: 'planning', component: () => import('@/views/PlanningView.vue') },
-      { path: 'analytics', name: 'analytics', component: () => import('@/views/AnalyticsView.vue') },
-      { path: 'calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue') },
-      { path: 'analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue') },
-      { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue') },
-      { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true } },
+      { path: 'order', name: 'order', component: () => import('@/views/OrderView.vue'), meta: { title: 'Новый заказ' } },
+      { path: 'history', name: 'history', component: () => import('@/views/HistoryView.vue'), meta: { title: 'История' } },
+      { path: 'planning', name: 'planning', component: () => import('@/views/PlanningView.vue'), meta: { title: 'Планирование' } },
+      { path: 'analytics', name: 'analytics', component: () => import('@/views/AnalyticsView.vue'), meta: { title: 'Аналитика' } },
+      { path: 'calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue'), meta: { title: 'Календарь' } },
+      { path: 'analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue'), meta: { title: 'Анализ' } },
+      { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue'), meta: { title: 'База товаров' } },
+      { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true, title: 'Админ-панель' } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
     ],
   },
@@ -37,12 +40,18 @@ const routes = [
     path: '/search-cards',
     name: 'search-cards',
     component: () => import('@/views/CardsSearchView.vue'),
+    meta: { title: 'Поиск карточек' },
   },
 ];
 
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+router.afterEach((to) => {
+  const pageTitle = to.meta.title;
+  document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
 router.beforeEach((to) => {

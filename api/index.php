@@ -56,7 +56,7 @@ function cleanNumeric($rows) {
     foreach ($rows as &$r) { foreach ($decimal as $col) { if (isset($r[$col])) $r[$col] = +$r[$col]; } }
     return $rows;
 }
-function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0x0fff)|0x4000,mt_rand(0,0x3fff)|0x8000,mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff)); }
+function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', random_int(0,0xffff),random_int(0,0xffff),random_int(0,0xffff),random_int(0,0x0fff)|0x4000,random_int(0,0x3fff)|0x8000,random_int(0,0xffff),random_int(0,0xffff),random_int(0,0xffff)); }
 
 function verifyAndMigratePassword($pdo, $userName, $inputPassword, $storedHash) {
     // Сначала проверяем bcrypt-хеш
@@ -107,10 +107,12 @@ function parseOr($orStr, &$where, &$params) {
     $orClauses = [];
     foreach ($parts as $part) {
         if (preg_match('/^(\w+)\.(eq|neq|gt|gte|lt|lte)\.(.+)$/', $part, $m)) {
+            if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $m[1])) continue;
             $ops = ['eq'=>'=','neq'=>'!=','gt'=>'>','gte'=>'>=','lt'=>'<','lte'=>'<='];
             $orClauses[] = "`{$m[1]}` {$ops[$m[2]]} ?";
             $params[] = $m[3];
         } elseif (preg_match('/^(\w+)\.ilike\.(.+)$/', $part, $m)) {
+            if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $m[1])) continue;
             $orClauses[] = "`{$m[1]}` LIKE ?";
             $params[] = str_replace(['%25','*'], '%', $m[2]);
         }
@@ -390,6 +392,7 @@ if ($method === 'POST') {
         $lid = $rec['id'] ?? $pdo->lastInsertId();
         $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s2->execute([$lid]); $r = $s2->fetch(); if ($r) $ins[] = $r;
     }
+    if ($table === 'users') { foreach ($ins as &$r) { unset($r['password']); } }
     respond(count($ins) === 1 ? $ins[0] : $ins, 201);
 }
 
@@ -412,7 +415,9 @@ if ($method === 'PATCH' || $method === 'PUT') {
         respond(['error' => $e->getMessage(), 'table' => $table], 500);
     }
     $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE " . implode(' AND ', $where)); $s2->execute($params);
-    respond($s2->fetchAll());
+    $result = $s2->fetchAll();
+    if ($table === 'users') { foreach ($result as &$r) { unset($r['password']); } }
+    respond($result);
 }
 
 if ($method === 'DELETE') {

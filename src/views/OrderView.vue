@@ -821,12 +821,7 @@ async function exportExcel() {
 async function clearOrder() {
   const ok = await new Promise(resolve => { confirmModal.value = { show:true, title:'Очистить данные?', message:'Заполненные данные (расход, остаток, транзит, заказ) будут сброшены. Товары останутся.', resolve }; });
   if (!ok) return;
-  orderStore.items.forEach(item => {
-    item.consumptionPeriod = 0;
-    item.stock = 0;
-    item.transit = 0;
-    item.finalOrder = 0;
-  });
+  orderStore.clearAllData();
   draftStore.save();
 }
 

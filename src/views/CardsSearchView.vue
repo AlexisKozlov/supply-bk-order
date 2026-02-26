@@ -855,6 +855,7 @@ onBeforeUnmount(() => {
     radial-gradient(ellipse 600px 400px at 20% 50%, rgba(214,35,0,0.25), transparent),
     radial-gradient(ellipse 500px 350px at 80% 30%, rgba(255,135,50,0.2), transparent);
   pointer-events: none;
+  -webkit-clip-path: inset(0);
   clip-path: inset(0);
 }
 .hero::after {
@@ -868,6 +869,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   pointer-events: none;
   animation: pulse-glow 6s ease-in-out infinite;
+  -webkit-clip-path: inset(-100% -100% 0 0);
   clip-path: inset(-100% -100% 0 0);
 }
 @keyframes pulse-glow {

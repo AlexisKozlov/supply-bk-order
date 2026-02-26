@@ -24,6 +24,7 @@ export const useHistoryStore = defineStore('history', () => {
       loading.value = true;
       orders.value = [];
     } else {
+      if (loadingMore.value) return orders.value;
       loadingMore.value = true;
     }
     error.value = null;
@@ -74,6 +75,7 @@ export const useHistoryStore = defineStore('history', () => {
       loading.value = true;
       plans.value = [];
     } else {
+      if (loadingMore.value) return plans.value;
       loadingMore.value = true;
     }
     error.value = null;

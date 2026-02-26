@@ -255,6 +255,8 @@ const notificationStore = useNotificationStore();
 
 const showNotifications = ref(false);
 const isOffline = ref(!navigator.onLine);
+function handleOnline() { isOffline.value = false; }
+function handleOffline() { isOffline.value = true; }
 
 const sidebarCollapsed = ref(false);
 const sidebarOpen = ref(false);
@@ -334,8 +336,8 @@ onMounted(() => {
   }
 
   document.addEventListener('click', handleOutsideClick);
-  window.addEventListener('online', () => { isOffline.value = false; });
-  window.addEventListener('offline', () => { isOffline.value = true; });
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
 
   notificationStore.startPolling();
 
@@ -353,6 +355,8 @@ onMounted(() => {
 let maintenanceTimer = null;
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
+  window.removeEventListener('online', handleOnline);
+  window.removeEventListener('offline', handleOffline);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
   notificationStore.stopPolling();

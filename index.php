@@ -29,7 +29,17 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $body = json_decode(file_get_contents('php://input'), true) ?? [];
 
 function respond($d, $c = 200) { http_response_code($c); echo json_encode($d, JSON_UNESCAPED_UNICODE); exit; }
-function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0x0fff)|0x4000,mt_rand(0,0x3fff)|0x8000,mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff)); }
+function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', random_int(0,0xffff),random_int(0,0xffff),random_int(0,0xffff),random_int(0,0x0fff)|0x4000,random_int(0,0x3fff)|0x8000,random_int(0,0xffff),random_int(0,0xffff),random_int(0,0xffff)); }
+
+function verifyAndMigratePassword($pdo, $userName, $inputPassword, $storedHash) {
+    if (password_verify($inputPassword, $storedHash)) return true;
+    if ($storedHash === $inputPassword) {
+        $hash = password_hash($inputPassword, PASSWORD_BCRYPT);
+        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$hash, $userName]);
+        return true;
+    }
+    return false;
+}
 
 function checkApiKey($pdo) {
     $k = $_SERVER['HTTP_X_API_KEY'] ?? '';
@@ -74,15 +84,6 @@ function parseOr($orStr, &$where, &$params) {
         }
     }
     if ($orClauses) $where[] = '(' . implode(' OR ', $orClauses) . ')';
-}
-
-// ═══ DEBUG ═══
-if ($endpoint === 'debug') {
-    respond([
-        'GET' => $_GET,
-        'raw_query' => $_SERVER['QUERY_STRING'] ?? '',
-        'uri' => $_SERVER['REQUEST_URI'] ?? ''
-    ]);
 }
 
 // ═══ SEARCH ═══
@@ -136,7 +137,7 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities FROM users WHERE name=?");
         $s->execute([$name]); $u = $s->fetch();
         if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if ($u['password'] !== $pass) respond(['success'=>false,'error'=>'wrong_password']);
+        if (!verifyAndMigratePassword($pdo, $u['name'], $pass, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
         $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
@@ -159,8 +160,9 @@ if ($endpoint === 'rpc') {
         $newPwd = $body['new_password'] ?? '';
         $s = $pdo->prepare("SELECT password FROM users WHERE name=?"); $s->execute([$name]); $u = $s->fetch();
         if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if ($u['password'] !== $oldPwd) respond(['success'=>false,'error'=>'wrong_password']);
-        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$newPwd, $name]);
+        if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
+        $hash = password_hash($newPwd, PASSWORD_BCRYPT);
+        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$hash, $name]);
         respond(['success'=>true]);
     }
     respond(['error'=>'Unknown RPC: '.$fn], 404);

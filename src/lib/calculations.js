@@ -36,7 +36,7 @@ export function calculateItem(item, settings) {
   let coverageDate = null;
   if (daily > 0 && daysAfterDelivery > 0) {
     coverageDate = new Date(deliveryDate);
-    coverageDate.setDate(coverageDate.getDate() + daysAfterDelivery);
+    coverageDate.setDate(coverageDate.getDate() + Math.floor(daysAfterDelivery));
   }
 
   return {

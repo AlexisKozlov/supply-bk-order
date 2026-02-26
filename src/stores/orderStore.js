@@ -166,6 +166,18 @@ export const useOrderStore = defineStore('order', () => {
     items.value = [];
   }
 
+  function clearAllData() {
+    _ensureInitialState();
+    items.value.forEach(item => {
+      item.consumptionPeriod = 0;
+      item.stock = 0;
+      item.transit = 0;
+      item.finalOrder = 0;
+      item._manualOrder = false;
+    });
+    _snapshot();
+  }
+
   function resetOrder() {
     items.value = [];
     settings.supplier = '';
@@ -282,7 +294,7 @@ export const useOrderStore = defineStore('order', () => {
     settings, items, editingOrderId, viewOnlyMode, dataVersion,
     canUndo, canRedo, pageTitle, finalSummary,
     addItem, removeItem, updateItemField, applyAllCalculated,
-    moveItem, clearItems, resetOrder, undo, redo,
+    moveItem, clearItems, clearAllData, resetOrder, undo, redo,
     saveItemOrder, restoreItemOrder, loadOrderIntoForm, auditLog,
     bumpDataVersion,
   };
