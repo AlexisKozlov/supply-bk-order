@@ -100,6 +100,8 @@ export const icons = {
 
   chartDown: `<svg viewBox="0 0 24 24" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>`,
 
+  bell: `<svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="#FFF3E0" stroke="#D62700" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.73 21a2 2 0 01-3.46 0" stroke="#FF8733" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+
   menu: `<svg viewBox="0 0 24 24" fill="none"><line x1="3" y1="6" x2="21" y2="6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="12" x2="21" y2="12" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="18" x2="21" y2="18" stroke="#FDBD10" stroke-width="2.5" stroke-linecap="round"/></svg>`,
 
   package: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="14" rx="2" fill="#FFE0B2" stroke="#D62700" stroke-width="1.8"/><path d="M3 7l9-5 9 5" fill="#FF8733" stroke="#D62700" stroke-width="1.5" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="12" stroke="#D62700" stroke-width="1.2"/></svg>`,
@@ -129,6 +131,8 @@ export const iconsLight = {
   calendar: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" fill="rgba(255,255,255,0.1)" stroke="#EF9A9A" stroke-width="1.3"/><rect x="3" y="5" width="18" height="5" rx="3" fill="#EF5350" opacity="0.7"/><path d="M8 2.5v4M16 2.5v4" stroke="#EF9A9A" stroke-width="1.5" stroke-linecap="round"/><circle cx="8.5" cy="15" r="1.8" fill="#EF9A9A"/><circle cx="12" cy="15" r="1.8" fill="#FFCDD2"/><circle cx="15.5" cy="15" r="1.8" fill="rgba(255,255,255,0.3)"/></svg>`,
 
   key: `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/><circle cx="7.5" cy="16.5" r="2" fill="#FFD54F"/></svg>`,
+
+  bell: `<svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.73 21a2 2 0 01-3.46 0" stroke="#FFD54F" stroke-width="1.5" stroke-linecap="round"/></svg>`,
 
   menu: `<svg viewBox="0 0 24 24" fill="none"><line x1="3" y1="6" x2="21" y2="6" stroke="rgba(255,255,255,0.8)" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="12" x2="21" y2="12" stroke="rgba(255,255,255,0.55)" stroke-width="2.5" stroke-linecap="round"/><line x1="3" y1="18" x2="21" y2="18" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/></svg>`,
 

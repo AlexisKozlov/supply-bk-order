@@ -24,6 +24,11 @@
             <option v-for="a in uniqueAuthors" :key="a" :value="a">{{ a }}</option>
           </select>
         </div>
+        <div class="ht-filter" style="display:flex;align-items:center;gap:4px;">
+          <input type="date" v-model="filterDateFrom" @change="load" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;" title="Дата от"/>
+          <span style="font-size:11px;color:var(--text-muted);">—</span>
+          <input type="date" v-model="filterDateTo" @change="load" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;" title="Дата до"/>
+        </div>
       </div>
     </div>
 
@@ -244,6 +249,8 @@ const isViewer = computed(() => userStore.isViewer);
 const filterType        = ref('orders');
 const filterSupplier    = ref('');
 const filterAuthor      = ref('');
+const filterDateFrom    = ref('');
+const filterDateTo      = ref('');
 const expandedOrders    = ref(new Set());
 const expandedPlans     = ref(new Set());
 const logModal          = ref({ show: false, loading: false, entries: [], type: '' });
@@ -356,13 +363,13 @@ watch(() => orderStore.settings.legalEntity, async () => {
   await load();
 });
 async function load() {
-  await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value });
+  await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
 }
 async function loadMore() {
-  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value });
+  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
 }
 async function loadMorePlansBtn() {
-  await historyStore.loadMorePlans({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value });
+  await historyStore.loadMorePlans({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
 }
 
 // --- Actions ---

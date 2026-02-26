@@ -31,7 +31,16 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 },
+              expiration: { maxEntries: 200, maxAgeSeconds: 600 },
+              networkTimeoutSeconds: 5,
+            },
+          },
+          {
+            urlPattern: /\.(?:png|svg|otf|woff|woff2)$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'static-assets',
+              expiration: { maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 },
             },
           },
         ],

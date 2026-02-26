@@ -3,6 +3,54 @@ import { ref, toRaw } from 'vue';
 import { useOrderStore } from './orderStore.js';
 
 const DRAFT_KEY = 'bk_draft';
+const IDB_NAME = 'bk_drafts';
+const IDB_STORE = 'drafts';
+
+// ─── IndexedDB хелперы ───
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGet(key) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch { return undefined; }
+}
+
+async function idbSet(key, value) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* fallback на localStorage */ }
+}
+
+async function idbDelete(key) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* ignore */ }
+}
 
 export const useDraftStore = defineStore('draft', () => {
   const isLoading = ref(false);
@@ -33,28 +81,34 @@ export const useDraftStore = defineStore('draft', () => {
       items: JSON.parse(JSON.stringify(toRaw(orderStore.items))),
       timestamp: new Date().toISOString(),
     };
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    const json = JSON.stringify(draft);
+    localStorage.setItem(DRAFT_KEY, json);
+    idbSet(DRAFT_KEY, draft);
   }
 
   function clear() {
     clearTimeout(_timer);
     localStorage.removeItem(DRAFT_KEY);
+    idbDelete(DRAFT_KEY);
   }
 
   /** Восстановить черновик. Возвращает true если черновик был загружен. */
   async function load(supplierLoader) {
-    const raw = localStorage.getItem(DRAFT_KEY);
-    if (!raw) return false;
+    let data = await idbGet(DRAFT_KEY);
+    if (!data) {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return false;
+      try { data = JSON.parse(raw); } catch { return false; }
+    }
 
     try {
-      const data = JSON.parse(raw);
       const orderStore = useOrderStore();
       isLoading.value = true;
 
       // Настройки
-      if (data.settings.today) orderStore.settings.today = new Date(data.settings.today);
-      if (data.settings.deliveryDate) orderStore.settings.deliveryDate = new Date(data.settings.deliveryDate);
-      if (data.settings.safetyEndDate) orderStore.settings.safetyEndDate = new Date(data.settings.safetyEndDate);
+      if (data.settings.today) { const d = new Date(data.settings.today); if (!isNaN(d)) orderStore.settings.today = d; }
+      if (data.settings.deliveryDate) { const d = new Date(data.settings.deliveryDate); if (!isNaN(d)) orderStore.settings.deliveryDate = d; }
+      if (data.settings.safetyEndDate) { const d = new Date(data.settings.safetyEndDate); if (!isNaN(d)) orderStore.settings.safetyEndDate = d; }
 
       orderStore.settings.legalEntity  = data.settings.legalEntity  || 'Бургер БК';
       orderStore.settings.supplier     = data.settings.supplier      || '';

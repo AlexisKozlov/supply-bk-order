@@ -17,8 +17,8 @@ export const useHistoryStore = defineStore('history', () => {
   const userStore  = useUserStore();
 
   // ─── Загрузить историю ────────────────────────────────────────────────────
-  async function loadOrders({ legalEntity, supplier = '', type = 'orders', reset = true } = {}) {
-    if (type === 'plans') return loadPlans({ legalEntity, supplier, reset });
+  async function loadOrders({ legalEntity, supplier = '', type = 'orders', reset = true, dateFrom = '', dateTo = '' } = {}) {
+    if (type === 'plans') return loadPlans({ legalEntity, supplier, reset, dateFrom, dateTo });
 
     if (reset) {
       loading.value = true;
@@ -43,6 +43,8 @@ export const useHistoryStore = defineStore('history', () => {
 
       if (legalEntity) query = query.eq('legal_entity', legalEntity);
       if (supplier)    query = query.eq('supplier', supplier);
+      if (dateFrom)    query = query.gte('delivery_date', dateFrom);
+      if (dateTo)      query = query.lte('delivery_date', dateTo);
 
       const { data, error: err } = await query;
 
@@ -67,7 +69,7 @@ export const useHistoryStore = defineStore('history', () => {
   }
 
   // ─── Загрузить историю планов ─────────────────────────────────────────────
-  async function loadPlans({ legalEntity, supplier = '', reset = true } = {}) {
+  async function loadPlans({ legalEntity, supplier = '', reset = true, dateFrom = '', dateTo = '' } = {}) {
     if (reset) {
       loading.value = true;
       plans.value = [];
@@ -86,6 +88,8 @@ export const useHistoryStore = defineStore('history', () => {
 
       if (legalEntity) query = query.eq('legal_entity', legalEntity);
       if (supplier)    query = query.eq('supplier', supplier);
+      if (dateFrom)    query = query.gte('created_at', dateFrom);
+      if (dateTo)      query = query.lte('created_at', dateTo + ' 23:59:59');
 
       const { data, error: err } = await query;
       if (err) { error.value = err; return []; }

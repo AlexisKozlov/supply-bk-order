@@ -58,6 +58,19 @@ function cleanNumeric($rows) {
 }
 function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0x0fff)|0x4000,mt_rand(0,0x3fff)|0x8000,mt_rand(0,0xffff),mt_rand(0,0xffff),mt_rand(0,0xffff)); }
 
+function verifyAndMigratePassword($pdo, $userName, $inputPassword, $storedHash) {
+    // Сначала проверяем bcrypt-хеш
+    if (password_verify($inputPassword, $storedHash)) return true;
+    // Fallback: прямое сравнение (для plain text паролей)
+    if ($storedHash === $inputPassword) {
+        // Ленивая миграция: хешируем и обновляем в БД
+        $hash = password_hash($inputPassword, PASSWORD_BCRYPT);
+        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$hash, $userName]);
+        return true;
+    }
+    return false;
+}
+
 function checkApiKey($pdo) {
     $k = $_SERVER['HTTP_X_API_KEY'] ?? '';
     if (!$k) return false;
@@ -159,7 +172,7 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities FROM users WHERE name=?");
         $s->execute([$name]); $u = $s->fetch();
         if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if ($u['password'] !== $pass) respond(['success'=>false,'error'=>'wrong_password']);
+        if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
         $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
@@ -173,9 +186,17 @@ if ($endpoint === 'rpc') {
         $pwd = $body['pwd'] ?? '';
         $s = $pdo->prepare("SELECT value FROM settings WHERE `key`='order_calculator_password'"); $s->execute();
         $stored = $s->fetchColumn();
-        if ($stored && $stored === $pwd) {
-            $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
-            respond(['success'=>true,'api_key'=>$s2->fetchColumn()]);
+        if ($stored) {
+            $ok = password_verify($pwd, $stored) || $stored === $pwd;
+            if ($ok) {
+                // Ленивая миграция legacy-пароля
+                if ($stored === $pwd) {
+                    $hash = password_hash($pwd, PASSWORD_BCRYPT);
+                    $pdo->prepare("UPDATE settings SET value=? WHERE `key`='order_calculator_password'")->execute([$hash]);
+                }
+                $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
+                respond(['success'=>true,'api_key'=>$s2->fetchColumn()]);
+            }
         }
         respond(['success'=>false]);
     }
@@ -185,9 +206,18 @@ if ($endpoint === 'rpc') {
         $newPwd = $body['new_password'] ?? '';
         $s = $pdo->prepare("SELECT password FROM users WHERE name=?"); $s->execute([$name]); $u = $s->fetch();
         if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if ($u['password'] !== $oldPwd) respond(['success'=>false,'error'=>'wrong_password']);
-        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$newPwd, $name]);
+        if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
+        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([password_hash($newPwd, PASSWORD_BCRYPT), $name]);
         respond(['success'=>true]);
+    }
+    if ($fn === 'mark_notifications_read') {
+        $ids = $body['ids'] ?? [];
+        $user = $body['user_name'] ?? '';
+        if (!$user || empty($ids)) respond(['success' => false, 'error' => 'missing params']);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $params = array_merge([$user], $ids);
+        $pdo->prepare("UPDATE notifications SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?) WHERE id IN ($ph) AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))")->execute(array_merge([$user], $ids, [$user]));
+        respond(['success' => true]);
     }
     if ($fn === 'check_maintenance') {
         $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
@@ -202,7 +232,7 @@ if ($endpoint === 'rpc') {
 if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications'];
 // Защита: users — только чтение (без password), запись только через RPC
 $readOnly = ['audit_log','search_logs'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found: '.$endpoint], 404); }
@@ -258,9 +288,36 @@ if ($method === 'GET') {
 
     $s = $pdo->prepare($sql); $s->execute($params); $data = $s->fetchAll();
 
-    if ($hasSubSelect && $subTable && in_array($subTable, $allowed)) {
+    if ($hasSubSelect && $subTable && in_array($subTable, $allowed) && !empty($data)) {
         $fk = $table === 'orders' ? 'order_id' : 'id';
-        foreach ($data as &$row) { $s2 = $pdo->prepare("SELECT $subCols FROM `$subTable` WHERE `$fk`=?"); $s2->execute([$row['id']]); $row[$subTable] = $s2->fetchAll(); }
+        $ids = array_column($data, 'id');
+        if ($ids) {
+            // Убедимся что FK-колонка включена в SELECT подтаблицы
+            $subSelCols = $subCols;
+            $fkIncluded = ($subCols === '*');
+            if (!$fkIncluded) {
+                $subColsArr = array_map('trim', explode(',', $subCols));
+                if (!in_array($fk, $subColsArr)) {
+                    $subSelCols = "`$fk`," . $subCols;
+                }
+                $fkIncluded = in_array($fk, $subColsArr);
+            }
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $s2 = $pdo->prepare("SELECT $subSelCols FROM `$subTable` WHERE `$fk` IN ($ph)");
+            $s2->execute($ids);
+            $subRows = $s2->fetchAll();
+            // Группируем по FK
+            $grouped = [];
+            foreach ($subRows as $sr) {
+                $key = $sr[$fk];
+                // Убрать FK из результата если он не был в оригинальном запросе
+                if ($subCols !== '*' && !$fkIncluded) unset($sr[$fk]);
+                $grouped[$key][] = $sr;
+            }
+            foreach ($data as &$row) {
+                $row[$subTable] = $grouped[$row['id']] ?? [];
+            }
+        }
     }
     if ($table === 'products') $data = cleanNumeric($data);
     // Скрыть пароль при чтении users

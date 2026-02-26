@@ -134,5 +134,23 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     });
   } catch(e) { /* не блокируем */ }
 
+  // Уведомление (не блокируем)
+  try {
+    const notifTitle = editingOrderId
+      ? `Заказ обновлён: ${settings.supplier || 'Свободный'}`
+      : `Новый заказ: ${settings.supplier || 'Свободный'}`;
+    const notifMessage = `${itemsWithOrder.length} позиций, поставка ${orderData.delivery_date || '—'}`;
+    await db.from('notifications').insert({
+      type: 'order',
+      title: notifTitle,
+      message: notifMessage,
+      entity_type: 'order',
+      entity_id: orderId,
+      legal_entity: settings.legalEntity,
+      created_by: userName || null,
+      read_by: userName ? JSON.stringify([userName]) : '[]',
+    });
+  } catch(e) { /* не блокируем */ }
+
   return { orderId, itemsCount: itemsWithOrder.length };
 }

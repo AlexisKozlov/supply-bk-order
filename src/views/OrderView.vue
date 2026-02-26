@@ -278,6 +278,8 @@ const orderResultModal      = ref({ show: false, text: '', supplier: '', deliver
 const isFullscreen          = ref(false);
 const compactMode           = ref(localStorage.getItem('bk_compact_mode') === '1');
 let   searchTimer           = null;
+const searchCache           = new Map();
+const SEARCH_CACHE_MAX      = 20;
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
@@ -335,6 +337,11 @@ watch(paramsReady, (ready) => {
 // ─── Init ──────────────────────────────────────────────────────────────────────
 // Перезагружать поставщиков при смене юр. лица в сайдбаре
 watch(() => orderStore.settings.legalEntity, async (le) => {
+  searchQuery.value = '';
+  searchResults.value = [];
+  searchDone.value = false;
+  clearTimeout(searchTimer);
+  searchCache.clear();
   await supplierStore.loadSuppliers(le);
 });
 
@@ -405,7 +412,10 @@ onMounted(async () => {
   document.addEventListener('click', closeShareDropdown);
 });
 
-onUnmounted(() => document.removeEventListener('click', closeShareDropdown));
+onUnmounted(() => {
+  document.removeEventListener('click', closeShareDropdown);
+  clearTimeout(searchTimer);
+});
 
 function closeShareDropdown(e) {
   if (!e.target.closest('.share-dropdown')) showShareDropdown.value = false;
@@ -429,6 +439,7 @@ async function onSupplierChange(e) {
   orderStore.settings.supplier = newSupplier;
   orderStore.settings.note = '';
   orderStore.items = [];
+  searchCache.clear();
   draftStore.save();
   if (!newSupplier) return;
   supplierLoading.value = true;
@@ -622,11 +633,24 @@ function onSearchInput() {
 }
 
 async function searchProducts(q) {
+  const cacheKey = `${q}_${orderStore.settings.legalEntity}_${orderStore.settings.supplier}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) {
+    searchResults.value = cached;
+    searchDone.value = true;
+    return;
+  }
   const params = new URLSearchParams({ q, limit: '10', legal_entity: orderStore.settings.legalEntity });
   if (orderStore.settings.supplier) params.set('supplier', orderStore.settings.supplier);
   try {
     const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-API-Key': localStorage.getItem('bk_api_key') || '' } });
-    searchResults.value = await r.json();
+    const results = await r.json();
+    searchResults.value = results;
+    // Сохраняем в кеш с лимитом
+    if (searchCache.size >= SEARCH_CACHE_MAX) {
+      searchCache.delete(searchCache.keys().next().value);
+    }
+    searchCache.set(cacheKey, results);
   } catch(e) { console.error(e); }
   finally { searchDone.value = true; }
 }

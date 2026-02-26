@@ -79,6 +79,17 @@
         </select>
       </div>
 
+      <!-- Уведомления -->
+      <div class="sidebar-notifications" v-if="!sidebarCollapsed" @click="showNotifications = true">
+        <BkIcon name="bell" size="sm" light/>
+        <span>Уведомления</span>
+        <span v-if="notificationStore.unreadCount" class="notification-badge-sidebar">{{ notificationStore.unreadCount }}</span>
+      </div>
+      <div v-else class="sidebar-notifications sidebar-notifications-collapsed" @click="showNotifications = true">
+        <BkIcon name="bell" size="sm" light/>
+        <span v-if="notificationStore.unreadCount" class="notification-badge-sidebar">{{ notificationStore.unreadCount }}</span>
+      </div>
+
       <!-- User section at bottom -->
       <div class="sidebar-bottom" v-if="userStore.currentUser">
         <!-- Dropdown menu -->
@@ -112,7 +123,16 @@
       <!-- Мобильный topbar -->
       <header class="topbar topbar-mobile-only">
         <button class="mobile-sidebar-toggle" @click="sidebarOpen = !sidebarOpen">☰</button>
+        <button class="notification-bell-mobile" @click="showNotifications = true" title="Уведомления">
+          <BkIcon name="bell" size="sm"/>
+          <span v-if="notificationStore.unreadCount" class="notification-badge">{{ notificationStore.unreadCount }}</span>
+        </button>
       </header>
+
+      <!-- Оффлайн-баннер -->
+      <div v-if="isOffline" class="offline-banner">
+        <BkIcon name="warning" size="sm"/> Нет подключения к интернету
+      </div>
 
       <!-- PAGE CONTENT -->
       <main class="content-area">
@@ -188,6 +208,32 @@
       </div>
     </Teleport>
 
+    <!-- Notifications Modal -->
+    <Teleport to="body">
+      <div v-if="showNotifications" class="modal" @click.self="showNotifications = false">
+        <div class="modal-box" style="max-width: 480px;">
+          <div class="modal-header">
+            <h2><BkIcon name="bell" size="sm"/> Уведомления</h2>
+            <button class="modal-close" @click="showNotifications = false"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div style="max-height: 400px; overflow-y: auto; padding: 0 20px 16px;">
+            <div v-if="notificationStore.loading && !notificationStore.notifications.length" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+            <div v-else-if="!notificationStore.notifications.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет уведомлений</div>
+            <div v-else>
+              <div v-for="n in notificationStore.notifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n) }">
+                <div class="notif-title">{{ n.title }}</div>
+                <div v-if="n.message" class="notif-message">{{ n.message }}</div>
+                <div class="notif-meta">{{ n.created_by || '' }} · {{ formatNotifDate(n.created_at) }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="notificationStore.unreadCount > 0" style="display:flex;justify-content:center;padding:8px 20px 16px;">
+            <button class="btn primary" @click="notificationStore.markAllRead()">Прочитать все</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
   </div>
 </template>
 
@@ -196,6 +242,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { useNotificationStore } from '@/stores/notificationStore.js';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -204,6 +251,10 @@ const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
 const orderStore = useOrderStore();
+const notificationStore = useNotificationStore();
+
+const showNotifications = ref(false);
+const isOffline = ref(!navigator.onLine);
 
 const sidebarCollapsed = ref(false);
 const sidebarOpen = ref(false);
@@ -261,6 +312,10 @@ onMounted(() => {
   }
 
   document.addEventListener('click', handleOutsideClick);
+  window.addEventListener('online', () => { isOffline.value = false; });
+  window.addEventListener('offline', () => { isOffline.value = true; });
+
+  notificationStore.startPolling();
 
   // Периодическая проверка тех. работ (каждые 60 сек)
   if (!userStore.isAdmin) {
@@ -273,7 +328,22 @@ let maintenanceTimer = null;
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
+  notificationStore.stopPolling();
 });
+
+function isUnread(n) {
+  const name = userStore.currentUser?.name;
+  if (!name) return false;
+  const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
+  return !readBy.includes(name);
+}
+
+function formatNotifDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
 
 function handleOutsideClick(e) {
   if (showUserMenu.value && !e.target.closest('.sidebar-bottom')) {
@@ -378,3 +448,54 @@ function confirmLogout() {
   router.replace({ name: 'home' });
 }
 </script>
+
+<style scoped>
+/* Notification bell - mobile topbar */
+.notification-bell-mobile {
+  position: relative; background: none; border: none; cursor: pointer;
+  padding: 4px 8px; margin-left: auto;
+}
+.notification-badge {
+  position: absolute; top: -2px; right: 0;
+  background: #D62700; color: #fff; font-size: 10px; font-weight: 700;
+  min-width: 16px; height: 16px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 4px; line-height: 1;
+}
+
+/* Sidebar notifications */
+.sidebar-notifications {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; cursor: pointer;
+  color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500;
+  transition: background 0.15s;
+}
+.sidebar-notifications:hover { background: rgba(255,255,255,0.08); }
+.sidebar-notifications-collapsed {
+  justify-content: center; padding: 8px;
+  position: relative;
+}
+.notification-badge-sidebar {
+  background: #D62700; color: #fff; font-size: 10px; font-weight: 700;
+  min-width: 16px; height: 16px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 4px; margin-left: auto; line-height: 1;
+}
+
+/* Notification modal items */
+.notif-item {
+  padding: 10px 0; border-bottom: 1px solid var(--border-light);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-unread { background: #FFF8E1; margin: 0 -20px; padding: 10px 20px; }
+.notif-title { font-weight: 600; font-size: 13px; color: var(--text); }
+.notif-message { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.notif-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+/* Offline banner */
+.offline-banner {
+  background: #FF9800; color: #fff; text-align: center;
+  padding: 6px 16px; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+</style>
