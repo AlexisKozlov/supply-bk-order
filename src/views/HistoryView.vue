@@ -79,7 +79,7 @@
                 <span v-else-if="!isViewer && order.received_at" class="ht-act ht-act-disabled" title="Доставка принята, редактирование невозможно"><BkIcon name="edit" size="sm"/></span>
                 <button class="ht-act" title="Скопировать" @click="copyOrder(order)"><BkIcon name="copy" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyOrderLink(order)"><BkIcon name="link" size="sm"/></button>
-                <button class="ht-act" title="Лог" @click="openLogModal(order.id, 'order')"><BkIcon name="note" size="sm"/></button>
+                <button class="ht-act" title="История изменений" @click="openLogModal(order.id, 'order')"><BkIcon name="note" size="sm"/></button>
                 <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
@@ -121,7 +121,7 @@
                 <button class="ht-act" title="Просмотр" @click="viewPlan(plan)"><BkIcon name="eye" size="sm"/></button>
                 <button v-if="!isViewer" class="ht-act" title="Редактировать" @click="loadPlan(plan)"><BkIcon name="edit" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyPlanLink(plan)"><BkIcon name="link" size="sm"/></button>
-                <button class="ht-act" title="Лог" @click="openLogModal(plan.id, 'plan')"><BkIcon name="note" size="sm"/></button>
+                <button class="ht-act" title="История изменений" @click="openLogModal(plan.id, 'plan')"><BkIcon name="note" size="sm"/></button>
                 <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deletePlan(plan)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
@@ -141,12 +141,12 @@
       <div v-if="logModal.show" class="modal" @click.self="logModal.show = false">
         <div class="modal-box log-modal-box">
           <div class="modal-header">
-            <h2><BkIcon name="note" size="sm"/> Лог изменений</h2>
+            <h2><BkIcon name="note" size="sm"/> История изменений</h2>
             <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="log-modal-body">
             <div v-if="logModal.loading" style="text-align:center;padding:24px;"><BurgerSpinner size="sm" /></div>
-            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в логе</div>
+            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в истории</div>
             <div v-else class="log-entries">
               <div v-for="log in logModal.entries" :key="log.id" class="log-entry">
                 <div class="log-entry-head">

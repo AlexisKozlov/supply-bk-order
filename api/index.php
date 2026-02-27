@@ -504,9 +504,11 @@ if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 // ═══ REST ═══
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications'];
 // Защита: только чтение через REST, запись — через RPC
-$readOnly = ['audit_log', 'search_logs', 'users'];
+$readOnly = ['search_logs', 'users'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
+// audit_log — только чтение и вставка (без update/delete для защиты целостности)
+$appendOnly = ['audit_log'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
 
@@ -517,6 +519,10 @@ if (in_array($table, $readOnly) && $method !== 'GET') {
 // Enforce no insert/delete for settings
 if (in_array($table, $noInsertDelete) && ($method === 'POST' || $method === 'DELETE')) {
     respond(['error' => 'Insert/delete not allowed for this table via REST'], 403);
+}
+// Enforce append-only (allow GET + POST, block PATCH/PUT/DELETE)
+if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
+    respond(['error' => 'Only read and insert allowed for this table'], 403);
 }
 
 if ($method === 'GET') {

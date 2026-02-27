@@ -31,8 +31,8 @@
           <span v-if="!sidebarCollapsed">История</span>
         </router-link>
         <router-link :to="{ name: 'plan-fact' }" class="sidebar-item" :class="{ active: currentRoute === 'plan-fact' }">
-          <span class="sidebar-icon"><BkIcon name="success" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">План-Факт</span>
+          <span class="sidebar-icon"><BkIcon name="delivery" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Доставки</span>
         </router-link>
       </nav>
 
@@ -154,10 +154,15 @@
       class="welcome-overlay"
       :class="{ 'welcome-visible': welcomeVisible, 'welcome-fade': welcomeFade }"
     >
+      <canvas ref="welcomeCanvas" class="welcome-canvas"></canvas>
       <div class="welcome-content">
-        <div class="welcome-avatar">{{ userInitials }}</div>
-        <div class="welcome-name">Добро пожаловать, {{ userStore.currentUser?.name }}!</div>
+        <div class="welcome-avatar-ring">
+          <div class="welcome-avatar">{{ userInitials }}</div>
+        </div>
+        <div class="welcome-greeting">{{ welcomeTimeGreeting }}</div>
+        <div class="welcome-name">{{ userStore.currentUser?.name }}</div>
         <div class="welcome-entity">{{ orderStore.settings.legalEntity }}</div>
+        <div class="welcome-line"></div>
       </div>
     </div>
 
@@ -261,7 +266,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -292,6 +297,66 @@ const showLogoutConfirm = ref(false);
 const showWelcome = ref(false);
 const welcomeVisible = ref(false);
 const welcomeFade = ref(false);
+const welcomeCanvas = ref(null);
+let welcomeRaf = null;
+
+const welcomeTimeGreeting = computed(() => {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'Доброе утро';
+  if (h >= 12 && h < 17) return 'Добрый день';
+  if (h >= 17 && h < 22) return 'Добрый вечер';
+  return 'Доброй ночи';
+});
+
+function startWelcomeParticles() {
+  const c = welcomeCanvas.value;
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = c.parentElement.getBoundingClientRect();
+  c.width = rect.width * dpr;
+  c.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+
+  const sparks = Array.from({ length: 80 }, () => ({
+    x: Math.random() * w,
+    y: Math.random() * h,
+    r: 0.5 + Math.random() * 2,
+    vy: -(0.15 + Math.random() * 0.6),
+    vx: (Math.random() - 0.5) * 0.3,
+    a: 0.2 + Math.random() * 0.6,
+    ph: Math.random() * Math.PI * 2,
+  }));
+
+  let t = 0;
+  const loop = () => {
+    t += 0.016;
+    ctx.clearRect(0, 0, w, h);
+    for (const s of sparks) {
+      s.ph += 0.02;
+      s.x += s.vx + Math.sin(s.ph) * 0.15;
+      s.y += s.vy;
+      if (s.y < -10) { s.y = h + 10; s.x = Math.random() * w; }
+      const glow = 0.5 + 0.5 * Math.sin(s.ph * 2);
+      ctx.globalAlpha = s.a * glow;
+      ctx.shadowBlur = s.r * 4;
+      ctx.shadowColor = '#FFB060';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = s.a > 0.5 ? '#FFD090' : '#FF8040';
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    welcomeRaf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+function stopWelcomeParticles() {
+  if (welcomeRaf) { cancelAnimationFrame(welcomeRaf); welcomeRaf = null; }
+}
 
 const pwdOld = ref('');
 const pwdNew = ref('');
@@ -310,7 +375,7 @@ const pageNames = {
   analysis: 'Анализ',
   database: 'База данных',
   admin: 'Админ панель',
-  'plan-fact': 'План-Факт',
+  'plan-fact': 'Доставки',
 };
 
 function sendHeartbeat() {
@@ -359,9 +424,12 @@ onMounted(() => {
   if (justLoggedIn) {
     sessionStorage.removeItem('bk_just_logged_in');
     showWelcome.value = true;
-    requestAnimationFrame(() => { welcomeVisible.value = true; });
-    setTimeout(() => { welcomeFade.value = true; }, 1800);
-    setTimeout(() => { showWelcome.value = false; welcomeVisible.value = false; welcomeFade.value = false; }, 2300);
+    requestAnimationFrame(() => {
+      welcomeVisible.value = true;
+      nextTick(() => startWelcomeParticles());
+    });
+    setTimeout(() => { welcomeFade.value = true; }, 2200);
+    setTimeout(() => { showWelcome.value = false; welcomeVisible.value = false; welcomeFade.value = false; stopWelcomeParticles(); }, 2800);
   }
 
   document.addEventListener('click', handleOutsideClick);

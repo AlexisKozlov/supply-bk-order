@@ -8,8 +8,8 @@ import { getQpb, getMultiplicity, toLocalDateStr } from './utils.js';
 export async function saveOrder({ items, settings, editingOrderId, note, userName }) {
   // Приводим все позиции к физическим коробкам (формат хранения)
   const allItems = items.map(item => {
-    const qpb  = getQpb(item);
-    const mult = getMultiplicity(item);
+    const qpb  = getQpb(item) || 1;
+    const mult = getMultiplicity(item) || 1;
     const physBoxes = settings.unit === 'boxes'
       ? item.finalOrder / mult
       : item.finalOrder / (qpb * mult);
@@ -110,6 +110,9 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       });
       auditAction = 'order_updated';
       auditDetails = { supplier: settings.supplier, changes, param_changes: paramChanges.length ? paramChanges : undefined };
+    } else {
+      auditAction = 'order_updated';
+      auditDetails = { supplier: settings.supplier, note: 'Не удалось загрузить старые позиции для diff' };
     }
   } else {
     // Новый заказ

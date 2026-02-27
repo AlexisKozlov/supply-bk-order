@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">Планирование</h1>
       <span v-if="viewOnly" class="editing-badge" style="cursor:pointer;background:#E3F2FD;color:#1565C0;border-color:#90CAF9;" @click="resetPlan"><BkIcon name="eye" size="sm"/> Просмотр</span>
-      <button v-if="viewOnly && editingPlanId" class="btn small" style="margin-left:4px;" @click="openLogModal" title="Лог изменений"><BkIcon name="note" size="sm"/> Лог</button>
+      <button v-if="viewOnly && editingPlanId" class="btn small" style="margin-left:4px;" @click="openLogModal" title="История изменений"><BkIcon name="note" size="sm"/> История</button>
       <span v-else-if="editingPlanId" class="editing-badge" style="cursor:pointer" @click="resetPlan"><BkIcon name="edit" size="sm"/> Редактирование</span>
     </div>
 
@@ -261,12 +261,12 @@
       <div v-if="logModal.show" class="modal" @click.self="logModal.show = false">
         <div class="modal-box" style="max-width:560px;">
           <div class="modal-header">
-            <h2><BkIcon name="note" size="sm"/> Лог изменений</h2>
+            <h2><BkIcon name="note" size="sm"/> История изменений</h2>
             <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div style="max-height:450px;overflow-y:auto;padding:0 20px 16px;">
             <div v-if="logModal.loading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
-            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в логе</div>
+            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей</div>
             <div v-else class="log-entries">
               <div v-for="log in logModal.entries" :key="log.id" class="log-entry">
                 <div class="log-entry-head">
@@ -966,7 +966,7 @@ async function copyPlanToClipboard() {
   await copyToClipboard(text); toast.success('Скопировано!', '');
 }
 
-// ─── Лог изменений ────────────────────────────────────────────────────────────
+// ─── История изменений ────────────────────────────────────────────────────────────
 async function openLogModal() {
   const id = editingPlanId.value;
   if (!id) return;

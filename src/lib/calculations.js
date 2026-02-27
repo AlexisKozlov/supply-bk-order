@@ -18,8 +18,8 @@ export function calculateItem(item, settings) {
   let calculatedOrder = needAfterDelivery - stockAfterDelivery;
   if (calculatedOrder < 0) calculatedOrder = 0;
 
-  const mult = getMultiplicity(item);
-  const qpb = getQpb(item);
+  const mult = getMultiplicity(item) || 1;
+  const qpb = getQpb(item) || 1;
 
   if (unit === 'boxes') {
     calculatedOrder = roundUp(calculatedOrder / mult) * mult;
@@ -49,8 +49,8 @@ export function calculateItem(item, settings) {
 function calculatePallets(item, unit) {
   if (!item.boxesPerPallet || !item.finalOrder) return null;
 
-  const qpb = getQpb(item);
-  const mult = getMultiplicity(item);
+  const qpb = getQpb(item) || 1;
+  const mult = getMultiplicity(item) || 1;
 
   const physBoxes =
     unit === 'boxes'

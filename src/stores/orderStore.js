@@ -250,14 +250,17 @@ export const useOrderStore = defineStore('order', () => {
 
     for (const histItem of (order.order_items || [])) {
       const productData = histItem.sku ? productMap[histItem.sku] : null;
-      addItem(productData || {
+      const added = addItem(productData || {
         sku: histItem.sku, name: histItem.name,
         qty_per_box: (productData?.qty_per_box) || histItem.qty_per_box || 1,
         boxes_per_pallet: null,
         multiplicity: (productData?.multiplicity) || 1,
       }, true);
 
-      const addedItem = items.value[items.value.length - 1];
+      // Если товар-дубликат (addItem вернул null), пропускаем
+      if (!added) continue;
+
+      const addedItem = added;
       addedItem.consumptionPeriod = Math.round(parseFloat(String(histItem.consumption_period || '0').replace(',', '.')) || 0);
       addedItem.stock = Math.round(parseFloat(String(histItem.stock || '0').replace(',', '.')) || 0);
       addedItem.transit = Math.round(parseFloat(String(histItem.transit || '0').replace(',', '.')) || 0);

@@ -109,6 +109,8 @@ export const icons = {
   oneC: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="4" fill="#FFDD2D" stroke="#F5A623" stroke-width="1"/><text x="12" y="17" font-family="Arial,sans-serif" font-weight="900" font-size="14" fill="#D62300" text-anchor="middle">1C</text></svg>`,
 
   excel: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="2" width="18" height="20" rx="2.5" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/><rect x="3" y="2" width="18" height="5" rx="2.5" fill="#4CAF50"/><path d="M8 11l3.5 4L8 19" stroke="#2E7D32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 11l-3.5 4L16 19" stroke="#2E7D32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+
+  delivery: `<svg viewBox="0 0 24 24" fill="none"><rect x="1" y="6" width="14" height="11" rx="2" fill="#FFE0B2" stroke="#D62700" stroke-width="1.5"/><path d="M15 10h3.4a2 2 0 011.6.8L22 13.5V15a2 2 0 01-2 2h-5" fill="#FF8733" stroke="#D62700" stroke-width="1.5" stroke-linejoin="round"/><circle cx="7" cy="18" r="2.2" fill="#FDBD10" stroke="#D62700" stroke-width="1.5"/><circle cx="17.5" cy="18" r="2.2" fill="#FDBD10" stroke="#D62700" stroke-width="1.5"/><line x1="9.2" y1="17" x2="15.3" y2="17" stroke="#D62700" stroke-width="1.5"/></svg>`,
 };
 
 /**
@@ -139,6 +141,8 @@ export const iconsLight = {
   chevronLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`,
 
   package: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="14" rx="2" fill="rgba(255,255,255,0.12)" stroke="#FFCC80" stroke-width="1.5"/><path d="M3 7l9-5 9 5" fill="#FF8733" opacity="0.4" stroke="#FFCC80" stroke-width="1.3" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="12" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/></svg>`,
+
+  delivery: `<svg viewBox="0 0 24 24" fill="none"><rect x="1" y="6" width="14" height="11" rx="2" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/><path d="M15 10h3.4a2 2 0 011.6.8L22 13.5V15a2 2 0 01-2 2h-5" fill="rgba(255,255,255,0.08)" stroke="#FFCC80" stroke-width="1.3" stroke-linejoin="round"/><circle cx="7" cy="18" r="2.2" fill="#FFD54F" stroke="rgba(255,255,255,0.6)" stroke-width="1.3"/><circle cx="17.5" cy="18" r="2.2" fill="#FFD54F" stroke="rgba(255,255,255,0.6)" stroke-width="1.3"/><line x1="9.2" y1="17" x2="15.3" y2="17" stroke="rgba(255,255,255,0.4)" stroke-width="1.3"/></svg>`,
 
   gear: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 005.18 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 8.92a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/></svg>`,
 };
