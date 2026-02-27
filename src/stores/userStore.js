@@ -15,9 +15,28 @@ export const useUserStore = defineStore('user', () => {
     try {
       const stored = localStorage.getItem('bk_user');
       if (stored) {
-        currentUser.value = JSON.parse(stored);
+        const user = JSON.parse(stored);
+        currentUser.value = user;
+        // Асинхронная валидация сессии на сервере
+        validateSession(user);
       }
     } catch (e) { /* noop */ }
+  }
+
+  async function validateSession(user) {
+    try {
+      const { data } = await db.rpc('validate_session', { user_name: user?.name || '' });
+      if (!data?.valid) {
+        logout();
+        return;
+      }
+      // Обновить роль из сервера (защита от подмены в localStorage)
+      if (data.user) {
+        const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities };
+        currentUser.value = updated;
+        localStorage.setItem('bk_user', JSON.stringify(updated));
+      }
+    } catch (e) { /* сеть недоступна — оставляем локальную сессию */ }
   }
 
   async function fetchUserList() {

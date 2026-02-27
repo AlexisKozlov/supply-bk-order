@@ -12,6 +12,15 @@
           </select>
         </div>
         <div class="anv-control">
+          <label>Хранение</label>
+          <select v-model="filterCategory">
+            <option value="">Все</option>
+            <option value="Сухой">Сухой</option>
+            <option value="Холод">Холод</option>
+            <option value="Мороз">Мороз</option>
+          </select>
+        </div>
+        <div class="anv-control">
           <label>Статус</label>
           <select v-model="filterStatus">
             <option value="">Все</option>
@@ -103,39 +112,62 @@
               </tr>
             </thead>
             <tbody>
-              <template v-for="group in filteredGroups" :key="group.name">
-                <tr class="anv-group" @click="toggleGroup(group.name)" :class="daysRowClass(group.groupDays)">
-                  <td class="anv-toggle">{{ expandedGroups.has(group.name) ? '▾' : '▸' }}</td>
-                  <td>
-                    <span class="anv-group-name">{{ group.name }}</span>
-                    <span class="anv-group-cnt">{{ group.items.length }}</span>
-                  </td>
-                  <td style="text-align:right" class="anv-group-val">{{ nf(group.totalStock) }}</td>
-                  <td style="text-align:right" class="anv-group-val">{{ nf(group.totalConsumption) }}</td>
-                  <td style="text-align:right">
-                    <span class="anv-days" :class="daysClass(group.groupDays)">{{ formatDays(group.groupDays) }}</span>
-                  </td>
-                  <td class="anv-action-cell" @click.stop>
-                    <button v-if="!isViewer && group.groupDays !== Infinity && group.groupDays < 7 && group.mainSupplier" class="anv-order-btn" @click="goToOrder(group.mainSupplier)" title="Заказать">
-                      <BkIcon name="package" size="xs"/>
-                    </button>
+              <template v-for="section in sectionedGroups" :key="section.key">
+                <tr class="anv-section" @click="toggleSection(section.key)">
+                  <td colspan="6">
+                    <span class="anv-section-toggle">{{ expandedSections.has(section.key) ? '▾' : '▸' }}</span>
+                    <span class="anv-section-name">{{ section.label }}</span>
+                    <span class="anv-section-cnt">{{ section.groups.length }}</span>
                   </td>
                 </tr>
-                <template v-if="expandedGroups.has(group.name)">
-                  <tr v-for="item in group.items" :key="item.id" class="anv-item">
-                    <td></td>
-                    <td>
-                      <span class="anv-sku">{{ item.sku }}</span>
-                      <span class="anv-item-name">{{ item.name }}</span>
-                      <span v-if="!compactMode" class="anv-item-supplier">{{ item.supplier_name }}</span>
-                    </td>
-                    <td style="text-align:right">{{ nf(item.displayStock) }}</td>
-                    <td style="text-align:right">{{ nf(item.displayConsumption) }}</td>
-                    <td style="text-align:right">
-                      <span class="anv-days anv-days-sm" :class="daysClass(item.daysOfStock)">{{ formatDays(item.daysOfStock) }}</span>
-                    </td>
-                    <td></td>
-                  </tr>
+                <template v-if="expandedSections.has(section.key)">
+                  <template v-for="group in section.groups" :key="group.name">
+                    <tr class="anv-group" @click="toggleGroup(group.name)" :class="daysRowClass(group.groupDays)">
+                      <td class="anv-toggle">{{ expandedGroups.has(group.name) ? '▾' : '▸' }}</td>
+                      <td>
+                        <span class="anv-group-name">{{ group.name }}</span>
+                        <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
+                      </td>
+                      <td style="text-align:right" class="anv-group-val">{{ nf(group.totalStock) }}</td>
+                      <td style="text-align:right" class="anv-group-val">{{ nf(group.totalConsumption) }}</td>
+                      <td style="text-align:right">
+                        <span class="anv-days" :class="daysClass(group.groupDays)">{{ formatDays(group.groupDays) }}</span>
+                      </td>
+                      <td class="anv-action-cell" @click.stop>
+                        <button v-if="!isViewer && group.groupDays !== Infinity && group.groupDays < 7 && group.mainSupplier" class="anv-order-btn" @click="goToOrder(group.mainSupplier)" title="Заказать">
+                          <BkIcon name="package" size="xs"/>
+                        </button>
+                      </td>
+                    </tr>
+                    <template v-if="expandedGroups.has(group.name)">
+                      <tr v-for="item in group.items" :key="item.id" class="anv-item" :class="{ 'anv-item-foreign': item._foreign }">
+                        <td></td>
+                        <td>
+                          <span class="anv-sku">{{ item.sku }}</span>
+                          <span class="anv-item-name">{{ item.name }}</span>
+                          <span v-if="item._foreign" class="anv-foreign-badge">{{ item.supplier_name }}</span>
+                          <span v-else-if="!compactMode" class="anv-item-supplier">{{ item.supplier_name }}</span>
+                        </td>
+                        <td style="text-align:right" class="anv-editable" @dblclick="startEdit(item, 'stock')">
+                          <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'stock'"
+                            v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
+                            @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
+                          <span v-else>{{ nf(item.displayStock) }}</span>
+                        </td>
+                        <td style="text-align:right" class="anv-editable" @dblclick="startEdit(item, 'consumption')">
+                          <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'consumption'"
+                            v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
+                            @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
+                          <span v-else>{{ nf(item.displayConsumption) }}</span>
+                        </td>
+                        <td style="text-align:right">
+                          <template v-if="item._foreign"><span class="anv-days anv-days-sm anv-d-muted">—</span></template>
+                          <template v-else><span class="anv-days anv-days-sm" :class="daysClass(item.daysOfStock)">{{ formatDays(item.daysOfStock) }}</span></template>
+                        </td>
+                        <td></td>
+                      </tr>
+                    </template>
+                  </template>
                 </template>
               </template>
             </tbody>
@@ -248,7 +280,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -278,6 +310,8 @@ const lastUpdate = reactive({ by: '', at: null, label: '' });
 const searchQuery = ref('');
 const filterSupplier = ref('');
 const filterStatus = ref('');
+const filterCategory = ref('');
+const expandedSections = reactive(new Set(['Сухой', 'Холод', 'Мороз', '']));
 const compactMode = ref(localStorage.getItem('bk_analysis_compact') === '1');
 
 const isBoxes = computed(() => unit.value === 'boxes');
@@ -316,7 +350,7 @@ async function loadProducts() {
   lastUpdate.label = '';
   try {
     let q = db.from('products')
-      .select('id, sku, name, analog_group, supplier, qty_per_box');
+      .select('id, sku, name, analog_group, supplier, qty_per_box, category');
     q = applyEntityFilter(q, orderStore.settings.legalEntity);
     const { data, error } = await q;
     if (error) { toast.error('Ошибка', 'Не удалось загрузить товары'); return; }
@@ -327,6 +361,7 @@ async function loadProducts() {
       analog_group: p.analog_group || '',
       supplier_name: p.supplier || '',
       qtyPerBox: p.qty_per_box || 1,
+      category: p.category || '',
       stock: 0,
       consumption: 0,
     }));
@@ -381,24 +416,30 @@ async function saveDataToDB() {
   const withData = items.value.filter(i => i.sku && (i.stock > 0 || i.consumption > 0));
   if (!withData.length) return;
 
+  // Дедупликация по SKU — при дублях берём последнее значение
+  const skuMap = new Map();
+  withData.forEach(item => { skuMap.set(item.sku, item); });
+  const unique = [...skuMap.values()];
+
   savingData.value = true;
   try {
-    // Удалить старые данные для этого юр. лица
-    await db.from('analysis_data').delete().eq('legal_entity', le);
-    // Вставить новые (батчами по 50)
     const now = localNow();
-    for (let i = 0; i < withData.length; i += 50) {
-      const batch = withData.slice(i, i + 50).map(item => ({
-        id: `${le}_${item.sku}`,
-        legal_entity: le,
-        sku: item.sku,
-        stock: item.stock,
-        consumption: item.consumption,
-        period_days: periodDays.value,
-        updated_by: userName,
-        updated_at: now,
-      }));
-      await db.from('analysis_data').insert(batch);
+    const allItems = unique.map(item => ({
+      id: `${le}_${item.sku}`,
+      legal_entity: le,
+      sku: item.sku,
+      stock: item.stock,
+      consumption: item.consumption,
+      period_days: periodDays.value,
+      updated_by: userName,
+      updated_at: now,
+    }));
+    const { data: result, error } = await db.rpc('replace_analysis_data', {
+      legal_entity: le,
+      items: allItems,
+    });
+    if (error || (result && result.error)) {
+      throw new Error(error || result?.error || 'Transaction failed');
     }
     lastUpdate.by = userName;
     lastUpdate.at = new Date();
@@ -414,6 +455,45 @@ async function saveDataToDB() {
 function toUnit(val, qpb) {
   if (!isBoxes.value || !qpb || qpb <= 1) return val;
   return Math.round(val / qpb * 10) / 10;
+}
+
+function fromUnit(val, qpb) {
+  if (!isBoxes.value || !qpb || qpb <= 1) return Math.round(val);
+  return Math.round(val * qpb);
+}
+
+// --- Inline editing ---
+const editingCell = ref(null); // { itemId, field }
+const editingValue = ref('');
+let _saveTimer = null;
+
+function startEdit(item, field) {
+  if (isViewer.value) return;
+  const display = field === 'stock' ? item.displayStock : item.displayConsumption;
+  editingCell.value = { itemId: item.id, field };
+  editingValue.value = String(display || 0);
+  nextTick(() => {
+    const el = document.querySelector('.anv-inline-input');
+    if (el) { el.focus(); el.select(); }
+  });
+}
+
+function commitEdit(item) {
+  if (!editingCell.value) return;
+  const { field } = editingCell.value;
+  const parsed = parseFloat(String(editingValue.value).replace(',', '.')) || 0;
+  const raw = items.value.find(i => i.id === item.id);
+  if (raw) {
+    raw[field] = fromUnit(Math.max(0, parsed), raw.qtyPerBox);
+  }
+  editingCell.value = null;
+  // Debounced save
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => saveDataToDB(), 1000);
+}
+
+function cancelEdit() {
+  editingCell.value = null;
 }
 
 function calcDays(stock, consumption) {
@@ -448,8 +528,9 @@ const groupsWithData = computed(() => {
   for (const item of items.value) {
     if (!item.analog_group) continue;
     if (item.stock <= 0 && item.consumption <= 0) continue;
-    // Фильтр по поставщику
-    if (filterSupplier.value && item.supplier_name !== filterSupplier.value) continue;
+
+    // Мягкая пометка: товар другого поставщика
+    const isForeign = !!(filterSupplier.value && item.supplier_name !== filterSupplier.value);
 
     if (!map.has(item.analog_group)) {
       map.set(item.analog_group, {
@@ -458,33 +539,46 @@ const groupsWithData = computed(() => {
         rawTotalStock: 0,
         rawTotalConsumption: 0,
         supplierCounts: {},
+        categoryCounts: {},
+        hasOwn: false,
       });
     }
     const g = map.get(item.analog_group);
     const d = calcDays(item.stock, item.consumption);
     g.items.push({
       ...item,
+      _foreign: isForeign,
       daysOfStock: d,
       displayStock: toUnit(item.stock, item.qtyPerBox),
       displayConsumption: toUnit(item.consumption, item.qtyPerBox),
     });
+    // Суммы — все товары группы (для корректного расчёта дней)
     g.rawTotalStock += item.stock;
     g.rawTotalConsumption += item.consumption;
-    // Считаем поставщиков
-    if (item.supplier_name) {
-      g.supplierCounts[item.supplier_name] = (g.supplierCounts[item.supplier_name] || 0) + 1;
+    if (!isForeign) {
+      g.hasOwn = true;
+      if (item.supplier_name) {
+        g.supplierCounts[item.supplier_name] = (g.supplierCounts[item.supplier_name] || 0) + 1;
+      }
+      const cat = item.category || '';
+      g.categoryCounts[cat] = (g.categoryCounts[cat] || 0) + 1;
     }
   }
-  const arr = Array.from(map.values());
+  // Группа включается только если есть хотя бы 1 «свой» товар
+  const arr = Array.from(map.values()).filter(g => !filterSupplier.value || g.hasOwn);
   for (const g of arr) {
     g.groupDays = calcDays(g.rawTotalStock, g.rawTotalConsumption);
-    // Суммируем уже сконвертированные значения каждого товара (вместо среднего qpb)
+    // Суммируем все товары группы (включая foreign — для полной картины)
     g.totalStock = Math.round(g.items.reduce((s, i) => s + i.displayStock, 0) * 10) / 10;
     g.totalConsumption = Math.round(g.items.reduce((s, i) => s + i.displayConsumption, 0) * 10) / 10;
-    g.items.sort((a, b) => a.daysOfStock - b.daysOfStock);
-    // Основной поставщик — самый частый
+    // Сортировка: свои сначала, потом foreign; внутри — по дням
+    g.items.sort((a, b) => (a._foreign ? 1 : 0) - (b._foreign ? 1 : 0) || a.daysOfStock - b.daysOfStock);
+    // Основной поставщик — самый частый среди своих
     const sc = g.supplierCounts;
     g.mainSupplier = Object.keys(sc).sort((a, b) => sc[b] - sc[a])[0] || '';
+    // Категория группы — самая частая среди своих товаров
+    const cc = g.categoryCounts;
+    g.category = Object.keys(cc).sort((a, b) => cc[b] - cc[a])[0] || '';
   }
   arr.sort((a, b) => a.groupDays - b.groupDays);
   return arr;
@@ -492,6 +586,11 @@ const groupsWithData = computed(() => {
 
 const filteredGroups = computed(() => {
   let result = groupsWithData.value;
+
+  // Фильтр по категории
+  if (filterCategory.value) {
+    result = result.filter(g => g.category === filterCategory.value);
+  }
 
   // Фильтр по статусу
   if (filterStatus.value) {
@@ -513,6 +612,21 @@ const filteredGroups = computed(() => {
   return result;
 });
 
+const sectionOrder = ['Сухой', 'Холод', 'Мороз', ''];
+const sectionLabels = { 'Сухой': 'Сухой', 'Холод': 'Холод', 'Мороз': 'Мороз', '': 'Без категории' };
+
+const sectionedGroups = computed(() => {
+  const map = {};
+  for (const cat of sectionOrder) map[cat] = [];
+  for (const g of filteredGroups.value) {
+    const cat = sectionOrder.includes(g.category) ? g.category : '';
+    map[cat].push(g);
+  }
+  return sectionOrder
+    .filter(cat => map[cat].length > 0)
+    .map(cat => ({ key: cat, label: sectionLabels[cat], groups: map[cat] }));
+});
+
 const totalItemsWithData = computed(() => groupsWithData.value.reduce((s, g) => s + g.items.length, 0));
 
 const criticalGroups = computed(() => groupsWithData.value.filter(g => g.groupDays !== Infinity && g.groupDays < 3));
@@ -530,6 +644,11 @@ const statusCounts = computed(() => {
   }
   return { red, orange, yellow, green, purple };
 });
+
+function toggleSection(key) {
+  if (expandedSections.has(key)) expandedSections.delete(key);
+  else expandedSections.add(key);
+}
 
 function toggleGroup(name) {
   if (expandedGroups.has(name)) expandedGroups.delete(name);
@@ -858,6 +977,41 @@ onMounted(() => { loadProducts(); });
 .anv-dot-green { background: #66BB6A; }
 .anv-dot-purple { background: #9C27B0; }
 
+/* ═══ Строка секции (Сухой / Холод / Мороз) ═══ */
+.anv-section {
+  cursor: pointer;
+  user-select: none;
+}
+.anv-section td {
+  background: #E8EAF6 !important;
+  border-bottom: 2px solid #9FA8DA !important;
+  padding: 8px 10px !important;
+  font-size: 13px;
+  font-weight: 700;
+  color: #283593;
+}
+.anv-section:hover td {
+  background: #D1D5EE !important;
+}
+.anv-section-toggle {
+  font-size: 10px;
+  color: #5C6BC0;
+  margin-right: 6px;
+}
+.anv-section-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #283593;
+}
+.anv-section-cnt {
+  font-size: 11px;
+  color: #7986CB;
+  margin-left: 6px;
+  font-weight: 500;
+}
+.anv-section-cnt::before { content: '('; }
+.anv-section-cnt::after { content: ')'; }
+
 /* ═══ Строка группы ═══ */
 .anv-group {
   cursor: pointer;
@@ -929,6 +1083,40 @@ onMounted(() => { loadProducts(); });
   opacity: 0.7;
 }
 
+/* ═══ Inline editing ═══ */
+.anv-editable { cursor: default; }
+.anv-editable:hover { background: rgba(0,0,0,.03); }
+.anv-inline-input {
+  width: 60px;
+  padding: 1px 4px;
+  font-size: 12px;
+  text-align: right;
+  border: 1px solid var(--primary, #4361ee);
+  border-radius: 3px;
+  outline: none;
+  background: #fff;
+}
+
+/* ═══ Foreign-товары (другой поставщик) ═══ */
+.anv-item-foreign td { opacity: 0.65; }
+.anv-foreign-badge {
+  display: inline-block;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 5px;
+  margin-left: 6px;
+  border-radius: 3px;
+  background: #E3F2FD;
+  color: #1565C0;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.anv-d-muted {
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 /* ═══ Кнопка «Заказать» ═══ */
 .anv-action-cell {
   text-align: center;
@@ -981,6 +1169,7 @@ onMounted(() => { loadProducts(); });
 .anv-d-purple { background: #F3E5F5; color: #6A1B9A; }
 
 /* ═══ Компактный режим ═══ */
+.anv-compact .anv-section td { padding: 5px 6px !important; font-size: 12px; }
 .anv-compact .anv-group td { padding: 3px 6px !important; font-size: 11px; }
 .anv-compact .anv-item td { padding: 2px 6px !important; font-size: 10px; }
 .anv-compact .anv-days { font-size: 10px; padding: 0 6px; min-width: 26px; }
@@ -996,24 +1185,147 @@ onMounted(() => { loadProducts(); });
   .anv-sidebar { width: 200px; }
 }
 @media (max-width: 900px) {
-  .anv-body { flex-direction: column; overflow-y: auto; }
-  .anv-main { flex: none; }
+  /* Ключевое: снять фиксированный layout, дать странице скроллиться */
+  .analysis-view {
+    overflow: auto !important;
+    height: auto !important;
+    min-height: 0;
+  }
+  .anv-body {
+    flex-direction: column;
+    overflow: visible;
+    flex: none;
+  }
+  .anv-main {
+    flex: none;
+  }
   .anv-main .order-table-wrapper {
     flex: none;
-    max-height: 60vh;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+    height: auto;
   }
-  .anv-sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; overflow-y: visible; }
+  .anv-sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-y: visible;
+  }
   .anv-card { flex: 1; min-width: 160px; }
 }
 @media (max-width: 768px) {
   .an-header { flex-direction: column; align-items: flex-start; gap: 8px; }
-  .anv-controls { width: 100%; }
+  .anv-controls { width: 100%; flex-wrap: wrap; gap: 6px; }
+  .anv-control { flex: 1; min-width: calc(50% - 4px); }
+  .anv-control select { width: 100%; font-size: 14px; min-height: 36px; }
   .anv-toolbar { flex-wrap: wrap; }
-  .anv-search { width: 160px; }
+  .anv-search { width: 100%; font-size: 14px; min-height: 36px; }
+  .anv-search-wrap { width: 100%; margin-left: 0; }
+
+  /* ── Скрыть таблицу с thead, показать как карточки ── */
+  .order-table thead { display: none !important; }
+  .order-table,
+  .order-table tbody { display: block !important; width: 100%; }
+
+  /* Группа аналогов — компактная карточка */
+  .anv-group {
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px !important;
+    border-bottom: 1px solid var(--border) !important;
+    border-radius: 0;
+  }
+  .anv-group td {
+    display: contents !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  /* Скрыть toggle td — стрелку покажем через CSS */
+  .anv-group td.anv-toggle {
+    display: inline !important;
+    font-size: 10px;
+    flex-shrink: 0;
+    width: auto;
+  }
+  .anv-group td:nth-child(2) {
+    display: inline !important;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .anv-group-name { font-size: 12px; }
+  .anv-group-cnt { font-size: 9px; }
+  /* Скрыть остаток и расход в группе */
+  .anv-group td:nth-child(3),
+  .anv-group td:nth-child(4) {
+    display: none !important;
+  }
+  /* Дней — правый край */
+  .anv-group td:nth-child(5) {
+    display: inline !important;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .anv-days { font-size: 10px; padding: 1px 6px; min-width: 28px; }
+  /* Скрыть кнопку заказать */
+  .anv-group td:nth-child(6) {
+    display: none !important;
+  }
+
+  /* Товар внутри группы — компактная строка */
+  .anv-item {
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px 3px 20px !important;
+    border-bottom: 1px solid var(--border-light) !important;
+  }
+  .anv-item td {
+    display: contents !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+  .anv-item td:first-child { display: none !important; } /* пустой toggle */
+  .anv-item td:nth-child(2) {
+    display: inline !important;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .anv-sku { font-size: 9px; }
+  .anv-item-name { font-size: 11px; }
+  .anv-item-supplier { display: none; }
+  /* Скрыть остаток и расход в товаре */
+  .anv-item td:nth-child(3),
+  .anv-item td:nth-child(4) {
+    display: none !important;
+  }
+  /* Дней */
+  .anv-item td:nth-child(5) {
+    display: inline !important;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .anv-days-sm { font-size: 9px; padding: 0 4px; min-width: 22px; }
+  .anv-item td:nth-child(6) { display: none !important; }
+
+  /* Sidebar компактный */
+  .anv-sidebar { flex-direction: column; gap: 6px; }
+  .anv-card { min-width: 0; padding: 6px 8px; }
+  .anv-card-title { font-size: 9px; margin-bottom: 3px; }
+  .anv-kpi { gap: 1px; }
+  .anv-kpi-label { font-size: 11px; }
+  .anv-kpi-val { font-size: 12px; }
+  .anv-crit-item { font-size: 11px; padding: 1px 0; }
+  .anv-crit-list { gap: 1px; }
+  .anv-legend { flex-wrap: wrap; gap: 4px; }
 }
 @media (max-width: 480px) {
-  .anv-sidebar { flex-direction: column; }
-  .anv-card { min-width: 0; }
+  .anv-control { min-width: 100%; }
 }
 
 /* ═══ Модалка ненайденных ═══ */

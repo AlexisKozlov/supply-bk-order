@@ -46,8 +46,11 @@ class QueryBuilder {
   lt(c, v)    { this._f[c] = `lt.${v}`;     return this; }
   lte(c, v)   { this._f[c] = `lte.${v}`;    return this; }
   in(c, v)    { this._f[c] = `in.(${v.join(',')})`; return this; }
-  is(c, v)    { this._f[c] = `eq.${v}`;     return this; }
-  not(c, op, v) { this._f[c] = `neq.${v}`;  return this; }
+  is(c, v)    { this._f[c] = v === null ? 'is.null' : `eq.${v}`; return this; }
+  not(c, op, v) {
+    if (op === 'is' && v === null) { this._f[c] = 'not.is.null'; return this; }
+    this._f[c] = `neq.${v}`; return this;
+  }
   ilike(c, v) { this._f[c] = `ilike.${v}`;  return this; }
   or(conditions) { this._or = conditions;    return this; }
 

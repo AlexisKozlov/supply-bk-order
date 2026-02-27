@@ -5,6 +5,7 @@
  */
 
 import { db } from '@/lib/apiClient.js';
+import { debug } from '@/lib/utils.js';
 
 const LEGAL_ENTITY_MAP = {
   'сбарро':              'ООО "Пицца Стар"',
@@ -536,7 +537,7 @@ export function importFromFile(target, items, legalEntity, unit) {
           return;
         }
         const result = await matchData(items, data, target, unit);
-        console.log(`[importStock] File: ${file.name}, parsed: ${data.length} items, matched: ${result.matched}/${items.length}, legalEntity: ${legalEntity}`);
+        debug(`[importStock] File: ${file.name}, parsed: ${data.length} items, matched: ${result.matched}/${items.length}, legalEntity: ${legalEntity}`);
         if (result.matched < items.length) {
           const unmatched = items.filter((item, idx) => {
             const updated = result.items[idx];
@@ -544,12 +545,12 @@ export function importFromFile(target, items, legalEntity, unit) {
               && updated.stockOnHand === item.stockOnHand;
           });
           if (unmatched.length > 0) {
-            console.log(`[importStock] Unmatched items (${unmatched.length}):`);
-            unmatched.slice(0, 10).forEach(i => console.log(`  sku=${i.sku || '?'} name="${i.name || '?'}"`));
+            debug(`[importStock] Unmatched items (${unmatched.length}):`);
+            unmatched.slice(0, 10).forEach(i => debug(`  sku=${i.sku || '?'} name="${i.name || '?'}"`));
           }
           if (data.length > 0) {
-            console.log(`[importStock] File sample:`);
-            data.slice(0, 5).forEach(d => console.log(`  sku=${d.sku || '?'} name="${(d.name || '?').slice(0, 40)}" stock=${d.stock ?? '-'}`));
+            debug(`[importStock] File sample:`);
+            data.slice(0, 5).forEach(d => debug(`  sku=${d.sku || '?'} name="${(d.name || '?').slice(0, 40)}" stock=${d.stock ?? '-'}`));
           }
         }
         resolve({ items: result.items, matched: result.matched, total: data.length, unmatchedFile: result.unmatchedFile || [], analogMerges: result.analogMerges || [] });

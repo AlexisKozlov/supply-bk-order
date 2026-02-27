@@ -116,6 +116,8 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     elseif (strpos($val,'ilike.')===0) {
         $where[] = "`$key` LIKE ?"; $params[] = str_replace('*', '%', substr($val, 6));
     }
+    elseif ($val === 'is.null') { $where[] = "`$key` IS NULL"; }
+    elseif ($val === 'not.is.null') { $where[] = "`$key` IS NOT NULL"; }
     else { $where[]="`$key`=?"; $params[]=$val; }
 }
 
@@ -138,6 +140,85 @@ function parseOr($orStr, &$where, &$params) {
 }
 
 // Debug endpoint disabled in production
+
+// ═══ DELETE ACT ═══
+if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
+    if (!checkApiKey($pdo)) respond(['error' => 'Invalid API key'], 401);
+    $orderId = $_GET['order_id'] ?? '';
+    if (!$orderId) respond(['error' => 'order_id required'], 400);
+
+    $s = $pdo->prepare("SELECT act_file FROM orders WHERE id=?"); $s->execute([$orderId]); $old = $s->fetchColumn();
+    if ($old) {
+        $filepath = __DIR__ . '/uploads/acts/' . basename($old);
+        if (file_exists($filepath)) unlink($filepath);
+        $pdo->prepare("UPDATE orders SET act_file=NULL WHERE id=?")->execute([$orderId]);
+    }
+    respond(['success' => true]);
+}
+
+// ═══ UPLOAD ACT ═══
+if ($endpoint === 'upload' && $subpoint === 'act') {
+    if ($method !== 'POST') respond(['error' => 'Method not allowed'], 405);
+    if (!checkApiKey($pdo)) respond(['error' => 'Invalid API key'], 401);
+
+    $orderId = $_POST['order_id'] ?? '';
+    if (!$orderId) respond(['error' => 'order_id required'], 400);
+
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        $code = $_FILES['file']['error'] ?? -1;
+        respond(['error' => 'Upload failed', 'code' => $code], 400);
+    }
+
+    $file = $_FILES['file'];
+    $maxSize = 10 * 1024 * 1024; // 10 MB
+    if ($file['size'] > $maxSize) respond(['error' => 'File too large (max 10MB)'], 400);
+
+    $allowed = ['application/pdf','image/jpeg','image/png','image/webp','image/heic'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    if (!in_array($mime, $allowed)) respond(['error' => 'File type not allowed. Allowed: PDF, JPEG, PNG, WebP, HEIC'], 400);
+
+    $ext = match($mime) {
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'image/heic' => 'heic',
+        default => 'bin',
+    };
+    $filename = 'act_' . preg_replace('/[^a-zA-Z0-9_-]/', '', $orderId) . '_' . time() . '.' . $ext;
+    $uploadDir = __DIR__ . '/uploads/acts/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
+    $dest = $uploadDir . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $dest)) respond(['error' => 'Save failed'], 500);
+
+    // Удалить старый файл, если есть
+    $s = $pdo->prepare("SELECT act_file FROM orders WHERE id=?"); $s->execute([$orderId]); $old = $s->fetchColumn();
+    if ($old && file_exists($uploadDir . basename($old))) unlink($uploadDir . basename($old));
+
+    $path = 'uploads/acts/' . $filename;
+    $pdo->prepare("UPDATE orders SET act_file=? WHERE id=?")->execute([$path, $orderId]);
+    respond(['success' => true, 'path' => $path]);
+}
+
+// ═══ DOWNLOAD ACT ═══
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2])) {
+    if (!checkApiKey($pdo)) respond(['error' => 'Invalid API key'], 401);
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/uploads/acts/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $filepath);
+    finfo_close($finfo);
+    $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: ' . $disposition . '; filename="' . $filename . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
 
 // ═══ SEARCH ═══
 if ($endpoint === 'search_products') {
@@ -182,8 +263,7 @@ if ($endpoint === 'search_products') {
 // ═══ RPC (публичные — без API-ключа) ═══
 if ($endpoint === 'rpc') {
     $fn = $subpoint ?? '';
-    $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $clientIp = explode(',', $clientIp)[0]; // Первый IP из цепочки
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
     // --- Публичные RPC (доступны без авторизации) ---
 
@@ -196,8 +276,8 @@ if ($endpoint === 'rpc') {
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities FROM users WHERE name=?");
         $s->execute([$name]); $u = $s->fetch();
-        if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'user_not_found']); }
-        if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'wrong_password']); }
+        if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'invalid_credentials']); }
+        if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'invalid_credentials']); }
         $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
@@ -266,6 +346,25 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT `value` FROM settings WHERE `key`='last_update'"); $s->execute();
         $row = $s->fetch();
         respond($row ?: ['value' => null]);
+    }
+
+    // Валидация сессии — проверяет API-ключ и возвращает данные пользователя
+    if ($fn === 'validate_session') {
+        $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+        if (!$apiKey) respond(['valid' => false]);
+        $s = $pdo->prepare("SELECT id FROM api_keys WHERE api_key=? AND is_active='true'");
+        $s->execute([$apiKey]);
+        if (!$s->fetch()) respond(['valid' => false]);
+        $userName = $body['user_name'] ?? '';
+        if ($userName) {
+            $s2 = $pdo->prepare("SELECT name, role, display_role, legal_entities FROM users WHERE name=?");
+            $s2->execute([$userName]);
+            $u = $s2->fetch();
+            if (!$u) respond(['valid' => false]);
+            $le = ($u['legal_entities'] && is_string($u['legal_entities'])) ? (json_decode($u['legal_entities'], true) ?? []) : [];
+            respond(['valid' => true, 'user' => ['name' => $u['name'], 'role' => $u['role'] ?? 'user', 'display_role' => $u['display_role'] ?? null, 'legal_entities' => $le]]);
+        }
+        respond(['valid' => true]);
     }
 
     // --- Приватные RPC (требуют API-ключ) ---
@@ -337,6 +436,65 @@ if ($endpoint === 'rpc') {
         $s->execute([$userName, $userName]);
         respond($s->fetchAll());
     }
+    if ($fn === 'replace_analysis_data') {
+        $legalEntity = $body['legal_entity'] ?? '';
+        $items = $body['items'] ?? [];
+        if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
+        if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        $allowed = ['id','legal_entity','sku','stock','consumption','period_days','updated_by','updated_at'];
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM `analysis_data` WHERE `legal_entity`=?")->execute([$legalEntity]);
+            foreach ($items as $item) {
+                $item = array_intersect_key($item, array_flip($allowed));
+                if (empty($item)) continue;
+                $cols = array_keys($item);
+                $ph = implode(',', array_fill(0, count($cols), '?'));
+                $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
+                $pdo->prepare("INSERT INTO `analysis_data` ($cn) VALUES ($ph)")->execute(array_values($item));
+            }
+            $pdo->commit();
+            respond(['success' => true, 'count' => count($items)]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("replace_analysis_data error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
+
+    if ($fn === 'replace_order_items') {
+        $orderId = $body['order_id'] ?? '';
+        $items = $body['items'] ?? [];
+        if (!$orderId) respond(['error' => 'order_id required'], 400);
+        if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);
+            if (count($items) > 0) {
+                foreach ($items as $item) {
+                    if (!isset($item['order_id'])) $item['order_id'] = $orderId;
+                    if (!isset($item['id'])) $item['id'] = uuid();
+                    foreach (array_keys($item) as $col) {
+                        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) {
+                            $pdo->rollBack();
+                            respond(['error' => 'Invalid column name: '.$col], 400);
+                        }
+                    }
+                    $cols = array_keys($item);
+                    $ph = implode(',', array_fill(0, count($cols), '?'));
+                    $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
+                    $pdo->prepare("INSERT INTO `order_items` ($cn) VALUES ($ph)")->execute(array_values($item));
+                }
+            }
+            $pdo->commit();
+            respond(['success' => true, 'count' => count($items)]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("replace_order_items error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
+
     respond(['error'=>'Not found'], 404);
 }
 
@@ -345,10 +503,21 @@ if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
 // ═══ REST ═══
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications'];
-// Защита: users — только чтение (без password), запись только через RPC
-$readOnly = ['audit_log','search_logs'];
+// Защита: только чтение через REST, запись — через RPC
+$readOnly = ['audit_log', 'search_logs', 'users'];
+// settings — только чтение и обновление (без delete/insert для защиты системных ключей)
+$noInsertDelete = ['settings'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
+
+// Enforce read-only
+if (in_array($table, $readOnly) && $method !== 'GET') {
+    respond(['error' => 'This table is read-only via REST API'], 403);
+}
+// Enforce no insert/delete for settings
+if (in_array($table, $noInsertDelete) && ($method === 'POST' || $method === 'DELETE')) {
+    respond(['error' => 'Insert/delete not allowed for this table via REST'], 403);
+}
 
 if ($method === 'GET') {
     $where = []; $params = [];
@@ -449,7 +618,14 @@ if ($method === 'POST') {
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
         $cols = array_keys($rec); $ph = implode(',', array_fill(0, count($cols), '?')); $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
         try {
-            $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph)"); $s->execute(array_values($rec));
+            if ($table === 'analysis_data') {
+                // Upsert: при дубле обновляем данные
+                $upd = implode(',', array_map(fn($c) => "`$c`=VALUES(`$c`)", $cols));
+                $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph) ON DUPLICATE KEY UPDATE $upd");
+            } else {
+                $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph)");
+            }
+            $s->execute(array_values($rec));
         } catch (PDOException $e) {
             error_log("INSERT error [{$table}]: " . $e->getMessage());
             respond(['error' => 'Insert failed'], 500);

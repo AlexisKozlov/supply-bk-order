@@ -1577,7 +1577,13 @@ input[type="number"]:focus {
 
   .topbar { padding: 0 14px; }
   .container { padding: 14px 10px; }
-  .content-area { padding: 12px 10px; }
+  .content-area {
+    padding: 12px 10px;
+    overflow: auto !important;
+  }
+  .main-wrapper {
+    overflow: auto !important;
+  }
   .footer { left: 0; }
 
   .params-bar { gap: 8px; }
@@ -1591,8 +1597,17 @@ input[type="number"]:focus {
 
   /* Мобильная раскладка: снимаем жёсткий flex, даём скролл */
   .order-view,
-  .planning-view {
-    overflow: auto;
+  .planning-view,
+  .analysis-view {
+    overflow: visible !important;
+    height: auto !important;
+    flex: none !important;
+    min-height: 0;
+  }
+  .content-area > .order-view,
+  .content-area > .planning-view,
+  .content-area > .analysis-view {
+    overflow: visible !important;
   }
   .order-section {
     overflow: visible;
@@ -2609,4 +2624,340 @@ button:disabled .bk-icon-wrap svg {
 @keyframes expandIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ═══════ TABLE ROW ANIMATIONS (unused — removed TransitionGroup) ═══════ */
+
+/* Hide mobile-only elements on desktop */
+.mob-calc-btn { display: none !important; }
+
+/* ═══════════════════════════════════════
+   MOBILE: ORDER TABLE CARD LAYOUT
+   ═══════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Table → block layout (ONLY for OrderView, not PlanningView) */
+  .order-view .order-table-wrapper table thead { display: none; }
+  .order-view .order-table-wrapper table,
+  .order-view .order-table-wrapper table tbody { display: block; width: 100%; }
+
+  .order-view .order-table-wrapper table tbody tr {
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    position: relative;
+    background: var(--card);
+  }
+  .order-view .order-table-wrapper table tbody tr:hover { background: #FFFBF5; }
+  .order-view .order-table-wrapper table tbody tr.has-order {
+    border-color: rgba(46,125,50,0.25);
+    background: #FCFDF9;
+  }
+
+  .order-view .order-table-wrapper table tbody tr td {
+    display: block;
+    border-bottom: none;
+    padding: 2px 0;
+    text-align: left;
+  }
+
+  /* Hide drag handle, calc column, pallets */
+  .order-view .order-table-wrapper td.td-drag { display: none !important; }
+  .order-view .order-table-wrapper td.calc { display: none !important; }
+  .order-view .order-table-wrapper td.pallets { display: none !important; }
+
+  /* Item name — full width, first line */
+  .order-view .order-table-wrapper td.item-name {
+    position: static !important;
+    box-shadow: none !important;
+    font-size: 13px;
+    font-weight: 600;
+    padding-right: 36px;
+    padding-left: 0;
+    max-width: none;
+    margin-bottom: 6px;
+  }
+
+  /* Delete button — absolute top-right */
+  .order-view .order-table-wrapper td.delete-cell {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 0;
+  }
+
+  /* Input cells — grid 2x2 with labels */
+  .order-view .order-table-wrapper td[data-label] {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: calc(50% - 4px);
+    box-sizing: border-box;
+    padding: 3px 0;
+    vertical-align: top;
+  }
+  .order-view .order-table-wrapper td[data-label]::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 50px;
+    flex-shrink: 0;
+  }
+  .order-view .order-table-wrapper td[data-label] input[type="number"] {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+
+  /* Stock until — inline with label */
+  .order-view .order-table-wrapper td.td-stock-until {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: calc(50% - 4px);
+    font-size: 11px;
+    padding: 3px 0;
+  }
+  .order-view .order-table-wrapper td.td-stock-until::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 50px;
+    flex-shrink: 0;
+  }
+
+  /* Order cell — full width row */
+  .order-view .order-table-wrapper td.td-order {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-light);
+    background: transparent;
+  }
+  .order-view .order-table-wrapper td.td-order::before {
+    content: 'Заказ';
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 42px;
+    flex-shrink: 0;
+  }
+  .order-view .order-table-wrapper td.td-order input { flex: 1; min-width: 0; }
+  .order-view .order-table-wrapper td.td-order .order-separator { color: var(--text-muted); font-size: 12px; }
+  .order-view .order-table-wrapper td.td-order .mob-calc-btn {
+    display: inline-flex !important;
+    padding: 4px 8px;
+    font-size: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Coverage date — inline */
+  .order-view .order-table-wrapper td.td-coverage {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    font-size: 11px;
+    padding: 3px 0;
+  }
+  .order-view .order-table-wrapper td.td-coverage::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 56px;
+    flex-shrink: 0;
+  }
+
+  /* Final summary wrap */
+  .final-summary { flex-wrap: wrap; }
+
+  /* Drawer full-width on mobile */
+  .drawer-panel { width: 100% !important; max-width: 100% !important; }
+
+  /* All clickable elements — min touch target */
+  .btn, button, .ht-act, .adm-act-btn, .db-card-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Exception for small inline elements */
+  .btn.small, .calc-to-order, .delete-item-x, .compact-toggle {
+    min-height: 36px;
+    min-width: 36px;
+  }
+}
+
+/* ═══════════════════════════════════════
+   MOBILE: PLANNING VIEW — CARD LAYOUT
+   ═══════════════════════════════════════ */
+
+/* Hidden on desktop */
+.plan-mobile-cards { display: none; }
+
+@media (max-width: 768px) {
+  /* Скрыть таблицу, показать карточки */
+  .planning-view .order-table-wrapper { display: none !important; }
+  .planning-view .plan-mobile-cards { display: block !important; }
+  .planning-view .compact-toggle { display: none !important; }
+  .planning-view .fullscreen-toggle-btn { display: none !important; }
+
+  /* Параметры: убрать sticky, нормальный поток */
+  .planning-view .params-block {
+    position: static;
+    z-index: auto;
+  }
+  /* Параметры по умолчанию свёрнуты на мобильном — summary всегда виден */
+  .planning-view .params-summary {
+    padding: 8px 10px;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  /* ── Карточка товара ── */
+  .plan-mob-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: var(--card);
+  }
+  .plan-mob-card.plan-mob-has-order {
+    border-color: rgba(46,125,50,0.3);
+    background: #FCFDF9;
+  }
+  .plan-mob-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+    line-height: 1.3;
+  }
+  .plan-mob-name b { color: var(--bk-orange); margin-right: 3px; font-size: 11px; }
+
+  /* Инпуты 2×2 */
+  .plan-mob-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .plan-mob-field {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .plan-mob-label {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 38px;
+    flex-shrink: 0;
+  }
+  .plan-mob-field input {
+    flex: 1;
+    min-width: 0 !important;
+    width: auto !important;
+    font-size: 12px !important;
+    padding: 3px !important;
+    height: 28px !important;
+  }
+  .plan-mob-field-ro {
+    align-items: center;
+  }
+  .plan-mob-reserve {
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .plan-mob-reserve.reserve-danger { color: #d32f2f; }
+  .plan-mob-reserve.reserve-warning { color: #e65100; }
+  .plan-mob-reserve.reserve-ok { color: #2e7d32; }
+
+  /* Периоды */
+  .plan-mob-periods {
+    border-top: 1px solid var(--border-light);
+    padding-top: 5px;
+    margin-bottom: 4px;
+  }
+  .plan-mob-period-title {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 3px;
+  }
+  .plan-mob-period-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .plan-mob-period {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 38px;
+    padding: 3px 5px;
+    border-radius: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border-light);
+    cursor: pointer;
+  }
+  .plan-mob-period.plan-mob-period-has {
+    background: #FFF8F0;
+    border-color: var(--bk-orange);
+  }
+  .plan-mob-period-label {
+    font-size: 8px;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .plan-mob-period-val {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .plan-mob-period-zero {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 10px;
+  }
+
+  /* Редактирование периода */
+  .plan-mob-period-editing {
+    border-color: var(--bk-orange) !important;
+    background: #FFF8F0 !important;
+  }
+  .plan-mob-edit-input {
+    width: 44px !important;
+    min-width: 0 !important;
+    text-align: center;
+    font-size: 13px !important;
+    font-weight: 700;
+    padding: 2px !important;
+    height: 24px !important;
+    border: 2px solid var(--bk-orange) !important;
+    border-radius: 4px;
+    background: #fff;
+    -moz-appearance: textfield;
+  }
+  .plan-mob-edit-input::-webkit-outer-spin-button,
+  .plan-mob-edit-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Итого */
+  .plan-mob-total {
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding-top: 3px;
+    border-top: 1px solid var(--border-light);
+  }
+  .plan-mob-total b { color: var(--bk-brown); }
+  .plan-mob-total-units { font-size: 10px; color: var(--text-muted); }
+}
 

@@ -15,7 +15,7 @@
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">или перетащите его сюда</div>
           </div>
           <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.6;">
-            <b>Ожидаемые колонки:</b> Артикул, Наименование, Поставщик, Коэффициент единицы для отчетов, Единица хранения, Количество кор. в паллете, Количество штук в блоке, Количество блоков в коробе, Активная, Группа аналогов (new)
+            <b>Ожидаемые колонки:</b> Артикул, Наименование, Поставщик, Коэффициент единицы для отчетов, Единица хранения, Количество кор. в паллете, Количество штук в блоке, Количество блоков в коробе, Активная, Группа аналогов, Хранение
           </div>
           <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none;" @change="onFileSelected" />
         </div>
@@ -47,6 +47,7 @@
                   <th>Ед.</th>
                   <th>Кратн.</th>
                   <th>Аналоги</th>
+                  <th>Хранение</th>
                 </tr>
               </thead>
               <tbody>
@@ -60,6 +61,7 @@
                   <td>{{ row.unit_of_measure }}</td>
                   <td>{{ row.multiplicity || '—' }}</td>
                   <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.analog_group || '—' }}</td>
+                  <td>{{ row.category || '—' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -73,7 +75,7 @@
             <b>{{ duplicateCount }}</b> {{ pluralize(duplicateCount, 'карточка без изменений', 'карточки без изменений', 'карточек без изменений') }} — будут пропущены.
           </div>
           <div v-if="updateCount > 0" style="margin-top:8px;padding:8px 12px;background:#E3F2FD;border:1px solid #90CAF9;border-radius:6px;font-size:12px;color:#1565C0;">
-            <b>{{ updateCount }}</b> {{ pluralize(updateCount, 'карточка будет обновлена', 'карточки будут обновлены', 'карточек будут обновлены') }} (поставщик / группа аналогов).
+            <b>{{ updateCount }}</b> {{ pluralize(updateCount, 'карточка будет обновлена', 'карточки будут обновлены', 'карточек будут обновлены') }} (поставщик / группа аналогов / хранение).
           </div>
           <div v-if="missingSuppliersCount > 0" style="margin-top:8px;padding:8px 12px;background:#E8F5E9;border:1px solid #A5D6A7;border-radius:6px;font-size:12px;color:#2E7D32;">
             <b>{{ missingSuppliersCount }}</b> {{ pluralize(missingSuppliersCount, 'поставщик будет создан', 'поставщика будут созданы', 'поставщиков будут созданы') }} в базе.
@@ -159,15 +161,20 @@ const COLUMN_MAP = {
   'поставщик':                         'supplier',
   'коэффициент единицы для отчетов':   'qty_per_box',
   'коэффициент единицы для отчётов':   'qty_per_box',
+  'шт/кор':                            'qty_per_box',
   'единица хранения':                  'unit_of_measure',
+  'ед. измерения':                     'unit_of_measure',
   'количество кор. в паллете':         'boxes_per_pallet',
   'количество кор в паллете':          'boxes_per_pallet',
+  'кор/пал':                           'boxes_per_pallet',
   'количество штук в блоке':           'block_qty',
   'количество блоков в коробе':        'case_blocks',
+  'кратность':                         'multiplicity_direct',
   'активная':                          'active',
   'видимость':                         'active',
   'группа аналогов (new)':             'analog_group',
   'группа аналогов':                   'analog_group',
+  'хранение':                          'category',
 };
 
 const UNIT_MAP = {
@@ -253,10 +260,11 @@ function classifyRow(row) {
   if (!row.sku) return 'new';
   const existing = existingMap.value.get(row.sku.toLowerCase().trim());
   if (!existing) return 'new';
-  // Есть карточка — если пустой поставщик или пустая группа аналогов, а в файле есть → обновить
+  // Есть карточка — если пустой поставщик/группа аналогов/хранение, а в файле есть → обновить
   const needSupplier = (!existing.supplier || !existing.supplier.trim()) && row.supplier;
   const needAnalog = (!existing.analog_group || !existing.analog_group.trim()) && row.analog_group;
-  if (needSupplier || needAnalog) return 'update';
+  const needCategory = (!existing.category || !existing.category.trim()) && row.category;
+  if (needSupplier || needAnalog || needCategory) return 'update';
   return 'duplicate';
 }
 
@@ -332,12 +340,14 @@ async function parseExcel(file) {
     const boxesPerPallet = colIdx.boxes_per_pallet !== undefined ? parseFloat(String(r[colIdx.boxes_per_pallet]).replace(',', '.')) || 0 : 0;
     const unitOfMeasure = colIdx.unit_of_measure !== undefined ? normalizeUnit(String(r[colIdx.unit_of_measure])) : 'шт';
 
-    // Кратность: max(штук в блоке, блоков в коробе), если оба = 1 → 1
+    // Кратность: прямое значение или max(штук в блоке, блоков в коробе)
+    const directMult = colIdx.multiplicity_direct !== undefined ? Math.round(parseFloat(String(r[colIdx.multiplicity_direct]).replace(',', '.')) || 0) : 0;
     const blockQty = colIdx.block_qty !== undefined ? Math.round(parseFloat(String(r[colIdx.block_qty]).replace(',', '.')) || 0) : 0;
     const caseBlocks = colIdx.case_blocks !== undefined ? Math.round(parseFloat(String(r[colIdx.case_blocks]).replace(',', '.')) || 0) : 0;
-    const multiplicity = Math.max(blockQty, caseBlocks) || 1;
+    const multiplicity = directMult || Math.max(blockQty, caseBlocks) || 1;
 
     const analogGroup = colIdx.analog_group !== undefined ? String(r[colIdx.analog_group] || '').trim() : '';
+    const category = colIdx.category !== undefined ? String(r[colIdx.category] || '').trim() : '';
 
     const row = {
       sku,
@@ -348,6 +358,7 @@ async function parseExcel(file) {
       unit_of_measure: unitOfMeasure,
       multiplicity,
       analog_group: analogGroup || null,
+      category: category || null,
       legal_entity: props.legalEntity,
     };
 
@@ -404,6 +415,7 @@ async function doImport() {
       const patch = {};
       if ((!existing.supplier || !existing.supplier.trim()) && row.supplier) patch.supplier = row.supplier;
       if ((!existing.analog_group || !existing.analog_group.trim()) && row.analog_group) patch.analog_group = row.analog_group;
+      if ((!existing.category || !existing.category.trim()) && row.category) patch.category = row.category;
       if (!Object.keys(patch).length) continue;
       const { error } = await db.from('products').update(patch).eq('id', existing.id);
       if (error) { errors++; } else { updated++; }

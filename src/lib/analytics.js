@@ -20,7 +20,7 @@ export async function getOrdersAnalytics(legalEntity, days = 30) {
   // Текущий период
   const { data: orders, error } = await db
     .from('orders')
-    .select('id, delivery_date, supplier, created_at, order_items(qty_boxes, sku, name)')
+    .select('id, delivery_date, supplier, created_at, received_at, received_by, order_items(qty_boxes, received_qty, sku, name)')
     .eq('legal_entity', legalEntity)
     .gte('created_at', start.toISOString())
     .order('created_at', { ascending: true });
@@ -219,6 +219,98 @@ function processData(orders, prevOrders, days) {
   const prevBoxes   = prevOrders.reduce((s, o) => s + sumBoxes(o.order_items), 0);
   const prevCount   = prevOrders.length;
 
+  // === План-Факт (расширенный) ===
+  const receivedOrders = orders.filter(o => o.received_at);
+  const pendingOrders = orders.filter(o => !o.received_at);
+  let planBoxes = 0, factBoxes = 0, discrepancyItems = 0, totalReceivedItems = 0;
+
+  // По поставщикам
+  const pfSupMap = {};
+  // По товарам — расхождения
+  const pfProdMap = {};
+  // По дням — тренд выполнения
+  const pfDayMap = {};
+
+  receivedOrders.forEach(o => {
+    const sup = o.supplier || 'Без поставщика';
+    if (!pfSupMap[sup]) pfSupMap[sup] = { supplier: sup, plan: 0, fact: 0, orders: 0, discrepancies: 0, items: 0, color: supplierColor[sup] || PALETTE[0] };
+    pfSupMap[sup].orders++;
+
+    const recDate = toLocalDateStr(new Date(o.received_at));
+    if (!pfDayMap[recDate]) pfDayMap[recDate] = { plan: 0, fact: 0 };
+
+    (o.order_items || []).forEach(item => {
+      const plan = parseBoxes(item);
+      const fact = item.received_qty != null ? parseFloat(String(item.received_qty).replace(',', '.')) || 0 : plan;
+      planBoxes += plan;
+      factBoxes += fact;
+      totalReceivedItems++;
+      pfSupMap[sup].plan += plan;
+      pfSupMap[sup].fact += fact;
+      pfSupMap[sup].items++;
+      pfDayMap[recDate].plan += plan;
+      pfDayMap[recDate].fact += fact;
+
+      const isDiscrepancy = Math.round(fact) !== Math.round(plan);
+      if (isDiscrepancy) {
+        discrepancyItems++;
+        pfSupMap[sup].discrepancies++;
+        const key = item.sku || item.name || '?';
+        if (!pfProdMap[key]) pfProdMap[key] = { sku: item.sku, name: item.name, plan: 0, fact: 0, count: 0, delta: 0 };
+        pfProdMap[key].plan += plan;
+        pfProdMap[key].fact += fact;
+        pfProdMap[key].delta += (fact - plan);
+        pfProdMap[key].count++;
+      }
+    });
+  });
+
+  const fulfillmentPct = planBoxes > 0 ? Math.round(factBoxes / planBoxes * 100) : null;
+
+  // Поставщики с % выполнения, сортировка по кол-ву расхождений
+  const pfSuppliers = Object.values(pfSupMap).map(s => ({
+    ...s,
+    plan: Math.round(s.plan),
+    fact: Math.round(s.fact),
+    fulfillmentPct: s.plan > 0 ? Math.round(s.fact / s.plan * 100) : 100,
+    discrepancyPct: s.items > 0 ? Math.round(s.discrepancies / s.items * 100) : 0,
+  })).sort((a, b) => b.discrepancies - a.discrepancies);
+
+  // Топ товаров с расхождениями
+  const pfDiscrepancyProducts = Object.values(pfProdMap).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 10).map(p => ({
+    ...p,
+    plan: Math.round(p.plan),
+    fact: Math.round(p.fact),
+    delta: Math.round(p.delta),
+  }));
+
+  // Тренд выполнения по дням
+  const pfDayKeys = Object.keys(pfDayMap).sort();
+  const pfDayTrend = pfDayKeys.map(k => {
+    const d = new Date(k + 'T00:00:00');
+    return {
+      date: k,
+      label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      plan: Math.round(pfDayMap[k].plan),
+      fact: Math.round(pfDayMap[k].fact),
+      pct: pfDayMap[k].plan > 0 ? Math.round(pfDayMap[k].fact / pfDayMap[k].plan * 100) : 100,
+    };
+  });
+
+  const planFact = {
+    receivedOrders: receivedOrders.length,
+    pendingOrders: pendingOrders.length,
+    planBoxes: Math.round(planBoxes),
+    factBoxes: Math.round(factBoxes),
+    fulfillmentPct,
+    discrepancyItems,
+    totalReceivedItems,
+    discrepancyPct: totalReceivedItems > 0 ? Math.round(discrepancyItems / totalReceivedItems * 100) : 0,
+    suppliers: pfSuppliers,
+    discrepancyProducts: pfDiscrepancyProducts,
+    dayTrend: pfDayTrend,
+  };
+
   return {
     days:         allDays,
     daysInMonth:  new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate(),
@@ -226,6 +318,7 @@ function processData(orders, prevOrders, days) {
     supplierColor,
     topProducts,
     anomalies,
+    planFact,
     totals:       { orders: totalOrders, boxes: totalBoxes },
     prev:         { orders: prevCount,   boxes: prevBoxes  },
     deltaOrders:  prevCount > 0 ? Math.round((totalOrders - prevCount) / prevCount * 100) : null,

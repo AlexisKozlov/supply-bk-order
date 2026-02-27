@@ -162,6 +162,58 @@
       </table>
     </div>
 
+    <!-- Мобильный карточный вид планирования -->
+    <div v-if="items.length" class="plan-mobile-cards">
+      <div v-for="(item, idx) in items" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item) }">
+        <div class="plan-mob-name">
+          <b v-if="item.sku">{{ item.sku }}</b> {{ item.name }}
+        </div>
+        <div class="plan-mob-inputs">
+          <div class="plan-mob-field">
+            <span class="plan-mob-label">Расход</span>
+            <input type="number" class="plan-calc-input" :value="item.monthlyConsumption || ''" @change="e => onInput(idx, 'consumption', e.target.value)" @focus="e => onCalcFocus(e, idx, 'consumption')" @keydown="e => onCalcKeydown(e, idx, 'consumption')" :disabled="viewOnly" placeholder="0"/>
+          </div>
+          <div class="plan-mob-field">
+            <span class="plan-mob-label">Склад</span>
+            <input type="number" class="plan-calc-input" :value="displayStock(item, 'stockOnHand')" @change="e => onInput(idx, 'stock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'stock')" @keydown="e => onCalcKeydown(e, idx, 'stock')" :disabled="viewOnly" placeholder="0"/>
+          </div>
+          <div class="plan-mob-field">
+            <span class="plan-mob-label">У пост.</span>
+            <input type="number" class="plan-calc-input" :value="displayStock(item, 'stockAtSupplier')" @change="e => onInput(idx, 'supplierStock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'supplierStock')" @keydown="e => onCalcKeydown(e, idx, 'supplierStock')" :disabled="viewOnly" placeholder="0"/>
+          </div>
+          <div class="plan-mob-field plan-mob-field-ro">
+            <span class="plan-mob-label">Запас</span>
+            <span class="plan-mob-reserve" :class="reserveDaysClass(item)">{{ reserveDaysText(item) }}</span>
+          </div>
+        </div>
+        <div class="plan-mob-periods" v-if="item.plan && item.plan.length">
+          <div class="plan-mob-period-title">Периоды заказа</div>
+          <div class="plan-mob-period-grid">
+            <div v-for="(p, pi) in item.plan" :key="pi" class="plan-mob-period"
+              :class="{ 'plan-mob-period-has': p.orderBoxes > 0, 'plan-mob-period-editing': editingCell && editingCell.idx === idx && editingCell.m === pi }"
+              @click="pi > 0 && !viewOnly && startMobEdit(idx, pi)">
+              <span class="plan-mob-period-label">{{ periodHeaders[pi]?.label || '' }}</span>
+              <template v-if="editingCell && editingCell.idx === idx && editingCell.m === pi">
+                <input type="number" class="plan-mob-edit-input" :value="p.orderBoxes || 0"
+                  @keydown.enter.prevent="applyEdit(idx, pi, $event.target.value)"
+                  @keydown.escape.prevent="cancelEdit()"
+                  @blur="applyEdit(idx, pi, $event.target.value)"
+                  @click.stop />
+              </template>
+              <template v-else>
+                <span class="plan-mob-period-val" v-if="p.orderBoxes > 0">{{ p.orderBoxes }}</span>
+                <span class="plan-mob-period-val plan-mob-period-zero" v-else>—</span>
+              </template>
+            </div>
+          </div>
+        </div>
+        <div class="plan-mob-total" v-if="itemTotalBoxes(item) > 0">
+          Итого: <b>{{ nf.format(itemTotalBoxes(item)) }} кор</b>
+          <span class="plan-mob-total-units">({{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }})</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Кнопки завершения -->
     <div v-if="items.length" class="toolbar-row toolbar-finish" style="margin-top:12px;" v-show="!isFullscreen">
       <div class="toolbar-spacer"></div>
@@ -241,7 +293,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -510,6 +562,16 @@ function applyEdit(idx, m, val) {
   recalcItem(idx, m + 1); _savePlanDraft();
 }
 function cancelEdit() { editingCell.value = null; }
+
+function startMobEdit(idx, m) {
+  if (viewOnly.value) return;
+  snapshot();
+  editingCell.value = { idx, m };
+  nextTick(() => {
+    const inp = document.querySelector('.plan-mob-edit-input');
+    if (inp) { inp.focus(); inp.select(); }
+  });
+}
 
 function roundToPallet(idx, m) {
   snapshot();
@@ -866,7 +928,7 @@ async function confirmSave() {
       if (ch.length) ld.changes = ch;
     }
     await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || null, user_name: userStore.currentUser?.name || null, details: ld });
-  } catch (_) {}
+  } catch (e) { console.warn('[planning] audit log:', e); }
   // Уведомление только при редактировании чужого плана
   if (editingPlanId.value && _loadedCreatedBy && _loadedCreatedBy !== userStore.currentUser?.name) {
     try {
@@ -888,7 +950,7 @@ async function confirmSave() {
         target_user: _loadedCreatedBy,
         read_by: JSON.stringify([userStore.currentUser?.name || '']),
       });
-    } catch(_) {}
+    } catch(e) { console.warn('[planning] notification:', e); }
   }
   toast.success(editingPlanId.value ? 'План обновлён' : 'План сохранён', `${itemsWithPlan.value.length} позиций`);
   showSaveModal.value = false;
@@ -912,6 +974,7 @@ async function openLogModal() {
   const { data } = await db.from('audit_log').select('*')
     .eq('entity_id', id).eq('entity_type', 'plan')
     .order('created_at', { ascending: false }).limit(50);
+  if (!logModal.value.show) return;
   logModal.value.entries = data || [];
   logModal.value.loading = false;
 }
@@ -966,7 +1029,8 @@ async function loadPlanFromHistory(planId) {
 
 watch(() => orderStore.settings.legalEntity, async () => { await supplierStore.loadSuppliers(orderStore.settings.legalEntity); supplier.value = ''; items.value = []; });
 const showCollapseHint = ref(false);
-watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
+let _collapseHintTimer = null;
+watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
 
 onMounted(async () => {
   if (!supplier.value) settingsExpanded.value = true;
@@ -982,6 +1046,11 @@ onMounted(async () => {
       else { draftStore.clearPlanDraft(); }
     }
   }
+});
+
+onBeforeUnmount(() => {
+  clearTimeout(_vTimer);
+  clearTimeout(_collapseHintTimer);
 });
 
 // Реактивная навигация: если query изменился когда компонент уже смонтирован
@@ -1068,4 +1137,6 @@ watch(() => route.query.planId, async (newId) => {
 .plan-compact .plan-total-cell.plan-has-value { font-size: 13px; }
 .plan-compact .plan-th-month { cursor: help; }
 .plan-compact .plan-edit-input { width: 50px !important; font-size: 12px !important; padding: 1px 3px !important; }
+
+/* Mobile styles moved to global style.css — .planning-view scope */
 </style>

@@ -13,6 +13,7 @@
         </button>
         <button v-if="!isViewer" class="btn primary" @click="openNew('product')" style="font-size:11px;padding:5px 12px;">+ Товар</button>
         <button v-if="!isViewer" class="btn secondary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт</button>
+        <button class="btn secondary" @click="doExportProducts" style="font-size:11px;padding:5px 12px;">Экспорт</button>
       </div>
       <button v-else-if="activeTab==='suppliers' && !isViewer" class="btn primary" @click="openNew('supplier')" style="font-size:11px;padding:5px 12px;">+ Поставщик</button>
     </div>
@@ -159,6 +160,7 @@ import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import ImportCardsModal from '@/components/modals/ImportCardsModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import { exportProductsToExcel } from '@/lib/excelExport.js';
 
 
 const route = useRoute();
@@ -332,6 +334,10 @@ async function removeFromGroup(p) {
 
 async function switchToAnalogs() { activeTab.value = 'analogs'; if (!products.value.length) await loadProducts(); }
 
+function doExportProducts() {
+  exportProductsToExcel(products.value, orderStore.settings.legalEntity);
+}
+
 async function onProductSaved() { editCardModal.value.show = false; await loadProducts(); }
 async function onSupplierSaved() { editSupplierModal.value.show = false; supplierStore.invalidate(); await loadSuppliers(); }
 async function onImportSaved() { showImportModal.value = false; await loadProducts(); }
@@ -424,5 +430,32 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
   font-size: 10px;
   font-weight: 500;
   opacity: 0.6;
+}
+
+/* ═══ Mobile ═══ */
+@media (max-width: 768px) {
+  /* Cards wrap */
+  .db-card { flex-wrap: wrap; padding: 8px 10px; }
+  .db-card-meta { flex-wrap: wrap; width: 100%; margin-top: 4px; }
+  .db-card-btns { opacity: 1; }
+  .db-card-btn { min-height: 36px; min-width: 36px; }
+
+  /* Search full-width */
+  .page-header { flex-wrap: wrap; gap: 8px; }
+  .page-header > div { flex-wrap: wrap; width: 100%; }
+
+  /* Tabs compact */
+  .db-tabs { gap: 0; }
+  .db-tab { padding: 8px 12px; font-size: 12px; }
+
+  /* Toggle buttons wrap */
+  .db-active-toggle { font-size: 11px; padding: 4px 8px; }
+
+  /* Contacts row */
+  .db-card-contacts { margin-top: 2px; }
+
+  /* Analog items */
+  .analog-item { padding: 6px 10px 6px 20px; flex-wrap: wrap; gap: 4px; }
+  .analog-group-header { padding: 8px 10px; }
 }
 </style>

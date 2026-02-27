@@ -83,7 +83,7 @@ export const useOrderStore = defineStore('order', () => {
   });
 
   function _snapshot() {
-    _history.push(JSON.parse(JSON.stringify(items.value)));
+    _history.push(items.value); // History.push уже делает deep clone
     _historyVersion.value++;
   }
 
@@ -162,8 +162,8 @@ export const useOrderStore = defineStore('order', () => {
 
   function clearItems() {
     _ensureInitialState();
-    _snapshot();
     items.value = [];
+    _snapshot();
   }
 
   function clearAllData() {

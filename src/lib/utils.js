@@ -76,7 +76,12 @@ export function formatMoscowRelative(str) {
   if (diff < 10) return 'только что';
   if (diff < 60) return `${diff} сек назад`;
   if (diff < 120) return '1 мин назад';
-  return `${Math.floor(diff / 60)} мин назад`;
+  if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`;
+  if (diff < 7200) return '1 час назад';
+  if (diff < 86400) return `${Math.floor(diff / 3600)} ч назад`;
+  if (diff < 172800) return 'вчера';
+  if (diff < 604800) return `${Math.floor(diff / 86400)} дн назад`;
+  return formatMoscowDateTime(str);
 }
 
 export function debug(...args) {

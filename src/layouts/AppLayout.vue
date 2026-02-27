@@ -30,6 +30,10 @@
           <span class="sidebar-icon"><BkIcon name="history" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">История</span>
         </router-link>
+        <router-link :to="{ name: 'plan-fact' }" class="sidebar-item" :class="{ active: currentRoute === 'plan-fact' }">
+          <span class="sidebar-icon"><BkIcon name="success" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">План-Факт</span>
+        </router-link>
       </nav>
 
       <div class="sidebar-section" v-if="!sidebarCollapsed">Данные</div>
@@ -306,6 +310,7 @@ const pageNames = {
   analysis: 'Анализ',
   database: 'База данных',
   admin: 'Админ панель',
+  'plan-fact': 'План-Факт',
 };
 
 function sendHeartbeat() {
@@ -388,7 +393,7 @@ onUnmounted(() => {
 function isUnread(n) {
   const name = userStore.currentUser?.name;
   if (!name) return false;
-  const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
+  const readBy = Array.isArray(n.read_by) ? n.read_by : [];
   return !readBy.includes(name);
 }
 

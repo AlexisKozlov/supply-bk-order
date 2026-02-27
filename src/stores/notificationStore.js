@@ -20,11 +20,19 @@ export const useNotificationStore = defineStore('notification', () => {
 
   const userStore = useUserStore();
 
+  // Парсит JSON-поля read_by/deleted_by один раз, кэширует результат как массив
+  function _parseJsonArray(n, field) {
+    const raw = n[field];
+    if (Array.isArray(raw)) return raw;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw || '[]') : [];
+    n[field] = parsed; // кэшируем распарсенный массив
+    return parsed;
+  }
+
   function isDeletedForUser(n) {
     const name = userStore.currentUser?.name;
     if (!name) return false;
-    const deletedBy = typeof n.deleted_by === 'string' ? JSON.parse(n.deleted_by || '[]') : (n.deleted_by || []);
-    return deletedBy.includes(name);
+    return _parseJsonArray(n, 'deleted_by').includes(name);
   }
 
   const visibleNotifications = computed(() => {
@@ -34,10 +42,7 @@ export const useNotificationStore = defineStore('notification', () => {
   const unreadCount = computed(() => {
     const name = userStore.currentUser?.name;
     if (!name) return 0;
-    return visibleNotifications.value.filter(n => {
-      const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
-      return !readBy.includes(name);
-    }).length;
+    return visibleNotifications.value.filter(n => !_parseJsonArray(n, 'read_by').includes(name)).length;
   });
 
   async function load() {
@@ -66,11 +71,8 @@ export const useNotificationStore = defineStore('notification', () => {
       // Обновляем локально
       notifications.value.forEach(n => {
         if (ids.includes(n.id)) {
-          const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
-          if (!readBy.includes(name)) {
-            readBy.push(name);
-            n.read_by = JSON.stringify(readBy);
-          }
+          const readBy = _parseJsonArray(n, 'read_by');
+          if (!readBy.includes(name)) readBy.push(name);
         }
       });
     } catch (e) {
@@ -81,10 +83,9 @@ export const useNotificationStore = defineStore('notification', () => {
   async function markAllRead() {
     const name = userStore.currentUser?.name;
     if (!name) return;
-    const unreadIds = visibleNotifications.value.filter(n => {
-      const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
-      return !readBy.includes(name);
-    }).map(n => n.id);
+    const unreadIds = visibleNotifications.value
+      .filter(n => !_parseJsonArray(n, 'read_by').includes(name))
+      .map(n => n.id);
     if (unreadIds.length) await markRead(unreadIds);
   }
 
@@ -96,9 +97,7 @@ export const useNotificationStore = defineStore('notification', () => {
       // Обновляем локально — добавляем юзера в deleted_by
       const n = notifications.value.find(n => n.id === id);
       if (n) {
-        const deletedBy = typeof n.deleted_by === 'string' ? JSON.parse(n.deleted_by || '[]') : (n.deleted_by || []);
-        deletedBy.push(name);
-        n.deleted_by = JSON.stringify(deletedBy);
+        _parseJsonArray(n, 'deleted_by').push(name);
       }
     } catch (e) {
       console.error('Ошибка удаления уведомления:', e);
@@ -113,9 +112,7 @@ export const useNotificationStore = defineStore('notification', () => {
       // Обновляем локально — помечаем все видимые как удалённые
       notifications.value.forEach(n => {
         if (!isDeletedForUser(n)) {
-          const deletedBy = typeof n.deleted_by === 'string' ? JSON.parse(n.deleted_by || '[]') : (n.deleted_by || []);
-          deletedBy.push(name);
-          n.deleted_by = JSON.stringify(deletedBy);
+          _parseJsonArray(n, 'deleted_by').push(name);
         }
       });
     } catch (e) {

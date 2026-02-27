@@ -297,7 +297,7 @@ async function loadOnlineUsers() {
   try {
     const { data } = await db.rpc('get_online_users');
     onlineUsers.value = data || [];
-  } catch { /* noop */ }
+  } catch (e) { console.warn('[admin] loadOnlineUsers:', e); }
   finally { onlineLoading.value = false; }
 }
 
@@ -332,7 +332,7 @@ async function loadBcHistory() {
   try {
     const { data } = await db.from('notifications').select('*').eq('type', 'broadcast').order('created_at', { ascending: false }).limit(20);
     bcHistory.value = data || [];
-  } catch { /* noop */ }
+  } catch (e) { console.warn('[admin] loadBcHistory:', e); }
   finally { bcHistoryLoading.value = false; }
 }
 
@@ -390,7 +390,7 @@ async function loadSettings() {
       if (s.key === 'maintenance_mode') maintenanceOn.value = s.value === 'true';
       if (s.key === 'maintenance_message') maintenanceMsg.value = s.value || '';
     }
-  } catch { /* noop */ }
+  } catch (e) { console.warn('[admin] loadSettings:', e); }
 }
 
 async function saveMaintenanceMsg() {
@@ -679,6 +679,26 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 @media (max-width: 600px) {
   .adm-user-entities { display: none; }
   .adm-user-actions { opacity: 1; }
-  .adm-maint-card { flex-direction: column; text-align: center; }
+  .adm-maint-card { flex-direction: column; text-align: center; gap: 12px; padding: 16px; }
+
+  /* Tabs — compact */
+  .adm-tabs { gap: 0; }
+  .adm-tab { padding: 8px 12px; font-size: 12px; gap: 4px; }
+  .adm-tab-count { font-size: 10px; padding: 1px 5px; }
+
+  /* User row — tighter */
+  .adm-user-row { gap: 10px; padding: 8px 10px; }
+  .adm-user-avatar { width: 34px; height: 34px; font-size: 12px; border-radius: 10px; }
+  .adm-user-name { font-size: 13px; flex-wrap: wrap; }
+
+  /* Toolbar wrap */
+  .adm-toolbar { flex-wrap: wrap; gap: 8px; }
+
+  /* Broadcast card */
+  .adm-maint-msg-card { padding: 14px; }
+  .adm-maint-msg-title { font-size: 13px; }
+
+  /* Online time */
+  .adm-online-time { font-size: 11px; }
 }
 </style>

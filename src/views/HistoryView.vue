@@ -75,7 +75,8 @@
               <td class="ht-td ht-td-center ht-td-created">{{ formatDateTime(order.created_at) }}</td>
               <td class="ht-td ht-td-center" @click.stop>
                 <button class="ht-act" title="Просмотр" @click="viewOrder(order)"><BkIcon name="eye" size="sm"/></button>
-                <button v-if="!isViewer" class="ht-act" title="Редактировать" @click="editOrder(order)"><BkIcon name="edit" size="sm"/></button>
+                <button v-if="!isViewer && !order.received_at" class="ht-act" title="Редактировать" @click="editOrder(order)"><BkIcon name="edit" size="sm"/></button>
+                <span v-else-if="!isViewer && order.received_at" class="ht-act ht-act-disabled" title="Доставка принята, редактирование невозможно"><BkIcon name="edit" size="sm"/></span>
                 <button class="ht-act" title="Скопировать" @click="copyOrder(order)"><BkIcon name="copy" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyOrderLink(order)"><BkIcon name="link" size="sm"/></button>
                 <button class="ht-act" title="Лог" @click="openLogModal(order.id, 'order')"><BkIcon name="note" size="sm"/></button>
@@ -386,6 +387,7 @@ async function openLogModal(entityId, entityType) {
   const { data } = await db.from('audit_log').select('*')
     .eq('entity_id', entityId).eq('entity_type', entityType)
     .order('created_at', { ascending: false }).limit(50);
+  if (!logModal.value.show) return;
   logModal.value.entries = data || [];
   logModal.value.loading = false;
 }
@@ -430,7 +432,7 @@ async function openOrderDrawer(order) {
   const skus = order.order_items.map(i => i.sku).filter(Boolean);
   if (!skus.length) return;
   const { data } = await db.from('products').select('sku, multiplicity').in('sku', skus);
-  if (!data) return;
+  if (!data || drawerOrder.value?.id !== order.id) return;
   const multMap = Object.fromEntries(data.map(p => [p.sku, p.multiplicity || 1]));
   order.order_items.forEach(i => { if (i.multiplicity == null && i.sku) i.multiplicity = multMap[i.sku] || 1; });
 }
@@ -498,7 +500,7 @@ async function deletePlan(plan) {
   const { error } = await db.from('plans').delete().eq('id', plan.id);
   if (error) { toast.error('Ошибка', ''); return; }
   // Clean orphan audit entries
-  try { await db.from('audit_log').delete().eq('entity_type', 'plan').eq('entity_id', plan.id); } catch {}
+  try { await db.from('audit_log').delete().eq('entity_type', 'plan').eq('entity_id', plan.id); } catch (e) { console.warn('[history] audit cleanup:', e); }
   toast.success('Удалён', ''); await load();
 }
 function planItemsFiltered(plan) {
@@ -582,6 +584,8 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
 }
 .ht-act:hover { opacity: 1; background: var(--bg); border-color: var(--border); }
 .ht-act-danger:hover { background: #FEF2F2; }
+.ht-act-disabled { opacity: 0.25; cursor: not-allowed; pointer-events: auto; }
+.ht-act-disabled:hover { opacity: 0.3; background: none; border-color: transparent; }
 
 /* ═══ DRAWER ═══ */
 .drawer-backdrop {
@@ -693,9 +697,64 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
 .ht-load-more-btn:disabled { opacity: 0.6; cursor: wait; }
 
 @media (max-width: 768px) {
-  .ht-td-created, .ht-td-note { display: none; }
-  .ht-th:nth-child(3), .ht-th:nth-child(5) { display: none; }
   .ht-tabs { font-size: 11px; }
   .ht-tab { padding: 5px 10px; }
+
+  /* Card-based layout for history table */
+  .ht-table thead { display: none; }
+  .ht-table, .ht-table tbody { display: block; width: 100%; }
+
+  .ht-row {
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    position: relative;
+    background: var(--card);
+  }
+  .ht-row:last-child { border-bottom: 1px solid var(--border); }
+
+  .ht-td { display: block; padding: 1px 0; border-bottom: none; }
+
+  /* Supplier — prominent */
+  .ht-td-supplier {
+    font-size: 14px;
+    font-weight: 700;
+    padding-right: 90px;
+  }
+
+  /* Date — top-right */
+  .ht-td-date {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: auto;
+    font-size: 12px;
+  }
+
+  /* Author — small */
+  .ht-td-center:not(.ht-td-created) { font-size: 11px; color: var(--text-muted); }
+
+  /* Hide note and created_at */
+  .ht-td-created, .ht-td-note { display: none; }
+
+  /* Actions — bottom row, always visible */
+  .ht-td-center:last-child {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-light);
+    text-align: left;
+  }
+  .ht-act { opacity: 1; min-height: 36px; min-width: 36px; }
+
+  /* Drawer full-width */
+  .drawer-panel { width: 100% !important; max-width: 100% !important; }
+
+  /* Filters wrap */
+  .page-header { flex-wrap: wrap; gap: 8px; }
+  .ht-filter select { font-size: 14px; min-height: 36px; }
 }
 </style>

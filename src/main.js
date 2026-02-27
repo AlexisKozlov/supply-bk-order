@@ -12,4 +12,8 @@ const pinia = createPinia();
 app.use(pinia);
 app.use(router);
 
+app.config.errorHandler = (err, instance, info) => {
+  console.error(`[Vue error] ${info}:`, err);
+};
+
 app.mount('#app');

@@ -52,6 +52,44 @@ export async function exportToExcel(items, settings) {
 }
 
 /**
+ * Экспорт карточек товаров в Excel
+ */
+export async function exportProductsToExcel(products, legalEntity) {
+  const XLSX = await import('xlsx');
+
+  const headerRow = [
+    'Артикул', 'Наименование', 'Поставщик', 'Шт/кор', 'Кор/пал',
+    'Ед. измерения', 'Кратность', 'Группа аналогов', 'Хранение', 'Видимость',
+  ];
+
+  const dataRows = products.map(p => [
+    p.sku || '',
+    p.name || '',
+    p.supplier || '',
+    p.qty_per_box || '',
+    p.boxes_per_pallet || '',
+    p.unit_of_measure || 'шт',
+    p.multiplicity || '',
+    p.analog_group || '',
+    p.category || '',
+    (p.is_active === 0 || p.is_active === '0') ? 'Нет' : 'Да',
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+  ws['!cols'] = [
+    { wch: 15 }, { wch: 40 }, { wch: 25 }, { wch: 8 }, { wch: 8 },
+    { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 10 },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Товары');
+
+  const date = new Date().toLocaleDateString('ru-RU');
+  const entity = (legalEntity || 'Все').replace(/[""«»]/g, '');
+  XLSX.writeFile(wb, `Карточки_${entity}_${date}.xlsx`);
+}
+
+/**
  * Экспорт аналитических отчётов в Excel — 4 листа
  */
 export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {

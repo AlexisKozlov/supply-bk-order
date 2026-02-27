@@ -65,7 +65,6 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     const { error } = await db.from('orders').update(orderData).eq('id', editingOrderId);
     if (error) return { error: 'Не удалось обновить заказ: ' + error };
 
-    await db.from('order_items').delete().eq('order_id', editingOrderId);
     orderId = editingOrderId;
 
     // Param diff
@@ -93,11 +92,16 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
         if (!old) {
           if (newItem.qty_boxes > 0) changes.push({ item: key, type: 'added', boxes: newItem.qty_boxes });
         } else {
-          const diffs = [];
-          if (old.qty_boxes !== newItem.qty_boxes) diffs.push(`заказ: ${old.qty_boxes}→${newItem.qty_boxes}`);
-          if (old.consumption_period !== newItem.consumption_period) diffs.push(`расход: ${old.consumption_period}→${newItem.consumption_period}`);
-          if (old.stock !== newItem.stock) diffs.push(`остаток: ${old.stock}→${newItem.stock}`);
-          if (diffs.length) changes.push({ item: key, type: 'changed', diffs });
+          if (old.qty_boxes > 0 && newItem.qty_boxes === 0) {
+            // Позиция обнулена — считаем как удалённую
+            changes.push({ item: key, type: 'removed', boxes: old.qty_boxes });
+          } else {
+            const diffs = [];
+            if (old.qty_boxes !== newItem.qty_boxes) diffs.push(`заказ: ${old.qty_boxes}→${newItem.qty_boxes}`);
+            if (old.consumption_period !== newItem.consumption_period) diffs.push(`расход: ${old.consumption_period}→${newItem.consumption_period}`);
+            if (old.stock !== newItem.stock) diffs.push(`остаток: ${old.stock}→${newItem.stock}`);
+            if (diffs.length) changes.push({ item: key, type: 'changed', diffs });
+          }
           oldMap.delete(key);
         }
       });
@@ -118,11 +122,20 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     auditDetails = { supplier: settings.supplier, legal_entity: settings.legalEntity, items_count: itemsWithOrder.length, total_items: allItems.length };
   }
 
-  // Вставляем только позиции с заказом
-  const { error: itemsError } = await db.from('order_items').insert(
-    itemsWithOrder.map(i => ({ order_id: orderId, ...i }))
-  );
-  if (itemsError) return { error: 'Не удалось сохранить состав заказа: ' + itemsError };
+  // Вставляем позиции (при обновлении — атомарно через транзакцию)
+  const orderItems = itemsWithOrder.map(i => ({ order_id: orderId, ...i }));
+  if (editingOrderId) {
+    const { data: rpcResult, error: rpcError } = await db.rpc('replace_order_items', {
+      order_id: orderId,
+      items: orderItems,
+    });
+    if (rpcError || (rpcResult && rpcResult.error)) {
+      return { error: 'Не удалось сохранить состав заказа: ' + (rpcError || rpcResult?.error) };
+    }
+  } else {
+    const { error: itemsError } = await db.from('order_items').insert(orderItems);
+    if (itemsError) return { error: 'Не удалось сохранить состав заказа: ' + itemsError };
+  }
 
   // Аудит-лог (не блокируем)
   try {
@@ -133,7 +146,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       user_name:   userName || null,
       details:     auditDetails,
     });
-  } catch(e) { /* не блокируем */ }
+  } catch(e) { console.warn('[saveOrder] audit log:', e); }
 
   // Уведомление только при редактировании чужого заказа
   if (editingOrderId && oldOrder?.created_by && oldOrder.created_by !== userName) {
@@ -160,7 +173,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
         target_user: oldOrder.created_by,
         read_by: userName ? JSON.stringify([userName]) : '[]',
       });
-    } catch(e) {}
+    } catch(e) { console.warn('[saveOrder] notification:', e); }
   }
 
   return { orderId, itemsCount: itemsWithOrder.length };

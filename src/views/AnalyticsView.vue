@@ -65,6 +65,13 @@
             </div>
             <div class="an-kpi-sub">за период</div>
           </div>
+          <div class="an-kpi" v-if="data.planFact.receivedOrders > 0">
+            <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="success" size="sm"/></span> Выполнение</div>
+            <div class="an-kpi-row">
+              <span class="an-kpi-val" :style="{ color: data.planFact.fulfillmentPct >= 95 ? '#2E7D32' : data.planFact.fulfillmentPct >= 80 ? '#E65100' : '#D32F2F' }">{{ data.planFact.fulfillmentPct }}%</span>
+            </div>
+            <div class="an-kpi-sub">{{ data.planFact.discrepancyItems }} расхожд. из {{ data.planFact.totalReceivedItems }}</div>
+          </div>
         </div>
 
         <!-- Chart -->
@@ -113,6 +120,122 @@
             </div>
           </div>
         </div>
+      </template>
+
+      <!-- ===== PLAN-FACT ===== -->
+      <template v-if="activeTab === 'planfact'">
+        <div v-if="!data.planFact.receivedOrders" style="text-align:center;padding:40px;color:var(--text-muted);">
+          <BkIcon name="success" size="sm"/> Нет принятых доставок за выбранный период
+        </div>
+        <template v-else>
+          <!-- KPI -->
+          <div class="an-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="success" size="sm"/></span> Принято</div>
+              <div class="an-kpi-row"><span class="an-kpi-val">{{ data.planFact.receivedOrders }}</span></div>
+              <div class="an-kpi-sub">заказов (ожидают: {{ data.planFact.pendingOrders }})</div>
+            </div>
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> План</div>
+              <div class="an-kpi-row"><span class="an-kpi-val">{{ nf(data.planFact.planBoxes) }}</span></div>
+              <div class="an-kpi-sub">коробок заказано</div>
+            </div>
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> Факт</div>
+              <div class="an-kpi-row"><span class="an-kpi-val">{{ nf(data.planFact.factBoxes) }}</span></div>
+              <div class="an-kpi-sub">коробок получено</div>
+            </div>
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="ruler" size="sm"/></span> Выполнение</div>
+              <div class="an-kpi-row">
+                <span class="an-kpi-val" :style="{ color: data.planFact.fulfillmentPct >= 95 ? '#2E7D32' : data.planFact.fulfillmentPct >= 80 ? '#E65100' : '#D32F2F' }">{{ data.planFact.fulfillmentPct }}%</span>
+              </div>
+              <div class="an-kpi-sub">факт / план</div>
+            </div>
+          </div>
+
+          <!-- Расхождения: прогресс-бар -->
+          <div class="an-card">
+            <div class="an-card-title"><BkIcon name="warning" size="sm"/> Расхождения</div>
+            <div class="an-pf-bar-wrap">
+              <div class="an-pf-bar-ok" :style="{ width: (100 - data.planFact.discrepancyPct) + '%' }">
+                <span v-if="100 - data.planFact.discrepancyPct > 15">{{ 100 - data.planFact.discrepancyPct }}% ОК</span>
+              </div>
+              <div class="an-pf-bar-disc" :style="{ width: data.planFact.discrepancyPct + '%' }">
+                <span v-if="data.planFact.discrepancyPct > 5">{{ data.planFact.discrepancyPct }}%</span>
+              </div>
+            </div>
+            <div class="an-pf-stats">
+              <span>{{ data.planFact.totalReceivedItems - data.planFact.discrepancyItems }} позиций совпали</span>
+              <span style="color:#D32F2F;">{{ data.planFact.discrepancyItems }} расхождений</span>
+            </div>
+            <div v-if="data.planFact.factBoxes < data.planFact.planBoxes" class="an-pf-deficit">
+              Недовоз: <b>{{ nf(data.planFact.planBoxes - data.planFact.factBoxes) }} кор.</b>
+            </div>
+            <div v-else-if="data.planFact.factBoxes > data.planFact.planBoxes" class="an-pf-surplus">
+              Перевоз: <b>{{ nf(data.planFact.factBoxes - data.planFact.planBoxes) }} кор.</b>
+            </div>
+          </div>
+
+          <!-- Тренд выполнения по дням -->
+          <div v-if="data.planFact.dayTrend.length > 1" class="an-card">
+            <div class="an-card-title"><BkIcon name="calendar" size="sm"/> Тренд выполнения по дням</div>
+            <div class="an-pf-trend">
+              <div v-for="d in data.planFact.dayTrend" :key="d.date" class="an-pf-trend-col" :title="`${d.label}: план ${d.plan}, факт ${d.fact} (${d.pct}%)`">
+                <div class="an-pf-trend-pct" :style="{ color: d.pct >= 95 ? '#2E7D32' : d.pct >= 80 ? '#E65100' : '#D32F2F' }">{{ d.pct }}%</div>
+                <div class="an-pf-trend-bars">
+                  <div class="an-pf-trend-plan" :style="{ height: pfTrendBarH(d.plan) + 'px' }"></div>
+                  <div class="an-pf-trend-fact" :style="{ height: pfTrendBarH(d.fact) + 'px' }"></div>
+                </div>
+                <div class="an-pf-trend-label">{{ d.label }}</div>
+              </div>
+            </div>
+            <div class="an-pf-trend-legend">
+              <span><span class="an-pf-legend-plan"></span> План</span>
+              <span><span class="an-pf-legend-fact"></span> Факт</span>
+            </div>
+          </div>
+
+          <!-- По поставщикам -->
+          <div v-if="data.planFact.suppliers.length" class="an-card">
+            <div class="an-card-title"><BkIcon name="building" size="sm"/> Выполнение по поставщикам</div>
+            <div v-for="s in data.planFact.suppliers" :key="s.supplier" class="an-pf-sup-row">
+              <div class="an-pf-sup-left">
+                <span class="an-sup-dot" :style="{ background: s.color }"></span>
+                <span class="an-pf-sup-name">{{ s.supplier }}</span>
+              </div>
+              <div class="an-pf-sup-mid">
+                <div class="an-pf-sup-bar-bg">
+                  <div class="an-pf-sup-bar-fill" :style="{ width: Math.min(s.fulfillmentPct, 100) + '%', background: s.fulfillmentPct >= 95 ? '#4CAF50' : s.fulfillmentPct >= 80 ? '#FF9800' : '#F44336' }"></div>
+                </div>
+              </div>
+              <div class="an-pf-sup-right">
+                <span class="an-pf-sup-pct" :style="{ color: s.fulfillmentPct >= 95 ? '#2E7D32' : s.fulfillmentPct >= 80 ? '#E65100' : '#D32F2F' }">{{ s.fulfillmentPct }}%</span>
+                <span class="an-pf-sup-detail">{{ nf(s.fact) }}/{{ nf(s.plan) }} кор.</span>
+                <span v-if="s.discrepancies > 0" class="an-pf-sup-disc">{{ s.discrepancies }} расх.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Топ товаров с расхождениями -->
+          <div v-if="data.planFact.discrepancyProducts.length" class="an-card">
+            <div class="an-card-title"><BkIcon name="fire" size="sm"/> Товары с расхождениями</div>
+            <div v-for="(p, i) in data.planFact.discrepancyProducts" :key="p.sku || p.name" class="an-pf-prod-row">
+              <div class="an-pf-prod-rank">{{ i + 1 }}</div>
+              <div class="an-pf-prod-info">
+                <div class="an-pf-prod-name">{{ p.name || p.sku }}</div>
+                <div class="an-pf-prod-meta">{{ p.count }}x расхожд.</div>
+              </div>
+              <div class="an-pf-prod-nums">
+                <span>план: {{ nf(p.plan) }}</span>
+                <span>факт: {{ nf(p.fact) }}</span>
+              </div>
+              <div class="an-pf-prod-delta" :class="p.delta < 0 ? 'neg' : 'pos'">
+                {{ p.delta > 0 ? '+' : '' }}{{ nf(p.delta) }} кор.
+              </div>
+            </div>
+          </div>
+        </template>
       </template>
 
       <!-- ===== SUPPLIERS ===== -->
@@ -345,6 +468,7 @@ const criticalAnomalies = computed(() => data.value ? data.value.anomalies.filte
 
 const tabs = [
   { id: 'overview', label: 'Обзор' },
+  { id: 'planfact', label: 'План-Факт' },
   { id: 'suppliers', label: 'Поставщики' },
   { id: 'products', label: 'Товары' },
   { id: 'anomalies', label: 'Аномалии' },
@@ -394,6 +518,12 @@ watch(activeTab, async (tab) => {
 function seasonBarH(boxes, maxBoxes) {
   return Math.max(Math.round((boxes / maxBoxes) * 120), 4);
 }
+
+const pfTrendMax = computed(() => {
+  if (!data.value?.planFact?.dayTrend?.length) return 1;
+  return Math.max(...data.value.planFact.dayTrend.map(d => Math.max(d.plan, d.fact)), 1);
+});
+function pfTrendBarH(v) { return Math.max(Math.round((v / pfTrendMax.value) * 80), 2); }
 
 async function exportAnalytics() {
   const { exportAnalyticsToExcel } = await import('@/lib/excelExport.js');
@@ -690,4 +820,95 @@ onMounted(() => load());
   .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }
   .rpt-fc-name { min-width: 80px; }
 }
+
+/* ═══ Plan-Fact analytics ═══ */
+.an-pf-bar-wrap {
+  display: flex; height: 28px; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border-light, #eee); margin-bottom: 10px;
+}
+.an-pf-bar-ok {
+  background: #E8F5E9; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #2E7D32; transition: width 0.3s;
+}
+.an-pf-bar-disc {
+  background: #FFEBEE; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #D32F2F; transition: width 0.3s;
+}
+.an-pf-stats {
+  display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary);
+}
+.an-pf-deficit {
+  margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 6px;
+  font-size: 13px; color: #E65100;
+}
+.an-pf-surplus {
+  margin-top: 10px; padding: 8px 12px; background: #E3F2FD; border-radius: 6px;
+  font-size: 13px; color: #1565C0;
+}
+
+/* ═══ Plan-Fact: Trend by day ═══ */
+.an-pf-trend {
+  display: flex; align-items: flex-end; gap: 6px; height: 140px;
+  overflow-x: auto; padding-bottom: 24px; margin-top: 8px;
+}
+.an-pf-trend-col {
+  flex: 1; min-width: 44px; max-width: 70px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.an-pf-trend-pct { font-size: 9px; font-weight: 700; margin-bottom: 2px; }
+.an-pf-trend-bars {
+  display: flex; gap: 2px; width: 80%; height: 90px;
+  align-items: flex-end; justify-content: center;
+}
+.an-pf-trend-plan {
+  width: 45%; background: #E0E0E0; border-radius: 2px 2px 0 0; transition: height 0.3s;
+}
+.an-pf-trend-fact {
+  width: 45%; background: #4CAF50; border-radius: 2px 2px 0 0; transition: height 0.3s;
+}
+.an-pf-trend-label {
+  font-size: 9px; color: var(--text-muted); margin-top: 3px;
+  border-top: 1px solid var(--border-light); padding-top: 2px;
+  white-space: nowrap; text-align: center;
+}
+.an-pf-trend-legend {
+  display: flex; gap: 16px; margin-top: 6px; font-size: 11px; color: var(--text-muted);
+}
+.an-pf-trend-legend span { display: flex; align-items: center; gap: 4px; }
+.an-pf-legend-plan { width: 12px; height: 6px; border-radius: 2px; background: #E0E0E0; }
+.an-pf-legend-fact { width: 12px; height: 6px; border-radius: 2px; background: #4CAF50; }
+
+/* ═══ Plan-Fact: Suppliers ═══ */
+.an-pf-sup-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.an-pf-sup-row:last-child { border-bottom: none; }
+.an-pf-sup-left { display: flex; align-items: center; gap: 6px; min-width: 120px; flex-shrink: 0; }
+.an-pf-sup-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.an-pf-sup-mid { flex: 1; }
+.an-pf-sup-bar-bg { height: 14px; background: var(--border-light, #eee); border-radius: 7px; overflow: hidden; }
+.an-pf-sup-bar-fill { height: 100%; border-radius: 7px; transition: width 0.4s; }
+.an-pf-sup-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.an-pf-sup-pct { font-size: 13px; font-weight: 800; min-width: 38px; text-align: right; }
+.an-pf-sup-detail { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.an-pf-sup-disc { font-size: 10px; font-weight: 700; color: #E65100; background: #FFF3E0; padding: 1px 5px; border-radius: 4px; }
+
+/* ═══ Plan-Fact: Products with discrepancies ═══ */
+.an-pf-prod-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.an-pf-prod-row:last-child { border-bottom: none; }
+.an-pf-prod-rank {
+  width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; flex-shrink: 0; background: #FFF3E0; color: #E65100;
+}
+.an-pf-prod-info { flex: 1; min-width: 0; }
+.an-pf-prod-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.an-pf-prod-meta { font-size: 10px; color: var(--text-muted); }
+.an-pf-prod-nums { font-size: 10px; color: var(--text-muted); text-align: right; line-height: 1.5; flex-shrink: 0; }
+.an-pf-prod-delta { font-size: 13px; font-weight: 800; min-width: 70px; text-align: right; flex-shrink: 0; }
+.an-pf-prod-delta.neg { color: #D32F2F; }
+.an-pf-prod-delta.pos { color: #E65100; }
 </style>

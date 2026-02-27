@@ -35,6 +35,15 @@
               <option value="кг">килограммы</option>
             </select>
           </div>
+          <div class="modal-field">
+            <span class="modal-field-label">Хранение</span>
+            <select v-model="form.category">
+              <option value="">Не указан</option>
+              <option value="Сухой">Сухой</option>
+              <option value="Холод">Холод</option>
+              <option value="Мороз">Мороз</option>
+            </select>
+          </div>
         </div>
 
         <div class="modal-row-2">
@@ -116,7 +125,7 @@ const prevSupplier = ref('');
 const form = ref({
   sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
-  analog_group: '', is_active: true,
+  analog_group: '', is_active: true, category: '',
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
 
@@ -135,6 +144,7 @@ onMounted(async () => {
         multiplicity: data.multiplicity || '', unit_of_measure: data.unit_of_measure || 'шт',
         analog_group: data.analog_group || '',
         is_active: data.is_active !== undefined ? !!data.is_active : true,
+        category: data.category || '',
       });
     }
   } else if (props.product) {
@@ -145,6 +155,7 @@ onMounted(async () => {
       multiplicity: props.product.multiplicity || '', unit_of_measure: props.product.unit_of_measure || 'шт',
       analog_group: props.product.analog_group || '',
       is_active: props.product.is_active !== undefined ? !!props.product.is_active : true,
+      category: props.product.category || '',
     });
   }
   await loadSuppliers();
@@ -206,6 +217,7 @@ async function save() {
       unit_of_measure: form.value.unit_of_measure || 'шт',
       analog_group: form.value.analog_group || null,
       is_active: form.value.is_active ? 1 : 0,
+      category: form.value.category || null,
     };
     let error;
     if (props.product) { ({ error } = await db.from('products').update(payload).eq('id', props.product.id)); }

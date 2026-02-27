@@ -12,7 +12,7 @@
     @dragend="onDragEnd"
   >
     <!-- Drag handle -->
-    <td style="padding:4px;text-align:center;width:30px;">
+    <td class="td-drag" style="padding:4px;text-align:center;width:30px;">
       <span class="drag-handle" style="cursor:grab;user-select:none;color:#b0ada8;font-size:16px;"
         @mousedown="dragActive = true" @mouseup="dragActive = false">⋮⋮</span>
     </td>
@@ -34,7 +34,7 @@
     </td>
 
     <!-- Расход -->
-    <td>
+    <td data-label="Расход">
       <input
         type="number"
         :value="item.consumptionPeriod"
@@ -49,7 +49,7 @@
     </td>
 
     <!-- Остаток -->
-    <td>
+    <td data-label="Остаток">
       <input
         type="number"
         :value="item.stock"
@@ -62,7 +62,7 @@
     </td>
 
     <!-- Транзит -->
-    <td v-if="settings.hasTransit" class="transit-col">
+    <td v-if="settings.hasTransit" class="transit-col" data-label="Транзит">
       <input
         type="number"
         :value="item.transit"
@@ -75,7 +75,7 @@
     </td>
 
     <!-- Хватит до (текущий запас) -->
-    <td class="stock-col stock-display" :class="stockCurrentHighlight" :title="compact ? stockUntilDisplay : ''">{{ compact ? stockUntilShort : stockUntilDisplay }}</td>
+    <td class="stock-col stock-display td-stock-until" :class="stockCurrentHighlight" data-label="Запас" :title="compact ? stockUntilDisplay : ''">{{ compact ? stockUntilShort : stockUntilDisplay }}</td>
 
     <!-- Расчёт заказа -->
     <td class="calc">
@@ -95,7 +95,7 @@
     </td>
 
     <!-- Заказ: штуки / коробки -->
-    <td class="order-cell order-highlight">
+    <td class="order-cell order-highlight td-order">
       <input
         type="number"
         class="order-pieces"
@@ -107,7 +107,7 @@
         ref="inputOrderPieces"
         :data-col="3"
       />
-      /
+      <span class="order-separator">/</span>
       <input
         type="number"
         class="order-boxes"
@@ -119,10 +119,11 @@
         ref="inputOrderBoxes"
         :data-col="4"
       />
+      <button class="btn small calc-to-order mob-calc-btn" @click="applyCalc">→ Расчёт</button>
     </td>
 
     <!-- Хватит до (после заказа) -->
-    <td class="date" :class="stockCoverageHighlight" :title="compact ? coverageDateDisplay : ''">{{ compact ? coverageDateShort : coverageDateDisplay }}</td>
+    <td class="date td-coverage" :class="stockCoverageHighlight" data-label="Хватит до" :title="compact ? coverageDateDisplay : ''">{{ compact ? coverageDateShort : coverageDateDisplay }}</td>
 
     <!-- Паллеты -->
     <td class="pallets">
@@ -294,16 +295,21 @@ const calcDisplayText = computed(() => {
     : Math.ceil(order / (qpb.value * mult.value));
   const pieces = s.unit === 'pieces' ? order : order * qpb.value;
 
-  if (mult.value > 1) return `${physBoxes} кор (${nf.format(pieces)} ${props.item.unitOfMeasure || 'шт'})`;
-  if (s.unit === 'pieces' && qpb.value > 1) return `${Math.ceil(order / qpb.value)} кор (${nf.format(order)} ${props.item.unitOfMeasure || 'шт'})`;
+  const safeUnit = escHtml(props.item.unitOfMeasure || 'шт');
+  if (mult.value > 1) return `${physBoxes} кор (${nf.format(pieces)} ${safeUnit})`;
+  if (s.unit === 'pieces' && qpb.value > 1) return `${Math.ceil(order / qpb.value)} кор (${nf.format(order)} ${safeUnit})`;
   if (s.unit === 'boxes') return `${order} кор`;
   return String(order);
 });
 
+function escHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 const tooltipHtml = computed(() => {
   const s = props.settings;
   if (!s.deliveryDate || !s.today) return '';
-  const inputUnit = s.unit === 'boxes' ? 'кор' : (props.item.unitOfMeasure || 'шт');
+  const inputUnit = escHtml(s.unit === 'boxes' ? 'кор' : (props.item.unitOfMeasure || 'шт'));
   const fmt = (n) => nf.format(Math.round(n * 10) / 10);
   const daily = s.periodDays > 0 ? (props.item.consumptionPeriod || 0) / s.periodDays : 0;
   const transitDays = Math.ceil((s.deliveryDate - s.today) / 86400000);

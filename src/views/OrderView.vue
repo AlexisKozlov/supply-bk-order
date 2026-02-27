@@ -81,7 +81,7 @@
 
     <!-- Тулбар: поиск + действия -->
     <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="order-toolbar">
-      <div class="search-bar" v-if="!orderStore.viewOnlyMode" style="position:relative;display:flex;align-items:center;gap:8px;">
+      <div class="search-bar" v-if="!orderStore.viewOnlyMode" ref="searchBarRef" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
           <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
             @input="onSearchInput" ref="searchInputRef" style="width:280px;max-width:360px;padding-right:28px;"/>
@@ -304,6 +304,7 @@ const searchQuery           = ref('');
 const searchResults         = ref([]);
 const searchDone            = ref(false);
 const searchInputRef        = ref(null);
+const searchBarRef          = ref(null);
 const editCardModal         = ref({ show: false, product: null });
 const analogMergeModal      = ref({ show: false, merges: [] });
 const logModal              = ref({ show: false, loading: false, entries: [] });
@@ -392,6 +393,13 @@ onMounted(async () => {
       if (!error && order) {
         const isView = route.query.mode === 'view';
         const isEdit = route.query.mode === 'edit';
+        if (order.received_at && isEdit) {
+          toast.warning('Доставка выполнена', 'Редактирование принятого заказа невозможно. Открыт в режиме просмотра.');
+          await orderStore.loadOrderIntoForm(order, order.legal_entity, false, true);
+          draftStore.saveNow();
+          orderVisible.value = true;
+          return;
+        }
         await orderStore.loadOrderIntoForm(order, order.legal_entity, isEdit, isView);
         draftStore.saveNow();
         orderVisible.value = true;
@@ -437,12 +445,21 @@ onMounted(async () => {
     }
   }
   document.addEventListener('click', closeShareDropdown);
+  document.addEventListener('click', closeSearchDropdown);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', closeShareDropdown);
+  document.removeEventListener('click', closeSearchDropdown);
   clearTimeout(searchTimer);
 });
+
+function closeSearchDropdown(e) {
+  if (searchBarRef.value && !searchBarRef.value.contains(e.target)) {
+    searchResults.value = [];
+    searchDone.value = false;
+  }
+}
 
 // Реактивная навигация: если query изменился когда компонент уже смонтирован
 watch(() => route.query.orderId, async (newId) => {
@@ -452,6 +469,12 @@ watch(() => route.query.orderId, async (newId) => {
     if (!error && order) {
       const isView = route.query.mode === 'view';
       const isEdit = route.query.mode === 'edit';
+      if (order.received_at && isEdit) {
+        toast.warning('Доставка выполнена', 'Редактирование принятого заказа невозможно. Открыт в режиме просмотра.');
+        await orderStore.loadOrderIntoForm(order, order.legal_entity, false, true);
+        orderVisible.value = true;
+        return;
+      }
       await orderStore.loadOrderIntoForm(order, order.legal_entity, isEdit, isView);
       orderVisible.value = true;
     } else {
@@ -691,14 +714,17 @@ async function searchProducts(q) {
   if (orderStore.settings.supplier) params.set('supplier', orderStore.settings.supplier);
   try {
     const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-API-Key': localStorage.getItem('bk_api_key') || '' } });
+    if (!r.ok) { searchResults.value = []; return; }
     const results = await r.json();
+    if (!Array.isArray(results)) { searchResults.value = []; return; }
+    // Защита от гонки: проверяем, что запрос ещё актуален
+    if (searchQuery.value.trim() !== q) return;
     searchResults.value = results;
-    // Сохраняем в кеш с лимитом
     if (searchCache.size >= SEARCH_CACHE_MAX) {
       searchCache.delete(searchCache.keys().next().value);
     }
     searchCache.set(cacheKey, results);
-  } catch(e) { console.error(e); }
+  } catch(e) { searchResults.value = []; }
   finally { searchDone.value = true; }
 }
 
@@ -721,6 +747,7 @@ async function openLogModal() {
   const { data } = await db.from('audit_log').select('*')
     .eq('entity_id', id).eq('entity_type', 'order')
     .order('created_at', { ascending: false }).limit(50);
+  if (!logModal.value.show) return;
   logModal.value.entries = data || [];
   logModal.value.loading = false;
 }
@@ -788,7 +815,7 @@ function buildOrderText() {
     const qpb = getQpb(item); const mult = getMultiplicity(item);
     const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
     const rb = Math.ceil(physBoxes); if (rb <= 0) return null;
-    const pieces = rb * qpb;
+    const pieces = rb * qpb * mult;
     const unit = item.unitOfMeasure || 'шт';
     return { text: `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit, qpb };
   }).filter(Boolean);
@@ -823,7 +850,7 @@ async function share(channel) {
     const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
     const rb = Math.ceil(physBoxes);
     if (rb <= 0) return null;
-    const pieces = rb * qpb;
+    const pieces = rb * qpb * mult;
     const unit = item.unitOfMeasure || 'шт';
     return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`;
   }).filter(Boolean);
