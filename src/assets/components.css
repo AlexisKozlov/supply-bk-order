@@ -5,75 +5,6 @@
  */
 
 /* ===== DATABASE LIST ===== */
-/* ===== КАРТОЧКИ ПОСТАВЩИКОВ ===== */
-.supplier-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  background: white;
-}
-.supplier-card:hover {
-  box-shadow: var(--shadow);
-}
-.supplier-card-info { flex: 1; min-width: 0; }
-.supplier-card-name {
-  font-size: 12px;
-  color: var(--text);
-  font-weight: 600;
-}
-.supplier-card-fullname {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.supplier-card-contacts {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-.supplier-contact-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  background: #f0f0f0;
-  color: #999;
-  font-weight: 600;
-}
-.supplier-contact-badge.filled-whatsapp {
-  background: #dcf8c6;
-  color: #25D366;
-}
-.supplier-contact-badge.filled-telegram {
-  background: #d6eefb;
-  color: #0088cc;
-}
-.supplier-contact-badge.filled-viber {
-  background: #ece6fd;
-  color: #7360f2;
-}
-.supplier-contact-badge.filled-email {
-  background: #fdf0e0;
-  color: #c77800;
-}
-.supplier-card-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-#databaseList, #supplierList {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
 .db-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -82,7 +13,7 @@
   align-items: center;
   gap: 8px;
   transition: all 0.2s ease;
-  background: white;
+  background: var(--card);
 }
 
 .db-card:hover {
@@ -214,15 +145,15 @@
 
 .chart-section {
   margin-bottom: 30px;
-  background: white;
+  background: var(--card);
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid #e8e3db;
+  border: 1px solid var(--border);
 }
 
 .chart-section h3 {
   margin: 0 0 20px 0;
-  color: #5A2D0C;
+  color: var(--text);
   font-size: 18px;
 }
 
@@ -232,7 +163,7 @@
   gap: 8px;
   height: 200px;
   padding: 10px 0;
-  border-bottom: 2px solid #e8e3db;
+  border-bottom: 2px solid var(--border);
 }
 
 .chart-bar-container {
@@ -266,12 +197,12 @@
 .chart-value {
   font-size: 11px;
   font-weight: bold;
-  color: #5A2D0C;
+  color: var(--text);
 }
 
 .chart-label {
   font-size: 11px;
-  color: #666;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -287,33 +218,33 @@
   gap: 12px;
   align-items: center;
   padding: 12px;
-  background: #fdf9f3;
+  background: var(--bg);
   border-radius: 6px;
   transition: background 0.2s;
 }
 
 .supplier-row:hover {
-  background: #f5efe5;
+  background: #FFF8F0;
 }
 
 .supplier-name {
   font-weight: 600;
-  color: #5A2D0C;
+  color: var(--text);
 }
 
 .supplier-stats {
   display: flex;
   gap: 12px;
   font-size: 13px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .supplier-bar {
   height: 24px;
-  background: #fdf9f3;
+  background: var(--bg);
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid #e8e3db;
+  border: 1px solid var(--border);
 }
 
 .supplier-bar-fill {
@@ -325,15 +256,15 @@
 
 .analytics-section {
   margin-top: 30px;
-  background: white;
+  background: var(--card);
   padding: 20px;
   border-radius: 8px;
-  border: 1px solid #e8e3db;
+  border: 1px solid var(--border);
 }
 
 .analytics-section h3 {
   margin: 0 0 20px 0;
-  color: #5A2D0C;
+  color: var(--text);
   font-size: 18px;
 }
 
@@ -349,13 +280,13 @@
   gap: 12px;
   align-items: center;
   padding: 12px;
-  background: #fdf9f3;
+  background: var(--bg);
   border-radius: 6px;
   transition: all 0.2s;
 }
 
 .product-row:hover {
-  background: #f5efe5;
+  background: #FFF8F0;
   transform: translateX(4px);
 }
 
@@ -380,13 +311,13 @@
 
 .product-name {
   font-weight: 600;
-  color: #5A2D0C;
+  color: var(--text);
   font-size: 14px;
 }
 
 .product-sku {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
 }
 
 .product-stats {
@@ -398,21 +329,21 @@
 
 .product-boxes {
   font-weight: 600;
-  color: #5A2D0C;
+  color: var(--text);
   font-size: 14px;
 }
 
 .product-orders {
   font-size: 12px;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .product-bar {
   height: 20px;
-  background: #fdf9f3;
+  background: var(--bg);
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid #e8e3db;
+  border: 1px solid var(--border);
 }
 
 .product-bar-fill {
@@ -428,7 +359,7 @@
   align-items: center;
   margin-bottom: 20px;
   padding: 12px;
-  background: #fdf9f3;
+  background: var(--bg);
   border-radius: 8px;
 }
 
@@ -565,7 +496,7 @@
 
 /* ── Улучшенные инпуты в таблице ── */
 td input[type="number"]:not(:placeholder-shown) {
-  background: #fff;
+  background: var(--card);
 }
 
 td input[type="number"]:focus {
@@ -717,7 +648,7 @@ tbody tr td[colspan] {
     overflow: visible;
   }
   
-  body { background: white; }
+  body { background: #fff; }
   .container { margin: 0; padding: 0; }
   .hidden { display: none !important; }
 }
@@ -736,7 +667,7 @@ tbody tr td[colspan] {
   border-collapse: collapse;
   font-size: 12px;
   min-width: 800px;
-  background: white;
+  background: var(--card);
 }
 
 .plan-table thead {
@@ -792,12 +723,12 @@ tbody tr td[colspan] {
   position: sticky;
   left: 0;
   z-index: 2;
-  background: white;
+  background: var(--card);
   border-right: 1px solid var(--border-light);
 }
 
 .plan-table tbody tr:hover .plan-td-name {
-  background: #fffbf0;
+  background: #FFF8F0;
 }
 
 .plan-td-input {
@@ -827,7 +758,7 @@ tbody tr td[colspan] {
   font-size: 11px !important;
   border-radius: 4px !important;
   border: 1.5px solid var(--border) !important;
-  background: #fafaf8 !important;
+  background: var(--bg) !important;
   font-weight: 500 !important;
   transition: border-color 0.15s, box-shadow 0.15s !important;
   margin: 0 auto !important;
@@ -836,7 +767,7 @@ tbody tr td[colspan] {
 .plan-input:focus {
   border-color: var(--orange) !important;
   box-shadow: 0 0 0 2px rgba(245,166,35,0.18) !important;
-  background: white !important;
+  background: var(--card) !important;
 }
 
 .plan-td-result {
@@ -846,7 +777,7 @@ tbody tr td[colspan] {
 }
 
 .plan-td-result.plan-has-value {
-  background: #fff8f0;
+  background: #FFF8F0;
 }
 
 .plan-result-value {
@@ -870,7 +801,7 @@ tbody tr td[colspan] {
 
 /* Totals row */
 .plan-totals {
-  background: #fdf9f2;
+  background: var(--bg);
   border-top: 2px solid var(--orange);
 }
 
@@ -893,7 +824,7 @@ tbody tr td[colspan] {
 }
 
 .plan-table tbody tr:hover {
-  background: #fffbf0;
+  background: #FFF8F0;
 }
 
 .plan-table tbody tr:last-child td {
@@ -1006,7 +937,7 @@ tbody tr td[colspan] {
   min-height: 80px;
   padding: 4px 5px;
   position: relative;
-  background: white;
+  background: var(--card);
   border-right: 1px solid var(--border-light);
   border-bottom: 1px solid var(--border-light);
   transition: background 0.1s;
@@ -1014,9 +945,9 @@ tbody tr td[colspan] {
 
 .cal-cell:nth-child(7n) { border-right: none; }
 
-.cal-cell:hover { background: #FFFAF5; }
+.cal-cell:hover { background: #FFF8F0; }
 
-.cal-empty { background: #FAFAF8; }
+.cal-empty { background: var(--bg); }
 
 .cal-past { opacity: 0.5; }
 
@@ -1167,7 +1098,7 @@ td.plan-td-result {
   cursor: pointer;
 }
 td.plan-td-result:hover {
-  background: #fdf9f3;
+  background: var(--bg);
 }
 
 /* ============= Дропдаун отправки заказа ============= */
@@ -1281,7 +1212,7 @@ td.plan-td-result:hover {
   font-weight: 600;
   font-family: inherit;
   color: var(--text);
-  background: #FAFAF7;
+  background: var(--bg);
   min-width: 80px;
   transition: border-color var(--transition);
 }
@@ -1289,7 +1220,7 @@ td.plan-td-result:hover {
 .setting-group select:focus,
 .setting-group input:focus {
   border-color: var(--accent);
-  background: white;
+  background: var(--card);
   outline: none;
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
@@ -1495,7 +1426,7 @@ td.plan-td-result:hover {
   border-top: 1px solid var(--border-light);
   font-size: 12px;
   line-height: 1.8;
-  background: #FAFAF7;
+  background: var(--bg);
 }
 
 .audit-log-panel {
@@ -1512,7 +1443,7 @@ td.plan-td-result:hover {
   display: flex;
   gap: 0;
   margin-bottom: 16px;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid var(--border);
 }
 
 .db-tab {
@@ -1660,7 +1591,7 @@ td.plan-td-result:hover {
   font-family: inherit;
   font-weight: 500;
   color: var(--text);
-  background: #FAFAF7;
+  background: var(--bg);
   box-sizing: border-box;
 }
 
@@ -1668,7 +1599,7 @@ td.plan-td-result:hover {
 .login-box input:focus {
   border-color: var(--accent);
   outline: none;
-  background: white;
+  background: var(--card);
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
 
@@ -1811,7 +1742,7 @@ td.plan-td-result:hover {
   top: 100%;
   left: 0;
   z-index: 100;
-  background: white;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.12);
@@ -1853,7 +1784,7 @@ td.plan-td-result:hover {
   backdrop-filter: blur(2px);
 }
 .modal-box {
-  background: white;
+  background: var(--card);
   border-radius: 12px;
   padding: 20px 24px;
   width: min(500px, calc(100% - 32px));

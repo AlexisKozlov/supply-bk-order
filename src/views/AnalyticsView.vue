@@ -199,6 +199,110 @@
         </div>
       </template>
 
+      <!-- ===== REPORTS ===== -->
+      <template v-if="activeTab === 'reports'">
+        <div class="rpt-toolbar">
+          <button class="btn primary" @click="exportAnalytics" :disabled="!data"><BkIcon name="excel" size="sm"/> Экспорт в Excel</button>
+        </div>
+
+        <!-- Топ-10 товаров -->
+        <div v-if="data" class="an-card">
+          <div class="an-card-title"><BkIcon name="fire" size="sm"/> Топ-10 товаров</div>
+          <div v-for="(p, i) in data.topProducts" :key="p.sku || p.name" class="rpt-prod-row">
+            <div class="rpt-prod-medal">{{ i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) }}</div>
+            <div class="rpt-prod-info">
+              <div class="rpt-prod-name">{{ p.name || p.sku }}</div>
+              <div class="rpt-prod-bar-wrap">
+                <div class="rpt-prod-bar" :style="{ width: pPct(p) + '%' }"></div>
+              </div>
+            </div>
+            <div class="rpt-prod-stats">
+              <span class="rpt-prod-boxes">{{ nf(p.boxes) }} кор</span>
+              <span v-if="p.deltaBoxes !== null" class="rpt-prod-delta" :class="p.deltaBoxes >= 0 ? 'up' : 'down'">
+                {{ p.deltaBoxes >= 0 ? '▲' : '▼' }} {{ Math.abs(p.deltaBoxes) }}%
+              </span>
+            </div>
+            <div class="rpt-prod-forecast">~{{ nf(p.forecast) }}</div>
+          </div>
+        </div>
+
+        <!-- Топ-5 поставщиков -->
+        <div v-if="data" class="an-card">
+          <div class="an-card-title"><BkIcon name="building" size="sm"/> Топ-5 поставщиков</div>
+          <div v-for="(s, i) in data.suppliers.slice(0, 5)" :key="s.supplier" class="rpt-sup-row">
+            <div class="rpt-sup-medal">{{ i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) }}</div>
+            <div class="rpt-sup-info">
+              <span class="rpt-sup-name">{{ s.supplier }}</span>
+              <div class="rpt-sup-bar-wrap">
+                <div class="rpt-sup-bar" :style="{ width: sPct(s) + '%', background: s.color }"></div>
+              </div>
+            </div>
+            <div class="rpt-sup-stats">
+              <span>{{ nf(s.boxes) }} кор</span>
+              <span class="rpt-sup-orders">{{ s.orders }} зак.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Сезонность -->
+        <div class="an-card">
+          <div class="an-card-title"><BkIcon name="calendar" size="sm"/> Сезонность (12 мес.)</div>
+          <div v-if="seasonalityLoading" style="text-align:center;padding:30px;color:var(--text-muted);">
+            <BurgerSpinner text="Загрузка..." />
+          </div>
+          <div v-else-if="!seasonality" style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Нет данных</div>
+          <template v-else>
+            <div class="rpt-season-chart">
+              <div v-for="m in seasonality.monthData" :key="m.key" class="rpt-season-col">
+                <div class="rpt-season-val">{{ nf(m.boxes) }}</div>
+                <div class="rpt-season-bar-area">
+                  <div class="rpt-season-bar" :style="{ height: seasonBarH(m.boxes, seasonality.maxBoxes) + 'px' }"></div>
+                  <div v-if="m.movingAvg !== null" class="rpt-season-avg-dot" :style="{ bottom: seasonBarH(m.movingAvg, seasonality.maxBoxes) + 'px' }"></div>
+                </div>
+                <div class="rpt-season-label">{{ m.label }}</div>
+              </div>
+            </div>
+            <div class="rpt-season-legend">
+              <span class="rpt-season-legend-item"><span class="rpt-season-legend-bar"></span> Коробок</span>
+              <span class="rpt-season-legend-item"><span class="rpt-season-legend-dot"></span> Скольз. среднее (3 мес.)</span>
+            </div>
+            <!-- YoY table -->
+            <div v-if="seasonality.monthData.some(m => m.yoyDelta !== null)" class="rpt-yoy-table">
+              <div class="rpt-yoy-title">Год к году</div>
+              <div class="rpt-yoy-grid">
+                <div v-for="m in seasonality.monthData" :key="m.key + '-yoy'" class="rpt-yoy-cell">
+                  <div class="rpt-yoy-label">{{ m.label }}</div>
+                  <div v-if="m.yoyDelta !== null" class="rpt-yoy-val" :class="m.yoyDelta >= 0 ? 'up' : 'down'">
+                    {{ m.yoyDelta >= 0 ? '+' : '' }}{{ m.yoyDelta }}%
+                  </div>
+                  <div v-else class="rpt-yoy-val">—</div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Прогноз расхода -->
+        <div v-if="data" class="an-card">
+          <div class="an-card-title"><BkIcon name="chartUp" size="sm"/> Прогноз расхода</div>
+          <div v-for="p in data.topProducts.slice(0, 5)" :key="'fc-' + (p.sku || p.name)" class="rpt-fc-row">
+            <div class="rpt-fc-name">{{ p.name || p.sku }}</div>
+            <div class="rpt-fc-bars">
+              <div class="rpt-fc-bar-wrap">
+                <div class="rpt-fc-bar rpt-fc-fact" :style="{ width: (p.boxes / Math.max(p.boxes, p.forecast, 1)) * 100 + '%' }"></div>
+              </div>
+              <div class="rpt-fc-bar-wrap">
+                <div class="rpt-fc-bar rpt-fc-forecast" :style="{ width: (p.forecast / Math.max(p.boxes, p.forecast, 1)) * 100 + '%' }"></div>
+              </div>
+            </div>
+            <div class="rpt-fc-nums">
+              <div>Факт: {{ nf(p.boxes) }}</div>
+              <div>Прогноз: {{ nf(p.forecast) }}</div>
+            </div>
+          </div>
+        </div>
+      </template>
+
     </div>
   </div>
 </template>
@@ -206,7 +310,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { getOrdersAnalytics } from '@/lib/analytics.js';
+import { getOrdersAnalytics, getSeasonalityData } from '@/lib/analytics.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -224,6 +328,8 @@ const days = ref(30);
 const loading = ref(false);
 const data = ref(null);
 const activeTab = ref('overview');
+const seasonality = ref(null);
+const seasonalityLoading = ref(false);
 
 const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 function nf(v) { return formatter.format(v || 0); }
@@ -242,6 +348,7 @@ const tabs = [
   { id: 'suppliers', label: 'Поставщики' },
   { id: 'products', label: 'Товары' },
   { id: 'anomalies', label: 'Аномалии' },
+  { id: 'reports', label: 'Отчёты' },
 ];
 
 function barH(boxes) { return Math.max(Math.round((boxes / maxTotal.value) * 110), 4); }
@@ -270,8 +377,27 @@ async function loadOrder(orderId) {
 
 async function load() {
   loading.value = true;
+  seasonality.value = null;
   data.value = await getOrdersAnalytics(orderStore.settings.legalEntity, days.value);
   loading.value = false;
+}
+
+// Lazy-load сезонности при переключении на таб «Отчёты»
+watch(activeTab, async (tab) => {
+  if (tab === 'reports' && !seasonality.value && !seasonalityLoading.value) {
+    seasonalityLoading.value = true;
+    seasonality.value = await getSeasonalityData(orderStore.settings.legalEntity);
+    seasonalityLoading.value = false;
+  }
+});
+
+function seasonBarH(boxes, maxBoxes) {
+  return Math.max(Math.round((boxes / maxBoxes) * 120), 4);
+}
+
+async function exportAnalytics() {
+  const { exportAnalyticsToExcel } = await import('@/lib/excelExport.js');
+  exportAnalyticsToExcel(data.value, seasonality.value);
 }
 
 watch(() => orderStore.settings.legalEntity, () => load());
@@ -288,7 +414,7 @@ onMounted(() => load());
 }
 .an-period {
   padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
-  font-size: 12px; font-weight: 600; background: white;
+  font-size: 12px; font-weight: 600; background: var(--card); color: var(--text);
 }
 
 /* Alert banner */
@@ -309,8 +435,8 @@ onMounted(() => load());
   border-bottom: 2px solid transparent; margin-bottom: -2px; background: none;
   color: var(--text-muted); transition: all 0.1s; display: flex; align-items: center; gap: 4px;
 }
-.an-tab.active { color: #5A2D0C; border-bottom-color: #5A2D0C; }
-.an-tab:hover { color: #5A2D0C; }
+.an-tab.active { color: var(--text); border-bottom-color: var(--text); }
+.an-tab:hover { color: var(--text); }
 .an-tab-badge {
   font-size: 10px; font-weight: 700; background: #F44336; color: #fff;
   padding: 0 5px; border-radius: 8px; line-height: 16px;
@@ -322,13 +448,13 @@ onMounted(() => load());
 /* KPI grid */
 .an-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
 .an-kpi {
-  background: white; border: 1px solid var(--border-light); border-radius: 10px; padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--border-light); border-radius: 10px; padding: 12px 14px;
 }
-.an-kpi-head { font-size: 11px; color: #8B7355; font-weight: 600; }
+.an-kpi-head { font-size: 11px; color: var(--text-muted); font-weight: 600; }
 .an-kpi-icon { margin-right: 2px; }
 .an-kpi-row { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
-.an-kpi-val { font-size: 24px; font-weight: 800; color: #3E2723; }
-.an-kpi-sub { font-size: 10px; color: #999; margin-top: 1px; }
+.an-kpi-val { font-size: 24px; font-weight: 800; color: var(--text); }
+.an-kpi-sub { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 
 .an-badge {
   font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px;
@@ -338,18 +464,18 @@ onMounted(() => load());
 
 /* Cards */
 .an-card {
-  background: white; border: 1px solid var(--border-light); border-radius: 10px;
+  background: var(--card); border: 1px solid var(--border-light); border-radius: 10px;
   padding: 14px; margin-bottom: 12px;
 }
 .an-card-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 10px; flex-wrap: wrap; gap: 6px;
 }
-.an-card-title { font-size: 14px; font-weight: 700; color: #5A2D0C; }
+.an-card-title { font-size: 14px; font-weight: 700; color: var(--text); }
 
 /* Legend */
 .an-legend { display: flex; flex-wrap: wrap; gap: 8px; }
-.an-legend-item { display: flex; align-items: center; gap: 3px; font-size: 10px; color: #5A2D0C; }
+.an-legend-item { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text); }
 .an-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
 /* Chart */
@@ -361,13 +487,13 @@ onMounted(() => load());
   flex: 1; min-width: 28px; max-width: 70px;
   display: flex; flex-direction: column; align-items: center;
 }
-.an-bar-num { font-size: 9px; font-weight: 700; color: #5A2D0C; margin-bottom: 2px; white-space: nowrap; }
+.an-bar-num { font-size: 9px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; }
 .an-bar-stack {
   width: 85%; display: flex; flex-direction: column; justify-content: flex-end; height: 120px;
 }
 .an-bar-seg { width: 100%; flex-shrink: 0; }
 .an-bar-label {
-  font-size: 9px; color: #999; margin-top: 3px; border-top: 1px solid #e8e3db; padding-top: 2px;
+  font-size: 9px; color: var(--text-muted); margin-top: 3px; border-top: 1px solid var(--border-light); padding-top: 2px;
   white-space: nowrap; text-align: center;
 }
 
@@ -375,60 +501,60 @@ onMounted(() => load());
 .an-sup-table { display: flex; flex-direction: column; }
 .an-sup-row {
   display: flex; align-items: center; gap: 10px; padding: 5px 0;
-  border-bottom: 1px solid #f5f0ea;
+  border-bottom: 1px solid var(--border-light);
 }
 .an-sup-row:last-child { border-bottom: none; }
 .an-sup-left { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .an-sup-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-.an-sup-name { font-size: 12px; font-weight: 600; color: #5A2D0C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.an-sup-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .an-sup-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; width: 70%; }
-.an-sup-bar-wrap { flex: 1; height: 12px; background: #f0ece5; border-radius: 6px; overflow: hidden; }
+.an-sup-bar-wrap { flex: 1; height: 12px; background: var(--border-light); border-radius: 6px; overflow: hidden; }
 .an-sup-bar { height: 100%; border-radius: 6px; transition: width 0.4s; }
-.an-sup-val { font-size: 11px; font-weight: 700; color: #5A2D0C; min-width: 50px; text-align: right; }
-.an-sup-meta { font-size: 10px; color: #8B7355; min-width: 45px; text-align: right; }
+.an-sup-val { font-size: 11px; font-weight: 700; color: var(--text); min-width: 50px; text-align: right; }
+.an-sup-meta { font-size: 10px; color: var(--text-muted); min-width: 45px; text-align: right; }
 
 /* Supplier cards (tab) */
 .an-sup-card { padding: 14px 16px; }
 .an-sup-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .an-sup-dot-lg { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
-.an-sup-card-name { font-size: 15px; font-weight: 700; color: #3E2723; flex: 1; }
-.an-sup-card-ago { font-size: 11px; color: #8B7355; }
+.an-sup-card-name { font-size: 15px; font-weight: 700; color: var(--text); flex: 1; }
+.an-sup-card-ago { font-size: 11px; color: var(--text-muted); }
 
 .an-sup-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.an-sup-metric { background: #FAFAF7; padding: 8px 6px; border-radius: 6px; text-align: center; }
-.an-sup-metric-val { font-size: 18px; font-weight: 800; color: #3E2723; }
+.an-sup-metric { background: var(--bg); padding: 8px 6px; border-radius: 6px; text-align: center; }
+.an-sup-metric-val { font-size: 18px; font-weight: 800; color: var(--text); }
 .an-sup-metric-val.val-up { color: #2E7D32; font-size: 14px; }
 .an-sup-metric-val.val-down { color: #C62828; font-size: 14px; }
-.an-sup-metric-label { font-size: 9px; color: #8B7355; font-weight: 600; }
+.an-sup-metric-label { font-size: 9px; color: var(--text-muted); font-weight: 600; }
 
 /* Products */
 .an-prod-header {
-  padding: 10px 14px; border-bottom: 1px solid #f0ece5;
-  font-size: 14px; font-weight: 700; color: #5A2D0C;
+  padding: 10px 14px; border-bottom: 1px solid var(--border-light);
+  font-size: 14px; font-weight: 700; color: var(--text);
 }
 .an-prod-row {
   display: flex; align-items: center; gap: 10px; padding: 9px 14px;
-  border-bottom: 1px solid #f5f0ea;
+  border-bottom: 1px solid var(--border-light);
 }
 .an-prod-row:last-child { border-bottom: none; }
 .an-prod-rank {
   width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; flex-shrink: 0; background: #e8e3db; color: #5A2D0C;
+  font-size: 10px; font-weight: 700; flex-shrink: 0; background: var(--border); color: var(--text);
 }
 .an-prod-rank.top { background: #F5A623; color: #fff; font-size: 12px; }
 .an-prod-info { flex: 1; min-width: 0; }
 .an-prod-line1 { display: flex; align-items: baseline; gap: 5px; }
 .an-prod-sku { font-size: 10px; font-weight: 700; color: #F5A623; }
-.an-prod-name { font-size: 12px; font-weight: 600; color: #3E2723; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.an-prod-progress { height: 4px; background: #f0ece5; border-radius: 2px; overflow: hidden; margin-top: 3px; }
+.an-prod-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.an-prod-progress { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-top: 3px; }
 .an-prod-progress-bar { height: 100%; background: linear-gradient(90deg, #4CAF50, #81C784); border-radius: 2px; transition: width 0.4s; }
 .an-prod-stats { text-align: right; min-width: 65px; flex-shrink: 0; }
-.an-prod-boxes { font-size: 13px; font-weight: 700; color: #3E2723; }
+.an-prod-boxes { font-size: 13px; font-weight: 700; color: var(--text); }
 .an-prod-delta { font-size: 10px; font-weight: 700; }
 .an-prod-delta.up { color: #2E7D32; }
 .an-prod-delta.down { color: #C62828; }
-.an-prod-forecast { border-left: 1px solid #f0ece5; padding-left: 10px; min-width: 60px; text-align: right; flex-shrink: 0; }
-.an-prod-forecast-label { font-size: 9px; color: #8B7355; }
+.an-prod-forecast { border-left: 1px solid var(--border-light); padding-left: 10px; min-width: 60px; text-align: right; flex-shrink: 0; }
+.an-prod-forecast-label { font-size: 9px; color: var(--text-muted); }
 .an-prod-forecast-val { font-size: 14px; font-weight: 700; color: #2196F3; }
 
 .an-forecast-note {
@@ -446,9 +572,9 @@ onMounted(() => load());
 .an-anomaly.sev-info { background: #FAFAFA; border: 1px solid #E0E0E0; }
 .an-anomaly-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
 .an-anomaly-body { flex: 1; }
-.an-anomaly-title { font-size: 13px; font-weight: 700; color: #3E2723; }
-.an-anomaly-text { font-size: 12px; color: #5A2D0C; margin-top: 1px; }
-.an-anomaly-detail { font-size: 11px; color: #8B7355; margin-top: 2px; }
+.an-anomaly-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.an-anomaly-text { font-size: 12px; color: var(--text); margin-top: 1px; }
+.an-anomaly-detail { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .an-anomaly-tag {
   font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
   flex-shrink: 0; white-space: nowrap;
@@ -460,11 +586,108 @@ onMounted(() => load());
 .an-anomaly.clickable { cursor: pointer; }
 .an-anomaly.clickable:hover { opacity: 0.85; }
 .an-anomaly-go {
-  font-size: 16px; font-weight: 700; color: #5A2D0C; flex-shrink: 0; align-self: center;
+  font-size: 16px; font-weight: 700; color: var(--text); flex-shrink: 0; align-self: center;
 }
+
+/* ===== REPORTS TAB ===== */
+.rpt-toolbar {
+  display: flex; justify-content: flex-end; margin-bottom: 12px;
+}
+
+/* Top products in reports */
+.rpt-prod-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.rpt-prod-row:last-child { border-bottom: none; }
+.rpt-prod-medal { width: 28px; text-align: center; font-size: 16px; flex-shrink: 0; }
+.rpt-prod-info { flex: 1; min-width: 0; }
+.rpt-prod-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpt-prod-bar-wrap { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-top: 4px; }
+.rpt-prod-bar { height: 100%; background: linear-gradient(90deg, #4CAF50, #81C784); border-radius: 2px; transition: width 0.4s; }
+.rpt-prod-stats { text-align: right; min-width: 80px; flex-shrink: 0; }
+.rpt-prod-boxes { font-size: 13px; font-weight: 700; color: var(--text); }
+.rpt-prod-delta { font-size: 10px; font-weight: 700; margin-left: 4px; }
+.rpt-prod-delta.up { color: #2E7D32; }
+.rpt-prod-delta.down { color: #C62828; }
+.rpt-prod-forecast { font-size: 12px; font-weight: 700; color: #2196F3; min-width: 50px; text-align: right; flex-shrink: 0; }
+
+/* Top suppliers in reports */
+.rpt-sup-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.rpt-sup-row:last-child { border-bottom: none; }
+.rpt-sup-medal { width: 28px; text-align: center; font-size: 16px; flex-shrink: 0; }
+.rpt-sup-info { flex: 1; min-width: 0; }
+.rpt-sup-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.rpt-sup-bar-wrap { height: 10px; background: var(--border-light); border-radius: 5px; overflow: hidden; margin-top: 4px; }
+.rpt-sup-bar { height: 100%; border-radius: 5px; transition: width 0.4s; }
+.rpt-sup-stats { text-align: right; min-width: 90px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.rpt-sup-orders { color: var(--text-muted); margin-left: 6px; }
+
+/* Seasonality chart */
+.rpt-season-chart {
+  display: flex; align-items: flex-end; gap: 6px; height: 180px;
+  overflow-x: auto; padding-bottom: 28px; margin-top: 12px;
+}
+.rpt-season-col {
+  flex: 1; min-width: 40px; max-width: 80px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.rpt-season-val { font-size: 9px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; }
+.rpt-season-bar-area { width: 70%; height: 130px; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+.rpt-season-bar { width: 100%; background: linear-gradient(to top, #F5A623, #ffb366); border-radius: 3px 3px 0 0; transition: height 0.4s; }
+.rpt-season-avg-dot {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #D62300; border: 2px solid var(--card);
+  z-index: 2;
+}
+.rpt-season-label {
+  font-size: 9px; color: var(--text-muted); margin-top: 3px;
+  border-top: 1px solid var(--border-light); padding-top: 2px;
+  white-space: nowrap; text-align: center;
+}
+.rpt-season-legend {
+  display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-muted);
+}
+.rpt-season-legend-item { display: flex; align-items: center; gap: 4px; }
+.rpt-season-legend-bar { width: 16px; height: 6px; border-radius: 2px; background: linear-gradient(90deg, #F5A623, #ffb366); }
+.rpt-season-legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #D62300; }
+
+/* YoY table */
+.rpt-yoy-table { margin-top: 14px; }
+.rpt-yoy-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.rpt-yoy-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px;
+}
+.rpt-yoy-cell {
+  padding: 6px; background: var(--bg); border-radius: 6px; text-align: center;
+}
+.rpt-yoy-label { font-size: 9px; color: var(--text-muted); font-weight: 600; }
+.rpt-yoy-val { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-top: 2px; }
+.rpt-yoy-val.up { color: #2E7D32; }
+.rpt-yoy-val.down { color: #C62828; }
+
+/* Forecast */
+.rpt-fc-row {
+  display: flex; align-items: center; gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.rpt-fc-row:last-child { border-bottom: none; }
+.rpt-fc-name { font-size: 12px; font-weight: 600; color: var(--text); min-width: 120px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpt-fc-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.rpt-fc-bar-wrap { height: 8px; background: var(--border-light); border-radius: 4px; overflow: hidden; }
+.rpt-fc-bar { height: 100%; border-radius: 4px; transition: width 0.4s; }
+.rpt-fc-fact { background: #4CAF50; }
+.rpt-fc-forecast { background: #2196F3; opacity: 0.6; }
+.rpt-fc-nums { font-size: 10px; color: var(--text-muted); min-width: 80px; text-align: right; flex-shrink: 0; line-height: 1.6; }
 
 @media (max-width: 600px) {
   .an-kpi-grid { grid-template-columns: 1fr; }
   .an-sup-metrics { grid-template-columns: repeat(2, 1fr); }
+  .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }
+  .rpt-fc-name { min-width: 80px; }
 }
 </style>

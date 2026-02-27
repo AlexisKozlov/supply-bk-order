@@ -3,14 +3,14 @@ import { ref } from 'vue';
 import { db } from '@/lib/apiClient.js';
 
 /**
- * Бургер БК и Воглия Матта — общие поставщики и товары.
- * Пицца Стар — отдельные.
+ * ООО "Бургер БК" и ООО "Воглия Матта" — общие поставщики и товары.
+ * ООО "Пицца Стар" — отдельные.
  */
 function getEntityGroup(legalEntity) {
-  if (legalEntity === 'Пицца Стар') {
-    return { cacheKey: 'Пицца Стар', entities: ['Пицца Стар'] };
+  if (legalEntity === 'ООО "Пицца Стар"') {
+    return { cacheKey: 'ООО "Пицца Стар"', entities: ['ООО "Пицца Стар"'] };
   }
-  return { cacheKey: 'BK_VM', entities: ['Бургер БК', 'Воглия Матта'] };
+  return { cacheKey: 'BK_VM', entities: ['ООО "Бургер БК"', 'ООО "Воглия Матта"'] };
 }
 
 export const useSupplierStore = defineStore('supplier', () => {
@@ -34,7 +34,7 @@ export const useSupplierStore = defineStore('supplier', () => {
       if (entities.length === 1) {
         query = query.eq('legal_entity', entities[0]);
       } else {
-        // or формат: legal_entity.eq.Бургер БК,legal_entity.eq.Воглия Матта
+        // or формат: legal_entity.eq.ООО "Бургер БК",legal_entity.eq.ООО "Воглия Матта"
         query = query.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
       }
 

@@ -50,3 +50,77 @@ export async function exportToExcel(items, settings) {
   const fileDate = `${String(dd.getDate()).padStart(2,'0')}-${String(dd.getMonth()+1).padStart(2,'0')}-${dd.getFullYear()}`;
   XLSX.writeFile(wb, `Заказ_${supplier}_${fileDate}.xlsx`);
 }
+
+/**
+ * Экспорт аналитических отчётов в Excel — 4 листа
+ */
+export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {
+  const XLSX = await import('xlsx');
+  const nf = new Intl.NumberFormat('ru-RU');
+
+  const wb = XLSX.utils.book_new();
+
+  // Лист 1: Обзор (KPI)
+  const overviewRows = [
+    ['Аналитика заказов'],
+    [`Период: ${analyticsData.period} дней`],
+    [],
+    ['Показатель', 'Текущий', 'Прошлый', 'Δ%'],
+    ['Заказов', analyticsData.totals.orders, analyticsData.prev.orders, analyticsData.deltaOrders !== null ? analyticsData.deltaOrders + '%' : '—'],
+    ['Коробок', Math.round(analyticsData.totals.boxes), Math.round(analyticsData.prev.boxes), analyticsData.deltaBoxes !== null ? analyticsData.deltaBoxes + '%' : '—'],
+    ['Ср. кор/заказ', analyticsData.totals.orders ? Math.round(analyticsData.totals.boxes / analyticsData.totals.orders) : 0, '', ''],
+  ];
+  const wsOverview = XLSX.utils.aoa_to_sheet(overviewRows);
+  wsOverview['!cols'] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, wsOverview, 'Обзор');
+
+  // Лист 2: Топ товаров
+  const prodRows = [
+    ['Топ товаров'],
+    [],
+    ['#', 'SKU', 'Наименование', 'Коробок', 'Δ%', 'Прогноз'],
+    ...analyticsData.topProducts.map((p, i) => [
+      i + 1, p.sku || '', p.name || '', Math.round(p.boxes),
+      p.deltaBoxes !== null ? p.deltaBoxes + '%' : '—',
+      p.forecast,
+    ]),
+  ];
+  const wsProds = XLSX.utils.aoa_to_sheet(prodRows);
+  wsProds['!cols'] = [{ wch: 5 }, { wch: 15 }, { wch: 35 }, { wch: 12 }, { wch: 8 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, wsProds, 'Топ товаров');
+
+  // Лист 3: Поставщики
+  const supRows = [
+    ['Поставщики'],
+    [],
+    ['Поставщик', 'Заказов', 'Коробок', 'Ср./заказ', 'Δ%', 'Дн. назад'],
+    ...analyticsData.suppliers.map(s => [
+      s.supplier, s.orders, Math.round(s.boxes),
+      s.orders ? Math.round(s.boxes / s.orders) : 0,
+      s.prevBoxes > 0 ? Math.round((s.boxes - s.prevBoxes) / s.prevBoxes * 100) + '%' : '—',
+      s.daysAgo !== null ? s.daysAgo : '—',
+    ]),
+  ];
+  const wsSups = XLSX.utils.aoa_to_sheet(supRows);
+  wsSups['!cols'] = [{ wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, wsSups, 'Поставщики');
+
+  // Лист 4: Сезонность
+  if (seasonalityData && seasonalityData.monthData) {
+    const seasonRows = [
+      ['Сезонность (12 мес.)'],
+      [],
+      ['Месяц', 'Коробок', 'Заказов', 'Скольз. среднее', 'YoY Δ%'],
+      ...seasonalityData.monthData.map(m => [
+        m.label, Math.round(m.boxes), m.orders,
+        m.movingAvg !== null ? Math.round(m.movingAvg) : '—',
+        m.yoyDelta !== null ? m.yoyDelta + '%' : '—',
+      ]),
+    ];
+    const wsSeason = XLSX.utils.aoa_to_sheet(seasonRows);
+    wsSeason['!cols'] = [{ wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsSeason, 'Сезонность');
+  }
+
+  XLSX.writeFile(wb, `Аналитика_${new Date().toLocaleDateString('ru-RU')}.xlsx`);
+}

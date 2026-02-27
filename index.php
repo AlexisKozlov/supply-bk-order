@@ -1,8 +1,14 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$host = $_SERVER['HTTP_HOST'] ?? '';
+if ($origin && parse_url($origin, PHP_URL_HOST) === $host) {
+    header("Access-Control-Allow-Origin: $origin");
+}
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $DB_HOST = 'localhost';
@@ -15,7 +21,8 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'DB: ' . $e->getMessage()]);
+    error_log('DB connection error: ' . $e->getMessage());
+    echo json_encode(['error' => 'Database connection failed']);
     exit;
 }
 
@@ -165,7 +172,7 @@ if ($endpoint === 'rpc') {
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$hash, $name]);
         respond(['success'=>true]);
     }
-    respond(['error'=>'Unknown RPC: '.$fn], 404);
+    respond(['error'=>'Not found'], 404);
 }
 
 // ═══ API KEY ═══
@@ -173,7 +180,7 @@ if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
 // ═══ REST ═══
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','api_keys'];
-if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found: '.$endpoint], 404); }
+if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
 
 if ($method === 'GET') {
@@ -224,7 +231,8 @@ if ($method === 'POST') {
         try {
             $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph)"); $s->execute(array_values($rec));
         } catch (PDOException $e) {
-            respond(['error' => $e->getMessage(), 'table' => $table, 'columns' => $cols], 500);
+            error_log("INSERT error [{$table}]: " . $e->getMessage());
+            respond(['error' => 'Insert failed'], 500);
         }
         $lid = $rec['id'] ?? $pdo->lastInsertId();
         $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s2->execute([$lid]); $r = $s2->fetch(); if ($r) $ins[] = $r;
@@ -244,7 +252,8 @@ if ($method === 'PATCH' || $method === 'PUT') {
     try {
         $s = $pdo->prepare("UPDATE `$table` SET " . implode(',', $set) . " WHERE " . implode(' AND ', $where)); $s->execute($all);
     } catch (PDOException $e) {
-        respond(['error' => $e->getMessage(), 'table' => $table], 500);
+        error_log("UPDATE error [{$table}]: " . $e->getMessage());
+        respond(['error' => 'Update failed'], 500);
     }
     $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE " . implode(' AND ', $where)); $s2->execute($params);
     respond($s2->fetchAll());

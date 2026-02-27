@@ -75,7 +75,7 @@
     </td>
 
     <!-- Хватит до (текущий запас) -->
-    <td v-if="settings.showStockColumn" class="stock-col stock-display" :class="stockCurrentHighlight" :title="compact ? stockUntilDisplay : ''">{{ compact ? stockUntilShort : stockUntilDisplay }}</td>
+    <td class="stock-col stock-display" :class="stockCurrentHighlight" :title="compact ? stockUntilDisplay : ''">{{ compact ? stockUntilShort : stockUntilDisplay }}</td>
 
     <!-- Расчёт заказа -->
     <td class="calc">

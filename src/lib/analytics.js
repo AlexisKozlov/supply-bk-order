@@ -233,3 +233,62 @@ function processData(orders, prevOrders, days) {
     period:       days,
   };
 }
+
+/**
+ * Сезонность: заказы за 12 месяцев, скользящее среднее, YoY
+ */
+export async function getSeasonalityData(legalEntity) {
+  const now = new Date();
+  const start = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+
+  const { data: orders, error } = await db
+    .from('orders')
+    .select('id, created_at, order_items(qty_boxes)')
+    .eq('legal_entity', legalEntity)
+    .gte('created_at', start.toISOString())
+    .order('created_at', { ascending: true });
+
+  if (error || !orders) return null;
+
+  // Группировка по месяцам
+  const monthMap = {};
+  orders.forEach(o => {
+    const d = new Date(o.created_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!monthMap[key]) monthMap[key] = { boxes: 0, orders: 0 };
+    monthMap[key].orders++;
+    monthMap[key].boxes += sumBoxes(o.order_items);
+  });
+
+  // Собрать 12 месяцев
+  const monthData = [];
+  const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = `${monthNames[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`;
+    const data = monthMap[key] || { boxes: 0, orders: 0 };
+
+    // YoY — тот же месяц прошлого года
+    const prevKey = `${d.getFullYear() - 1}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const prevData = monthMap[prevKey];
+    let yoyDelta = null;
+    if (prevData && prevData.boxes > 0) {
+      yoyDelta = Math.round((data.boxes - prevData.boxes) / prevData.boxes * 100);
+    }
+
+    monthData.push({ key, label, ...data, movingAvg: null, yoyDelta });
+  }
+
+  // Скользящее среднее за 3 месяца
+  for (let i = 0; i < monthData.length; i++) {
+    if (i >= 2) {
+      const avg = (monthData[i].boxes + monthData[i-1].boxes + monthData[i-2].boxes) / 3;
+      monthData[i].movingAvg = Math.round(avg);
+    }
+  }
+
+  const maxBoxes = Math.max(...monthData.map(m => m.boxes), 1);
+
+  return { monthData, maxBoxes };
+}

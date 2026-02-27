@@ -1,11 +1,11 @@
 /**
- * Бургер БК и Воглия Матта — одна группа (общие поставщики и товары).
- * Пицца Стар — отдельная группа.
+ * ООО "Бургер БК" и ООО "Воглия Матта" — одна группа (общие поставщики и товары).
+ * ООО "Пицца Стар" — отдельная группа.
  * Возвращает массив юр. лиц для фильтрации.
  */
 export function getEntityGroup(legalEntity) {
-  if (legalEntity === 'Пицца Стар') return ['Пицца Стар'];
-  return ['Бургер БК', 'Воглия Матта'];
+  if (legalEntity === 'ООО "Пицца Стар"') return ['ООО "Пицца Стар"'];
+  return ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
 }
 
 /**
@@ -46,6 +46,37 @@ export function getMultiplicity(item) {
 export function toLocalDateStr(d) {
   if (!(d instanceof Date) || isNaN(d)) return '';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Парсит MySQL datetime (без таймзоны, сервер в UTC+3) в Date.
+ */
+export function parseMoscowDate(str) {
+  if (!str) return null;
+  return new Date(str.replace(' ', 'T') + '+03:00');
+}
+
+/**
+ * Форматирует MySQL datetime в «дд.мм.гггг чч:мм» (UTC+3).
+ */
+export function formatMoscowDateTime(str) {
+  const d = parseMoscowDate(str);
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Форматирует MySQL datetime как «X мин назад» (UTC+3).
+ */
+export function formatMoscowRelative(str) {
+  const d = parseMoscowDate(str);
+  if (!d || isNaN(d)) return '';
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diff < 10) return 'только что';
+  if (diff < 60) return `${diff} сек назад`;
+  if (diff < 120) return '1 мин назад';
+  return `${Math.floor(diff / 60)} мин назад`;
 }
 
 export function debug(...args) {

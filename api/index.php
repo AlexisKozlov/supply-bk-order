@@ -13,6 +13,8 @@ if ($allowed_origin) {
 }
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 // Load .env
@@ -37,7 +39,8 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'DB: ' . $e->getMessage()]);
+    error_log('DB connection error: ' . $e->getMessage());
+    echo json_encode(['error' => 'Database connection failed']);
     exit;
 }
 
@@ -77,6 +80,20 @@ function checkApiKey($pdo) {
     $s = $pdo->prepare("SELECT id FROM api_keys WHERE api_key=? AND is_active='true'");
     $s->execute([$k]);
     return $s->fetch() !== false;
+}
+
+function checkRateLimit($pdo, $ip, $maxAttempts = 10, $windowMinutes = 10) {
+    // Очистка старых записей
+    $pdo->prepare("DELETE FROM failed_login_attempts WHERE attempted_at < NOW() - INTERVAL ? MINUTE")->execute([$windowMinutes]);
+    // Подсчёт попыток
+    $s = $pdo->prepare("SELECT COUNT(*) as cnt FROM failed_login_attempts WHERE ip_address = ? AND attempted_at > NOW() - INTERVAL ? MINUTE");
+    $s->execute([$ip, $windowMinutes]);
+    $count = $s->fetch()['cnt'] ?? 0;
+    return $count < $maxAttempts;
+}
+
+function recordFailedLogin($pdo, $ip, $userName = '') {
+    $pdo->prepare("INSERT INTO failed_login_attempts (ip_address, user_name, attempted_at) VALUES (?, ?, NOW())")->execute([$ip, $userName]);
 }
 
 function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
@@ -127,7 +144,7 @@ if ($endpoint === 'search_products') {
     $q = $_GET['q'] ?? '';
     $le = $_GET['legal_entity'] ?? '';
     $supplier = $_GET['supplier'] ?? '';
-    $limit = intval($_GET['limit'] ?? 10);
+    $limit = min(intval($_GET['limit'] ?? 10), 100);
     
     if (strlen($q) < 2) respond([]);
     
@@ -162,19 +179,25 @@ if ($endpoint === 'search_products') {
     respond(cleanNumeric($s->fetchAll()));
 }
 
-// ═══ RPC ═══
+// ═══ RPC (публичные — без API-ключа) ═══
 if ($endpoint === 'rpc') {
     $fn = $subpoint ?? '';
+    $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $clientIp = explode(',', $clientIp)[0]; // Первый IP из цепочки
+
+    // --- Публичные RPC (доступны без авторизации) ---
+
     if ($fn === 'get_user_list') {
         $s = $pdo->query("SELECT name FROM users ORDER BY name");
         respond($s->fetchAll());
     }
     if ($fn === 'check_user_password') {
         $name = $body['user_name'] ?? ''; $pass = $body['user_password'] ?? '';
+        if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities FROM users WHERE name=?");
         $s->execute([$name]); $u = $s->fetch();
-        if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
+        if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'user_not_found']); }
+        if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'wrong_password']); }
         $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
@@ -186,12 +209,12 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
+        if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $s = $pdo->prepare("SELECT value FROM settings WHERE `key`='order_calculator_password'"); $s->execute();
         $stored = $s->fetchColumn();
         if ($stored) {
             $ok = password_verify($pwd, $stored) || $stored === $pwd;
             if ($ok) {
-                // Ленивая миграция legacy-пароля
                 if ($stored === $pwd) {
                     $hash = password_hash($pwd, PASSWORD_BCRYPT);
                     $pdo->prepare("UPDATE settings SET value=? WHERE `key`='order_calculator_password'")->execute([$hash]);
@@ -200,47 +223,22 @@ if ($endpoint === 'rpc') {
                 respond(['success'=>true,'api_key'=>$s2->fetchColumn()]);
             }
         }
+        recordFailedLogin($pdo, $clientIp, '_legacy');
         respond(['success'=>false]);
     }
-    if ($fn === 'change_user_password') {
-        $name = $body['user_name'] ?? '';
-        $oldPwd = $body['old_password'] ?? '';
-        $newPwd = $body['new_password'] ?? '';
-        $s = $pdo->prepare("SELECT password FROM users WHERE name=?"); $s->execute([$name]); $u = $s->fetch();
-        if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
-        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([password_hash($newPwd, PASSWORD_BCRYPT), $name]);
-        respond(['success'=>true]);
+    if ($fn === 'check_maintenance') {
+        $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
+        $rows = $s->fetchAll(); $mm = 'false'; $msg = '';
+        foreach ($rows as $r) { if ($r['key'] === 'maintenance_mode') $mm = $r['value']; if ($r['key'] === 'maintenance_message') $msg = $r['value']; }
+        respond(['maintenance_mode' => $mm === 'true', 'maintenance_message' => $msg ?: null]);
     }
-    if ($fn === 'mark_notifications_read') {
-        $ids = $body['ids'] ?? [];
-        $user = $body['user_name'] ?? '';
-        if (!$user || empty($ids)) respond(['success' => false, 'error' => 'missing params']);
-        $ph = implode(',', array_fill(0, count($ids), '?'));
-        $params = array_merge([$user], $ids);
-        $pdo->prepare("UPDATE notifications SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?) WHERE id IN ($ph) AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))")->execute(array_merge([$user], $ids, [$user]));
-        respond(['success' => true]);
-    }
-    if ($fn === 'heartbeat') {
-        $userName = $body['user_name'] ?? '';
-        $page = $body['page'] ?? '';
-        if ($userName) {
-            $s = $pdo->prepare("INSERT INTO user_presence (user_name, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
-            $s->execute([$userName, $page]);
-        }
-        respond(['success' => true]);
-    }
-    if ($fn === 'get_online_users') {
-        $s = $pdo->query("SELECT user_name, page, last_seen FROM user_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE ORDER BY last_seen DESC");
-        respond($s->fetchAll());
-    }
-    // Гостевой heartbeat (без авторизации)
+    // Гостевые эндпоинты (публичная страница поиска карточек)
     if ($fn === 'guest_heartbeat') {
         $sid = $body['session_id'] ?? '';
         $page = $body['page'] ?? 'search-cards';
-        if ($sid) {
+        if ($sid && preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $sid)) {
             $s = $pdo->prepare("INSERT INTO guest_presence (session_id, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
-            $s->execute([$sid, $page]);
+            $s->execute([$sid, substr($page, 0, 100)]);
         }
         respond(['success' => true]);
     }
@@ -248,15 +246,15 @@ if ($endpoint === 'rpc') {
         $s = $pdo->query("SELECT COUNT(*) as cnt FROM guest_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE");
         respond($s->fetch());
     }
-    // Логирование поиска карточек (без авторизации)
     if ($fn === 'log_card_search') {
+        if (!checkRateLimit($pdo, $clientIp, 60, 1)) respond(['success' => true]); // Тихий rate-limit
         $q = $body['query'] ?? '';
         $found = $body['found'] ?? false;
         $matchType = $body['match_type'] ?? null;
         $matchedId = $body['matched_card_id'] ?? null;
-        if ($q) {
+        if ($q && mb_strlen($q) <= 200) {
             $s = $pdo->prepare("INSERT INTO search_logs (query, found, match_type, matched_card_id, created_at) VALUES (?, ?, ?, ?, NOW())");
-            $s->execute([$q, $found ? 1 : 0, $matchType, $matchedId]);
+            $s->execute([mb_substr($q, 0, 200), $found ? 1 : 0, $matchType ? mb_substr($matchType, 0, 50) : null, $matchedId]);
         }
         respond(['success' => true]);
     }
@@ -269,33 +267,77 @@ if ($endpoint === 'rpc') {
         $row = $s->fetch();
         respond($row ?: ['value' => null]);
     }
+
+    // --- Приватные RPC (требуют API-ключ) ---
+    if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
+
+    if ($fn === 'change_user_password') {
+        $name = $body['user_name'] ?? '';
+        $oldPwd = $body['old_password'] ?? '';
+        $newPwd = $body['new_password'] ?? '';
+        if (!$name || !$oldPwd || !$newPwd) respond(['success'=>false,'error'=>'missing params'], 400);
+        if (mb_strlen($newPwd) < 4) respond(['success'=>false,'error'=>'password_too_short'], 400);
+        $s = $pdo->prepare("SELECT password FROM users WHERE name=?"); $s->execute([$name]); $u = $s->fetch();
+        if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
+        if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
+        $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([password_hash($newPwd, PASSWORD_BCRYPT), $name]);
+        respond(['success'=>true]);
+    }
+    if ($fn === 'mark_notifications_read') {
+        $ids = $body['ids'] ?? [];
+        $user = $body['user_name'] ?? '';
+        if (!$user || empty($ids)) respond(['success' => false, 'error' => 'missing params']);
+        $ids = array_slice($ids, 0, 100); // Лимит на количество ID
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $pdo->prepare("UPDATE notifications SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?) WHERE id IN ($ph) AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))")->execute(array_merge([$user], $ids, [$user]));
+        respond(['success' => true]);
+    }
+    if ($fn === 'heartbeat') {
+        $userName = $body['user_name'] ?? '';
+        $page = $body['page'] ?? '';
+        if ($userName) {
+            $s = $pdo->prepare("INSERT INTO user_presence (user_name, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
+            $s->execute([$userName, substr($page, 0, 100)]);
+        }
+        respond(['success' => true]);
+    }
+    if ($fn === 'get_online_users') {
+        $s = $pdo->query("SELECT user_name, page, last_seen FROM user_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE ORDER BY last_seen DESC");
+        respond($s->fetchAll());
+    }
     if ($fn === 'send_broadcast') {
         $userName = $body['user_name'] ?? '';
         $title = $body['title'] ?? 'Важное сообщение';
         $message = $body['message'] ?? '';
         if (!$userName || !$message) respond(['success' => false, 'error' => 'missing params'], 400);
-        // Проверяем роль admin
         $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$userName]); $u = $s->fetch();
         if (!$u || $u['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $pdo->prepare("INSERT INTO notifications (type, title, message, created_by, read_by, created_at) VALUES ('broadcast', ?, ?, ?, '[]', NOW())")
-            ->execute([$title, $message, $userName]);
+            ->execute([mb_substr($title, 0, 255), mb_substr($message, 0, 2000), $userName]);
         $id = $pdo->lastInsertId();
         respond(['success' => true, 'id' => $id]);
+    }
+    if ($fn === 'delete_notification_for_user') {
+        $id = $body['id'] ?? null;
+        $userName = $body['user_name'] ?? '';
+        if (!$id || !$userName) respond(['success' => false, 'error' => 'missing params'], 400);
+        $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE id = ? AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $id, $userName]);
+        respond(['success' => true]);
+    }
+    if ($fn === 'delete_all_notifications_for_user') {
+        $userName = $body['user_name'] ?? '';
+        if (!$userName) respond(['success' => false, 'error' => 'missing params'], 400);
+        $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE (target_user = ? OR type = 'broadcast') AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $userName, $userName]);
+        respond(['success' => true]);
     }
     if ($fn === 'get_active_broadcasts') {
         $userName = $body['user_name'] ?? '';
         if (!$userName) respond([]);
-        $s = $pdo->prepare("SELECT id, title, message, created_by, created_at FROM notifications WHERE type='broadcast' AND created_at > NOW() - INTERVAL 24 HOUR AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?)) ORDER BY created_at DESC LIMIT 5");
-        $s->execute([$userName]);
+        $s = $pdo->prepare("SELECT id, title, message, created_by, created_at FROM notifications WHERE type='broadcast' AND created_at > NOW() - INTERVAL 24 HOUR AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?)) AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?)) ORDER BY created_at DESC LIMIT 5");
+        $s->execute([$userName, $userName]);
         respond($s->fetchAll());
     }
-    if ($fn === 'check_maintenance') {
-        $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
-        $rows = $s->fetchAll(); $mm = 'false'; $msg = '';
-        foreach ($rows as $r) { if ($r['key'] === 'maintenance_mode') $mm = $r['value']; if ($r['key'] === 'maintenance_message') $msg = $r['value']; }
-        respond(['maintenance_mode' => $mm === 'true', 'maintenance_message' => $msg ?: null]);
-    }
-    respond(['error'=>'Unknown RPC: '.$fn], 404);
+    respond(['error'=>'Not found'], 404);
 }
 
 // ═══ API KEY ═══
@@ -305,7 +347,7 @@ if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications'];
 // Защита: users — только чтение (без password), запись только через RPC
 $readOnly = ['audit_log','search_logs'];
-if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found: '.$endpoint], 404); }
+if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
 
 if ($method === 'GET') {
@@ -355,7 +397,7 @@ if ($method === 'GET') {
             $sql .= " ORDER BY `{$op[0]}` " . (($op[1]??'asc')==='desc'?'DESC':'ASC');
         }
     }
-    if (isset($_GET['limit'])) $sql .= " LIMIT " . intval($_GET['limit']);
+    if (isset($_GET['limit'])) $sql .= " LIMIT " . min(intval($_GET['limit']), 5000);
     if (isset($_GET['offset'])) $sql .= " OFFSET " . intval($_GET['offset']);
 
     $s = $pdo->prepare($sql); $s->execute($params); $data = $s->fetchAll();
@@ -409,7 +451,8 @@ if ($method === 'POST') {
         try {
             $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph)"); $s->execute(array_values($rec));
         } catch (PDOException $e) {
-            respond(['error' => $e->getMessage(), 'table' => $table, 'columns' => $cols], 500);
+            error_log("INSERT error [{$table}]: " . $e->getMessage());
+            respond(['error' => 'Insert failed'], 500);
         }
         $lid = $rec['id'] ?? $pdo->lastInsertId();
         $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s2->execute([$lid]); $r = $s2->fetch(); if ($r) $ins[] = $r;
@@ -434,7 +477,8 @@ if ($method === 'PATCH' || $method === 'PUT') {
     try {
         $s = $pdo->prepare("UPDATE `$table` SET " . implode(',', $set) . " WHERE " . implode(' AND ', $where)); $s->execute($all);
     } catch (PDOException $e) {
-        respond(['error' => $e->getMessage(), 'table' => $table], 500);
+        error_log("UPDATE error [{$table}]: " . $e->getMessage());
+        respond(['error' => 'Update failed'], 500);
     }
     $s2 = $pdo->prepare("SELECT * FROM `$table` WHERE " . implode(' AND ', $where)); $s2->execute($params);
     $result = $s2->fetchAll();

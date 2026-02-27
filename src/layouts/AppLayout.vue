@@ -221,16 +221,16 @@
             <button class="modal-close" @click="showNotifications = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="notif-list">
-            <div v-if="notificationStore.loading && !notificationStore.notifications.length" class="notif-empty">Загрузка...</div>
-            <div v-else-if="!notificationStore.notifications.length" class="notif-empty">Нет уведомлений</div>
+            <div v-if="notificationStore.loading && !notificationStore.visibleNotifications.length" class="notif-empty">Загрузка...</div>
+            <div v-else-if="!notificationStore.visibleNotifications.length" class="notif-empty">Нет уведомлений</div>
             <div v-else>
-              <div v-for="n in notificationStore.notifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n), 'notif-clickable': n.entity_id }" @click="goToNotifEntity(n)">
-                <div class="notif-icon-col">
+              <div v-for="n in notificationStore.visibleNotifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n), 'notif-clickable': n.entity_id }">
+                <div class="notif-icon-col" @click="goToNotifEntity(n)">
                   <div class="notif-icon" :class="n.entity_type === 'plan' ? 'notif-icon-plan' : 'notif-icon-order'">
                     <BkIcon :name="n.entity_type === 'plan' ? 'planning' : 'package'" size="sm"/>
                   </div>
                 </div>
-                <div class="notif-body">
+                <div class="notif-body" @click="goToNotifEntity(n)">
                   <div class="notif-title">{{ n.title }}</div>
                   <div v-if="n.message" class="notif-message">{{ n.message }}</div>
                   <div class="notif-meta">
@@ -238,11 +238,13 @@
                     <span v-if="n.entity_id" class="notif-link">Открыть →</span>
                   </div>
                 </div>
+                <button class="notif-delete-btn" @click.stop="notificationStore.deleteNotification(n.id)" title="Удалить">×</button>
               </div>
             </div>
           </div>
-          <div v-if="notificationStore.unreadCount > 0" class="notif-actions">
-            <button class="btn primary" @click="notificationStore.markAllRead()">Прочитать все</button>
+          <div v-if="notificationStore.unreadCount > 0 || notificationStore.visibleNotifications.length > 0" class="notif-actions">
+            <button v-if="notificationStore.unreadCount > 0" class="btn primary" @click="notificationStore.markAllRead()">Прочитать все</button>
+            <button class="btn notif-delete-all-btn" @click="notificationStore.deleteAll()">Удалить все</button>
           </div>
         </div>
       </div>
@@ -550,7 +552,7 @@ function confirmLogout() {
 /* Notification modal items */
 .notif-list { max-height: 420px; overflow-y: auto; padding: 0 20px 12px; }
 .notif-empty { text-align: center; padding: 32px 0; color: var(--text-muted); font-size: 13px; }
-.notif-actions { display: flex; justify-content: center; padding: 8px 20px 16px; }
+.notif-actions { display: flex; justify-content: center; gap: 8px; padding: 8px 20px 16px; }
 .notif-item {
   display: flex; gap: 10px; padding: 10px 0;
   border-bottom: 1px solid var(--border-light);
@@ -576,6 +578,23 @@ function confirmLogout() {
 .notif-clickable { cursor: pointer; border-radius: 8px; transition: background 0.15s; }
 .notif-clickable:hover { background: var(--bg-secondary, #f5f5f5); }
 .notif-link { color: var(--bk-orange, #E87A1E); font-weight: 600; margin-left: auto; }
+
+/* Кнопка удаления отдельного уведомления */
+.notif-delete-btn {
+  flex-shrink: 0; align-self: flex-start;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 18px; line-height: 1;
+  padding: 2px 6px; border-radius: 4px;
+  opacity: 0; transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.notif-item:hover .notif-delete-btn { opacity: 1; }
+.notif-delete-btn:hover { background: rgba(214, 39, 0, 0.1); color: #D62700; }
+
+/* Кнопка «Удалить все» */
+.notif-delete-all-btn {
+  color: #D62700 !important; border-color: #D62700 !important;
+}
+.notif-delete-all-btn:hover { background: rgba(214, 39, 0, 0.08) !important; }
 
 /* Offline banner */
 .offline-banner {

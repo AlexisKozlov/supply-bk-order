@@ -110,7 +110,7 @@ export const useDraftStore = defineStore('draft', () => {
       if (data.settings.deliveryDate) { const d = new Date(data.settings.deliveryDate); if (!isNaN(d)) orderStore.settings.deliveryDate = d; }
       if (data.settings.safetyEndDate) { const d = new Date(data.settings.safetyEndDate); if (!isNaN(d)) orderStore.settings.safetyEndDate = d; }
 
-      orderStore.settings.legalEntity  = data.settings.legalEntity  || 'Бургер БК';
+      orderStore.settings.legalEntity  = data.settings.legalEntity  || 'ООО "Бургер БК"';
       orderStore.settings.supplier     = data.settings.supplier      || '';
       orderStore.settings.periodDays   = data.settings.periodDays    || 30;
       orderStore.settings.safetyDays   = data.settings.safetyDays    || 0;

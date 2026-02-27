@@ -34,7 +34,7 @@ export const useOrderStore = defineStore('order', () => {
   const userStore = useUserStore();
 
   const settings = reactive({
-    legalEntity: localStorage.getItem('bk_legal_entity') || 'Бургер БК',
+    legalEntity: localStorage.getItem('bk_legal_entity') || 'ООО "Бургер БК"',
     supplier: '',
     today: null,
     deliveryDate: null,
@@ -270,7 +270,7 @@ export const useOrderStore = defineStore('order', () => {
         : Math.round(physBoxes * itemQpb * itemMult);
     }
 
-    editingOrderId.value = isEditing ? order.id : null;
+    editingOrderId.value = (isEditing || isViewOnly) ? order.id : null;
     viewOnlyMode.value = isViewOnly;
     _history.clear(); _historyVersion.value++;
     _snapshot();

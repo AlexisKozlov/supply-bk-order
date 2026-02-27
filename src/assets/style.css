@@ -1633,6 +1633,50 @@ input[type="number"]:focus {
   .toolbar-finish .toolbar-spacer {
     display: none;
   }
+
+  /* ─── Тулбар: кнопки-иконки ─── */
+  .order-actions .btn {
+    font-size: 0;
+    padding: 8px;
+    min-width: 36px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .order-actions .btn .bk-icon-wrap {
+    font-size: 16px;
+  }
+  .order-toolbar .search-bar input {
+    height: 36px;
+    font-size: 16px;
+  }
+
+  /* ─── Нижний тулбар: кнопки-иконки, «Сохранить» с текстом ─── */
+  .toolbar-finish .btn {
+    font-size: 0;
+    padding: 8px;
+    min-width: 36px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .toolbar-finish .btn .bk-icon-wrap {
+    font-size: 16px;
+  }
+  .toolbar-finish .btn.primary {
+    font-size: 13px;
+    flex: 1;
+    max-width: 200px;
+    gap: 6px;
+  }
+
+  /* Share dropdown не уходит за правый край */
+  .share-dropdown {
+    right: 0;
+    left: auto;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1643,6 +1687,13 @@ input[type="number"]:focus {
 
   input[type="number"] { font-size: 16px !important; min-height: 36px; }
   input, select { font-size: 16px !important; }
+
+  .compact-toggle { display: none !important; }
+  .fullscreen-toggle-btn { display: none !important; }
+
+  .pf-group {
+    flex: 1 1 100% !important;
+  }
 }
 
 /* Sidebar overlay for mobile */
@@ -2287,10 +2338,10 @@ input[type="number"]:focus {
 
 /* ═══ ORDER RESULT MODAL ═══ */
 .order-result-modal { max-width: 680px; }
-.or-summary { display: flex; gap: 8px; margin-bottom: 14px; }
-.or-card { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
-.or-card-label { display: block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); margin-bottom: 2px; }
-.or-card-value { font-size: 15px; font-weight: 800; color: var(--text); }
+.or-summary { display: flex; gap: 6px; margin-bottom: 10px; }
+.or-card { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+.or-card-label { display: block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin-bottom: 1px; }
+.or-card-value { font-size: 12px; font-weight: 700; color: var(--text); }
 .or-card-accent { background: linear-gradient(135deg, #FFF3E0, #FFE0B2); border-color: #FF8733; }
 .or-card-accent .or-card-value { color: #D62700; }
 .or-table-wrap { max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
@@ -2304,6 +2355,16 @@ input[type="number"]:focus {
 .or-sku { color: var(--text-muted); font-size: 11px; font-family: monospace; }
 .or-name { font-weight: 600; color: var(--text); }
 .or-qty { font-weight: 700; color: #D62700; text-align: right; white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .or-summary { flex-wrap: wrap; }
+  .or-card { flex: 1 1 calc(50% - 4px); }
+  .or-table-wrap { overflow-x: auto; }
+  .or-table { min-width: 400px; }
+}
+@media (max-width: 480px) {
+  .or-card { flex: 1 1 100%; }
+}
 
 /* ═══ UNIVERSAL DISABLED STYLES ═══ */
 /* Gray out ALL disabled form elements — buttons, inputs, selects */
@@ -2500,7 +2561,17 @@ button:disabled .bk-icon-wrap svg {
     gap: 6px 8px;
   }
   .pf-group {
-    min-width: 100px;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+  .pf-group.pf-narrow {
+    flex: 1 1 calc(33% - 6px);
+    max-width: none;
+  }
+  .pf-group input,
+  .pf-group select {
+    height: 36px;
+    font-size: 16px;
   }
 }
 

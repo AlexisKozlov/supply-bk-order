@@ -46,14 +46,15 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
   let orderId;
   let auditAction;
   let auditDetails;
+  let oldOrder = null;
 
   if (editingOrderId) {
     // Загружаем старый заказ для diff параметров
-    const { data: oldOrder } = await db
+    ({ data: oldOrder } = await db
       .from('orders')
-      .select('delivery_date, today_date, safety_days, period_days, unit, note, supplier')
+      .select('delivery_date, today_date, safety_days, period_days, unit, note, supplier, created_by')
       .eq('id', editingOrderId)
-      .single();
+      .single());
 
     // Загружаем старые позиции для diff
     const { data: oldItems } = await db
@@ -134,23 +135,33 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     });
   } catch(e) { /* не блокируем */ }
 
-  // Уведомление (не блокируем)
-  try {
-    const notifTitle = editingOrderId
-      ? `Заказ обновлён: ${settings.supplier || 'Свободный'}`
-      : `Новый заказ: ${settings.supplier || 'Свободный'}`;
-    const notifMessage = `${itemsWithOrder.length} позиций, поставка ${orderData.delivery_date || '—'}`;
-    await db.from('notifications').insert({
-      type: 'order',
-      title: notifTitle,
-      message: notifMessage,
-      entity_type: 'order',
-      entity_id: orderId,
-      legal_entity: settings.legalEntity,
-      created_by: userName || null,
-      read_by: userName ? JSON.stringify([userName]) : '[]',
-    });
-  } catch(e) { /* не блокируем */ }
+  // Уведомление только при редактировании чужого заказа
+  if (editingOrderId && oldOrder?.created_by && oldOrder.created_by !== userName) {
+    try {
+      const changes = auditDetails?.changes || [];
+      const paramChanges = auditDetails?.param_changes || [];
+      const lines = [];
+      if (paramChanges.length) {
+        paramChanges.forEach(p => lines.push(`${p.label}: ${p.from} → ${p.to}`));
+      }
+      changes.forEach(c => {
+        if (c.type === 'added') lines.push(`+ ${c.item} (${c.boxes} кор.)`);
+        else if (c.type === 'removed') lines.push(`− ${c.item} (${c.boxes} кор.)`);
+        else if (c.type === 'changed') lines.push(`${c.item}: ${c.diffs.join(', ')}`);
+      });
+      await db.from('notifications').insert({
+        type: 'order',
+        title: `${userName} изменил ваш заказ: ${settings.supplier}`,
+        message: lines.join('\n') || 'Изменения в заказе',
+        entity_type: 'order',
+        entity_id: orderId,
+        legal_entity: settings.legalEntity,
+        created_by: userName || null,
+        target_user: oldOrder.created_by,
+        read_by: userName ? JSON.stringify([userName]) : '[]',
+      });
+    } catch(e) {}
+  }
 
   return { orderId, itemsCount: itemsWithOrder.length };
 }

@@ -10,14 +10,6 @@
         <input v-model="form.short_name" placeholder="Краткое наименование*" />
         <input v-model="form.full_name" placeholder="Полное наименование" />
 
-        <label>Юр. лицо
-          <select v-model="form.legal_entity">
-            <option value="Бургер БК">Бургер БК</option>
-            <option value="Воглия Матта">Воглия Матта</option>
-            <option value="Пицца Стар">Пицца Стар</option>
-          </select>
-        </label>
-
         <div style="margin-top:12px;font-size:13px;font-weight:600;color:#555;margin-bottom:6px;">Контакты</div>
         <div class="modal-row-2">
           <div class="modal-field">
@@ -63,25 +55,27 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
+import { useFormDirty } from '@/composables/useFormDirty.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 
+const orderStore = useOrderStore();
 
 const props = defineProps({
   supplier: { type: Object, default: null },
-  legalEntity: { type: String, default: 'Бургер БК' },
 });
 const emit = defineEmits(['close', 'saved']);
 const toast = useToastStore();
 const saving = ref(false);
 const showConfirmClose = ref(false);
 const oldShortName = ref('');
-let initialForm = null;
 
 const form = ref({
-  short_name: '', full_name: '', legal_entity: props.legalEntity,
+  short_name: '', full_name: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
   whatsapp: '', telegram: '', viber: '', email: '',
 });
+const { saveSnapshot, isDirty } = useFormDirty(form);
 
 function onKey(e) {
   if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
@@ -92,7 +86,7 @@ onMounted(() => {
     Object.assign(form.value, {
       short_name: props.supplier.short_name || '',
       full_name: props.supplier.full_name || '',
-      legal_entity: props.supplier.legal_entity || props.legalEntity,
+      legal_entity: props.supplier.legal_entity || form.value.legal_entity,
       whatsapp: props.supplier.whatsapp || '',
       telegram: props.supplier.telegram || '',
       viber: props.supplier.viber || '',
@@ -100,13 +94,9 @@ onMounted(() => {
     });
     oldShortName.value = props.supplier.short_name || '';
   }
-  initialForm = JSON.stringify(form.value);
+  saveSnapshot();
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
-
-function isDirty() {
-  return JSON.stringify(form.value) !== initialForm;
-}
 
 function tryClose() {
   if (isDirty()) { showConfirmClose.value = true; return; }

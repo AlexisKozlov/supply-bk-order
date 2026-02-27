@@ -73,13 +73,6 @@
             <option value="true">Да</option>
           </select>
         </div>
-        <div class="pf-group pf-narrow">
-          <label>Запас</label>
-          <select :value="orderStore.settings.showStockColumn ? 'true' : 'false'" @change="(e) => { orderStore.settings.showStockColumn = e.target.value === 'true'; draftStore.save(); }" :disabled="orderStore.viewOnlyMode">
-            <option value="true">Показать</option>
-            <option value="false">Скрыть</option>
-          </select>
-        </div>
         <div v-if="showCollapseHint" class="params-collapse-hint" @click="settingsExpanded = false; showCollapseHint = false;">
           Параметры заполнены — нажмите чтобы свернуть ▲
         </div>
@@ -110,7 +103,7 @@
         <button class="btn small" :disabled="!orderStore.canRedo || orderStore.viewOnlyMode" @click="orderStore.redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
         <button class="compact-toggle" :class="{ active: compactMode }" @click="toggleCompact" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
-        <button class="btn small" :disabled="orderStore.viewOnlyMode" @click="orderStore.applyAllCalculated" title="Все рассчитанные → В заказ">Все→Заказ</button>
+        <button class="btn small" :disabled="orderStore.viewOnlyMode" @click="orderStore.applyAllCalculated" title="Все рассчитанные → В заказ"><BkIcon name="add" size="sm"/> Все→Заказ</button>
         <button class="btn small" :disabled="fillLoading || orderStore.viewOnlyMode" @click="fillFromLastOrder" title="Загрузить расход из последнего заказа">
           <BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расход
         </button>
@@ -120,7 +113,7 @@
         <button class="btn small" :disabled="importLoading || orderStore.viewOnlyMode" @click="importFromExcel" title="Импорт из файла">
           <BkIcon v-if="importLoading" name="loading" size="sm"/><BkIcon v-else name="import" size="sm"/> Импорт
         </button>
-        <button class="btn small danger" :disabled="orderStore.viewOnlyMode" @click="clearOrder" title="Очистить данные">Очистить</button>
+        <button class="btn small danger" :disabled="orderStore.viewOnlyMode" @click="clearOrder" title="Очистить данные"><BkIcon name="delete" size="sm"/> Очистить</button>
       </div>
     </div>
 
@@ -797,7 +790,7 @@ function buildOrderText() {
     const rb = Math.ceil(physBoxes); if (rb <= 0) return null;
     const pieces = rb * qpb;
     const unit = item.unitOfMeasure || 'шт';
-    return { text: `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit, qpb };
+    return { text: `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit, qpb };
   }).filter(Boolean);
   return { lines, deliveryDate };
 }
@@ -832,7 +825,7 @@ async function share(channel) {
     if (rb <= 0) return null;
     const pieces = rb * qpb;
     const unit = item.unitOfMeasure || 'шт';
-    return `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`;
+    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`;
   }).filter(Boolean);
   if (!lines.length) { toast.error('Нет позиций для отправки', ''); return; }
   const le       = orderStore.settings.legalEntity || '';

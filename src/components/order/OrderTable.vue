@@ -8,7 +8,7 @@
           <th>Расход<br><small>(за период)</small></th>
           <th>Остаток</th>
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
-          <th v-if="settings.showStockColumn" class="stock-col">Запас</th>
+          <th class="stock-col">Запас</th>
           <th>Расчёт<br><small>заказа</small></th>
           <th>
             Заказ<br>
@@ -24,7 +24,7 @@
           <th>Расход</th>
           <th>Остаток</th>
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
-          <th v-if="settings.showStockColumn" class="stock-col">Запас</th>
+          <th class="stock-col">Запас</th>
           <th>Расчёт</th>
           <th>{{ settings.unit === 'boxes' ? 'Кор/Физ' : 'Шт/Кор' }}</th>
           <th>До</th>
@@ -97,9 +97,8 @@ const orderStore = useOrderStore();
 const draftStore = useDraftStore();
 const settings = computed(() => orderStore.settings);
 const colSpan = computed(() => {
-  let c = 8; // базовые колонки
+  let c = 9; // базовые колонки (включая запас)
   if (settings.value.hasTransit) c++;
-  if (settings.value.showStockColumn) c++;
   return c;
 });
 

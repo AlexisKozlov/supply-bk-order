@@ -61,8 +61,7 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="order in sortedOrders" :key="order.id">
-            <tr class="ht-row" :class="{ 'ht-row-expanded': expandedOrders.has(order.id) }" @click="toggleItems(order.id)">
+          <tr v-for="order in sortedOrders" :key="order.id" class="ht-row" :class="{ 'ht-row-selected': drawerOrder?.id === order.id }" @click="openOrderDrawer(order)">
               <td class="ht-td ht-td-date">
                 <span class="ht-date-day">{{ dayOfWeek(order.delivery_date) }}</span>
                 <span class="ht-date-main">{{ formatDateShort(order.delivery_date) }}</span>
@@ -83,29 +82,6 @@
                 <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
-            <!-- Expanded: items (note removed — already shown in table column) -->
-            <tr v-if="expandedOrders.has(order.id)" class="ht-detail-row">
-              <td :colspan="6" class="ht-detail-cell">
-                <div class="ht-detail-inner">
-                  <table class="ht-items-table" v-if="orderItemsFiltered(order).length">
-                    <thead>
-                      <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(item, idx) in orderItemsFiltered(order)" :key="item.sku || item.name">
-                        <td class="ht-items-num">{{ idx + 1 }}</td>
-                        <td class="ht-items-sku">{{ item.sku || '—' }}</td>
-                        <td class="ht-items-name">{{ item.name }}</td>
-                        <td class="ht-items-qty">{{ Math.round(item.qty_boxes) }}</td>
-                        <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1) * (item.multiplicity || 1))) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div v-else style="color:var(--text-muted);font-size:12px;padding:8px;">Нет позиций с заказом</div>
-                </div>
-              </td>
-            </tr>
-          </template>
         </tbody>
       </table>
       <div class="ht-load-more-wrap">
@@ -131,8 +107,7 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="plan in filteredPlans" :key="plan.id">
-            <tr class="ht-row" @click="togglePlanItems(plan.id)">
+          <tr v-for="plan in filteredPlans" :key="plan.id" class="ht-row" :class="{ 'ht-row-selected': drawerPlan?.id === plan.id }" @click="openPlanDrawer(plan)">
               <td class="ht-td ht-td-supplier">
                 <span class="ht-supplier-dot" :style="{ background: supplierColor(plan.supplier) }"></span>
                 {{ plan.supplier || '—' }}
@@ -149,17 +124,6 @@
                 <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deletePlan(plan)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
-            <tr v-if="expandedPlans.has(plan.id)" class="ht-detail-row">
-              <td :colspan="6" class="ht-detail-cell">
-                <div class="ht-detail-inner">
-                  <div v-for="item in planItemsFiltered(plan)" :key="item.sku || item.name" style="font-size:12px;padding:2px 0;">
-                    <b v-if="item.sku">{{ item.sku }}</b> {{ item.name }} — {{ planItemTotalBoxes(item) }} кор
-                  </div>
-                  <div v-if="!planItemsFiltered(plan).length" style="color:var(--text-muted);font-size:12px;">Нет позиций</div>
-                </div>
-              </td>
-            </tr>
-          </template>
         </tbody>
       </table>
       <div class="ht-load-more-wrap">
@@ -216,14 +180,86 @@
       v-if="confirmModal.show"
       :title="confirmModal.title"
       :message="confirmModal.message"
-      @confirm="confirmModal.resolve(true); confirmModal.show = false"
-      @cancel="confirmModal.resolve(false); confirmModal.show = false"
+      @confirm="onConfirmOk"
+      @cancel="onConfirmCancel"
     />
+
+    <!-- Order Drawer -->
+    <Teleport to="body">
+      <Transition name="drawer">
+        <div v-if="drawerOrder" class="drawer-backdrop" @click.self="drawerOrder = null">
+          <div class="drawer-panel">
+            <div class="drawer-header">
+              <div>
+                <div class="drawer-title">{{ drawerOrder.supplier }}</div>
+                <div class="drawer-subtitle">
+                  <span class="ht-date-day">{{ dayOfWeek(drawerOrder.delivery_date) }}</span>
+                  {{ formatDateShort(drawerOrder.delivery_date) }}
+                  <span v-if="drawerOrder.created_by" class="drawer-author">{{ drawerOrder.created_by }}</span>
+                </div>
+              </div>
+              <button class="drawer-close" @click="drawerOrder = null"><BkIcon name="close" size="sm"/></button>
+            </div>
+            <div v-if="drawerOrder.note" class="drawer-note">{{ drawerOrder.note }}</div>
+            <div class="drawer-body">
+              <table class="ht-items-table" v-if="orderItemsFiltered(drawerOrder).length">
+                <thead>
+                  <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(item, idx) in orderItemsFiltered(drawerOrder)" :key="item.sku || item.name">
+                    <td class="ht-items-num">{{ idx + 1 }}</td>
+                    <td class="ht-items-sku">{{ item.sku || '—' }}</td>
+                    <td class="ht-items-name">{{ item.name }}</td>
+                    <td class="ht-items-qty">{{ Math.round(item.qty_boxes) }}</td>
+                    <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1) * (item.multiplicity || 1))) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="drawer-empty">Нет позиций с заказом</div>
+            </div>
+            <div class="drawer-footer">
+              <span class="drawer-count">{{ orderItemsFiltered(drawerOrder).length }} позиций</span>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- Plan Drawer -->
+      <Transition name="drawer">
+        <div v-if="drawerPlan" class="drawer-backdrop" @click.self="drawerPlan = null">
+          <div class="drawer-panel">
+            <div class="drawer-header">
+              <div>
+                <div class="drawer-title">{{ drawerPlan.supplier || '—' }}</div>
+                <div class="drawer-subtitle">
+                  {{ drawerPlan.period_type === 'weeks' ? drawerPlan.period_count + ' нед.' : drawerPlan.period_count + ' мес.' }}
+                  <span v-if="drawerPlan.created_by" class="drawer-author">{{ drawerPlan.created_by }}</span>
+                </div>
+              </div>
+              <button class="drawer-close" @click="drawerPlan = null"><BkIcon name="close" size="sm"/></button>
+            </div>
+            <div v-if="drawerPlan.note" class="drawer-note">{{ drawerPlan.note }}</div>
+            <div class="drawer-body">
+              <div v-for="item in planItemsFiltered(drawerPlan)" :key="item.sku || item.name" class="drawer-plan-item">
+                <span class="drawer-plan-sku" v-if="item.sku">{{ item.sku }}</span>
+                <span class="drawer-plan-name">{{ item.name }}</span>
+                <span class="drawer-plan-qty">{{ planItemTotalBoxes(item) }} кор</span>
+              </div>
+              <div v-if="!planItemsFiltered(drawerPlan).length" class="drawer-empty">Нет позиций</div>
+            </div>
+            <div class="drawer-footer">
+              <span class="drawer-count">{{ planItemsFiltered(drawerPlan).length }} позиций</span>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useHistoryStore } from '@/stores/historyStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -234,6 +270,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { copyToClipboard, getQpb, getMultiplicity } from '@/lib/utils.js';
+import { useConfirm } from '@/composables/useConfirm.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -251,10 +288,10 @@ const filterSupplier    = ref('');
 const filterAuthor      = ref('');
 const filterDateFrom    = ref('');
 const filterDateTo      = ref('');
-const expandedOrders    = ref(new Set());
-const expandedPlans     = ref(new Set());
+const drawerOrder       = ref(null);
+const drawerPlan        = ref(null);
 const logModal          = ref({ show: false, loading: false, entries: [], type: '' });
-const confirmModal      = ref({ show: false, title: '', message: '', resolve: null });
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
 const sortKey = ref('delivery_date');
 const sortAsc = ref(false);
@@ -353,8 +390,18 @@ async function openLogModal(entityId, entityType) {
   logModal.value.loading = false;
 }
 
+// --- Drawer Escape ---
+function onKey(e) {
+  if (e.key === 'Escape') {
+    if (drawerOrder.value) { drawerOrder.value = null; return; }
+    if (drawerPlan.value) { drawerPlan.value = null; }
+  }
+}
+onUnmounted(() => document.removeEventListener('keydown', onKey));
+
 // --- Data ---
 onMounted(async () => {
+  document.addEventListener('keydown', onKey);
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   await load();
 });
@@ -373,11 +420,10 @@ async function loadMorePlansBtn() {
 }
 
 // --- Actions ---
-async function toggleItems(id) {
-  if (expandedOrders.value.has(id)) { expandedOrders.value.delete(id); return; }
-  expandedOrders.value.add(id);
+async function openOrderDrawer(order) {
+  if (drawerOrder.value?.id === order.id) { drawerOrder.value = null; return; }
+  drawerOrder.value = order;
   // Подгрузка multiplicity из products для старых заказов (fallback)
-  const order = historyStore.orders.find(o => o.id === id);
   if (!order?.order_items?.length) return;
   const needFetch = order.order_items.some(i => i.multiplicity == null && i.sku);
   if (!needFetch) return;
@@ -388,7 +434,10 @@ async function toggleItems(id) {
   const multMap = Object.fromEntries(data.map(p => [p.sku, p.multiplicity || 1]));
   order.order_items.forEach(i => { if (i.multiplicity == null && i.sku) i.multiplicity = multMap[i.sku] || 1; });
 }
-function togglePlanItems(id) { expandedPlans.value.has(id) ? expandedPlans.value.delete(id) : expandedPlans.value.add(id); }
+function openPlanDrawer(plan) {
+  if (drawerPlan.value?.id === plan.id) { drawerPlan.value = null; return; }
+  drawerPlan.value = plan;
+}
 
 async function viewOrder(order) {
   const ok = await confirmAction('Загрузить заказ?', `${order.supplier} от ${formatDate(order.delivery_date)} — просмотр`);
@@ -428,7 +477,7 @@ async function copyOrder(order) {
     const mult = prod.multiplicity || 1;
     const pieces = Math.round(boxes * qpb * mult);
     const unit = prod.unit_of_measure || 'шт';
-    return `${item.sku ? item.sku + '  ' : ''}${item.name}, ${nf.format(qpb)} ${unit} - ${boxes} коробок (${nf.format(pieces)} ${unit})`;
+    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${boxes} коробок (${nf.format(pieces)} ${unit})`;
   }).filter(Boolean);
   if (!lines.length) { toast.error('Нет позиций', ''); return; }
   const text = `Добрый день!\nПросьба отгрузить товар для ${order.legal_entity}, дата поставки - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;
@@ -457,7 +506,6 @@ function planItemsFiltered(plan) {
   return items.filter(i => (i.plan || []).some(p => p.order_boxes > 0));
 }
 function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0); }
-function confirmAction(title, message) { return new Promise(resolve => { confirmModal.value = { show: true, title, message, resolve }; }); }
 </script>
 
 <style scoped>
@@ -513,7 +561,7 @@ function confirmAction(title, message) { return new Promise(resolve => { confirm
 /* Rows */
 .ht-row { cursor: pointer; transition: background 0.1s; border-bottom: 1px solid var(--border-light); }
 .ht-row:hover { background: #FFFBF5; }
-.ht-row-expanded { background: #FFF9F0; }
+.ht-row-selected { background: #FFF3E0; }
 .ht-row:last-child { border-bottom: none; }
 
 /* Cells */
@@ -535,13 +583,55 @@ function confirmAction(title, message) { return new Promise(resolve => { confirm
 .ht-act:hover { opacity: 1; background: var(--bg); border-color: var(--border); }
 .ht-act-danger:hover { background: #FEF2F2; }
 
-/* Detail row */
-.ht-detail-row td { padding: 0 !important; }
-.ht-detail-cell { background: #FAFAF7; }
-.ht-detail-inner { padding: 8px 16px 12px; border-top: 1px dashed var(--border); }
+/* ═══ DRAWER ═══ */
+.drawer-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end;
+}
+.drawer-panel {
+  width: 420px; max-width: 90vw; height: 100%;
+  background: white; box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.drawer-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 20px 20px 12px; border-bottom: 1px solid var(--border-light);
+}
+.drawer-title { font-size: 16px; font-weight: 700; color: var(--bk-brown); }
+.drawer-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.drawer-author { padding: 1px 8px; background: var(--bg); border-radius: 10px; font-weight: 600; font-size: 11px; color: var(--text-secondary); }
+.drawer-close {
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 6px; cursor: pointer; opacity: 0.6; transition: all 0.15s; flex-shrink: 0;
+}
+.drawer-close:hover { opacity: 1; background: var(--bg); }
+.drawer-note {
+  padding: 8px 20px; font-size: 12px; color: var(--text-secondary);
+  font-style: italic; background: #FAFAF7; border-bottom: 1px solid var(--border-light);
+}
+.drawer-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+.drawer-empty { color: var(--text-muted); font-size: 12px; padding: 16px 4px; text-align: center; }
+.drawer-footer {
+  padding: 10px 20px; border-top: 1px solid var(--border-light);
+  font-size: 12px; color: var(--text-muted); font-weight: 500;
+}
+.drawer-count { font-weight: 600; }
 
-/* Note */
-.ht-note { font-size: 12px; color: var(--text-secondary); font-style: italic; padding: 4px 0 8px; display: flex; align-items: center; gap: 4px; }
+/* Drawer plan items */
+.drawer-plan-item {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 4px 0; border-bottom: 1px solid var(--border-light); font-size: 12px;
+}
+.drawer-plan-item:last-child { border-bottom: none; }
+.drawer-plan-sku { font-weight: 700; color: var(--text-muted); font-size: 11px; min-width: 60px; }
+.drawer-plan-name { flex: 1; color: var(--text); }
+.drawer-plan-qty { font-weight: 700; color: var(--bk-brown); white-space: nowrap; }
+
+/* Drawer transition */
+.drawer-enter-active, .drawer-leave-active { transition: opacity 0.2s ease; }
+.drawer-enter-active .drawer-panel, .drawer-leave-active .drawer-panel { transition: transform 0.25s ease; }
+.drawer-enter-from, .drawer-leave-to { opacity: 0; }
+.drawer-enter-from .drawer-panel, .drawer-leave-to .drawer-panel { transform: translateX(100%); }
 
 /* Items table */
 .ht-items-table { width: 100%; border-collapse: collapse; font-size: 12px; }

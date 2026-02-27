@@ -154,4 +154,27 @@ function doConfirm() { emit('confirm', note.value.trim()); }
 .sm-note-section input:focus { border-color: var(--bk-orange); outline: none; }
 
 .sm-actions { display: flex; gap: 8px; }
+
+@media (max-width: 768px) {
+  .sm-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .sm-table-wrap {
+    overflow-x: auto;
+  }
+  .sm-table {
+    min-width: 400px;
+  }
+  .sm-actions {
+    flex-direction: column;
+  }
+  .sm-note-section input {
+    font-size: 16px;
+  }
+}
+@media (max-width: 480px) {
+  .sm-cards {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

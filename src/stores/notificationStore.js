@@ -4,28 +4,50 @@ import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
 const POLL_INTERVAL = 60000;
+const BROADCAST_POLL_INTERVAL = 15000;
 
 export const useNotificationStore = defineStore('notification', () => {
   const notifications = ref([]);
   const loading = ref(false);
   let pollTimer = null;
+  let broadcastTimer = null;
+
+  const activeBroadcasts = ref([]);
+  const _savedDismissed = JSON.parse(localStorage.getItem('bk_broadcast_dismissed') || '[]');
+  const broadcastDismissed = ref(new Set(_savedDismissed));
+
+  const sessionStartTime = ref(null);
 
   const userStore = useUserStore();
+
+  function isDeletedForUser(n) {
+    const name = userStore.currentUser?.name;
+    if (!name) return false;
+    const deletedBy = typeof n.deleted_by === 'string' ? JSON.parse(n.deleted_by || '[]') : (n.deleted_by || []);
+    return deletedBy.includes(name);
+  }
+
+  const visibleNotifications = computed(() => {
+    return notifications.value.filter(n => !isDeletedForUser(n));
+  });
 
   const unreadCount = computed(() => {
     const name = userStore.currentUser?.name;
     if (!name) return 0;
-    return notifications.value.filter(n => {
+    return visibleNotifications.value.filter(n => {
       const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
       return !readBy.includes(name);
     }).length;
   });
 
   async function load() {
+    const name = userStore.currentUser?.name;
+    if (!name) return;
     loading.value = true;
     try {
       const { data } = await db.from('notifications')
         .select('*')
+        .or(`target_user.eq.${name},type.eq.broadcast`)
         .order('created_at', { ascending: false })
         .limit(50);
       notifications.value = data || [];
@@ -47,7 +69,7 @@ export const useNotificationStore = defineStore('notification', () => {
           const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
           if (!readBy.includes(name)) {
             readBy.push(name);
-            n.read_by = readBy;
+            n.read_by = JSON.stringify(readBy);
           }
         }
       });
@@ -59,17 +81,82 @@ export const useNotificationStore = defineStore('notification', () => {
   async function markAllRead() {
     const name = userStore.currentUser?.name;
     if (!name) return;
-    const unreadIds = notifications.value.filter(n => {
+    const unreadIds = visibleNotifications.value.filter(n => {
       const readBy = typeof n.read_by === 'string' ? JSON.parse(n.read_by || '[]') : (n.read_by || []);
       return !readBy.includes(name);
     }).map(n => n.id);
     if (unreadIds.length) await markRead(unreadIds);
   }
 
+  async function deleteNotification(id) {
+    const name = userStore.currentUser?.name;
+    if (!name) return;
+    try {
+      await db.rpc('delete_notification_for_user', { id, user_name: name });
+      // Обновляем локально — добавляем юзера в deleted_by
+      const n = notifications.value.find(n => n.id === id);
+      if (n) {
+        const deletedBy = typeof n.deleted_by === 'string' ? JSON.parse(n.deleted_by || '[]') : (n.deleted_by || []);
+        deletedBy.push(name);
+        n.deleted_by = JSON.stringify(deletedBy);
+      }
+    } catch (e) {
+      console.error('Ошибка удаления уведомления:', e);
+    }
+  }
+
+  async function deleteAll() {
+    const name = userStore.currentUser?.name;
+    if (!name) return;
+    try {
+      await db.rpc('delete_all_notifications_for_user', { user_name: name });
+      // Обновляем локально — помечаем все видимые как удалённые
+      notifications.value.forEach(n => {
+        if (!isDeletedForUser(n)) {
+          const deletedBy = typeof n.deleted_by === 'string' ? JSON.parse(n.deleted_by || '[]') : (n.deleted_by || []);
+          deletedBy.push(name);
+          n.deleted_by = JSON.stringify(deletedBy);
+        }
+      });
+    } catch (e) {
+      console.error('Ошибка удаления всех уведомлений:', e);
+    }
+  }
+
+  const currentBroadcast = computed(() => {
+    if (!sessionStartTime.value) return null;
+    return activeBroadcasts.value.find(b => {
+      if (broadcastDismissed.value.has(b.id)) return false;
+      // Показывать модалку только для broadcast, отправленных после входа в приложение
+      const createdAt = new Date(b.created_at).getTime();
+      return createdAt > sessionStartTime.value;
+    }) || null;
+  });
+
+  async function checkBroadcasts() {
+    const name = userStore.currentUser?.name;
+    if (!name) return;
+    try {
+      const { data } = await db.rpc('get_active_broadcasts', { user_name: name });
+      activeBroadcasts.value = data || [];
+    } catch (e) {
+      console.error('Ошибка проверки broadcast:', e);
+    }
+  }
+
+  async function dismissBroadcast(id) {
+    broadcastDismissed.value.add(id);
+    localStorage.setItem('bk_broadcast_dismissed', JSON.stringify([...broadcastDismissed.value]));
+    try { await markRead([id]); } catch (e) { console.error('Ошибка отметки broadcast:', e); }
+  }
+
   function startPolling() {
     stopPolling();
+    sessionStartTime.value = Date.now();
     load();
+    checkBroadcasts();
     pollTimer = setInterval(() => load(), POLL_INTERVAL);
+    broadcastTimer = setInterval(() => checkBroadcasts(), BROADCAST_POLL_INTERVAL);
   }
 
   function stopPolling() {
@@ -77,7 +164,11 @@ export const useNotificationStore = defineStore('notification', () => {
       clearInterval(pollTimer);
       pollTimer = null;
     }
+    if (broadcastTimer) {
+      clearInterval(broadcastTimer);
+      broadcastTimer = null;
+    }
   }
 
-  return { notifications, loading, unreadCount, load, markRead, markAllRead, startPolling, stopPolling };
+  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling };
 });

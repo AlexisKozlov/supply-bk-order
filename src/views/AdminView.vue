@@ -17,6 +17,9 @@
         <BkIcon name="warning" size="sm"/> Тех. работы
         <span v-if="maintenanceOn" class="adm-tab-dot"></span>
       </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'broadcast' }" @click="activeTab = 'broadcast'">
+        <BkIcon name="bell" size="sm"/> Рассылка
+      </button>
     </div>
 
     <!-- ═══ Пользователи ═══ -->
@@ -130,6 +133,50 @@
       </div>
     </div>
 
+    <!-- ═══ Рассылка ═══ -->
+    <div v-if="activeTab === 'broadcast'" class="adm-section">
+      <div class="adm-maint-card">
+        <div class="adm-maint-icon">
+          <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
+            <circle cx="24" cy="24" r="22" fill="rgba(253,189,16,0.08)" stroke="#FDBD10" stroke-width="2"/>
+            <path d="M24 12C24 12 12 18 12 28c0 3 0 5 1.5 6.5h21c1.5-1.5 1.5-3.5 1.5-6.5 0-10-12-16-12-16z" stroke="#FDBD10" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <rect x="20" y="34.5" width="8" height="3" rx="1.5" fill="#FDBD10" opacity=".5"/>
+            <path d="M21 37.5a3 3 0 006 0" stroke="#FDBD10" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="adm-maint-body">
+          <h3 class="adm-maint-title">Рассылка уведомлений</h3>
+          <p class="adm-maint-desc">
+            Отправьте важное сообщение всем сотрудникам. Оно появится как всплывающее окно, которое нельзя пропустить.
+          </p>
+        </div>
+      </div>
+
+      <div class="adm-maint-msg-card" style="margin-top:16px;">
+        <h4 class="adm-maint-msg-title">Новое сообщение</h4>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <input v-model="bcTitle" class="adm-maint-textarea" style="resize:none;height:auto;padding:10px 14px;" placeholder="Заголовок (необязательно)" />
+          <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения для всех сотрудников..."></textarea>
+        </div>
+        <button class="btn primary" style="margin-top:12px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim()">
+          {{ bcSending ? 'Отправка...' : 'Отправить всем' }}
+        </button>
+      </div>
+
+      <div class="adm-maint-msg-card" style="margin-top:16px;">
+        <h4 class="adm-maint-msg-title">История рассылок</h4>
+        <div v-if="bcHistoryLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
+        <div v-else-if="!bcHistory.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Ещё не было рассылок</div>
+        <div v-else style="display:flex;flex-direction:column;gap:8px;">
+          <div v-for="b in bcHistory" :key="b.id" class="bc-history-item">
+            <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
+            <div class="bc-history-msg">{{ b.message }}</div>
+            <div class="bc-history-meta">{{ b.created_by }} &middot; {{ formatBcDate(b.created_at) }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ Модалка пользователя ═══ -->
     <Teleport to="body">
       <div v-if="userModal.show" class="modal" @click.self="userModal.show = false">
@@ -191,19 +238,21 @@
     </Teleport>
 
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
-      @confirm="confirmModal.resolve(true); confirmModal.show = false"
-      @cancel="confirmModal.resolve(false); confirmModal.show = false" />
+      @confirm="onConfirmOk"
+      @cancel="onConfirmCancel" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import { useConfirm } from '@/composables/useConfirm.js';
 
 const userStore = useUserStore();
 const toast = useToastStore();
@@ -213,16 +262,23 @@ const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);
 
-const allEntities = ['Бургер БК', 'Воглия Матта', 'Пицца Стар'];
+const allEntities = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
 
 const userModal = ref({ show: false, user: null });
 const form = ref({ name: '', password: '', role: 'user', display_role: '', legal_entities: [] });
-const confirmModal = ref({ show: false, title: '', message: '', resolve: null });
+const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
 const maintenanceOn = ref(false);
 const maintenanceSaving = ref(false);
 const maintenanceMsg = ref('');
 const maintenanceMsgSaving = ref(false);
+
+// ═══ Broadcast ═══
+const bcTitle = ref('');
+const bcMessage = ref('');
+const bcSending = ref(false);
+const bcHistory = ref([]);
+const bcHistoryLoading = ref(false);
 
 // ═══ Онлайн-пользователи ═══
 const onlineUsers = ref([]);
@@ -245,16 +301,42 @@ async function loadOnlineUsers() {
   finally { onlineLoading.value = false; }
 }
 
-function formatOnlineTime(str) {
-  if (!str) return '';
-  // MySQL возвращает datetime без таймзоны — сервер в UTC+3 (Москва)
-  const d = new Date(str.replace(' ', 'T') + '+03:00');
-  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 10) return 'только что';
-  if (diff < 60) return `${diff} сек назад`;
-  if (diff < 120) return '1 мин назад';
-  return `${Math.floor(diff / 60)} мин назад`;
+const formatOnlineTime = formatMoscowRelative;
+
+async function sendBroadcast() {
+  if (!bcMessage.value.trim()) return;
+  bcSending.value = true;
+  try {
+    const { data } = await db.rpc('send_broadcast', {
+      user_name: userStore.currentUser.name,
+      title: bcTitle.value.trim() || 'Важное сообщение',
+      message: bcMessage.value.trim(),
+    });
+    if (data?.success) {
+      toast.success('Отправлено', 'Сообщение отправлено всем пользователям');
+      bcTitle.value = '';
+      bcMessage.value = '';
+      loadBcHistory();
+    } else {
+      toast.error('Ошибка', data?.error || 'Не удалось отправить');
+    }
+  } catch {
+    toast.error('Ошибка', 'Не удалось отправить сообщение');
+  } finally {
+    bcSending.value = false;
+  }
 }
+
+async function loadBcHistory() {
+  bcHistoryLoading.value = true;
+  try {
+    const { data } = await db.from('notifications').select('*').eq('type', 'broadcast').order('created_at', { ascending: false }).limit(20);
+    bcHistory.value = data || [];
+  } catch { /* noop */ }
+  finally { bcHistoryLoading.value = false; }
+}
+
+const formatBcDate = formatMoscowDateTime;
 
 watch(activeTab, (tab) => {
   if (tab === 'online') {
@@ -262,6 +344,9 @@ watch(activeTab, (tab) => {
     onlineTimer = setInterval(loadOnlineUsers, 15000);
   } else {
     if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
+  }
+  if (tab === 'broadcast') {
+    loadBcHistory();
   }
 });
 
@@ -279,7 +364,7 @@ function parseLe(val) {
 }
 
 function shortEntity(le) {
-  const map = { 'Бургер БК': 'БК', 'Воглия Матта': 'ВМ', 'Пицца Стар': 'ПС' };
+  const map = { 'ООО "Бургер БК"': 'БК', 'ООО "Воглия Матта"': 'ВМ', 'ООО "Пицца Стар"': 'ПС' };
   return map[le] || le;
 }
 
@@ -369,9 +454,7 @@ async function saveUser() {
 
 async function deleteUser(u) {
   if (u.name === userStore.currentUser?.name) { toast.error('Нельзя удалить себя', ''); return; }
-  const ok = await new Promise(r => {
-    confirmModal.value = { show: true, title: 'Удалить пользователя?', message: `Пользователь «${u.name}» будет удалён безвозвратно.`, resolve: r };
-  });
+  const ok = await confirmAction('Удалить пользователя?', `Пользователь «${u.name}» будет удалён безвозвратно.`);
   if (!ok) return;
   const { error } = await db.from('users').delete().eq('id', u.id);
   if (error) { toast.error('Ошибка', ''); return; }
@@ -582,6 +665,15 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 .adm-online-time {
   font-size: 12px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap;
 }
+
+/* ═══ Broadcast History ═══ */
+.bc-history-item {
+  padding: 12px 14px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--border-light);
+}
+.bc-history-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.bc-history-msg { font-size: 13px; color: var(--text-secondary); line-height: 1.5; white-space: pre-line; }
+.bc-history-meta { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 
 /* ═══ Responsive ═══ */
 @media (max-width: 600px) {
