@@ -307,7 +307,7 @@ const filteredRestaurants = computed(() => {
     const q = searchQuery.value.toLowerCase();
     list = list.filter(r =>
       String(r.number).includes(q) ||
-      r.address.toLowerCase().includes(q)
+      (r.address || '').toLowerCase().includes(q)
     );
   }
   return list;
@@ -352,7 +352,7 @@ function dayRestaurants(day) {
     const q = searchQuery.value.toLowerCase();
     list = list.filter(r =>
       String(r.number).includes(q) ||
-      r.address.toLowerCase().includes(q)
+      (r.address || '').toLowerCase().includes(q)
     );
   }
   return list;
@@ -360,6 +360,7 @@ function dayRestaurants(day) {
 
 // ═══ Inline edit (table — dblclick) ═══
 const editingCell = ref(null);
+let savingEdit = false;
 
 function startEdit(restaurant, day) {
   if (!canEdit.value) return;
@@ -376,15 +377,18 @@ function startEdit(restaurant, day) {
 }
 
 async function saveEdit() {
-  if (!editingCell.value) return;
+  if (!editingCell.value || savingEdit) return;
+  savingEdit = true;
   const { restaurantId, day, value } = editingCell.value;
   const oldValue = getTime({ id: restaurantId }, day);
   editingCell.value = null;
-  if (value === oldValue) return;
+  if (value === oldValue) { savingEdit = false; return; }
   try {
     await store.saveScheduleCell(restaurantId, day, value);
   } catch (e) {
     toastStore.error('Ошибка сохранения');
+  } finally {
+    savingEdit = false;
   }
 }
 
@@ -394,6 +398,7 @@ function cancelEdit() {
 
 // ═══ Drag & drop (move delivery between days) ═══
 const dragState = ref(null);
+const dragging = ref(false);
 let longPressTimer = null;
 
 function onPointerDown(e, restaurant, day) {
@@ -430,23 +435,23 @@ function onDragLeave() {
 }
 
 async function onDrop(restaurant, toDay) {
-  if (!dragState.value || dragState.value.rid !== restaurant.id) return;
+  if (!dragState.value || dragState.value.rid !== restaurant.id || dragging.value) return;
   const { fromDay, time } = dragState.value;
   dragState.value = null;
   if (fromDay === toDay || !time) return;
 
+  dragging.value = true;
   try {
-    // Сначала создаём в новом дне (безопасно — данные не теряются)
     await store.saveScheduleCell(restaurant.id, toDay, time);
-    // Только потом удаляем из старого
     await store.saveScheduleCell(restaurant.id, fromDay, '');
     toastStore.success(`${dayNames.find(d => d.num === fromDay)?.short} → ${dayNames.find(d => d.num === toDay)?.short}`);
   } catch (e) {
     console.error('Drag move error:', e);
     toastStore.error('Ошибка переноса');
-    // Перезагружаем данные чтобы вернуть актуальное состояние
     store.invalidate();
     store.load(orderStore.settings.legalEntity);
+  } finally {
+    dragging.value = false;
   }
 }
 
@@ -501,8 +506,13 @@ async function saveCardEdit() {
   }
 }
 
-function exportExcel() {
-  exportScheduleToExcel(filteredRestaurants.value, store.scheduleByRestaurant, store.lastUpdate);
+async function exportExcel() {
+  try {
+    await exportScheduleToExcel(filteredRestaurants.value, store.scheduleByRestaurant, store.lastUpdate);
+  } catch (e) {
+    console.error('Export error:', e);
+    toastStore.error('Ошибка экспорта в Excel');
+  }
 }
 
 function printSchedule() {
@@ -580,8 +590,6 @@ function formatLastUpdate(upd) {
 }
 .ds-view :deep(.pf-main-table) {
   font-size: 12px;
-}
-.ds-view :deep(.pf-main-table) {
   border-collapse: collapse;
 }
 .ds-view :deep(.pf-mth) {

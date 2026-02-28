@@ -290,14 +290,14 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
         const time = rSched?.get(d)?.delivery_time || '';
         setCell(row, 2 + d, time || '—', sDay(!!time, stripe));
       }
-      setCell(row, 9, '', sEmpty(stripe));
+      setCell(row, 9, r.notes || '', sEmpty(stripe));
 
       row++;
     });
   }
 
-  writeGroup('Минск', minsk);
-  writeGroup('Регионы', regions);
+  if (minsk.length) writeGroup('Минск', minsk);
+  if (regions.length) writeGroup('Регионы', regions);
 
   // Строка итогов
   setCell(row, 0, '', sTotalEmpty);
@@ -333,10 +333,16 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
   // Мержи
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }, // Заголовок
-    { s: { r: 2, c: 0 }, e: { r: 2, c: colCount - 1 } }, // Минск
   ];
-  const regIdx = 3 + minsk.length;
-  ws['!merges'].push({ s: { r: regIdx, c: 0 }, e: { r: regIdx, c: colCount - 1 } }); // Регионы
+  // Мержи групп — динамически по реальным строкам
+  let groupRow = 2; // после заголовка (0) и шапки (1)
+  if (minsk.length) {
+    ws['!merges'].push({ s: { r: groupRow, c: 0 }, e: { r: groupRow, c: colCount - 1 } });
+    groupRow += 1 + minsk.length;
+  }
+  if (regions.length) {
+    ws['!merges'].push({ s: { r: groupRow, c: 0 }, e: { r: groupRow, c: colCount - 1 } });
+  }
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'График доставки');

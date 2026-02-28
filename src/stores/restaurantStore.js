@@ -9,6 +9,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   const loading = ref(false);
   const loaded = ref(false);
   const loadedGroup = ref('');
+  let loadPromise = null;
 
   function entityToGroup(legalEntity) {
     if (legalEntity && legalEntity.includes('Пицца Стар')) return 'PS';
@@ -18,15 +19,26 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   async function load(legalEntity) {
     const group = entityToGroup(legalEntity);
     if (loaded.value && loadedGroup.value === group) return;
+    // Защита от параллельных вызовов
+    if (loading.value && loadPromise) return loadPromise;
     loading.value = true;
+    loadPromise = _doLoad(group);
+    try {
+      await loadPromise;
+    } finally {
+      loadPromise = null;
+    }
+  }
+
+  async function _doLoad(group) {
     try {
       const [rRes, sRes] = await Promise.all([
         db.from('restaurants').select('*').eq('legal_entity_group', group).order('sort_order'),
         db.from('delivery_schedule').select('*'),
       ]);
       if (rRes.error) throw new Error(rRes.error);
+      if (sRes.error) throw new Error(sRes.error);
       restaurants.value = rRes.data || [];
-      // Фильтруем расписание по загруженным ресторанам
       const ids = new Set(restaurants.value.map(r => String(r.id)));
       schedule.value = (sRes.data || []).filter(s => ids.has(String(s.restaurant_id)));
       loaded.value = true;
@@ -55,7 +67,9 @@ export const useRestaurantStore = defineStore('restaurant', () => {
       const rSched = scheduleByRestaurant.value.get(String(r.id));
       if (!rSched) continue;
       for (const [day, s] of rSched) {
-        map.get(day)?.push({ ...r, delivery_time: s.delivery_time, schedule_notes: s.notes });
+        if (day >= 1 && day <= 6) {
+          map.get(day)?.push({ ...r, delivery_time: s.delivery_time, schedule_notes: s.notes });
+        }
       }
     }
     return map;
@@ -88,6 +102,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   }
 
   async function saveScheduleCell(restaurantId, dayOfWeek, deliveryTime) {
+    if (dayOfWeek < 1 || dayOfWeek > 6) throw new Error('Invalid day_of_week');
     const rid = String(restaurantId);
     const existing = schedule.value.find(s => String(s.restaurant_id) === rid && Number(s.day_of_week) === dayOfWeek);
     const meta = _meta();
@@ -115,12 +130,28 @@ export const useRestaurantStore = defineStore('restaurant', () => {
         ...meta,
       });
       if (error) throw new Error(error);
-      if (data) schedule.value.push(data);
+      // data может быть объектом или массивом — нормализуем
+      const record = Array.isArray(data) ? data[0] : data;
+      if (record && record.id) {
+        schedule.value.push(record);
+      } else {
+        // Если API не вернул данные, перезагружаем
+        invalidate();
+        await load();
+      }
     }
   }
 
+  // Только поля таблицы restaurants (без лишних из restaurantsByDay)
+  const restaurantFields = ['id', 'number', 'address', 'city', 'region', 'notes', 'sort_order', 'legal_entity_group', 'is_active'];
+
   async function saveRestaurant(restaurant) {
-    const { id, ...fields } = restaurant;
+    // Убираем лишние поля (delivery_time, schedule_notes и т.д.)
+    const clean = {};
+    for (const key of restaurantFields) {
+      if (key in restaurant) clean[key] = restaurant[key];
+    }
+    const { id, ...fields } = clean;
     if (id) {
       const { data, error } = await db.from('restaurants').update(fields).eq('id', id);
       if (error) throw new Error(error);
@@ -131,8 +162,9 @@ export const useRestaurantStore = defineStore('restaurant', () => {
       fields.sort_order = restaurants.value.length + 1;
       const { data, error } = await db.from('restaurants').insert(fields);
       if (error) throw new Error(error);
-      if (data) restaurants.value.push(data);
-      return data;
+      const record = Array.isArray(data) ? data[0] : data;
+      if (record && record.id) restaurants.value.push(record);
+      return record;
     }
   }
 
