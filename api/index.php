@@ -495,6 +495,31 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    if ($fn === 'replace_restaurant_schedule') {
+        $restaurantId = $body['restaurant_id'] ?? null;
+        $items = $body['items'] ?? [];
+        if (!$restaurantId) respond(['error' => 'restaurant_id required'], 400);
+        if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM `delivery_schedule` WHERE `restaurant_id`=?")->execute([$restaurantId]);
+            foreach ($items as $item) {
+                $day = intval($item['day_of_week'] ?? 0);
+                $time = $item['delivery_time'] ?? null;
+                $notes = $item['notes'] ?? null;
+                if ($day < 1 || $day > 7) continue;
+                $pdo->prepare("INSERT INTO `delivery_schedule` (`restaurant_id`, `day_of_week`, `delivery_time`, `notes`) VALUES (?, ?, ?, ?)")
+                    ->execute([$restaurantId, $day, $time, $notes]);
+            }
+            $pdo->commit();
+            respond(['success' => true]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("replace_restaurant_schedule error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
+
     respond(['error'=>'Not found'], 404);
 }
 
@@ -502,7 +527,7 @@ if ($endpoint === 'rpc') {
 if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule'];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
@@ -618,7 +643,7 @@ if ($method === 'POST') {
     if (!is_array($body) || count($body) === 0) respond(['error' => 'Empty body'], 400);
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }

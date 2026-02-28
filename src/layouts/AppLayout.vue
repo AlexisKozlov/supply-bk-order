@@ -46,6 +46,10 @@
           <span class="sidebar-icon"><BkIcon name="database" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">База данных</span>
         </router-link>
+        <router-link :to="{ name: 'delivery-schedule' }" class="sidebar-item" :class="{ active: currentRoute === 'delivery-schedule' }">
+          <span class="sidebar-icon"><BkIcon name="schedule" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">График доставки</span>
+        </router-link>
       </nav>
 
       <div class="sidebar-section" v-if="!sidebarCollapsed">Отчёты</div>
@@ -376,6 +380,7 @@ const pageNames = {
   database: 'База данных',
   admin: 'Админ панель',
   'plan-fact': 'Доставки',
+  'delivery-schedule': 'График доставки',
 };
 
 function sendHeartbeat() {

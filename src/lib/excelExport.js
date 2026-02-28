@@ -162,3 +162,183 @@ export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {
 
   XLSX.writeFile(wb, `Аналитика_${new Date().toLocaleDateString('ru-RU')}.xlsx`);
 }
+
+/**
+ * Экспорт графика доставки в Excel (как таблица на сайте)
+ */
+export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, lastUpdate) {
+  const XLSX = await import('xlsx-js-style');
+  const date = new Date().toLocaleDateString('ru-RU');
+
+  const colCount = 10; // №, Адрес, Дн, ПН-СБ(6), Комментарий
+  const dayNames = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+
+  // Цвета как на сайте
+  const brown = '502314';
+  const brownBg = 'F0EBE5';
+  const greenBg = 'A5D6A7';
+  const greenText = '1B5E20';
+  const orangeBg = 'FF8732';
+  const redText = 'D62300';
+  const borderColor = 'E8E0D6';
+  const stripeBg = 'FAF8F5';
+
+  const thinBorder = { style: 'thin', color: { rgb: borderColor } };
+  const borders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+
+  // Стили
+  const sHeader = {
+    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 13, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: { top: thinBorder, bottom: thinBorder, left: { style: 'thin', color: { rgb: '3A1A0E' } }, right: { style: 'thin', color: { rgb: '3A1A0E' } } },
+  };
+  const sGroup = {
+    font: { bold: true, sz: 14, color: { rgb: brown }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brownBg } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+  const sEmpty = (stripe) => ({
+    fill: stripe ? { fgColor: { rgb: stripeBg } } : undefined,
+    border: borders,
+  });
+  const sNum = (stripe) => ({
+    font: { bold: true, sz: 15, color: { rgb: redText }, name: 'Calibri' },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    fill: stripe ? { fgColor: { rgb: stripeBg } } : undefined,
+    border: borders,
+  });
+  const sAddr = (stripe) => ({
+    font: { bold: true, sz: 14, color: { rgb: brown }, name: 'Calibri' },
+    alignment: { vertical: 'center' },
+    fill: stripe ? { fgColor: { rgb: stripeBg } } : undefined,
+    border: borders,
+  });
+  const sCnt = (stripe) => ({
+    font: { bold: true, sz: 13, color: { rgb: '666666' }, name: 'Calibri' },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    fill: stripe ? { fgColor: { rgb: stripeBg } } : undefined,
+    border: borders,
+  });
+  const sDay = (hasTime, stripe) => ({
+    font: hasTime ? { bold: true, sz: 13, color: { rgb: greenText }, name: 'Calibri' } : { sz: 13, color: { rgb: 'D5D0CA' }, name: 'Calibri' },
+    fill: hasTime ? { fgColor: { rgb: greenBg } } : (stripe ? { fgColor: { rgb: stripeBg } } : undefined),
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  });
+  const sTotalsLabel = {
+    font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalVal = {
+    font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: orangeBg } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalEmpty = {
+    fill: { fgColor: { rgb: brown } },
+    border: borders,
+  };
+
+  // Разделяем на Минск и регионы
+  const minsk = restaurants.filter(r => r.region === 'Минск');
+  const regions = restaurants.filter(r => r.region !== 'Минск');
+
+  const ws = {};
+  let row = 0;
+
+  function setCell(r, c, val, style) {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    ws[ref] = { v: val, t: typeof val === 'number' ? 'n' : 's', s: style };
+  }
+
+  // Строка 0: заголовок
+  setCell(row, 0, `График доставки — ${date}`, {
+    font: { bold: true, sz: 18, color: { rgb: brown }, name: 'Calibri' },
+    alignment: { vertical: 'center' },
+  });
+  row++;
+
+  // Строка 1: заголовки колонок
+  const headers = ['№', 'Адрес', 'Дн', ...dayNames, 'Комментарий'];
+  headers.forEach((h, c) => setCell(row, c, h, sHeader));
+  row++;
+
+  // Данные с группами
+  function writeGroup(label, items) {
+    // Строка группы
+    for (let c = 0; c < colCount; c++) {
+      setCell(row, c, c === 0 ? `${label} (${items.length})` : '', sGroup);
+    }
+    row++;
+
+    // Строки ресторанов
+    items.forEach((r, idx) => {
+      const stripe = idx % 2 === 1;
+      const rSched = scheduleByRestaurant.get(String(r.id));
+      const cnt = rSched ? rSched.size : 0;
+
+      setCell(row, 0, r.number || '', sNum(stripe));
+      setCell(row, 1, r.address || '', sAddr(stripe));
+      setCell(row, 2, cnt, sCnt(stripe));
+
+      for (let d = 1; d <= 6; d++) {
+        const time = rSched?.get(d)?.delivery_time || '';
+        setCell(row, 2 + d, time || '—', sDay(!!time, stripe));
+      }
+      setCell(row, 9, '', sEmpty(stripe));
+
+      row++;
+    });
+  }
+
+  writeGroup('Минск', minsk);
+  writeGroup('Регионы', regions);
+
+  // Строка итогов
+  setCell(row, 0, '', sTotalEmpty);
+  setCell(row, 1, '', sTotalEmpty);
+  setCell(row, 2, 'Доставок:', sTotalsLabel);
+  for (let d = 1; d <= 6; d++) {
+    let c = 0;
+    for (const r of restaurants) {
+      if (scheduleByRestaurant.get(String(r.id))?.get(d)?.delivery_time) c++;
+    }
+    setCell(row, 2 + d, c, sTotalVal);
+  }
+  setCell(row, 9, '', sTotalEmpty);
+  row++;
+
+  // Диапазон
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: row - 1, c: colCount - 1 } });
+
+  // Ширины колонок
+  ws['!cols'] = [
+    { wch: 7 },   // №
+    { wch: 62 },  // Адрес
+    { wch: 5 },   // Дн
+    { wch: 21 }, { wch: 21 }, { wch: 21 }, { wch: 21 }, { wch: 21 }, { wch: 21 },
+    { wch: 24 },  // Комментарий
+  ];
+
+  // Высота строк
+  ws['!rows'] = [];
+  ws['!rows'][0] = { hpt: 24 }; // Заголовок
+  ws['!rows'][1] = { hpt: 22 }; // Шапка
+
+  // Мержи
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }, // Заголовок
+    { s: { r: 2, c: 0 }, e: { r: 2, c: colCount - 1 } }, // Минск
+  ];
+  const regIdx = 3 + minsk.length;
+  ws['!merges'].push({ s: { r: regIdx, c: 0 }, e: { r: regIdx, c: colCount - 1 } }); // Регионы
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'График доставки');
+  XLSX.writeFile(wb, `График_доставки_${date}.xlsx`);
+}
