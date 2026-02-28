@@ -133,11 +133,23 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       items: orderItems,
     });
     if (rpcError || (rpcResult && rpcResult.error)) {
+      // Откатываем параметры заказа к предыдущим значениям
+      if (oldOrder) {
+        await db.from('orders').update({
+          delivery_date: oldOrder.delivery_date, today_date: oldOrder.today_date,
+          safety_days: oldOrder.safety_days, period_days: oldOrder.period_days,
+          unit: oldOrder.unit, note: oldOrder.note, supplier: oldOrder.supplier,
+        }).eq('id', editingOrderId);
+      }
       return { error: 'Не удалось сохранить состав заказа: ' + (rpcError || rpcResult?.error) };
     }
   } else {
     const { error: itemsError } = await db.from('order_items').insert(orderItems);
-    if (itemsError) return { error: 'Не удалось сохранить состав заказа: ' + itemsError };
+    if (itemsError) {
+      // Откатываем: удаляем заказ без позиций
+      await db.from('orders').delete().eq('id', orderId);
+      return { error: 'Не удалось сохранить состав заказа: ' + itemsError };
+    }
   }
 
   // Аудит-лог (не блокируем)

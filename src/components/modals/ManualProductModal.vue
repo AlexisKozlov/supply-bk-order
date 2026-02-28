@@ -131,7 +131,7 @@ async function submit() {
       legal_entity:    form.value.legal_entity,
       qty_per_box:     +form.value.qty_per_box,
       boxes_per_pallet: +form.value.boxes_per_pallet,
-      multiplicity:    +form.value.multiplicity || 0,
+      multiplicity:    +form.value.multiplicity || 1,
       unit_of_measure: form.value.unit_of_measure || 'шт',
     };
 

@@ -19,7 +19,7 @@
           </select>
         </div>
         <div class="ht-filter">
-          <select v-model="filterAuthor">
+          <select v-model="filterAuthor" @change="load">
             <option value="">Все авторы</option>
             <option v-for="a in uniqueAuthors" :key="a" :value="a">{{ a }}</option>
           </select>
@@ -412,10 +412,10 @@ watch(() => orderStore.settings.legalEntity, async () => {
   await load();
 });
 async function load() {
-  await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
+  await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value });
 }
 async function loadMore() {
-  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
+  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value });
 }
 async function loadMorePlansBtn() {
   await historyStore.loadMorePlans({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
@@ -756,5 +756,14 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
   /* Filters wrap */
   .page-header { flex-wrap: wrap; gap: 8px; }
   .ht-filter select { font-size: 14px; min-height: 36px; }
+}
+
+@media (max-width: 480px) {
+  .page-header { flex-direction: column; align-items: stretch !important; }
+  .page-header > div { flex-direction: column; }
+  .ht-filter { width: 100%; }
+  .ht-filter select { width: 100%; }
+  .ht-tabs { width: 100%; justify-content: stretch; }
+  .ht-tab { flex: 1; text-align: center; }
 }
 </style>

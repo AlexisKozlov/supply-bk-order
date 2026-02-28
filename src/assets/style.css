@@ -43,7 +43,7 @@ input[type="number"] { -moz-appearance: textfield; }
   --sidebar-active: #502314;
   --text: #2C1810;
   --text-secondary: #6B5344;
-  --text-muted: #9B8B7E;
+  --text-muted: #7A6B5F;
   --border: #E8E0D6;
   --border-light: #F0EBE4;
   --accent: var(--bk-red);
@@ -88,7 +88,7 @@ body {
   background: var(--card);
   border-radius: 20px;
   padding: 40px 36px 32px;
-  width: 380px;
+  width: min(380px, calc(100vw - 32px));
   text-align: center;
   box-shadow: var(--shadow-lg);
 }
@@ -681,6 +681,11 @@ select:focus, input:focus, textarea:focus {
   outline: none;
   box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
 }
+select:focus-visible, input:focus-visible, textarea:focus-visible,
+button:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
 .required { border-color: var(--error) !important; box-shadow: 0 0 0 2px rgba(211,47,47,0.1) !important; }
 
@@ -1258,8 +1263,8 @@ input[type="number"]:focus {
 
 .modal-box.confirm-modal {
   width: auto;
-  min-width: 320px;
-  max-width: 420px;
+  min-width: min(320px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 32px));
 }
 .modal-box.confirm-modal h3 {
   font-size: 16px;
@@ -1510,8 +1515,8 @@ input[type="number"]:focus {
   padding: 12px 16px;
   box-shadow: 0 8px 32px rgba(44,24,16,0.15);
   border-left: 4px solid var(--accent);
-  max-width: 340px;
-  min-width: 260px;
+  max-width: min(340px, calc(100vw - 32px));
+  min-width: min(260px, calc(100vw - 32px));
   animation: toastIn 0.25s ease;
   display: flex;
   gap: 10px;
@@ -1721,58 +1726,6 @@ input[type="number"]:focus {
 }
 
 .sidebar-overlay.visible { display: block; }
-/* ═══════ WELCOME SCREEN ═══════ */
-.welcome-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  background: linear-gradient(135deg, #2C1810 0%, #502314 50%, #8B5E34 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: welcomeFadeIn 0.3s ease;
-}
-.welcome-overlay.welcome-fade-out {
-  animation: welcomeFadeOut 0.4s ease forwards;
-}
-.welcome-content {
-  text-align: center;
-  color: white;
-  animation: welcomeSlideUp 0.5s ease;
-}
-.welcome-logo {
-  font-size: 56px;
-  margin-bottom: 16px;
-  animation: welcomePulse 1.2s ease infinite;
-}
-.welcome-name {
-  font-size: 24px;
-  font-weight: 700;
-  margin-bottom: 6px;
-  letter-spacing: 0.3px;
-}
-.welcome-entity {
-  font-size: 14px;
-  opacity: 0.7;
-  font-weight: 500;
-}
-@keyframes welcomeFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes welcomeFadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-@keyframes welcomeSlideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes welcomePulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.08); }
-}
-
 /* ═══════ WELCOME SCREEN ═══════ */
 .welcome-overlay {
   position: fixed;
@@ -2745,7 +2698,7 @@ button:disabled .bk-icon-wrap svg {
     min-width: 42px;
     flex-shrink: 0;
   }
-  .order-view .order-table-wrapper td.td-order input { flex: 1; min-width: 0; }
+  .order-view .order-table-wrapper td.td-order input { flex: 1; min-width: 0; width: auto !important; }
   .order-view .order-table-wrapper td.td-order .order-separator { color: var(--text-muted); font-size: 12px; }
   .order-view .order-table-wrapper td.td-order .mob-calc-btn {
     display: inline-flex !important;
@@ -2788,6 +2741,8 @@ button:disabled .bk-icon-wrap svg {
   .btn.small, .calc-to-order, .delete-item-x, .compact-toggle {
     min-height: 36px;
     min-width: 36px;
+    width: auto;
+    height: auto;
   }
 }
 

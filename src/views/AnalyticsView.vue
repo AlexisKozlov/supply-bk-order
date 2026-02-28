@@ -304,6 +304,122 @@
         </div>
       </template>
 
+      <!-- ===== FORECAST ===== -->
+      <template v-if="activeTab === 'forecast'">
+        <div v-if="forecastLoading" style="text-align:center;padding:60px;">
+          <BurgerSpinner text="Загрузка прогноза..." />
+        </div>
+        <div v-else-if="!forecast" style="text-align:center;padding:60px;color:var(--text-muted);">Нет данных для прогноза</div>
+        <template v-else>
+          <!-- Контролы -->
+          <div class="fc-controls">
+            <div class="fc-controls-left">
+              <div class="fc-period-btns">
+                <button v-for="p in [7, 14, 30]" :key="p" class="fc-period-btn" :class="{ active: forecastPeriod === p }" @click="forecastPeriod = p">{{ p }} дн.</button>
+              </div>
+              <select v-model="forecastSupplier" class="fc-supplier-select">
+                <option value="">Все поставщики</option>
+                <option v-for="s in forecast.suppliers" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </div>
+            <button v-if="forecastSupplier" class="btn primary fc-order-btn" @click="createOrderFromForecast" :disabled="!filteredForecast.length">
+              <BkIcon name="order" size="sm"/> Заказ для {{ forecastSupplier }}
+            </button>
+          </div>
+
+          <!-- KPI -->
+          <div class="an-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> Товаров в расчёте</div>
+              <div class="an-kpi-row"><span class="an-kpi-val">{{ forecastKpi.totalProducts }}</span></div>
+              <div class="an-kpi-sub">которые заказывали за 60 дней</div>
+            </div>
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="chartUp" size="sm"/></span> Понадобится коробок</div>
+              <div class="an-kpi-row"><span class="an-kpi-val">{{ nf(forecastKpi.totalForecast) }}</span><span class="an-kpi-unit">кор.</span></div>
+              <div class="an-kpi-sub">ожидаемый расход за {{ forecastPeriod }} дней</div>
+            </div>
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="warning" size="sm"/></span> Товаров с дефицитом</div>
+              <div class="an-kpi-row"><span class="an-kpi-val" style="color:#D32F2F;">{{ forecastKpi.deficitCount }}</span><span class="an-kpi-unit">из {{ forecastKpi.withStockCount }} с остатками</span></div>
+              <div class="an-kpi-sub">{{ forecastKpi.criticalCount ? 'критично (на 3 дня и менее): ' + forecastKpi.criticalCount : 'критичных нет' }}{{ forecastKpi.noStockCount ? ' · без данных: ' + forecastKpi.noStockCount : '' }}</div>
+            </div>
+            <div class="an-kpi">
+              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="chartUp" size="sm"/></span> Тренд заказов</div>
+              <div class="an-kpi-row"><span class="an-kpi-val">{{ forecastKpi.trendUp }}</span><span class="an-kpi-unit">растут</span></div>
+              <div class="an-kpi-sub">падают: {{ forecastKpi.trendDown }} · стабильно: {{ forecastKpi.trendStable }}</div>
+            </div>
+          </div>
+
+          <!-- Легенда-пояснение -->
+          <div class="fc-legend">
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#E8F5E9;border-color:#4CAF50;"></span> <b>Ок</b> — запаса больше чем на 7 дней</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFF3E0;border-color:#FF9800;"></span> <b>Мало</b> — запаса на 4–7 дней</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFEBEE;border-color:#F44336;"></span> <b>Критично</b> — запаса на 3 дня и менее</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#F5F5F5;border-color:#BDBDBD;"></span> <b>Нет данных</b> — остатки не внесены (на стр. Анализ)</div>
+          </div>
+
+          <!-- Таблица -->
+          <div class="an-card fc-table-card">
+            <div class="fc-table-wrap">
+              <table class="fc-table">
+                <thead>
+                  <tr>
+                    <th class="fc-th fc-th-name" @click="toggleForecastSort('name')">Товар{{ sortIcon('name') }}</th>
+                    <th class="fc-th fc-th-spark fc-hide-mobile">Динамика за 14 дн.</th>
+                    <th class="fc-th fc-th-num" @click="toggleForecastSort('avgPerDay')" title="Среднее потребление коробок в день">Расход/день, кор.{{ sortIcon('avgPerDay') }}</th>
+                    <th class="fc-th fc-th-num" @click="toggleForecastSort('forecast')" title="Сколько коробок потребуется за выбранный период">Нужно на {{ forecastPeriod }} дн., кор.{{ sortIcon('forecast') }}</th>
+                    <th class="fc-th fc-th-num" @click="toggleForecastSort('stock')" title="Текущий остаток на складе в коробках">На складе, кор.{{ sortIcon('stock') }}</th>
+                    <th class="fc-th fc-th-num" @click="toggleForecastSort('daysOfStock')" title="На сколько дней хватит текущего остатка">Хватит на, дн.{{ sortIcon('daysOfStock') }}</th>
+                    <th class="fc-th fc-th-status">Запас</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in filteredForecast" :key="item.sku || item.name" class="fc-row" :class="'fc-status-' + item.stockStatus">
+                    <td class="fc-td fc-td-name">
+                      <div class="fc-item-name">{{ item.name || item.sku }}</div>
+                      <div v-if="item.sku" class="fc-item-sku">{{ item.sku }}</div>
+                      <div v-if="item.supplier && !forecastSupplier" class="fc-item-supplier">{{ item.supplier }}</div>
+                    </td>
+                    <td class="fc-td fc-td-spark fc-hide-mobile">
+                      <template v-if="item.sparkline.some(v => v > 0)">
+                        <svg class="fc-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none">
+                          <path :d="sparklinePath(item.sparkline, 60, 20)" fill="none" :stroke="sparklineColor(item.trend)" stroke-width="1.5"/>
+                        </svg>
+                      </template>
+                      <span class="fc-trend-label" :class="'fc-trend-' + item.trend">{{ trendLabel(item.trend) }}</span>
+                    </td>
+                    <td class="fc-td fc-td-num" :class="{ 'fc-no-data': !item.hasConsumptionData }">
+                      {{ item.hasConsumptionData ? item.avgPerDay.toFixed(1) : '—' }}
+                    </td>
+                    <td class="fc-td fc-td-num fc-td-forecast" :class="{ 'fc-no-data': !item.hasConsumptionData }">
+                      {{ item.hasConsumptionData ? Math.round(forecastVal(item)) : '—' }}
+                    </td>
+                    <td class="fc-td fc-td-num" :class="{ 'fc-no-data': item.stock === null }">
+                      {{ item.stock !== null ? Math.round(item.stock) : '—' }}
+                    </td>
+                    <td class="fc-td fc-td-num" :class="item.daysOfStock !== null && item.daysOfStock <= 3 ? 'fc-days-critical' : item.daysOfStock !== null && item.daysOfStock <= 7 ? 'fc-days-warning' : item.daysOfStock === null ? 'fc-no-data' : ''">
+                      {{ item.daysOfStock === null ? '—' : item.daysOfStock >= 999 ? '—' : item.daysOfStock }}
+                    </td>
+                    <td class="fc-td fc-td-status">
+                      <span class="fc-status-badge" :class="'fc-badge-' + item.stockStatus">{{ stockStatusLabel(item.stockStatus) }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-if="!filteredForecast.length" style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px;">
+              Нет товаров по выбранному фильтру
+            </div>
+          </div>
+
+          <div class="fc-note">
+            <BkIcon name="bulb" size="sm"/> <b>Откуда данные:</b> расход и остатки — со страницы Анализ.
+            Прогноз = дневной расход × количество дней. Динамика и тренд — из истории заказов за 60 дней.
+          </div>
+        </template>
+      </template>
+
       <!-- ===== ANOMALIES ===== -->
       <template v-if="activeTab === 'anomalies'">
         <div v-if="!data.anomalies.length" style="text-align:center;padding:40px;color:var(--text-muted);">
@@ -318,7 +434,7 @@
             <div class="an-anomaly-detail">{{ a.detail }}</div>
           </div>
           <span class="an-anomaly-tag">{{ typeLabel(a.type) }}</span>
-          <span v-if="a.orderId" class="an-anomaly-go">→</span>
+          <span v-if="a.orderId" class="an-anomaly-go" title="Открыть заказ">Открыть →</span>
         </div>
       </template>
 
@@ -433,7 +549,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { getOrdersAnalytics, getSeasonalityData } from '@/lib/analytics.js';
+import { getOrdersAnalytics, getSeasonalityData, getForecastData } from '@/lib/analytics.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -453,6 +569,11 @@ const data = ref(null);
 const activeTab = ref('overview');
 const seasonality = ref(null);
 const seasonalityLoading = ref(false);
+const forecast = ref(null);
+const forecastLoading = ref(false);
+const forecastPeriod = ref(7);
+const forecastSupplier = ref('');
+const forecastSort = ref({ col: 'default', asc: true });
 
 const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 function nf(v) { return formatter.format(v || 0); }
@@ -471,6 +592,7 @@ const tabs = [
   { id: 'planfact', label: 'Доставки' },
   { id: 'suppliers', label: 'Поставщики' },
   { id: 'products', label: 'Товары' },
+  { id: 'forecast', label: 'Прогноз' },
   { id: 'anomalies', label: 'Аномалии' },
   { id: 'reports', label: 'Отчёты' },
 ];
@@ -501,19 +623,138 @@ async function loadOrder(orderId) {
 
 async function load() {
   loading.value = true;
-  seasonality.value = null;
   data.value = await getOrdersAnalytics(orderStore.settings.legalEntity, days.value);
   loading.value = false;
 }
 
-// Lazy-load сезонности при переключении на таб «Отчёты»
+// Lazy-load сезонности и прогноза при переключении на табы
 watch(activeTab, async (tab) => {
   if (tab === 'reports' && !seasonality.value && !seasonalityLoading.value) {
     seasonalityLoading.value = true;
     seasonality.value = await getSeasonalityData(orderStore.settings.legalEntity);
     seasonalityLoading.value = false;
   }
+  if (tab === 'forecast' && !forecast.value && !forecastLoading.value) {
+    await loadForecast();
+  }
 });
+
+async function loadForecast() {
+  forecastLoading.value = true;
+  forecast.value = await getForecastData(orderStore.settings.legalEntity);
+  forecastLoading.value = false;
+}
+
+// Фильтрованный и отсортированный список прогноза
+const filteredForecast = computed(() => {
+  if (!forecast.value) return [];
+  let items = forecast.value.items;
+  if (forecastSupplier.value) {
+    items = items.filter(i => i.supplier === forecastSupplier.value);
+  }
+  const sort = forecastSort.value;
+  if (sort.col !== 'default') {
+    items = [...items].sort((a, b) => {
+      let va, vb;
+      if (sort.col === 'name') { va = (a.name || a.sku || '').toLowerCase(); vb = (b.name || b.sku || '').toLowerCase(); return sort.asc ? va.localeCompare(vb) : vb.localeCompare(va); }
+      if (sort.col === 'forecast') { va = forecastVal(a); vb = forecastVal(b); }
+      else if (sort.col === 'avgPerDay') { va = a.avgPerDay; vb = b.avgPerDay; }
+      else if (sort.col === 'stock') { va = a.stock ?? -1; vb = b.stock ?? -1; }
+      else if (sort.col === 'daysOfStock') { va = a.daysOfStock ?? 9999; vb = b.daysOfStock ?? 9999; }
+      else { va = 0; vb = 0; }
+      return sort.asc ? va - vb : vb - va;
+    });
+  }
+  return items;
+});
+
+function forecastVal(item) {
+  if (forecastPeriod.value === 14) return item.forecast14;
+  if (forecastPeriod.value === 30) return item.forecast30;
+  return item.forecast7;
+}
+
+// KPI пересчитываются по отфильтрованному списку (с учётом выбранного поставщика)
+const forecastKpi = computed(() => {
+  const items = filteredForecast.value;
+  const withStock = items.filter(i => i.stockStatus !== 'unknown');
+  const deficit = withStock.filter(i => i.stockStatus === 'critical' || i.stockStatus === 'warning');
+  const totalForecast = items.reduce((s, i) => s + forecastVal(i), 0);
+  return {
+    totalProducts: items.length,
+    withStockCount: withStock.length,
+    noStockCount: items.length - withStock.length,
+    deficitCount: deficit.length,
+    criticalCount: items.filter(i => i.stockStatus === 'critical').length,
+    totalForecast: Math.round(totalForecast),
+    trendUp: items.filter(i => i.trend === 'up').length,
+    trendDown: items.filter(i => i.trend === 'down').length,
+    trendStable: items.filter(i => i.trend === 'stable').length,
+  };
+});
+
+function toggleForecastSort(col) {
+  if (forecastSort.value.col === col) {
+    forecastSort.value.asc = !forecastSort.value.asc;
+  } else {
+    forecastSort.value = { col, asc: col === 'name' };
+  }
+}
+
+function sortIcon(col) {
+  if (forecastSort.value.col !== col) return '';
+  return forecastSort.value.asc ? ' ▲' : ' ▼';
+}
+
+function sparklinePath(data, w, h) {
+  if (!data || data.length < 2) return '';
+  const max = Math.max(...data, 0.1);
+  const step = w / (data.length - 1);
+  return data.map((v, i) => {
+    const x = Math.round(i * step * 10) / 10;
+    const y = Math.round((h - (v / max) * h) * 10) / 10;
+    return (i === 0 ? 'M' : 'L') + x + ',' + y;
+  }).join(' ');
+}
+
+function sparklineColor(trend) {
+  if (trend === 'up') return '#4CAF50';
+  if (trend === 'down') return '#F44336';
+  return '#9E9E9E';
+}
+
+function stockStatusLabel(status) {
+  if (status === 'critical') return 'Критично';
+  if (status === 'warning') return 'Мало';
+  if (status === 'unknown') return 'Нет данных';
+  return 'Ок';
+}
+
+function trendLabel(trend) {
+  if (trend === 'up') return '▲ Растёт';
+  if (trend === 'down') return '▼ Падает';
+  return '— Стабильно';
+}
+
+async function createOrderFromForecast() {
+  if (!forecast.value || !forecastSupplier.value) return;
+  const items = filteredForecast.value;
+  if (!items.length) return;
+  orderStore.resetOrder();
+  orderStore.settings.supplier = forecastSupplier.value;
+  let count = 0;
+  for (const item of items) {
+    const added = orderStore.addItem({
+      sku: item.sku,
+      name: item.name,
+      qty_per_box: item.qtyPerBox,
+    });
+    if (added) count++;
+  }
+  draftStore.saveNow();
+  router.push({ name: 'order' });
+  toast.success('Заказ создан', `${count} поз. для ${forecastSupplier.value}`);
+}
 
 function seasonBarH(boxes, maxBoxes) {
   return Math.max(Math.round((boxes / maxBoxes) * 120), 4);
@@ -530,7 +771,11 @@ async function exportAnalytics() {
   exportAnalyticsToExcel(data.value, seasonality.value);
 }
 
-watch(() => orderStore.settings.legalEntity, () => load());
+watch(() => orderStore.settings.legalEntity, () => {
+  seasonality.value = null;
+  forecast.value = null;
+  load();
+});
 onMounted(() => load());
 </script>
 
@@ -716,7 +961,8 @@ onMounted(() => load());
 .an-anomaly.clickable { cursor: pointer; }
 .an-anomaly.clickable:hover { opacity: 0.85; }
 .an-anomaly-go {
-  font-size: 16px; font-weight: 700; color: var(--text); flex-shrink: 0; align-self: center;
+  font-size: 11px; font-weight: 700; color: #1565C0; flex-shrink: 0; align-self: center;
+  white-space: nowrap; padding: 3px 8px; background: #E3F2FD; border-radius: 4px;
 }
 
 /* ===== REPORTS TAB ===== */
@@ -814,7 +1060,10 @@ onMounted(() => load());
 .rpt-fc-forecast { background: #2196F3; opacity: 0.6; }
 .rpt-fc-nums { font-size: 10px; color: var(--text-muted); min-width: 80px; text-align: right; flex-shrink: 0; line-height: 1.6; }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
+  .an-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
   .an-kpi-grid { grid-template-columns: 1fr; }
   .an-sup-metrics { grid-template-columns: repeat(2, 1fr); }
   .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }
@@ -911,4 +1160,99 @@ onMounted(() => load());
 .an-pf-prod-delta { font-size: 13px; font-weight: 800; min-width: 70px; text-align: right; flex-shrink: 0; }
 .an-pf-prod-delta.neg { color: #D32F2F; }
 .an-pf-prod-delta.pos { color: #E65100; }
+
+/* ═══ FORECAST TAB ═══ */
+.fc-controls {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.fc-controls-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fc-period-btns { display: flex; gap: 0; }
+.fc-period-btn {
+  padding: 5px 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--border);
+  background: var(--card); color: var(--text-muted); cursor: pointer; transition: all 0.15s;
+}
+.fc-period-btn:first-child { border-radius: 6px 0 0 6px; }
+.fc-period-btn:last-child { border-radius: 0 6px 6px 0; }
+.fc-period-btn:not(:first-child) { border-left: none; }
+.fc-period-btn.active { background: var(--text); color: var(--card); border-color: var(--text); }
+.fc-supplier-select {
+  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; background: var(--card); color: var(--text);
+  max-width: 200px;
+}
+.fc-order-btn { white-space: nowrap; font-size: 12px; }
+
+.fc-legend {
+  display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--card); border: 1px solid var(--border-light);
+  border-radius: 8px; font-size: 12px; color: var(--text);
+}
+.fc-legend-item { display: flex; align-items: center; gap: 6px; }
+.fc-legend-dot {
+  width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0;
+  border: 1.5px solid;
+}
+.an-kpi-unit { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+
+.fc-table-card { padding: 0; overflow: hidden; }
+.fc-table-wrap { overflow-x: auto; }
+.fc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.fc-th {
+  padding: 8px 10px; font-weight: 700; font-size: 11px; color: var(--text-muted);
+  border-bottom: 2px solid var(--border-light); text-align: left; cursor: pointer;
+  white-space: nowrap; user-select: none;
+}
+.fc-th:hover { color: var(--text); }
+.fc-th-name { min-width: 140px; }
+.fc-th-spark { min-width: 100px; }
+.fc-th-num { text-align: right; min-width: 70px; }
+.fc-th-status { text-align: center; min-width: 70px; cursor: default; }
+
+.fc-row { border-bottom: 1px solid var(--border-light); transition: background 0.1s; }
+.fc-row:hover { background: rgba(0,0,0,0.02); }
+.fc-row:last-child { border-bottom: none; }
+.fc-status-critical { background: #FFF5F5; }
+.fc-status-critical:hover { background: #FFEBEE; }
+.fc-status-warning { background: #FFFCF0; }
+.fc-status-warning:hover { background: #FFF8E1; }
+
+.fc-td { padding: 8px 10px; vertical-align: middle; }
+.fc-td-name { }
+.fc-item-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.fc-item-sku { font-size: 10px; color: #F5A623; font-weight: 700; }
+.fc-item-supplier { font-size: 10px; color: var(--text-muted); }
+.fc-td-spark { }
+.fc-sparkline { width: 60px; height: 20px; display: block; }
+.fc-trend-label { font-size: 10px; font-weight: 600; white-space: nowrap; }
+.fc-trend-up { color: #4CAF50; }
+.fc-trend-down { color: #F44336; }
+.fc-trend-stable { color: #9E9E9E; }
+.fc-td-num { text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.fc-td-forecast { color: #2196F3; font-weight: 700; }
+.fc-days-critical { color: #D32F2F; font-weight: 800; }
+.fc-days-warning { color: #E65100; font-weight: 700; }
+.fc-td-status { text-align: center; }
+.fc-status-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 10px; font-weight: 700;
+}
+.fc-badge-ok { background: #E8F5E9; color: #2E7D32; }
+.fc-badge-warning { background: #FFF3E0; color: #E65100; }
+.fc-badge-critical { background: #FFEBEE; color: #D32F2F; }
+.fc-badge-unknown { background: #F5F5F5; color: #9E9E9E; }
+.fc-no-data { color: var(--text-muted); font-weight: 400; }
+
+.fc-note {
+  margin-top: 8px; padding: 8px 12px; background: #E3F2FD; border-radius: 8px;
+  border: 1px solid #90CAF9; font-size: 12px; color: #1565C0;
+}
+
+@media (max-width: 768px) {
+  .fc-controls { flex-direction: column; align-items: stretch; }
+  .fc-controls-left { flex-direction: column; }
+  .fc-supplier-select { max-width: none; }
+  .fc-hide-mobile { display: none; }
+  .fc-item-name { max-width: 120px; }
+}
 </style>

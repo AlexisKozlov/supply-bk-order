@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
@@ -166,6 +166,11 @@ export const useNotificationStore = defineStore('notification', () => {
       broadcastTimer = null;
     }
   }
+
+  // Останавливаем polling при разлогине
+  watch(() => userStore.currentUser, (user) => {
+    if (!user) stopPolling();
+  });
 
   return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling };
 });

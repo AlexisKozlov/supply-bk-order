@@ -51,13 +51,13 @@
         <div class="pf-group">
           <label>Запас (дн.) <small v-if="safetyDateDisplay" style="font-weight:400;color:var(--text-muted);">– {{ safetyDateDisplay }}</small></label>
           <div style="display:flex;gap:4px;align-items:center;">
-            <input type="number" :value="orderStore.settings.safetyDays" :class="{ 'param-required-pulse': !orderStore.settings.safetyDays }" @change="onSafetyDaysChange" style="width:60px;" :disabled="orderStore.viewOnlyMode"/>
+            <input type="number" min="0" :value="orderStore.settings.safetyDays" :class="{ 'param-required-pulse': !orderStore.settings.safetyDays }" @change="onSafetyDaysChange" style="width:60px;" :disabled="orderStore.viewOnlyMode"/>
             <input type="date" :value="safetyDateStr" @change="onSafetyDateChange" :min="deliveryStr" style="flex:1;" :disabled="orderStore.viewOnlyMode"/>
           </div>
         </div>
         <div class="pf-group pf-narrow">
           <label>Период (дн.)</label>
-          <input type="number" :value="orderStore.settings.periodDays" @change="(e) => { orderStore.settings.periodDays = +e.target.value || 30; draftStore.save(); }" :disabled="orderStore.viewOnlyMode"/>
+          <input type="number" min="1" :value="orderStore.settings.periodDays" @change="(e) => { orderStore.settings.periodDays = Math.max(1, +e.target.value || 30); draftStore.save(); }" :disabled="orderStore.viewOnlyMode"/>
         </div>
         <div class="pf-group pf-narrow">
           <label>Единицы</label>
@@ -798,6 +798,12 @@ async function onCardSaved() {
   try {
     const { data } = await db.from('products').select('*').eq('id', product.id).single();
     if (!data) return;
+    // Если карточку скрыли — убираем позицию из заказа
+    if (!data.is_active) {
+      orderStore.items = orderStore.items.filter(i => i.productId !== product.id && i.sku !== product.sku);
+      draftStore.save();
+      return;
+    }
     const item = orderStore.items.find(i => i.productId === product.id || i.sku === product.sku);
     if (item) {
       item.sku = data.sku || item.sku; item.name = data.name || item.name;

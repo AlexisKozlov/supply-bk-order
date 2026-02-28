@@ -256,6 +256,7 @@ const searchQuery = ref('');
 const loading = ref(false);
 const products = ref([]);
 const suppliers = ref([]);
+let _dbLoadId = 0;
 const editCardModal = ref({ show: false, product: null });
 const editSupplierModal = ref({ show: false, supplier: null });
 const confirmModal = ref({ show: false, title: '', message: '', resolve: null });
@@ -346,13 +347,15 @@ onMounted(() => {
 });
 
 async function loadProducts() {
+  const myId = ++_dbLoadId;
   loading.value = true;
   try {
     const { data, error } = await db.from('products').select('*').order('name');
+    if (myId !== _dbLoadId) return; // Новый запрос перехватил
     if (error) { toast.error('Ошибка', ''); return; }
     const group = getEntityGroup(orderStore.settings.legalEntity);
     products.value = (data || []).filter(p => group.includes(p.legal_entity));
-  } finally { loading.value = false; }
+  } finally { if (myId === _dbLoadId) loading.value = false; }
 }
 
 async function switchToSuppliers() { activeTab.value = 'suppliers'; await loadSuppliers(); }

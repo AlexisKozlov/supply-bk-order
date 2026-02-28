@@ -232,10 +232,11 @@ if ($endpoint === 'search_products') {
     $where = [];
     $params = [];
     
-    // Поиск по SKU или имени
+    // Поиск по SKU или имени (экранируем спецсимволы LIKE)
+    $escaped_q = str_replace(['%', '_'], ['\\%', '\\_'], $q);
     $where[] = "(`sku` LIKE ? OR `name` LIKE ?)";
-    $params[] = "%{$q}%";
-    $params[] = "%{$q}%";
+    $params[] = "%{$escaped_q}%";
+    $params[] = "%{$escaped_q}%";
     
     // Фильтр по юр. лицу
     if ($le && (strpos($le, 'Пицца Стар') !== false || $le === 'Пицца Стар')) {
@@ -550,10 +551,30 @@ if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
     respond(['error' => 'Only read and insert allowed for this table'], 403);
 }
 
+// Белый список полей, доступных для фильтрации через GET-параметры
+$filterWhitelist = [
+    'products'    => ['id','sku','name','supplier','legal_entity','is_active','analog_group','category'],
+    'suppliers'   => ['id','short_name','legal_entity','is_active'],
+    'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit'],
+    'order_items' => ['id','order_id','sku','name'],
+    'plans'       => ['id','supplier','legal_entity','created_at'],
+    'item_order'  => ['supplier','legal_entity','item_id'],
+    'settings'    => ['key'],
+    'audit_log'   => ['entity_type','entity_id','action','user_name'],
+    'stock_1c'    => ['sku','legal_entity'],
+    'cards'       => ['id','sku','name','supplier','legal_entity','is_active'],
+    'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],
+    'restaurants' => ['id','legal_entity'],
+    'delivery_schedule' => ['id','restaurant_id','legal_entity'],
+    'analysis_data' => ['id','legal_entity','sku'],
+];
+
 if ($method === 'GET') {
     $where = []; $params = [];
+    $allowedFields = $filterWhitelist[$table] ?? [];
     foreach ($_GET as $k => $v) {
         if (in_array($k, ['select','order','limit','offset','or'])) continue;
+        if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue;
         parseFilter($k, $v, $where, $params, $pdo, $table);
     }
     if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params);

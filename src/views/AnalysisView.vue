@@ -280,7 +280,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -762,6 +762,7 @@ async function loadFrom1c() {
 
 watch(() => orderStore.settings.legalEntity, () => { loadProducts(); });
 onMounted(() => { loadProducts(); });
+onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 </script>
 
 <style scoped>

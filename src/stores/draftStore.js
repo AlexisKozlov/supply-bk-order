@@ -112,8 +112,8 @@ export const useDraftStore = defineStore('draft', () => {
 
       orderStore.settings.legalEntity  = data.settings.legalEntity  || 'ООО "Бургер БК"';
       orderStore.settings.supplier     = data.settings.supplier      || '';
-      orderStore.settings.periodDays   = data.settings.periodDays    || 30;
-      orderStore.settings.safetyDays   = data.settings.safetyDays    || 0;
+      orderStore.settings.periodDays   = Math.max(1, data.settings.periodDays || 30);
+      orderStore.settings.safetyDays   = Math.max(0, data.settings.safetyDays || 0);
       orderStore.settings.unit         = data.settings.unit          || 'pieces';
       orderStore.settings.hasTransit   = data.settings.hasTransit    || false;
       orderStore.settings.showStockColumn = data.settings.showStockColumn ?? true;

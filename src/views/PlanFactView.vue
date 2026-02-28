@@ -279,7 +279,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
 import { useUserStore } from '@/stores/userStore.js'
@@ -388,6 +388,11 @@ function sumOrderBoxes(order) {
 }
 
 onMounted(async () => {
+  await loadSuppliers()
+  await loadOrders()
+})
+
+watch(legalEntity, async () => {
   await loadSuppliers()
   await loadOrders()
 })

@@ -57,6 +57,7 @@ export const useOrderStore = defineStore('order', () => {
   const _history = new History(50);
   const _historyVersion = ref(0);
   let _snapshotTimer = null;
+  let _loadRequestId = 0;
 
   const canUndo = computed(() => { _historyVersion.value; return _history.canUndo(); });
   const canRedo = computed(() => { _historyVersion.value; return _history.canRedo(); });
@@ -100,7 +101,11 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function addItem(product, skipSnapshot = false) {
-    const exists = items.value.find(i => i.productId === product.id || (i.sku && i.sku === product.sku));
+    const exists = items.value.find(i =>
+      (product.id && i.productId === product.id) ||
+      (product.sku && i.sku === product.sku) ||
+      (!product.id && !product.sku && product.name && i.name === product.name)
+    );
     if (exists) return null;
     // FIX баг 3: сохраняем начальное состояние ДО изменения
     if (!skipSnapshot) _ensureInitialState();
@@ -229,6 +234,7 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   async function loadOrderIntoForm(order, legalEntity, isEditing = false, isViewOnly = false) {
+    const myRequestId = ++_loadRequestId;
     items.value = [];
     settings.legalEntity = legalEntity;
     settings.supplier = order.supplier || '';
@@ -245,6 +251,7 @@ export const useOrderStore = defineStore('order', () => {
     let productMap = {};
     if (skus.length > 0) {
       const { data: productsData } = await db.from('products').select('*').in('sku', skus);
+      if (myRequestId !== _loadRequestId) return; // Новый вызов перехватил — выходим
       if (productsData) productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));
     }
 
