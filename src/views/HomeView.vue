@@ -199,6 +199,7 @@ const svgIcons = {
   history: `<svg viewBox="0 0 32 32" fill="none"><rect x="5" y="3" width="22" height="26" rx="3" stroke="#502314" stroke-width="2"/><line x1="10" y1="10" x2="22" y2="10" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".4"/><line x1="10" y1="15" x2="22" y2="15" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".3"/><line x1="10" y1="20" x2="18" y2="20" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".2"/><rect x="8" y="8" width="3" height="3" rx=".5" fill="#D62700" opacity=".7"/><rect x="8" y="13" width="3" height="3" rx=".5" fill="#FF8733" opacity=".5"/><rect x="8" y="18" width="3" height="3" rx=".5" fill="#D4C4B0" opacity=".5"/></svg>`,
   database: `<svg viewBox="0 0 32 32" fill="none"><ellipse cx="16" cy="8" rx="11" ry="4" stroke="#502314" stroke-width="2"/><path d="M5 8v7c0 2.2 4.9 4 11 4s11-1.8 11-4V8" stroke="#502314" stroke-width="2"/><path d="M5 15v7c0 2.2 4.9 4 11 4s11-1.8 11-4v-7" stroke="#502314" stroke-width="2"/><ellipse cx="16" cy="15" rx="11" ry="4" fill="#D62700" opacity=".1"/><ellipse cx="16" cy="22" rx="11" ry="4" fill="#FF8733" opacity=".1"/></svg>`,
   search: `<svg viewBox="0 0 32 32" fill="none"><circle cx="14" cy="14" r="9" stroke="#502314" stroke-width="2.5"/><line x1="21" y1="21" x2="28" y2="28" stroke="#502314" stroke-width="2.5" stroke-linecap="round"/><circle cx="14" cy="14" r="4" fill="#D62700" opacity=".12"/></svg>`,
+  delivery: `<svg viewBox="0 0 32 32" fill="none"><rect x="2" y="10" width="18" height="12" rx="2" stroke="#502314" stroke-width="2"/><path d="M20 14h5l4 5v3h-9v-8z" stroke="#502314" stroke-width="2" stroke-linejoin="round"/><circle cx="9" cy="24" r="2.5" fill="#D62700" stroke="#502314" stroke-width="1.5"/><circle cx="24" cy="24" r="2.5" fill="#FF8733" stroke="#502314" stroke-width="1.5"/><rect x="5" y="13" width="6" height="3" rx="1" fill="#D62700" opacity=".2"/><rect x="5" y="17" width="4" height="2" rx=".5" fill="#FF8733" opacity=".2"/></svg>`,
   analysis: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="24" height="24" rx="3" stroke="#502314" stroke-width="2"/><path d="M9 20l4-5 4 3 6-8" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="20" r="1.5" fill="#D62700"/><circle cx="13" cy="15" r="1.5" fill="#FF8733"/><circle cx="17" cy="18" r="1.5" fill="#FF8733"/><circle cx="23" cy="10" r="1.5" fill="#D62700"/><rect x="8" y="23" width="3" height="3" rx=".5" fill="#502314" opacity=".2"/><rect x="13" y="22" width="3" height="4" rx=".5" fill="#502314" opacity=".25"/><rect x="18" y="21" width="3" height="5" rx=".5" fill="#502314" opacity=".3"/><rect x="23" y="23" width="3" height="3" rx=".5" fill="#502314" opacity=".15"/></svg>`,
 };
 
@@ -208,7 +209,8 @@ const dockModules = [
   { key: 'calendar',  name: 'Календарь',       svg: svgIcons.calendar },
   { key: 'analytics', name: 'Аналитика',       svg: svgIcons.analytics },
   { key: 'history',   name: 'История',         svg: svgIcons.history },
-  { key: 'database',  name: 'База товаров',    svg: svgIcons.database },
+  { key: 'database',  name: 'База данных',     svg: svgIcons.database },
+  { key: 'delivery-schedule', name: 'Доставки в рестораны', svg: svgIcons.delivery },
   { key: 'search',    name: 'Поиск карточек',  svg: svgIcons.search, public: true },
   { key: 'analysis',  name: 'Анализ',          svg: svgIcons.analysis },
 ];

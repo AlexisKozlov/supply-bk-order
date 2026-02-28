@@ -143,7 +143,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   }
 
   // Только поля таблицы restaurants (без лишних из restaurantsByDay)
-  const restaurantFields = ['id', 'number', 'address', 'city', 'region', 'notes', 'sort_order', 'legal_entity_group', 'is_active'];
+  const restaurantFields = ['id', 'number', 'address', 'city', 'region', 'notes', 'sort_order', 'legal_entity_group'];
 
   async function saveRestaurant(restaurant) {
     // Убираем лишние поля (delivery_time, schedule_notes и т.д.)

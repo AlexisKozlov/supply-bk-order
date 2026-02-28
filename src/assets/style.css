@@ -1610,16 +1610,16 @@ input[type="number"]:focus {
     overflow: visible !important;
   }
   .order-section {
-    overflow: visible;
-    height: auto;
-    flex: none;
+    overflow: visible !important;
+    height: auto !important;
+    flex: none !important;
   }
   .order-table-wrapper {
-    overflow-x: auto;
-    overflow-y: visible;
-    height: auto;
-    flex: none;
-    max-height: none;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    height: auto !important;
+    flex: none !important;
+    max-height: none !important;
   }
 
   /* Тулбар заказа/плана — перенос строк */

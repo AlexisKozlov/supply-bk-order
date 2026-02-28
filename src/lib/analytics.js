@@ -17,7 +17,7 @@ export async function getOrdersAnalytics(legalEntity, days = 30) {
   const start = new Date(now); start.setDate(start.getDate() - days);
   const prevS = new Date(start); prevS.setDate(prevS.getDate() - days);
 
-  // Текущий период
+  // Текущий период — фильтр по конкретному юр. лицу (заказы у каждого свои)
   const { data: orders, error } = await db
     .from('orders')
     .select('id, delivery_date, supplier, created_at, received_at, received_by, order_items(qty_boxes, received_qty, sku, name)')
@@ -82,7 +82,8 @@ function processData(orders, prevOrders, days) {
     if (!supMap[sup]) supMap[sup] = { supplier: sup, orders: 0, boxes: 0, color: supplierColor[sup], lastDate: null };
     supMap[sup].orders++;
     supMap[sup].boxes += boxes;
-    const d = new Date(o.created_at);
+    // Используем дату доставки (если есть) или дату создания
+    const d = o.delivery_date ? new Date(o.delivery_date) : new Date(o.created_at);
     if (!supMap[sup].lastDate || d > supMap[sup].lastDate) supMap[sup].lastDate = d;
   });
   // Прошлый период для поставщиков
@@ -121,10 +122,15 @@ function processData(orders, prevOrders, days) {
       prevProdMap[key].orders++;
     });
   });
+  // Реальное кол-во дней с заказами для более точного среднего
+  const activeDays = new Set(orders.map(o => toLocalDateStr(new Date(o.created_at)))).size || 1;
   const topProducts = Object.values(prodMap).sort((a, b) => b.boxes - a.boxes).slice(0, 10).map(p => {
     const key = p.sku || p.name || '?';
     const prev = prevProdMap[key] || { boxes: 0, orders: 0 };
-    const avgPerDay = days > 0 ? p.boxes / days : 0;
+    // Среднее на основе дней с заказами + учёт обоих периодов для прогноза
+    const totalBoxesBoth = p.boxes + prev.boxes;
+    const totalDaysBoth = days * 2;
+    const avgPerDay = totalDaysBoth > 0 ? totalBoxesBoth / totalDaysBoth : 0;
     return {
       ...p,
       prevBoxes: prev.boxes,
@@ -137,31 +143,40 @@ function processData(orders, prevOrders, days) {
   // === Аномалии ===
   const anomalies = [];
 
-  // 1. Резкий рост/падение расхода товара
-  topProducts.forEach(p => {
-    if (p.deltaBoxes !== null && p.deltaBoxes >= 30) {
-      anomalies.push({
-        type: 'spike', icon: '📈', severity: 'warning',
-        title: p.name || p.sku,
-        text: `Расход вырос на ${p.deltaBoxes}%`,
-        detail: `${p.boxes} кор vs ${p.prevBoxes} кор в прошлом периоде`,
-      });
-    }
-    if (p.deltaBoxes !== null && p.deltaBoxes <= -20) {
-      anomalies.push({
-        type: 'drop', icon: '📉', severity: 'warning',
-        title: p.name || p.sku,
-        text: `Расход упал на ${Math.abs(p.deltaBoxes)}%`,
-        detail: `${p.boxes} кор vs ${p.prevBoxes} кор в прошлом периоде`,
-      });
+  // 1. Резкий рост/падение расхода — по ВСЕМ товарам (не только топ-10)
+  const allProductsWithDelta = Object.values(prodMap).map(p => {
+    const key = p.sku || p.name || '?';
+    const prev = prevProdMap[key] || { boxes: 0 };
+    const delta = prev.boxes > 0 ? Math.round((p.boxes - prev.boxes) / prev.boxes * 100) : null;
+    return { ...p, prevBoxes: prev.boxes, deltaBoxes: delta };
+  });
+  // Минимум 5 коробок в одном из периодов, чтобы мелкие товары не шумели
+  allProductsWithDelta.forEach(p => {
+    if (p.deltaBoxes !== null && Math.max(p.boxes, p.prevBoxes) >= 5) {
+      if (p.deltaBoxes >= 50) {
+        anomalies.push({
+          type: 'spike', icon: '📈', severity: p.deltaBoxes >= 100 ? 'danger' : 'warning',
+          title: p.name || p.sku,
+          text: `Расход вырос на ${p.deltaBoxes}%`,
+          detail: `${Math.round(p.boxes)} кор vs ${Math.round(p.prevBoxes)} кор в прошлом периоде`,
+        });
+      }
+      if (p.deltaBoxes <= -30) {
+        anomalies.push({
+          type: 'drop', icon: '📉', severity: p.deltaBoxes <= -60 ? 'danger' : 'warning',
+          title: p.name || p.sku,
+          text: `Расход упал на ${Math.abs(p.deltaBoxes)}%`,
+          detail: `${Math.round(p.boxes)} кор vs ${Math.round(p.prevBoxes)} кор в прошлом периоде`,
+        });
+      }
     }
   });
 
-  // 2. Поставщик давно без заказа (> 2x средний интервал)
+  // 2. Поставщик давно без заказа (> 2.5x средний интервал, минимум 7 дней)
   suppliers.forEach(s => {
-    if (s.orders >= 2 && s.daysAgo !== null) {
+    if (s.orders >= 3 && s.daysAgo !== null) {
       const avgInterval = days / s.orders;
-      if (s.daysAgo > avgInterval * 2) {
+      if (s.daysAgo > Math.max(avgInterval * 2.5, 7)) {
         anomalies.push({
           type: 'supplier', icon: '⚠️', severity: 'danger',
           title: s.supplier,
@@ -172,41 +187,44 @@ function processData(orders, prevOrders, days) {
     }
   });
 
-  // 3. Необычно большой/маленький заказ
-  const orderSizes = orders.map(o => {
+  // 3. Необычно большой/маленький заказ — PER SUPPLIER (у каждого свой масштаб)
+  const ordersBySupplier = {};
+  orders.forEach(o => {
+    const sup = o.supplier || 'Без поставщика';
+    if (!ordersBySupplier[sup]) ordersBySupplier[sup] = [];
     const d = new Date(o.created_at);
-    return {
+    ordersBySupplier[sup].push({
       id: o.id,
-      supplier: o.supplier || 'Без поставщика',
+      supplier: sup,
       boxes: sumBoxes(o.order_items),
       date: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
-    };
+    });
   });
-  if (orderSizes.length >= 3) {
-    const mean = orderSizes.reduce((s, o) => s + o.boxes, 0) / orderSizes.length;
-    const std = Math.sqrt(orderSizes.reduce((s, o) => s + (o.boxes - mean) ** 2, 0) / orderSizes.length);
-    if (std > 0) {
-      orderSizes.forEach(o => {
-        const z = (o.boxes - mean) / std;
-        if (z > 2) {
-          anomalies.push({
-            type: 'outlier', icon: '⚡', severity: 'info',
-            title: `${o.supplier} (${o.date})`,
-            text: `Необычно большой заказ: ${Math.round(o.boxes)} кор`,
-            detail: `Среднее: ${Math.round(mean)} кор. Нажмите чтобы открыть`,
-            orderId: o.id,
-          });
-        } else if (z < -2) {
-          anomalies.push({
-            type: 'outlier', icon: '⚡', severity: 'info',
-            title: `${o.supplier} (${o.date})`,
-            text: `Необычно маленький заказ: ${Math.round(o.boxes)} кор`,
-            detail: `Среднее: ${Math.round(mean)} кор. Нажмите чтобы открыть`,
-            orderId: o.id,
-          });
-        }
-      });
-    }
+  for (const [sup, supOrders] of Object.entries(ordersBySupplier)) {
+    if (supOrders.length < 3) continue;
+    const mean = supOrders.reduce((s, o) => s + o.boxes, 0) / supOrders.length;
+    const std = Math.sqrt(supOrders.reduce((s, o) => s + (o.boxes - mean) ** 2, 0) / supOrders.length);
+    if (std <= 0 || mean < 3) continue; // пропускаем если мало данных или нет разброса
+    supOrders.forEach(o => {
+      const z = (o.boxes - mean) / std;
+      if (z > 2.5) {
+        anomalies.push({
+          type: 'outlier', icon: '⚡', severity: 'info',
+          title: `${o.supplier} (${o.date})`,
+          text: `Необычно большой заказ: ${Math.round(o.boxes)} кор`,
+          detail: `Среднее для ${o.supplier}: ${Math.round(mean)} кор`,
+          orderId: o.id,
+        });
+      } else if (z < -2.5 && o.boxes > 0) {
+        anomalies.push({
+          type: 'outlier', icon: '⚡', severity: 'info',
+          title: `${o.supplier} (${o.date})`,
+          text: `Необычно маленький заказ: ${Math.round(o.boxes)} кор`,
+          detail: `Среднее для ${o.supplier}: ${Math.round(mean)} кор`,
+          orderId: o.id,
+        });
+      }
+    });
   }
 
   // Сортировка аномалий: danger → warning → info

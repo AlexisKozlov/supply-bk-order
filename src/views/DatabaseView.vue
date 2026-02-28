@@ -16,6 +16,7 @@
         <button class="btn secondary" @click="doExportProducts" style="font-size:11px;padding:5px 12px;">Экспорт</button>
       </div>
       <button v-else-if="activeTab==='suppliers' && !isViewer" class="btn primary" @click="openNew('supplier')" style="font-size:11px;padding:5px 12px;">+ Поставщик</button>
+      <button v-else-if="activeTab==='restaurants' && !isViewer" class="btn primary" @click="openRestaurantModal(null)" style="font-size:11px;padding:5px 12px;">+ Ресторан</button>
     </div>
 
     <!-- Табы -->
@@ -29,13 +30,16 @@
       <button class="db-tab" :class="{ active: activeTab==='analogs' }" @click="switchToAnalogs">
         <BkIcon name="link" size="sm"/> Аналоги <span class="db-tab-count">{{ analogGroups.length }}</span>
       </button>
+      <button class="db-tab" :class="{ active: activeTab==='restaurants' }" @click="switchToRestaurants">
+        <BkIcon name="schedule" size="sm"/> Рестораны <span class="db-tab-count">{{ restaurantStore.restaurants.length }}</span>
+      </button>
     </div>
 
     <!-- Поиск -->
     <div style="position:relative;margin-bottom:14px;">
       <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none;opacity:0.5;"><BkIcon name="search" size="sm"/></span>
       <input v-model="searchQuery" style="width:100%;padding:9px 36px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--card);box-sizing:border-box;transition:border-color .15s,box-shadow .15s;"
-        :placeholder="activeTab === 'products' ? 'Поиск по названию, артикулу, поставщику...' : activeTab === 'suppliers' ? 'Поиск по названию поставщика...' : 'Поиск по названию группы или товара...'"
+        :placeholder="activeTab === 'products' ? 'Поиск по названию, артикулу, поставщику...' : activeTab === 'suppliers' ? 'Поиск по названию поставщика...' : activeTab === 'restaurants' ? 'Поиск по номеру или адресу...' : 'Поиск по названию группы или товара...'"
         @focus="$event.target.style.borderColor='var(--bk-orange)';$event.target.style.boxShadow='0 0 0 3px rgba(245,166,35,0.12)'"
         @blur="$event.target.style.borderColor='var(--border)';$event.target.style.boxShadow='none'" />
       <button v-if="searchQuery" @click="searchQuery=''" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;"><BkIcon name="close" size="xs"/></button>
@@ -118,6 +122,31 @@
       </div>
     </div>
 
+    <!-- Рестораны -->
+    <div v-if="activeTab==='restaurants'">
+      <div v-if="restaurantStore.loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!filteredRestaurants.length" style="text-align:center;padding:40px;color:var(--text-muted);">Рестораны не найдены</div>
+      <div v-else class="db-grid">
+        <div v-for="r in filteredRestaurants" :key="r.id" class="db-card" @click="!isViewer && openRestaurantModal(r)" :style="isViewer ? 'cursor:default' : ''">
+          <div class="db-card-top">
+            <span class="db-rest-num">{{ r.number }}</span>
+            <div class="db-card-title">
+              <span class="db-card-address">{{ r.address || 'Без адреса' }}</span>
+            </div>
+          </div>
+          <div class="db-card-meta">
+            <span v-if="r.city && r.city !== 'Минск'">{{ r.city }}</span>
+            <span v-if="r.region !== 'Минск'">{{ r.region }}</span>
+            <span v-if="r.notes" class="db-rest-note">{{ r.notes }}</span>
+          </div>
+          <div v-if="!isViewer" class="db-card-btns">
+            <button class="db-card-btn" @click.stop="openRestaurantModal(r)"><BkIcon name="edit" size="sm"/></button>
+            <button class="db-card-btn db-card-btn-del" @click.stop="deleteRestaurant(r)"><BkIcon name="delete" size="sm"/></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Переименование группы -->
     <Teleport to="body">
       <div v-if="renameModal.show" class="modal" @click.self="renameModal.show = false">
@@ -133,6 +162,56 @@
           <div style="display:flex;gap:8px;">
             <button class="btn primary" @click="saveRenameGroup" :disabled="!renameModal.newName.trim()">Сохранить</button>
             <button class="btn secondary" @click="renameModal.show = false">Отмена</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Модалка ресторана -->
+    <Teleport to="body">
+      <div v-if="restModal.show" class="modal" @click.self="restModal.show = false">
+        <div class="modal-box" style="max-width: 480px;">
+          <div class="modal-header">
+            <h2>{{ restModal.data.id ? 'Ресторан ' + restModal.data.number : 'Новый ресторан' }}</h2>
+            <button class="modal-close" @click="restModal.show = false"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div class="db-rest-modal-body">
+            <div class="db-rest-form-row">
+              <label class="db-rest-label">
+                <span class="db-rest-label-text">Номер</span>
+                <input v-model.number="restModal.data.number" type="number" min="1" />
+              </label>
+              <label class="db-rest-label">
+                <span class="db-rest-label-text">Регион</span>
+                <select v-model="restModal.data.region">
+                  <option value="Минск">Минск</option>
+                  <option value="Регионы">Регионы</option>
+                </select>
+              </label>
+            </div>
+            <label class="db-rest-label">
+              <span class="db-rest-label-text">Город</span>
+              <input v-model="restModal.data.city" type="text" placeholder="Минск" />
+            </label>
+            <label class="db-rest-label">
+              <span class="db-rest-label-text">Адрес</span>
+              <input v-model="restModal.data.address" type="text" placeholder="ул. Притыцкого, 154" />
+            </label>
+            <label class="db-rest-label">
+              <span class="db-rest-label-text">Комментарий</span>
+              <input v-model="restModal.data.notes" type="text" />
+            </label>
+          </div>
+          <div class="db-rest-modal-footer">
+            <button v-if="restModal.data.id" class="btn db-rest-btn-delete" @click="deleteRestaurant(restModal.data); restModal.show = false">
+              <BkIcon name="delete" size="xs"/> Удалить
+            </button>
+            <div class="db-rest-modal-footer-right">
+              <button class="btn" @click="restModal.show = false">Отмена</button>
+              <button class="btn primary" @click="saveRestaurant" :disabled="restModal.saving">
+                {{ restModal.saving ? 'Сохранение...' : 'Сохранить' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -161,7 +240,7 @@ import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import ImportCardsModal from '@/components/modals/ImportCardsModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { exportProductsToExcel } from '@/lib/excelExport.js';
-
+import { useRestaurantStore } from '@/stores/restaurantStore.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -169,6 +248,7 @@ const toast = useToastStore();
 const userStore = useUserStore();
 const supplierStore = useSupplierStore();
 const orderStore = useOrderStore();
+const restaurantStore = useRestaurantStore();
 const isViewer = computed(() => userStore.isViewer);
 
 const activeTab = ref('products');
@@ -184,6 +264,7 @@ const showOnlyActive = ref(true);
 const showNoAnalog = ref(false);
 const expandedGroups = ref(new Set());
 const renameModal = ref({ show: false, oldName: '', newName: '' });
+const restModal = ref({ show: false, data: {}, saving: false });
 
 const filteredProducts = computed(() => {
   const q = searchQuery.value.toLowerCase();
@@ -220,6 +301,16 @@ const filteredAnalogGroups = computed(() => {
   );
 });
 
+const filteredRestaurants = computed(() => {
+  const q = searchQuery.value.toLowerCase();
+  if (!q) return restaurantStore.restaurants;
+  return restaurantStore.restaurants.filter(r =>
+    String(r.number).includes(q) ||
+    (r.address || '').toLowerCase().includes(q) ||
+    (r.city || '').toLowerCase().includes(q)
+  );
+});
+
 // Watch route query — handles sidebar "Новый товар" click when already on this page
 watch(() => route.query, (q) => {
   if (q?.action === 'new-product') {
@@ -231,17 +322,22 @@ watch(() => route.query, (q) => {
     activeTab.value = 'suppliers';
     loadSuppliers();
   }
+  if (q?.tab === 'restaurants') {
+    switchToRestaurants();
+  }
 });
 
 watch(() => orderStore.settings.legalEntity, () => {
   if (activeTab.value === 'products' || activeTab.value === 'analogs') loadProducts();
   if (activeTab.value === 'suppliers' || activeTab.value === 'analogs') loadSuppliers();
+  if (activeTab.value === 'restaurants') { restaurantStore.invalidate(); restaurantStore.load(orderStore.settings.legalEntity); }
 });
 
 onMounted(() => {
   loadProducts();
   loadSuppliers();
   if (route.query.tab === 'suppliers') activeTab.value = 'suppliers';
+  if (route.query.tab === 'restaurants') switchToRestaurants();
   if (route.query.action === 'new-product') {
     activeTab.value = 'products';
     editCardModal.value = { show: true, product: null };
@@ -333,6 +429,64 @@ async function removeFromGroup(p) {
 }
 
 async function switchToAnalogs() { activeTab.value = 'analogs'; if (!products.value.length) await loadProducts(); }
+
+async function switchToRestaurants() {
+  activeTab.value = 'restaurants';
+  await restaurantStore.load(orderStore.settings.legalEntity);
+}
+
+function openRestaurantModal(r) {
+  if (r) {
+    restModal.value = {
+      show: true,
+      data: { ...r },
+      saving: false,
+    };
+  } else {
+    restModal.value = {
+      show: true,
+      data: {
+        number: '',
+        region: 'Минск',
+        city: 'Минск',
+        address: '',
+        notes: '',
+        legal_entity_group: restaurantStore.entityToGroup(orderStore.settings.legalEntity),
+      },
+      saving: false,
+    };
+  }
+}
+
+async function saveRestaurant() {
+  restModal.value.saving = true;
+  try {
+    const data = { ...restModal.value.data };
+    delete data.sort_order;
+    await restaurantStore.saveRestaurant(data);
+    restModal.value.show = false;
+    restaurantStore.invalidate();
+    await restaurantStore.load(orderStore.settings.legalEntity);
+    toast.success('Ресторан сохранён');
+  } catch (e) {
+    toast.error('Ошибка сохранения');
+  } finally {
+    restModal.value.saving = false;
+  }
+}
+
+async function deleteRestaurant(r) {
+  const ok = await new Promise(resolve => {
+    confirmModal.value = { show: true, title: 'Удалить ресторан?', message: `Ресторан ${r.number} — ${r.address}`, resolve };
+  });
+  if (!ok) return;
+  try {
+    await restaurantStore.deleteRestaurant(r.id);
+    toast.success('Ресторан удалён');
+  } catch (e) {
+    toast.error('Ошибка удаления');
+  }
+}
 
 function doExportProducts() {
   exportProductsToExcel(products.value, orderStore.settings.legalEntity);
@@ -431,6 +585,44 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
   font-weight: 500;
   opacity: 0.6;
 }
+
+/* ═══ Restaurant number badge ═══ */
+.db-rest-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bk-red); color: #fff;
+  font-weight: 800; font-size: 13px; flex-shrink: 0;
+}
+.db-card-address {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.db-rest-note {
+  font-style: italic; color: var(--text-muted);
+}
+
+/* ═══ Restaurant modal ═══ */
+.db-rest-modal-body { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+.db-rest-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.db-rest-label { display: flex; flex-direction: column; gap: 4px; }
+.db-rest-label-text { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.db-rest-label input, .db-rest-label select {
+  padding: 8px 10px; border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 14px; font-family: inherit; color: var(--text); background: white;
+  transition: border-color 0.15s;
+}
+.db-rest-label input:focus, .db-rest-label select:focus {
+  outline: none; border-color: var(--bk-orange);
+  box-shadow: 0 0 0 2px rgba(255, 135, 50, 0.12);
+}
+.db-rest-label input::placeholder { color: var(--text-muted); }
+.db-rest-modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px 16px; gap: 8px;
+}
+.db-rest-modal-footer-right { display: flex; gap: 8px; margin-left: auto; }
+.db-rest-btn-delete { color: var(--error) !important; border-color: var(--error) !important; }
+.db-rest-btn-delete:hover { background: rgba(214, 39, 0, 0.06) !important; }
 
 /* ═══ Mobile ═══ */
 @media (max-width: 768px) {

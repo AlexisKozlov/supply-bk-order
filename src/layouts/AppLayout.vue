@@ -26,22 +26,18 @@
           <span class="sidebar-icon"><BkIcon name="planning" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">Планирование</span>
         </router-link>
+        <router-link :to="{ name: 'plan-fact' }" class="sidebar-item" :class="{ active: currentRoute === 'plan-fact' }">
+          <span class="sidebar-icon"><BkIcon name="delivery" size="sm" light/></span>
+          <span v-if="!sidebarCollapsed">Поставки</span>
+        </router-link>
         <router-link :to="{ name: 'history' }" class="sidebar-item" :class="{ active: currentRoute === 'history' }">
           <span class="sidebar-icon"><BkIcon name="history" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">История</span>
-        </router-link>
-        <router-link :to="{ name: 'plan-fact' }" class="sidebar-item" :class="{ active: currentRoute === 'plan-fact' }">
-          <span class="sidebar-icon"><BkIcon name="delivery" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Доставки</span>
         </router-link>
       </nav>
 
       <div class="sidebar-section" v-if="!sidebarCollapsed">Данные</div>
       <nav class="sidebar-nav">
-        <router-link v-if="!userStore.isViewer" :to="{ name: 'database', query: { action: 'new-product' } }" class="sidebar-item">
-          <span class="sidebar-icon"><BkIcon name="add" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Новый товар</span>
-        </router-link>
         <router-link :to="{ name: 'database' }" class="sidebar-item" :class="{ active: currentRoute === 'database' }">
           <span class="sidebar-icon"><BkIcon name="database" size="sm" light/></span>
           <span v-if="!sidebarCollapsed">База данных</span>
@@ -379,7 +375,7 @@ const pageNames = {
   analysis: 'Анализ',
   database: 'База данных',
   admin: 'Админ панель',
-  'plan-fact': 'Доставки',
+  'plan-fact': 'Поставки',
   'delivery-schedule': 'График доставки',
 };
 
