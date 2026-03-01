@@ -400,24 +400,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'validate_session') {
         $sessionUser = getSessionUser($pdo);
         if (!$sessionUser) {
-            // Fallback: проверяем API-ключ + user_name (обратная совместимость)
-            $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-            if (!$apiKey) respond(['valid' => false]);
-            $s = $pdo->prepare("SELECT id FROM api_keys WHERE api_key=? AND is_active='true'");
-            $s->execute([$apiKey]);
-            if (!$s->fetch()) respond(['valid' => false]);
-            $userName = $body['user_name'] ?? '';
-            if ($userName) {
-                $s2 = $pdo->prepare("SELECT name, role, display_role, legal_entities, created_at FROM users WHERE name=?");
-                $s2->execute([$userName]);
-                $u = $s2->fetch();
-                if (!$u) respond(['valid' => false]);
-                $le = ($u['legal_entities'] && is_string($u['legal_entities'])) ? (json_decode($u['legal_entities'], true) ?? []) : [];
-                // Выдаём сессионный токен при валидации для миграции
-                $sessionToken = createSessionToken($pdo, $u['name']);
-                respond(['valid' => true, 'session_token' => $sessionToken, 'user' => ['name' => $u['name'], 'role' => $u['role'] ?? 'user', 'display_role' => $u['display_role'] ?? null, 'legal_entities' => $le, 'created_at' => $u['created_at'] ?? null]]);
-            }
-            respond(['valid' => true]);
+            respond(['valid' => false]);
         }
         $le = ($sessionUser['legal_entities'] && is_string($sessionUser['legal_entities'])) ? (json_decode($sessionUser['legal_entities'], true) ?? []) : [];
         respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'created_at' => $sessionUser['created_at'] ?? null]]);
@@ -426,13 +409,17 @@ if ($endpoint === 'rpc') {
     // --- Приватные RPC (требуют авторизацию) ---
     if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
+    // Получаем имя авторизованного пользователя из сессии (для защиты от подмены user_name)
+    $authUser = getSessionUser($pdo);
+    $authUserName = $authUser ? $authUser['name'] : '';
+
     if ($fn === 'get_user_list') {
         $s = $pdo->query("SELECT name, email FROM users ORDER BY name");
         respond($s->fetchAll());
     }
     if ($fn === 'change_user_password') {
         if (!checkRateLimit($pdo, $clientIp, 10, 10)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-        $name = $body['user_name'] ?? '';
+        $name = $authUserName; // Менять можно только свой пароль
         $oldPwd = $body['old_password'] ?? '';
         $newPwd = $body['new_password'] ?? '';
         if (!$name || !$oldPwd || !$newPwd) respond(['success'=>false,'error'=>'missing params'], 400);
@@ -509,13 +496,17 @@ if ($endpoint === 'rpc') {
         // Не позволять удалить себя
         $s2 = $pdo->prepare("SELECT name FROM users WHERE id=?"); $s2->execute([$userId]); $target = $s2->fetch();
         if ($target && $target['name'] === $callerName) respond(['success' => false, 'error' => 'cannot delete yourself'], 400);
+        // Удаляем активные сессии пользователя, чтобы он не мог продолжать работу
+        if ($target) {
+            $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
+        }
         $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$userId]);
         respond(['success' => true]);
     }
 
     if ($fn === 'mark_notifications_read') {
         $ids = $body['ids'] ?? [];
-        $user = $body['user_name'] ?? '';
+        $user = $authUserName;
         if (!$user || empty($ids)) respond(['success' => false, 'error' => 'missing params']);
         $ids = array_slice($ids, 0, 100); // Лимит на количество ID
         $ph = implode(',', array_fill(0, count($ids), '?'));
@@ -523,8 +514,7 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'heartbeat') {
-        $sessionUser = getSessionUser($pdo);
-        $userName = $sessionUser ? $sessionUser['name'] : ($body['user_name'] ?? '');
+        $userName = $authUserName;
         $page = $body['page'] ?? '';
         $editingOrderId = $body['editing_order_id'] ?? null;
         if ($userName) {
@@ -535,7 +525,7 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'check_order_lock') {
         $orderId = $body['order_id'] ?? '';
-        $userName = $body['user_name'] ?? '';
+        $userName = $authUserName;
         if (!$orderId) respond(['locked' => false]);
         $s = $pdo->prepare("SELECT user_name FROM user_presence WHERE editing_order_id = ? AND user_name != ? AND last_seen > NOW() - INTERVAL 2 MINUTE LIMIT 1");
         $s->execute([$orderId, $userName]);
@@ -543,7 +533,7 @@ if ($endpoint === 'rpc') {
         respond($row ? ['locked' => true, 'locked_by' => $row['user_name']] : ['locked' => false]);
     }
     if ($fn === 'unlock_order') {
-        $userName = $body['user_name'] ?? '';
+        $userName = $authUserName;
         if ($userName) {
             $pdo->prepare("UPDATE user_presence SET editing_order_id = NULL WHERE user_name = ?")->execute([$userName]);
         }
@@ -567,19 +557,19 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'delete_notification_for_user') {
         $id = $body['id'] ?? null;
-        $userName = $body['user_name'] ?? '';
+        $userName = $authUserName;
         if (!$id || !$userName) respond(['success' => false, 'error' => 'missing params'], 400);
         $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE id = ? AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $id, $userName]);
         respond(['success' => true]);
     }
     if ($fn === 'delete_all_notifications_for_user') {
-        $userName = $body['user_name'] ?? '';
+        $userName = $authUserName;
         if (!$userName) respond(['success' => false, 'error' => 'missing params'], 400);
         $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE (target_user = ? OR type = 'broadcast') AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $userName, $userName]);
         respond(['success' => true]);
     }
     if ($fn === 'get_active_broadcasts') {
-        $userName = $body['user_name'] ?? '';
+        $userName = $authUserName;
         if (!$userName) respond([]);
         // Не показывать уведомления, отправленные до регистрации пользователя
         $su = $pdo->prepare("SELECT created_at FROM users WHERE name=?"); $su->execute([$userName]); $uRow = $su->fetch();
