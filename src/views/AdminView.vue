@@ -200,9 +200,16 @@
         <div v-else-if="!bcHistory.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Ещё не было рассылок</div>
         <div v-else style="display:flex;flex-direction:column;gap:8px;">
           <div v-for="b in bcHistory" :key="b.id" class="bc-history-item">
-            <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
-            <div class="bc-history-msg">{{ b.message }}</div>
-            <div class="bc-history-meta">{{ b.created_by }} &middot; {{ formatBcDate(b.created_at) }}</div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+              <div style="flex:1;min-width:0;">
+                <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
+                <div class="bc-history-msg">{{ b.message }}</div>
+                <div class="bc-history-meta">{{ b.created_by }} &middot; {{ formatBcDate(b.created_at) }}</div>
+              </div>
+              <button class="bc-delete-btn" @click="deleteBroadcast(b)" :disabled="b._deleting" title="Удалить рассылку">
+                <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h1v10a2 2 0 002 2h8a2 2 0 002-2V6h1a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 2h4v1H8V4zm-2 4a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"/></svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -382,6 +389,22 @@ async function loadBcHistory() {
     bcHistory.value = data || [];
   } catch (e) { console.warn('[admin] loadBcHistory:', e); }
   finally { bcHistoryLoading.value = false; }
+}
+
+async function deleteBroadcast(b) {
+  const ok = await confirmAction('Удалить рассылку?', `Сообщение «${b.title || 'Важное сообщение'}» будет удалено для всех пользователей.`);
+  if (!ok) return;
+  b._deleting = true;
+  try {
+    const { data, error } = await db.rpc('delete_broadcast', { id: b.id });
+    if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
+    toast.success('Удалено', 'Рассылка удалена');
+    bcHistory.value = bcHistory.value.filter(x => x.id !== b.id);
+  } catch {
+    toast.error('Ошибка', 'Не удалось удалить');
+  } finally {
+    b._deleting = false;
+  }
 }
 
 const formatBcDate = formatMoscowDateTime;
@@ -805,6 +828,12 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 .bc-history-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
 .bc-history-msg { font-size: 13px; color: var(--text-secondary); line-height: 1.5; white-space: pre-line; }
 .bc-history-meta { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.bc-delete-btn {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 4px; border-radius: 6px; transition: all .15s;
+}
+.bc-delete-btn:hover { color: #e53e3e; background: rgba(229,62,62,.08); }
+.bc-delete-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ═══ Responsive ═══ */
 @media (max-width: 600px) {

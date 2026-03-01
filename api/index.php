@@ -88,7 +88,7 @@ function getSessionUser($pdo) {
     if (!$token) return null;
     // Удаляем протухшие сессии (раз в запрос — дёшево)
     $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
-    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
+    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) return null;
@@ -304,7 +304,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'check_user_password') {
         $name = $body['user_name'] ?? ''; $pass = $body['user_password'] ?? '';
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities FROM users WHERE name=?");
+        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,created_at FROM users WHERE name=?");
         $s->execute([$name]); $u = $s->fetch();
         if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'invalid_credentials']); }
         if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'invalid_credentials']); }
@@ -316,7 +316,7 @@ if ($endpoint === 'rpc') {
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
         foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
-        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le],'api_key'=>$s2->fetchColumn(),'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
+        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'created_at'=>$u['created_at'] ?? null],'api_key'=>$s2->fetchColumn(),'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
@@ -406,19 +406,19 @@ if ($endpoint === 'rpc') {
             if (!$s->fetch()) respond(['valid' => false]);
             $userName = $body['user_name'] ?? '';
             if ($userName) {
-                $s2 = $pdo->prepare("SELECT name, role, display_role, legal_entities FROM users WHERE name=?");
+                $s2 = $pdo->prepare("SELECT name, role, display_role, legal_entities, created_at FROM users WHERE name=?");
                 $s2->execute([$userName]);
                 $u = $s2->fetch();
                 if (!$u) respond(['valid' => false]);
                 $le = ($u['legal_entities'] && is_string($u['legal_entities'])) ? (json_decode($u['legal_entities'], true) ?? []) : [];
                 // Выдаём сессионный токен при валидации для миграции
                 $sessionToken = createSessionToken($pdo, $u['name']);
-                respond(['valid' => true, 'session_token' => $sessionToken, 'user' => ['name' => $u['name'], 'role' => $u['role'] ?? 'user', 'display_role' => $u['display_role'] ?? null, 'legal_entities' => $le]]);
+                respond(['valid' => true, 'session_token' => $sessionToken, 'user' => ['name' => $u['name'], 'role' => $u['role'] ?? 'user', 'display_role' => $u['display_role'] ?? null, 'legal_entities' => $le, 'created_at' => $u['created_at'] ?? null]]);
             }
             respond(['valid' => true]);
         }
         $le = ($sessionUser['legal_entities'] && is_string($sessionUser['legal_entities'])) ? (json_decode($sessionUser['legal_entities'], true) ?? []) : [];
-        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le]]);
+        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'created_at' => $sessionUser['created_at'] ?? null]]);
     }
 
     // --- Приватные RPC (требуют API-ключ) ---
@@ -457,7 +457,7 @@ if ($endpoint === 'rpc') {
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $id = uuid();
         try {
-            $pdo->prepare("INSERT INTO users (id, name, password, role, display_role, legal_entities) VALUES (?, ?, ?, ?, ?, ?)")
+            $pdo->prepare("INSERT INTO users (id, name, password, role, display_role, legal_entities, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())")
                 ->execute([$id, $name, $hash, $role, $displayRole, is_array($legalEntities) ? json_encode($legalEntities, JSON_UNESCAPED_UNICODE) : $legalEntities]);
         } catch (PDOException $e) {
             respond(['success' => false, 'error' => 'User already exists or DB error'], 400);
@@ -575,9 +575,33 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_active_broadcasts') {
         $userName = $body['user_name'] ?? '';
         if (!$userName) respond([]);
-        $s = $pdo->prepare("SELECT id, title, message, created_by, created_at FROM notifications WHERE type='broadcast' AND created_at > NOW() - INTERVAL 24 HOUR AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?)) AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?)) ORDER BY created_at DESC LIMIT 5");
-        $s->execute([$userName, $userName]);
+        // Не показывать уведомления, отправленные до регистрации пользователя
+        $su = $pdo->prepare("SELECT created_at FROM users WHERE name=?"); $su->execute([$userName]); $uRow = $su->fetch();
+        $userCreated = $uRow['created_at'] ?? null;
+        $sql = "SELECT id, title, message, created_by, created_at FROM notifications WHERE type='broadcast' AND created_at > NOW() - INTERVAL 24 HOUR AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?)) AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))";
+        $params = [$userName, $userName];
+        if ($userCreated) {
+            $sql .= " AND created_at > ?";
+            $params[] = $userCreated;
+        }
+        $sql .= " ORDER BY created_at DESC LIMIT 5";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
         respond($s->fetchAll());
+    }
+    if ($fn === 'delete_broadcast') {
+        $sessionUser = getSessionUser($pdo);
+        $role = $sessionUser ? $sessionUser['role'] : null;
+        if (!$role) {
+            $callerName = $body['caller_name'] ?? '';
+            $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $u = $s->fetch();
+            $role = $u['role'] ?? '';
+        }
+        if ($role !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $id = $body['id'] ?? null;
+        if (!$id) respond(['success' => false, 'error' => 'id required'], 400);
+        $pdo->prepare("DELETE FROM notifications WHERE id = ? AND type = 'broadcast'")->execute([$id]);
+        respond(['success' => true]);
     }
     if ($fn === 'replace_analysis_data') {
         $legalEntity = $body['legal_entity'] ?? '';
