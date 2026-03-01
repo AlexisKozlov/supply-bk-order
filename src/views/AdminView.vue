@@ -45,6 +45,7 @@
               <span v-else-if="u.role === 'viewer'" class="adm-badge adm-badge-viewer">читатель</span>
               <span v-if="u.name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
             </div>
+            <div v-if="u.email" class="adm-user-email">{{ u.email }}</div>
             <div class="adm-user-meta">
               {{ u.display_role || (u.role === 'admin' ? 'Администратор' : 'Сотрудник') }}
             </div>
@@ -230,6 +231,11 @@
               <input v-model="form.name" placeholder="ФИО пользователя" />
             </div>
 
+            <div class="modal-field">
+              <span class="modal-field-label">Email</span>
+              <input v-model="form.email" type="email" placeholder="Email для входа в систему" />
+            </div>
+
             <div class="modal-row-2">
               <div class="modal-field" style="flex:1;">
                 <span class="modal-field-label">Пароль</span>
@@ -303,7 +309,7 @@ const users = ref([]);
 const allEntities = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
 
 const userModal = ref({ show: false, user: null });
-const form = ref({ name: '', password: '', role: 'user', display_role: '', legal_entities: [] });
+const form = ref({ name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [] });
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
 const maintenanceOn = ref(false);
@@ -479,13 +485,14 @@ function openUserModal(user) {
   if (user) {
     form.value = {
       name: user.name || '',
+      email: user.email || '',
       password: '',
       role: user.role || 'user',
       display_role: user.display_role || '',
       legal_entities: parseLe(user.legal_entities),
     };
   } else {
-    form.value = { name: '', password: '', role: 'user', display_role: '', legal_entities: [] };
+    form.value = { name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [] };
   }
   userModal.value.show = true;
 }
@@ -498,6 +505,7 @@ async function saveUser() {
   try {
     const payload = {
       name: form.value.name.trim(),
+      email: form.value.email.trim(),
       role: form.value.role,
       display_role: form.value.display_role.trim() || null,
       legal_entities: JSON.stringify(form.value.legal_entities),
@@ -664,6 +672,7 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
   font-size: 14px; font-weight: 600; color: var(--text);
   display: flex; align-items: center; gap: 6px;
 }
+.adm-user-email { font-size: 11px; color: var(--text-muted); margin-top: 1px; opacity: .7; }
 .adm-user-meta { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
 
 .adm-badge {

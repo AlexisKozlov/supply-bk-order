@@ -760,7 +760,7 @@ async function searchProducts(q) {
   const params = new URLSearchParams({ q, limit: '10', legal_entity: orderStore.settings.legalEntity });
   if (orderStore.settings.supplier) params.set('supplier', orderStore.settings.supplier);
   try {
-    const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-API-Key': localStorage.getItem('bk_api_key') || '' } });
+    const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
     if (!r.ok) { searchResults.value = []; return; }
     const results = await r.json();
     if (!Array.isArray(results)) { searchResults.value = []; return; }

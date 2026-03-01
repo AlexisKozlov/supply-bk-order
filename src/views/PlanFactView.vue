@@ -625,9 +625,9 @@ async function deleteActFile() {
   const ok = await confirm('Удалить акт?', 'Файл акта расхождения будет удалён.')
   if (!ok) return
   try {
-    const apiKey = localStorage.getItem('bk_api_key') || ''
+    const sessionToken = localStorage.getItem('bk_session_token') || ''
     const resp = await fetch('/api/upload/act?order_id=' + selectedOrder.value.id, {
-      method: 'DELETE', headers: { 'X-API-Key': apiKey }
+      method: 'DELETE', headers: { 'X-Session-Token': sessionToken }
     })
     if (!resp.ok) { toast.error('Ошибка', 'Не удалось удалить файл'); return }
     selectedOrder.value.act_file = null
@@ -642,9 +642,9 @@ async function uploadActFile(orderId) {
   const formData = new FormData()
   formData.append('order_id', orderId)
   formData.append('file', actFile.value)
-  const apiKey = localStorage.getItem('bk_api_key') || ''
+  const sessionToken = localStorage.getItem('bk_session_token') || ''
   try {
-    const resp = await fetch('/api/upload/act', { method: 'POST', headers: { 'X-API-Key': apiKey }, body: formData })
+    const resp = await fetch('/api/upload/act', { method: 'POST', headers: { 'X-Session-Token': sessionToken }, body: formData })
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}))
       toast.error('Ошибка загрузки', body.error || 'Не удалось загрузить файл')

@@ -131,10 +131,7 @@
       <Transition name="login-fade">
         <div v-if="showAdminLogin && !isAdmin" class="login-popup">
           <div class="login-popup-title">Вход в базу данных</div>
-          <select v-model="adminUserName" class="field-input">
-            <option value="" disabled>Пользователь</option>
-            <option v-for="u in userList" :key="u.name" :value="u.name">{{ u.name }}</option>
-          </select>
+          <input v-model="adminUserName" type="email" class="field-input" placeholder="Введите email" autocomplete="email" />
           <input
             v-model="adminPassword"
             type="password"
@@ -706,11 +703,10 @@ function handleClickOutside(e) {
 // ═══════════════════════════════
 
 const isAdmin = ref(false)
-const adminApiKey = ref('')
+const adminSessionToken = ref('')
 const showAdminLogin = ref(false)
 const adminUserName = ref('')
 const adminPassword = ref('')
-const userList = ref([])
 const adminOpen = ref(false)
 const adminTab = ref('add')
 
@@ -723,34 +719,22 @@ const editResults = ref([])
 const editingCard = ref(null)
 const editForm = ref({ id: '', name: '', analogs: '' })
 
-// Загрузка списка пользователей
-async function loadUserList() {
-  try {
-    const res = await fetch(`${API_BASE}/rpc/get_user_list`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}'
-    })
-    if (res.ok) userList.value = await res.json()
-  } catch { /* ignore */ }
-}
-
 // Авторизация
 async function loginAdmin() {
   if (!adminUserName.value || !adminPassword.value) {
-    showToast('Заполните имя и пароль', 'warning')
+    showToast('Заполните email и пароль', 'warning')
     return
   }
   try {
     const res = await fetch(`${API_BASE}/rpc/check_user_password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_name: adminUserName.value, user_password: adminPassword.value })
+      body: JSON.stringify({ user_email: adminUserName.value, user_password: adminPassword.value })
     })
     const data = await res.json()
     if (data.success) {
       isAdmin.value = true
-      adminApiKey.value = data.api_key || ''
+      adminSessionToken.value = data.session_token || ''
       showAdminLogin.value = false
       adminPassword.value = ''
       showToast('Добро пожаловать в базу данных!', 'success')
@@ -777,7 +761,7 @@ function closeAdmin() {
 function adminHeaders() {
   return {
     'Content-Type': 'application/json',
-    'X-API-Key': adminApiKey.value
+    'X-Session-Token': adminSessionToken.value
   }
 }
 
@@ -1029,10 +1013,10 @@ watch(() => [auditFilter.value.dateFrom, auditFilter.value.dateTo], () => {
 // Авто-логин из сессии основного сайта (только для пользователей с ролью не viewer)
 function tryAutoLogin() {
   if (userStore.isAuthenticated && userStore.currentUser?.role !== 'viewer') {
-    const storedKey = localStorage.getItem('bk_api_key')
-    if (storedKey) {
+    const storedToken = localStorage.getItem('bk_session_token')
+    if (storedToken) {
       isAdmin.value = true
-      adminApiKey.value = storedKey
+      adminSessionToken.value = storedToken
     }
   }
 }
@@ -1050,7 +1034,6 @@ onMounted(() => {
   maintenanceTimer = setInterval(checkMaintenance, 60000)
   loadCards()
   loadLastUpdate()
-  loadUserList()
   tryAutoLogin()
   sendGuestHeartbeat()
   heartbeatInterval = setInterval(sendGuestHeartbeat, 30000)

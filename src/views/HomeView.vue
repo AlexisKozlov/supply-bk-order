@@ -97,13 +97,10 @@
             <button class="login-close" @click="showLoginModal = false"><BkIcon name="close" size="xs"/></button>
             <div class="login-form">
               <div class="login-form-title">Вход в систему</div>
-              <div class="login-form-sub">Выберите пользователя и введите пароль</div>
+              <div class="login-form-sub">Введите email и пароль</div>
               <div class="login-field">
-                <label>Пользователь</label>
-                <select v-model="selectedUser" :disabled="loginLoading">
-                  <option value="">Выберите имя...</option>
-                  <option v-for="u in userList" :key="u.name" :value="u.name">{{ u.name }}</option>
-                </select>
+                <label>Email</label>
+                <input v-model="selectedUser" type="email" placeholder="Введите email" autocomplete="email" :disabled="loginLoading" @keydown.enter="$refs.passwordInput?.focus()" />
               </div>
               <div class="login-field">
                 <label>Пароль</label>
@@ -181,7 +178,6 @@ const selectedUser = ref('');
 const password = ref('');
 const loginError = ref('');
 const loginLoading = ref(false);
-const userList = ref([]);
 const isMaintenance = ref(false);
 const maintenanceBannerText = ref('');
 const maintenanceEndTimeRaw = ref(null);
@@ -367,11 +363,10 @@ function handleOutsideClick(e) {
   if (showUserMenu.value && !e.target.closest('.p-header-right')) showUserMenu.value = false;
 }
 
-async function openLogin() {
+function openLogin() {
   showLoginModal.value = true;
   loginError.value = '';
   password.value = '';
-  if (userList.value.length === 0) userList.value = await userStore.fetchUserList();
 }
 
 const showLoader = ref(false);

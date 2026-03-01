@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { db, setApiKey, setSessionToken } from '@/lib/apiClient.js';
+import { db, setSessionToken } from '@/lib/apiClient.js';
 
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref(null);
@@ -42,24 +42,14 @@ export const useUserStore = defineStore('user', () => {
     } catch (e) { /* сеть недоступна — оставляем локальную сессию */ }
   }
 
-  async function fetchUserList() {
-    try {
-      const { data } = await db.rpc('get_user_list');
-      return Array.isArray(data) ? data : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  async function login(name, password) {
+  async function login(email, password) {
     const { data, error } = await db.rpc('check_user_password', {
-      user_name: name,
+      user_email: email,
       user_password: password,
     });
     if (!error && data?.success) {
-      if (data.api_key) setApiKey(data.api_key);
       if (data.session_token) setSessionToken(data.session_token);
-      const user = data.user || { name, role: 'user' };
+      const user = data.user || { name: email, role: 'user' };
       currentUser.value = user;
       localStorage.setItem('bk_user', JSON.stringify(user));
       if (data.maintenance_mode !== undefined) {
@@ -112,7 +102,6 @@ export const useUserStore = defineStore('user', () => {
     maintenanceMessage,
     maintenanceEndTime,
     restoreSession,
-    fetchUserList,
     login,
     logout,
     getAllowedEntities,

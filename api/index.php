@@ -82,6 +82,12 @@ function checkApiKey($pdo) {
     return $s->fetch() !== false;
 }
 
+// Проверка авторизации: сначала сессионный токен, затем API-ключ (для серверных/машинных запросов)
+function checkAuth($pdo) {
+    if (getSessionUser($pdo)) return true;
+    return checkApiKey($pdo);
+}
+
 // Получить пользователя по сессионному токену из заголовка X-Session-Token
 function getSessionUser($pdo) {
     $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
@@ -167,7 +173,7 @@ function parseOr($orStr, &$where, &$params, $allowedFields = []) {
 
 // ═══ DELETE ACT ═══
 if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
-    if (!checkApiKey($pdo)) respond(['error' => 'Invalid API key'], 401);
+    if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
     $orderId = $_GET['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
 
@@ -183,7 +189,7 @@ if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
 // ═══ UPLOAD ACT ═══
 if ($endpoint === 'upload' && $subpoint === 'act') {
     if ($method !== 'POST') respond(['error' => 'Method not allowed'], 405);
-    if (!checkApiKey($pdo)) respond(['error' => 'Invalid API key'], 401);
+    if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
 
     $orderId = $_POST['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
@@ -233,7 +239,7 @@ if ($endpoint === 'upload' && $subpoint === 'act') {
 
 // ═══ DOWNLOAD ACT ═══
 if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2])) {
-    if (!checkApiKey($pdo)) respond(['error' => 'Invalid API key'], 401);
+    if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
     $filename = basename($parts[2]);
     $filepath = __DIR__ . '/uploads/acts/' . $filename;
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
@@ -250,7 +256,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
 
 // ═══ SEARCH ═══
 if ($endpoint === 'search_products') {
-    if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
+    if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
     $q = $_GET['q'] ?? '';
     $le = $_GET['legal_entity'] ?? '';
     $supplier = $_GET['supplier'] ?? '';
@@ -297,18 +303,13 @@ if ($endpoint === 'rpc') {
 
     // --- Публичные RPC (доступны без авторизации) ---
 
-    if ($fn === 'get_user_list') {
-        $s = $pdo->query("SELECT name FROM users ORDER BY name");
-        respond($s->fetchAll());
-    }
     if ($fn === 'check_user_password') {
-        $name = $body['user_name'] ?? ''; $pass = $body['user_password'] ?? '';
+        $email = $body['user_email'] ?? ''; $pass = $body['user_password'] ?? '';
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,created_at FROM users WHERE name=?");
-        $s->execute([$name]); $u = $s->fetch();
-        if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'invalid_credentials']); }
-        if (!verifyAndMigratePassword($pdo, $name, $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'invalid_credentials']); }
-        $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
+        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,created_at FROM users WHERE email=?");
+        $s->execute([$email]); $u = $s->fetch();
+        if (!$u) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
+        if (!verifyAndMigratePassword($pdo, $u['name'], $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
         $displayRole = $u['display_role'] ?? null;
@@ -316,7 +317,7 @@ if ($endpoint === 'rpc') {
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
         foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
-        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'created_at'=>$u['created_at'] ?? null],'api_key'=>$s2->fetchColumn(),'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
+        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'created_at'=>$u['created_at'] ?? null],'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
@@ -330,8 +331,7 @@ if ($endpoint === 'rpc') {
                     $hash = password_hash($pwd, PASSWORD_BCRYPT);
                     $pdo->prepare("UPDATE settings SET value=? WHERE `key`='order_calculator_password'")->execute([$hash]);
                 }
-                $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
-                respond(['success'=>true,'api_key'=>$s2->fetchColumn()]);
+                respond(['success'=>true]);
             }
             recordFailedLogin($pdo, $clientIp, '_legacy');
         }
@@ -421,9 +421,13 @@ if ($endpoint === 'rpc') {
         respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'created_at' => $sessionUser['created_at'] ?? null]]);
     }
 
-    // --- Приватные RPC (требуют API-ключ) ---
-    if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
+    // --- Приватные RPC (требуют авторизацию) ---
+    if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
+    if ($fn === 'get_user_list') {
+        $s = $pdo->query("SELECT name, email FROM users ORDER BY name");
+        respond($s->fetchAll());
+    }
     if ($fn === 'change_user_password') {
         if (!checkRateLimit($pdo, $clientIp, 10, 10)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $name = $body['user_name'] ?? '';
@@ -440,13 +444,10 @@ if ($endpoint === 'rpc') {
     // ─── Управление пользователями (только admin) ───
     if ($fn === 'create_user') {
         $caller = getSessionUser($pdo);
-        if (!$caller) { // Fallback на caller_name для обратной совместимости
-            $callerName = $body['caller_name'] ?? '';
-            $s = $pdo->prepare("SELECT name, role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
-        }
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $callerName = $caller['name'];
         $name = trim($body['name'] ?? '');
+        $email = trim($body['email'] ?? '');
         $password = $body['password'] ?? '';
         $role = $body['role'] ?? 'user';
         $displayRole = $body['display_role'] ?? null;
@@ -457,25 +458,22 @@ if ($endpoint === 'rpc') {
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $id = uuid();
         try {
-            $pdo->prepare("INSERT INTO users (id, name, password, role, display_role, legal_entities, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())")
-                ->execute([$id, $name, $hash, $role, $displayRole, is_array($legalEntities) ? json_encode($legalEntities, JSON_UNESCAPED_UNICODE) : $legalEntities]);
+            $pdo->prepare("INSERT INTO users (id, name, email, password, role, display_role, legal_entities, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())")
+                ->execute([$id, $name, $email ?: null, $hash, $role, $displayRole, is_array($legalEntities) ? json_encode($legalEntities, JSON_UNESCAPED_UNICODE) : $legalEntities]);
         } catch (PDOException $e) {
             respond(['success' => false, 'error' => 'User already exists or DB error'], 400);
         }
-        respond(['success' => true, 'user' => ['id' => $id, 'name' => $name, 'role' => $role, 'display_role' => $displayRole]]);
+        respond(['success' => true, 'user' => ['id' => $id, 'name' => $name, 'email' => $email ?: null, 'role' => $role, 'display_role' => $displayRole]]);
     }
     if ($fn === 'update_user') {
         $caller = getSessionUser($pdo);
-        if (!$caller) {
-            $callerName = $body['caller_name'] ?? '';
-            $s = $pdo->prepare("SELECT name, role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
-        }
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $callerName = $caller['name'];
         $userId = $body['user_id'] ?? '';
         if (!$userId) respond(['success' => false, 'error' => 'user_id required'], 400);
         $sets = []; $params = [];
         if (isset($body['name']) && trim($body['name'])) { $sets[] = "name=?"; $params[] = trim($body['name']); }
+        if (array_key_exists('email', $body)) { $sets[] = "email=?"; $params[] = trim($body['email']) ?: null; }
         if (isset($body['role']) && in_array($body['role'], ['admin', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
         if (array_key_exists('display_role', $body)) { $sets[] = "display_role=?"; $params[] = $body['display_role']; }
         if (array_key_exists('legal_entities', $body)) { $sets[] = "legal_entities=?"; $params[] = is_array($body['legal_entities']) ? json_encode($body['legal_entities'], JSON_UNESCAPED_UNICODE) : $body['legal_entities']; }
@@ -490,10 +488,6 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'delete_user') {
         $caller = getSessionUser($pdo);
-        if (!$caller) {
-            $callerName = $body['caller_name'] ?? '';
-            $s = $pdo->prepare("SELECT name, role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
-        }
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $callerName = $caller['name'];
         $userId = $body['user_id'] ?? '';
@@ -547,13 +541,11 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'send_broadcast') {
         $sessionUser = getSessionUser($pdo);
-        $userName = $sessionUser ? $sessionUser['name'] : ($body['user_name'] ?? '');
+        if (!$sessionUser || $sessionUser['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $userName = $sessionUser['name'];
         $title = $body['title'] ?? 'Важное сообщение';
         $message = $body['message'] ?? '';
-        if (!$userName || !$message) respond(['success' => false, 'error' => 'missing params'], 400);
-        $role = $sessionUser ? $sessionUser['role'] : null;
-        if (!$role) { $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$userName]); $u = $s->fetch(); $role = $u['role'] ?? ''; }
-        if ($role !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        if (!$message) respond(['success' => false, 'error' => 'missing params'], 400);
         $pdo->prepare("INSERT INTO notifications (type, title, message, created_by, read_by, created_at) VALUES ('broadcast', ?, ?, ?, '[]', NOW())")
             ->execute([mb_substr($title, 0, 255), mb_substr($message, 0, 2000), $userName]);
         $id = $pdo->lastInsertId();
@@ -591,13 +583,7 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'delete_broadcast') {
         $sessionUser = getSessionUser($pdo);
-        $role = $sessionUser ? $sessionUser['role'] : null;
-        if (!$role) {
-            $callerName = $body['caller_name'] ?? '';
-            $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $u = $s->fetch();
-            $role = $u['role'] ?? '';
-        }
-        if ($role !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        if (!$sessionUser || $sessionUser['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $id = $body['id'] ?? null;
         if (!$id) respond(['success' => false, 'error' => 'id required'], 400);
         $pdo->prepare("DELETE FROM notifications WHERE id = ? AND type = 'broadcast'")->execute([$id]);
@@ -691,7 +677,7 @@ if ($endpoint === 'rpc') {
 }
 
 // ═══ API KEY ═══
-if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
+if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule'];

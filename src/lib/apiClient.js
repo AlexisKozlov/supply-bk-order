@@ -2,12 +2,9 @@
 // Интерфейс .from().select()/.insert()/.update()/.delete()
 
 const API_BASE = '/api';
-function getApiKey() { return localStorage.getItem('bk_api_key') || ''; }
 function getSessionToken() { return localStorage.getItem('bk_session_token') || ''; }
 function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
-  const k = getApiKey();
-  if (k) h['X-API-Key'] = k;
   const t = getSessionToken();
   if (t) h['X-Session-Token'] = t;
   return h;
@@ -169,5 +166,4 @@ export const db = {
   rpc(fn, p) { return rpc(fn, p); },
 };
 
-export function setApiKey(k) { localStorage.setItem('bk_api_key', k); }
 export function setSessionToken(t) { localStorage.setItem('bk_session_token', t); }
