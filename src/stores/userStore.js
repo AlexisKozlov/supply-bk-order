@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { db, setApiKey } from '@/lib/apiClient.js';
+import { db, setApiKey, setSessionToken } from '@/lib/apiClient.js';
 
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref(null);
@@ -31,6 +31,8 @@ export const useUserStore = defineStore('user', () => {
         logout();
         return;
       }
+      // Сохранить сессионный токен если сервер выдал (миграция)
+      if (data.session_token) setSessionToken(data.session_token);
       // Обновить роль из сервера (защита от подмены в localStorage)
       if (data.user) {
         const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities };
@@ -56,6 +58,7 @@ export const useUserStore = defineStore('user', () => {
     });
     if (!error && data?.success) {
       if (data.api_key) setApiKey(data.api_key);
+      if (data.session_token) setSessionToken(data.session_token);
       const user = data.user || { name, role: 'user' };
       currentUser.value = user;
       localStorage.setItem('bk_user', JSON.stringify(user));

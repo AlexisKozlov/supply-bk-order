@@ -12,7 +12,7 @@ if ($allowed_origin) {
     }
 }
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
+header('Access-Control-Allow-Headers: Content-Type, X-API-Key, X-Session-Token');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
@@ -80,6 +80,28 @@ function checkApiKey($pdo) {
     $s = $pdo->prepare("SELECT id FROM api_keys WHERE api_key=? AND is_active='true'");
     $s->execute([$k]);
     return $s->fetch() !== false;
+}
+
+// Получить пользователя по сессионному токену из заголовка X-Session-Token
+function getSessionUser($pdo) {
+    $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
+    if (!$token) return null;
+    // Удаляем протухшие сессии (раз в запрос — дёшево)
+    $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
+    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
+    $s->execute([$token]);
+    $row = $s->fetch();
+    if (!$row) return null;
+    return $row;
+}
+
+function createSessionToken($pdo, $userName) {
+    $token = bin2hex(random_bytes(32));
+    $expires = date('Y-m-d H:i:s', strtotime('+30 days'));
+    // Ограничиваем количество сессий на пользователя (макс 5)
+    $pdo->prepare("DELETE FROM user_sessions WHERE user_name = ? AND id NOT IN (SELECT id FROM (SELECT id FROM user_sessions WHERE user_name = ? ORDER BY created_at DESC LIMIT 4) AS t)")->execute([$userName, $userName]);
+    $pdo->prepare("INSERT INTO user_sessions (user_name, token, expires_at) VALUES (?, ?, ?)")->execute([$userName, $token, $expires]);
+    return $token;
 }
 
 function checkRateLimit($pdo, $ip, $maxAttempts = 10, $windowMinutes = 10) {
@@ -290,10 +312,11 @@ if ($endpoint === 'rpc') {
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
         $displayRole = $u['display_role'] ?? null;
+        $sessionToken = createSessionToken($pdo, $u['name']);
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
         foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
-        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le],'api_key'=>$s2->fetchColumn(),'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
+        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le],'api_key'=>$s2->fetchColumn(),'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
@@ -371,23 +394,31 @@ if ($endpoint === 'rpc') {
         respond($row ?: ['value' => null]);
     }
 
-    // Валидация сессии — проверяет API-ключ и возвращает данные пользователя
+    // Валидация сессии — проверяет session_token и возвращает данные пользователя
     if ($fn === 'validate_session') {
-        $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-        if (!$apiKey) respond(['valid' => false]);
-        $s = $pdo->prepare("SELECT id FROM api_keys WHERE api_key=? AND is_active='true'");
-        $s->execute([$apiKey]);
-        if (!$s->fetch()) respond(['valid' => false]);
-        $userName = $body['user_name'] ?? '';
-        if ($userName) {
-            $s2 = $pdo->prepare("SELECT name, role, display_role, legal_entities FROM users WHERE name=?");
-            $s2->execute([$userName]);
-            $u = $s2->fetch();
-            if (!$u) respond(['valid' => false]);
-            $le = ($u['legal_entities'] && is_string($u['legal_entities'])) ? (json_decode($u['legal_entities'], true) ?? []) : [];
-            respond(['valid' => true, 'user' => ['name' => $u['name'], 'role' => $u['role'] ?? 'user', 'display_role' => $u['display_role'] ?? null, 'legal_entities' => $le]]);
+        $sessionUser = getSessionUser($pdo);
+        if (!$sessionUser) {
+            // Fallback: проверяем API-ключ + user_name (обратная совместимость)
+            $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+            if (!$apiKey) respond(['valid' => false]);
+            $s = $pdo->prepare("SELECT id FROM api_keys WHERE api_key=? AND is_active='true'");
+            $s->execute([$apiKey]);
+            if (!$s->fetch()) respond(['valid' => false]);
+            $userName = $body['user_name'] ?? '';
+            if ($userName) {
+                $s2 = $pdo->prepare("SELECT name, role, display_role, legal_entities FROM users WHERE name=?");
+                $s2->execute([$userName]);
+                $u = $s2->fetch();
+                if (!$u) respond(['valid' => false]);
+                $le = ($u['legal_entities'] && is_string($u['legal_entities'])) ? (json_decode($u['legal_entities'], true) ?? []) : [];
+                // Выдаём сессионный токен при валидации для миграции
+                $sessionToken = createSessionToken($pdo, $u['name']);
+                respond(['valid' => true, 'session_token' => $sessionToken, 'user' => ['name' => $u['name'], 'role' => $u['role'] ?? 'user', 'display_role' => $u['display_role'] ?? null, 'legal_entities' => $le]]);
+            }
+            respond(['valid' => true]);
         }
-        respond(['valid' => true]);
+        $le = ($sessionUser['legal_entities'] && is_string($sessionUser['legal_entities'])) ? (json_decode($sessionUser['legal_entities'], true) ?? []) : [];
+        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le]]);
     }
 
     // --- Приватные RPC (требуют API-ключ) ---
@@ -408,9 +439,13 @@ if ($endpoint === 'rpc') {
     }
     // ─── Управление пользователями (только admin) ───
     if ($fn === 'create_user') {
-        $callerName = $body['caller_name'] ?? '';
-        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        $caller = getSessionUser($pdo);
+        if (!$caller) { // Fallback на caller_name для обратной совместимости
+            $callerName = $body['caller_name'] ?? '';
+            $s = $pdo->prepare("SELECT name, role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        }
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $callerName = $caller['name'];
         $name = trim($body['name'] ?? '');
         $password = $body['password'] ?? '';
         $role = $body['role'] ?? 'user';
@@ -430,9 +465,13 @@ if ($endpoint === 'rpc') {
         respond(['success' => true, 'user' => ['id' => $id, 'name' => $name, 'role' => $role, 'display_role' => $displayRole]]);
     }
     if ($fn === 'update_user') {
-        $callerName = $body['caller_name'] ?? '';
-        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        $caller = getSessionUser($pdo);
+        if (!$caller) {
+            $callerName = $body['caller_name'] ?? '';
+            $s = $pdo->prepare("SELECT name, role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        }
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $callerName = $caller['name'];
         $userId = $body['user_id'] ?? '';
         if (!$userId) respond(['success' => false, 'error' => 'user_id required'], 400);
         $sets = []; $params = [];
@@ -450,9 +489,13 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'delete_user') {
-        $callerName = $body['caller_name'] ?? '';
-        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        $caller = getSessionUser($pdo);
+        if (!$caller) {
+            $callerName = $body['caller_name'] ?? '';
+            $s = $pdo->prepare("SELECT name, role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        }
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $callerName = $caller['name'];
         $userId = $body['user_id'] ?? '';
         if (!$userId) respond(['success' => false, 'error' => 'user_id required'], 400);
         // Не позволять удалить себя
@@ -472,7 +515,8 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'heartbeat') {
-        $userName = $body['user_name'] ?? '';
+        $sessionUser = getSessionUser($pdo);
+        $userName = $sessionUser ? $sessionUser['name'] : ($body['user_name'] ?? '');
         $page = $body['page'] ?? '';
         $editingOrderId = $body['editing_order_id'] ?? null;
         if ($userName) {
@@ -502,12 +546,14 @@ if ($endpoint === 'rpc') {
         respond($s->fetchAll());
     }
     if ($fn === 'send_broadcast') {
-        $userName = $body['user_name'] ?? '';
+        $sessionUser = getSessionUser($pdo);
+        $userName = $sessionUser ? $sessionUser['name'] : ($body['user_name'] ?? '');
         $title = $body['title'] ?? 'Важное сообщение';
         $message = $body['message'] ?? '';
         if (!$userName || !$message) respond(['success' => false, 'error' => 'missing params'], 400);
-        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$userName]); $u = $s->fetch();
-        if (!$u || $u['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $role = $sessionUser ? $sessionUser['role'] : null;
+        if (!$role) { $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$userName]); $u = $s->fetch(); $role = $u['role'] ?? ''; }
+        if ($role !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $pdo->prepare("INSERT INTO notifications (type, title, message, created_by, read_by, created_at) VALUES ('broadcast', ?, ?, ?, '[]', NOW())")
             ->execute([mb_substr($title, 0, 255), mb_substr($message, 0, 2000), $userName]);
         $id = $pdo->lastInsertId();

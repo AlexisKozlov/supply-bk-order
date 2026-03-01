@@ -226,7 +226,7 @@
             <div class="modal-row-2">
               <div class="modal-field" style="flex:1;">
                 <span class="modal-field-label">Пароль</span>
-                <input v-model="form.password" :placeholder="userModal.user ? 'Не менять — оставить пустым' : 'Пароль'" />
+                <input type="password" v-model="form.password" :placeholder="userModal.user ? 'Не менять — оставить пустым' : 'Пароль'" />
               </div>
               <div class="modal-field" style="width:155px;flex-shrink:0;">
                 <span class="modal-field-label">Роль</span>

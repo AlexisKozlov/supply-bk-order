@@ -3,18 +3,27 @@
 
 const API_BASE = '/api';
 function getApiKey() { return localStorage.getItem('bk_api_key') || ''; }
+function getSessionToken() { return localStorage.getItem('bk_session_token') || ''; }
 function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
   const k = getApiKey();
   if (k) h['X-API-Key'] = k;
+  const t = getSessionToken();
+  if (t) h['X-Session-Token'] = t;
   return h;
 }
 
 async function fetchWithRetry(url, opts, maxRetries = 2) {
   for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
     try {
-      return await fetch(url, opts);
+      const res = await fetch(url, { ...opts, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
     } catch (e) {
+      clearTimeout(timer);
+      if (e.name === 'AbortError') throw new Error('Сервер не отвечает (таймаут 30 сек)');
       if (attempt >= maxRetries || !(e instanceof TypeError)) throw e;
       await new Promise(r => setTimeout(r, 1000));
     }
@@ -161,3 +170,4 @@ export const db = {
 };
 
 export function setApiKey(k) { localStorage.setItem('bk_api_key', k); }
+export function setSessionToken(t) { localStorage.setItem('bk_session_token', t); }

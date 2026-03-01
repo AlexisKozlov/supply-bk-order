@@ -14,6 +14,12 @@ app.use(router);
 
 app.config.errorHandler = (err, instance, info) => {
   console.error(`[Vue error] ${info}:`, err);
+  import('./stores/toastStore.js').then(({ useToastStore }) => {
+    try {
+      const toast = useToastStore();
+      toast.error('Произошла ошибка', err?.message || 'Неизвестная ошибка');
+    } catch (e) { /* store not ready */ }
+  }).catch(() => {});
 };
 
 app.mount('#app');
