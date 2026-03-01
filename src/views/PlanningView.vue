@@ -682,10 +682,14 @@ function onUnitChange(e) {
 // ─── Validation (#7 fix — uses inputUnit.value which is already updated) ──
 let _vTimer = null;
 let _validationCache = null;
-function triggerValidation() { clearTimeout(_vTimer); _vTimer = setTimeout(runValidation, 300); }
+let _appliedAnalogs = new Map(); // SKU товара → Set<SKU применённых аналогов>
+let _validationGen = 0;
+function triggerValidation() { clearTimeout(_vTimer); _validationGen++; _vTimer = setTimeout(runValidation, 300); }
 async function runValidation() {
   if (!supplier.value || !items.value.length) return;
-  const avgMap = await _loadValidationData();
+  const gen = _validationGen;
+  const avgMap = await _loadValidationData(gen);
+  if (gen !== _validationGen) return; // данные устарели, пропускаем
   if (!avgMap.size) return;
   items.value.forEach(item => {
     if (!item.sku || !item.monthlyConsumption) { item._cw = false; item._ct = ''; return; }
@@ -696,24 +700,42 @@ async function runValidation() {
     else { item._cw = false; item._ct = ''; }
   });
 }
-async function _loadValidationData() {
+async function _loadValidationData(gen) {
   if (_validationCache && _validationCache.le === orderStore.settings.legalEntity && _validationCache.unit === inputUnit.value && _validationCache.periodDays === consumptionPeriodDays.value) return _validationCache.data;
   const targetPeriod = consumptionPeriodDays.value || 30;
   const avgMap = new Map();
-  let query = db.from('analysis_data').select('sku, consumption, period_days')
+
+  // 1. Загружаем расход из analysis_data
+  const { data, error } = await db.from('analysis_data').select('sku, consumption, period_days')
     .eq('legal_entity', orderStore.settings.legalEntity);
-  const { data, error } = await query;
+  if (gen !== _validationGen) return avgMap;
   if (error || !data?.length) { _validationCache = { le: orderStore.settings.legalEntity, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap }; return avgMap; }
+
+  // Карта SKU → расход в штуках за период (с тем же округлением что при загрузке)
+  const adMap = new Map();
   data.forEach(d => {
     if (!d.sku || !d.consumption) return;
-    const daily = (d.period_days || 30) > 0 ? d.consumption / (d.period_days || 30) : 0;
-    let val = daily * targetPeriod;
-    if (inputUnit.value === 'boxes') {
-      const item = items.value.find(i => i.sku === d.sku);
-      if (item) val = val / getQpb(item);
-    }
-    avgMap.set(d.sku, val);
+    const srcPeriod = d.period_days || 30;
+    const valPcs = srcPeriod === targetPeriod
+      ? Math.round((d.consumption) * 10) / 10
+      : Math.round(((d.consumption) / srcPeriod) * targetPeriod * 10) / 10;
+    adMap.set(d.sku, valPcs);
   });
+
+  // 2. Для каждого товара: свой расход + расход ПРИМЕНЁННЫХ аналогов
+  items.value.forEach(item => {
+    if (!item.sku) return;
+    let valPcs = adMap.get(item.sku) || 0;
+    const applied = _appliedAnalogs.get(item.sku);
+    if (applied) {
+      for (const aSku of applied) { valPcs += adMap.get(aSku) || 0; }
+    }
+    if (!valPcs) return;
+    const val = inputUnit.value === 'boxes' ? Math.round(valPcs / getQpb(item) * 100) / 100 : valPcs;
+    avgMap.set(item.sku, val);
+  });
+
+  if (gen !== _validationGen) return avgMap;
   _validationCache = { le: orderStore.settings.legalEntity, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap };
   return avgMap;
 }
@@ -732,7 +754,8 @@ async function fillConsumption() {
     }
 
     _validationCache = null;
-    recalcAll(); triggerValidation(); _savePlanDraft();
+    _appliedAnalogs = new Map();
+    recalcAll(); _savePlanDraft();
 
     const dateStr = result.updatedAt
       ? result.updatedAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -741,7 +764,10 @@ async function fillConsumption() {
     toast.success('Загружено', `${result.matched} из ${result.total}. Данные от ${dateStr}${byStr}`);
 
     if (result.analogMerges?.length) {
+      // Проверку запустим после закрытия модалки аналогов
       analogMergeModal.value = { show: true, merges: result.analogMerges };
+    } else {
+      triggerValidation();
     }
   } catch (err) {
     console.error('[fillConsumption]', err);
@@ -766,13 +792,14 @@ async function loadFrom1c() {
       const d = item.sku ? stockMap.get(item.sku) : null; if (!d) return;
       const qpb = getQpb(item);
       // stock_1c всегда в штуках → stockOnHand хранится в штуках
-      item.stockOnHand = Math.round(d.stock || 0);
+      item.stockOnHand = Math.round((d.stock || 0) * 10) / 10;
       // consumption → расход за выбранный период в текущих единицах
       const dailyC = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
       const periodConsumption = dailyC * (consumptionPeriodDays.value || 30);
-      item.monthlyConsumption = inputUnit.value === 'boxes' ? Math.round(periodConsumption / qpb * 100) / 100 : Math.round(periodConsumption);
+      item.monthlyConsumption = inputUnit.value === 'boxes' ? Math.round(periodConsumption / qpb * 100) / 100 : Math.round(periodConsumption * 10) / 10;
       f++;
     });
+    _validationCache = null;
     recalcAll(); triggerValidation(); _savePlanDraft();
     toast.success('Из 1С загружено', `${f} из ${items.value.length} позиций`);
   } catch { toast.error('Ошибка', 'stock_1c не найдена'); }
@@ -799,6 +826,7 @@ async function doImport() {
     if (u.stockAtSupplier !== undefined) item.stockAtSupplier = inputUnit.value === 'boxes' ? u.stockAtSupplier * getQpb(item) : u.stockAtSupplier;
     if (u.monthlyConsumption !== undefined) item.monthlyConsumption = u.monthlyConsumption;
   });
+  _validationCache = null;
   recalcAll(); triggerValidation(); _savePlanDraft();
   toast.success('Импорт', `${result.matched} обновлены`);
   if (result.analogMerges?.length) {
@@ -807,14 +835,35 @@ async function doImport() {
 }
 function onAnalogApply() {
   const { merges } = analogMergeModal.value;
+  // Запоминаем какие аналоги применены (checked) для проверки расхода
+  for (const merge of merges) {
+    const set = _appliedAnalogs.get(merge.itemSku) || new Set();
+    for (const a of merge.analogs) {
+      if (a.checked) set.add(a.sku);
+      else set.delete(a.sku);
+    }
+    if (set.size) _appliedAnalogs.set(merge.itemSku, set);
+    else _appliedAnalogs.delete(merge.itemSku);
+  }
   const applied = applyAnalogMerges(items.value, merges, 'planning');
   analogMergeModal.value.show = false;
   if (applied > 0) {
     recalcAll(); _savePlanDraft();
     toast.success('Аналоги применены', `${applied} аналогов добавлены`);
   }
+  _validationCache = null;
+  triggerValidation();
 }
-function onAnalogSkip() { analogMergeModal.value.show = false; }
+function onAnalogSkip() {
+  // Аналоги не применены — убираем их из проверки
+  const { merges } = analogMergeModal.value;
+  for (const merge of merges) {
+    _appliedAnalogs.delete(merge.itemSku);
+  }
+  analogMergeModal.value.show = false;
+  _validationCache = null;
+  triggerValidation();
+}
 
 // ─── Edit product card (#2) ───────────────────────────────────────────────
 async function openProductEdit(item) {
@@ -849,47 +898,190 @@ async function onCardSaved() {
 
 async function exportExcel() {
   if (!itemsWithPlan.value.length) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
-  const XLSX = await import('xlsx');
+  const XLSX = await import('xlsx-js-style');
   const headers = periodHeaders.value;
   const le = orderStore.settings.legalEntity;
+  const colTotal = 2 + headers.length;       // индекс колонки «Итого»
+  const colPallets = colTotal + 1;             // индекс колонки «Паллеты»
+  const totalCols = colPallets + 1;            // всего колонок
 
-  const info = [
-    [`План: ${supplier.value}`],
-    [`Юр. лицо: ${le}`],
-    [`Период: ${periodCount.value} ${periodType.value === 'weeks' ? 'нед.' : 'мес.'} с ${startDateStr.value}`],
-    [],
-  ];
+  // Палитра
+  const brown = '502314';
+  const brownLight = 'F0EBE5';
+  const cream = 'FFF8F0';
+  const summaryBg = 'EDE7E3';     // фон для колонок Итого/Паллеты (чуть темнее)
+  const summaryBgStripe = 'E4DDD7'; // полосатый фон для Итого/Паллеты
+  const summaryHeader = '3A1A0E'; // тёмный заголовок для Итого/Паллеты
+  const borderClr = 'E0D6CC';
+  const border = { style: 'thin', color: { rgb: borderClr } };
+  const borders = { top: border, bottom: border, left: border, right: border };
 
-  const colHeaders = ['Артикул', 'Наименование'];
-  headers.forEach(h => colHeaders.push(h.label));
+  const sTitle = { font: { bold: true, sz: 16, color: { rgb: brown }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sInfo = { font: { sz: 11, color: { rgb: '666666' }, name: 'Calibri' } };
+  const sHeader = {
+    font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: borders,
+  };
+  const sHeaderLeft = { ...sHeader, alignment: { ...sHeader.alignment, horizontal: 'left' } };
+  const sHeaderSummary = {
+    font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: summaryHeader } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: borders,
+  };
 
-  const rows = itemsWithPlan.value.map(item => {
-    const row = [item.sku || '', item.name || ''];
-    item.plan.forEach(p => {
+  function sCell(stripe) {
+    return {
+      font: { sz: 11, name: 'Calibri' },
+      fill: stripe ? { fgColor: { rgb: cream } } : undefined,
+      alignment: { vertical: 'center' },
+      border: borders,
+    };
+  }
+  function sCellBold(stripe) {
+    return {
+      font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' },
+      fill: stripe ? { fgColor: { rgb: cream } } : undefined,
+      alignment: { vertical: 'center' },
+      border: borders,
+    };
+  }
+  function sPeriodVal(stripe, hasValue) {
+    return {
+      font: { bold: hasValue, sz: 11, color: { rgb: hasValue ? brown : 'CCCCCC' }, name: 'Calibri' },
+      fill: stripe ? { fgColor: { rgb: cream } } : undefined,
+      alignment: { horizontal: 'center', vertical: 'center' },
+      border: borders,
+    };
+  }
+  function sSummaryVal(stripe, hasValue) {
+    return {
+      font: { bold: hasValue, sz: 11, color: { rgb: hasValue ? brown : 'CCCCCC' }, name: 'Calibri' },
+      fill: { fgColor: { rgb: stripe ? summaryBgStripe : summaryBg } },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      border: borders,
+    };
+  }
+  const sTotalLabel = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalEmpty = { fill: { fgColor: { rgb: brown } }, border: borders };
+  const sTotalVal = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalSummary = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: summaryHeader } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+
+  function setCell(ws, r, c, val, style) {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    ws[ref] = { v: val, t: typeof val === 'number' ? 'n' : 's', s: style };
+  }
+
+  const ws = {};
+  let r = 0;
+
+  // Заголовок
+  setCell(ws, r, 0, `План заказов — ${supplier.value}`, sTitle);
+  r++;
+  setCell(ws, r, 0, `Юр. лицо: ${le}`, sInfo);
+  r++;
+  setCell(ws, r, 0, `Период: ${periodCount.value} ${periodType.value === 'weeks' ? 'нед.' : 'мес.'} с ${startDateStr.value}`, sInfo);
+  r += 2;
+
+  // Шапка таблицы
+  setCell(ws, r, 0, 'Артикул', sHeaderLeft);
+  setCell(ws, r, 1, 'Наименование', sHeaderLeft);
+  headers.forEach((h, c) => setCell(ws, r, c + 2, h.label, sHeader));
+  setCell(ws, r, colTotal, 'Итого', sHeaderSummary);
+  setCell(ws, r, colPallets, 'Паллеты', sHeaderSummary);
+  r++;
+
+  // Данные
+  itemsWithPlan.value.forEach((item, idx) => {
+    const stripe = idx % 2 === 1;
+    setCell(ws, r, 0, item.sku || '', sCell(stripe));
+    setCell(ws, r, 1, item.name || '', sCellBold(stripe));
+    item.plan.forEach((p, c) => {
       if (p.orderBoxes > 0) {
-        row.push(`${p.orderBoxes} кор (${nf.format(p.orderUnits)} ${item.unitOfMeasure || 'шт'})`);
+        setCell(ws, r, c + 2, `${p.orderBoxes} кор (${nf.format(p.orderUnits)} ${item.unitOfMeasure || 'шт'})`, sPeriodVal(stripe, true));
       } else {
-        row.push('');
+        setCell(ws, r, c + 2, '—', sPeriodVal(stripe, false));
       }
     });
-    return row;
+    // Итого по товару
+    const tBoxes = itemTotalBoxes(item);
+    const tUnits = itemTotalUnits(item);
+    if (tBoxes > 0) {
+      setCell(ws, r, colTotal, `${nf.format(tBoxes)} кор (${nf.format(tUnits)} ${item.unitOfMeasure || 'шт'})`, sSummaryVal(stripe, true));
+    } else {
+      setCell(ws, r, colTotal, '—', sSummaryVal(stripe, false));
+    }
+    // Паллеты
+    const bpp = item.boxesPerPallet || 0;
+    if (bpp > 0 && tBoxes > 0) {
+      const pallets = Math.floor(tBoxes / bpp);
+      const remainder = tBoxes % bpp;
+      const parts = [];
+      if (pallets > 0) parts.push(`${pallets} пал`);
+      if (remainder > 0) parts.push(`${remainder} кор`);
+      setCell(ws, r, colPallets, parts.join(' + '), sSummaryVal(stripe, true));
+    } else {
+      setCell(ws, r, colPallets, bpp ? '—' : '', sSummaryVal(stripe, false));
+    }
+    r++;
   });
 
-  const totalRow = ['', 'ИТОГО'];
+  // Итого коробок
+  setCell(ws, r, 0, '', sTotalEmpty);
+  setCell(ws, r, 1, 'ИТОГО кор:', sTotalLabel);
   headers.forEach((_, m) => {
     const t = periodTotalBoxes(m);
-    totalRow.push(t > 0 ? `${nf.format(t)} кор` : '');
+    setCell(ws, r, m + 2, t > 0 ? `${nf.format(t)} кор` : '—', sTotalVal);
   });
+  const grandTotalBoxes = itemsWithPlan.value.reduce((s, i) => s + itemTotalBoxes(i), 0);
+  const grandTotalUnits = itemsWithPlan.value.reduce((s, i) => s + itemTotalUnits(i), 0);
+  setCell(ws, r, colTotal, grandTotalBoxes > 0 ? `${nf.format(grandTotalBoxes)} кор (${nf.format(grandTotalUnits)} шт)` : '—', sTotalSummary);
+  setCell(ws, r, colPallets, '', sTotalSummary);
+  r++;
 
-  const allRows = [...info, colHeaders, ...rows, totalRow];
-  const ws = XLSX.utils.aoa_to_sheet(allRows);
+  // Итого паллет
+  setCell(ws, r, 0, '', sTotalEmpty);
+  setCell(ws, r, 1, 'ИТОГО пал:', sTotalLabel);
+  let grandPallets = 0;
+  headers.forEach((_, m) => {
+    let periodPal = 0;
+    itemsWithPlan.value.forEach(item => {
+      const bpp = item.boxesPerPallet || 0;
+      const boxes = item.plan[m]?.orderBoxes || 0;
+      if (bpp > 0 && boxes > 0) periodPal += Math.floor(boxes / bpp);
+    });
+    grandPallets += periodPal;
+    setCell(ws, r, m + 2, periodPal > 0 ? `${periodPal} пал` : '—', sTotalVal);
+  });
+  setCell(ws, r, colTotal, grandPallets > 0 ? `${grandPallets} пал` : '—', sTotalSummary);
+  setCell(ws, r, colPallets, '', sTotalSummary);
+  r++;
 
+  // Настройки листа
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: totalCols - 1 } });
   ws['!cols'] = [
-    { wch: 12 }, { wch: 40 },
+    { wch: 14 }, { wch: 42 },
     ...headers.map(() => ({ wch: 22 })),
+    { wch: 24 }, { wch: 32 },
   ];
-
-  const totalCols = 2 + headers.length;
+  ws['!rows'] = [{ hpt: 24 }];
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
     { s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } },
@@ -910,6 +1102,7 @@ function _savePlanDraft() {
 
 // ─── Загрузка товаров (#3 — порядок из item_order) ────────────────────────
 async function loadProducts() {
+  _appliedAnalogs = new Map();
   if (!supplier.value) { items.value = []; return; }
   suppLoading.value = true;
   try {

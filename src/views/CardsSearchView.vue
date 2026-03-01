@@ -1225,9 +1225,9 @@ onBeforeUnmount(() => {
   transition: all 0.25s;
 }
 .search-field:focus-within {
-  background: rgba(255,255,255,0.18);
-  border-color: rgba(255,255,255,0.3);
-  box-shadow: 0 0 0 4px rgba(214,35,0,0.15), 0 8px 32px rgba(0,0,0,0.2);
+  background: rgba(255,255,255,0.22);
+  border-color: rgba(255,255,255,0.45);
+  box-shadow: 0 0 0 3px rgba(214,35,0,0.25), 0 8px 32px rgba(0,0,0,0.2);
 }
 .search-icon {
   color: rgba(255,255,255,0.4);
@@ -1243,10 +1243,15 @@ onBeforeUnmount(() => {
   background: none;
   border: none;
   outline: none;
+  box-shadow: none;
   font-size: 15px;
   font-family: inherit;
   color: #fff;
   min-width: 0;
+}
+.search-input:focus {
+  border: none;
+  box-shadow: none;
 }
 .search-input::placeholder {
   color: rgba(255,255,255,0.35);

@@ -1079,8 +1079,11 @@ onMounted(() => load());
 
 @media (max-width: 768px) {
   .an-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .an-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .an-tab { padding: 7px 10px; font-size: 11px; white-space: nowrap; }
 }
 @media (max-width: 480px) {
+  .an-tab { padding: 6px 8px; font-size: 10px; }
   .an-kpi-grid { grid-template-columns: 1fr; }
   .an-sup-metrics { grid-template-columns: repeat(2, 1fr); }
   .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }

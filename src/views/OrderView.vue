@@ -649,13 +649,18 @@ async function onSaveConfirm(note) {
 
     showSaveModal.value = false;
     orderStore.editingOrderId = null;
-    orderStore.settings.note = '';
     draftStore.clear();
 
-    // Сбрасываем данные, оставляем товары
-    orderStore.items.forEach(item => {
-      item.consumptionPeriod = 0; item.stock = 0; item.transit = 0; item.finalOrder = 0;
-    });
+    // Полный сброс: параметры + товары
+    orderStore.settings.supplier = '';
+    orderStore.settings.today = null;
+    orderStore.settings.deliveryDate = null;
+    orderStore.settings.safetyDays = 0;
+    orderStore.settings.safetyEndDate = null;
+    orderStore.settings.periodDays = 30;
+    orderStore.settings.hasTransit = false;
+    orderStore.settings.note = '';
+    orderStore.items.splice(0);
   } finally { savingOrder.value = false; }
 }
 
@@ -954,7 +959,9 @@ async function importFromExcel() {
     });
     orderStore.bumpDataVersion();
     draftStore.save();
+    const unitLabel = orderStore.settings.unit === 'boxes' ? 'коробки' : 'штуки';
     toast.success('Импорт завершён', `${result.matched} из ${orderStore.items.length} позиций обновлены`);
+    toast.info('Проверьте единицы', `Сейчас заказ в режиме «${unitLabel}». Убедитесь что данные в файле были в тех же единицах`);
     if (result.analogMerges?.length) {
       analogMergeModal.value = { show: true, merges: result.analogMerges, target: 'order' };
     }

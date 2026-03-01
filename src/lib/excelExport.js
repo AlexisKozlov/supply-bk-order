@@ -1,23 +1,91 @@
 import { getQpb, getMultiplicity } from './utils.js';
 
 export async function exportToExcel(items, settings) {
-  const XLSX = await import('xlsx');
+  const XLSX = await import('xlsx-js-style');
   const nf = new Intl.NumberFormat('ru-RU');
 
   const supplier     = settings.supplier || 'Все';
   const deliveryDate = settings.deliveryDate?.toLocaleDateString('ru-RU') || '';
   const legalEntity  = settings.legalEntity || '';
 
-  const headerRows = [
-    [`Поставщик: ${supplier}`],
-    [`Дата прихода: ${deliveryDate}`],
-    [`Юридическое лицо: ${legalEntity}`],
-    [],
-    ['Наименование', 'Заказ'],
-  ];
+  // Палитра
+  const brown = '502314';
+  const brownLight = 'F0EBE5';
+  const orange = 'FF8732';
+  const cream = 'FFF8F0';
+  const borderClr = 'E0D6CC';
+  const border = { style: 'thin', color: { rgb: borderClr } };
+  const borders = { top: border, bottom: border, left: border, right: border };
 
-  const dataRows = items.map(item => {
-    if (!item.finalOrder || item.finalOrder <= 0) return null;
+  const sTitle = { font: { bold: true, sz: 16, color: { rgb: brown }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sInfo = { font: { sz: 11, color: { rgb: '666666' }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sInfoBold = { font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' }, alignment: { vertical: 'center' } };
+  const sHeader = {
+    font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+  const sHeaderLeft = { ...sHeader, alignment: { ...sHeader.alignment, horizontal: 'left' } };
+
+  function sCell(stripe) {
+    return {
+      font: { sz: 11, name: 'Calibri' },
+      fill: stripe ? { fgColor: { rgb: cream } } : undefined,
+      alignment: { vertical: 'center' },
+      border: borders,
+    };
+  }
+  function sOrder(stripe) {
+    return {
+      font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' },
+      fill: stripe ? { fgColor: { rgb: cream } } : undefined,
+      alignment: { horizontal: 'center', vertical: 'center' },
+      border: borders,
+    };
+  }
+  const sTotalLabel = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalVal = {
+    font: { bold: true, sz: 13, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+
+  function setCell(ws, r, c, val, style) {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    ws[ref] = { v: val, t: typeof val === 'number' ? 'n' : 's', s: style };
+  }
+
+  const ws = {};
+  let r = 0;
+
+  // Заголовок
+  setCell(ws, r, 0, `Заказ — ${supplier}`, sTitle);
+  r++;
+  setCell(ws, r, 0, `Дата прихода: ${deliveryDate}`, sInfo);
+  r++;
+  setCell(ws, r, 0, `Юр. лицо: ${legalEntity}`, sInfo);
+  r += 2;
+
+  // Шапка таблицы
+  setCell(ws, r, 0, 'Наименование', sHeaderLeft);
+  setCell(ws, r, 1, 'Заказ', sHeader);
+  setCell(ws, r, 2, 'Паллеты', sHeader);
+  r++;
+
+  // Данные
+  let totalBoxes = 0;
+  let totalPallets = 0;
+  let totalBoxesLeft = 0;
+  let count = 0;
+  items.forEach(item => {
+    if (!item.finalOrder || item.finalOrder <= 0) return;
     const qpb  = getQpb(item);
     const mult = getMultiplicity(item);
     const physBoxes = settings.unit === 'boxes'
@@ -25,23 +93,48 @@ export async function exportToExcel(items, settings) {
       : Math.ceil(item.finalOrder / (qpb * mult));
     const pieces = settings.unit === 'pieces' ? item.finalOrder : physBoxes * qpb;
     const unit = item.unitOfMeasure || 'шт';
-    const nameWithSku = item.sku ? `${item.sku} ${item.name || ''}` : (item.name || '');
-    return [nameWithSku, `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`];
-  }).filter(Boolean);
+    const nameWithSku = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
+    const stripe = count % 2 === 1;
+    const bpp = item.boxesPerPallet || 0;
+    const pallets = bpp > 0 ? Math.floor(physBoxes / bpp) : 0;
+    const boxesLeft = bpp > 0 ? physBoxes % bpp : physBoxes;
 
-  const allRows = [...headerRows, ...dataRows];
-  const ws = XLSX.utils.aoa_to_sheet(allRows);
-
-  ws['!cols'] = [{ wch: 50 }, { wch: 20 }];
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } },
-    { s: { r: 2, c: 0 }, e: { r: 2, c: 1 } },
-  ];
-
-  ['A1', 'A2', 'A3', 'A5', 'B5'].forEach(cell => {
-    if (ws[cell]) ws[cell].s = { font: { bold: true } };
+    setCell(ws, r, 0, nameWithSku, sCell(stripe));
+    setCell(ws, r, 1, `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`, sOrder(stripe));
+    if (bpp > 0 && pallets > 0) {
+      setCell(ws, r, 2, `${pallets} пал${boxesLeft ? ' + ' + boxesLeft + ' кор' : ''}`, sOrder(stripe));
+    } else if (bpp > 0) {
+      setCell(ws, r, 2, `${physBoxes} кор`, sCell(stripe));
+    } else {
+      setCell(ws, r, 2, '—', sCell(stripe));
+    }
+    totalBoxes += physBoxes;
+    totalPallets += pallets;
+    totalBoxesLeft += boxesLeft;
+    count++;
+    r++;
   });
+
+  // Строка итого
+  if (count > 0) {
+    setCell(ws, r, 0, 'ИТОГО:', sTotalLabel);
+    setCell(ws, r, 1, `${nf.format(totalBoxes)} кор`, sTotalVal);
+    const palletsSummary = totalPallets > 0
+      ? `${totalPallets} пал${totalBoxesLeft ? ' + ' + totalBoxesLeft + ' кор' : ''}`
+      : `${totalBoxes} кор`;
+    setCell(ws, r, 2, palletsSummary, sTotalVal);
+    r++;
+  }
+
+  // Диапазон, ширины, мержи
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: 2 } });
+  ws['!cols'] = [{ wch: 55 }, { wch: 24 }, { wch: 18 }];
+  ws['!rows'] = [{ hpt: 24 }];
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
+  ];
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Заказ');
@@ -488,7 +581,7 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
   };
   const sTotalVal = {
     font: { bold: true, sz: 14, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
-    fill: { fgColor: { rgb: orangeBg } },
+    fill: { fgColor: { rgb: brown } },
     alignment: { horizontal: 'center', vertical: 'center' },
     border: borders,
   };

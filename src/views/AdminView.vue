@@ -470,6 +470,7 @@ function openUserModal(user) {
 async function saveUser() {
   if (!form.value.name.trim()) { toast.error('Введите имя', ''); return; }
   if (!userModal.value.user && !form.value.password) { toast.error('Введите пароль', ''); return; }
+  if (form.value.password && form.value.password.length < 4) { toast.error('Короткий пароль', 'Минимум 4 символа'); return; }
   saving.value = true;
   try {
     const payload = {

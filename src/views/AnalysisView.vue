@@ -1,58 +1,93 @@
 <template>
   <div class="analysis-view" :class="{ 'anv-compact': compactMode }">
     <!-- Header -->
-    <div class="an-header">
-      <h1 class="page-title">Анализ запасов</h1>
-      <div class="anv-controls">
-        <div class="anv-control">
-          <label>Поставщик</label>
-          <select v-model="filterSupplier">
-            <option value="">Все</option>
-            <option v-for="s in uniqueSuppliers" :key="s" :value="s">{{ s }}</option>
-          </select>
-        </div>
-        <div class="anv-control">
-          <label>Хранение</label>
-          <select v-model="filterCategory">
-            <option value="">Все</option>
-            <option value="Сухой">Сухой</option>
-            <option value="Холод">Холод</option>
-            <option value="Мороз">Мороз</option>
-          </select>
-        </div>
-        <div class="anv-control">
-          <label>Статус</label>
-          <select v-model="filterStatus">
-            <option value="">Все</option>
-            <option value="red">&lt;3 дн.</option>
-            <option value="orange">&lt;7 дн.</option>
-            <option value="yellow">&lt;14 дн.</option>
-            <option value="green">14–30 дн.</option>
-            <option value="purple">30+ дн.</option>
-          </select>
-        </div>
-        <div class="anv-control">
-          <label>Расход за</label>
-          <select v-model.number="periodDays">
-            <option :value="7">7 дней</option>
-            <option :value="14">14 дней</option>
-            <option :value="21">21 день</option>
-            <option :value="30">30 дней</option>
-            <option :value="60">60 дней</option>
-            <option :value="90">90 дней</option>
-          </select>
-        </div>
-        <div class="anv-control">
-          <label>Единицы</label>
-          <select v-model="unit">
-            <option value="pieces">Штуки</option>
-            <option value="boxes">Коробки</option>
-          </select>
+    <div class="anv-header">
+      <h1 class="page-title" style="margin-bottom:0">Анализ запасов</h1>
+      <div class="anv-header-controls">
+        <div class="anv-unit-toggle">
+          <button
+            class="anv-unit-btn"
+            :class="{ active: unit === 'pieces' }"
+            @click="unit = 'pieces'"
+          >Шт</button>
+          <button
+            class="anv-unit-btn"
+            :class="{ active: unit === 'boxes' }"
+            @click="unit = 'boxes'"
+          >Кор</button>
         </div>
       </div>
     </div>
 
-    <!-- Тулбар -->
+    <!-- Alert banner for critical groups -->
+    <div
+      v-if="hasData && criticalGroups.length"
+      class="anv-alert-banner"
+      @click="activeTab = 'red'"
+    >
+      <span class="anv-alert-icon">!</span>
+      <span>{{ criticalGroups.length }} {{ criticalGroups.length === 1 ? 'критичная группа' : criticalGroups.length < 5 ? 'критичные группы' : 'критичных групп' }} — менее 3 дней запаса</span>
+      <span class="anv-alert-arrow">&rarr;</span>
+    </div>
+
+    <!-- KPI Cards -->
+    <div v-if="hasData" class="anv-kpi-grid">
+      <div class="anv-kpi-card">
+        <div class="anv-kpi-head">Групп аналогов</div>
+        <div class="anv-kpi-val">{{ groupsWithData.length }}</div>
+      </div>
+      <div class="anv-kpi-card">
+        <div class="anv-kpi-head">Товаров с данными</div>
+        <div class="anv-kpi-val">{{ totalItemsWithData }}</div>
+        <div class="anv-kpi-sub">из {{ items.length }}</div>
+      </div>
+      <div class="anv-kpi-card anv-kpi-danger" v-if="statusCounts.red">
+        <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
+        <div class="anv-kpi-val">{{ statusCounts.red }}</div>
+      </div>
+      <div class="anv-kpi-card anv-kpi-danger" v-else>
+        <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
+        <div class="anv-kpi-val" style="color:var(--green)">0</div>
+      </div>
+      <div class="anv-kpi-card anv-kpi-warn" v-if="statusCounts.orange">
+        <div class="anv-kpi-head">Требуют внимания</div>
+        <div class="anv-kpi-val">{{ statusCounts.orange }}</div>
+      </div>
+      <div class="anv-kpi-card" v-else>
+        <div class="anv-kpi-head">Требуют внимания</div>
+        <div class="anv-kpi-val" style="color:var(--green)">0</div>
+      </div>
+    </div>
+
+    <!-- Distribution bar -->
+    <div v-if="hasData && groupsWithData.length" class="anv-dist-bar">
+      <div v-if="statusCounts.red" class="anv-dist-seg anv-dist-red" :style="{ flex: statusCounts.red }" :title="'<3 дн: ' + statusCounts.red"></div>
+      <div v-if="statusCounts.orange" class="anv-dist-seg anv-dist-orange" :style="{ flex: statusCounts.orange }" :title="'<7 дн: ' + statusCounts.orange"></div>
+      <div v-if="statusCounts.yellow" class="anv-dist-seg anv-dist-yellow" :style="{ flex: statusCounts.yellow }" :title="'<14 дн: ' + statusCounts.yellow"></div>
+      <div v-if="statusCounts.green" class="anv-dist-seg anv-dist-green" :style="{ flex: statusCounts.green }" :title="'14-30 дн: ' + statusCounts.green"></div>
+      <div v-if="statusCounts.purple" class="anv-dist-seg anv-dist-purple" :style="{ flex: statusCounts.purple }" :title="'30+ дн: ' + statusCounts.purple"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div v-if="hasData" class="anv-tabs">
+      <button class="anv-tab" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
+        Все <span class="anv-tab-cnt">{{ groupsWithData.length }}</span>
+      </button>
+      <button class="anv-tab" :class="{ active: activeTab === 'red' }" @click="activeTab = 'red'">
+        <span class="anv-tab-dot" style="background:#EF5350"></span> 0–3 дн <span v-if="statusCounts.red" class="anv-tab-cnt anv-tab-cnt-red">{{ statusCounts.red }}</span>
+      </button>
+      <button class="anv-tab" :class="{ active: activeTab === 'orange' }" @click="activeTab = 'orange'">
+        <span class="anv-tab-dot" style="background:#FF9800"></span> 3–7 дн <span v-if="statusCounts.orange" class="anv-tab-cnt anv-tab-cnt-orange">{{ statusCounts.orange }}</span>
+      </button>
+      <button class="anv-tab" :class="{ active: activeTab === 'normal' }" @click="activeTab = 'normal'">
+        <span class="anv-tab-dot" style="background:#66BB6A"></span> Норма <span v-if="statusCounts.yellow + statusCounts.green" class="anv-tab-cnt">{{ statusCounts.yellow + statusCounts.green }}</span>
+      </button>
+      <button class="anv-tab" :class="{ active: activeTab === 'purple' }" @click="activeTab = 'purple'">
+        <span class="anv-tab-dot" style="background:#AB47BC"></span> 30+ <span v-if="statusCounts.purple" class="anv-tab-cnt anv-tab-cnt-purple">{{ statusCounts.purple }}</span>
+      </button>
+    </div>
+
+    <!-- Toolbar -->
     <div class="anv-toolbar" v-if="items.length">
       <button v-if="!isViewer" class="btn small" @click="doImport" :disabled="importLoading || savingData">
         <BkIcon v-if="importLoading" name="loading" size="sm"/>
@@ -62,186 +97,137 @@
         <BkIcon v-if="load1cLoading" name="loading" size="sm"/>
         <BkIcon v-else name="oneC" size="sm"/> 1С
       </button>
-      <button class="compact-toggle" :class="{ active: compactMode }" @click="toggleCompact"><BkIcon name="menu" size="sm"/> Компакт</button>
+      <button class="anv-compact-btn" :class="{ active: compactMode }" @click="toggleCompact">
+        <BkIcon name="menu" size="sm"/>
+      </button>
+      <div class="anv-toolbar-sep"></div>
+      <div class="anv-chip-filter" v-if="hasData">
+        <select v-model="filterSupplier" class="anv-chip-select">
+          <option value="">Поставщик: все</option>
+          <option v-for="s in uniqueSuppliers" :key="s" :value="s">{{ s }}</option>
+        </select>
+      </div>
+      <div class="anv-chip-filter" v-if="hasData">
+        <select v-model="filterCategory" class="anv-chip-select">
+          <option value="">Хранение: все</option>
+          <option value="Сухой">Сухой</option>
+          <option value="Холод">Холод</option>
+          <option value="Мороз">Мороз</option>
+        </select>
+      </div>
       <div class="anv-search-wrap" v-if="hasData">
         <input
           v-model="searchQuery"
           type="text"
           class="anv-search"
-          placeholder="Поиск по группе / товару..."
+          placeholder="Поиск..."
         />
         <span v-if="searchQuery" class="anv-search-clear" @click="searchQuery = ''">&times;</span>
       </div>
       <span v-if="savingData" class="anv-saving">Сохранение...</span>
       <span v-if="lastUpdate.by && !savingData" class="anv-last-update">
-        Обновил: <b>{{ lastUpdate.by }}</b> · {{ lastUpdate.label }}
+        <b>{{ lastUpdate.by }}</b> &middot; {{ lastUpdate.label }}
       </span>
     </div>
 
-    <!-- Загрузка -->
+    <!-- Loading -->
     <div v-if="loading" class="anv-empty">
       <BurgerSpinner text="Загрузка товаров..." />
     </div>
 
-    <!-- Пусто -->
+    <!-- Empty -->
     <div v-else-if="!items.length" class="anv-empty">
-      Нет товаров для «{{ orderStore.settings.legalEntity }}»
+      Нет товаров для &laquo;{{ orderStore.settings.legalEntity }}&raquo;
     </div>
 
-    <!-- Нет данных -->
+    <!-- No data -->
     <div v-else-if="!hasData" class="anv-empty">
       <div style="font-size:28px;margin-bottom:8px;">📊</div>
       <div style="font-weight:600;margin-bottom:4px;">Загрузите данные</div>
       <div style="font-size:13px;">Нажмите «1С» или «Импорт» чтобы заполнить остатки и расход</div>
     </div>
 
-    <!-- Основная область: таблица + сводка -->
-    <div v-else class="anv-body">
-      <!-- Таблица групп -->
-      <div class="anv-main">
-        <div class="order-table-wrapper">
-          <table class="order-table">
-            <thead>
-              <tr>
-                <th style="width:28px"></th>
-                <th>Группа / Товар</th>
-                <th style="text-align:right;width:80px">Остаток</th>
-                <th style="text-align:right;width:80px">Расход</th>
-                <th style="text-align:right;width:70px">Дней</th>
-                <th style="width:32px"></th>
+    <!-- Main table -->
+    <div v-else class="anv-table-card">
+      <div class="anv-table-wrap">
+        <table class="anv-table">
+          <thead>
+            <tr>
+              <th class="anv-th-toggle"></th>
+              <th class="anv-th-name">Группа / Товар</th>
+              <th class="anv-th-num">Остаток</th>
+              <th class="anv-th-num">Расход</th>
+              <th class="anv-th-days">Дней</th>
+              <th class="anv-th-action"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="section in sectionedGroups" :key="section.key">
+              <tr class="anv-section-row" @click="toggleSection(section.key)">
+                <td colspan="6">
+                  <svg class="anv-chevron" :class="{ open: expandedSections.has(section.key) }" viewBox="0 0 16 16" width="12" height="12"><path d="M5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span class="anv-section-label">{{ section.label }}</span>
+                  <span class="anv-section-count">{{ section.groups.length }}</span>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              <template v-for="section in sectionedGroups" :key="section.key">
-                <tr class="anv-section" @click="toggleSection(section.key)">
-                  <td colspan="6">
-                    <span class="anv-section-toggle">{{ expandedSections.has(section.key) ? '▾' : '▸' }}</span>
-                    <span class="anv-section-name">{{ section.label }}</span>
-                    <span class="anv-section-cnt">{{ section.groups.length }}</span>
-                  </td>
-                </tr>
-                <template v-if="expandedSections.has(section.key)">
-                  <template v-for="group in section.groups" :key="group.name">
-                    <tr class="anv-group" @click="toggleGroup(group.name)" :class="daysRowClass(group.groupDays)">
-                      <td class="anv-toggle">{{ expandedGroups.has(group.name) ? '▾' : '▸' }}</td>
-                      <td>
-                        <span class="anv-group-name">{{ group.name }}</span>
-                        <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
+              <template v-if="expandedSections.has(section.key)">
+                <template v-for="group in section.groups" :key="group.name">
+                  <tr class="anv-group-row" :class="groupRowClass(group.groupDays)" @click="toggleGroup(group.name)">
+                    <td class="anv-td-toggle">
+                      <svg class="anv-chevron" :class="{ open: expandedGroups.has(group.name) }" viewBox="0 0 16 16" width="11" height="11"><path d="M5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </td>
+                    <td class="anv-td-name">
+                      <span class="anv-group-name">{{ group.name }}</span>
+                      <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
+                    </td>
+                    <td class="anv-td-num">{{ nf(group.totalStock) }}</td>
+                    <td class="anv-td-num">{{ nf(group.totalConsumption) }}</td>
+                    <td class="anv-td-days">
+                      <span class="anv-days-badge" :class="daysClass(group.groupDays)">{{ formatDays(group.groupDays) }}</span>
+                    </td>
+                    <td class="anv-td-action" @click.stop>
+                      <button v-if="!isViewer && group.groupDays !== Infinity && group.groupDays < 7 && group.mainSupplier" class="anv-order-btn" @click="goToOrder(group.mainSupplier)" title="Заказать">
+                        <BkIcon name="package" size="xs"/>
+                      </button>
+                    </td>
+                  </tr>
+                  <template v-if="expandedGroups.has(group.name)">
+                    <tr v-for="item in group.items" :key="item.id" class="anv-item-row" :class="{ 'anv-item-foreign': item._foreign }">
+                      <td></td>
+                      <td class="anv-td-name anv-td-name-item">
+                        <span class="anv-sku">{{ item.sku }}</span>
+                        <span class="anv-item-name">{{ item.name }}</span>
+                        <span v-if="item._foreign" class="anv-foreign-badge">{{ item.supplier_name }}</span>
+                        <span v-else-if="!compactMode" class="anv-item-supplier">{{ item.supplier_name }}</span>
                       </td>
-                      <td style="text-align:right" class="anv-group-val">{{ nf(group.totalStock) }}</td>
-                      <td style="text-align:right" class="anv-group-val">{{ nf(group.totalConsumption) }}</td>
-                      <td style="text-align:right">
-                        <span class="anv-days" :class="daysClass(group.groupDays)">{{ formatDays(group.groupDays) }}</span>
+                      <td class="anv-td-num anv-editable" @dblclick="startEdit(item, 'stock')">
+                        <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'stock'"
+                          v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
+                          @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
+                        <span v-else>{{ nf(item.displayStock) }}</span>
                       </td>
-                      <td class="anv-action-cell" @click.stop>
-                        <button v-if="!isViewer && group.groupDays !== Infinity && group.groupDays < 7 && group.mainSupplier" class="anv-order-btn" @click="goToOrder(group.mainSupplier)" title="Заказать">
-                          <BkIcon name="package" size="xs"/>
-                        </button>
+                      <td class="anv-td-num anv-editable" @dblclick="startEdit(item, 'consumption')">
+                        <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'consumption'"
+                          v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
+                          @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
+                        <span v-else>{{ nf(item.displayConsumption) }}</span>
                       </td>
+                      <td class="anv-td-days">
+                        <template v-if="item._foreign"><span class="anv-days-badge anv-days-sm anv-d-muted">&mdash;</span></template>
+                        <template v-else><span class="anv-days-badge anv-days-sm" :class="daysClass(item.daysOfStock)">{{ formatDays(item.daysOfStock) }}</span></template>
+                      </td>
+                      <td></td>
                     </tr>
-                    <template v-if="expandedGroups.has(group.name)">
-                      <tr v-for="item in group.items" :key="item.id" class="anv-item" :class="{ 'anv-item-foreign': item._foreign }">
-                        <td></td>
-                        <td>
-                          <span class="anv-sku">{{ item.sku }}</span>
-                          <span class="anv-item-name">{{ item.name }}</span>
-                          <span v-if="item._foreign" class="anv-foreign-badge">{{ item.supplier_name }}</span>
-                          <span v-else-if="!compactMode" class="anv-item-supplier">{{ item.supplier_name }}</span>
-                        </td>
-                        <td style="text-align:right" class="anv-editable" @dblclick="startEdit(item, 'stock')">
-                          <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'stock'"
-                            v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
-                            @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
-                          <span v-else>{{ nf(item.displayStock) }}</span>
-                        </td>
-                        <td style="text-align:right" class="anv-editable" @dblclick="startEdit(item, 'consumption')">
-                          <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'consumption'"
-                            v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
-                            @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
-                          <span v-else>{{ nf(item.displayConsumption) }}</span>
-                        </td>
-                        <td style="text-align:right">
-                          <template v-if="item._foreign"><span class="anv-days anv-days-sm anv-d-muted">—</span></template>
-                          <template v-else><span class="anv-days anv-days-sm" :class="daysClass(item.daysOfStock)">{{ formatDays(item.daysOfStock) }}</span></template>
-                        </td>
-                        <td></td>
-                      </tr>
-                    </template>
                   </template>
                 </template>
               </template>
-            </tbody>
-          </table>
-        </div>
+            </template>
+          </tbody>
+        </table>
       </div>
-
-      <!-- Сводка -->
-      <aside class="anv-sidebar">
-        <div class="anv-card">
-          <div class="anv-card-title">Сводка</div>
-          <div class="anv-kpi">
-            <div class="anv-kpi-row">
-              <span class="anv-kpi-label">Групп аналогов</span>
-              <span class="anv-kpi-val">{{ groupsWithData.length }}</span>
-            </div>
-            <div class="anv-kpi-row">
-              <span class="anv-kpi-label">Товаров с данными</span>
-              <span class="anv-kpi-val">{{ totalItemsWithData }}</span>
-            </div>
-            <div class="anv-kpi-row">
-              <span class="anv-kpi-label">Всего товаров</span>
-              <span class="anv-kpi-val anv-kpi-muted">{{ items.length }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="anv-card" v-if="criticalGroups.length">
-          <div class="anv-card-title anv-card-danger">Критичные (&lt;3 дн.)</div>
-          <div class="anv-crit-list">
-            <div v-for="g in criticalGroups" :key="g.name" class="anv-crit-item" @click="expandAndScroll(g.name)">
-              <span>{{ g.name }}</span>
-              <div style="display:flex;align-items:center;gap:4px;">
-                <span class="anv-days anv-days-sm anv-d-red">{{ formatDays(g.groupDays) }}</span>
-                <button v-if="!isViewer && g.mainSupplier" class="anv-order-btn anv-order-btn-sm" @click.stop="goToOrder(g.mainSupplier)" title="Заказать"><BkIcon name="package" size="xs"/></button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="anv-card" v-if="warningGroups.length">
-          <div class="anv-card-title anv-card-warn">Внимание (&lt;7 дн.)</div>
-          <div class="anv-crit-list">
-            <div v-for="g in warningGroups" :key="g.name" class="anv-crit-item" @click="expandAndScroll(g.name)">
-              <span>{{ g.name }}</span>
-              <div style="display:flex;align-items:center;gap:4px;">
-                <span class="anv-days anv-days-sm anv-d-orange">{{ formatDays(g.groupDays) }}</span>
-                <button v-if="!isViewer && g.mainSupplier" class="anv-order-btn anv-order-btn-sm" @click.stop="goToOrder(g.mainSupplier)" title="Заказать"><BkIcon name="package" size="xs"/></button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="anv-card">
-          <div class="anv-card-title">По статусу</div>
-          <div class="anv-status-bar">
-            <div v-if="statusCounts.red" class="anv-bar-seg anv-bar-red" :style="{ flex: statusCounts.red }" @click="filterStatus = 'red'" style="cursor:pointer">{{ statusCounts.red }}</div>
-            <div v-if="statusCounts.orange" class="anv-bar-seg anv-bar-orange" :style="{ flex: statusCounts.orange }" @click="filterStatus = 'orange'" style="cursor:pointer">{{ statusCounts.orange }}</div>
-            <div v-if="statusCounts.yellow" class="anv-bar-seg anv-bar-yellow" :style="{ flex: statusCounts.yellow }" @click="filterStatus = 'yellow'" style="cursor:pointer">{{ statusCounts.yellow }}</div>
-            <div v-if="statusCounts.green" class="anv-bar-seg anv-bar-green" :style="{ flex: statusCounts.green }" @click="filterStatus = 'green'" style="cursor:pointer">{{ statusCounts.green }}</div>
-            <div v-if="statusCounts.purple" class="anv-bar-seg anv-bar-purple" :style="{ flex: statusCounts.purple }" @click="filterStatus = 'purple'" style="cursor:pointer">{{ statusCounts.purple }}</div>
-          </div>
-          <div class="anv-legend">
-            <span :class="{ 'anv-legend-active': filterStatus === 'red' }" @click="filterStatus = filterStatus === 'red' ? '' : 'red'" style="cursor:pointer"><i class="anv-dot anv-dot-red"></i> &lt;3 дн.</span>
-            <span :class="{ 'anv-legend-active': filterStatus === 'orange' }" @click="filterStatus = filterStatus === 'orange' ? '' : 'orange'" style="cursor:pointer"><i class="anv-dot anv-dot-orange"></i> &lt;7</span>
-            <span :class="{ 'anv-legend-active': filterStatus === 'yellow' }" @click="filterStatus = filterStatus === 'yellow' ? '' : 'yellow'" style="cursor:pointer"><i class="anv-dot anv-dot-yellow"></i> &lt;14</span>
-            <span :class="{ 'anv-legend-active': filterStatus === 'green' }" @click="filterStatus = filterStatus === 'green' ? '' : 'green'" style="cursor:pointer"><i class="anv-dot anv-dot-green"></i> 14–30</span>
-            <span :class="{ 'anv-legend-active': filterStatus === 'purple' }" @click="filterStatus = filterStatus === 'purple' ? '' : 'purple'" style="cursor:pointer"><i class="anv-dot anv-dot-purple"></i> 30+</span>
-          </div>
-        </div>
-      </aside>
     </div>
 
-    <!-- Модалка ненайденных позиций -->
+    <!-- Unmatched items modal -->
     <Teleport to="body">
       <div v-if="showUnmatched" class="anv-modal-overlay" @click.self="showUnmatched = false">
         <div class="anv-modal">
@@ -309,8 +295,8 @@ const lastUpdate = reactive({ by: '', at: null, label: '' });
 
 const searchQuery = ref('');
 const filterSupplier = ref('');
-const filterStatus = ref('');
 const filterCategory = ref('');
+const activeTab = ref('all');
 const expandedSections = reactive(new Set(['Сухой', 'Холод', 'Мороз', '']));
 const compactMode = ref(localStorage.getItem('bk_analysis_compact') === '1');
 
@@ -365,7 +351,6 @@ async function loadProducts() {
       stock: 0,
       consumption: 0,
     }));
-    // Автозагрузка сохранённых данных
     await loadSavedData();
   } catch {
     toast.error('Ошибка', 'Не удалось загрузить товары');
@@ -393,10 +378,9 @@ async function loadSavedData() {
     items.value.forEach(item => {
       const d = item.sku ? map.get(item.sku) : null;
       if (!d) return;
-      // Данные в analysis_data хранятся в штуках
-      item.stock = Math.round(d.stock || 0);
+      item.stock = Math.round((d.stock || 0) * 10) / 10;
       const daily = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
-      item.consumption = Math.round(daily * periodDays.value);
+      item.consumption = Math.round(daily * periodDays.value * 10) / 10;
       filled++;
       const t = d.updated_at ? new Date(d.updated_at) : null;
       if (t && (!newest || t > newest)) { newest = t; newestBy = d.updated_by || ''; }
@@ -416,7 +400,6 @@ async function saveDataToDB() {
   const withData = items.value.filter(i => i.sku && (i.stock > 0 || i.consumption > 0));
   if (!withData.length) return;
 
-  // Дедупликация по SKU — при дублях берём последнее значение
   const skuMap = new Map();
   withData.forEach(item => { skuMap.set(item.sku, item); });
   const unique = [...skuMap.values()];
@@ -444,6 +427,7 @@ async function saveDataToDB() {
     lastUpdate.by = userName;
     lastUpdate.at = new Date();
     lastUpdate.label = formatTimeAgo(new Date());
+    toast.success('Сохранено', 'Данные анализа обновлены');
   } catch (e) {
     console.error('[analysis] Ошибка сохранения:', e);
     toast.error('Ошибка', 'Не удалось сохранить данные анализа');
@@ -458,12 +442,12 @@ function toUnit(val, qpb) {
 }
 
 function fromUnit(val, qpb) {
-  if (!isBoxes.value || !qpb || qpb <= 1) return Math.round(val);
-  return Math.round(val * qpb);
+  if (!isBoxes.value || !qpb || qpb <= 1) return Math.round(val * 10) / 10;
+  return Math.round(val * qpb * 10) / 10;
 }
 
 // --- Inline editing ---
-const editingCell = ref(null); // { itemId, field }
+const editingCell = ref(null);
 const editingValue = ref('');
 let _saveTimer = null;
 
@@ -487,7 +471,6 @@ function commitEdit(item) {
     raw[field] = fromUnit(Math.max(0, parsed), raw.qtyPerBox);
   }
   editingCell.value = null;
-  // Debounced save
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => saveDataToDB(), 1000);
 }
@@ -503,16 +486,17 @@ function calcDays(stock, consumption) {
 }
 
 function getStatusKey(days) {
-  if (days === Infinity || days >= 30) return 'purple';
-  if (days >= 14) return 'green';
-  if (days >= 7) return 'yellow';
-  if (days >= 3) return 'orange';
+  if (days === Infinity) return 'purple';
+  const d = Math.round(days);
+  if (d >= 30) return 'purple';
+  if (d >= 14) return 'green';
+  if (d >= 7) return 'yellow';
+  if (d >= 3) return 'orange';
   return 'red';
 }
 
 const hasData = computed(() => items.value.some(i => i.stock > 0 || i.consumption > 0));
 
-// Уникальные поставщики из товаров с данными
 const uniqueSuppliers = computed(() => {
   const set = new Set();
   for (const item of items.value) {
@@ -529,7 +513,6 @@ const groupsWithData = computed(() => {
     if (!item.analog_group) continue;
     if (item.stock <= 0 && item.consumption <= 0) continue;
 
-    // Мягкая пометка: товар другого поставщика
     const isForeign = !!(filterSupplier.value && item.supplier_name !== filterSupplier.value);
 
     if (!map.has(item.analog_group)) {
@@ -552,7 +535,6 @@ const groupsWithData = computed(() => {
       displayStock: toUnit(item.stock, item.qtyPerBox),
       displayConsumption: toUnit(item.consumption, item.qtyPerBox),
     });
-    // Суммы — все товары группы (для корректного расчёта дней)
     g.rawTotalStock += item.stock;
     g.rawTotalConsumption += item.consumption;
     if (!isForeign) {
@@ -564,19 +546,14 @@ const groupsWithData = computed(() => {
       g.categoryCounts[cat] = (g.categoryCounts[cat] || 0) + 1;
     }
   }
-  // Группа включается только если есть хотя бы 1 «свой» товар
   const arr = Array.from(map.values()).filter(g => !filterSupplier.value || g.hasOwn);
   for (const g of arr) {
     g.groupDays = calcDays(g.rawTotalStock, g.rawTotalConsumption);
-    // Суммируем все товары группы (включая foreign — для полной картины)
     g.totalStock = Math.round(g.items.reduce((s, i) => s + i.displayStock, 0) * 10) / 10;
     g.totalConsumption = Math.round(g.items.reduce((s, i) => s + i.displayConsumption, 0) * 10) / 10;
-    // Сортировка: свои сначала, потом foreign; внутри — по дням
     g.items.sort((a, b) => (a._foreign ? 1 : 0) - (b._foreign ? 1 : 0) || a.daysOfStock - b.daysOfStock);
-    // Основной поставщик — самый частый среди своих
     const sc = g.supplierCounts;
     g.mainSupplier = Object.keys(sc).sort((a, b) => sc[b] - sc[a])[0] || '';
-    // Категория группы — самая частая среди своих товаров
     const cc = g.categoryCounts;
     g.category = Object.keys(cc).sort((a, b) => cc[b] - cc[a])[0] || '';
   }
@@ -587,17 +564,26 @@ const groupsWithData = computed(() => {
 const filteredGroups = computed(() => {
   let result = groupsWithData.value;
 
-  // Фильтр по категории
+  // Tab filter
+  if (activeTab.value === 'red') {
+    result = result.filter(g => getStatusKey(g.groupDays) === 'red');
+  } else if (activeTab.value === 'orange') {
+    result = result.filter(g => getStatusKey(g.groupDays) === 'orange');
+  } else if (activeTab.value === 'normal') {
+    result = result.filter(g => {
+      const s = getStatusKey(g.groupDays);
+      return s === 'yellow' || s === 'green';
+    });
+  } else if (activeTab.value === 'purple') {
+    result = result.filter(g => getStatusKey(g.groupDays) === 'purple');
+  }
+
+  // Category filter
   if (filterCategory.value) {
     result = result.filter(g => g.category === filterCategory.value);
   }
 
-  // Фильтр по статусу
-  if (filterStatus.value) {
-    result = result.filter(g => getStatusKey(g.groupDays) === filterStatus.value);
-  }
-
-  // Фильтр по поиску
+  // Search filter
   const q = searchQuery.value.toLowerCase().trim();
   if (q) {
     result = result.filter(g => {
@@ -629,18 +615,18 @@ const sectionedGroups = computed(() => {
 
 const totalItemsWithData = computed(() => groupsWithData.value.reduce((s, g) => s + g.items.length, 0));
 
-const criticalGroups = computed(() => groupsWithData.value.filter(g => g.groupDays !== Infinity && g.groupDays < 3));
-const warningGroups = computed(() => groupsWithData.value.filter(g => g.groupDays !== Infinity && g.groupDays >= 3 && g.groupDays < 7));
+const criticalGroups = computed(() => groupsWithData.value.filter(g => getStatusKey(g.groupDays) === 'red'));
+const warningGroups = computed(() => groupsWithData.value.filter(g => getStatusKey(g.groupDays) === 'orange'));
 
 const statusCounts = computed(() => {
   let red = 0, orange = 0, yellow = 0, green = 0, purple = 0;
   for (const g of groupsWithData.value) {
-    const d = g.groupDays;
-    if (d === Infinity || d >= 30) purple++;
-    else if (d >= 14) green++;
-    else if (d < 3) red++;
-    else if (d < 7) orange++;
-    else yellow++;
+    const s = getStatusKey(g.groupDays);
+    if (s === 'red') red++;
+    else if (s === 'orange') orange++;
+    else if (s === 'yellow') yellow++;
+    else if (s === 'green') green++;
+    else purple++;
   }
   return { red, orange, yellow, green, purple };
 });
@@ -655,28 +641,16 @@ function toggleGroup(name) {
   else expandedGroups.add(name);
 }
 
-function expandAndScroll(name) {
-  expandedGroups.add(name);
-}
-
 function goToOrder(supplier) {
   router.push({ name: 'order', query: { supplier } });
 }
 
 function daysClass(days) {
-  if (days === Infinity || days >= 30) return 'anv-d-purple';
-  if (days < 3) return 'anv-d-red';
-  if (days < 7) return 'anv-d-orange';
-  if (days < 14) return 'anv-d-yellow';
-  return 'anv-d-green';
+  return 'anv-d-' + getStatusKey(days);
 }
 
-function daysRowClass(days) {
-  if (days === Infinity || days >= 30) return 'anv-row-purple';
-  if (days < 3) return 'anv-row-red';
-  if (days < 7) return 'anv-row-orange';
-  if (days < 14) return 'anv-row-yellow';
-  return 'anv-row-green';
+function groupRowClass(days) {
+  return 'anv-grow-' + getStatusKey(days);
 }
 
 function formatDays(days) {
@@ -690,11 +664,10 @@ function nf(n) {
   return n.toLocaleString('ru-RU');
 }
 
-// Ненайденные позиции после импорта
+// Unmatched items
 const unmatchedItems = ref([]);
 const showUnmatched = ref(false);
 
-// Импорт — только по артикулу
 async function doImport() {
   importLoading.value = true;
   try {
@@ -702,11 +675,9 @@ async function doImport() {
     if (!result) return;
     if (result.error) { toast.error('Ошибка импорта', result.error); return; }
     const imported = result.items;
-    // Данные из importFromFile уже в штуках — сохраняем как есть (без конвертации)
     items.value = imported;
     toast.success('Импорт завершён', `Сопоставлено: ${result.matched} из ${result.total} (файл)`);
     await saveDataToDB();
-    // Показать ненайденные
     if (result.unmatchedFile?.length) {
       unmatchedItems.value = result.unmatchedFile;
       showUnmatched.value = true;
@@ -742,10 +713,9 @@ async function loadFrom1c() {
     items.value.forEach(item => {
       const d = item.sku ? stockMap.get(item.sku) : null;
       if (!d) return;
-      // Всегда храним в штуках — конвертация в коробки только при отображении (toUnit)
-      item.stock = Math.round(d.stock || 0);
+      item.stock = Math.round((d.stock || 0) * 10) / 10;
       const daily = (d.period_days || 30) > 0 ? (d.consumption || 0) / (d.period_days || 30) : 0;
-      item.consumption = Math.round(daily * periodDays.value);
+      item.consumption = Math.round(daily * periodDays.value * 10) / 10;
       filled++;
     });
 
@@ -770,60 +740,253 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   display: flex;
   flex-direction: column;
   height: 100%;
-  gap: 6px;
+  gap: 0;
   overflow: hidden;
 }
 
-.an-header {
+/* ═══ Header ═══ */
+.anv-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.anv-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.anv-controls {
+/* Unit toggle */
+.anv-unit-toggle {
   display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
-.anv-control {
+.anv-unit-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: var(--card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.anv-unit-btn:first-child { border-right: 1px solid var(--border-light); }
+.anv-unit-btn:hover { background: var(--bg); }
+.anv-unit-btn.active {
+  background: var(--bk-brown);
+  color: white;
+}
+
+/* ═══ Alert Banner ═══ */
+.anv-alert-banner {
+  padding: 8px 14px;
+  background: #FFF3E0;
+  border: 1px solid #FFCC80;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #E65100;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  transition: background 0.15s;
+}
+.anv-alert-banner:hover { background: #FFE0B2; }
+.anv-alert-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #E65100;
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.anv-alert-arrow {
+  margin-left: auto;
+  font-size: 14px;
+}
+
+/* ═══ KPI Cards ═══ */
+.anv-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.anv-kpi-card {
+  background: var(--card);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.anv-kpi-danger { border-left: 3px solid #EF5350; }
+.anv-kpi-warn { border-left: 3px solid #FF9800; }
+.anv-kpi-head {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.anv-kpi-val {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.2;
+}
+.anv-kpi-danger .anv-kpi-val { color: #C62828; }
+.anv-kpi-warn .anv-kpi-val { color: #E65100; }
+.anv-kpi-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+/* ═══ Distribution Bar ═══ */
+.anv-dist-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.anv-dist-seg { min-width: 4px; }
+.anv-dist-red { background: #EF5350; }
+.anv-dist-orange { background: #FF9800; }
+.anv-dist-yellow { background: #AED581; }
+.anv-dist-green { background: #66BB6A; }
+.anv-dist-purple { background: #AB47BC; }
+
+/* ═══ Tabs ═══ */
+.anv-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border-light);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.anv-tab {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 5px;
+  transition: color 0.15s;
 }
-.anv-control label {
-  font-size: 12px;
+.anv-tab:hover { color: var(--text-secondary); }
+.anv-tab-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.anv-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--bk-brown);
+}
+.anv-tab-cnt {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: 8px;
+  line-height: 16px;
+  background: var(--border-light);
   color: var(--text-muted);
-  white-space: nowrap;
 }
-.anv-control select {
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 600;
-  background: white;
+.anv-tab.active .anv-tab-cnt {
+  background: var(--bk-brown);
+  color: white;
 }
+.anv-tab-cnt-red { background: #FFEBEE; color: #C62828; }
+.anv-tab.active .anv-tab-cnt-red { background: #EF5350; color: white; }
+.anv-tab-cnt-orange { background: #FFF3E0; color: #E65100; }
+.anv-tab.active .anv-tab-cnt-orange { background: #FF9800; color: white; }
+.anv-tab-cnt-purple { background: #F3E5F5; color: #7B1FA2; }
+.anv-tab.active .anv-tab-cnt-purple { background: #AB47BC; color: white; }
 
+/* ═══ Toolbar ═══ */
 .anv-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
   flex-wrap: wrap;
+  margin-bottom: 8px;
 }
+.anv-compact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+.anv-compact-btn:hover { border-color: var(--bk-orange); color: var(--text); }
+.anv-compact-btn.active { border-color: var(--bk-orange); background: #FFFBF5; color: var(--bk-brown); }
+
+.anv-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-light);
+  margin: 0 2px;
+}
+
+.anv-chip-filter { position: relative; }
+.anv-chip-select {
+  padding: 4px 24px 4px 8px;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%237A6B5F' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.anv-chip-select:hover { border-color: var(--bk-orange); }
 
 .anv-search-wrap {
   position: relative;
-  margin-left: 6px;
 }
 .anv-search {
-  padding: 4px 24px 4px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  padding: 5px 24px 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
   font-size: 12px;
-  width: 200px;
+  font-weight: 600;
+  width: 220px;
   background: white;
 }
 .anv-search:focus {
@@ -857,194 +1020,148 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   font-weight: 600;
 }
 
+/* ═══ Empty state ═══ */
 .anv-empty {
   text-align: center;
   padding: 60px 20px;
   color: var(--text-muted);
 }
 
-/* ═══ Двухколоночный лейаут ═══ */
-.anv-body {
-  display: flex;
-  gap: 16px;
+/* ═══ Table Card ═══ */
+.anv-table-card {
   flex: 1;
   min-height: 0;
+  background: var(--card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
   overflow: hidden;
-}
-.anv-main {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
-.anv-main .order-table-wrapper {
+.anv-table-wrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
-
-/* ═══ Сайдбар-сводка ═══ */
-.anv-sidebar {
-  width: 240px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow-y: auto;
-  min-height: 0;
+.anv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: auto;
 }
 
-.anv-card {
-  background: white;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-}
-.anv-card-title {
-  font-size: 11px;
+/* Table header */
+.anv-table thead th {
+  padding: 8px 10px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
   color: var(--text-muted);
-  margin-bottom: 8px;
-}
-.anv-card-danger { color: #C62828; }
-.anv-card-warn { color: #E65100; }
-
-.anv-kpi { display: flex; flex-direction: column; gap: 6px; }
-.anv-kpi-row { display: flex; justify-content: space-between; align-items: center; }
-.anv-kpi-label { font-size: 12px; color: var(--text-secondary); }
-.anv-kpi-val { font-size: 14px; font-weight: 700; color: var(--text); }
-.anv-kpi-muted { color: var(--text-muted); font-weight: 500; }
-
-.anv-crit-list { display: flex; flex-direction: column; gap: 4px; }
-.anv-crit-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  padding: 3px 0;
-  cursor: pointer;
-  color: var(--text);
-}
-.anv-crit-item:hover { color: var(--accent); }
-
-/* Статус-бар */
-.anv-status-bar {
-  display: flex;
-  height: 18px;
-  border-radius: 4px;
-  overflow: hidden;
-  gap: 1px;
-}
-.anv-bar-seg {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  color: white;
-  min-width: 18px;
-}
-.anv-bar-red { background: #EF5350; }
-.anv-bar-orange { background: #FF9800; }
-.anv-bar-yellow { background: #FDD835; color: #5D4037; }
-.anv-bar-green { background: #66BB6A; }
-.anv-bar-purple { background: #9C27B0; }
-
-.anv-legend {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.anv-legend-active {
-  font-weight: 700;
-  color: var(--text);
-}
-.anv-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  margin-right: 2px;
-  vertical-align: middle;
-}
-.anv-dot-red { background: #EF5350; }
-.anv-dot-orange { background: #FF9800; }
-.anv-dot-yellow { background: #FDD835; }
-.anv-dot-green { background: #66BB6A; }
-.anv-dot-purple { background: #9C27B0; }
-
-/* ═══ Строка секции (Сухой / Холод / Мороз) ═══ */
-.anv-section {
-  cursor: pointer;
-  user-select: none;
-}
-.anv-section td {
-  background: #E8EAF6 !important;
-  border-bottom: 2px solid #9FA8DA !important;
-  padding: 8px 10px !important;
-  font-size: 13px;
-  font-weight: 700;
-  color: #283593;
-}
-.anv-section:hover td {
-  background: #D1D5EE !important;
-}
-.anv-section-toggle {
-  font-size: 10px;
-  color: #5C6BC0;
-  margin-right: 6px;
-}
-.anv-section-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #283593;
-}
-.anv-section-cnt {
-  font-size: 11px;
-  color: #7986CB;
-  margin-left: 6px;
-  font-weight: 500;
-}
-.anv-section-cnt::before { content: '('; }
-.anv-section-cnt::after { content: ')'; }
-
-/* ═══ Строка группы ═══ */
-.anv-group {
-  cursor: pointer;
-  user-select: none;
-}
-.anv-group td {
-  background: var(--bk-yellow) !important;
-  border-bottom: 1px solid var(--border) !important;
-  padding: 6px 8px !important;
-  font-size: 12px;
-}
-.anv-group td:nth-child(2),
-.anv-item td:nth-child(2) {
+  background: var(--bg);
+  border-bottom: 2px solid var(--border-light);
+  position: sticky;
+  top: 0;
+  z-index: 20;
   text-align: left;
 }
-.anv-group:hover td { background: #f0e5d0 !important; }
-.anv-group.anv-row-red td { background: #FFF0F0 !important; }
-.anv-group.anv-row-red:hover td { background: #FFE4E4 !important; }
-.anv-group.anv-row-orange td { background: #FFF8ED !important; }
-.anv-group.anv-row-orange:hover td { background: #FFEFDB !important; }
-.anv-group.anv-row-yellow td { background: #FFFDE7 !important; }
-.anv-group.anv-row-yellow:hover td { background: #FFF9C4 !important; }
-.anv-group.anv-row-green td { background: #E8F5E9 !important; }
-.anv-group.anv-row-green:hover td { background: #C8E6C9 !important; }
-.anv-group.anv-row-purple td { background: #F3E5F5 !important; }
-.anv-group.anv-row-purple:hover td { background: #E1BEE7 !important; }
+.anv-th-toggle { width: 28px; }
+.anv-th-name { }
+.anv-th-num { width: 80px; text-align: right !important; }
+.anv-th-days { width: 70px; text-align: center !important; }
+.anv-th-action { width: 36px; }
 
-.anv-toggle {
-  text-align: center;
-  font-size: 10px;
-  color: var(--bk-brown-light);
+/* ═══ Section Row (Сухой/Холод/Мороз) ═══ */
+.anv-section-row {
+  cursor: pointer;
+  user-select: none;
 }
+.anv-section-row td {
+  background: #F5F0EA;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.anv-section-row:hover td { background: #EDE6DC; }
+.anv-section-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--bk-brown);
+}
+.anv-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--bk-brown);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 8px;
+  padding: 0 5px;
+}
+
+/* Chevron icon */
+.anv-chevron {
+  color: var(--bk-brown-light);
+  transition: transform 0.15s;
+  vertical-align: middle;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.anv-chevron.open { transform: rotate(90deg); }
+
+/* ═══ Group Row ═══ */
+.anv-group-row {
+  cursor: pointer;
+  user-select: none;
+}
+.anv-group-row td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+  background: var(--card);
+  transition: background 0.1s;
+}
+
+/* Status color indicator — left border */
+.anv-group-row.anv-grow-red td:first-child { box-shadow: inset 3px 0 0 #EF5350; }
+.anv-group-row.anv-grow-orange td:first-child { box-shadow: inset 3px 0 0 #FF9800; }
+.anv-group-row.anv-grow-yellow td:first-child { box-shadow: inset 3px 0 0 #FDD835; }
+.anv-group-row.anv-grow-green td:first-child { box-shadow: inset 3px 0 0 #66BB6A; }
+.anv-group-row.anv-grow-purple td:first-child { box-shadow: inset 3px 0 0 #AB47BC; }
+
+/* Light background tint for critical */
+.anv-group-row.anv-grow-red td { background: #FFF8F7; }
+.anv-group-row.anv-grow-red:hover td { background: #FFEFED; }
+.anv-group-row.anv-grow-orange td { background: #FFFBF5; }
+.anv-group-row.anv-grow-orange:hover td { background: #FFF3E0; }
+.anv-group-row:hover td { background: #FFF8F0; }
+.anv-group-row.anv-grow-red:hover td { background: #FFEFED; }
+.anv-group-row.anv-grow-orange:hover td { background: #FFF3E0; }
+
+.anv-td-toggle {
+  text-align: center;
+  width: 28px;
+}
+.anv-td-name { text-align: left; }
+.anv-td-name-item { padding-left: 24px !important; }
+.anv-td-num {
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.anv-td-days { text-align: center; }
+.anv-td-action {
+  text-align: center;
+  padding: 2px !important;
+}
+
 .anv-group-name {
   font-weight: 600;
   color: var(--bk-brown);
@@ -1055,17 +1172,12 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   color: var(--text-muted);
   margin-left: 4px;
 }
-.anv-group-val {
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
 
-/* ═══ Строка товара ═══ */
-.anv-item td {
+/* ═══ Item Row ═══ */
+.anv-item-row td {
   font-size: 11px;
-  padding: 3px 8px !important;
-  border-bottom: 1px solid var(--border-light) !important;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--border-light);
   color: var(--text-secondary);
 }
 .anv-sku {
@@ -1074,9 +1186,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   color: var(--text-muted);
   margin-right: 4px;
 }
-.anv-item-name {
-  font-size: 11px;
-}
+.anv-item-name { font-size: 11px; }
 .anv-item-supplier {
   font-size: 9px;
   color: var(--text-muted);
@@ -1092,13 +1202,13 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   padding: 1px 4px;
   font-size: 12px;
   text-align: right;
-  border: 1px solid var(--primary, #4361ee);
-  border-radius: 3px;
+  border: 1.5px solid var(--bk-orange);
+  border-radius: 4px;
   outline: none;
   background: #fff;
 }
 
-/* ═══ Foreign-товары (другой поставщик) ═══ */
+/* ═══ Foreign items ═══ */
 .anv-item-foreign td { opacity: 0.65; }
 .anv-foreign-badge {
   display: inline-block;
@@ -1118,11 +1228,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   font-weight: 400;
 }
 
-/* ═══ Кнопка «Заказать» ═══ */
-.anv-action-cell {
-  text-align: center;
-  padding: 2px !important;
-}
+/* ═══ Order button ═══ */
 .anv-order-btn {
   display: inline-flex;
   align-items: center;
@@ -1141,15 +1247,9 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   border-color: var(--bk-orange);
   background: #FFF8ED;
 }
-.anv-order-btn-sm {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
 
-/* ═══ Бейдж дней ═══ */
-.anv-days {
+/* ═══ Days Badge ═══ */
+.anv-days-badge {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 10px;
@@ -1165,15 +1265,16 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 }
 .anv-d-red { background: #FFEBEE; color: #C62828; }
 .anv-d-orange { background: #FFF3E0; color: #E65100; }
-.anv-d-yellow { background: #FFFDE7; color: #F57F17; }
+.anv-d-yellow { background: #F1F8E9; color: #558B2F; }
 .anv-d-green { background: #E8F5E9; color: #2E7D32; }
 .anv-d-purple { background: #F3E5F5; color: #6A1B9A; }
 
-/* ═══ Компактный режим ═══ */
-.anv-compact .anv-section td { padding: 5px 6px !important; font-size: 12px; }
-.anv-compact .anv-group td { padding: 3px 6px !important; font-size: 11px; }
-.anv-compact .anv-item td { padding: 2px 6px !important; font-size: 10px; }
-.anv-compact .anv-days { font-size: 10px; padding: 0 6px; min-width: 26px; }
+/* ═══ Compact Mode ═══ */
+.anv-compact .anv-section-row td { padding: 5px 6px; }
+.anv-compact .anv-section-label { font-size: 10px; }
+.anv-compact .anv-group-row td { padding: 3px 6px; font-size: 11px; }
+.anv-compact .anv-item-row td { padding: 2px 6px; font-size: 10px; }
+.anv-compact .anv-days-badge { font-size: 10px; padding: 0 6px; min-width: 26px; }
 .anv-compact .anv-days-sm { font-size: 9px; padding: 0 4px; min-width: 22px; }
 .anv-compact .anv-group-name { font-size: 11px; }
 .anv-compact .anv-sku { font-size: 9px; }
@@ -1181,155 +1282,114 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 .anv-compact .anv-item-supplier { display: none; }
 .anv-compact .anv-group-cnt { font-size: 9px; }
 
-/* ═══ Мобильная адаптация ═══ */
-@media (max-width: 1024px) {
-  .anv-sidebar { width: 200px; }
-}
+/* ═══ Responsive ═══ */
 @media (max-width: 900px) {
-  /* Ключевое: снять фиксированный layout, дать странице скроллиться */
   .analysis-view {
     overflow: auto !important;
     height: auto !important;
     min-height: 0;
   }
-  .anv-body {
-    flex-direction: column;
-    overflow: visible;
+  .anv-table-card {
     flex: none;
   }
-  .anv-main {
+  .anv-table-wrap {
     flex: none;
-  }
-  .anv-main .order-table-wrapper {
-    flex: none;
-    max-height: none;
     overflow-x: auto;
     overflow-y: visible;
     height: auto;
   }
-  .anv-sidebar {
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    overflow-y: visible;
-  }
-  .anv-card { flex: 1; min-width: 160px; }
+  .anv-kpi-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
 @media (max-width: 768px) {
-  .an-header { flex-direction: column; align-items: flex-start; gap: 8px; }
-  .anv-controls { width: 100%; flex-wrap: wrap; gap: 6px; }
-  .anv-control { flex: 1; min-width: calc(50% - 4px); }
-  .anv-control select { width: 100%; font-size: 14px; min-height: 36px; }
+  .anv-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .anv-header-controls { width: 100%; justify-content: flex-end; }
+  .anv-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .anv-kpi-val { font-size: 20px; }
+  .anv-tabs { gap: 0; }
+  .anv-tab { padding: 6px 8px; font-size: 11px; }
   .anv-toolbar { flex-wrap: wrap; }
   .anv-search { width: 100%; font-size: 14px; min-height: 36px; }
   .anv-search-wrap { width: 100%; margin-left: 0; }
 
-  /* ── Скрыть таблицу с thead, показать как карточки ── */
-  .order-table thead { display: none !important; }
-  .order-table,
-  .order-table tbody { display: block !important; width: 100%; }
+  /* Table card-like layout */
+  .anv-table thead { display: none; }
+  .anv-table, .anv-table tbody { display: block; width: 100%; }
 
-  /* Группа аналогов — компактная карточка */
-  .anv-group {
+  .anv-group-row {
     display: flex !important;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px !important;
-    border-bottom: 1px solid var(--border) !important;
-    border-radius: 0;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
   }
-  .anv-group td {
-    display: contents !important;
+  .anv-group-row td {
+    display: contents;
     padding: 0 !important;
     border: none !important;
+    background: none !important;
   }
-  /* Скрыть toggle td — стрелку покажем через CSS */
-  .anv-group td.anv-toggle {
-    display: inline !important;
-    font-size: 10px;
+  .anv-group-row td.anv-td-toggle {
+    display: inline;
     flex-shrink: 0;
     width: auto;
   }
-  .anv-group td:nth-child(2) {
-    display: inline !important;
+  .anv-group-row td.anv-td-name {
+    display: inline;
     flex: 1;
     min-width: 0;
     overflow: hidden;
   }
-  .anv-group-name { font-size: 12px; }
-  .anv-group-cnt { font-size: 9px; }
-  /* Скрыть остаток и расход в группе */
-  .anv-group td:nth-child(3),
-  .anv-group td:nth-child(4) {
-    display: none !important;
-  }
-  /* Дней — правый край */
-  .anv-group td:nth-child(5) {
-    display: inline !important;
+  .anv-group-row td.anv-td-num { display: none !important; }
+  .anv-group-row td.anv-td-days {
+    display: inline;
     margin-left: auto;
     flex-shrink: 0;
   }
-  .anv-days { font-size: 10px; padding: 1px 6px; min-width: 28px; }
-  /* Скрыть кнопку заказать */
-  .anv-group td:nth-child(6) {
-    display: none !important;
-  }
+  .anv-group-row td.anv-td-action { display: none !important; }
 
-  /* Товар внутри группы — компактная строка */
-  .anv-item {
+  .anv-item-row {
     display: flex !important;
     align-items: center;
     gap: 4px;
-    padding: 3px 8px 3px 20px !important;
-    border-bottom: 1px solid var(--border-light) !important;
+    padding: 3px 8px 3px 20px;
+    border-bottom: 1px solid var(--border-light);
   }
-  .anv-item td {
-    display: contents !important;
+  .anv-item-row td {
+    display: contents;
     padding: 0 !important;
     border: none !important;
   }
-  .anv-item td:first-child { display: none !important; } /* пустой toggle */
-  .anv-item td:nth-child(2) {
-    display: inline !important;
+  .anv-item-row td:first-child { display: none !important; }
+  .anv-item-row td.anv-td-name {
+    display: inline;
     flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    padding-left: 0 !important;
   }
-  .anv-sku { font-size: 9px; }
-  .anv-item-name { font-size: 11px; }
-  .anv-item-supplier { display: none; }
-  /* Скрыть остаток и расход в товаре */
-  .anv-item td:nth-child(3),
-  .anv-item td:nth-child(4) {
-    display: none !important;
-  }
-  /* Дней */
-  .anv-item td:nth-child(5) {
-    display: inline !important;
+  .anv-item-row td.anv-td-num { display: none !important; }
+  .anv-item-row td.anv-td-days {
+    display: inline;
     margin-left: auto;
     flex-shrink: 0;
   }
-  .anv-days-sm { font-size: 9px; padding: 0 4px; min-width: 22px; }
-  .anv-item td:nth-child(6) { display: none !important; }
-
-  /* Sidebar компактный */
-  .anv-sidebar { flex-direction: column; gap: 6px; }
-  .anv-card { min-width: 0; padding: 6px 8px; }
-  .anv-card-title { font-size: 9px; margin-bottom: 3px; }
-  .anv-kpi { gap: 1px; }
-  .anv-kpi-label { font-size: 11px; }
-  .anv-kpi-val { font-size: 12px; }
-  .anv-crit-item { font-size: 11px; padding: 1px 0; }
-  .anv-crit-list { gap: 1px; }
-  .anv-legend { flex-wrap: wrap; gap: 4px; }
+  .anv-item-row td:last-child { display: none !important; }
+  .anv-item-supplier { display: none; }
 }
+
 @media (max-width: 480px) {
-  .anv-control { min-width: 100%; }
+  .anv-kpi-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .anv-kpi-card { padding: 8px 10px; }
+  .anv-kpi-val { font-size: 18px; }
+  .anv-tab { padding: 5px 6px; font-size: 10px; }
+  .anv-tab-cnt { font-size: 9px; padding: 0 4px; }
+  .anv-chip-select { font-size: 10px; }
 }
 
-/* ═══ Модалка ненайденных ═══ */
+/* ═══ Modal ═══ */
 .anv-modal-overlay {
   position: fixed;
   inset: 0;
@@ -1405,7 +1465,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   color: var(--text-secondary);
 }
 .anv-modal-table tbody tr:hover td {
-  background: var(--bk-yellow-light, #FFF8ED);
+  background: #FFF8ED;
 }
 .anv-modal-footer {
   padding: 10px 18px 14px;

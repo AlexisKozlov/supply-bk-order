@@ -90,7 +90,7 @@ function parseNum(val) {
   if (val === null || val === undefined || val === '') return 0;
   const s = String(val).replace(/\s/g, '').replace(',', '.');
   const n = parseFloat(s);
-  return isNaN(n) ? 0 : Math.round(n);
+  return isNaN(n) ? 0 : Math.round(n * 10) / 10;
 }
 
 function normSku(sku) {
@@ -440,7 +440,7 @@ async function matchData(items, fileData, target, unit) {
                 const itemQpb = item.qtyPerBox || 1;
                 const needConvert = unit === 'boxes' && analogQpb !== itemQpb && itemQpb > 0;
                 const ratio = needConvert ? analogQpb / itemQpb : 1;
-                const convertVal = (v) => Math.round(v * ratio);
+                const convertVal = (v) => Math.round(v * ratio * 10) / 10;
 
                 foundAnalogs.push({
                   sku: analogSku,
@@ -581,18 +581,18 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
     const srcPeriodDays = d.period_days || 30;
     // Если период совпадает — берём как есть, без потерь от округления
     const consumptionPcs = srcPeriodDays === targetPeriodDays
-      ? Math.round(d.consumption || 0)
-      : Math.round(((d.consumption || 0) / srcPeriodDays) * targetPeriodDays);
-    const stockPcs = Math.round(d.stock || 0);
+      ? Math.round((d.consumption || 0) * 10) / 10
+      : Math.round(((d.consumption || 0) / srcPeriodDays) * targetPeriodDays * 10) / 10;
+    const stockPcs = Math.round((d.stock || 0) * 10) / 10;
     const qpb = getQpb(item);
 
     if (target === 'order') {
       // unit=boxes → пересчёт через qtyPerBox (штук в упаковке)
       item.consumptionPeriod = unit === 'boxes'
-        ? Math.round(consumptionPcs / qpb)
+        ? Math.round(consumptionPcs / qpb * 10) / 10
         : consumptionPcs;
       item.stock = unit === 'boxes'
-        ? Math.round(stockPcs / qpb)
+        ? Math.round(stockPcs / qpb * 10) / 10
         : stockPcs;
     } else {
       // planning: monthlyConsumption — расход за выбранный период в текущих единицах
@@ -663,15 +663,15 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
               const itemQpb = item.qtyPerBox || 1;
               const analogPeriodDays = analogData.period_days || 30;
               const analogDaily = analogPeriodDays > 0 ? (analogData.consumption || 0) / analogPeriodDays : 0;
-              const analogConsumptionPcs = Math.round(analogDaily * targetPeriodDays);
-              const analogStockPcs = Math.round(analogData.stock ?? 0);
+              const analogConsumptionPcs = Math.round(analogDaily * targetPeriodDays * 10) / 10;
+              const analogStockPcs = Math.round((analogData.stock ?? 0) * 10) / 10;
 
               if (target === 'order') {
                 foundAnalogs.push({
                   sku: analogSku,
                   name: analogSkuToName.get(analogSku) || '',
-                  stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb) : analogStockPcs,
-                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb) : analogConsumptionPcs,
+                  stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb * 10) / 10 : analogStockPcs,
+                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb * 10) / 10 : analogConsumptionPcs,
                   checked: true,
                 });
               } else {
@@ -679,7 +679,7 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
                   sku: analogSku,
                   name: analogSkuToName.get(analogSku) || '',
                   stock: analogStockPcs,
-                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb) : analogConsumptionPcs,
+                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb * 10) / 10 : analogConsumptionPcs,
                   checked: true,
                 });
               }
