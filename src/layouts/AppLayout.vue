@@ -679,4 +679,73 @@ function confirmLogout() {
   padding: 6px 16px; font-size: 13px; font-weight: 600;
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }
+
+/* ═══ Welcome overlay ═══ */
+.welcome-overlay {
+  position: fixed; inset: 0; z-index: 99999;
+  background: linear-gradient(135deg, #2C1810 0%, #502314 40%, #8B4513 100%);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .4s ease;
+  pointer-events: none;
+}
+.welcome-overlay.welcome-visible { opacity: 1; pointer-events: auto; }
+.welcome-overlay.welcome-fade { opacity: 0; transition: opacity .6s ease; }
+.welcome-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0;
+}
+.welcome-content {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  animation: welcomeSlideUp .6s cubic-bezier(.2,.8,.3,1) forwards;
+}
+@keyframes welcomeSlideUp {
+  from { opacity: 0; transform: translateY(30px) scale(.95); }
+  to { opacity: 1; transform: none; }
+}
+.welcome-avatar-ring {
+  width: 80px; height: 80px; border-radius: 50%;
+  background: conic-gradient(#FDBD10, #D62700, #FF8733, #FDBD10);
+  display: flex; align-items: center; justify-content: center;
+  animation: welcomeRingSpin 3s linear infinite;
+  padding: 3px;
+}
+@keyframes welcomeRingSpin { to { transform: rotate(360deg); } }
+.welcome-avatar {
+  width: 100%; height: 100%; border-radius: 50%;
+  background: linear-gradient(135deg, #D62700, #FF8733);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 900; color: #fff;
+  letter-spacing: 1px;
+}
+.welcome-greeting {
+  font-size: 14px; font-weight: 500; color: rgba(245,230,208,.6);
+  text-transform: uppercase; letter-spacing: 3px;
+  margin-top: 8px;
+}
+.welcome-name {
+  font-size: 28px; font-weight: 900; color: #F5E6D0;
+  font-family: 'Flame', 'Sora', sans-serif;
+  text-align: center;
+}
+.welcome-entity {
+  font-size: 12px; font-weight: 600; color: rgba(253,189,16,.7);
+  background: rgba(253,189,16,.08); padding: 4px 16px;
+  border-radius: 20px; border: 1px solid rgba(253,189,16,.15);
+}
+.welcome-line {
+  width: 40px; height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, #D62700, #FF8733);
+  margin-top: 4px;
+  animation: welcomeLineGrow .8s ease .3s both;
+}
+@keyframes welcomeLineGrow {
+  from { width: 0; opacity: 0; }
+  to { width: 40px; opacity: 1; }
+}
+
+@media (max-width: 480px) {
+  .welcome-name { font-size: 22px; }
+  .welcome-avatar-ring { width: 64px; height: 64px; }
+  .welcome-avatar { font-size: 18px; }
+}
 </style>
