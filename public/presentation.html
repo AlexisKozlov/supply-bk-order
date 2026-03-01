@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supply Department — Презентация</title>
+<style>
+@font-face { font-family:'Flame'; src:url('Flame-Regular.otf') format('opentype'); font-weight:400 }
+@font-face { font-family:'Flame'; src:url('Flame-Bold.otf') format('opentype'); font-weight:700 }
+
+:root {
+  --brown:#502314; --dark:#1a0e09; --dark2:#2C1810; --red:#D62700;
+  --orange:#FF8733; --yellow:#FDBD10; --cream:#F5E6D0; --green:#4CAF50;
+  --card:rgba(255,255,255,0.04); --card-b:rgba(255,255,255,0.07);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{overflow:hidden;height:100%}
+body{font-family:'Flame','Segoe UI',system-ui,sans-serif;background:var(--dark);color:#fff;height:100%;overflow:hidden;-webkit-font-smoothing:antialiased}
+
+/* ═══ AMBIENT ═══ */
+.ambient{position:fixed;inset:0;pointer-events:none;z-index:0}
+.ambient-orb{position:absolute;border-radius:50%;filter:blur(120px);opacity:0.07;will-change:transform}
+.orb1{width:600px;height:600px;background:var(--red);top:-10%;left:-5%;animation:orbFloat1 20s ease-in-out infinite}
+.orb2{width:500px;height:500px;background:var(--orange);bottom:-15%;right:-10%;animation:orbFloat2 25s ease-in-out infinite}
+.orb3{width:400px;height:400px;background:var(--yellow);top:40%;left:50%;animation:orbFloat3 18s ease-in-out infinite}
+@keyframes orbFloat1{0%,100%{transform:translate(0,0)}50%{transform:translate(80px,60px)}}
+@keyframes orbFloat2{0%,100%{transform:translate(0,0)}50%{transform:translate(-60px,-80px)}}
+@keyframes orbFloat3{0%,100%{transform:translate(0,0)}50%{transform:translate(-40px,50px)}}
+
+/* ═══ SLIDES ═══ */
+.deck{position:relative;width:100vw;height:100vh;z-index:1}
+.slide{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 80px;opacity:0;visibility:hidden;transition:none}
+.slide.active{opacity:1;visibility:visible}
+.slide.animating-in{visibility:visible}
+.slide.animating-out{visibility:visible}
+
+/* ═══ REVEAL ANIMATIONS ═══ */
+[data-reveal]{opacity:0;transform:translateY(30px);transition:opacity 0.7s cubic-bezier(.16,1,.3,1),transform 0.7s cubic-bezier(.16,1,.3,1)}
+[data-reveal].revealed{opacity:1;transform:translateY(0)}
+[data-reveal-left]{opacity:0;transform:translateX(-40px);transition:opacity 0.7s cubic-bezier(.16,1,.3,1),transform 0.7s cubic-bezier(.16,1,.3,1)}
+[data-reveal-left].revealed{opacity:1;transform:translateX(0)}
+[data-reveal-right]{opacity:0;transform:translateX(40px);transition:opacity 0.7s cubic-bezier(.16,1,.3,1),transform 0.7s cubic-bezier(.16,1,.3,1)}
+[data-reveal-right].revealed{opacity:1;transform:translateX(0)}
+[data-reveal-scale]{opacity:0;transform:scale(0.85);transition:opacity 0.7s cubic-bezier(.16,1,.3,1),transform 0.7s cubic-bezier(.16,1,.3,1)}
+[data-reveal-scale].revealed{opacity:1;transform:scale(1)}
+
+/* ═══ TYPOGRAPHY ═══ */
+.tag{font-size:13px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:var(--yellow);margin-bottom:16px}
+h1{font-size:clamp(36px,5.5vw,64px);font-weight:700;line-height:1.1;text-align:center}
+h2{font-size:clamp(28px,3.5vw,46px);font-weight:700;line-height:1.15;text-align:center}
+.lead{font-size:clamp(17px,1.8vw,22px);color:rgba(245,230,208,0.6);text-align:center;max-width:700px;line-height:1.6;font-weight:400}
+.divider{width:60px;height:3px;border-radius:2px;background:linear-gradient(90deg,var(--red),var(--orange));margin:20px auto}
+
+/* ═══ HERO ═══ */
+.hero-particles{position:absolute;inset:0;overflow:hidden}
+.hero-particles span{position:absolute;border-radius:50%;pointer-events:none;animation:sparkRise linear infinite;opacity:0}
+@keyframes sparkRise{0%{opacity:0;transform:translateY(0) scale(0)}10%{opacity:1}80%{opacity:.8}100%{opacity:0;transform:translateY(-100vh) scale(1)}}
+.hero-logo{margin-bottom:24px;animation:logoFloat 4s ease-in-out infinite}
+@keyframes logoFloat{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-8px) rotate(1deg)}}
+.hero-date{font-size:13px;color:rgba(245,230,208,0.25);letter-spacing:3px;margin-top:32px}
+
+/* ═══ CARDS ═══ */
+.grid{display:grid;gap:20px;width:100%;max-width:1100px}
+.g2{grid-template-columns:1fr 1fr}
+.g3{grid-template-columns:1fr 1fr 1fr}
+.g4{grid-template-columns:1fr 1fr 1fr 1fr}
+
+.card{background:var(--card);border:1px solid var(--card-b);border-radius:16px;padding:28px;position:relative;overflow:hidden;transition:transform 0.3s cubic-bezier(.16,1,.3,1),box-shadow 0.3s,border-color 0.3s}
+.card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at var(--mx,50%) var(--my,50%),rgba(253,189,16,0.06) 0%,transparent 60%);opacity:0;transition:opacity 0.4s;pointer-events:none}
+.card:hover{transform:translateY(-4px);box-shadow:0 20px 60px rgba(0,0,0,0.3);border-color:rgba(255,255,255,0.12)}
+.card:hover::before{opacity:1}
+.card-icon{font-size:28px;margin-bottom:14px;display:block}
+.card h3{font-size:19px;margin-bottom:8px;font-weight:700}
+.card p{font-size:15px;line-height:1.6;color:rgba(245,230,208,0.6);font-weight:400;font-family:'Segoe UI',system-ui,sans-serif}
+
+/* ═══ ACCENT CARD ═══ */
+.card-accent{border-left:3px solid var(--yellow)}
+.card-accent.red{border-left-color:var(--red)}
+.card-accent.orange{border-left-color:var(--orange)}
+.card-accent.green{border-left-color:var(--green)}
+
+/* ═══ BIG NUMBER ═══ */
+.big-num{font-size:clamp(48px,6vw,72px);font-weight:700;line-height:1;background:linear-gradient(135deg,var(--yellow),var(--orange));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.big-card{background:var(--card);border:1px solid var(--card-b);border-radius:20px;padding:36px;text-align:center}
+.big-card p{font-size:17px;color:rgba(245,230,208,0.5);margin-top:8px;font-weight:400;font-family:'Segoe UI',system-ui,sans-serif}
+
+/* ═══ FLOW ═══ */
+.flow{display:flex;align-items:stretch;gap:12px;width:100%;max-width:1100px}
+.flow-step{flex:1;background:var(--card);border:1px solid var(--card-b);border-radius:14px;padding:24px 16px;text-align:center;position:relative;transition:transform 0.3s,border-color 0.3s}
+.flow-step:hover{transform:translateY(-3px);border-color:rgba(253,189,16,0.2)}
+.step-num{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--red),var(--orange));display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;margin-bottom:14px}
+.flow-step h3{font-size:16px;margin-bottom:6px;font-weight:700}
+.flow-step p{font-size:13px;color:rgba(245,230,208,0.5);font-family:'Segoe UI',system-ui,sans-serif;font-weight:400}
+.flow-arrow{display:flex;align-items:center;color:var(--orange);font-size:20px;opacity:0.4}
+
+/* ═══ STATUS BAR ═══ */
+.status-bar{display:flex;width:100%;max-width:900px;height:44px;border-radius:22px;overflow:hidden;position:relative}
+.status-bar>div{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;transition:flex 0.6s cubic-bezier(.16,1,.3,1)}
+.sb-red{background:#D62700;flex:1}
+.sb-orange{background:#FF8733;flex:1.5}
+.sb-yellow{background:#FDBD10;color:#333;flex:2}
+.sb-green{background:#4CAF50;flex:3}
+.sb-purple{background:#9C27B0;flex:1}
+
+/* ═══ SHIELD ═══ */
+.shield{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--card);border:1px solid var(--card-b);border-radius:12px;font-size:16px;color:var(--cream);transition:transform 0.2s,border-color 0.3s;font-weight:400}
+.shield b{font-weight:700;font-size:17px}
+.shield:hover{transform:translateX(4px);border-color:rgba(253,189,16,0.15)}
+.shield-icon{font-size:20px;flex-shrink:0}
+
+/* ═══ CHECKLIST ═══ */
+.checklist{list-style:none;max-width:700px;width:100%}
+.checklist li{padding:12px 0;display:flex;align-items:center;gap:16px;font-size:20px;color:var(--cream);border-bottom:1px solid rgba(255,255,255,0.04);font-weight:400}
+.checklist li:last-child{border-bottom:none}
+.check{width:28px;height:28px;border-radius:50%;background:rgba(76,175,80,0.15);border:2px solid var(--green);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--green);flex-shrink:0}
+
+/* ═══ NAV ═══ */
+.nav{position:fixed;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:20px 40px;z-index:100;background:linear-gradient(transparent,rgba(0,0,0,0.8))}
+.nav-btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:10px 28px;color:#fff;font-family:'Flame',sans-serif;font-size:14px;cursor:pointer;transition:all 0.2s;backdrop-filter:blur(10px)}
+.nav-btn:hover:not(:disabled){background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.2);transform:translateY(-1px)}
+.nav-btn:disabled{opacity:0.25;cursor:default}
+.nav-center{display:flex;align-items:center;gap:6px}
+.nav-dot{width:6px;height:6px;border-radius:3px;background:rgba(255,255,255,0.15);transition:all 0.4s cubic-bezier(.16,1,.3,1);cursor:pointer}
+.nav-dot.active{background:var(--yellow);width:28px}
+.nav-dot:hover:not(.active){background:rgba(255,255,255,0.3)}
+
+/* ═══ PROGRESS BAR ═══ */
+.progress-bar{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--red),var(--orange),var(--yellow));z-index:200;transition:width 0.4s cubic-bezier(.16,1,.3,1);box-shadow:0 0 20px rgba(253,189,16,0.3)}
+
+/* ═══ COUNTER ANIMATION ═══ */
+.counter{display:inline-block}
+
+@media(max-width:900px){
+  .slide{padding:40px 24px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .flow{flex-direction:column}
+  .flow-arrow{transform:rotate(90deg);align-self:center}
+  .shield-grid{grid-template-columns:1fr !important}
+}
+</style>
+</head>
+<body>
+
+<div class="ambient">
+  <div class="ambient-orb orb1"></div>
+  <div class="ambient-orb orb2"></div>
+  <div class="ambient-orb orb3"></div>
+</div>
+
+<div class="progress-bar" id="progress" style="width:0%"></div>
+
+<div class="deck" id="deck">
+
+<!-- ══════════ 0: HERO ══════════ -->
+<div class="slide active" data-bg="hero">
+  <div class="hero-particles" id="particles"></div>
+  <div class="hero-logo" data-reveal>
+    <svg viewBox="0 0 100 95" width="110" height="105" fill="none">
+      <path d="M8 48c0-20 17-34 42-34s42 14 42 34H8z" fill="url(#g1)"/>
+      <ellipse cx="32" cy="26" rx="3.5" ry="3" fill="#F9E4B7" opacity=".6"/>
+      <ellipse cx="48" cy="20" rx="3" ry="2.5" fill="#F9E4B7" opacity=".5"/>
+      <ellipse cx="64" cy="25" rx="3.8" ry="3" fill="#F9E4B7" opacity=".55"/>
+      <rect x="6" y="48" width="88" height="9" rx="4.5" fill="#4CAF50"/>
+      <path d="M6 52q5-4 10 0t10 0 10 0 10 0 10 0 10 0 10 0 10 0 10 0" stroke="#388E3C" stroke-width="1.5" fill="none"/>
+      <path d="M8 57h84l3 7H5l3-7z" fill="#FDBD10"/>
+      <rect x="6" y="65" width="88" height="14" rx="3" fill="url(#g2)"/>
+      <rect x="8" y="79" width="84" height="10" rx="5" fill="url(#g3)"/>
+      <defs>
+        <linearGradient id="g1" x1="50" y1="14" x2="50" y2="48"><stop stop-color="#F5C547"/><stop offset="1" stop-color="#D4881A"/></linearGradient>
+        <linearGradient id="g2" x1="50" y1="65" x2="50" y2="79"><stop stop-color="#8B4513"/><stop offset="1" stop-color="#4A2510"/></linearGradient>
+        <linearGradient id="g3" x1="50" y1="79" x2="50" y2="89"><stop stop-color="#E8A430"/><stop offset="1" stop-color="#C47A15"/></linearGradient>
+      </defs>
+    </svg>
+  </div>
+  <div class="tag" data-reveal style="transition-delay:.15s">Supply Department</div>
+  <h1 data-reveal style="transition-delay:.3s">Система управления<br>закупками</h1>
+  <div class="divider" data-reveal style="transition-delay:.45s"></div>
+  <p class="lead" data-reveal style="transition-delay:.6s">Автоматизация полного цикла —<br>от расчёта заказа до приёмки товара</p>
+  <div class="hero-date" data-reveal style="transition-delay:.8s">Презентация для руководства &nbsp;•&nbsp; Март 2026</div>
+</div>
+
+<!-- ══════════ 1: PROBLEM ══════════ -->
+<div class="slide" data-bg="fire">
+  <div class="tag" data-reveal>Проблема</div>
+  <h2 data-reveal style="transition-delay:.1s">Как было раньше</h2>
+  <p class="lead" data-reveal style="transition-delay:.2s;margin-bottom:32px">Четыре боли, которые мешали работе отдела закупок</p>
+  <div class="grid g2" data-reveal style="transition-delay:.3s">
+    <div class="card">
+      <span class="card-icon">📄</span>
+      <h3>Ручной расчёт в Excel</h3>
+      <p>Формулы ломаются, данные устаревают, каждый работает в своей копии файла — нет единой картины</p>
+    </div>
+    <div class="card">
+      <span class="card-icon">⚠️</span>
+      <h3>Ошибки в заказах</h3>
+      <p>Неверный расход, забытые позиции, путаница между юридическими лицами, пересорт</p>
+    </div>
+    <div class="card">
+      <span class="card-icon">⏱️</span>
+      <h3>Потеря времени</h3>
+      <p>Сбор данных из разных источников, пересчёт вручную, копирование заказов в мессенджеры</p>
+    </div>
+    <div class="card">
+      <span class="card-icon">🔍</span>
+      <h3>Нет прозрачности</h3>
+      <p>Непонятно: кто заказал, когда поставка, какие остатки на складе, есть ли дефицит</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 2: SOLUTION FLOW ══════════ -->
+<div class="slide" data-bg="gold">
+  <div class="tag" data-reveal>Решение</div>
+  <h2 data-reveal style="transition-delay:.1s">Полный цикл в одной системе</h2>
+  <p class="lead" data-reveal style="transition-delay:.2s;margin-bottom:36px">От загрузки данных до приёмки на складе — пять шагов</p>
+  <div class="flow" data-reveal style="transition-delay:.35s">
+    <div class="flow-step">
+      <div class="step-num">1</div>
+      <h3>Анализ<br>остатков</h3>
+      <p>Загрузка данных<br>по складу</p>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">
+      <div class="step-num">2</div>
+      <h3>Расчёт<br>заказа</h3>
+      <p>Автоматически<br>за секунды</p>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">
+      <div class="step-num">3</div>
+      <h3>Отправка<br>поставщику</h3>
+      <p>WhatsApp, Telegram<br>Email, Excel</p>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">
+      <div class="step-num">4</div>
+      <h3>Контроль<br>поставки</h3>
+      <p>Статус в<br>реальном времени</p>
+    </div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">
+      <div class="step-num">5</div>
+      <h3>Аналитика<br>и отчёты</h3>
+      <p>KPI, тренды<br>аномалии</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 3: MAIN FEATURE ══════════ -->
+<div class="slide" data-bg="dark">
+  <div class="tag" data-reveal>Ключевая функция</div>
+  <h2 data-reveal style="transition-delay:.1s">Автоматический расчёт заказа</h2>
+  <div style="display:flex;gap:32px;width:100%;max-width:1100px;margin-top:28px;align-items:stretch">
+    <div style="flex:1.2;display:flex;flex-direction:column;gap:16px">
+      <div class="card card-accent" data-reveal-left style="transition-delay:.2s">
+        <h3>📦 &nbsp;Что на входе</h3>
+        <p>Текущий остаток на складе, средний расход за выбранный период, дата ближайшей поставки, нужный страховочный запас</p>
+      </div>
+      <div class="card card-accent orange" data-reveal-left style="transition-delay:.35s">
+        <h3>⚙️ &nbsp;Что делает система</h3>
+        <p>Считает дневной расход, прогнозирует остаток к дате поставки, определяет потребность с учётом страховки, округляет по упаковке</p>
+      </div>
+      <div class="card card-accent green" data-reveal-left style="transition-delay:.5s">
+        <h3>📋 &nbsp;Что на выходе</h3>
+        <p>Готовый заказ — одной кнопкой отправляется поставщику в WhatsApp, Telegram или на почту</p>
+      </div>
+    </div>
+    <div style="flex:0.8;display:flex;flex-direction:column;gap:20px;justify-content:center">
+      <div class="big-card" data-reveal-right style="transition-delay:.3s">
+        <div class="big-num"><span class="counter" data-target="30">0</span> сек</div>
+        <p>вместо 30 минут на расчёт</p>
+      </div>
+      <div class="big-card" data-reveal-right style="transition-delay:.5s">
+        <div class="big-num"><span class="counter" data-target="0">0</span></div>
+        <p>ошибок в формулах</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 4: ALL FEATURES ══════════ -->
+<div class="slide" data-bg="warm">
+  <div class="tag" data-reveal>Возможности</div>
+  <h2 data-reveal style="transition-delay:.1s">9 модулей — всё, что нужно</h2>
+  <div class="grid g3" style="margin-top:24px">
+    <div class="card" data-reveal style="transition-delay:.15s">
+      <span class="card-icon">📋</span><h3>Расчёт заказов</h3>
+      <p>Автоматика на основе расхода, остатков и сроков</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.2s">
+      <span class="card-icon">📅</span><h3>Планирование</h3>
+      <p>Прогноз закупок на неделю, месяц, квартал</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.25s">
+      <span class="card-icon">🚚</span><h3>Доставки</h3>
+      <p>Статусы: в пути, принято, расхождения</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.3s">
+      <span class="card-icon">📊</span><h3>Аналитика</h3>
+      <p>KPI, графики, сравнение периодов, аномалии</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.35s">
+      <span class="card-icon">📦</span><h3>Анализ запасов</h3>
+      <p>Цветовая индикация критичности остатков</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.4s">
+      <span class="card-icon">📆</span><h3>Календарь</h3>
+      <p>Визуальный обзор поставок по дням</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.45s">
+      <span class="card-icon">🗄️</span><h3>База данных</h3>
+      <p>Товары, поставщики, аналоги, рестораны</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.5s">
+      <span class="card-icon">🕐</span><h3>История</h3>
+      <p>Архив заказов и планов с аудитом изменений</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.55s">
+      <span class="card-icon">📍</span><h3>График доставки</h3>
+      <p>Расписание по ресторанам, экспорт, печать</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 5: STOCK ANALYSIS ══════════ -->
+<div class="slide" data-bg="dark">
+  <div class="tag" data-reveal>Контроль</div>
+  <h2 data-reveal style="transition-delay:.1s">Анализ запасов — всё видно сразу</h2>
+  <p class="lead" data-reveal style="transition-delay:.2s;margin-bottom:24px">Каждый товар получает цвет по количеству дней запаса</p>
+  <div class="status-bar" data-reveal-scale style="transition-delay:.35s">
+    <div class="sb-red">< 3 дн</div>
+    <div class="sb-orange">3 – 7 дн</div>
+    <div class="sb-yellow">7 – 14 дн</div>
+    <div class="sb-green">14 – 30 дн &nbsp;✓</div>
+    <div class="sb-purple">30+ дн</div>
+  </div>
+  <div class="grid g4" style="margin-top:28px">
+    <div class="card" data-reveal style="transition-delay:.4s;text-align:center">
+      <div style="font-size:36px;margin-bottom:8px">🔴</div>
+      <h3 style="color:#ff6b6b">Критично</h3>
+      <p>Товар заканчивается — срочный заказ</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.5s;text-align:center">
+      <div style="font-size:36px;margin-bottom:8px">🟠</div>
+      <h3 style="color:#ffa940">Внимание</h3>
+      <p>Скоро закончится — запланировать</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.6s;text-align:center">
+      <div style="font-size:36px;margin-bottom:8px">🟢</div>
+      <h3 style="color:#52c41a">Норма</h3>
+      <p>Запас достаточный — всё хорошо</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.7s;text-align:center">
+      <div style="font-size:36px;margin-bottom:8px">🟣</div>
+      <h3 style="color:#b37feb">Избыток</h3>
+      <p>Слишком много — снизить заказ</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 6: INTEGRATIONS ══════════ -->
+<div class="slide" data-bg="warm">
+  <div class="tag" data-reveal>Интеграции</div>
+  <h2 data-reveal style="transition-delay:.1s">Связь с внешним миром</h2>
+  <div class="grid g2" style="margin-top:32px;max-width:900px">
+    <div class="card" data-reveal style="transition-delay:.2s;text-align:center;padding:36px">
+      <div style="font-size:48px;margin-bottom:16px">📊</div>
+      <h3>Импорт из Excel</h3>
+      <p>Загрузка остатков и расхода из файлов в систему</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.3s;text-align:center;padding:36px">
+      <div style="font-size:48px;margin-bottom:16px">📥</div>
+      <h3>Экспорт в Excel</h3>
+      <p>Заказы, планы, графики — выгрузка в привычный формат</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.4s;text-align:center;padding:36px">
+      <div style="font-size:48px;margin-bottom:16px">💬</div>
+      <h3>Мессенджеры</h3>
+      <p>Отправка заказа в WhatsApp, Telegram, Viber — одной кнопкой</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.5s;text-align:center;padding:36px">
+      <div style="font-size:48px;margin-bottom:16px">📧</div>
+      <h3>Email</h3>
+      <p>Отправка заказов поставщикам по электронной почте</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 7: ENTITIES & ROLES ══════════ -->
+<div class="slide" data-bg="gold">
+  <div class="tag" data-reveal>Структура</div>
+  <h2 data-reveal style="transition-delay:.1s">3 юрлица — 1 система</h2>
+  <p class="lead" data-reveal style="transition-delay:.2s;margin-bottom:28px">Данные каждого юрлица полностью изолированы. Переключение — одним кликом.</p>
+  <div class="grid g3" style="max-width:900px">
+    <div class="card" data-reveal style="transition-delay:.25s;text-align:center;padding:32px;border-top:3px solid var(--red)">
+      <div style="font-size:40px;margin-bottom:10px">🍔</div>
+      <h3>Бургер БК</h3>
+      <p>Свои заказы, остатки, расход, аналитика</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.35s;text-align:center;padding:32px;border-top:3px solid var(--orange)">
+      <div style="font-size:40px;margin-bottom:10px">🍕</div>
+      <h3>Воглия Матта</h3>
+      <p>Свои заказы, остатки, расход, аналитика</p>
+    </div>
+    <div class="card" data-reveal style="transition-delay:.45s;text-align:center;padding:32px;border-top:3px solid var(--yellow)">
+      <div style="font-size:40px;margin-bottom:10px">⭐</div>
+      <h3>Пицца Стар</h3>
+      <p>Свои заказы, остатки, расход, аналитика</p>
+    </div>
+  </div>
+  <div class="grid g3" data-reveal style="transition-delay:.55s;margin-top:20px;max-width:900px">
+    <div class="shield"><span class="shield-icon">👑</span><span><b style="color:var(--yellow)">Администратор</b> — полный доступ</span></div>
+    <div class="shield"><span class="shield-icon">👤</span><span><b style="color:var(--orange)">Сотрудник</b> — заказы и данные</span></div>
+    <div class="shield"><span class="shield-icon">👁️</span><span><b>Читатель</b> — только просмотр</span></div>
+  </div>
+</div>
+
+<!-- ══════════ 8: SECURITY ══════════ -->
+<div class="slide" data-bg="dark">
+  <div class="tag" data-reveal>Безопасность</div>
+  <h2 data-reveal style="transition-delay:.1s">Данные под защитой</h2>
+  <div class="grid g2" style="margin-top:28px;max-width:900px;gap:14px">
+    <div class="shield" data-reveal style="transition-delay:.2s"><span class="shield-icon">🔐</span>Вход по email и паролю (мин. 8 символов)</div>
+    <div class="shield" data-reveal style="transition-delay:.25s"><span class="shield-icon">🔑</span>Пароли зашифрованы надёжным алгоритмом</div>
+    <div class="shield" data-reveal style="transition-delay:.3s"><span class="shield-icon">🛡️</span>Защита от подбора пароля</div>
+    <div class="shield" data-reveal style="transition-delay:.35s"><span class="shield-icon">🔒</span>Защищённое соединение (HTTPS)</div>
+    <div class="shield" data-reveal style="transition-delay:.4s"><span class="shield-icon">📝</span>Журнал всех входов (IP, время)</div>
+    <div class="shield" data-reveal style="transition-delay:.45s"><span class="shield-icon">🔄</span>Сброс сессий при смене пароля</div>
+    <div class="shield" data-reveal style="transition-delay:.5s"><span class="shield-icon">👤</span>Разграничение по ролям и юрлицам</div>
+    <div class="shield" data-reveal style="transition-delay:.55s"><span class="shield-icon">📜</span>Аудит всех изменений в заказах</div>
+  </div>
+</div>
+
+<!-- ══════════ 9: DEVICES ══════════ -->
+<div class="slide" data-bg="warm">
+  <div class="tag" data-reveal>Доступность</div>
+  <h2 data-reveal style="transition-delay:.1s">Работает на любом устройстве</h2>
+  <div class="grid g3" style="margin-top:28px;max-width:950px">
+    <div class="card" data-reveal-scale style="transition-delay:.2s;text-align:center;padding:36px">
+      <div style="font-size:52px;margin-bottom:14px">🖥️</div>
+      <h3>Компьютер</h3>
+      <p>Полный интерфейс в любом браузере — Chrome, Safari, Edge</p>
+    </div>
+    <div class="card" data-reveal-scale style="transition-delay:.35s;text-align:center;padding:36px">
+      <div style="font-size:52px;margin-bottom:14px">📱</div>
+      <h3>Телефон</h3>
+      <p>Адаптивный дизайн, можно установить как приложение</p>
+    </div>
+    <div class="card" data-reveal-scale style="transition-delay:.5s;text-align:center;padding:36px">
+      <div style="font-size:52px;margin-bottom:14px">📟</div>
+      <h3>Планшет</h3>
+      <p>Удобно для работы на складе и в дороге</p>
+    </div>
+  </div>
+  <div class="grid g2" data-reveal style="transition-delay:.6s;margin-top:20px;max-width:700px">
+    <div class="card" style="text-align:center">
+      <h3 style="color:var(--green)">⚡ Ничего устанавливать не нужно</h3>
+      <p>Открыл браузер — начал работать</p>
+    </div>
+    <div class="card" style="text-align:center">
+      <h3 style="color:var(--yellow)">🔌 Работа без интернета</h3>
+      <p>Черновики сохраняются на устройстве</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 10: FINAL ══════════ -->
+<div class="slide" data-bg="hero">
+  <div class="hero-particles" id="particles2"></div>
+  <div class="tag" data-reveal>Итог</div>
+  <h2 data-reveal style="transition-delay:.15s;font-size:clamp(32px,4.5vw,52px)">Готово к запуску</h2>
+  <div class="divider" data-reveal style="transition-delay:.3s"></div>
+  <ul class="checklist" data-reveal style="transition-delay:.4s;margin-top:20px">
+    <li><div class="check">✓</div>Полный цикл закупок — от анализа до приёмки</li>
+    <li><div class="check">✓</div>Автоматический расчёт — без ошибок, за секунды</li>
+    <li><div class="check">✓</div>Три юрлица с полностью раздельными данными</li>
+    <li><div class="check">✓</div>Интеграция с Excel и мессенджерами</li>
+    <li><div class="check">✓</div>Безопасность — шифрование, роли, логирование</li>
+    <li><div class="check">✓</div>Компьютер, телефон, планшет — без установки</li>
+  </ul>
+  <div data-reveal style="transition-delay:.7s;margin-top:40px;text-align:center">
+    <div style="font-size:24px;font-weight:700;color:var(--cream)">Supply Department</div>
+    <div style="font-size:13px;color:rgba(245,230,208,0.3);margin-top:8px;letter-spacing:2px">СИСТЕМА УПРАВЛЕНИЯ ЗАКУПКАМИ &nbsp;•&nbsp; 2026</div>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<!-- NAV -->
+<nav class="nav">
+  <button class="nav-btn" id="prevBtn" disabled>← Назад</button>
+  <div class="nav-center" id="dots"></div>
+  <button class="nav-btn" id="nextBtn">Далее →</button>
+</nav>
+
+<script>
+const slides = [...document.querySelectorAll('.slide')];
+const total = slides.length;
+let cur = 0, animating = false;
+
+// Dots
+const dotsEl = document.getElementById('dots');
+slides.forEach((_,i) => {
+  const d = document.createElement('div');
+  d.className = 'nav-dot' + (i===0?' active':'');
+  d.onclick = () => goTo(i);
+  dotsEl.appendChild(d);
+});
+
+// Particles
+function spawnParticles(id) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  const colors = ['#FDBD10','#FF8733','#D62700','#F5E6D0'];
+  for (let i=0; i<50; i++) {
+    const s = document.createElement('span');
+    const size = 2 + Math.random()*5;
+    Object.assign(s.style, {
+      width: size+'px', height: size+'px',
+      left: Math.random()*100+'%', bottom: '-5%',
+      background: colors[Math.random()*colors.length|0],
+      animationDuration: (6+Math.random()*14)+'s',
+      animationDelay: (Math.random()*8)+'s'
+    });
+    c.appendChild(s);
+  }
+}
+spawnParticles('particles');
+spawnParticles('particles2');
+
+// Card glow follow
+document.addEventListener('mousemove', e => {
+  document.querySelectorAll('.card').forEach(c => {
+    const r = c.getBoundingClientRect();
+    c.style.setProperty('--mx', ((e.clientX-r.left)/r.width*100)+'%');
+    c.style.setProperty('--my', ((e.clientY-r.top)/r.height*100)+'%');
+  });
+});
+
+// Reveal
+function revealSlide(idx) {
+  const s = slides[idx];
+  const els = s.querySelectorAll('[data-reveal],[data-reveal-left],[data-reveal-right],[data-reveal-scale]');
+  // reset first
+  els.forEach(el => el.classList.remove('revealed'));
+  // trigger
+  requestAnimationFrame(() => {
+    setTimeout(() => els.forEach(el => el.classList.add('revealed')), 50);
+  });
+  // counters
+  s.querySelectorAll('.counter').forEach(c => {
+    const target = +c.dataset.target;
+    if (target === 0) { c.textContent = '0'; return; }
+    let start = 0;
+    const dur = 1200, step = 16;
+    const inc = target / (dur/step);
+    const timer = setInterval(() => {
+      start += inc;
+      if (start >= target) { c.textContent = target; clearInterval(timer); }
+      else c.textContent = Math.floor(start);
+    }, step);
+  });
+}
+
+function goTo(idx) {
+  if (idx<0||idx>=total||idx===cur||animating) return;
+  animating = true;
+  const old = slides[cur];
+  const next = slides[idx];
+  const dir = idx > cur ? 1 : -1;
+
+  // Animate out
+  old.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+  old.style.opacity = '0';
+  old.style.transform = `translateX(${-dir*60}px)`;
+  old.classList.add('animating-out');
+
+  // Prepare in
+  next.style.transition = 'none';
+  next.style.opacity = '0';
+  next.style.transform = `translateX(${dir*60}px)`;
+  next.classList.add('animating-in');
+  next.style.visibility = 'visible';
+
+  setTimeout(() => {
+    old.classList.remove('active','animating-out');
+    old.style.transition = 'none';
+    old.style.opacity = '0';
+    old.style.visibility = 'hidden';
+
+    next.style.transition = 'opacity 0.5s ease, transform 0.5s cubic-bezier(.16,1,.3,1)';
+    next.style.opacity = '1';
+    next.style.transform = 'translateX(0)';
+    next.classList.add('active');
+    next.classList.remove('animating-in');
+
+    cur = idx;
+    updateNav();
+    revealSlide(idx);
+
+    setTimeout(() => { animating = false; }, 500);
+  }, 350);
+}
+
+function updateNav() {
+  document.getElementById('prevBtn').disabled = cur===0;
+  document.getElementById('nextBtn').disabled = cur===total-1;
+  document.querySelectorAll('.nav-dot').forEach((d,i) => d.classList.toggle('active', i===cur));
+  document.getElementById('progress').style.width = (cur/(total-1)*100)+'%';
+}
+
+document.getElementById('prevBtn').onclick = () => goTo(cur-1);
+document.getElementById('nextBtn').onclick = () => goTo(cur+1);
+
+document.addEventListener('keydown', e => {
+  if (e.key==='ArrowRight'||e.key===' ') { e.preventDefault(); goTo(cur+1); }
+  if (e.key==='ArrowLeft') { e.preventDefault(); goTo(cur-1); }
+});
+
+let tx=0;
+document.addEventListener('touchstart', e => { tx=e.touches[0].clientX; }, {passive:true});
+document.addEventListener('touchend', e => {
+  const dx=e.changedTouches[0].clientX-tx;
+  if (Math.abs(dx)>50) goTo(cur+(dx<0?1:-1));
+}, {passive:true});
+
+// Init first slide reveals
+revealSlide(0);
+</script>
+</body>
+</html>
