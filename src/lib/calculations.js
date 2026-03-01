@@ -52,13 +52,14 @@ function calculatePallets(item, unit) {
   const qpb = getQpb(item) || 1;
   const mult = getMultiplicity(item) || 1;
 
-  const physBoxes =
+  const physBoxes = Math.round(
     unit === 'boxes'
       ? item.finalOrder / mult
-      : item.finalOrder / (qpb * mult);
+      : item.finalOrder / (qpb * mult)
+  );
 
   return {
     pallets: Math.floor(physBoxes / item.boxesPerPallet),
-    boxesLeft: Math.ceil(physBoxes % item.boxesPerPallet),
+    boxesLeft: physBoxes % item.boxesPerPallet,
   };
 }

@@ -17,13 +17,13 @@ export async function exportToExcel(items, settings) {
   ];
 
   const dataRows = items.map(item => {
+    if (!item.finalOrder || item.finalOrder <= 0) return null;
     const qpb  = getQpb(item);
     const mult = getMultiplicity(item);
     const physBoxes = settings.unit === 'boxes'
       ? Math.ceil(item.finalOrder / mult)
       : Math.ceil(item.finalOrder / (qpb * mult));
-    if (physBoxes <= 0) return null;
-    const pieces = settings.unit === 'pieces' ? item.finalOrder : item.finalOrder * qpb;
+    const pieces = settings.unit === 'pieces' ? item.finalOrder : physBoxes * qpb;
     const unit = item.unitOfMeasure || 'шт';
     const nameWithSku = item.sku ? `${item.sku} ${item.name || ''}` : (item.name || '');
     return [nameWithSku, `${nf.format(physBoxes)} кор (${nf.format(Math.round(pieces))} ${unit})`];

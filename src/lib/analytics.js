@@ -356,11 +356,11 @@ function processData(orders, prevOrders, days) {
 }
 
 /**
- * Сезонность: заказы за 12 месяцев, скользящее среднее, YoY
+ * Сезонность: заказы за 24 месяца, скользящее среднее, YoY
  */
 export async function getSeasonalityData(legalEntity) {
   const now = new Date();
-  const start = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+  const start = new Date(now.getFullYear() - 2, now.getMonth(), 1);
 
   const { data: orders, error } = await db
     .from('orders')
@@ -423,22 +423,24 @@ export async function getForecastData(legalEntity) {
   const start12m = new Date(now.getFullYear() - 1, now.getMonth(), 1);
 
   // 3 параллельных запроса: заказы за 60 дней, остатки, сезонность (12 мес.)
+  // Для рабочих данных (orders, analysis_data) фильтруем строго по одному юрлицу
   let ordersQuery = db.from('orders')
     .select('id, created_at, supplier, order_items(qty_boxes, sku, name)')
+    .eq('legal_entity', legalEntity)
     .gte('created_at', start60.toISOString())
     .order('created_at', { ascending: true });
-  ordersQuery = applyEntityFilter(ordersQuery, legalEntity);
 
   let stockQuery = db.from('analysis_data')
-    .select('sku, stock, consumption, period_days');
-  stockQuery = applyEntityFilter(stockQuery, legalEntity);
+    .select('sku, stock, consumption, period_days')
+    .eq('legal_entity', legalEntity);
 
   let seasonQuery = db.from('orders')
     .select('id, created_at, order_items(qty_boxes, sku)')
+    .eq('legal_entity', legalEntity)
     .gte('created_at', start12m.toISOString())
     .order('created_at', { ascending: true });
-  seasonQuery = applyEntityFilter(seasonQuery, legalEntity);
 
+  // Для справочников (products) — общий фильтр по группе юрлиц
   let productsQuery = db.from('products')
     .select('sku, name, qty_per_box, supplier');
   productsQuery = applyEntityFilter(productsQuery, legalEntity);

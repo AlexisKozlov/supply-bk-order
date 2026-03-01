@@ -130,6 +130,8 @@ export const iconsLight = {
 
   database: `<svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="8" ry="3.5" fill="rgba(255,255,255,0.12)" stroke="#90CAF9" stroke-width="1.3"/><path d="M4 6v5.5c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5V6" stroke="#90CAF9" stroke-width="1.3"/><path d="M4 11.5V17c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5v-5.5" stroke="#64B5F6" stroke-width="1.3"/></svg>`,
 
+  search: `<svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" fill="rgba(255,255,255,0.1)" stroke="#90CAF9" stroke-width="1.5"/><line x1="16.5" y1="16.5" x2="21" y2="21" stroke="#64B5F6" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+
   analytics: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 18l5-6 4 3 6-9 3 3" stroke="#FFD54F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="12" r="2.5" fill="#FFA726"/><circle cx="21" cy="6" r="2.5" fill="#FFD54F"/></svg>`,
 
   calendar: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="3" fill="rgba(255,255,255,0.1)" stroke="#EF9A9A" stroke-width="1.3"/><rect x="3" y="5" width="18" height="5" rx="3" fill="#EF5350" opacity="0.7"/><path d="M8 2.5v4M16 2.5v4" stroke="#EF9A9A" stroke-width="1.5" stroke-linecap="round"/><circle cx="8.5" cy="15" r="1.8" fill="#EF9A9A"/><circle cx="12" cy="15" r="1.8" fill="#FFCDD2"/><circle cx="15.5" cy="15" r="1.8" fill="rgba(255,255,255,0.3)"/></svg>`,

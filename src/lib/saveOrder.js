@@ -56,6 +56,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       .eq('id', editingOrderId)
       .single());
 
+    if (!oldOrder) return { error: 'Заказ не найден — возможно, он был удалён' };
+
     // Загружаем старые позиции для diff
     const { data: oldItems } = await db
       .from('order_items')

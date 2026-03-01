@@ -2,28 +2,11 @@
   <div class="cards-page">
 
     <!-- Тех. работы -->
-    <div v-if="maintenanceMode" class="mnt-overlay">
-      <div class="mnt-bg">
-        <div class="mnt-orb mnt-orb-1"></div>
-        <div class="mnt-orb mnt-orb-2"></div>
-      </div>
-      <div class="mnt-card">
-        <div class="mnt-icon">
-          <svg viewBox="0 0 64 64" width="40" height="40" fill="none">
-            <path d="M32 8L32 36" stroke="#FDBD10" stroke-width="5" stroke-linecap="round">
-              <animate attributeName="opacity" values="1;.4;1" dur="2s" repeatCount="indefinite"/>
-            </path>
-            <circle cx="32" cy="48" r="4" fill="#FDBD10">
-              <animate attributeName="opacity" values="1;.4;1" dur="2s" repeatCount="indefinite"/>
-            </circle>
-          </svg>
-        </div>
-        <h1 class="mnt-title">Технические работы</h1>
-        <p class="mnt-msg" v-if="maintenanceMessage">{{ maintenanceMessage }}</p>
-        <p class="mnt-msg" v-else>Система временно недоступна.<br>Мы проводим плановое обслуживание и скоро вернёмся.</p>
-        <router-link to="/" class="mnt-home">← На главную</router-link>
-      </div>
-    </div>
+    <MaintenanceScreen v-if="maintenanceMode && !isAdmin"
+      :message="maintenanceMessage"
+      :end-time="maintenanceEndTime"
+      :show-home-link="true"
+    />
 
     <!-- Hero-секция с поиском -->
     <header class="hero">
@@ -383,6 +366,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '../stores/userStore'
+import MaintenanceScreen from '@/components/MaintenanceScreen.vue'
 
 const API_BASE = '/api'
 const userStore = useUserStore()
@@ -401,6 +385,7 @@ const guestCount = ref(0)
 // Тех. работы
 const maintenanceMode = ref(false)
 const maintenanceMessage = ref('')
+const maintenanceEndTime = ref(null)
 
 // Toast
 const toastVisible = ref(false)
@@ -434,6 +419,7 @@ async function checkMaintenance() {
     const data = await res.json()
     maintenanceMode.value = !!data?.maintenance_mode
     maintenanceMessage.value = data?.maintenance_message || ''
+    maintenanceEndTime.value = data?.maintenance_end_time || null
   } catch { /* ignore */ }
 }
 
@@ -505,6 +491,8 @@ async function logSearch(queryStr, found, matchType, matchedCardId) {
 
 // --- Гостевой heartbeat ---
 async function sendGuestHeartbeat() {
+  // Не считаем гостя онлайн, если показана страница техработ
+  if (maintenanceMode.value && !isAdmin.value) return;
   try {
     await fetch(`${API_BASE}/rpc/guest_heartbeat`, {
       method: 'POST',
@@ -875,16 +863,17 @@ async function updateCard() {
     : []
 
   try {
-    // Если поменяли ID — удаляем старую, создаём новую
+    // Если поменяли ID — сначала создаём новую, потом удаляем старую (безопасный порядок)
     if (oldId !== newId) {
-      await fetch(`${API_BASE}/cards/${oldId}`, {
-        method: 'DELETE',
-        headers: adminHeaders()
-      })
-      await fetch(`${API_BASE}/cards`, {
+      const createRes = await fetch(`${API_BASE}/cards`, {
         method: 'POST',
         headers: adminHeaders(),
         body: JSON.stringify({ id: newId, name: editForm.value.name.trim(), analogs })
+      })
+      if (!createRes.ok) throw new Error('Не удалось создать карточку с новым ID')
+      await fetch(`${API_BASE}/cards/${oldId}`, {
+        method: 'DELETE',
+        headers: adminHeaders()
       })
     } else {
       await fetch(`${API_BASE}/cards/${oldId}`, {
@@ -1037,9 +1026,9 @@ watch(() => [auditFilter.value.dateFrom, auditFilter.value.dateTo], () => {
   }
 })
 
-// Авто-логин из сессии основного сайта
+// Авто-логин из сессии основного сайта (только для пользователей с ролью не viewer)
 function tryAutoLogin() {
-  if (userStore.isAuthenticated) {
+  if (userStore.isAuthenticated && userStore.currentUser?.role !== 'viewer') {
     const storedKey = localStorage.getItem('bk_api_key')
     if (storedKey) {
       isAdmin.value = true
@@ -2220,77 +2209,4 @@ select.field-input {
   .search-btn-icon { display: none; }
 }
 
-/* ═══ Тех. работы — оверлей ═══ */
-.mnt-overlay {
-  position: fixed; inset: 0; z-index: 99999;
-  background: #1A0E09;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
-}
-.mnt-bg { position: absolute; inset: 0; overflow: hidden; }
-.mnt-orb {
-  position: absolute; border-radius: 50%; filter: blur(80px);
-  animation: mnt-float 8s ease-in-out infinite;
-}
-.mnt-orb-1 {
-  width: 400px; height: 400px; top: -10%; left: -5%;
-  background: radial-gradient(circle, rgba(214,39,0,.15) 0%, transparent 70%);
-}
-.mnt-orb-2 {
-  width: 350px; height: 350px; bottom: -10%; right: -5%;
-  background: radial-gradient(circle, rgba(245,166,35,.12) 0%, transparent 70%);
-  animation-delay: -3s;
-}
-@keyframes mnt-float {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(-20px, 30px) scale(0.95); }
-}
-.mnt-card {
-  position: relative; z-index: 1;
-  background: rgba(40, 22, 14, 0.8);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
-  border: 1px solid rgba(253, 189, 16, 0.12);
-  border-radius: 24px;
-  padding: 48px 40px 36px;
-  max-width: 440px; width: 90%;
-  text-align: center;
-  box-shadow: 0 24px 80px rgba(0,0,0,.5);
-  animation: mnt-in .6s ease;
-}
-@keyframes mnt-in {
-  from { opacity: 0; transform: translateY(20px) scale(.97); }
-  to { opacity: 1; transform: none; }
-}
-.mnt-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 80px; height: 80px; border-radius: 50%;
-  background: rgba(253, 189, 16, 0.06);
-  border: 2px solid rgba(253, 189, 16, 0.2);
-  margin-bottom: 24px;
-}
-.mnt-title {
-  font-family: 'Flame', sans-serif;
-  font-size: 26px; font-weight: 700;
-  color: #FDBD10; margin: 0 0 12px;
-}
-.mnt-msg {
-  font-size: 15px; line-height: 1.6;
-  color: rgba(245, 230, 208, 0.65);
-  margin: 0 0 24px;
-}
-.mnt-home {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 10px 28px; border-radius: 12px;
-  border: 1.5px solid rgba(245, 230, 208, 0.15);
-  background: rgba(245, 230, 208, 0.04);
-  color: rgba(245, 230, 208, 0.5);
-  font-size: 13px; font-weight: 600;
-  text-decoration: none; transition: all .2s;
-}
-.mnt-home:hover {
-  border-color: rgba(253, 189, 16, 0.4);
-  color: #FDBD10;
-  background: rgba(253, 189, 16, 0.06);
-}
 </style>

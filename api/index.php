@@ -121,17 +121,19 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     else { $where[]="`$key`=?"; $params[]=$val; }
 }
 
-function parseOr($orStr, &$where, &$params) {
+function parseOr($orStr, &$where, &$params, $allowedFields = []) {
     $parts = preg_split('/,(?=[a-zA-Z_])/', $orStr);
     $orClauses = [];
     foreach ($parts as $part) {
         if (preg_match('/^(\w+)\.(eq|neq|gt|gte|lt|lte)\.(.+)$/', $part, $m)) {
             if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $m[1])) continue;
+            if (!empty($allowedFields) && !in_array($m[1], $allowedFields)) continue;
             $ops = ['eq'=>'=','neq'=>'!=','gt'=>'>','gte'=>'>=','lt'=>'<','lte'=>'<='];
             $orClauses[] = "`{$m[1]}` {$ops[$m[2]]} ?";
             $params[] = $m[3];
         } elseif (preg_match('/^(\w+)\.ilike\.(.+)$/', $part, $m)) {
             if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $m[1])) continue;
+            if (!empty($allowedFields) && !in_array($m[1], $allowedFields)) continue;
             $orClauses[] = "`{$m[1]}` LIKE ?";
             $params[] = str_replace(['%25','*'], '%', $m[2]);
         }
@@ -163,6 +165,10 @@ if ($endpoint === 'upload' && $subpoint === 'act') {
 
     $orderId = $_POST['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
+
+    // Проверяем существование заказа
+    $chk = $pdo->prepare("SELECT id FROM orders WHERE id=?"); $chk->execute([$orderId]);
+    if (!$chk->fetch()) respond(['error' => 'Order not found'], 404);
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         $code = $_FILES['file']['error'] ?? -1;
@@ -214,7 +220,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
     finfo_close($finfo);
     $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: ' . $disposition . '; filename="' . $filename . '"');
+    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $filename) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -222,12 +228,13 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
 
 // ═══ SEARCH ═══
 if ($endpoint === 'search_products') {
+    if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
     $q = $_GET['q'] ?? '';
     $le = $_GET['legal_entity'] ?? '';
     $supplier = $_GET['supplier'] ?? '';
     $limit = min(intval($_GET['limit'] ?? 10), 100);
     
-    if (strlen($q) < 2) respond([]);
+    if (mb_strlen($q, 'UTF-8') < 2) respond([]);
     
     $where = [];
     $params = [];
@@ -303,15 +310,28 @@ if ($endpoint === 'rpc') {
                 $s2 = $pdo->prepare("SELECT api_key FROM api_keys WHERE is_active='true' LIMIT 1"); $s2->execute();
                 respond(['success'=>true,'api_key'=>$s2->fetchColumn()]);
             }
+            recordFailedLogin($pdo, $clientIp, '_legacy');
         }
-        recordFailedLogin($pdo, $clientIp, '_legacy');
         respond(['success'=>false]);
     }
     if ($fn === 'check_maintenance') {
-        $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $s->execute();
-        $rows = $s->fetchAll(); $mm = 'false'; $msg = '';
-        foreach ($rows as $r) { if ($r['key'] === 'maintenance_mode') $mm = $r['value']; if ($r['key'] === 'maintenance_message') $msg = $r['value']; }
-        respond(['maintenance_mode' => $mm === 'true', 'maintenance_message' => $msg ?: null]);
+        $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message','maintenance_end_time')"); $s->execute();
+        $rows = $s->fetchAll(); $mm = 'false'; $msg = ''; $endTime = null;
+        foreach ($rows as $r) {
+            if ($r['key'] === 'maintenance_mode') $mm = $r['value'];
+            if ($r['key'] === 'maintenance_message') $msg = $r['value'];
+            if ($r['key'] === 'maintenance_end_time') $endTime = $r['value'];
+        }
+        // Автовыключение: если таймер истёк — выключаем техработы
+        if ($mm === 'true' && $endTime) {
+            $endTs = strtotime($endTime);
+            if ($endTs && $endTs <= time()) {
+                $pdo->prepare("UPDATE settings SET value='false' WHERE `key`='maintenance_mode'")->execute();
+                $pdo->prepare("UPDATE settings SET value='' WHERE `key`='maintenance_end_time'")->execute();
+                respond(['maintenance_mode' => false, 'maintenance_message' => null, 'maintenance_end_time' => null]);
+            }
+        }
+        respond(['maintenance_mode' => $mm === 'true', 'maintenance_message' => $msg ?: null, 'maintenance_end_time' => $endTime ?: null]);
     }
     // Гостевые эндпоинты (публичная страница поиска карточек)
     if ($fn === 'guest_heartbeat') {
@@ -324,7 +344,9 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'get_guest_count') {
-        $s = $pdo->query("SELECT COUNT(*) as cnt FROM guest_presence WHERE last_seen > NOW() - INTERVAL 2 MINUTE");
+        // Чистим старые записи (старше 5 минут)
+        $pdo->exec("DELETE FROM guest_presence WHERE last_seen < NOW() - INTERVAL 5 MINUTE");
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM guest_presence WHERE last_seen > NOW() - INTERVAL 1 MINUTE");
         respond($s->fetch());
     }
     if ($fn === 'log_card_search') {
@@ -372,17 +394,74 @@ if ($endpoint === 'rpc') {
     if (!checkApiKey($pdo)) { respond(['error'=>'Invalid API key'], 401); }
 
     if ($fn === 'change_user_password') {
+        if (!checkRateLimit($pdo, $clientIp, 10, 10)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $name = $body['user_name'] ?? '';
         $oldPwd = $body['old_password'] ?? '';
         $newPwd = $body['new_password'] ?? '';
         if (!$name || !$oldPwd || !$newPwd) respond(['success'=>false,'error'=>'missing params'], 400);
         if (mb_strlen($newPwd) < 4) respond(['success'=>false,'error'=>'password_too_short'], 400);
         $s = $pdo->prepare("SELECT password FROM users WHERE name=?"); $s->execute([$name]); $u = $s->fetch();
-        if (!$u) respond(['success'=>false,'error'=>'user_not_found']);
-        if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) respond(['success'=>false,'error'=>'wrong_password']);
+        if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'user_not_found']); }
+        if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'wrong_password']); }
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([password_hash($newPwd, PASSWORD_BCRYPT), $name]);
         respond(['success'=>true]);
     }
+    // ─── Управление пользователями (только admin) ───
+    if ($fn === 'create_user') {
+        $callerName = $body['caller_name'] ?? '';
+        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $name = trim($body['name'] ?? '');
+        $password = $body['password'] ?? '';
+        $role = $body['role'] ?? 'user';
+        $displayRole = $body['display_role'] ?? null;
+        $legalEntities = $body['legal_entities'] ?? '[]';
+        if (!$name) respond(['success' => false, 'error' => 'name required'], 400);
+        if (!$password || mb_strlen($password) < 4) respond(['success' => false, 'error' => 'password required (min 4 chars)'], 400);
+        if (!in_array($role, ['admin', 'user', 'viewer'])) $role = 'user';
+        $hash = password_hash($password, PASSWORD_BCRYPT);
+        $id = uuid();
+        try {
+            $pdo->prepare("INSERT INTO users (id, name, password, role, display_role, legal_entities) VALUES (?, ?, ?, ?, ?, ?)")
+                ->execute([$id, $name, $hash, $role, $displayRole, is_array($legalEntities) ? json_encode($legalEntities, JSON_UNESCAPED_UNICODE) : $legalEntities]);
+        } catch (PDOException $e) {
+            respond(['success' => false, 'error' => 'User already exists or DB error'], 400);
+        }
+        respond(['success' => true, 'user' => ['id' => $id, 'name' => $name, 'role' => $role, 'display_role' => $displayRole]]);
+    }
+    if ($fn === 'update_user') {
+        $callerName = $body['caller_name'] ?? '';
+        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $userId = $body['user_id'] ?? '';
+        if (!$userId) respond(['success' => false, 'error' => 'user_id required'], 400);
+        $sets = []; $params = [];
+        if (isset($body['name']) && trim($body['name'])) { $sets[] = "name=?"; $params[] = trim($body['name']); }
+        if (isset($body['role']) && in_array($body['role'], ['admin', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
+        if (array_key_exists('display_role', $body)) { $sets[] = "display_role=?"; $params[] = $body['display_role']; }
+        if (array_key_exists('legal_entities', $body)) { $sets[] = "legal_entities=?"; $params[] = is_array($body['legal_entities']) ? json_encode($body['legal_entities'], JSON_UNESCAPED_UNICODE) : $body['legal_entities']; }
+        if (isset($body['password']) && $body['password'] !== '') {
+            if (mb_strlen($body['password']) < 4) respond(['success' => false, 'error' => 'password_too_short'], 400);
+            $sets[] = "password=?"; $params[] = password_hash($body['password'], PASSWORD_BCRYPT);
+        }
+        if (empty($sets)) respond(['success' => false, 'error' => 'nothing to update'], 400);
+        $params[] = $userId;
+        $pdo->prepare("UPDATE users SET " . implode(',', $sets) . " WHERE id=?")->execute($params);
+        respond(['success' => true]);
+    }
+    if ($fn === 'delete_user') {
+        $callerName = $body['caller_name'] ?? '';
+        $s = $pdo->prepare("SELECT role FROM users WHERE name=?"); $s->execute([$callerName]); $caller = $s->fetch();
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $userId = $body['user_id'] ?? '';
+        if (!$userId) respond(['success' => false, 'error' => 'user_id required'], 400);
+        // Не позволять удалить себя
+        $s2 = $pdo->prepare("SELECT name FROM users WHERE id=?"); $s2->execute([$userId]); $target = $s2->fetch();
+        if ($target && $target['name'] === $callerName) respond(['success' => false, 'error' => 'cannot delete yourself'], 400);
+        $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$userId]);
+        respond(['success' => true]);
+    }
+
     if ($fn === 'mark_notifications_read') {
         $ids = $body['ids'] ?? [];
         $user = $body['user_name'] ?? '';
@@ -395,9 +474,26 @@ if ($endpoint === 'rpc') {
     if ($fn === 'heartbeat') {
         $userName = $body['user_name'] ?? '';
         $page = $body['page'] ?? '';
+        $editingOrderId = $body['editing_order_id'] ?? null;
         if ($userName) {
-            $s = $pdo->prepare("INSERT INTO user_presence (user_name, page, last_seen) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW()");
-            $s->execute([$userName, substr($page, 0, 100)]);
+            $s = $pdo->prepare("INSERT INTO user_presence (user_name, page, last_seen, editing_order_id) VALUES (?, ?, NOW(), ?) ON DUPLICATE KEY UPDATE page=VALUES(page), last_seen=NOW(), editing_order_id=VALUES(editing_order_id)");
+            $s->execute([$userName, substr($page, 0, 100), $editingOrderId]);
+        }
+        respond(['success' => true]);
+    }
+    if ($fn === 'check_order_lock') {
+        $orderId = $body['order_id'] ?? '';
+        $userName = $body['user_name'] ?? '';
+        if (!$orderId) respond(['locked' => false]);
+        $s = $pdo->prepare("SELECT user_name FROM user_presence WHERE editing_order_id = ? AND user_name != ? AND last_seen > NOW() - INTERVAL 2 MINUTE LIMIT 1");
+        $s->execute([$orderId, $userName]);
+        $row = $s->fetch();
+        respond($row ? ['locked' => true, 'locked_by' => $row['user_name']] : ['locked' => false]);
+    }
+    if ($fn === 'unlock_order') {
+        $userName = $body['user_name'] ?? '';
+        if ($userName) {
+            $pdo->prepare("UPDATE user_presence SET editing_order_id = NULL WHERE user_name = ?")->execute([$userName]);
         }
         respond(['success' => true]);
     }
@@ -555,7 +651,7 @@ if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
 $filterWhitelist = [
     'products'    => ['id','sku','name','supplier','legal_entity','is_active','analog_group','category'],
     'suppliers'   => ['id','short_name','legal_entity','is_active'],
-    'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit'],
+    'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit','received_at'],
     'order_items' => ['id','order_id','sku','name'],
     'plans'       => ['id','supplier','legal_entity','created_at'],
     'item_order'  => ['supplier','legal_entity','item_id'],
@@ -564,7 +660,7 @@ $filterWhitelist = [
     'stock_1c'    => ['sku','legal_entity'],
     'cards'       => ['id','sku','name','supplier','legal_entity','is_active'],
     'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],
-    'restaurants' => ['id','legal_entity'],
+    'restaurants' => ['id','legal_entity','legal_entity_group'],
     'delivery_schedule' => ['id','restaurant_id','legal_entity'],
     'analysis_data' => ['id','legal_entity','sku'],
 ];
@@ -577,7 +673,7 @@ if ($method === 'GET') {
         if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue;
         parseFilter($k, $v, $where, $params, $pdo, $table);
     }
-    if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params);
+    if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields);
 
     if ($subpoint) {
         $s = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s->execute([$subpoint]); $row = $s->fetch();
@@ -609,6 +705,15 @@ if ($method === 'GET') {
         $sel = $valid ? implode(',', array_map(fn($c) => "`$c`", $selCols)) : '*';
     }
 
+    // Поиск по товарам внутри заказов
+    if ($table === 'orders' && isset($_GET['search']) && trim($_GET['search']) !== '') {
+        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], trim($_GET['search']));
+        $searchTerm = '%' . $escaped . '%';
+        $where[] = "id IN (SELECT order_id FROM order_items WHERE name LIKE ? ESCAPE '\\\\' OR sku LIKE ? ESCAPE '\\\\')";
+        $params[] = $searchTerm;
+        $params[] = $searchTerm;
+    }
+
     $sql = "SELECT $sel FROM `$table`";
     if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
     if (isset($_GET['order'])) {
@@ -619,9 +724,17 @@ if ($method === 'GET') {
         }
     }
     if (isset($_GET['limit'])) $sql .= " LIMIT " . min(intval($_GET['limit']), 5000);
-    if (isset($_GET['offset'])) $sql .= " OFFSET " . intval($_GET['offset']);
+    if (isset($_GET['offset'])) {
+        if (!isset($_GET['limit'])) $sql .= " LIMIT 5000";
+        $sql .= " OFFSET " . intval($_GET['offset']);
+    }
 
-    $s = $pdo->prepare($sql); $s->execute($params); $data = $s->fetchAll();
+    try {
+        $s = $pdo->prepare($sql); $s->execute($params); $data = $s->fetchAll();
+    } catch (PDOException $e) {
+        error_log("SELECT error [{$table}]: " . $e->getMessage());
+        respond(['error' => 'Query failed'], 500);
+    }
 
     if ($hasSubSelect && $subTable && in_array($subTable, $allowed) && !empty($data)) {
         $fk = $table === 'orders' ? 'order_id' : 'id';
@@ -647,6 +760,8 @@ if ($method === 'GET') {
                 $key = $sr[$fk];
                 // Убрать FK из результата если он не был в оригинальном запросе
                 if ($subCols !== '*' && !$fkIncluded) unset($sr[$fk]);
+                // Скрыть пароль при подзапросе таблицы users
+                if ($subTable === 'users') unset($sr['password']);
                 $grouped[$key][] = $sr;
             }
             foreach ($data as &$row) {
@@ -662,6 +777,11 @@ if ($method === 'GET') {
 
 if ($method === 'POST') {
     if (!is_array($body) || count($body) === 0) respond(['error' => 'Empty body'], 400);
+    // Запрет создания broadcast-уведомлений через REST (только через RPC send_broadcast)
+    if ($table === 'notifications') {
+        $recs_check = isset($body[0]) ? $body : [$body];
+        foreach ($recs_check as $rc) { if (isset($rc['type']) && $rc['type'] === 'broadcast') respond(['error' => 'Use RPC send_broadcast'], 403); }
+    }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
         if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants'])) $rec['id'] = uuid();
@@ -691,8 +811,9 @@ if ($method === 'POST') {
 
 if ($method === 'PATCH' || $method === 'PUT') {
     $where = []; $params = [];
-    foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; parseFilter($k, $v, $where, $params, $pdo, $table); }
-    if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params);
+    $allowedFields = $filterWhitelist[$table] ?? [];
+    foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); }
+    if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields);
     if ($subpoint) { $where = ["`id`=?"]; $params = [$subpoint]; }
     if (!$where) respond(['error'=>'No filters'], 400);
     if (!is_array($body) || count($body) === 0) respond(['error' => 'Empty body'], 400);
@@ -717,9 +838,32 @@ if ($method === 'PATCH' || $method === 'PUT') {
 if ($method === 'DELETE') {
     $where = []; $params = [];
     if ($subpoint) { $where[] = "`id`=?"; $params[] = $subpoint; }
-    else { foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params); }
+    else { $allowedFields = $filterWhitelist[$table] ?? []; foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields); }
     if (!$where) respond(['error'=>'No filters'], 400);
-    $s = $pdo->prepare("DELETE FROM `$table` WHERE " . implode(' AND ', $where)); $s->execute($params);
+    // Запоминаем ID удаляемых записей для аудита
+    $deletedIds = [];
+    if (in_array($table, ['orders','plans','products','suppliers','restaurants'])) {
+        try {
+            $preS = $pdo->prepare("SELECT `id` FROM `$table` WHERE " . implode(' AND ', $where));
+            $preS->execute($params);
+            $deletedIds = array_column($preS->fetchAll(), 'id');
+        } catch (PDOException $e) { /* не блокируем удаление */ }
+    }
+    try {
+        $s = $pdo->prepare("DELETE FROM `$table` WHERE " . implode(' AND ', $where)); $s->execute($params);
+    } catch (PDOException $e) {
+        error_log("DELETE error [{$table}]: " . $e->getMessage());
+        respond(['error' => 'Delete failed'], 500);
+    }
+    // Аудит-лог для удалений
+    if ($s->rowCount() > 0 && !empty($deletedIds)) {
+        try {
+            foreach ($deletedIds as $did) {
+                $pdo->prepare("INSERT INTO `audit_log` (`action`, `entity_type`, `entity_id`, `details`, `created_at`) VALUES (?, ?, ?, '{}', NOW())")
+                    ->execute([$table . '_deleted', $table, $did]);
+            }
+        } catch (PDOException $e) { /* не блокируем ответ */ }
+    }
     respond(['deleted' => $s->rowCount()]);
 }
 

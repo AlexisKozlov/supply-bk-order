@@ -136,8 +136,9 @@ export const useRestaurantStore = defineStore('restaurant', () => {
         schedule.value.push(record);
       } else {
         // Если API не вернул данные, перезагружаем
+        const currentGroup = loadedGroup.value;
         invalidate();
-        await load();
+        await _doLoad(currentGroup);
       }
     }
   }

@@ -54,6 +54,8 @@ async function idbDelete(key) {
 
 export const useDraftStore = defineStore('draft', () => {
   const isLoading = ref(false);
+  const lastSaved = ref(null);
+  const lastPlanSaved = ref(null);
   let _timer = null;
 
   function save() {
@@ -84,6 +86,7 @@ export const useDraftStore = defineStore('draft', () => {
     const json = JSON.stringify(draft);
     localStorage.setItem(DRAFT_KEY, json);
     idbSet(DRAFT_KEY, draft);
+    lastSaved.value = new Date();
   }
 
   function clear() {
@@ -126,6 +129,7 @@ export const useDraftStore = defineStore('draft', () => {
 
       // Товары
       orderStore.items = data.items || [];
+      orderStore.clearHistory();
 
       isLoading.value = false;
 
@@ -179,6 +183,7 @@ export const useDraftStore = defineStore('draft', () => {
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(PLAN_DRAFT_KEY, JSON.stringify(draft));
+      lastPlanSaved.value = new Date();
     }, 500);
   }
 
@@ -203,5 +208,5 @@ export const useDraftStore = defineStore('draft', () => {
     try { return JSON.parse(raw); } catch { return null; }
   }
 
-  return { isLoading, save, saveNow, clear, load, hasDraft, savePlan, clearPlanDraft, hasPlanDraft, loadPlanDraft };
+  return { isLoading, lastSaved, lastPlanSaved, save, saveNow, clear, load, hasDraft, savePlan, clearPlanDraft, hasPlanDraft, loadPlanDraft };
 });

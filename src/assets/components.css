@@ -5,54 +5,7 @@
  */
 
 /* ===== DATABASE LIST ===== */
-.db-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  background: var(--card);
-}
-
-.db-card:hover {
-  box-shadow: var(--shadow);
-  border-color: var(--border);
-}
-
-.db-card-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.db-card-sku {
-  font-weight: 700;
-  color: var(--orange);
-  font-size: 11px;
-  letter-spacing: 0.3px;
-}
-
-.db-card-name {
-  font-size: 12px;
-  color: var(--text);
-  font-weight: 600;
-  margin: 1px 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.db-card-supplier {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.db-card-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
+/* .db-card* — определены ниже в секции Database View */
 
 @media (max-width: 700px) {
   #databaseList, #supplierList {
@@ -576,8 +529,8 @@ tbody tr {
 
 /* ── Фокус-кольцо для select (accessibility) ── */
 select:focus-visible {
-  outline: 2px solid var(--orange);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent, #D62300);
 }
 
 /* ── Счётчик позиций — badge-стиль ── */
@@ -766,7 +719,7 @@ tbody tr td[colspan] {
 
 .plan-input:focus {
   border-color: var(--orange) !important;
-  box-shadow: 0 0 0 2px rgba(245,166,35,0.18) !important;
+  box-shadow: inset 0 0 0 1px var(--orange) !important;
   background: var(--card) !important;
 }
 
@@ -1101,45 +1054,7 @@ td.plan-td-result:hover {
   background: var(--bg);
 }
 
-/* ============= Дропдаун отправки заказа ============= */
-.share-dropdown {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  background: var(--card);
-  border-radius: 4px;
-  box-shadow: var(--shadow-lg);
-  z-index: 9999;
-  min-width: 160px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-.share-dropdown button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 14px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: inherit;
-  color: var(--text);
-  text-align: left;
-  transition: background 0.15s;
-}
-.share-dropdown button:hover {
-  background: var(--bg);
-}
-.share-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+/* .share-dropdown, .share-dot — определены ниже */
 
 /* #9 Кнопка Очистить — красный фон при hover */
 .btn-clear-order:hover {
@@ -1156,15 +1071,18 @@ td.plan-td-result:hover {
 .page-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-shrink: 0;
   flex-wrap: wrap;
 }
 
 .page-title {
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--text);
+  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--bk-brown);
+  letter-spacing: 0.3px;
   margin: 0;
 }
 
@@ -1173,31 +1091,32 @@ td.plan-td-result:hover {
   background: var(--card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
-  padding: 16px 20px;
-  margin-bottom: 16px;
+  padding: 6px 10px;
+  margin-bottom: 5px;
+  flex-shrink: 0;
 }
 
 .settings-row {
   display: flex;
-  align-items: flex-end;
-  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  gap: 4px 8px;
+  align-items: flex-end;
+  margin-top: 6px;
 }
 
 .setting-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
   min-width: 0;
 }
 
 .setting-group label {
-  font-size: 11px;
+  font-size: 7px;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.4px;
   white-space: nowrap;
 }
 
@@ -1205,10 +1124,10 @@ td.plan-td-result:hover {
 .setting-group input[type="date"],
 .setting-group input[type="number"],
 .setting-group input[type="text"] {
-  padding: 6px 10px;
+  padding: 3px 5px;
   border: 1.5px solid var(--border);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 600;
   font-family: inherit;
   color: var(--text);
@@ -1222,7 +1141,7 @@ td.plan-td-result:hover {
   border-color: var(--accent);
   background: var(--card);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .setting-group input.required {
@@ -1394,6 +1313,7 @@ td.plan-td-result:hover {
   align-items: center;
   padding: 12px 16px;
   gap: 12px;
+  cursor: pointer;
 }
 
 .history-title {
@@ -1421,6 +1341,19 @@ td.plan-td-result:hover {
   flex-shrink: 0;
 }
 
+.history-actions .btn.small {
+  padding: 5px 9px; font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: none; cursor: pointer;
+  background: var(--bg);
+  transition: background var(--transition);
+}
+.history-actions .btn.small:nth-child(1) { background: #E3F2FD; }
+.history-actions .btn.small:nth-child(2) { background: #FFF3E0; }
+.history-actions .btn.small:nth-child(3) { background: #F3E5F5; }
+.history-actions .btn.small:nth-child(4) { background: #FFEBEE; }
+.history-actions .btn.small:hover { filter: brightness(0.92); }
+
 .history-items {
   padding: 8px 16px 12px;
   border-top: 1px solid var(--border-light);
@@ -1429,11 +1362,24 @@ td.plan-td-result:hover {
   background: var(--bg);
 }
 
+.history-items > div {
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.history-items > div:last-child { border-bottom: none; }
+
+@keyframes expandDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 600px; }
+}
+
 .audit-log-panel {
   padding: 8px 16px 12px;
   border-top: 1px solid var(--border-light);
   background: #F8F0FF;
   font-size: 12px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 /* ─── Database View ─── */
@@ -1533,19 +1479,7 @@ td.plan-td-result:hover {
   flex-shrink: 0;
 }
 
-.supplier-contact-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-  background: var(--bg);
-  color: var(--text-muted);
-  border: 1px solid var(--border-light);
-}
-.supplier-contact-badge.filled-whatsapp { background: #E8F5E9; color: #25D366; border-color: #A5D6A7; }
-.supplier-contact-badge.filled-telegram { background: #E3F2FD; color: #0088cc; border-color: #90CAF9; }
-.supplier-contact-badge.filled-viber { background: #F3E5F5; color: #7360f2; border-color: #CE93D8; }
-.supplier-contact-badge.filled-email { background: #FFF3E0; color: #8B7355; border-color: #FFCC80; }
+/* .supplier-contact-badge — определён ниже */
 
 /* ─── Login ─── */
 .login-overlay {
@@ -1600,7 +1534,7 @@ td.plan-td-result:hover {
   border-color: var(--accent);
   outline: none;
   background: var(--card);
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .login-logo {
@@ -1701,9 +1635,13 @@ td.plan-td-result:hover {
 }
 
 .modal-field-label {
+  display: block;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
 }
 
 /* ═══════ EDITING BADGE ═══════ */
@@ -1780,33 +1718,48 @@ td.plan-td-result:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0,0,0,0.4);
-  backdrop-filter: blur(2px);
+  background: rgba(44,24,16,0.5);
+  backdrop-filter: blur(4px);
+  animation: backdropIn 0.2s ease;
 }
+@keyframes backdropIn { from { background-color: rgba(0,0,0,0); backdrop-filter: blur(0); } to { background-color: rgba(44,24,16,0.5); backdrop-filter: blur(4px); } }
 .modal-box {
   background: var(--card);
-  border-radius: 12px;
-  padding: 20px 24px;
-  width: min(500px, calc(100% - 32px));
-  max-height: 90vh;
+  border-radius: 14px;
+  padding: 20px;
+  width: 460px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
   overflow-y: auto;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  box-shadow: var(--shadow-lg);
+  animation: modalIn 0.2s ease;
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
-.modal-header h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.modal-header h2 {
+  font-size: 17px; font-weight: 700; color: var(--text);
+  margin: 0; flex: 1;
+}
 .modal-close {
-  background: none; border: none; font-size: 18px;
-  cursor: pointer; color: var(--text-muted); padding: 4px;
+  width: 36px; height: 36px;
+  border: none; background: var(--bg);
+  border-radius: 8px;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+  transition: all var(--transition);
 }
-.modal-close:hover { color: var(--text); }
-.modal-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
-.modal-field { display: flex; flex-direction: column; }
-.modal-field-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+.modal-close:hover { background: #FFEBEE; color: var(--error); }
 
 /* ─── Подсказка под параметрами ─────────────────────────────────── */
 .settings-hint {

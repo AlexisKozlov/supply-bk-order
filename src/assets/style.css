@@ -74,15 +74,7 @@ body {
 .hidden { display: none !important; }
 
 /* ═══════ LOGIN ═══════ */
-.login-overlay {
-  position: fixed;
-  inset: 0;
-  background: linear-gradient(135deg, var(--bk-brown) 0%, var(--bk-red-dark) 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10000;
-}
+/* .login-overlay — определён в components.css */
 
 .login-box {
   background: var(--card);
@@ -92,8 +84,6 @@ body {
   text-align: center;
   box-shadow: var(--shadow-lg);
 }
-
-.login-logo { font-size: 48px; margin-bottom: 4px; }
 
 .login-box h2 {
   font-size: 22px;
@@ -126,7 +116,7 @@ body {
 .login-box input:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.08);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .login-box .btn { width: 100%; margin-top: 6px; }
@@ -679,34 +669,17 @@ select, input[type="date"], input[type="number"], input[type="text"], input[type
 select:focus, input:focus, textarea:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 select:focus-visible, input:focus-visible, textarea:focus-visible,
 button:focus-visible, .btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.required { border-color: var(--error) !important; box-shadow: 0 0 0 2px rgba(211,47,47,0.1) !important; }
+.required { border-color: var(--error) !important; box-shadow: inset 0 0 0 2px rgba(211,47,47,0.15) !important; }
 
-.safety-input-wrap {
-  display: flex; align-items: center; gap: 0;
-  position: relative;
-}
-
-.safety-input-wrap input { padding-right: 32px; width: 100%; }
-
-.safety-calendar-icon {
-  position: absolute; right: 4px;
-  background: none; border: none;
-  cursor: pointer; padding: 4px;
-  opacity: 0.5;
-  transition: opacity var(--transition);
-}
-
-.safety-calendar-icon:hover { opacity: 1; }
-
-
+/* .safety-input-wrap, .safety-calendar-icon — определены в components.css */
 
 /* ═══════ BUTTONS ═══════ */
 .btn {
@@ -794,85 +767,9 @@ button:focus-visible, .btn:focus-visible {
   border-radius: 4px;
 }
 
-.editing-badge {
-  background: #FFF3E0;
-  color: #E65100;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid #FFCC80;
-  cursor: pointer;
-  margin-left: 4px;
-  animation: pulse-orange 2s infinite;
-}
+/* .editing-badge — определён в components.css */
 
-/* Режим просмотра — синий бейдж */
-.view-only-mode .editing-badge,
-.view-only-mode ~ .editing-badge {
-  background: #E3F2FD;
-  color: #1565C0;
-  border-color: #90CAF9;
-  animation: pulse-blue 2s infinite;
-}
-
-@keyframes pulse-blue {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(21,101,192,0.2); }
-  50% { box-shadow: 0 0 0 6px rgba(21,101,192,0); }
-}
-
-/* Блокировка ввода в режиме просмотра заказа */
-/* 1. Блокируем ВСЕ интерактивные элементы внутри content-area */
-.view-only-mode input,
-.view-only-mode select,
-.view-only-mode textarea,
-.view-only-mode button,
-.view-only-mode .btn,
-.view-only-mode .drag-handle,
-.view-only-mode .inline-add-row {
-  pointer-events: none !important;
-  opacity: 0.4;
-}
-/* 2. Разрешаем: селекторы отображения (шт/кор, транзит, запас, проверка) */
-.view-only-mode #unit,
-.view-only-mode #hasTransit,
-.view-only-mode #showStockColumn {
-  pointer-events: auto !important;
-  opacity: 1 !important;
-}
-/* 3. Разрешаем: ВСЕ кнопки в toolbar-finish (скопировать, результат, отправить, excel) */
-.view-only-mode .toolbar-finish button,
-.view-only-mode .toolbar-finish .btn,
-.view-only-mode .toolbar-finish .share-dropdown button {
-  pointer-events: auto !important;
-  opacity: 1 !important;
-}
-/* Сохранить остаётся disabled в просмотре — handled by :disabled attr */
-/* 4. Разрешаем: кнопку развернуть/свернуть и компакт */
-.view-only-mode .fullscreen-toggle-btn,
-.view-only-mode .compact-toggle {
-  pointer-events: auto !important;
-  opacity: 1 !important;
-}
-/* 5. Разрешаем: бейдж просмотра (чтобы выйти) */
-.view-only-mode .editing-badge {
-  pointer-events: auto !important;
-  opacity: 1 !important;
-}
-/* 6. Разрешаем: клик по названию товара и кнопку "Подробнее" */
-.view-only-mode .item-name {
-  pointer-events: auto !important;
-  opacity: 1 !important;
-}
-.view-only-mode .summary-details-btn {
-  pointer-events: auto !important;
-  opacity: 1 !important;
-}
-
-@keyframes pulse-orange {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(230,81,0,0.2); }
-  50% { box-shadow: 0 0 0 6px rgba(230,81,0,0); }
-}
+/* .view-only-mode — определён в components.css */
 
 .table-toolbar-spacer { flex: 1; min-width: 8px; }
 
@@ -1071,7 +968,7 @@ input[type="number"] {
 input[type="number"]:focus {
   border-color: var(--accent);
   background: var(--card);
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 
@@ -1097,7 +994,7 @@ input[type="number"]:focus {
 .search input:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 
@@ -1149,20 +1046,7 @@ input[type="number"]:focus {
 .search-results div:hover { background: var(--bg); }
 
 /* ═══════ MODALS ═══════ */
-
-/* Обычные модалки (подтверждение, ред. карточки, сохранение) */
-.modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(44,24,16,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9998;
-  backdrop-filter: blur(4px);
-  animation: backdropIn 0.2s ease;
-}
-@keyframes backdropIn { from { background-color: rgba(0,0,0,0); backdrop-filter: blur(0); } to { background-color: rgba(44,24,16,0.5); backdrop-filter: blur(4px); } }
+/* .modal — определён в components.css */
 
 /* PAGE-МОДАЛКИ: заменяют content-area внутри main-area */
 .modal.page-modal {
@@ -1249,17 +1133,7 @@ input[type="number"]:focus {
   overflow-y: auto !important;
 }
 
-.modal-box {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 20px;
-  width: 460px;
-  max-width: calc(100vw - 24px);
-  max-height: calc(100vh - 24px);
-  overflow-y: auto;
-  box-shadow: var(--shadow-lg);
-  animation: modalIn 0.2s ease;
-}
+/* .modal-box — определён в components.css */
 
 .modal-box.confirm-modal {
   width: auto;
@@ -1289,35 +1163,7 @@ input[type="number"]:focus {
   max-height: 90vh;
 }
 
-@keyframes modalIn {
-  from { opacity: 0; transform: scale(0.96) translateY(8px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.modal-header h2 {
-  font-size: 17px; font-weight: 700; color: var(--text);
-  margin: 0; flex: 1;
-}
-
-.modal-close {
-  width: 36px; height: 36px;
-  border: none; background: var(--bg);
-  border-radius: 8px;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted);
-  transition: all var(--transition);
-}
-
-.modal-close:hover { background: #FFEBEE; color: var(--error); }
+/* .modal-header, .modal-close — определены в components.css */
 
 .modal-box input,
 .modal-box select,
@@ -1342,7 +1188,7 @@ input[type="number"]:focus {
 .modal-box textarea:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .modal-box label {
@@ -1362,25 +1208,7 @@ input[type="number"]:focus {
   letter-spacing: 0;
 }
 
-.modal-row-2 {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.modal-row-2 .modal-field {
-  flex: 1;
-}
-
-.modal-field-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 4px;
-}
+/* .modal-row-2, .modal-field-label — определены в components.css */
 
 .modal-row-2 input {
   margin-bottom: 0 !important;
@@ -1392,108 +1220,12 @@ input[type="number"]:focus {
   margin-top: 16px;
 }
 
-/* ═══════ HISTORY ═══════ */
-.history-order {
-  border-bottom: 2px solid var(--border);
-  transition: all var(--transition);
-  margin-bottom: 4px;
-  background: var(--card);
-  border-radius: var(--radius-sm);
-}
+/* .history-* — определены в components.css */
 
-.history-order:hover { background: #FFF8F0; box-shadow: var(--shadow); }
-
-.history-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  cursor: pointer;
-  gap: 10px;
-}
-
-.history-title {
-  flex: 1; min-width: 0;
-  font-size: 14px; font-weight: 600; color: var(--text);
-}
-
-.history-meta {
-  font-size: 11px; font-weight: 400; color: var(--text-muted);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
-}
-
-.history-actions {
-  display: flex; gap: 4px; flex-shrink: 0;
-}
-
-.history-actions .btn.small {
-  padding: 5px 9px; font-size: 13px;
-  border-radius: var(--radius-sm);
-  border: none; cursor: pointer;
-  background: var(--bg);
-  transition: background var(--transition);
-}
-
-.history-actions .btn.small:nth-child(1) { background: #E3F2FD; }
-.history-actions .btn.small:nth-child(2) { background: #FFF3E0; }
-.history-actions .btn.small:nth-child(3) { background: #F3E5F5; }
-.history-actions .btn.small:nth-child(4) { background: #FFEBEE; }
-.history-actions .btn.small:hover { filter: brightness(0.92); }
-
-.history-items {
-  padding: 10px 14px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--border-light);
-  background: #FAFAF7;
-  animation: expandDown 0.2s ease;
-}
-
-.history-items > div {
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--border);
-}
-
-.history-items > div:last-child { border-bottom: none; }
-
-@keyframes expandDown {
-  from { opacity: 0; max-height: 0; }
-  to { opacity: 1; max-height: 600px; }
-}
-
-/* Audit log */
-.audit-log-panel {
-  padding: 10px 16px;
-  background: #FAF5FF;
-  border-top: 1px solid #E8E0F0;
-  max-height: 200px;
-  overflow-y: auto;
-}
+/* .audit-log-panel — определён в components.css */
 
 /* ═══════ DATABASE TABS ═══════ */
-.db-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 2px solid var(--border);
-  margin-bottom: 16px;
-}
-
-.db-tab {
-  padding: 10px 20px;
-  border: none; background: none;
-  font-size: 13px; font-weight: 600;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  font-family: inherit;
-  transition: all var(--transition);
-}
-
-.db-tab:hover { color: var(--text); }
-.db-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* .db-tabs, .db-tab — определены в components.css */
 
 .db-tab-content { display: flex; flex-direction: column; }
 .db-tab-content.hidden { display: none; }
@@ -1545,17 +1277,7 @@ input[type="number"]:focus {
   to { opacity: 1; transform: translateX(0); }
 }
 
-/* ═══════ LOADING ═══════ */
-.loading-spinner {
-  width: 28px; height: 28px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  margin: 0 auto;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
+/* .loading-spinner, @keyframes spin — определены в components.css */
 
 /* ═══════ VERSION IN SIDEBAR ═══════ */
 .sidebar-version {
@@ -1835,14 +1557,7 @@ input[type="number"]:focus {
 }
 
 /* ═══════ SETTINGS PANEL ═══════ */
-.settings-panel {
-  background: var(--card);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-  margin-bottom: 5px;
-  flex-shrink: 0;
-}
+/* .settings-panel — определён в components.css */
 .settings-header {
   display: flex;
   align-items: center;
@@ -1863,36 +1578,6 @@ input[type="number"]:focus {
 .settings-toggle:hover {
   color: var(--text);
   background: rgba(0,0,0,.03);
-}
-.settings-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  align-items: flex-end;
-  margin-top: 6px;
-}
-.setting-group {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.setting-group label {
-  font-size: 7px;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-.setting-group select,
-.setting-group input {
-  font-size: 10px;
-  padding: 3px 5px;
-}
-.toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
 }
 .toolbar-spacer {
   flex: 1;
@@ -1987,58 +1672,9 @@ input[type="number"]:focus {
   background: var(--bk-brown);
   color: white;
 }
-.share-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  z-index: 100;
-  min-width: 160px;
-  overflow: hidden;
-}
-.share-dropdown button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 14px;
-  border: none;
-  background: none;
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  color: var(--text);
-}
-.share-dropdown button:hover { background: var(--bg); }
-.share-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-  flex-shrink: 0;
-}
-.page-title {
-  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--bk-brown);
-  letter-spacing: 0.3px;
-}
-.btn.danger {
-  background: none;
-  color: var(--error);
-  border-color: #FFCDD2;
-}
-.btn.danger:hover { background: #FEF2F2; }
+/* .share-dropdown, .share-dot — определены в components.css */
+/* .page-header, .page-title — определены в components.css */
+/* .btn.danger — определён в components.css */
 /* Inline add row */
 .inline-add-row td { border-top: 1px dashed #e0e0e0 !important; background: #fafbfc; }
 .inline-add-row:hover td { background: #f5f6f8; }
@@ -2082,6 +1718,10 @@ input[type="number"]:focus {
 }
 
 /* Бейдж просмотра в планировании — синий */
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(21,101,192,0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(21,101,192,0); }
+}
 .plan-badge-view {
   background: #E3F2FD !important;
   color: #1565C0 !important;
@@ -2210,10 +1850,6 @@ input[type="number"]:focus {
 .plan-period-tip:hover .plan-tip {
   display: block;
 }
-.calc-tip-row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-.calc-tip-lbl { color: #b0ada8; }
-.calc-tip-val { font-weight: 600; white-space: nowrap; }
-.calc-tip-hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 5px 0; }
 .plan-tip-row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
 .plan-tip-lbl { color: #b0ada8; }
 .plan-tip-val { font-weight: 600; white-space: nowrap; }
@@ -2493,7 +2129,7 @@ button:disabled .bk-icon-wrap svg {
 .pf-group input:focus {
   border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(214,35,0,0.06);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .params-collapse-hint {
   width: 100%;

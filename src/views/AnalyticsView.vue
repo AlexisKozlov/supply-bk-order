@@ -623,16 +623,27 @@ async function loadOrder(orderId) {
 
 async function load() {
   loading.value = true;
-  data.value = await getOrdersAnalytics(orderStore.settings.legalEntity, days.value);
-  loading.value = false;
+  try {
+    data.value = await getOrdersAnalytics(orderStore.settings.legalEntity, days.value);
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось загрузить аналитику');
+    data.value = null;
+  } finally {
+    loading.value = false;
+  }
 }
 
 // Lazy-load сезонности и прогноза при переключении на табы
 watch(activeTab, async (tab) => {
   if (tab === 'reports' && !seasonality.value && !seasonalityLoading.value) {
     seasonalityLoading.value = true;
-    seasonality.value = await getSeasonalityData(orderStore.settings.legalEntity);
-    seasonalityLoading.value = false;
+    try {
+      seasonality.value = await getSeasonalityData(orderStore.settings.legalEntity);
+    } catch (e) {
+      seasonality.value = null;
+    } finally {
+      seasonalityLoading.value = false;
+    }
   }
   if (tab === 'forecast' && !forecast.value && !forecastLoading.value) {
     await loadForecast();
@@ -641,8 +652,14 @@ watch(activeTab, async (tab) => {
 
 async function loadForecast() {
   forecastLoading.value = true;
-  forecast.value = await getForecastData(orderStore.settings.legalEntity);
-  forecastLoading.value = false;
+  try {
+    forecast.value = await getForecastData(orderStore.settings.legalEntity);
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось загрузить прогноз');
+    forecast.value = null;
+  } finally {
+    forecastLoading.value = false;
+  }
 }
 
 // Фильтрованный и отсортированный список прогноза

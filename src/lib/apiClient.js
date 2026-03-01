@@ -10,6 +10,17 @@ function buildHeaders() {
   return h;
 }
 
+async function fetchWithRetry(url, opts, maxRetries = 2) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, opts);
+    } catch (e) {
+      if (attempt >= maxRetries || !(e instanceof TypeError)) throw e;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+}
+
 class QueryBuilder {
   constructor(t) {
     this._t = t;
@@ -67,6 +78,8 @@ class QueryBuilder {
 
   then(res, rej) { this._run().then(res, rej); }
 
+  rawParam(key, value) { this._rawParams = this._rawParams || {}; this._rawParams[key] = value; return this; }
+
   async _run() {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(this._f)) p.set(k, v);
@@ -74,6 +87,7 @@ class QueryBuilder {
     if (this._ord) p.set('order', this._ord);
     if (this._lim) p.set('limit', String(this._lim));
     if (this._off) p.set('offset', String(this._off));
+    if (this._rawParams) { for (const [k, v] of Object.entries(this._rawParams)) p.set(k, v); }
     let qs = p.toString();
     if (this._or) {
       const orEncoded = encodeURIComponent(this._or).replace(/%2C/gi, ',').replace(/%2A/gi, '*');
@@ -83,7 +97,7 @@ class QueryBuilder {
 
     try {
       if (this._method === 'GET') {
-        const r = await fetch(url, { headers: buildHeaders() });
+        const r = await fetchWithRetry(url, { headers: buildHeaders() });
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         let d = await r.json();
         if (Array.isArray(d)) d = d.map(row => parseJsonFields(row));
@@ -98,7 +112,7 @@ class QueryBuilder {
 
       if (this._method === 'POST') {
         const b = this._body.length === 1 ? this._body[0] : this._body;
-        const r = await fetch(url, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(b) });
+        const r = await fetchWithRetry(url, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(b) });
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         let d = await r.json();
         if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
@@ -106,7 +120,7 @@ class QueryBuilder {
       }
 
       if (this._method === 'PATCH') {
-        const r = await fetch(url, { method: 'PATCH', headers: buildHeaders(), body: JSON.stringify(this._body) });
+        const r = await fetchWithRetry(url, { method: 'PATCH', headers: buildHeaders(), body: JSON.stringify(this._body) });
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         let d = await r.json();
         if (Array.isArray(d)) d = d.map(parseJsonFields);
@@ -114,7 +128,7 @@ class QueryBuilder {
       }
 
       if (this._method === 'DELETE') {
-        const r = await fetch(url, { method: 'DELETE', headers: buildHeaders() });
+        const r = await fetchWithRetry(url, { method: 'DELETE', headers: buildHeaders() });
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         return { data: await r.json(), error: null };
       }
@@ -135,7 +149,7 @@ function parseJsonFields(row) {
 
 async function rpc(fn, params = {}) {
   try {
-    const r = await fetch(`${API_BASE}/rpc/${fn}`, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) });
+    const r = await fetchWithRetry(`${API_BASE}/rpc/${fn}`, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) });
     if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
     return { data: await r.json(), error: null };
   } catch (e) { return { data: null, error: e.message }; }

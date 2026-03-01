@@ -287,6 +287,7 @@ import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useDraftStore } from '@/stores/draftStore.js'
 import { useConfirm } from '@/composables/useConfirm.js'
+import { applyEntityFilter } from '@/lib/utils.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
@@ -358,6 +359,7 @@ const actFile = ref(null)
 const editDeliveryDate = ref('')
 
 const legalEntity = computed(() => orderStore.settings.legalEntity)
+let _loadRequestId = 0
 const hasAnyFact = computed(() => drawerItems.value.some(i => i._factValue !== null))
 
 const emptyText = computed(() => {
@@ -398,7 +400,9 @@ watch(legalEntity, async () => {
 })
 
 async function loadSuppliers() {
-  const { data } = await db.from('suppliers').select('short_name').order('short_name')
+  let query = db.from('suppliers').select('short_name').order('short_name')
+  query = applyEntityFilter(query, legalEntity.value)
+  const { data } = await query
   if (data) suppliers.value = data.map(s => s.short_name)
 }
 
@@ -414,6 +418,7 @@ function datePlusDays(dateStr, n) {
 }
 
 async function loadOrders() {
+  const myRequestId = ++_loadRequestId
   loading.value = true
   try {
     const today = todayStr()
@@ -436,6 +441,7 @@ async function loadOrders() {
     }
 
     const { data, error } = await query
+    if (myRequestId !== _loadRequestId) return
     if (error) { toast.error('Ошибка', 'Не удалось загрузить заказы'); return }
     orders.value = data || []
 
@@ -573,7 +579,7 @@ async function onDeliveryDateChange(e) {
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'delivery_date_changed',
       user_name: userName,
-      details: JSON.stringify({ supplier: selectedOrder.value.supplier, old_date: editDeliveryDate.value, new_date: newDate }),
+      details: { supplier: selectedOrder.value.supplier, old_date: editDeliveryDate.value, new_date: newDate },
       created_at: now,
     })
     editDeliveryDate.value = newDate
@@ -671,7 +677,7 @@ async function acceptAsOrdered() {
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
-      details: JSON.stringify({ supplier: selectedOrder.value.supplier, items_count: items.length, discrepancies: 0 }),
+      details: { supplier: selectedOrder.value.supplier, items_count: items.length, discrepancies: 0 },
       created_at: now,
     })
     toast.success('Принято', `Заказ ${selectedOrder.value.supplier} принят`)
@@ -706,10 +712,10 @@ async function saveReceived() {
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
-      details: JSON.stringify({
+      details: {
         supplier: selectedOrder.value.supplier, items_count: drawerItems.value.length, discrepancies,
         items_with_discrepancy: itemsWithFact.filter(i => i._delta !== 0).map(i => ({ name: i.name, ordered: i.qty_boxes, received: i._factValue, delta: i._delta })),
-      }),
+      },
       created_at: now,
     })
     toast.success('Принято', `Заказ ${selectedOrder.value.supplier} принят${discrepancies ? ` (${discrepancies} расхожд.)` : ''}`)
@@ -734,7 +740,7 @@ async function revertToTransit() {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: orderId, action: 'reception_reverted', user_name: userName,
-      details: JSON.stringify({ supplier: selectedOrder.value.supplier, reverted_from: selectedOrder.value.received_by }),
+      details: { supplier: selectedOrder.value.supplier, reverted_from: selectedOrder.value.received_by },
       created_at: now,
     })
     toast.success('Возвращено', `Заказ ${selectedOrder.value.supplier} снова ожидает приёмки`)

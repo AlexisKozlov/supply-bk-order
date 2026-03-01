@@ -21,12 +21,11 @@
 </template>
 <script setup>
 import { useToastStore } from '@/stores/toastStore.js';
-import BkIcon from '@/components/ui/BkIcon.vue';
 
 const toastStore = useToastStore();
 </script>
 <style scoped>
-.toast-container { position:fixed; top:16px; right:16px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+.toast-container { position:fixed; top:16px; right:16px; z-index:9999999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
 .toast { display:flex; align-items:flex-start; gap:10px; background:#fff; padding:12px 14px; border-radius:10px; min-width:280px; max-width:400px; pointer-events:all; cursor:pointer; box-shadow:0 4px 20px rgba(0,0,0,0.1),0 1px 3px rgba(0,0,0,0.06); border-left:4px solid #999; }
 .toast--success { border-left-color:#34a853; } .toast--error { border-left-color:#ea4335; } .toast--warning { border-left-color:#f5a623; } .toast--info { border-left-color:#4285f4; }
 .toast-icon { width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; color:#fff; flex-shrink:0; margin-top:1px; line-height:1; }

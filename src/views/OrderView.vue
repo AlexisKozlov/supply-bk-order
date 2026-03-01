@@ -104,8 +104,8 @@
         <button class="compact-toggle" :class="{ active: compactMode }" @click="toggleCompact" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
         <button class="btn small" :disabled="orderStore.viewOnlyMode" @click="orderStore.applyAllCalculated" title="Все рассчитанные → В заказ"><BkIcon name="add" size="sm"/> Все→Заказ</button>
-        <button class="btn small" :disabled="fillLoading || orderStore.viewOnlyMode" @click="fillFromLastOrder" title="Загрузить расход из последнего заказа">
-          <BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расход
+        <button class="btn small" :disabled="fillLoading || orderStore.viewOnlyMode" @click="fillFromLastOrder" title="Загрузить расход и остаток из анализа запасов">
+          <BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расх/ост
         </button>
         <button class="btn small" :disabled="load1cLoading || orderStore.viewOnlyMode" @click="loadFrom1c" title="Загрузить из 1С">
           <BkIcon v-if="load1cLoading" name="loading" size="sm"/><BkIcon v-else name="oneC" size="sm"/> 1С
@@ -147,6 +147,7 @@
         </div>
         <button class="btn" @click="exportExcel" v-if="orderStore.items.length" :disabled="!itemsWithOrderCount"><BkIcon name="excel" size="sm"/> Excel</button>
       </div>
+      <div v-if="draftStatusText && orderStore.items.length && !orderStore.viewOnlyMode && !orderStore.editingOrderId" class="draft-status">{{ draftStatusText }}</div>
     </div>
 
     <!-- Модалки -->
@@ -260,7 +261,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -269,7 +270,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
 import { saveOrder } from '@/lib/saveOrder.js';
-import { importFromFile, applyAnalogMerges } from '@/lib/importStock.js';
+import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import OrderTable from '@/components/order/OrderTable.vue';
 import SaveOrderModal from '@/components/modals/SaveOrderModal.vue';
 import ManualProductModal from '@/components/modals/ManualProductModal.vue';
@@ -289,6 +290,7 @@ const toast         = useToastStore();
 const userStore     = useUserStore();
 
 const isViewer = computed(() => userStore.isViewer);
+let _orderLoadId = 0;
 const orderVisible          = ref(true);
 const settingsExpanded      = ref(false);
 const supplierLoading       = ref(false);
@@ -309,6 +311,22 @@ const editCardModal         = ref({ show: false, product: null });
 const analogMergeModal      = ref({ show: false, merges: [] });
 const logModal              = ref({ show: false, loading: false, entries: [] });
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
+
+// Статус автосохранения черновика
+const draftTick = ref(0);
+let draftTickTimer = null;
+const draftStatusText = computed(() => {
+  draftTick.value; // dependency
+  const t = draftStore.lastSaved;
+  if (!t) return '';
+  const diff = Math.floor((Date.now() - t.getTime()) / 1000);
+  if (diff < 10) return 'Черновик сохранён';
+  if (diff < 60) return 'Черновик сохранён только что';
+  const mins = Math.floor(diff / 60);
+  if (mins === 1) return 'Черновик сохранён 1 мин. назад';
+  if (mins < 60) return `Черновик сохранён ${mins} мин. назад`;
+  return '';
+});
 const orderResultModal      = ref({ show: false, text: '', supplier: '', deliveryDate: '', lines: [] });
 const isFullscreen          = ref(false);
 const compactMode           = ref(localStorage.getItem('bk_compact_mode') === '1');
@@ -389,21 +407,30 @@ onMounted(async () => {
   // Загрузка заказа по ID из query params
   if (route.query.orderId) {
     try {
+      let mode = route.query.mode || 'view';
+      // Проверка блокировки при редактировании
+      if (mode === 'edit') {
+        const { data: lock } = await db.rpc('check_order_lock', { order_id: route.query.orderId, user_name: userStore.currentUser?.name || '' });
+        if (lock?.locked) {
+          toast.warning('Заказ заблокирован', `Редактирует: ${lock.locked_by}. Открыт в режиме просмотра.`);
+          mode = 'view';
+        }
+      }
       const { data: order, error } = await db.from('orders').select('*, order_items(*)').eq('id', route.query.orderId).single();
       if (!error && order) {
-        const isView = route.query.mode === 'view';
-        const isEdit = route.query.mode === 'edit';
-        if (order.received_at && isEdit) {
+        const isView = mode === 'view';
+        const isEditFinal = mode === 'edit';
+        if (order.received_at && isEditFinal) {
           toast.warning('Доставка выполнена', 'Редактирование принятого заказа невозможно. Открыт в режиме просмотра.');
           await orderStore.loadOrderIntoForm(order, order.legal_entity, false, true);
           draftStore.saveNow();
           orderVisible.value = true;
           return;
         }
-        await orderStore.loadOrderIntoForm(order, order.legal_entity, isEdit, isView);
+        await orderStore.loadOrderIntoForm(order, order.legal_entity, isEditFinal, isView);
         draftStore.saveNow();
         orderVisible.value = true;
-        toast.success('Заказ загружен', isView ? 'Режим просмотра' : (isEdit ? 'Режим редактирования' : ''));
+        toast.success('Заказ загружен', isView ? 'Режим просмотра' : (isEditFinal ? 'Режим редактирования' : ''));
       } else {
         toast.error('Заказ не найден', '');
       }
@@ -446,12 +473,36 @@ onMounted(async () => {
   }
   document.addEventListener('click', closeShareDropdown);
   document.addEventListener('click', closeSearchDropdown);
+  draftTickTimer = setInterval(() => { draftTick.value++; }, 30000);
 });
+
+function hasUnsavedData() {
+  return orderStore.items.length > 0 && !orderStore.viewOnlyMode;
+}
+
+function onBeforeUnload(e) {
+  if (hasUnsavedData()) { e.preventDefault(); }
+}
+
+onMounted(() => { window.addEventListener('beforeunload', onBeforeUnload); });
 
 onUnmounted(() => {
   document.removeEventListener('click', closeShareDropdown);
   document.removeEventListener('click', closeSearchDropdown);
   clearTimeout(searchTimer);
+  if (draftTickTimer) clearInterval(draftTickTimer);
+  window.removeEventListener('beforeunload', onBeforeUnload);
+});
+
+onBeforeRouteLeave(() => {
+  if (hasUnsavedData()) {
+    draftStore.saveNow();
+    if (!window.confirm('Есть несохранённые данные. Уйти?')) return false;
+  }
+  // Снимаем блокировку редактирования при уходе (после подтверждения)
+  if (orderStore.editingOrderId) {
+    db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '' }).catch(() => {});
+  }
 });
 
 function closeSearchDropdown(e) {
@@ -464,11 +515,22 @@ function closeSearchDropdown(e) {
 // Реактивная навигация: если query изменился когда компонент уже смонтирован
 watch(() => route.query.orderId, async (newId) => {
   if (!newId) return;
+  const myLoadId = ++_orderLoadId;
   try {
+    let mode = route.query.mode;
+    if (mode === 'edit') {
+      const { data: lock } = await db.rpc('check_order_lock', { order_id: newId, user_name: userStore.currentUser?.name || '' });
+      if (myLoadId !== _orderLoadId) return;
+      if (lock?.locked) {
+        toast.warning('Заказ заблокирован', `Редактирует: ${lock.locked_by}. Открыт в режиме просмотра.`);
+        mode = 'view';
+      }
+    }
     const { data: order, error } = await db.from('orders').select('*, order_items(*)').eq('id', newId).single();
+    if (myLoadId !== _orderLoadId) return;
     if (!error && order) {
-      const isView = route.query.mode === 'view';
-      const isEdit = route.query.mode === 'edit';
+      const isView = mode === 'view';
+      const isEdit = mode === 'edit';
       if (order.received_at && isEdit) {
         toast.warning('Доставка выполнена', 'Редактирование принятого заказа невозможно. Открыт в режиме просмотра.');
         await orderStore.loadOrderIntoForm(order, order.legal_entity, false, true);
@@ -507,6 +569,7 @@ async function onSupplierChange(e) {
   orderStore.settings.supplier = newSupplier;
   orderStore.settings.note = '';
   orderStore.items = [];
+  orderStore.clearHistory();
   searchCache.clear();
   draftStore.save();
   if (!newSupplier) return;
@@ -593,59 +656,38 @@ async function onSaveConfirm(note) {
     orderStore.items.forEach(item => {
       item.consumptionPeriod = 0; item.stock = 0; item.transit = 0; item.finalOrder = 0;
     });
-    draftStore.save();
   } finally { savingOrder.value = false; }
 }
 
-// ─── Подставить расход из прошлого заказа ────────────────────────────────────
+// ─── Загрузить расход/остаток из анализа запасов ─────────────────────────────
 async function fillFromLastOrder() {
   if (!orderStore.items.length) { toast.error('Нет товаров', 'Сначала добавьте товары'); return; }
-  const supplier = orderStore.settings.supplier;
-  if (!supplier) { toast.info('Выберите поставщика', ''); return; }
 
   fillLoading.value = true;
   try {
-    const { data, error } = await db
-      .from('orders')
-      .select('id, unit, period_days, order_items(sku, consumption_period, qty_per_box)')
-      .eq('supplier', supplier)
-      .eq('legal_entity', orderStore.settings.legalEntity)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    const result = await loadFromAnalysis('order', orderStore.items, orderStore.settings.legalEntity, orderStore.settings.unit, orderStore.settings.periodDays || 30);
 
-    if (error || !data?.order_items?.length) {
-      toast.info('Нет данных', `Прошлых заказов для «${supplier}» не найдено`); return;
+    if (result.matched === 0) {
+      toast.info('Нет данных', 'Нет данных анализа для этих товаров');
+      return;
     }
 
-    const prevMap = new Map();
-    data.order_items.forEach(i => { if (i.sku) prevMap.set(i.sku, i); });
+    orderStore.bumpDataVersion();
+    draftStore.save();
 
-    const prevUnit    = data.unit || 'pieces';
-    const currentUnit = orderStore.settings.unit;
-    let filled = 0;
+    const dateStr = result.updatedAt
+      ? result.updatedAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : '—';
+    const byStr = result.updatedBy ? ` (${result.updatedBy})` : '';
+    toast.success('Загружено', `${result.matched} из ${result.total}. Данные от ${dateStr}${byStr}`);
 
-    orderStore.items.forEach(item => {
-      if (!item.sku) return;
-      const prev = prevMap.get(item.sku);
-      if (!prev) return;
-      const qpb = getQpb(item);
-      let c = prev.consumption_period || 0;
-      if (prevUnit === 'pieces' && currentUnit === 'boxes') c = c / qpb;
-      else if (prevUnit === 'boxes' && currentUnit === 'pieces') c = c * qpb;
-      item.consumptionPeriod = Math.round(c);
-      filled++;
-    });
-
-    if (filled > 0) {
-      orderStore.bumpDataVersion();
-      draftStore.save();
-      toast.success('Расход подставлен', `Заполнено: ${filled} из ${orderStore.items.length} товаров`);
-    } else {
-      toast.info('Ничего не подставлено', 'Расход уже заполнен или нет совпадений');
+    if (result.analogMerges?.length) {
+      analogMergeModal.value = { show: true, merges: result.analogMerges, target: 'order' };
     }
-  } catch { toast.error('Ошибка', 'Не удалось загрузить прошлый заказ'); }
-  finally { fillLoading.value = false; }
+  } catch (err) {
+    console.error('[fillFromLastOrder]', err);
+    toast.error('Ошибка', 'Не удалось загрузить данные анализа');
+  } finally { fillLoading.value = false; }
 }
 
 // ─── Загрузить из 1С ──────────────────────────────────────────────────────────
@@ -974,6 +1016,10 @@ async function exitEditMode() {
 </script>
 
 <style scoped>
+.draft-status {
+  font-size: 11px; color: var(--text-muted); text-align: right;
+  padding: 4px 8px 0; font-weight: 500;
+}
 .log-entries { display: flex; flex-direction: column; }
 .log-entry { padding: 10px 0; border-bottom: 1px solid var(--border-light); }
 .log-entry:last-child { border-bottom: none; }

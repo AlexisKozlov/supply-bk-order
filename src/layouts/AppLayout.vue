@@ -384,13 +384,15 @@ function sendHeartbeat() {
   const name = userStore.currentUser?.name;
   if (!name) return;
   const page = pageNames[route.name] || route.name || '';
-  db.rpc('heartbeat', { user_name: name, page }).catch(() => {});
+  const editingOrderId = (route.name === 'order' && route.query.orderId && route.query.mode === 'edit') ? route.query.orderId : null;
+  db.rpc('heartbeat', { user_name: name, page, editing_order_id: editingOrderId }).catch(() => {});
 }
 
 let heartbeatTimer = null;
 let maintenanceTimer = null;
+let removeAfterEach = null;
 
-router.afterEach(() => {
+removeAfterEach = router.afterEach(() => {
   sidebarOpen.value = false;
   if (!userStore.isAdmin) userStore.checkMaintenance();
   sendHeartbeat();
@@ -456,6 +458,7 @@ onUnmounted(() => {
   window.removeEventListener('offline', handleOffline);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
+  if (removeAfterEach) removeAfterEach();
   notificationStore.stopPolling();
 });
 

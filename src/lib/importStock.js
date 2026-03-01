@@ -5,7 +5,7 @@
  */
 
 import { db } from '@/lib/apiClient.js';
-import { debug } from '@/lib/utils.js';
+import { debug, getQpb } from '@/lib/utils.js';
 
 const LEGAL_ENTITY_MAP = {
   'сбарро':              'ООО "Пицца Стар"',
@@ -469,6 +469,19 @@ async function matchData(items, fileData, target, unit) {
       console.warn('[importStock] Ошибка при обработке аналогов:', err);
     }
   }
+  // Пост-обработка дублей аналогов (один аналог → несколько товаров)
+  const seenAnalogs = new Map();
+  for (const merge of analogMerges) {
+    for (const a of merge.analogs) {
+      if (seenAnalogs.has(a.sku)) {
+        a.shared = true;
+        a.sharedWith = seenAnalogs.get(a.sku);
+        a.checked = false;
+      } else {
+        seenAnalogs.set(a.sku, merge.itemSku);
+      }
+    }
+  }
   // Collect file entries that didn't match any item (only with SKU)
   const unmatchedFile = fileData.filter(d => d.sku && !matchedFileEntries.has(d)).map(d => ({
     sku: d.sku,
@@ -489,7 +502,9 @@ async function matchData(items, fileData, target, unit) {
 export function applyAnalogMerges(storeItems, analogMerges, target) {
   let applied = 0;
   for (const merge of analogMerges) {
-    const item = storeItems[merge.itemIdx];
+    const item = merge.itemSku
+      ? storeItems.find(i => i.sku === merge.itemSku)
+      : storeItems[merge.itemIdx];
     if (!item) continue;
     for (const a of merge.analogs) {
       if (!a.checked) continue;
@@ -506,6 +521,208 @@ export function applyAnalogMerges(storeItems, analogMerges, target) {
     }
   }
   return applied;
+}
+
+// ─── Загрузка расхода/остатков из analysis_data ────────────────────────────
+
+/**
+ * Загрузить расход и остатки из таблицы analysis_data (страница «Анализ запасов»).
+ * @param {'order'|'planning'} target
+ * @param {Array} items — текущие позиции
+ * @param {string} legalEntity — юр. лицо
+ * @param {string} unit — 'boxes' | 'pieces'
+ * @param {number} targetPeriodDays — период расхода (в днях), под который пересчитывать
+ * @returns {Promise<{matched, total, updatedAt, updatedBy, analogMerges}>}
+ */
+export async function loadFromAnalysis(target, items, legalEntity, unit, targetPeriodDays = 30) {
+  // 1. Загрузить analysis_data по конкретному юрлицу (не по группе — каждое юрлицо импортирует свои данные)
+  const { data, error } = await db.from('analysis_data')
+    .select('sku, stock, consumption, period_days, updated_by, updated_at')
+    .eq('legal_entity', legalEntity);
+
+  if (error) throw new Error('Не удалось загрузить данные анализа');
+
+  // 2. Построить карту sku → данные
+  const adMap = new Map();
+  if (data?.length) {
+    data.forEach(d => {
+      if (!d.sku) return;
+      adMap.set(d.sku, d);
+      // Индекс без ведущих нулей
+      const noZeros = normSku(d.sku);
+      adMap.set(noZeros, d);
+    });
+  }
+
+  // 3. Определить дату обновления (самая свежая)
+  let updatedAt = null;
+  let updatedBy = '';
+  if (data?.length) {
+    data.forEach(d => {
+      const t = d.updated_at ? new Date(d.updated_at) : null;
+      if (t && (!updatedAt || t > updatedAt)) {
+        updatedAt = t;
+        updatedBy = d.updated_by || '';
+      }
+    });
+  }
+
+  // 4. Заполнить позиции
+  let matched = 0;
+  const matchedSkus = new Set();
+
+  items.forEach(item => {
+    if (!item.sku) return;
+    const d = adMap.get(item.sku) || adMap.get(normSku(item.sku));
+    if (!d) return;
+    matched++;
+    matchedSkus.add(d.sku);
+
+    const srcPeriodDays = d.period_days || 30;
+    // Если период совпадает — берём как есть, без потерь от округления
+    const consumptionPcs = srcPeriodDays === targetPeriodDays
+      ? Math.round(d.consumption || 0)
+      : Math.round(((d.consumption || 0) / srcPeriodDays) * targetPeriodDays);
+    const stockPcs = Math.round(d.stock || 0);
+    const qpb = getQpb(item);
+
+    if (target === 'order') {
+      // unit=boxes → пересчёт через qtyPerBox (штук в упаковке)
+      item.consumptionPeriod = unit === 'boxes'
+        ? Math.round(consumptionPcs / qpb)
+        : consumptionPcs;
+      item.stock = unit === 'boxes'
+        ? Math.round(stockPcs / qpb)
+        : stockPcs;
+    } else {
+      // planning: monthlyConsumption — расход за выбранный период в текущих единицах
+      item.monthlyConsumption = unit === 'boxes'
+        ? Math.round(consumptionPcs / qpb * 100) / 100
+        : consumptionPcs;
+      // stockOnHand — всегда в штуках (PlanningView хранит так)
+      item.stockOnHand = stockPcs;
+    }
+  });
+
+  // 5. Фаза аналогов
+  const analogMerges = [];
+  try {
+    const itemSkus = new Set(items.map(i => i.sku).filter(Boolean));
+    if (itemSkus.size > 0) {
+      const skuList = [...itemSkus];
+      const { data: products } = await db.from('products')
+        .select('sku,name,analog_group')
+        .in('sku', skuList);
+
+      if (products?.length) {
+        const skuToGroup = new Map();
+        const skuToName = new Map();
+        const groups = new Set();
+        for (const p of products) {
+          if (p.analog_group) {
+            skuToGroup.set(p.sku, p.analog_group);
+            skuToName.set(p.sku, p.name);
+            groups.add(p.analog_group);
+          }
+        }
+
+        if (groups.size > 0) {
+          const { data: allAnalogProducts } = await db.from('products')
+            .select('sku,name,analog_group,qty_per_box')
+            .neq('analog_group', '');
+          const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
+
+          const groupToSkus = new Map();
+          const analogSkuToName = new Map();
+          const analogSkuToQpb = new Map();
+          for (const p of groupProducts) {
+            if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);
+            groupToSkus.get(p.analog_group).push(p.sku);
+            analogSkuToName.set(p.sku, p.name);
+            analogSkuToQpb.set(p.sku, p.qty_per_box || 1);
+          }
+
+          for (let idx = 0; idx < items.length; idx++) {
+            const item = items[idx];
+            if (!item.sku) continue;
+            const group = skuToGroup.get(item.sku);
+            if (!group) continue;
+            const analogs = groupToSkus.get(group);
+            if (!analogs) continue;
+
+            const foundAnalogs = [];
+            for (const analogSku of analogs) {
+              if (analogSku === item.sku) continue;
+              if (itemSkus.has(analogSku)) continue;
+
+              // Ищем аналог в данных analysis_data
+              const analogData = adMap.get(analogSku) || adMap.get(normSku(analogSku));
+              if (!analogData) continue;
+
+              // analysis_data хранит всё в штуках — пересчитываем в единицы товара
+              const itemQpb = item.qtyPerBox || 1;
+              const analogPeriodDays = analogData.period_days || 30;
+              const analogDaily = analogPeriodDays > 0 ? (analogData.consumption || 0) / analogPeriodDays : 0;
+              const analogConsumptionPcs = Math.round(analogDaily * targetPeriodDays);
+              const analogStockPcs = Math.round(analogData.stock ?? 0);
+
+              if (target === 'order') {
+                foundAnalogs.push({
+                  sku: analogSku,
+                  name: analogSkuToName.get(analogSku) || '',
+                  stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb) : analogStockPcs,
+                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb) : analogConsumptionPcs,
+                  checked: true,
+                });
+              } else {
+                foundAnalogs.push({
+                  sku: analogSku,
+                  name: analogSkuToName.get(analogSku) || '',
+                  stock: analogStockPcs,
+                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb) : analogConsumptionPcs,
+                  checked: true,
+                });
+              }
+            }
+
+            if (foundAnalogs.length > 0) {
+              analogMerges.push({
+                itemSku: item.sku,
+                itemName: item.name || skuToName.get(item.sku) || item.sku,
+                itemIdx: idx,
+                analogs: foundAnalogs,
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[loadFromAnalysis] Ошибка при обработке аналогов:', err);
+  }
+
+  // 6. Пост-обработка: если один аналог предлагается нескольким товарам —
+  //    пометить как общий и снять галочку у всех кроме первого
+  const seenAnalogSkus = new Map(); // analogSku → первый itemSku
+  for (const merge of analogMerges) {
+    for (const a of merge.analogs) {
+      if (seenAnalogSkus.has(a.sku)) {
+        a.shared = true;
+        a.sharedWith = seenAnalogSkus.get(a.sku);
+        a.checked = false; // по умолчанию выключен у второго+ товара
+      } else {
+        seenAnalogSkus.set(a.sku, merge.itemSku);
+      }
+    }
+  }
+
+  return {
+    matched,
+    total: items.length,
+    updatedAt,
+    updatedBy,
+    analogMerges,
+  };
 }
 
 // ─── Публичный API ─────────────────────────────────────────────────────────

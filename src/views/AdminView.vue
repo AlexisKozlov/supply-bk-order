@@ -123,6 +123,37 @@
         <span>Сайт <b>недоступен</b> для обычных пользователей прямо сейчас</span>
       </div>
 
+      <!-- Таймер -->
+      <div class="adm-maint-msg-card">
+        <h4 class="adm-maint-msg-title">Автовыключение</h4>
+        <p class="adm-maint-msg-hint">Тех. работы автоматически выключатся в указанное время. Пользователи увидят обратный отсчёт.</p>
+
+        <div class="adm-timer-row">
+          <button v-for="opt in quickTimerOptions" :key="opt.min" class="adm-timer-btn"
+            @click="setQuickTimer(opt.min)">
+            {{ opt.label }}
+          </button>
+        </div>
+
+        <div class="adm-timer-custom">
+          <label class="adm-timer-custom-label">Или укажите конкретное время:</label>
+          <div class="adm-timer-input-row">
+            <input type="time" v-model="maintenanceTimeInput" class="adm-timer-input" />
+            <button class="btn primary" style="font-size:13px;padding:7px 16px;" @click="saveExactTime" :disabled="maintenanceTimerSaving || !maintenanceTimeInput">
+              {{ maintenanceTimerSaving ? 'Сохранение...' : 'Установить' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="maintenanceEndTimeDisplay" class="adm-timer-info">
+          <span>Выключится в: <b>{{ maintenanceEndTimeDisplay }}</b></span>
+          <button class="adm-timer-clear" @click="clearTimer">Сбросить</button>
+        </div>
+        <div v-else class="adm-timer-info adm-timer-info-off">
+          Таймер не установлен — техработы нужно будет выключить вручную
+        </div>
+      </div>
+
       <div class="adm-maint-msg-card">
         <h4 class="adm-maint-msg-title">Сообщение для пользователей</h4>
         <p class="adm-maint-msg-hint">Отображается на экране технических работ. Если пусто — показывается стандартный текст.</p>
@@ -272,6 +303,23 @@ const maintenanceOn = ref(false);
 const maintenanceSaving = ref(false);
 const maintenanceMsg = ref('');
 const maintenanceMsgSaving = ref(false);
+const maintenanceTimerSaving = ref(false);
+const maintenanceEndTimeCurrent = ref(null);
+const maintenanceTimeInput = ref('');
+
+const quickTimerOptions = [
+  { min: 15, label: '15 мин' },
+  { min: 30, label: '30 мин' },
+  { min: 60, label: '1 час' },
+  { min: 120, label: '2 часа' },
+];
+
+const maintenanceEndTimeDisplay = computed(() => {
+  if (!maintenanceEndTimeCurrent.value) return '';
+  const d = new Date(maintenanceEndTimeCurrent.value);
+  if (isNaN(d.getTime()) || d.getTime() <= Date.now()) return '';
+  return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+});
 
 // ═══ Broadcast ═══
 const bcTitle = ref('');
@@ -384,11 +432,12 @@ async function loadUsers() {
 
 async function loadSettings() {
   try {
-    const { data } = await db.from('settings').select('*').or('key.eq.maintenance_mode,key.eq.maintenance_message');
+    const { data } = await db.from('settings').select('*').or('key.eq.maintenance_mode,key.eq.maintenance_message,key.eq.maintenance_end_time');
     if (!data) return;
     for (const s of data) {
       if (s.key === 'maintenance_mode') maintenanceOn.value = s.value === 'true';
       if (s.key === 'maintenance_message') maintenanceMsg.value = s.value || '';
+      if (s.key === 'maintenance_end_time') maintenanceEndTimeCurrent.value = s.value || null;
     }
   } catch (e) { console.warn('[admin] loadSettings:', e); }
 }
@@ -396,15 +445,8 @@ async function loadSettings() {
 async function saveMaintenanceMsg() {
   maintenanceMsgSaving.value = true;
   try {
-    // Попробуем обновить; если запись не существует — создадим
-    const { data } = await db.from('settings').select('key').eq('key', 'maintenance_message').limit(1);
-    if (data && data.length) {
-      const { error } = await db.from('settings').update({ value: maintenanceMsg.value }).eq('key', 'maintenance_message');
-      if (error) { toast.error('Ошибка', ''); return; }
-    } else {
-      const { error } = await db.from('settings').insert({ key: 'maintenance_message', value: maintenanceMsg.value });
-      if (error) { toast.error('Ошибка', ''); return; }
-    }
+    const { error } = await db.from('settings').update({ value: maintenanceMsg.value }).eq('key', 'maintenance_message');
+    if (error) { toast.error('Ошибка', ''); return; }
     toast.success('Сообщение сохранено', '');
   } finally { maintenanceMsgSaving.value = false; }
 }
@@ -439,12 +481,21 @@ async function saveUser() {
     if (form.value.password) payload.password = form.value.password;
 
     if (userModal.value.user) {
-      const { error } = await db.from('users').update(payload).eq('id', userModal.value.user.id);
-      if (error) { toast.error('Ошибка', error.message || ''); return; }
+      const { data, error } = await db.rpc('update_user', {
+        caller_name: userStore.currentUser?.name || '',
+        user_id: userModal.value.user.id,
+        ...payload,
+      });
+      if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
       toast.success('Обновлено', payload.name);
     } else {
-      const { error } = await db.from('users').insert([payload]);
-      if (error) { toast.error('Ошибка', error.message || ''); return; }
+      if (!form.value.password) { toast.error('Введите пароль', ''); return; }
+      const { data, error } = await db.rpc('create_user', {
+        caller_name: userStore.currentUser?.name || '',
+        ...payload,
+        password: form.value.password,
+      });
+      if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
       toast.success('Создано', payload.name);
     }
     userModal.value.show = false;
@@ -456,8 +507,8 @@ async function deleteUser(u) {
   if (u.name === userStore.currentUser?.name) { toast.error('Нельзя удалить себя', ''); return; }
   const ok = await confirmAction('Удалить пользователя?', `Пользователь «${u.name}» будет удалён безвозвратно.`);
   if (!ok) return;
-  const { error } = await db.from('users').delete().eq('id', u.id);
-  if (error) { toast.error('Ошибка', ''); return; }
+  const { data, error } = await db.rpc('delete_user', { caller_name: userStore.currentUser?.name || '', user_id: u.id });
+  if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
   toast.success('Удалено', u.name);
   await loadUsers();
 }
@@ -470,8 +521,56 @@ async function toggleMaintenance() {
     if (error) { toast.error('Ошибка', ''); return; }
     maintenanceOn.value = newVal;
     userStore.maintenanceMode = newVal;
+    // При выключении очищаем таймер
+    if (!newVal) {
+      await updateSetting('maintenance_end_time', '');
+      maintenanceEndTimeCurrent.value = null;
+      userStore.maintenanceEndTime = null;
+    }
     toast.success(newVal ? 'Тех. работы включены' : 'Тех. работы выключены', '');
   } finally { maintenanceSaving.value = false; }
+}
+
+async function updateSetting(key, value) {
+  await db.from('settings').update({ value }).eq('key', key);
+}
+
+function setQuickTimer(minutes) {
+  const endDate = new Date(Date.now() + minutes * 60 * 1000);
+  maintenanceTimeInput.value = endDate.getHours().toString().padStart(2, '0') + ':' + endDate.getMinutes().toString().padStart(2, '0');
+  saveExactTime();
+}
+
+async function saveExactTime() {
+  if (!maintenanceTimeInput.value) return;
+  maintenanceTimerSaving.value = true;
+  try {
+    const [hh, mm] = maintenanceTimeInput.value.split(':').map(Number);
+    const target = new Date();
+    target.setHours(hh, mm, 0, 0);
+    // Если время уже прошло — считаем, что это завтра
+    if (target.getTime() <= Date.now()) {
+      target.setDate(target.getDate() + 1);
+    }
+    const endTimeVal = target.toISOString();
+    await updateSetting('maintenance_end_time', endTimeVal);
+    maintenanceEndTimeCurrent.value = endTimeVal;
+    userStore.maintenanceEndTime = endTimeVal;
+    toast.success('Таймер установлен', `Выключится в ${maintenanceTimeInput.value}`);
+  } catch (e) { toast.error('Ошибка', ''); }
+  finally { maintenanceTimerSaving.value = false; }
+}
+
+async function clearTimer() {
+  maintenanceTimerSaving.value = true;
+  try {
+    await updateSetting('maintenance_end_time', '');
+    maintenanceEndTimeCurrent.value = null;
+    userStore.maintenanceEndTime = null;
+    maintenanceTimeInput.value = '';
+    toast.success('Таймер сброшен', '');
+  } catch (e) { toast.error('Ошибка', ''); }
+  finally { maintenanceTimerSaving.value = false; }
 }
 
 onMounted(() => { loadUsers(); loadSettings(); loadOnlineUsers(); });
@@ -652,6 +751,37 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
   background: var(--bg);
 }
 .adm-maint-textarea:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(245,166,35,.1); }
+
+/* Timer */
+.adm-timer-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.adm-timer-btn {
+  padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all .15s;
+  border: 1.5px solid var(--border); background: var(--bg); color: var(--text-muted);
+}
+.adm-timer-btn:hover { border-color: var(--bk-orange); color: var(--text); }
+.adm-timer-btn.active { border-color: var(--bk-orange); background: #FFFBF5; color: var(--bk-brown); }
+.adm-timer-custom { margin-top: 12px; }
+.adm-timer-custom-label { font-size: 12px; color: var(--text-muted); font-weight: 500; display: block; margin-bottom: 6px; }
+.adm-timer-input-row { display: flex; gap: 8px; align-items: center; }
+.adm-timer-input {
+  padding: 7px 12px; border: 1.5px solid var(--border); border-radius: 8px;
+  font-size: 15px; font-family: inherit; font-weight: 600;
+  background: var(--bg); color: var(--text); width: 120px;
+}
+.adm-timer-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(245,166,35,.1); }
+.adm-timer-info {
+  margin-top: 12px; font-size: 13px; color: var(--text-secondary);
+  padding: 10px 14px; border-radius: 8px; background: #FFF8E1; border: 1px solid #FFE0B2;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.adm-timer-info-off { background: var(--bg); border-color: var(--border-light); color: var(--text-muted); }
+.adm-timer-clear {
+  background: none; border: 1px solid #E57373; color: #D32F2F;
+  padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all .15s;
+}
+.adm-timer-clear:hover { background: #FFF0F0; }
 
 /* ═══ Online ═══ */
 .adm-avatar-online {

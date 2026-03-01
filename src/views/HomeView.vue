@@ -31,6 +31,7 @@
     <div v-if="isMaintenance" class="p-maint-banner">
       <svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="10" cy="10" r="8" stroke="#FDBD10" stroke-width="1.5"/><path d="M10 6v5" stroke="#FDBD10" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="13.5" r="1" fill="#FDBD10"/></svg>
       <span>{{ maintenanceBannerText }}</span>
+      <span v-if="maintenanceCountdown" class="p-maint-timer"> &middot; {{ maintenanceCountdown }}</span>
     </div>
 
     <!-- Body — centered content -->
@@ -174,6 +175,7 @@ const hoveredIdx = ref(null);
 const bgCanvas = ref(null);
 let bgRaf = null;
 let bgResize = null;
+let _loaderTimers = [];
 
 const selectedUser = ref('');
 const password = ref('');
@@ -182,12 +184,34 @@ const loginLoading = ref(false);
 const userList = ref([]);
 const isMaintenance = ref(false);
 const maintenanceBannerText = ref('');
+const maintenanceEndTimeRaw = ref(null);
+const maintenanceNow = ref(Date.now());
+let maintenanceTickTimer = null;
+
+const maintenanceCountdown = computed(() => {
+  if (!maintenanceEndTimeRaw.value) return '';
+  const end = new Date(maintenanceEndTimeRaw.value).getTime();
+  if (isNaN(end) || end <= maintenanceNow.value) return '';
+  const diff = Math.max(0, end - maintenanceNow.value);
+  const totalSec = Math.floor(diff / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}ч ${m}м`;
+  if (m > 0) return `${m}м ${s}с`;
+  return `${s}с`;
+});
 
 async function checkMaintenanceForHome() {
   try {
     const { data } = await db.rpc('check_maintenance');
     isMaintenance.value = !!data?.maintenance_mode;
     maintenanceBannerText.value = data?.maintenance_message || 'Ведутся технические работы. Вход может быть ограничен.';
+    maintenanceEndTimeRaw.value = data?.maintenance_end_time || null;
+    // Запускаем тик для обратного отсчёта
+    if (data?.maintenance_end_time && !maintenanceTickTimer) {
+      maintenanceTickTimer = setInterval(() => { maintenanceNow.value = Date.now(); }, 1000);
+    }
   } catch { /* noop */ }
 }
 
@@ -241,6 +265,9 @@ onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
   if (bgRaf) cancelAnimationFrame(bgRaf);
   if (bgResize) window.removeEventListener('resize', bgResize);
+  if (maintenanceTickTimer) clearInterval(maintenanceTickTimer);
+  _loaderTimers.forEach(id => clearTimeout(id));
+  _loaderTimers = [];
 });
 
 function initEmberGlow() {
@@ -352,13 +379,19 @@ const loaderText = ref('Готовим...');
 
 const loaderTexts = ['Готовим...', 'Собираем бургер...', 'Почти готово!'];
 
+function _safeTimeout(fn, delay) {
+  const id = setTimeout(fn, delay);
+  _loaderTimers.push(id);
+  return id;
+}
+
 function goTo(name, query) {
   if (!userStore.isAuthenticated) { loginRedirectTo.value = '/' + name; openLogin(); return; }
   showLoader.value = true;
   loaderText.value = loaderTexts[0];
-  setTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
-  setTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
-  setTimeout(() => {
+  _safeTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
+  _safeTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
+  _safeTimeout(() => {
     showLoader.value = false;
     router.push(query ? { name, query } : { name });
   }, 1400);
@@ -383,9 +416,9 @@ async function doLogin() {
     loginRedirectTo.value = null;
     showLoader.value = true;
     loaderText.value = loaderTexts[0];
-    setTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
-    setTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
-    setTimeout(() => {
+    _safeTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
+    _safeTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
+    _safeTimeout(() => {
       showLoader.value = false;
       if (redirect && redirect !== '/' && redirect !== '/login') router.push(redirect);
       else router.push({ name: 'order' });

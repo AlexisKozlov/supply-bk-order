@@ -6,6 +6,7 @@ export const useUserStore = defineStore('user', () => {
   const currentUser = ref(null);
   const maintenanceMode = ref(false);
   const maintenanceMessage = ref('');
+  const maintenanceEndTime = ref(null);
 
   const isAuthenticated = computed(() => !!currentUser.value);
   const isAdmin = computed(() => currentUser.value?.role === 'admin');
@@ -74,6 +75,7 @@ export const useUserStore = defineStore('user', () => {
     currentUser.value = null;
     maintenanceMode.value = false;
     maintenanceMessage.value = '';
+    maintenanceEndTime.value = null;
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -94,6 +96,7 @@ export const useUserStore = defineStore('user', () => {
       const { data } = await db.rpc('check_maintenance');
       maintenanceMode.value = !!data?.maintenance_mode;
       maintenanceMessage.value = data?.maintenance_message || '';
+      maintenanceEndTime.value = data?.maintenance_end_time || null;
     } catch (e) { /* noop */ }
   }
 
@@ -104,6 +107,7 @@ export const useUserStore = defineStore('user', () => {
     isViewer,
     maintenanceMode,
     maintenanceMessage,
+    maintenanceEndTime,
     restoreSession,
     fetchUserList,
     login,

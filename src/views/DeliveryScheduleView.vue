@@ -256,7 +256,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -288,8 +288,21 @@ const dayNames = [
 
 const colCount = computed(() => 3 + dayNames.length + 1); // №, Адрес, Дн, 6 дней, Комментарий
 
+function onKey(e) {
+  if (e.key === 'Escape') {
+    if (cardEditing.value) { cardEditing.value = null; return; }
+    if (editingRestaurant.value) { editingRestaurant.value = null; return; }
+  }
+}
+
 onMounted(() => {
   store.load(orderStore.settings.legalEntity);
+  document.addEventListener('keydown', onKey);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onKey);
+  clearTimeout(longPressTimer);
 });
 
 watch(() => orderStore.settings.legalEntity, (le) => {

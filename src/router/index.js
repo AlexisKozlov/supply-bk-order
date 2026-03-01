@@ -29,6 +29,12 @@ const routes = [
     ],
   },
   {
+    path: '/search-cards',
+    name: 'search-cards',
+    component: () => import('@/views/CardsSearchView.vue'),
+    meta: { title: 'Поиск карточек' },
+  },
+  {
     path: '/login',
     name: 'login',
     redirect: (to) => ({ name: 'home', query: { showLogin: 'true', redirect: to.query.redirect || '' } }),
@@ -39,10 +45,10 @@ const routes = [
     redirect: { name: 'home' },
   },
   {
-    path: '/search-cards',
-    name: 'search-cards',
-    component: () => import('@/views/CardsSearchView.vue'),
-    meta: { title: 'Поиск карточек' },
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/views/NotFoundView.vue'),
+    meta: { title: 'Страница не найдена' },
   },
 ];
 

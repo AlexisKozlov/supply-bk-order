@@ -179,10 +179,15 @@ function nextMonth() { showMonthPicker.value = false; month.value++; if (month.v
 
 async function load() {
   loading.value = true;
-  const result = await loadCalendarData(year.value, month.value, orderStore.settings.legalEntity);
-  orders.value = result.orders;
-  supplierColors.value = result.supplierColors;
-  loading.value = false;
+  try {
+    const result = await loadCalendarData(year.value, month.value, orderStore.settings.legalEntity);
+    orders.value = result.orders;
+    supplierColors.value = result.supplierColors;
+  } catch (e) {
+    orders.value = [];
+  } finally {
+    loading.value = false;
+  }
 }
 
 watch(() => orderStore.settings.legalEntity, () => load());

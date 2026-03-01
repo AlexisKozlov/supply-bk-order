@@ -13,12 +13,15 @@ export const useHistoryStore = defineStore('history', () => {
   const error   = ref(null);
   const hasMoreOrders = ref(false);
   const hasMorePlans  = ref(false);
+  let _loadRequestId = 0;
 
   const userStore  = useUserStore();
 
   // ─── Загрузить историю ────────────────────────────────────────────────────
-  async function loadOrders({ legalEntity, supplier = '', type = 'orders', reset = true, dateFrom = '', dateTo = '', author = '' } = {}) {
+  async function loadOrders({ legalEntity, supplier = '', type = 'orders', reset = true, dateFrom = '', dateTo = '', author = '', search = '' } = {}) {
     if (type === 'plans') return loadPlans({ legalEntity, supplier, reset, dateFrom, dateTo });
+
+    const myRequestId = reset ? ++_loadRequestId : _loadRequestId;
 
     if (reset) {
       loading.value = true;
@@ -36,7 +39,7 @@ export const useHistoryStore = defineStore('history', () => {
         .from('orders')
         .select(`id, delivery_date, today_date, supplier, legal_entity,
                  safety_days, period_days, unit, note, created_at, created_by,
-                 has_transit, show_stock_column,
+                 has_transit, show_stock_column, received_at,
                  order_items(sku, name, qty_boxes, qty_per_box, consumption_period, stock, transit)`)
         .order('delivery_date', { ascending: false })
         .limit(PAGE_SIZE)
@@ -47,9 +50,11 @@ export const useHistoryStore = defineStore('history', () => {
       if (dateFrom)    query = query.gte('delivery_date', dateFrom);
       if (dateTo)      query = query.lte('delivery_date', dateTo);
       if (author)      query = query.eq('created_by', author);
+      if (search)      query = query.rawParam('search', search);
 
       const { data, error: err } = await query;
 
+      if (myRequestId !== _loadRequestId) return orders.value;
       if (err) { error.value = err; return []; }
 
       const fetched = data || [];
@@ -125,9 +130,10 @@ export const useHistoryStore = defineStore('history', () => {
 
   // ─── Удалить заказ ────────────────────────────────────────────────────────
   async function deleteOrder(orderId) {
-    await db.from('order_items').delete().eq('order_id', orderId);
+    const { error: itemsErr } = await db.from('order_items').delete().eq('order_id', orderId);
+    if (itemsErr) return { error: 'Не удалось удалить позиции заказа: ' + itemsErr };
     const { error: err } = await db.from('orders').delete().eq('id', orderId);
-    if (err) return { error: err.message };
+    if (err) return { error: err };
     await db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} });
     orders.value = orders.value.filter(o => o.id !== orderId);
     return { success: true };

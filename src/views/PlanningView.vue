@@ -77,7 +77,7 @@
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
         <button class="compact-toggle" :class="{ active: compactPlan }" @click="toggleCompactPlan" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
-        <button class="btn small" @click="fillConsumption" :disabled="viewOnly" title="Загрузить расход"><BkIcon name="history" size="sm"/> Загрузить расход</button>
+        <button class="btn small" @click="fillConsumption" :disabled="fillLoading || viewOnly" title="Загрузить расход и остаток из анализа запасов"><BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расх/ост</button>
         <button class="btn small" @click="loadFrom1c" :disabled="load1cLoading || viewOnly" title="Загрузить из 1С"><BkIcon v-if="load1cLoading" name="loading" size="sm"/><BkIcon v-else name="oneC" size="sm"/> 1С</button>
         <button class="btn small" @click="doImport" :disabled="viewOnly" title="Импорт из файла"><BkIcon name="import" size="sm"/> Импорт</button>
         <button class="btn small danger" @click="clearAll" :disabled="viewOnly" title="Очистить данные">Очистить</button>
@@ -221,6 +221,7 @@
       <button class="btn" @click="copyPlanToClipboard" :disabled="!itemsWithPlan.length"><BkIcon name="history" size="sm"/> Копировать</button>
       <button class="btn" @click="exportExcel" :disabled="!itemsWithPlan.length"><BkIcon name="excel" size="sm"/> Excel</button>
     </div>
+    <div v-if="planDraftStatusText && items.length && !viewOnly && !editingPlanId" class="draft-status">{{ planDraftStatusText }}</div>
 
     <!-- Модалки -->
     <EditCardModal v-if="editCardModal.show" :product="editCardModal.product" @close="editCardModal.show = false" @saved="onCardSaved"/>
@@ -294,7 +295,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, onBeforeRouteLeave } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -302,8 +303,8 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
-import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, toLocalDateStr } from '@/lib/utils.js';
-import { importFromFile, applyAnalogMerges } from '@/lib/importStock.js';
+import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
+import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
@@ -331,11 +332,28 @@ const items = ref([]);
 const suppLoading = ref(false);
 const settingsExpanded = ref(false);
 const load1cLoading = ref(false);
+const fillLoading = ref(false);
 const editingPlanId = ref(null);
 const viewOnly = ref(false);
 const logModal = ref({ show: false, loading: false, entries: [] });
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 const editCardModal = ref({ show: false, product: null });
+
+// Статус автосохранения черновика плана
+const planDraftTick = ref(0);
+let planDraftTickTimer = null;
+const planDraftStatusText = computed(() => {
+  planDraftTick.value;
+  const t = draftStore.lastPlanSaved;
+  if (!t) return '';
+  const diff = Math.floor((Date.now() - t.getTime()) / 1000);
+  if (diff < 10) return 'Черновик сохранён';
+  if (diff < 60) return 'Черновик сохранён только что';
+  const mins = Math.floor(diff / 60);
+  if (mins === 1) return 'Черновик сохранён 1 мин. назад';
+  if (mins < 60) return `Черновик сохранён ${mins} мин. назад`;
+  return '';
+});
 const analogMergeModal = ref({ show: false, merges: [] });
 const editingCell = ref(null);
 const showSaveModal = ref(false);
@@ -347,7 +365,6 @@ const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 let _prevPlanItems = null;
 let _loadedCreatedBy = null;
 let _loadedNote = '';
-let _consumptionCache = null;
 
 // ─── Calculator for plan inputs (#3) ──────────────────────────────────────
 let _activeCalcIdx = null;
@@ -509,10 +526,42 @@ function displayStock(item, field) {
   return inputUnit.value === 'boxes' ? Math.ceil(val / getQpb(item)) : val;
 }
 
+// Безопасный вычислитель арифметических выражений (без new Function)
+function _safeCalc(expr) {
+  const tokens = expr.match(/(\d+\.?\d*|[+\-*/()])/g);
+  if (!tokens) return 0;
+  // Рекурсивный парсер: expr → term (+/- term)* → factor (*/÷ factor)* → number | (expr)
+  let pos = 0;
+  function parseExpr() {
+    let result = parseTerm();
+    while (pos < tokens.length && (tokens[pos] === '+' || tokens[pos] === '-')) {
+      const op = tokens[pos++];
+      const right = parseTerm();
+      result = op === '+' ? result + right : result - right;
+    }
+    return result;
+  }
+  function parseTerm() {
+    let result = parseFactor();
+    while (pos < tokens.length && (tokens[pos] === '*' || tokens[pos] === '/')) {
+      const op = tokens[pos++];
+      const right = parseFactor();
+      result = op === '*' ? result * right : (right !== 0 ? result / right : 0);
+    }
+    return result;
+  }
+  function parseFactor() {
+    if (tokens[pos] === '(') { pos++; const r = parseExpr(); if (tokens[pos] === ')') pos++; return r; }
+    const n = parseFloat(tokens[pos++] || '0');
+    return isNaN(n) ? 0 : n;
+  }
+  return parseExpr();
+}
+
 function onInput(idx, type, rawValue) {
   snapshot();
   let value = 0; const raw = rawValue.trim();
-  if (/^[\d\s+\-*/().]+$/.test(raw) && raw) { try { value = new Function('return ' + raw)(); } catch { value = parseFloat(raw) || 0; } if (!isFinite(value)) value = 0; value = Math.round(value * 100) / 100; }
+  if (/^[\d\s+\-*/().]+$/.test(raw) && raw) { try { value = _safeCalc(raw); } catch { value = parseFloat(raw) || 0; } if (!isFinite(value)) value = 0; value = Math.round(value * 100) / 100; }
   const item = items.value[idx]; const qpb = getQpb(item);
   if (type === 'consumption') { item.monthlyConsumption = value; triggerValidation(); }
   else if (type === 'stock') { item.stockOnHand = inputUnit.value === 'boxes' ? value * qpb : value; }
@@ -625,17 +674,18 @@ function onUnitChange(e) {
     item.plan.forEach(p => { p.locked = false; });
   });
   inputUnit.value = newUnit;
-  _consumptionCache = null; // (#7) сбрасываем кэш ПЕРЕД validation
+  _validationCache = null; // сбрасываем кэш ПЕРЕД validation
   recalcAll(); triggerValidation(); _savePlanDraft();
   toast.info('Единицы обновлены', `Пересчитано в ${newUnit === 'boxes' ? 'коробки' : 'штуки'}`);
 }
 
 // ─── Validation (#7 fix — uses inputUnit.value which is already updated) ──
 let _vTimer = null;
+let _validationCache = null;
 function triggerValidation() { clearTimeout(_vTimer); _vTimer = setTimeout(runValidation, 300); }
 async function runValidation() {
   if (!supplier.value || !items.value.length) return;
-  const avgMap = await loadAvgConsumption();
+  const avgMap = await _loadValidationData();
   if (!avgMap.size) return;
   items.value.forEach(item => {
     if (!item.sku || !item.monthlyConsumption) { item._cw = false; item._ct = ''; return; }
@@ -646,41 +696,57 @@ async function runValidation() {
     else { item._cw = false; item._ct = ''; }
   });
 }
-async function loadAvgConsumption() {
-  if (_consumptionCache && _consumptionCache.supplier === supplier.value && _consumptionCache.unit === inputUnit.value && _consumptionCache.periodDays === consumptionPeriodDays.value) return _consumptionCache.data;
-  const { data, error } = await db.from('orders').select('*, order_items(sku, consumption_period, qty_per_box)')
-    .eq('legal_entity', orderStore.settings.legalEntity).eq('supplier', supplier.value).order('created_at', { ascending: false }).limit(2);
-  const avgMap = new Map();
+async function _loadValidationData() {
+  if (_validationCache && _validationCache.le === orderStore.settings.legalEntity && _validationCache.unit === inputUnit.value && _validationCache.periodDays === consumptionPeriodDays.value) return _validationCache.data;
   const targetPeriod = consumptionPeriodDays.value || 30;
-  if (error || !data?.length) { _consumptionCache = { supplier: supplier.value, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap }; return avgMap; }
-  const bySku = {};
-  data.forEach(order => {
-    const oUnit = order.unit || 'pieces'; const pd = order.period_days || 30;
-    (order.order_items || []).forEach(oi => {
-      if (!oi.sku || !oi.consumption_period) return;
-      let mv = (oi.consumption_period / pd) * targetPeriod;
-      const eqpb = items.value.find(i => i.sku === oi.sku)?.qtyPerBox || oi.qty_per_box || 1;
-      if (oUnit === 'pieces' && inputUnit.value === 'boxes') mv /= eqpb;
-      else if (oUnit === 'boxes' && inputUnit.value === 'pieces') mv *= eqpb;
-      if (!bySku[oi.sku]) bySku[oi.sku] = [];
-      bySku[oi.sku].push(mv);
-    });
+  const avgMap = new Map();
+  let query = db.from('analysis_data').select('sku, consumption, period_days')
+    .eq('legal_entity', orderStore.settings.legalEntity);
+  const { data, error } = await query;
+  if (error || !data?.length) { _validationCache = { le: orderStore.settings.legalEntity, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap }; return avgMap; }
+  data.forEach(d => {
+    if (!d.sku || !d.consumption) return;
+    const daily = (d.period_days || 30) > 0 ? d.consumption / (d.period_days || 30) : 0;
+    let val = daily * targetPeriod;
+    if (inputUnit.value === 'boxes') {
+      const item = items.value.find(i => i.sku === d.sku);
+      if (item) val = val / getQpb(item);
+    }
+    avgMap.set(d.sku, val);
   });
-  Object.entries(bySku).forEach(([sku, vals]) => { avgMap.set(sku, vals.reduce((a, b) => a + b, 0) / vals.length); });
-  _consumptionCache = { supplier: supplier.value, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap };
+  _validationCache = { le: orderStore.settings.legalEntity, unit: inputUnit.value, periodDays: targetPeriod, data: avgMap };
   return avgMap;
 }
 
-// ─── Загрузить расход ─────────────────────────────────────────────────────
+// ─── Загрузить расход/остаток из анализа запасов ──────────────────────────
 async function fillConsumption() {
-  if (!items.value.length || !supplier.value) return;
-  snapshot(); _consumptionCache = null;
-  const avgMap = await loadAvgConsumption();
-  if (!avgMap.size) { toast.info('Нет истории', 'Не найдены заказы'); return; }
-  let f = 0;
-  items.value.forEach(item => { if (item.sku) { const avg = avgMap.get(item.sku); if (avg > 0) { item.monthlyConsumption = Math.round(avg); f++; } } });
-  recalcAll(); triggerValidation(); _savePlanDraft();
-  toast.success('Расход подставлен', `${f} из ${items.value.length} позиций`);
+  if (!items.value.length) return;
+  snapshot();
+  fillLoading.value = true;
+  try {
+    const result = await loadFromAnalysis('planning', items.value, orderStore.settings.legalEntity, inputUnit.value, consumptionPeriodDays.value || 30);
+
+    if (result.matched === 0) {
+      toast.info('Нет данных', 'Нет данных анализа для этих товаров');
+      return;
+    }
+
+    _validationCache = null;
+    recalcAll(); triggerValidation(); _savePlanDraft();
+
+    const dateStr = result.updatedAt
+      ? result.updatedAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : '—';
+    const byStr = result.updatedBy ? ` (${result.updatedBy})` : '';
+    toast.success('Загружено', `${result.matched} из ${result.total}. Данные от ${dateStr}${byStr}`);
+
+    if (result.analogMerges?.length) {
+      analogMergeModal.value = { show: true, merges: result.analogMerges };
+    }
+  } catch (err) {
+    console.error('[fillConsumption]', err);
+    toast.error('Ошибка', 'Не удалось загрузить данные анализа');
+  } finally { fillLoading.value = false; }
 }
 
 // ─── 1С (#1) ──────────────────────────────────────────────────────────────
@@ -876,7 +942,7 @@ async function restoreItemOrder() {
 function onParamsChange() { supplierStore.loadSuppliers(orderStore.settings.legalEntity); recalcAll(); _savePlanDraft(); }
 function onPeriodChange() { items.value.forEach(i => { i.plan = []; }); recalcAll(); }
 function onConsumptionPeriodChange() {
-  _consumptionCache = null;
+  _validationCache = null;
   items.value.forEach(i => { i.plan = []; });
   recalcAll(); triggerValidation(); _savePlanDraft();
 }
@@ -905,11 +971,14 @@ async function confirmSave() {
     })),
   };
   let error;
+  let newPlanId = null;
   if (editingPlanId.value) {
     ({ error } = await db.from('plans').update(planData).eq('id', editingPlanId.value));
   } else {
     planData.created_by = userStore.currentUser?.name || null;
-    ({ error } = await db.from('plans').insert([planData]));
+    const res = await db.from('plans').insert([planData]);
+    error = res.error;
+    if (res.data && res.data.id) newPlanId = res.data.id;
   }
   if (error) { toast.error('Ошибка', ''); saving.value = false; return; }
   try {
@@ -927,7 +996,7 @@ async function confirmSave() {
       });
       if (ch.length) ld.changes = ch;
     }
-    await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || null, user_name: userStore.currentUser?.name || null, details: ld });
+    await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || newPlanId || null, user_name: userStore.currentUser?.name || null, details: ld });
   } catch (e) { console.warn('[planning] audit log:', e); }
   // Уведомление только при редактировании чужого плана
   if (editingPlanId.value && _loadedCreatedBy && _loadedCreatedBy !== userStore.currentUser?.name) {
@@ -1033,6 +1102,7 @@ let _collapseHintTimer = null;
 watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
 
 onMounted(async () => {
+  planDraftTickTimer = setInterval(() => { planDraftTick.value++; }, 30000);
   if (!supplier.value) settingsExpanded.value = true;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (route.query.planId) {
@@ -1048,9 +1118,28 @@ onMounted(async () => {
   }
 });
 
+function hasPlanUnsavedData() {
+  return items.value.length > 0 && !viewOnly.value;
+}
+
+function onPlanBeforeUnload(e) {
+  if (hasPlanUnsavedData()) { e.preventDefault(); }
+}
+
+onMounted(() => { window.addEventListener('beforeunload', onPlanBeforeUnload); });
+
 onBeforeUnmount(() => {
   clearTimeout(_vTimer);
   clearTimeout(_collapseHintTimer);
+  if (planDraftTickTimer) clearInterval(planDraftTickTimer);
+  window.removeEventListener('beforeunload', onPlanBeforeUnload);
+});
+
+onBeforeRouteLeave(() => {
+  if (hasPlanUnsavedData()) {
+    draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
+    if (!window.confirm('Есть несохранённые данные. Уйти?')) return false;
+  }
 });
 
 // Реактивная навигация: если query изменился когда компонент уже смонтирован
@@ -1062,6 +1151,10 @@ watch(() => route.query.planId, async (newId) => {
 </script>
 
 <style scoped>
+.draft-status {
+  font-size: 11px; color: var(--text-muted); text-align: right;
+  padding: 4px 8px 0; font-weight: 500;
+}
 /* Log modal */
 .log-entries { display: flex; flex-direction: column; }
 .log-entry { padding: 10px 0; border-bottom: 1px solid var(--border-light); }

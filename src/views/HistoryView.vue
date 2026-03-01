@@ -29,6 +29,17 @@
           <span style="font-size:11px;color:var(--text-muted);">—</span>
           <input type="date" v-model="filterDateTo" @change="load" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;" title="Дата до"/>
         </div>
+        <div v-if="filterType === 'orders'" class="ht-filter">
+          <input type="text" v-model="searchQuery" @input="onSearchInput" placeholder="Поиск по товарам..." style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;min-width:160px;"/>
+        </div>
+        <div v-if="filterType === 'orders'" class="ht-filter" style="display:flex;gap:6px;align-items:center;">
+          <button class="btn small" :class="{ active: compareMode }" @click="toggleCompare" style="font-size:11px;">
+            <BkIcon name="ruler" size="xs"/> {{ compareMode ? 'Отмена' : 'Сравнить' }}
+          </button>
+          <button v-if="compareMode && compareSelection.length === 2" class="btn small primary" @click="openCompare" style="font-size:11px;">
+            Сравнить 2 заказа
+          </button>
+        </div>
       </div>
     </div>
 
@@ -48,6 +59,7 @@
       <table class="ht-table">
         <thead>
           <tr>
+            <th v-if="compareMode" class="ht-th" style="width:36px;"></th>
             <th class="ht-th ht-th-sort" @click="toggleSort('delivery_date')">
               Дата поставки <span class="ht-sort-icon">{{ sortIcon('delivery_date') }}</span>
             </th>
@@ -61,7 +73,10 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="order in sortedOrders" :key="order.id" class="ht-row" :class="{ 'ht-row-selected': drawerOrder?.id === order.id }" @click="openOrderDrawer(order)">
+          <tr v-for="order in sortedOrders" :key="order.id" class="ht-row" :class="{ 'ht-row-selected': drawerOrder?.id === order.id || compareSelection.includes(order.id) }" @click="compareMode ? toggleCompareSelect(order) : openOrderDrawer(order)">
+              <td v-if="compareMode" class="ht-td ht-td-center" style="width:36px;" @click.stop>
+                <input type="checkbox" :checked="compareSelection.includes(order.id)" @change="toggleCompareSelect(order)" :disabled="compareSelection.length >= 2 && !compareSelection.includes(order.id)"/>
+              </td>
               <td class="ht-td ht-td-date">
                 <span class="ht-date-day">{{ dayOfWeek(order.delivery_date) }}</span>
                 <span class="ht-date-main">{{ formatDateShort(order.delivery_date) }}</span>
@@ -256,6 +271,13 @@
         </div>
       </Transition>
     </Teleport>
+
+    <CompareOrdersModal
+      v-if="showCompareModal && compareOrderA && compareOrderB"
+      :order-a="compareOrderA"
+      :order-b="compareOrderB"
+      @close="showCompareModal = false"
+    />
   </div>
 </template>
 
@@ -274,6 +296,7 @@ import { copyToClipboard, getQpb, getMultiplicity } from '@/lib/utils.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import CompareOrdersModal from '@/components/modals/CompareOrdersModal.vue';
 
 const historyStore  = useHistoryStore();
 const orderStore    = useOrderStore();
@@ -297,6 +320,29 @@ const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: 
 const sortKey = ref('delivery_date');
 const sortAsc = ref(false);
 const nf = new Intl.NumberFormat('ru-RU');
+const searchQuery = ref('');
+const compareMode = ref(false);
+const compareSelection = ref([]);
+const showCompareModal = ref(false);
+
+function toggleCompare() {
+  compareMode.value = !compareMode.value;
+  compareSelection.value = [];
+}
+function toggleCompareSelect(order) {
+  const idx = compareSelection.value.indexOf(order.id);
+  if (idx >= 0) compareSelection.value.splice(idx, 1);
+  else if (compareSelection.value.length < 2) compareSelection.value.push(order.id);
+}
+function openCompare() { showCompareModal.value = true; }
+const compareOrderA = computed(() => historyStore.orders.find(o => o.id === compareSelection.value[0]));
+const compareOrderB = computed(() => historyStore.orders.find(o => o.id === compareSelection.value[1]));
+
+let searchTimer = null;
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => load(), 500);
+}
 
 const suppliers = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
 const rows = computed(() => {
@@ -399,7 +445,7 @@ function onKey(e) {
     if (drawerPlan.value) { drawerPlan.value = null; }
   }
 }
-onUnmounted(() => document.removeEventListener('keydown', onKey));
+onUnmounted(() => { document.removeEventListener('keydown', onKey); clearTimeout(searchTimer); });
 
 // --- Data ---
 onMounted(async () => {
@@ -412,10 +458,10 @@ watch(() => orderStore.settings.legalEntity, async () => {
   await load();
 });
 async function load() {
-  await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value });
+  await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value, search: filterType.value === 'orders' ? searchQuery.value : '' });
 }
 async function loadMore() {
-  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value });
+  await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value, search: searchQuery.value });
 }
 async function loadMorePlansBtn() {
   await historyStore.loadMorePlans({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value });
@@ -447,6 +493,12 @@ async function viewOrder(order) {
   router.push({ name: 'order', query: { orderId: order.id, mode: 'view' } });
 }
 async function editOrder(order) {
+  // Проверяем блокировку
+  const { data: lock } = await db.rpc('check_order_lock', { order_id: order.id, user_name: userStore.currentUser?.name || '' });
+  if (lock?.locked) {
+    toast.warning('Заказ заблокирован', `Сейчас редактирует: ${lock.locked_by}`);
+    return;
+  }
   const ok = await confirmAction('Редактировать заказ?', 'При сохранении — обновится поверх старого.');
   if (!ok) return;
   router.push({ name: 'order', query: { orderId: order.id, mode: 'edit' } });
@@ -499,12 +551,15 @@ async function deletePlan(plan) {
   if (!ok) return;
   const { error } = await db.from('plans').delete().eq('id', plan.id);
   if (error) { toast.error('Ошибка', ''); return; }
-  // Clean orphan audit entries
-  try { await db.from('audit_log').delete().eq('entity_type', 'plan').eq('entity_id', plan.id); } catch (e) { console.warn('[history] audit cleanup:', e); }
+  // Запись об удалении в аудит
+  try { await db.from('audit_log').insert({ action: 'plan_deleted', entity_type: 'plan', entity_id: plan.id, user_name: userStore.currentUser?.name || null, details: { supplier: plan.supplier } }); } catch (e) { console.warn('[history] audit log:', e); }
   toast.success('Удалён', ''); await load();
 }
 function planItemsFiltered(plan) {
-  const items = typeof plan.items === 'string' ? JSON.parse(plan.items) : (plan.items || []);
+  let items;
+  try {
+    items = typeof plan.items === 'string' ? JSON.parse(plan.items) : (plan.items || []);
+  } catch { items = []; }
   return items.filter(i => (i.plan || []).some(p => p.order_boxes > 0));
 }
 function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s + (p.order_boxes || 0), 0); }

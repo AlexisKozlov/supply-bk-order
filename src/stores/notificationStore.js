@@ -13,7 +13,9 @@ export const useNotificationStore = defineStore('notification', () => {
   let broadcastTimer = null;
 
   const activeBroadcasts = ref([]);
-  const _savedDismissed = JSON.parse(localStorage.getItem('bk_broadcast_dismissed') || '[]');
+  let _savedDismissed = [];
+  try { _savedDismissed = JSON.parse(localStorage.getItem('bk_broadcast_dismissed') || '[]'); } catch { _savedDismissed = []; }
+  if (!Array.isArray(_savedDismissed)) _savedDismissed = [];
   const broadcastDismissed = ref(new Set(_savedDismissed));
 
   const sessionStartTime = ref(null);
@@ -24,7 +26,9 @@ export const useNotificationStore = defineStore('notification', () => {
   function _parseJsonArray(n, field) {
     const raw = n[field];
     if (Array.isArray(raw)) return raw;
-    const parsed = typeof raw === 'string' ? JSON.parse(raw || '[]') : [];
+    let parsed = [];
+    if (typeof raw === 'string') { try { parsed = JSON.parse(raw || '[]'); } catch { parsed = []; } }
+    if (!Array.isArray(parsed)) parsed = [];
     n[field] = parsed; // кэшируем распарсенный массив
     return parsed;
   }

@@ -191,6 +191,10 @@ export const useOrderStore = defineStore('order', () => {
     _history.clear(); _historyVersion.value++;
   }
 
+  function clearHistory() {
+    _history.clear(); _historyVersion.value++;
+  }
+
   function undo() {
     clearTimeout(_snapshotTimer);
     const state = _history.undo();
@@ -210,12 +214,16 @@ export const useOrderStore = defineStore('order', () => {
   async function saveItemOrder() {
     const supplier = settings.supplier || 'all';
     const legalEntity = settings.legalEntity;
-    await db.from('item_order').delete().eq('supplier', supplier).eq('legal_entity', legalEntity);
+    const { error: delErr } = await db.from('item_order').delete().eq('supplier', supplier).eq('legal_entity', legalEntity);
+    if (delErr) { console.error('saveItemOrder delete error:', delErr); return; }
     const orderData = items.value.map((item, index) => ({
       supplier, legal_entity: legalEntity,
       item_id: item.productId || item.id, position: index,
     }));
-    if (orderData.length > 0) await db.from('item_order').insert(orderData);
+    if (orderData.length > 0) {
+      const { error: insErr } = await db.from('item_order').insert(orderData);
+      if (insErr) console.error('saveItemOrder insert error:', insErr);
+    }
   }
 
   async function restoreItemOrder() {
@@ -304,7 +312,7 @@ export const useOrderStore = defineStore('order', () => {
     settings, items, editingOrderId, viewOnlyMode, dataVersion,
     canUndo, canRedo, pageTitle, finalSummary,
     addItem, removeItem, updateItemField, applyAllCalculated,
-    moveItem, clearItems, clearAllData, resetOrder, undo, redo,
+    moveItem, clearItems, clearAllData, resetOrder, clearHistory, undo, redo,
     saveItemOrder, restoreItemOrder, loadOrderIntoForm, auditLog,
     bumpDataVersion,
   };
