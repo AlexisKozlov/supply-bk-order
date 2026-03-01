@@ -290,6 +290,7 @@ const importLoading = ref(false);
 const load1cLoading = ref(false);
 const savingData = ref(false);
 const items = ref([]);
+let _loadRequestId = 0;
 const expandedGroups = reactive(new Set());
 const lastUpdate = reactive({ by: '', at: null, label: '' });
 
@@ -328,6 +329,7 @@ function formatTimeAgo(date) {
 }
 
 async function loadProducts() {
+  const myRequestId = ++_loadRequestId;
   loading.value = true;
   items.value = [];
   expandedGroups.clear();
@@ -339,6 +341,7 @@ async function loadProducts() {
       .select('id, sku, name, analog_group, supplier, qty_per_box, category');
     q = applyEntityFilter(q, orderStore.settings.legalEntity);
     const { data, error } = await q;
+    if (myRequestId !== _loadRequestId) return;
     if (error) { toast.error('Ошибка', 'Не удалось загрузить товары'); return; }
     items.value = (data || []).map(p => ({
       id: p.id,
@@ -351,15 +354,16 @@ async function loadProducts() {
       stock: 0,
       consumption: 0,
     }));
-    await loadSavedData();
+    await loadSavedData(myRequestId);
   } catch {
+    if (myRequestId !== _loadRequestId) return;
     toast.error('Ошибка', 'Не удалось загрузить товары');
   } finally {
-    loading.value = false;
+    if (myRequestId === _loadRequestId) loading.value = false;
   }
 }
 
-async function loadSavedData() {
+async function loadSavedData(requestId) {
   const skus = items.value.map(i => i.sku).filter(Boolean);
   if (!skus.length) return;
   try {
@@ -368,6 +372,7 @@ async function loadSavedData() {
       .select('sku, stock, consumption, period_days, updated_by, updated_at')
       .eq('legal_entity', orderStore.settings.legalEntity)
       .in('sku', skus);
+    if (requestId !== undefined && requestId !== _loadRequestId) return;
     if (!data?.length) return;
 
     const map = new Map(data.map(d => [d.sku, d]));

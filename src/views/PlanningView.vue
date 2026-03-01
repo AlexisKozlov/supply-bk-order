@@ -1266,7 +1266,13 @@ function resetPlan() {
 async function loadPlanFromHistory(planId) {
   const { data: plan, error } = await db.from('plans').select('*').eq('id', planId).single();
   if (error || !plan) { toast.error('Ошибка', ''); return; }
-  orderStore.settings.legalEntity = plan.legal_entity || 'ООО "Бургер БК"';
+  const planEntity = plan.legal_entity || 'ООО "Бургер БК"';
+  const allowed = userStore.getAllowedEntities();
+  if (allowed && !allowed.includes(planEntity)) {
+    toast.error('Нет доступа', 'У вас нет доступа к юрлицу этого плана');
+    return;
+  }
+  orderStore.settings.legalEntity = planEntity;
   supplier.value = plan.supplier || '';
   periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());

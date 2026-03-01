@@ -276,6 +276,10 @@ export const useOrderStore = defineStore('order', () => {
       if (!added) continue;
 
       const addedItem = added;
+      // Восстанавливаем кратность и штук-в-коробке из сохранённого заказа,
+      // чтобы пересчёт был корректным даже если карточку товара с тех пор изменили
+      if (histItem.multiplicity) addedItem.multiplicity = histItem.multiplicity;
+      if (histItem.qty_per_box) addedItem.qtyPerBox = histItem.qty_per_box;
       addedItem.consumptionPeriod = Math.round(parseFloat(String(histItem.consumption_period || '0').replace(',', '.')) || 0);
       addedItem.stock = Math.round(parseFloat(String(histItem.stock || '0').replace(',', '.')) || 0);
       addedItem.transit = Math.round(parseFloat(String(histItem.transit || '0').replace(',', '.')) || 0);
