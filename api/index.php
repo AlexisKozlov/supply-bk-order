@@ -305,6 +305,7 @@ if ($endpoint === 'rpc') {
 
     if ($fn === 'check_user_password') {
         $email = $body['user_email'] ?? ''; $pass = $body['user_password'] ?? '';
+        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success'=>false,'error'=>'invalid_email'], 400);
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,created_at FROM users WHERE email=?");
         $s->execute([$email]); $u = $s->fetch();
@@ -314,6 +315,7 @@ if ($endpoint === 'rpc') {
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
         $displayRole = $u['display_role'] ?? null;
         $sessionToken = createSessionToken($pdo, $u['name']);
+        try { $pdo->prepare("INSERT INTO login_log (email, user_name, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([$email, $u['name'], $clientIp]); } catch (PDOException $e) {}
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
         foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
@@ -434,11 +436,12 @@ if ($endpoint === 'rpc') {
         $oldPwd = $body['old_password'] ?? '';
         $newPwd = $body['new_password'] ?? '';
         if (!$name || !$oldPwd || !$newPwd) respond(['success'=>false,'error'=>'missing params'], 400);
-        if (mb_strlen($newPwd) < 4) respond(['success'=>false,'error'=>'password_too_short'], 400);
+        if (mb_strlen($newPwd) < 8) respond(['success'=>false,'error'=>'password_too_short'], 400);
         $s = $pdo->prepare("SELECT password FROM users WHERE name=?"); $s->execute([$name]); $u = $s->fetch();
         if (!$u) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'user_not_found']); }
         if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'wrong_password']); }
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([password_hash($newPwd, PASSWORD_BCRYPT), $name]);
+        $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$name]);
         respond(['success'=>true]);
     }
     // ─── Управление пользователями (только admin) ───
@@ -453,7 +456,8 @@ if ($endpoint === 'rpc') {
         $displayRole = $body['display_role'] ?? null;
         $legalEntities = $body['legal_entities'] ?? '[]';
         if (!$name) respond(['success' => false, 'error' => 'name required'], 400);
-        if (!$password || mb_strlen($password) < 4) respond(['success' => false, 'error' => 'password required (min 4 chars)'], 400);
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success' => false, 'error' => 'invalid_email'], 400);
+        if (!$password || mb_strlen($password) < 8) respond(['success' => false, 'error' => 'password required (min 8 chars)'], 400);
         if (!in_array($role, ['admin', 'user', 'viewer'])) $role = 'user';
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $id = uuid();
@@ -473,17 +477,27 @@ if ($endpoint === 'rpc') {
         if (!$userId) respond(['success' => false, 'error' => 'user_id required'], 400);
         $sets = []; $params = [];
         if (isset($body['name']) && trim($body['name'])) { $sets[] = "name=?"; $params[] = trim($body['name']); }
-        if (array_key_exists('email', $body)) { $sets[] = "email=?"; $params[] = trim($body['email']) ?: null; }
+        if (array_key_exists('email', $body)) {
+            $emailVal = trim($body['email']);
+            if ($emailVal && !filter_var($emailVal, FILTER_VALIDATE_EMAIL)) respond(['success' => false, 'error' => 'invalid_email'], 400);
+            $sets[] = "email=?"; $params[] = $emailVal ?: null;
+        }
         if (isset($body['role']) && in_array($body['role'], ['admin', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
         if (array_key_exists('display_role', $body)) { $sets[] = "display_role=?"; $params[] = $body['display_role']; }
         if (array_key_exists('legal_entities', $body)) { $sets[] = "legal_entities=?"; $params[] = is_array($body['legal_entities']) ? json_encode($body['legal_entities'], JSON_UNESCAPED_UNICODE) : $body['legal_entities']; }
+        $passwordChanged = false;
         if (isset($body['password']) && $body['password'] !== '') {
-            if (mb_strlen($body['password']) < 4) respond(['success' => false, 'error' => 'password_too_short'], 400);
+            if (mb_strlen($body['password']) < 8) respond(['success' => false, 'error' => 'password_too_short'], 400);
             $sets[] = "password=?"; $params[] = password_hash($body['password'], PASSWORD_BCRYPT);
+            $passwordChanged = true;
         }
         if (empty($sets)) respond(['success' => false, 'error' => 'nothing to update'], 400);
         $params[] = $userId;
         $pdo->prepare("UPDATE users SET " . implode(',', $sets) . " WHERE id=?")->execute($params);
+        if ($passwordChanged) {
+            $s = $pdo->prepare("SELECT name FROM users WHERE id=?"); $s->execute([$userId]); $target = $s->fetch();
+            if ($target) $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
+        }
         respond(['success' => true]);
     }
     if ($fn === 'delete_user') {

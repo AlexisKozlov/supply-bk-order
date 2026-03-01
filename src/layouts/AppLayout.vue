@@ -281,7 +281,6 @@ const route = useRoute();
 const userStore = useUserStore();
 const orderStore = useOrderStore();
 const notificationStore = useNotificationStore();
-
 const showNotifications = ref(false);
 const isOffline = ref(!navigator.onLine);
 function handleOnline() { isOffline.value = false; }
@@ -561,7 +560,7 @@ async function changePassword() {
   pwdSuccess.value = '';
   if (!pwdOld.value || !pwdNew.value) { pwdError.value = 'Заполните все поля'; return; }
   if (pwdNew.value !== pwdConfirm.value) { pwdError.value = 'Пароли не совпадают'; return; }
-  if (pwdNew.value.length < 3) { pwdError.value = 'Пароль слишком короткий'; return; }
+  if (pwdNew.value.length < 8) { pwdError.value = 'Минимум 8 символов'; return; }
 
   pwdLoading.value = true;
   try {
