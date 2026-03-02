@@ -6,7 +6,7 @@
     <!-- Header -->
     <header class="p-header">
       <div class="p-header-left">
-        <div class="p-logo"><svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="#F5A623"/><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="url(#ht)"/><ellipse cx="20" cy="18" rx="2" ry="1.8" fill="#F9E4B7" opacity=".8"/><ellipse cx="30" cy="14" rx="1.8" ry="1.5" fill="#F9E4B7" opacity=".7"/><ellipse cx="40" cy="17" rx="2.2" ry="1.7" fill="#F9E4B7" opacity=".75"/><ellipse cx="26" cy="22" rx="1.5" ry="1.3" fill="#F9E4B7" opacity=".6"/><ellipse cx="36" cy="22" rx="1.6" ry="1.4" fill="#F9E4B7" opacity=".65"/><rect x="6" y="30" width="52" height="6" rx="3" fill="#4CAF50"/><path d="M6 33q3-3 6.5 0t6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0" stroke="#388E3C" stroke-width="1.5" fill="none"/><path d="M7 36h50l2 5H5l2-5z" fill="#FDBD10"/><path d="M7 41h50v1q-3 4-6 4H13q-3 0-6-4v-1z" fill="#FDBD10" opacity=".3"/><rect x="6" y="42" width="52" height="9" rx="2" fill="#6D3A1F"/><rect x="6" y="42" width="52" height="9" rx="2" fill="url(#hpt)"/><rect x="7" y="51" width="50" height="7" rx="4" fill="#D4881A"/><rect x="7" y="51" width="50" height="7" rx="4" fill="url(#hbb)"/><defs><linearGradient id="ht" x1="32" y1="10" x2="32" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#F5C547" offset="0"/><stop stop-color="#D4881A" offset="1"/></linearGradient><linearGradient id="hpt" x1="32" y1="42" x2="32" y2="51" gradientUnits="userSpaceOnUse"><stop stop-color="#8B4513"/><stop stop-color="#4A2510" offset="1"/></linearGradient><linearGradient id="hbb" x1="32" y1="51" x2="32" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#E8A430"/><stop stop-color="#C47A15" offset="1"/></linearGradient></defs></svg></div>
+        <div class="p-logo"><SupplyLogo :size="36"/></div>
         <div class="p-brand">
           <h1>Supply Department</h1>
           <small>Портал закупок</small>
@@ -88,7 +88,7 @@
         <div class="login-card">
           <div class="login-left">
             <div class="login-brand">
-              <span class="login-brand-icon"><svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" width="40" height="40"><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="#F5A623"/><path d="M8 30c0-12 10-20 24-20s24 8 24 20H8z" fill="url(#lt)"/><ellipse cx="20" cy="18" rx="2" ry="1.8" fill="#F9E4B7" opacity=".8"/><ellipse cx="30" cy="14" rx="1.8" ry="1.5" fill="#F9E4B7" opacity=".7"/><ellipse cx="40" cy="17" rx="2.2" ry="1.7" fill="#F9E4B7" opacity=".75"/><ellipse cx="26" cy="22" rx="1.5" ry="1.3" fill="#F9E4B7" opacity=".6"/><ellipse cx="36" cy="22" rx="1.6" ry="1.4" fill="#F9E4B7" opacity=".65"/><rect x="6" y="30" width="52" height="6" rx="3" fill="#4CAF50"/><path d="M6 33q3-3 6.5 0t6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0 6.5 0" stroke="#388E3C" stroke-width="1.5" fill="none"/><path d="M7 36h50l2 5H5l2-5z" fill="#FDBD10"/><path d="M7 41h50v1q-3 4-6 4H13q-3 0-6-4v-1z" fill="#FDBD10" opacity=".3"/><rect x="6" y="42" width="52" height="9" rx="2" fill="#6D3A1F"/><rect x="6" y="42" width="52" height="9" rx="2" fill="url(#lpt)"/><rect x="7" y="51" width="50" height="7" rx="4" fill="#D4881A"/><rect x="7" y="51" width="50" height="7" rx="4" fill="url(#lbb)"/><defs><linearGradient id="lt" x1="32" y1="10" x2="32" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#F5C547" offset="0"/><stop stop-color="#D4881A" offset="1"/></linearGradient><linearGradient id="lpt" x1="32" y1="42" x2="32" y2="51" gradientUnits="userSpaceOnUse"><stop stop-color="#8B4513"/><stop stop-color="#4A2510" offset="1"/></linearGradient><linearGradient id="lbb" x1="32" y1="51" x2="32" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#E8A430"/><stop stop-color="#C47A15" offset="1"/></linearGradient></defs></svg></span>
+              <span class="login-brand-icon"><SupplyLogo :size="40"/></span>
               <div class="login-brand-title">Supply Department</div>
               <div class="login-brand-sub">Портал закупок</div>
             </div>
@@ -116,18 +116,21 @@
       </div>
     </Teleport>
 
-    <!-- Burger Loader -->
+    <!-- Supply Loader -->
     <Teleport to="body">
-      <Transition name="burger-loader">
-        <div v-if="showLoader" class="burger-loader-overlay">
-          <div class="burger-loader">
-            <div class="burger-layer bun-top"></div>
-            <div class="burger-layer lettuce"></div>
-            <div class="burger-layer cheese"></div>
-            <div class="burger-layer patty"></div>
-            <div class="burger-layer bun-bottom"></div>
+      <Transition name="supply-loader">
+        <div v-if="showLoader" class="supply-loader-overlay">
+          <div class="supply-loader-icon">
+            <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none" width="80" height="80">
+              <circle cx="16" cy="16" r="10" fill="#D62300" class="ldr-c ldr-c1"/>
+              <circle cx="32" cy="16" r="10" fill="#F5A623" class="ldr-c ldr-c2"/>
+              <circle cx="16" cy="32" r="10" fill="#FF8733" class="ldr-c ldr-c3"/>
+              <circle cx="32" cy="32" r="10" fill="#FFD54F" class="ldr-c ldr-c4"/>
+              <circle cx="24" cy="24" r="8.5" fill="#502314"/>
+              <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
+            </svg>
           </div>
-          <div class="burger-loader-text">{{ loaderText }}</div>
+          <div class="supply-loader-text">{{ loaderText }}</div>
         </div>
       </Transition>
     </Teleport>
@@ -156,6 +159,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 
 
 const router = useRouter();
@@ -213,7 +217,7 @@ async function checkMaintenanceForHome() {
 
 const svgIcons = {
   order: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="6" width="24" height="22" rx="3" stroke="#502314" stroke-width="2"/><path d="M4 12h24" stroke="#502314" stroke-width="2"/><path d="M12 2v6M20 2v6" stroke="#502314" stroke-width="2" stroke-linecap="round"/><rect x="9" y="16" width="6" height="4" rx="1" fill="#D62700" opacity=".8"/><rect x="17" y="16" width="6" height="4" rx="1" fill="#FF8733" opacity=".6"/><rect x="9" y="22" width="6" height="3" rx="1" fill="#FF8733" opacity=".4"/></svg>`,
-  planning: `<svg viewBox="0 0 32 32" fill="none"><rect x="3" y="8" width="5" height="18" rx="2" fill="#D4C4B0"/><rect x="10" y="12" width="5" height="14" rx="2" fill="#FF8733"/><rect x="17" y="5" width="5" height="21" rx="2" fill="#D62700"/><rect x="24" y="10" width="5" height="16" rx="2" fill="#502314" opacity=".7"/><path d="M2 28h28" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".3"/></svg>`,
+  planning: `<svg viewBox="0 0 32 32" fill="none"><line x1="4" y1="6" x2="4" y2="26" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".3"/><rect x="6" y="7" width="14" height="4" rx="2" fill="#D62700"/><rect x="6" y="13" width="20" height="4" rx="2" fill="#FF8733"/><rect x="6" y="19" width="11" height="4" rx="2" fill="#D62700" opacity=".6"/><rect x="6" y="25" width="17" height="4" rx="2" fill="#D4C4B0"/><circle cx="20" cy="9" r="1.2" fill="#fff" opacity=".5"/><circle cx="26" cy="15" r="1.2" fill="#fff" opacity=".5"/></svg>`,
   calendar: `<svg viewBox="0 0 32 32" fill="none"><rect x="3" y="6" width="26" height="22" rx="3" stroke="#502314" stroke-width="2"/><path d="M3 13h26" stroke="#502314" stroke-width="1.5"/><path d="M10 3v5M22 3v5" stroke="#502314" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="19" r="2" fill="#D62700"/><circle cx="16" cy="19" r="2" fill="#FF8733" opacity=".6"/><circle cx="22" cy="19" r="2" fill="#D4C4B0"/><circle cx="10" cy="24" r="1.5" fill="#D4C4B0"/><circle cx="16" cy="24" r="1.5" fill="#D62700" opacity=".5"/></svg>`,
   analytics: `<svg viewBox="0 0 32 32" fill="none"><path d="M4 26L10 18L16 21L22 11L28 6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 26L10 18L16 21L22 11L28 6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" opacity=".15" transform="translate(0,2)"/><circle cx="10" cy="18" r="2.5" fill="#fff" stroke="#D62700" stroke-width="1.5"/><circle cx="22" cy="11" r="2.5" fill="#fff" stroke="#FF8733" stroke-width="1.5"/><circle cx="28" cy="6" r="2.5" fill="#fff" stroke="#D62700" stroke-width="1.5"/></svg>`,
   history: `<svg viewBox="0 0 32 32" fill="none"><rect x="5" y="3" width="22" height="26" rx="3" stroke="#502314" stroke-width="2"/><line x1="10" y1="10" x2="22" y2="10" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".4"/><line x1="10" y1="15" x2="22" y2="15" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".3"/><line x1="10" y1="20" x2="18" y2="20" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".2"/><rect x="8" y="8" width="3" height="3" rx=".5" fill="#D62700" opacity=".7"/><rect x="8" y="13" width="3" height="3" rx=".5" fill="#FF8733" opacity=".5"/><rect x="8" y="18" width="3" height="3" rx=".5" fill="#D4C4B0" opacity=".5"/></svg>`,
@@ -373,9 +377,9 @@ function openLogin() {
 }
 
 const showLoader = ref(false);
-const loaderText = ref('Готовим...');
+const loaderText = ref('Загрузка...');
 
-const loaderTexts = ['Готовим...', 'Собираем бургер...', 'Почти готово!'];
+const loaderTexts = ['Загрузка...', 'Подготовка данных...', 'Почти готово!'];
 
 function _safeTimeout(fn, delay) {
   const id = setTimeout(fn, delay);
@@ -399,7 +403,12 @@ function stubModule(name) { toast.info('В разработке', `${name} — �
 
 function goPublic(key) {
   const routes = { search: '/search-cards' };
-  router.push(routes[key] || '/' + key);
+  const target = routes[key] || '/' + key;
+  showLoader.value = true;
+  loaderText.value = loaderTexts[0];
+  _safeTimeout(() => { loaderText.value = loaderTexts[1]; }, 500);
+  _safeTimeout(() => { loaderText.value = loaderTexts[2]; }, 1000);
+  _safeTimeout(() => { showLoader.value = false; router.push(target); }, 1400);
 }
 
 async function doLogin() {
@@ -452,7 +461,7 @@ function confirmLogout() {
 }
 @keyframes mntBannerIn { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }
 .p-header-left { display: flex; align-items: center; gap: 14px; }
-.p-logo { width: 46px; height: 46px; border-radius: 50%; background: linear-gradient(135deg, #D62700, #FF8733); display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 16px rgba(214,39,0,.2); }
+.p-logo { display: flex; align-items: center; justify-content: center; }
 .p-brand h1 { font-size: 17px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }
 .p-brand small { display: block; font-size: 9px; font-weight: 700; color: rgba(245,166,35,.7); text-transform: uppercase; letter-spacing: 2px; margin-top: 1px; }
 .p-header-right { display: flex; align-items: center; gap: 14px; position: relative; }
@@ -476,7 +485,8 @@ function confirmLogout() {
 
 /* Dock — slot/item pattern for stable hover */
 .p-dock { display: flex; gap: 0; padding: 16px 28px; background: rgba(255,255,255,.035); border-radius: 22px; border: 1px solid rgba(255,255,255,.05); align-items: flex-end; flex-shrink: 0; }
-.p-dock-slot { width: 72px; display: flex; justify-content: center; flex-shrink: 0; }
+.p-dock-slot { width: 72px; display: flex; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; }
+.p-dock-slot:hover { z-index: 10; }
 .p-dock-item { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; transition: transform .25s cubic-bezier(.2,1,.3,1); position: relative; transform-origin: bottom center; will-change: transform; }
 .p-dock-item.p-dock-hovered { transform: scale(1.28) translateY(-10px); }
 .p-dock-item.p-dock-neighbor { transform: scale(1.1) translateY(-4px); }
@@ -488,7 +498,7 @@ function confirmLogout() {
 .p-dock-item.p-dock-hovered .p-dock-icon { box-shadow: 0 10px 28px rgba(0,0,0,.25); }
 .p-dock-icon :deep(svg) { width: 100%; height: 100%; }
 .p-dock-stub .p-dock-icon { background: rgba(250,246,239,.4); border-style: dashed; border-color: rgba(80,35,20,.08); }
-.p-dock-label { font-size: 9px; font-weight: 700; color: rgba(245,230,208,.65); opacity: 0; transition: opacity .18s; white-space: nowrap; text-align: center; }
+.p-dock-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; font-size: 9px; font-weight: 700; color: rgba(245,230,208,.65); opacity: 0; transition: opacity .18s; white-space: nowrap; text-align: center; pointer-events: none; }
 .p-dock-item.p-dock-hovered .p-dock-label { opacity: 1; }
 .p-dock-tag { position: absolute; top: -6px; right: -4px; font-size: 7px; font-weight: 800; text-transform: uppercase; background: rgba(214,39,0,.12); color: #D62700; padding: 1px 5px; border-radius: 4px; letter-spacing: .3px; }
 
@@ -543,7 +553,7 @@ function confirmLogout() {
 @media (max-width: 480px) {
   .p-header { padding: 10px 12px; }
   .p-header-left { gap: 8px; }
-  .p-logo { width: 36px; height: 36px; font-size: 18px; }
+  .p-logo { }
   .p-brand h1 { font-size: 14px; }
   .p-entity { display: none; }
   .p-uname { display: none; }
@@ -571,12 +581,12 @@ function confirmLogout() {
   .p-dock-slot { width: 60px; }
 }
 
-/* ═══ BURGER LOADER ═══ */
-.burger-loader-overlay {
+/* ═══ SUPPLY LOADER ═══ */
+.supply-loader-overlay {
   position: fixed;
   inset: 0;
   z-index: 99999;
-  background: linear-gradient(135deg, #2C1810 0%, #502314 50%, #8B5E34 100%);
+  background: linear-gradient(135deg, #2C1810 0%, #502314 50%, #3D1500 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -584,95 +594,43 @@ function confirmLogout() {
   gap: 32px;
 }
 
-.burger-loader {
-  position: relative;
-  width: 120px;
-  height: 100px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0;
+.supply-loader-icon {
+  animation: ldr-pulse 2s ease-in-out infinite;
 }
 
-.burger-layer {
-  border-radius: 6px;
-  opacity: 0;
-  transform: translateY(-60px) scale(0.7);
+.ldr-c {
+  animation: ldr-circle 1.6s ease-in-out infinite;
+}
+.ldr-c1 { animation-delay: 0s; }
+.ldr-c2 { animation-delay: 0.2s; }
+.ldr-c3 { animation-delay: 0.4s; }
+.ldr-c4 { animation-delay: 0.6s; }
+
+@keyframes ldr-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.05); opacity: 1; }
 }
 
-.bun-top {
-  width: 90px; height: 28px;
-  background: linear-gradient(180deg, #F5A623 0%, #D4881A 100%);
-  border-radius: 45px 45px 4px 4px;
-  animation: burger-drop 0.35s ease forwards 0.15s;
-  box-shadow: inset 0 -3px 0 rgba(0,0,0,0.1);
-  position: relative;
-}
-.bun-top::after {
-  content: '';
-  position: absolute;
-  top: 5px; left: 20px;
-  width: 6px; height: 5px;
-  background: rgba(255,255,255,0.5);
-  border-radius: 50%;
-  box-shadow: 15px 2px 0 rgba(255,255,255,0.4), 30px -1px 0 rgba(255,255,255,0.3), 45px 3px 0 rgba(255,255,255,0.35);
-}
-
-.lettuce {
-  width: 96px; height: 10px;
-  background: #4CAF50;
-  border-radius: 2px;
-  animation: burger-drop 0.35s ease forwards 0.4s;
-  clip-path: polygon(0% 50%, 5% 0%, 12% 60%, 20% 10%, 28% 55%, 35% 5%, 43% 50%, 50% 0%, 58% 55%, 65% 8%, 73% 50%, 80% 5%, 88% 55%, 95% 10%, 100% 50%, 100% 100%, 0% 100%);
-}
-
-.cheese {
-  width: 94px; height: 10px;
-  background: #FDBD10;
-  border-radius: 2px;
-  animation: burger-drop 0.35s ease forwards 0.6s;
-  clip-path: polygon(0% 0%, 100% 0%, 100% 60%, 92% 100%, 75% 60%, 58% 100%, 42% 60%, 25% 100%, 8% 60%, 0% 100%);
-}
-
-.patty {
-  width: 88px; height: 18px;
-  background: linear-gradient(180deg, #6D3A1F 0%, #4A2510 100%);
-  border-radius: 4px;
-  animation: burger-drop 0.35s ease forwards 0.8s;
-  box-shadow: inset 0 2px 0 rgba(255,255,255,0.08), inset 0 -2px 0 rgba(0,0,0,0.2);
-}
-
-.bun-bottom {
-  width: 92px; height: 16px;
-  background: linear-gradient(180deg, #D4881A 0%, #C47A15 100%);
-  border-radius: 4px 4px 20px 20px;
-  animation: burger-drop 0.35s ease forwards 0.1s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-
-@keyframes burger-drop {
-  0%   { opacity: 0; transform: translateY(-60px) scale(0.7) rotate(-5deg); }
-  60%  { opacity: 1; transform: translateY(4px) scale(1.05) rotate(1deg); }
-  80%  { transform: translateY(-2px) scale(0.98) rotate(0deg); }
-  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
-}
-
-.burger-loader-text {
-  color: rgba(255,255,255,0.9);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  animation: text-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes text-pulse {
-  0%, 100% { opacity: 0.7; }
+@keyframes ldr-circle {
+  0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
 
-.burger-loader-enter-active { animation: loaderFadeIn 0.3s ease; }
-.burger-loader-leave-active { animation: loaderFadeOut 0.3s ease; }
+.supply-loader-text {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  animation: ldr-text-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes ldr-text-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.supply-loader-enter-active { animation: loaderFadeIn 0.3s ease; }
+.supply-loader-leave-active { animation: loaderFadeOut 0.3s ease; }
 @keyframes loaderFadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes loaderFadeOut { from { opacity: 1; } to { opacity: 0; } }
 </style>

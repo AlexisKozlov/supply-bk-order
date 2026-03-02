@@ -28,7 +28,8 @@
           </div>
           <div class="modal-field">
             <span class="modal-field-label">Email</span>
-            <input v-model="form.email" placeholder="email@example.com" />
+            <input v-model="form.email" placeholder="email@example.com; email2@..." />
+            <span v-if="form.email && /[,;]/.test(form.email)" class="modal-field-hint">Несколько адресов через точку с запятой</span>
           </div>
         </div>
 

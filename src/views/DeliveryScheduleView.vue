@@ -20,14 +20,25 @@
             <option v-for="r in store.regions" :key="r" :value="r">{{ r }}</option>
           </select>
         </div>
+        <button
+          v-if="canEdit"
+          class="ds-edit-toggle"
+          :class="{ active: editMode }"
+          @click="toggleEditMode"
+        >
+          <BkIcon :name="editMode ? 'close' : 'edit'" size="xs"/>
+          {{ editMode ? 'Готово' : 'Редактировать' }}
+        </button>
+        <button class="btn" @click="exportExcel">Excel</button>
+        <button class="btn" @click="printSchedule">Печать</button>
+        <button class="btn" @click="openLogModal"><BkIcon name="note" size="xs"/> История</button>
         <input
           v-model="searchQuery"
           type="text"
           class="ds-search"
           placeholder="Поиск по номеру или адресу..."
+          style="margin-left:auto;"
         />
-        <button class="btn" @click="exportExcel">Excel</button>
-        <button class="btn" @click="printSchedule">Печать</button>
       </div>
     </div>
 
@@ -64,7 +75,7 @@
               class="pf-mrow"
             >
               <td class="pf-mtd pf-mtd-center ds-td-num">{{ r.number }}</td>
-              <td class="pf-mtd ds-td-addr" @dblclick="startEditRestaurant(r)">{{ r.address }}</td>
+              <td class="pf-mtd ds-td-addr" :class="{ 'ds-td-addr-editable': isEditing }" @dblclick="startEditRestaurant(r)">{{ r.address }}</td>
               <td class="pf-mtd pf-mtd-center ds-td-cnt">
                 <span class="ds-cnt-badge">{{ deliveryCount(r) }}</span>
               </td>
@@ -77,10 +88,10 @@
                   'ds-td-editing': editingCell?.rid === r.id && editingCell?.day === d.num,
                   'ds-td-drop-target': dragState && dragState.rid === r.id && dragState.overDay === d.num && dragState.fromDay !== d.num,
                 }"
-                @dblclick="startEdit(r, d.num)"
-                @dragover.prevent="onDragOver($event, r, d.num)"
+                @dblclick="isEditing && startEdit(r, d.num)"
+                @dragover.prevent="isEditing && onDragOver($event, r, d.num)"
                 @dragleave="onDragLeave"
-                @drop.prevent="onDrop(r, d.num)"
+                @drop.prevent="isEditing && onDrop(r, d.num)"
               >
                 <template v-if="editingCell?.rid === r.id && editingCell?.day === d.num">
                   <input
@@ -96,7 +107,7 @@
                   <span
                     v-if="getTime(r, d.num)"
                     class="ds-time-chip"
-                    :draggable="canEdit"
+                    :draggable="isEditing"
                     @dragstart="onDragStart($event, r, d.num)"
                     @dragend="onDragEnd"
                     @pointerdown="onPointerDown($event, r, d.num)"
@@ -124,51 +135,33 @@
       </table>
       <div class="ds-table-footer">
         <span>Всего {{ filteredRestaurants.length }} ресторанов</span>
-        <span v-if="canEdit" class="ds-hint">2x клик: время / адрес. Перетащите время на другой день</span>
+        <span v-if="isEditing" class="ds-hint">2x клик: время / адрес. Перетащите время на другой день</span>
       </div>
     </div>
 
-    <!-- ═══ BY-DAY MODE ═══ -->
+    <!-- ═══ BY-DAY MODE (columns) ═══ -->
     <div v-else-if="viewMode === 'byDay'" class="ds-byday">
-      <div class="db-tabs ds-day-tabs">
-        <button
-          v-for="d in dayNames"
-          :key="d.num"
-          class="db-tab"
-          :class="{ active: selectedDay === d.num }"
-          @click="selectedDay = d.num"
-        >
-          {{ d.full }}
-          <span class="db-tab-count">{{ dayRestaurants(d.num).length }}</span>
-        </button>
-      </div>
-
-      <div v-if="!dayRestaurants(selectedDay).length" class="pf-empty" style="padding:40px;">
-        <BkIcon name="delivery" size="lg"/>
-        <span>Нет доставок в этот день</span>
-      </div>
-
-      <div v-else class="ds-cards-grid">
-        <div
-          v-for="item in dayRestaurants(selectedDay)"
-          :key="item.id"
-          class="ds-card"
-          @dblclick="startEditRestaurant(item)"
-        >
-          <div class="ds-card-header">
-            <div class="ds-card-num">{{ item.number }}</div>
-            <div class="ds-card-region" v-if="item.region !== 'Минск'">{{ item.city }}</div>
+      <div class="ds-columns">
+        <div v-for="d in dayNames" :key="d.num" class="ds-col">
+          <div class="ds-col-header">
+            <span class="ds-col-day">{{ d.short }}</span>
+            <span class="ds-col-count">{{ dayRestaurants(d.num).length }}</span>
           </div>
-          <div class="ds-card-addr">{{ item.address }}</div>
-          <div class="ds-card-bottom">
+          <div class="ds-col-body">
+            <div v-if="!dayRestaurants(d.num).length" class="ds-col-empty">—</div>
             <div
-              class="ds-card-time"
-              :class="{ 'ds-card-time-editable': canEdit }"
-              @dblclick.stop="startCardEdit(item)"
-              :title="canEdit ? 'Двойной клик для редактирования времени' : ''"
+              v-for="item in dayRestaurants(d.num)"
+              :key="item.id"
+              class="ds-col-item"
+              @dblclick="isEditing && startEditRestaurant(item)"
             >
-              <BkIcon name="schedule" size="xs"/>
-              {{ item.delivery_time || '—' }}
+              <span class="ds-col-item-num">{{ item.number }}</span>
+              <span class="ds-col-item-addr">{{ item.address }}</span>
+              <span
+                class="ds-col-item-time"
+                :class="{ 'ds-col-item-time-edit': isEditing }"
+                @dblclick.stop="isEditing && startCardEdit(item, d.num)"
+              >{{ item.delivery_time || '—' }}</span>
             </div>
           </div>
         </div>
@@ -252,6 +245,14 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- ═══ AUDIT LOG MODAL ═══ -->
+    <AuditLogModal
+      :show="showLogModal"
+      :loading="logLoading"
+      :entries="logEntries"
+      @close="showLogModal = false"
+    />
   </div>
 </template>
 
@@ -263,6 +264,8 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import AuditLogModal from '@/components/modals/AuditLogModal.vue';
+import { db } from '@/lib/apiClient.js';
 import { exportScheduleToExcel } from '@/lib/excelExport.js';
 
 const store = useRestaurantStore();
@@ -275,7 +278,20 @@ const selectedDay = ref(1);
 const filterRegion = ref('');
 const searchQuery = ref('');
 
-const canEdit = computed(() => !userStore.isViewer);
+const canEdit = computed(() => true);
+const editMode = ref(false);
+const isEditing = computed(() => canEdit.value && editMode.value);
+
+function toggleEditMode() {
+  if (editMode.value) {
+    // Выходим из режима — отменяем все текущие правки
+    editingCell.value = null;
+    editingRestaurant.value = null;
+    cardEditing.value = null;
+    dragState.value = null;
+  }
+  editMode.value = !editMode.value;
+}
 
 const dayNames = [
   { num: 1, short: 'ПН', full: 'Понедельник' },
@@ -376,7 +392,7 @@ const editingCell = ref(null);
 let savingEdit = false;
 
 function startEdit(restaurant, day) {
-  if (!canEdit.value) return;
+  if (!isEditing.value) return;
   editingCell.value = {
     rid: restaurant.id,
     day,
@@ -415,7 +431,7 @@ const dragging = ref(false);
 let longPressTimer = null;
 
 function onPointerDown(e, restaurant, day) {
-  if (!canEdit.value) return;
+  if (!isEditing.value) return;
   longPressTimer = setTimeout(() => {
     // Визуальная обратная связь — элемент станет draggable
     const el = e.target;
@@ -428,7 +444,7 @@ function onPointerUp() {
 }
 
 function onDragStart(e, restaurant, day) {
-  if (!canEdit.value) { e.preventDefault(); return; }
+  if (!isEditing.value) { e.preventDefault(); return; }
   clearTimeout(longPressTimer);
   const time = getTime(restaurant, day);
   dragState.value = { rid: restaurant.id, fromDay: day, time, overDay: null };
@@ -477,7 +493,7 @@ function onDragEnd(e) {
 const editingRestaurant = ref(null);
 
 function startEditRestaurant(restaurant) {
-  if (!canEdit.value) return;
+  if (!isEditing.value) return;
   editingRestaurant.value = { ...restaurant };
 }
 
@@ -495,12 +511,13 @@ async function saveRestaurantEdit() {
 // ═══ Card edit (by-day mode — dblclick) ═══
 const cardEditing = ref(null);
 
-function startCardEdit(item) {
-  if (!canEdit.value) return;
-  const d = dayNames.find(d => d.num === selectedDay.value);
+function startCardEdit(item, dayNum) {
+  if (!isEditing.value) return;
+  const day = dayNum || selectedDay.value;
+  const d = dayNames.find(d => d.num === day);
   cardEditing.value = {
     restaurant: item,
-    day: selectedDay.value,
+    day,
     dayLabel: d?.full || '',
     value: item.delivery_time || '',
   };
@@ -530,6 +547,34 @@ async function exportExcel() {
 
 function printSchedule() {
   window.print();
+}
+
+// ═══ Audit log modal ═══
+const showLogModal = ref(false);
+const logLoading = ref(false);
+const logEntries = ref([]);
+
+async function openLogModal() {
+  showLogModal.value = true;
+  logLoading.value = true;
+  logEntries.value = [];
+  try {
+    const { data, error } = await db.from('audit_log')
+      .select('*')
+      .eq('entity_type', 'delivery_schedule')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) throw new Error(error);
+    logEntries.value = (data || []).map(row => ({
+      ...row,
+      details: typeof row.details === 'string' ? JSON.parse(row.details) : row.details,
+    }));
+  } catch (e) {
+    console.error('Failed to load audit log:', e);
+    toastStore.error('Не удалось загрузить историю');
+  } finally {
+    logLoading.value = false;
+  }
 }
 
 function formatLastUpdate(upd) {
@@ -586,9 +631,63 @@ function formatLastUpdate(upd) {
 }
 .ds-mode-toggle.active .ds-toggle-knob { left: 16px; }
 
+/* ═══ Edit mode toggle ═══ */
+.ds-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: white;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.ds-edit-toggle:hover {
+  border-color: var(--bk-orange);
+  color: var(--text);
+}
+.ds-edit-toggle.active {
+  border-color: var(--bk-orange);
+  background: #FFF3E0;
+  color: var(--bk-brown);
+  box-shadow: 0 0 0 2px rgba(255, 135, 50, 0.15);
+}
+
+/* ═══ Header buttons — unified size ═══ */
+.page-header .btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.page-header .btn:hover {
+  border-color: var(--bk-orange);
+  color: var(--text);
+  background: white;
+  transform: none;
+}
+.page-header :deep(.pf-filter select) {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: white;
+}
+
 /* ═══ Search ═══ */
 .ds-search {
-  padding: 6px 10px; border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 8px;
   font-size: 12px; font-weight: 600; font-family: inherit; color: var(--text);
   width: 200px; background: white;
   transition: border-color 0.15s;
@@ -661,16 +760,16 @@ function formatLastUpdate(upd) {
 .ds-td-num {
   font-weight: 800; color: var(--bk-red);
   font-size: 13px;
-  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
+  font-family: 'Plus Jakarta Sans', sans-serif;
 }
 .ds-td-addr {
   text-align: left;
-  cursor: pointer;
   font-weight: 600; color: var(--bk-brown); font-size: 12px;
   width: 1%;
   white-space: nowrap;
   padding-right: 8px !important;
 }
+.ds-td-addr-editable { cursor: pointer; }
 .ds-th-note-h { }
 .ds-td-cnt { padding: 3px 4px !important; vertical-align: middle; text-align: center; }
 .ds-cnt-badge {
@@ -696,11 +795,13 @@ function formatLastUpdate(upd) {
   padding: 2px 6px;
   border-radius: 3px;
   letter-spacing: -0.2px;
-  cursor: grab;
   user-select: none;
   touch-action: none;
 }
-.ds-time-chip:hover {
+.ds-time-chip[draggable="true"] {
+  cursor: grab;
+}
+.ds-time-chip[draggable="true"]:hover {
   background: #81C784;
 }
 .ds-time-chip.ds-chip-ready {
@@ -759,99 +860,79 @@ function formatLastUpdate(upd) {
 }
 .ds-hint { font-size: 10px; color: var(--text-muted); opacity: 0.7; }
 
-/* ═══ BY-DAY MODE ═══ */
-.ds-day-tabs {
-  display: flex;
-  justify-content: center;
-  gap: 0;
-  margin-bottom: 16px;
-  border-bottom: 2px solid var(--border-light);
-}
-.ds-day-tabs .db-tab {
-  padding: 10px 22px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: none;
-  border: none;
-  border-bottom: 3px solid transparent;
-  margin-bottom: -2px;
-  cursor: pointer;
-  transition: all .15s;
-  display: inline-flex;
-  align-items: center;
+/* ═══ BY-DAY MODE (columns) ═══ */
+.ds-columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
+  align-items: start;
 }
-.ds-day-tabs .db-tab.active {
-  color: var(--bk-brown);
-  border-bottom-color: var(--bk-brown);
-  font-weight: 700;
+.ds-col {
+  background: var(--card, #fff);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  min-width: 0;
 }
-.ds-day-tabs .db-tab:hover:not(.active) {
-  color: var(--text);
-  background: rgba(139,115,85,.05);
-}
-.ds-day-tabs .db-tab-count {
-  display: inline-block;
-  background: var(--border-light);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 7px;
-  border-radius: 10px;
-}
-.ds-day-tabs .db-tab.active .db-tab-count {
+.ds-col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 6px;
   background: var(--bk-brown);
   color: #fff;
+  font-weight: 700; font-size: 11px;
+  letter-spacing: 0.3px;
+}
+.ds-col-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 15px; border-radius: 8px;
+  background: var(--bk-orange); color: #fff;
+  font-size: 9px; font-weight: 800; padding: 0 4px;
+}
+.ds-col-body {
+  padding: 3px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.ds-col-empty {
+  text-align: center; padding: 10px 0;
+  color: var(--text-muted); font-size: 11px; opacity: 0.5;
 }
 
-.ds-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
+.ds-col-item {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border-light, #f0ebe5);
+  transition: background 0.1s;
+  display: flex; align-items: center; gap: 4px;
 }
-
-.ds-card {
-  background: white; border: 1.5px solid var(--border);
-  border-radius: var(--radius); padding: 14px 16px;
-  transition: all 0.15s;
-}
-.ds-card:hover {
-  box-shadow: 0 4px 12px rgba(80, 35, 20, 0.1);
-  border-color: var(--bk-orange);
-  transform: translateY(-1px);
-}
-
-.ds-card-header {
-  display: flex; align-items: baseline; justify-content: space-between;
-  margin-bottom: 4px;
-}
-.ds-card-num {
-  font-weight: 800; font-size: 22px; color: var(--bk-red);
-  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
+.ds-col-item:last-child { border-bottom: none; }
+.ds-col-item:hover { background: #FFF8F0; }
+.ds-col-item-num {
+  font-weight: 800; font-size: 11px; color: var(--bk-red);
+  font-family: 'Plus Jakarta Sans', sans-serif;
   line-height: 1;
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: center;
+  border-right: 1px solid var(--border-light, #e8e3dd);
+  padding-right: 4px;
+  margin-right: 2px;
 }
-.ds-card-region {
-  font-size: 11px; font-weight: 600; color: var(--text-muted);
-  background: var(--bg); padding: 2px 8px; border-radius: 10px;
+.ds-col-item-addr {
+  font-size: 10px; font-weight: 500; color: var(--text-secondary);
+  line-height: 1.2;
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.ds-card-addr {
-  font-weight: 600; font-size: 13px; line-height: 1.3;
-  color: var(--bk-brown); margin-bottom: 8px;
+.ds-col-item-time {
+  display: inline-block;
+  background: #A5D6A7; color: #1B5E20;
+  padding: 0 4px; border-radius: 2px;
+  font-weight: 700; font-size: 9px;
+  white-space: nowrap;
+  line-height: 1.5;
+  flex-shrink: 0;
 }
-.ds-card-bottom {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  flex-wrap: wrap;
-}
-.ds-card-time {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: #E8F5E9; color: #1B5E20;
-  padding: 5px 12px; border-radius: 6px;
-  font-weight: 700; font-size: 13px;
-  border: 1px solid #A5D6A7;
-}
-.ds-card-time-editable { cursor: pointer; transition: all 0.15s; }
-.ds-card-time-editable:hover { background: #C8E6C9; box-shadow: 0 2px 6px rgba(46,125,50,0.18); }
+.ds-col-item-time-edit { cursor: pointer; }
+.ds-col-item-time-edit:hover { background: #81C784; }
 
 /* ═══ Modal ═══ */
 .ds-modal-body { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -899,8 +980,8 @@ function formatLastUpdate(upd) {
   @page { size: landscape; margin: 6mm; }
 
   /* Скрываем UI-элементы */
-  .ds-search, .ds-mode-toggle, .pf-filter, .btn,
-  .ds-byday, .ds-table-footer, .ds-hint,
+  .ds-search, .ds-mode-toggle, .ds-edit-toggle, .pf-filter, .btn,
+  .ds-table-footer, .ds-hint,
   .sidebar, .topbar, .topbar-mobile-only,
   .sidebar-overlay { display: none !important; }
   .app-layout .main-wrapper { all: unset; display: block; }
@@ -909,8 +990,8 @@ function formatLastUpdate(upd) {
   .page-header {
     display: flex !important; margin-bottom: 4px !important; padding: 0 !important;
   }
-  .page-title { font-size: 12px !important; margin: 0 !important; }
-  .ds-last-update { font-size: 8px !important; }
+  .page-title { font-size: 14px !important; margin: 0 !important; }
+  .ds-last-update { font-size: 11px !important; opacity: 1 !important; color: #333 !important; }
 
   .ds-view { padding: 0 !important; }
   .pf-wrap {
@@ -926,15 +1007,15 @@ function formatLastUpdate(upd) {
   .pf-mth {
     background: #502314 !important; color: rgba(255,255,255,0.9) !important;
     padding: 3px 5px !important; font-size: 12px !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
+    border: 1.5px solid rgba(255,255,255,0.2) !important;
     white-space: nowrap !important;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
-  /* Все ячейки — без переносов */
+  /* Все ячейки — чёткие границы */
   .pf-mtd {
     padding: 2px 4px !important; line-height: 1.3 !important;
-    border: 1px solid #E8E0D6 !important;
+    border: 1.5px solid #999 !important;
     white-space: nowrap !important;
   }
 
@@ -944,10 +1025,11 @@ function formatLastUpdate(upd) {
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
-  /* Номер ресторана — красный */
+  /* Номер ресторана */
   .ds-td-num {
-    font-size: 13px !important; font-weight: 800 !important;
-    color: #D62300 !important;
+    font-size: 14px !important; font-weight: 600 !important;
+    color: #000 !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
   }
 
   /* Адрес */
@@ -962,14 +1044,15 @@ function formatLastUpdate(upd) {
   /* Комментарий */
   .ds-th-note-h, .ds-td-note { font-size: 11px !important; }
 
-  /* Бейдж кол-ва дней — коричневый как на сайте */
+  /* Бейдж кол-ва дней — просто число */
   .ds-cnt-badge {
-    width: 16px !important; height: 16px !important; font-size: 10px !important;
-    background: #502314 !important; color: #fff !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    width: auto !important; height: auto !important; font-size: 12px !important;
+    background: none !important; color: #000 !important;
+    border: none !important; border-radius: 0 !important;
+    font-weight: 900 !important;
   }
 
-  /* Время доставки — зелёный как на сайте */
+  /* Время доставки */
   .ds-time-chip {
     font-size: 12px !important; font-weight: 700 !important;
     background: #A5D6A7 !important; color: #1B5E20 !important;
@@ -983,14 +1066,15 @@ function formatLastUpdate(upd) {
     background: #F0EBE5 !important; padding: 3px 5px !important;
     font-size: 12px !important; font-weight: 800 !important;
     color: #502314 !important;
-    border: 1px solid #E8E0D6 !important;
+    border: 1.5px solid #999 !important;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .ds-group-count {
-    width: 16px !important; height: 16px !important;
-    font-size: 10px !important; min-width: 16px !important;
-    background: #502314 !important; color: #fff !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    width: auto !important; height: auto !important;
+    font-size: 12px !important; min-width: auto !important;
+    background: none !important; color: #502314 !important;
+    border: none !important; border-radius: 0 !important;
+    font-weight: 900 !important; padding: 0 !important;
   }
 
   /* Итого — коричневый как на сайте */
@@ -1003,11 +1087,54 @@ function formatLastUpdate(upd) {
     color: rgba(255,255,255,0.8) !important;
   }
   .ds-total-badge {
-    background: #FF8732 !important; color: #fff !important;
-    min-width: 20px !important; height: 18px !important; font-size: 13px !important;
-    padding: 0 4px !important;
+    background: none !important; color: #fff !important;
+    min-width: auto !important; height: auto !important; font-size: 14px !important;
+    font-weight: 900 !important;
+    padding: 0 !important;
+    border: none !important; border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* ═══ Print: By-day columns ═══ */
+  .ds-byday { break-inside: avoid; }
+  .ds-columns {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 4px !important;
+  }
+  .ds-col {
+    border: 1px solid #aaa !important;
+    border-radius: 0 !important;
+    break-inside: avoid;
+  }
+  .ds-col-header {
+    background: #502314 !important; color: #fff !important;
+    padding: 5px 8px !important; font-size: 13px !important;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
+  .ds-col-count {
+    background: none !important; color: #fff !important;
+    min-width: auto !important; height: auto !important; font-size: 14px !important;
+    font-weight: 900 !important;
+    border: none !important; border-radius: 0 !important;
+  }
+  .ds-col-body { padding: 2px 4px !important; gap: 0 !important; }
+  .ds-col-item {
+    padding: 3px 4px !important; border-color: #ddd !important;
+    gap: 5px !important;
+  }
+  .ds-col-item-num {
+    font-size: 15px !important; font-weight: 600 !important; color: #000 !important;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+  }
+  .ds-col-item-addr {
+    font-size: 13px !important; color: #333 !important; font-weight: 600 !important;
+  }
+  .ds-col-item-time {
+    font-size: 13px !important; padding: 1px 5px !important;
+    background: #A5D6A7 !important; color: #1B5E20 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .ds-col-empty { padding: 8px 0 !important; font-size: 12px !important; }
 }
 
 /* ═══ Mobile ═══ */
@@ -1045,27 +1172,11 @@ function formatLastUpdate(upd) {
   /* Компактнее ячейки */
   .ds-td-addr { font-size: 11px !important; }
 
-  /* Табы — скролл, короткие */
-  .ds-day-tabs {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    justify-content: flex-start !important;
-    gap: 0;
-    padding-bottom: 0;
+  /* Колонки по дням — 2 на планшете */
+  .ds-columns {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 4px;
   }
-  .ds-day-tabs .db-tab {
-    padding: 8px 12px;
-    font-size: 12px;
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-
-  /* Карточки — одна колонка */
-  .ds-cards-grid { grid-template-columns: 1fr; gap: 8px; }
-  .ds-card { padding: 12px 14px; }
-  .ds-card-num { font-size: 18px; }
-  .ds-card-addr { font-size: 12px; }
-  .ds-card-time { font-size: 12px; padding: 4px 10px; }
 
   /* Модалки — на всю ширину */
   .modal-box { max-width: calc(100vw - 24px) !important; margin: 12px; }
@@ -1081,7 +1192,6 @@ function formatLastUpdate(upd) {
   }
   .ds-mode-toggle { order: -1; }
   .pf-main-table { min-width: 500px; }
-  .ds-day-tabs .db-tab { padding: 7px 10px; font-size: 11px; }
-  .ds-card-num { font-size: 16px; }
+  .ds-columns { grid-template-columns: 1fr !important; }
 }
 </style>

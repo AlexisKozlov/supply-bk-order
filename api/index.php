@@ -720,9 +720,9 @@ $appendOnly = ['audit_log'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
 
-// RBAC: viewer может только читать
+// RBAC: viewer может только читать (кроме графика доставки)
 $sessionUser = getSessionUser($pdo);
-if ($sessionUser && ($sessionUser['role'] ?? '') === 'viewer' && $method !== 'GET') {
+if ($sessionUser && ($sessionUser['role'] ?? '') === 'viewer' && $method !== 'GET' && $table !== 'delivery_schedule') {
     respond(['error' => 'Недостаточно прав (только просмотр)'], 403);
 }
 

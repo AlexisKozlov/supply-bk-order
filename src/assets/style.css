@@ -179,9 +179,6 @@ body {
 }
 .sidebar.collapsed .sidebar-brand-icon {
   display: flex;
-  width: 32px; height: 32px;
-  font-size: 16px;
-  border-radius: 8px;
   order: 2;
 }
 .sidebar.collapsed .sidebar-collapse-btn {
@@ -203,20 +200,14 @@ body {
 .sidebar.collapsed .sidebar-bottom { padding: 8px 4px 12px; position: relative; }
 
 .sidebar-brand-icon {
-  width: 36px; height: 36px;
-  background: linear-gradient(135deg, #D62300, #FF8732);
-  border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(214,35,0,0.4);
   text-decoration: none;
-  font-size: 18px;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s;
   flex-shrink: 0;
 }
 .sidebar-brand-icon:hover {
   transform: scale(1.08);
-  box-shadow: 0 6px 16px rgba(214,35,0,0.5);
 }
 
 .sidebar-brand-text {

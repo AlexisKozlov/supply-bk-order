@@ -5,7 +5,7 @@
 
 export const icons = {
   // ─── Navigation / Modules ───
-  burger: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="7" width="20" height="12" rx="4" fill="#FDBD10" stroke="#D62700" stroke-width="1.5"/><path d="M4 13h16" stroke="#502314" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="10.5" r="1.2" fill="#4CAF50"/><circle cx="11" cy="10" r="1.2" fill="#D62700"/><circle cx="15" cy="10.5" r="1.2" fill="#FF8733"/></svg>`,
+  burger: `<svg viewBox="0 0 24 24" fill="none"><circle cx="8" cy="8" r="5" fill="#D62300"/><circle cx="16" cy="8" r="5" fill="#F5A623"/><circle cx="8" cy="16" r="5" fill="#FF8733"/><circle cx="16" cy="16" r="5" fill="#FFD54F"/><circle cx="12" cy="12" r="4.2" fill="#502314"/><text x="12" y="14.8" text-anchor="middle" fill="white" font-size="7" font-weight="900" font-family="Arial,sans-serif">S</text></svg>`,
 
   home: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" fill="#FFE0B2" stroke="#D62700" stroke-width="1.8"/><path d="M3 12l9-8 9 8" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="15" width="6" height="5" rx=".5" fill="#FF8733"/></svg>`,
 

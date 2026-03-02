@@ -589,7 +589,7 @@ const criticalAnomalies = computed(() => data.value ? data.value.anomalies.filte
 
 const tabs = [
   { id: 'overview', label: 'Обзор' },
-  { id: 'planfact', label: 'Доставки' },
+  { id: 'planfact', label: 'Поставки' },
   { id: 'suppliers', label: 'Поставщики' },
   { id: 'products', label: 'Товары' },
   { id: 'forecast', label: 'Прогноз' },

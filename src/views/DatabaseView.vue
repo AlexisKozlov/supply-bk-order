@@ -66,7 +66,7 @@
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="editProduct(p)"><BkIcon name="edit" size="sm"/></button>
-            <button class="db-card-btn db-card-btn-del" @click.stop="deleteProduct(p)"><BkIcon name="delete" size="sm"/></button>
+            <button v-if="isAdmin" class="db-card-btn db-card-btn-del" @click.stop="deleteProduct(p)"><BkIcon name="delete" size="sm"/></button>
           </div>
         </div>
       </div>
@@ -90,7 +90,7 @@
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="editSupplier(s)"><BkIcon name="edit" size="sm"/></button>
-            <button class="db-card-btn db-card-btn-del" @click.stop="deleteSupplier(s)"><BkIcon name="delete" size="sm"/></button>
+            <button v-if="isAdmin" class="db-card-btn db-card-btn-del" @click.stop="deleteSupplier(s)"><BkIcon name="delete" size="sm"/></button>
           </div>
         </div>
       </div>
@@ -115,7 +115,7 @@
               <span v-if="p.sku" class="db-card-sku">{{ p.sku }}</span>
               <span class="db-card-name" style="flex:1;">{{ p.name }}</span>
               <span style="font-size:11px;color:var(--text-muted);">{{ p.supplier || '—' }}</span>
-              <button v-if="!isViewer" class="db-card-btn db-card-btn-del" @click.stop="removeFromGroup(p)" title="Убрать из группы"><BkIcon name="close" size="xs"/></button>
+              <button v-if="isAdmin" class="db-card-btn db-card-btn-del" @click.stop="removeFromGroup(p)" title="Убрать из группы"><BkIcon name="close" size="xs"/></button>
             </div>
           </div>
         </div>
@@ -141,7 +141,7 @@
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="openRestaurantModal(r)"><BkIcon name="edit" size="sm"/></button>
-            <button class="db-card-btn db-card-btn-del" @click.stop="deleteRestaurant(r)"><BkIcon name="delete" size="sm"/></button>
+            <button v-if="isAdmin" class="db-card-btn db-card-btn-del" @click.stop="deleteRestaurant(r)"><BkIcon name="delete" size="sm"/></button>
           </div>
         </div>
       </div>
@@ -203,7 +203,7 @@
             </label>
           </div>
           <div class="db-rest-modal-footer">
-            <button v-if="restModal.data.id" class="btn db-rest-btn-delete" @click="deleteRestaurant(restModal.data); restModal.show = false">
+            <button v-if="restModal.data.id && isAdmin" class="btn db-rest-btn-delete" @click="deleteRestaurant(restModal.data); restModal.show = false">
               <BkIcon name="delete" size="xs"/> Удалить
             </button>
             <div class="db-rest-modal-footer-right">
@@ -250,6 +250,7 @@ const supplierStore = useSupplierStore();
 const orderStore = useOrderStore();
 const restaurantStore = useRestaurantStore();
 const isViewer = computed(() => userStore.isViewer);
+const isAdmin = computed(() => userStore.isAdmin);
 
 const activeTab = ref('products');
 const searchQuery = ref('');
@@ -378,6 +379,7 @@ function editProduct(p) { editCardModal.value = { show: true, product: p }; }
 function editSupplier(s) { editSupplierModal.value = { show: true, supplier: s }; }
 
 async function deleteProduct(p) {
+  if (!isAdmin.value) return;
   const ok = await new Promise(r => { confirmModal.value = { show:true, title:'Удалить карточку?', message:`${p.sku ? p.sku + ' ' : ''}${p.name}`, resolve: r }; });
   if (!ok) return;
   const { error } = await db.from('products').delete().eq('id', p.id);
@@ -385,6 +387,7 @@ async function deleteProduct(p) {
   toast.success('Удалено', ''); await loadProducts();
 }
 async function deleteSupplier(s) {
+  if (!isAdmin.value) return;
   const ok = await new Promise(r => { confirmModal.value = { show:true, title:'Удалить поставщика?', message: s.short_name, resolve: r }; });
   if (!ok) return;
   const { error } = await db.from('suppliers').delete().eq('id', s.id);
@@ -423,6 +426,7 @@ async function saveRenameGroup() {
 }
 
 async function removeFromGroup(p) {
+  if (!isAdmin.value) return;
   const ok = await new Promise(r => { confirmModal.value = { show:true, title:'Убрать из группы?', message:`${p.name} будет убран из группы аналогов «${p.analog_group}»`, resolve: r }; });
   if (!ok) return;
   const { error } = await db.from('products').update({ analog_group: null }).eq('id', p.id);
@@ -479,6 +483,7 @@ async function saveRestaurant() {
 }
 
 async function deleteRestaurant(r) {
+  if (!isAdmin.value) return;
   const ok = await new Promise(resolve => {
     confirmModal.value = { show: true, title: 'Удалить ресторан?', message: `Ресторан ${r.number} — ${r.address}`, resolve };
   });

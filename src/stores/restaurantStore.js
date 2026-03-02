@@ -3,6 +3,9 @@ import { ref, computed } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 
+const DAY_NAMES = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота' };
+const DAY_SHORT = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ' };
+
 export const useRestaurantStore = defineStore('restaurant', () => {
   const restaurants = ref([]);
   const schedule = ref([]);
@@ -106,27 +109,26 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     const rid = String(restaurantId);
     const existing = schedule.value.find(s => String(s.restaurant_id) === rid && Number(s.day_of_week) === dayOfWeek);
     const meta = _meta();
+    const oldTime = existing?.delivery_time || '';
+    const newTime = deliveryTime?.trim() || '';
 
-    if (!deliveryTime || deliveryTime.trim() === '') {
+    if (!newTime) {
       if (existing) {
         const { error } = await db.from('delivery_schedule').delete().eq('id', existing.id);
         if (error) throw new Error(error);
         schedule.value = schedule.value.filter(s => s.id !== existing.id);
       }
-      return;
-    }
-
-    if (existing) {
+    } else if (existing) {
       const { data, error } = await db.from('delivery_schedule').update({
-        delivery_time: deliveryTime.trim(), ...meta,
+        delivery_time: newTime, ...meta,
       }).eq('id', existing.id);
       if (error) throw new Error(error);
-      Object.assign(existing, { delivery_time: deliveryTime.trim(), ...meta });
+      Object.assign(existing, { delivery_time: newTime, ...meta });
     } else {
       const { data, error } = await db.from('delivery_schedule').insert({
         restaurant_id: restaurantId,
         day_of_week: dayOfWeek,
-        delivery_time: deliveryTime.trim(),
+        delivery_time: newTime,
         ...meta,
       });
       if (error) throw new Error(error);
@@ -139,6 +141,37 @@ export const useRestaurantStore = defineStore('restaurant', () => {
         const currentGroup = loadedGroup.value;
         invalidate();
         await _doLoad(currentGroup);
+      }
+    }
+
+    // Аудит-лог (не блокирует основное действие)
+    if (oldTime !== newTime) {
+      try {
+        const rest = restaurants.value.find(r => String(r.id) === rid);
+        // Снимок полного графика ресторана (после изменения)
+        const rSched = scheduleByRestaurant.value.get(rid);
+        const fullSchedule = {};
+        for (let d = 1; d <= 6; d++) {
+          const short = DAY_SHORT[d];
+          fullSchedule[short] = rSched?.get(d)?.delivery_time || '';
+        }
+        await db.from('audit_log').insert({
+          entity_type: 'delivery_schedule',
+          entity_id: Number(restaurantId),
+          action: 'schedule_updated',
+          user_name: meta.updated_by,
+          details: JSON.stringify({
+            restaurant_number: rest?.number || restaurantId,
+            param_changes: [{
+              label: DAY_NAMES[dayOfWeek] || `День ${dayOfWeek}`,
+              from: oldTime || '—',
+              to: newTime || '—',
+            }],
+            full_schedule: fullSchedule,
+          }),
+        });
+      } catch (e) {
+        console.warn('Audit log error (schedule):', e);
       }
     }
   }
@@ -154,10 +187,43 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     }
     const { id, ...fields } = clean;
     if (id) {
+      // Запоминаем старые значения для аудита
+      const oldRest = restaurants.value.find(r => r.id === id);
       const { data, error } = await db.from('restaurants').update(fields).eq('id', id);
       if (error) throw new Error(error);
       const idx = restaurants.value.findIndex(r => r.id === id);
       if (idx >= 0 && data?.[0]) restaurants.value[idx] = data[0];
+
+      // Аудит-лог (не блокирует основное действие)
+      if (oldRest) {
+        try {
+          const fieldLabels = { number: 'Номер', address: 'Адрес', city: 'Город', region: 'Регион', notes: 'Комментарий' };
+          const paramChanges = [];
+          for (const [key, label] of Object.entries(fieldLabels)) {
+            const oldVal = oldRest[key] || '';
+            const newVal = fields[key] || '';
+            if (String(oldVal) !== String(newVal)) {
+              paramChanges.push({ label, from: oldVal || '—', to: newVal || '—' });
+            }
+          }
+          if (paramChanges.length) {
+            const meta = _meta();
+            await db.from('audit_log').insert({
+              entity_type: 'delivery_schedule',
+              entity_id: id,
+              action: 'restaurant_updated',
+              user_name: meta.updated_by,
+              details: JSON.stringify({
+                restaurant_number: oldRest.number || fields.number || id,
+                param_changes: paramChanges,
+              }),
+            });
+          }
+        } catch (e) {
+          console.warn('Audit log error (restaurant):', e);
+        }
+      }
+
       return data?.[0];
     } else {
       fields.sort_order = restaurants.value.length + 1;

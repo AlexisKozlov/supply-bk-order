@@ -2,7 +2,7 @@
   <div class="planfact-view">
     <!-- Header -->
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-      <h1 class="page-title">Доставки</h1>
+      <h1 class="page-title">Поставки</h1>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <div class="pf-tabs">
           <button class="pf-tab" :class="{ active: tab === 'overdue' }" @click="tab = 'overdue'; loadOrders()">

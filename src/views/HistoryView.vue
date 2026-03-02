@@ -151,46 +151,7 @@
       </div>
     </div>
 
-    <!-- LOG MODAL -->
-    <Teleport to="body">
-      <div v-if="logModal.show" class="modal" @click.self="logModal.show = false">
-        <div class="modal-box log-modal-box">
-          <div class="modal-header">
-            <h2><BkIcon name="note" size="sm"/> История изменений</h2>
-            <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
-          </div>
-          <div class="log-modal-body">
-            <div v-if="logModal.loading" style="text-align:center;padding:24px;"><BurgerSpinner size="sm" /></div>
-            <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в истории</div>
-            <div v-else class="log-entries">
-              <div v-for="log in logModal.entries" :key="log.id" class="log-entry">
-                <div class="log-entry-head">
-                  <span class="log-badge" :class="logBadgeClass(log.action)">{{ logBadgeLabel(log.action) }}</span>
-                  <span class="log-author">{{ log.user_name || '—' }}</span>
-                  <span class="log-date">{{ formatDateTime(log.created_at) }}</span>
-                </div>
-                <!-- Param changes inline -->
-                <div v-if="log.details?.param_changes?.length" class="log-params">
-                  <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="log-param-chip">
-                    {{ pc.label }}: {{ pc.from }} → {{ pc.to }}
-                  </span>
-                </div>
-                <div v-if="log.details?.note" class="log-note-line">📝 {{ log.details.note }}</div>
-                <div v-if="log.details?.items_count" class="log-meta">{{ log.details.items_count }} позиций</div>
-                <!-- Item changes compact -->
-                <div v-if="log.details?.changes?.length" class="log-changes">
-                  <span v-for="(c, ci) in log.details.changes" :key="ci" class="log-ch-chip" :class="{ 'log-ch-add': c.type==='added', 'log-ch-del': c.type==='removed', 'log-ch-upd': c.type==='changed' }">
-                    <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
-                    <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
-                    <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <AuditLogModal :show="logModal.show" :loading="logModal.loading" :entries="logModal.entries" @close="logModal.show = false" />
 
     <ConfirmModal
       v-if="confirmModal.show"
@@ -295,6 +256,7 @@ import { db } from '@/lib/apiClient.js';
 import { copyToClipboard, getQpb, getMultiplicity } from '@/lib/utils.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import AuditLogModal from '@/components/modals/AuditLogModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import CompareOrdersModal from '@/components/modals/CompareOrdersModal.vue';
 
@@ -418,16 +380,6 @@ function orderItemsFiltered(order) {
 }
 
 // --- Log modal ---
-function logBadgeLabel(action) {
-  return { order_created:'Создан', order_updated:'Изменён', order_deleted:'Удалён', plan_created:'Создан', plan_updated:'Изменён', plan_deleted:'Удалён' }[action] || action;
-}
-function logBadgeClass(action) {
-  if (action.includes('created')) return 'log-badge-created';
-  if (action.includes('updated')) return 'log-badge-updated';
-  if (action.includes('deleted')) return 'log-badge-deleted';
-  return '';
-}
-
 async function openLogModal(entityId, entityType) {
   logModal.value = { show: true, loading: true, entries: [], type: entityType };
   const { data } = await db.from('audit_log').select('*')
@@ -703,35 +655,6 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
 .ht-items-sku { font-weight: 600; color: var(--text-muted); font-size: 11px; width: 80px; }
 .ht-items-name { color: var(--text); }
 .ht-items-qty { font-weight: 700; text-align: right; width: 60px; color: var(--bk-brown); }
-
-/* ═══ LOG MODAL ═══ */
-.log-modal-box { max-width: 560px; }
-.log-modal-body { max-height: 450px; overflow-y: auto; padding: 0 20px 16px; }
-.log-entries { display: flex; flex-direction: column; }
-.log-entry { padding: 10px 0; border-bottom: 1px solid var(--border-light); }
-.log-entry:last-child { border-bottom: none; }
-.log-entry-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.log-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
-.log-badge-created { background: #E8F5E9; color: #2E7D32; }
-.log-badge-updated { background: #FFF3E0; color: #E65100; }
-.log-badge-deleted { background: #FFEBEE; color: #C62828; }
-.log-author { font-weight: 600; font-size: 12px; color: var(--text); }
-.log-date { font-size: 11px; color: var(--text-muted); }
-.log-note-line { font-size: 11px; color: var(--text-secondary); font-style: italic; margin-top: 3px; }
-.log-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-.log-params { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.log-param-chip {
-  display: inline-block; padding: 1px 7px; border-radius: 4px;
-  font-size: 11px; background: #EDE7F6; color: #4A148C; font-weight: 500;
-}
-.log-changes { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
-.log-ch-chip {
-  display: inline-block; padding: 1px 6px; border-radius: 4px;
-  font-size: 10px; font-weight: 600; line-height: 1.5;
-}
-.log-ch-add { background: #E8F5E9; color: #2E7D32; }
-.log-ch-del { background: #FFEBEE; color: #C62828; }
-.log-ch-upd { background: #FFF8E1; color: #5D4037; }
 
 /* Load more */
 .ht-load-more-wrap {
