@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supply Department — Ответы на вопросы руководства</title>
+<style>
+@font-face { font-family: 'Flame'; src: url('/Flame-Bold.otf') format('opentype'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Flame'; src: url('/Flame-Regular.otf') format('opentype'); font-weight: 400; font-display: swap; }
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root { --bg: #1a0e09; --red: #D62300; --orange: #FF8733; --yellow: #FDBD10; --cream: #FFF8F0; --glass: rgba(255,255,255,0.06); --glass-border: rgba(255,255,255,0.1); --text: #FFF8F0; --text-dim: rgba(255,248,240,0.6); --green: #4CAF50; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.6; padding: 40px 20px; }
+.container { max-width: 860px; margin: 0 auto; }
+.header { text-align: center; margin-bottom: 48px; padding-bottom: 32px; border-bottom: 1px solid var(--glass-border); }
+.header svg { margin-bottom: 16px; }
+.header h1 { font-family: 'Flame', sans-serif; font-size: 2rem; margin-bottom: 8px; }
+.header p { color: var(--text-dim); font-size: 1rem; }
+.section { margin-bottom: 40px; }
+.section-title { font-family: 'Flame', sans-serif; font-size: 1.3rem; color: var(--orange); margin-bottom: 20px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,135,51,.2); }
+.qa { background: var(--glass); border: 1px solid var(--glass-border); border-radius: 12px; padding: 20px 24px; margin-bottom: 12px; }
+.qa .q { font-weight: 700; font-size: 1rem; margin-bottom: 10px; color: var(--cream); }
+.qa .a { color: var(--text-dim); font-size: .95rem; }
+.qa .a strong { color: var(--text); font-weight: 600; }
+.qa .a ul { margin-top: 8px; padding-left: 20px; }
+.qa .a li { margin-bottom: 4px; }
+.back-link { display: inline-block; margin-bottom: 24px; color: var(--orange); text-decoration: none; font-size: .9rem; }
+.back-link:hover { text-decoration: underline; }
+.print-btn { position: fixed; bottom: 24px; right: 24px; padding: 12px 24px; background: var(--orange); color: #fff; border: none; border-radius: 8px; font-size: .9rem; cursor: pointer; font-weight: 600; }
+.print-btn:hover { background: #e07020; }
+@media print { .print-btn { display: none; } .back-link { display: none; } body { background: #fff; color: #222; padding: 20px; } .qa { border-color: #ddd; background: #f9f9f9; } .qa .q { color: #111; } .qa .a { color: #444; } .qa .a strong { color: #111; } .section-title { color: #D62300; border-color: #D62300; } .header { border-color: #ddd; } .header p { color: #666; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<a class="back-link" href="/presentation.html">← Вернуться к презентации</a>
+
+<div class="header">
+<svg width="64" height="64" viewBox="5 5 38 38" fill="none"><circle cx="16" cy="16" r="10" fill="#D62300"/><circle cx="32" cy="16" r="10" fill="#F5A623"/><circle cx="16" cy="32" r="10" fill="#FF8733"/><circle cx="32" cy="32" r="10" fill="#FFD54F"/><circle cx="24" cy="24" r="8.5" fill="#502314"/><text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial,sans-serif">S</text></svg>
+<h1>Ответы на вопросы по проекту</h1>
+<p>Supply Department — Портал закупок</p>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Общие вопросы о системе</div>
+
+<div class="qa">
+<div class="q">Что это за система?</div>
+<div class="a">Веб-приложение для управления закупками. Автоматизирует расчёт заказов, анализ остатков, планирование потребностей и контроль поставок. Заменяет ручную работу в Excel.</div>
+</div>
+
+<div class="qa">
+<div class="q">Какую проблему решает?</div>
+<div class="a">Раньше расчёт одного заказа занимал <strong>до 40 минут</strong> в Excel с риском ошибок. Система делает то же самое за <strong>30 секунд</strong>, без ошибок и с полной прозрачностью — кто, что и когда заказал.</div>
+</div>
+
+<div class="qa">
+<div class="q">Для кого предназначена?</div>
+<div class="a">Для отдела закупок (Supply Department). Основные пользователи — менеджеры по закупкам. Также есть доступ для руководства (режим наблюдателя) и администраторов.</div>
+</div>
+
+<div class="qa">
+<div class="q">Система уже работает или это прототип?</div>
+<div class="a"><strong>Система полностью рабочая и развёрнута на сервере.</strong> Все модули функционируют: расчёт заказов, анализ, планирование, история, контроль поставок, управление пользователями.</div>
+</div>
+
+<div class="qa">
+<div class="q">Сколько юрлиц поддерживает?</div>
+<div class="a">Сейчас три: <strong>Бургер БК</strong>, <strong>Воглия Матта</strong> и <strong>Пицца Стар</strong>. Каждое юрлицо работает со своими данными — заказы, остатки, расход полностью разделены. Добавление новых юрлиц возможно.</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Как работает расчёт заказа</div>
+
+<div class="qa">
+<div class="q">Как система считает, сколько нужно заказать?</div>
+<div class="a">По формуле: <strong>средний расход в день × количество дней до следующей поставки − текущий остаток + страховочный запас</strong>. Результат округляется по кратности упаковки (например, если товар продаётся коробками по 6 — заказ будет кратен 6).</div>
+</div>
+
+<div class="qa">
+<div class="q">Откуда берутся данные о расходе?</div>
+<div class="a">Из файла, который <strong>скачивается из 1С и загружается в систему через импорт</strong>. Это занимает пару минут. Система анализирует расход за выбранный период (обычно 7–14 дней) и рассчитывает среднее.</div>
+</div>
+
+<div class="qa">
+<div class="q">А если расход нетипичный (праздники, акции)?</div>
+<div class="a">Менеджер <strong>всегда может скорректировать</strong> рассчитанное количество вручную перед отправкой. Система — помощник, а не замена здравому смыслу. Также есть настройка страховочных дней для подстраховки.</div>
+</div>
+
+<div class="qa">
+<div class="q">Учитывает ли система график доставок?</div>
+<div class="a">Да. В системе задан <strong>график доставок в рестораны</strong> — по дням недели для каждого поставщика. Расчёт автоматически учитывает, когда будет следующая доставка, и считает потребность именно до этой даты.</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Данные и интеграции</div>
+
+<div class="qa">
+<div class="q">Как данные попадают в систему?</div>
+<div class="a">Через <strong>ручной импорт файлов из 1С</strong>. Сотрудник скачивает файл с остатками/расходом из 1С и загружает его в систему через встроенный импорт. Автоматической связки с 1С сейчас нет.</div>
+</div>
+
+<div class="qa">
+<div class="q">Можно ли выгрузить данные из системы?</div>
+<div class="a">Да. Заказы, планы и аналитические данные <strong>экспортируются в Excel</strong>. Заказы также можно отправить поставщику через мессенджер или email прямо из системы.</div>
+</div>
+
+<div class="qa">
+<div class="q">Как часто нужно обновлять остатки?</div>
+<div class="a">Рекомендуется <strong>перед каждым расчётом заказа</strong> — обычно ежедневно или по мере необходимости. Загрузка файла занимает меньше минуты.</div>
+</div>
+
+<div class="qa">
+<div class="q">Будет ли автоматическая загрузка из 1С?</div>
+<div class="a">Это одно из направлений развития. Сейчас работает ручной импорт — он простой и надёжный. Автоматизация возможна после согласования с IT-отделом.</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Безопасность и доступ</div>
+
+<div class="qa">
+<div class="q">Кто имеет доступ к системе?</div>
+<div class="a">Только <strong>авторизованные пользователи</strong> с логином и паролем. Создаёт пользователей администратор. Три роли: администратор (полный доступ), сотрудник (работа с заказами), наблюдатель (только просмотр).</div>
+</div>
+
+<div class="qa">
+<div class="q">Видит ли одно юрлицо данные другого?</div>
+<div class="a"><strong>Нет.</strong> Данные каждого юрлица полностью изолированы. Пользователь видит только то юрлицо, к которому привязан. Общие только справочники товаров и поставщиков (там, где это необходимо).</div>
+</div>
+
+<div class="qa">
+<div class="q">Как защищены данные?</div>
+<div class="a">
+<ul>
+<li>Пароли <strong>зашифрованы</strong> (bcrypt)</li>
+<li>API защищён <strong>ключами</strong></li>
+<li>Все запросы <strong>валидируются</strong> на сервере</li>
+<li>Защита от SQL-инъекций и других атак</li>
+<li><strong>Аудит-лог</strong> — записывается каждое действие (кто, когда, что сделал)</li>
+<li>Сессии имеют <strong>тайм-аут</strong> — автоматический выход при бездействии</li>
+</ul>
+</div>
+</div>
+
+<div class="qa">
+<div class="q">Можно ли узнать, кто изменил заказ?</div>
+<div class="a">Да. <strong>Аудит-лог</strong> фиксирует все действия: создание, изменение, удаление заказов. Видно кто, когда и что именно изменил.</div>
+</div>
+
+<div class="qa">
+<div class="q">Где хранятся данные?</div>
+<div class="a">На <strong>корпоративном сервере</strong>. База данных MariaDB (совместима с MySQL). Данные не уходят на внешние сервисы.</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Техническая часть</div>
+
+<div class="qa">
+<div class="q">На чём написана система?</div>
+<div class="a">Интерфейс: <strong>Vue 3</strong> (современный фреймворк для веб-приложений). Сервер: <strong>PHP + MariaDB</strong>. Всё работает через обычный веб-сервер (nginx).</div>
+</div>
+
+<div class="qa">
+<div class="q">Нужно ли что-то устанавливать?</div>
+<div class="a"><strong>Нет.</strong> Система работает в браузере. Пользователь открывает ссылку — и работает. Поддерживаются Chrome, Firefox, Safari, Edge.</div>
+</div>
+
+<div class="qa">
+<div class="q">Работает ли с телефона или планшета?</div>
+<div class="a">Да. Интерфейс <strong>адаптивный</strong> — подстраивается под любой размер экрана. Все функции доступны с мобильного устройства.</div>
+</div>
+
+<div class="qa">
+<div class="q">Что будет, если сервер упадёт?</div>
+<div class="a">Все данные хранятся в базе данных и <strong>не теряются</strong>. После восстановления сервера система продолжает работать с того же места. Рекомендуется настроить регулярное резервное копирование базы.</div>
+</div>
+
+<div class="qa">
+<div class="q">Сколько пользователей может работать одновременно?</div>
+<div class="a">Система рассчитана на <strong>десятки одновременных пользователей</strong>. Для текущего масштаба (3 юрлица, несколько менеджеров) — с большим запасом.</div>
+</div>
+
+<div class="qa">
+<div class="q">Кто поддерживает и развивает систему?</div>
+<div class="a">Система <strong>разработана внутри компании</strong>. Поддержка и развитие — силами внутренней команды. Нет зависимости от внешних подрядчиков.</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Аналитика и контроль</div>
+
+<div class="qa">
+<div class="q">Какую аналитику даёт система?</div>
+<div class="a">
+<ul>
+<li><strong>Тренды расхода</strong> — графики по дням, неделям, месяцам</li>
+<li><strong>Обнаружение аномалий</strong> — резкие скачки расхода подсвечиваются</li>
+<li><strong>Сравнение периодов</strong> — эта неделя vs прошлая</li>
+<li><strong>Светофор запасов</strong> — моментальная оценка: что критично, что в норме, чего избыток</li>
+<li><strong>Детализация по товарам</strong> — фильтры по поставщику, категории, периоду</li>
+</ul>
+</div>
+</div>
+
+<div class="qa">
+<div class="q">Можно ли отследить историю заказов?</div>
+<div class="a">Да. <strong>Все заказы сохраняются</strong> с датой, составом и автором. Можно просмотреть любой прошлый заказ, а также повторить его — система подставит те же позиции.</div>
+</div>
+
+<div class="qa">
+<div class="q">Как работает контроль поставок?</div>
+<div class="a">После доставки можно <strong>сравнить план с фактом</strong>: что заказали vs что привезли. Система подсвечивает расхождения и показывает, на сколько дней хватит привезённого товара.</div>
+</div>
+
+<div class="qa">
+<div class="q">Что такое «светофор запасов»?</div>
+<div class="a">Автоматическая оценка каждого товара по уровню остатка:
+<ul>
+<li>🔴 <strong>Критично</strong> — товар скоро закончится, нужно заказать срочно</li>
+<li>🟠 <strong>Внимание</strong> — остаток ниже нормы</li>
+<li>🟢 <strong>Норма</strong> — всё в порядке</li>
+<li>🔵 <strong>Избыток</strong> — товара слишком много, возможно заморозка средств</li>
+</ul>
+</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Планы развития</div>
+
+<div class="qa">
+<div class="q">Что планируется добавить?</div>
+<div class="a">Три ключевых направления:
+<ul>
+<li><strong>Telegram-бот</strong> — заказы и уведомления прямо в мессенджере</li>
+<li><strong>Модуль ПСЦ</strong> — управление полной себестоимостью продукции</li>
+<li><strong>Цены товаров</strong> — отслеживание закупочных цен, сравнение и история изменений</li>
+</ul>
+</div>
+</div>
+
+<div class="qa">
+<div class="q">Можно ли добавить новые функции по запросу?</div>
+<div class="a">Да. Система спроектирована модульно — <strong>новые функции добавляются без остановки работы</strong>. Любые пожелания можно обсудить и реализовать.</div>
+</div>
+
+<div class="qa">
+<div class="q">Планируется ли интеграция с другими системами?</div>
+<div class="a">Это возможно. Архитектура позволяет добавлять интеграции. Конкретные направления определяются по потребностям бизнеса.</div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<div class="section">
+<div class="section-title">Внедрение</div>
+
+<div class="qa">
+<div class="q">Как быстро можно начать работать?</div>
+<div class="a">Система <strong>уже развёрнута и готова</strong>. Для старта нужно: создать учётные записи пользователей и загрузить справочники (товары, поставщики, графики доставок в рестораны). Это вопрос нескольких часов.</div>
+</div>
+
+<div class="qa">
+<div class="q">Нужно ли обучение сотрудников?</div>
+<div class="a">Интерфейс <strong>интуитивно понятный</strong> — большинство функций не требуют обучения. Для первого знакомства достаточно короткой демонстрации (15–20 минут). Все подписи и подсказки на русском языке.</div>
+</div>
+
+<div class="qa">
+<div class="q">Какие риски при внедрении?</div>
+<div class="a"><strong>Минимальные.</strong> Система не заменяет существующие процессы резко — можно начать с одного юрлица или одного поставщика, убедиться что всё работает, и расширить. Старый способ работы (Excel) никуда не девается и остаётся доступным.</div>
+</div>
+
+<div class="qa">
+<div class="q">Что нужно от IT-отдела?</div>
+<div class="a">Сервер уже работает. IT-отдел может потребоваться для: настройки резервного копирования базы данных, настройки доступа к серверу из сети, и (в перспективе) для согласования автоматической связки с 1С.</div>
+</div>
+</div>
+
+</div>
+
+<button class="print-btn" onclick="window.print()">🖨️ Распечатать</button>
+</body>
+</html>
