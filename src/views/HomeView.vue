@@ -248,6 +248,9 @@ onMounted(async () => {
   if (route.query.showLogin === 'true' || route.query.redirect) {
     loginRedirectTo.value = route.query.redirect || null;
     openLogin();
+    if (route.query.expired === 'true') {
+      toast.warning('Сессия истекла', 'Войдите заново для продолжения работы');
+    }
   }
   document.addEventListener('click', handleOutsideClick);
   initEmberGlow();

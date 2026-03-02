@@ -449,13 +449,13 @@ async function loadOrders() {
     if (tab.value === 'received') mainSortAsc.value = false
     else mainSortAsc.value = true
 
-    await loadCounts()
+    await loadCounts(myRequestId)
   } finally {
     loading.value = false
   }
 }
 
-async function loadCounts() {
+async function loadCounts(requestId) {
   const today = todayStr()
   const le = legalEntity.value
 
@@ -463,6 +463,7 @@ async function loadCounts() {
     db.from('orders').select('id').eq('legal_entity', le).is('received_at', null).gt('delivery_date', today).limit(200),
     db.from('orders').select('id').eq('legal_entity', le).is('received_at', null).lte('delivery_date', today).limit(200),
   ])
+  if (requestId !== undefined && requestId !== _loadRequestId) return
   transitCount.value = transitRes.data?.length ?? 0
   overdueCount.value = overdueRes.data?.length ?? 0
 }
@@ -669,9 +670,9 @@ async function acceptAsOrdered() {
   try {
     const items = drawerItems.value
     const userName = userStore.currentUser?.name || 'Неизвестно'
-    for (const item of items) {
-      await db.from('order_items').update({ received_qty: item.qty_boxes }).eq('id', item.id)
-    }
+    await db.rpc('batch_update_received_qty', {
+      items: items.map(i => ({ id: i.id, received_qty: i.qty_boxes }))
+    })
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
     await db.from('orders').update({ received_at: now, received_by: userName }).eq('id', selectedOrder.value.id)
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
@@ -701,12 +702,11 @@ async function saveReceived() {
   saving.value = true
   try {
     const userName = userStore.currentUser?.name || 'Неизвестно'
-    for (const item of itemsWithFact) {
-      await db.from('order_items').update({ received_qty: item._factValue }).eq('id', item.id)
-    }
-    for (const item of drawerItems.value.filter(i => i._factValue === null)) {
-      await db.from('order_items').update({ received_qty: item.qty_boxes }).eq('id', item.id)
-    }
+    const allItems = drawerItems.value.map(i => ({
+      id: i.id,
+      received_qty: i._factValue !== null ? i._factValue : i.qty_boxes
+    }))
+    await db.rpc('batch_update_received_qty', { items: allItems })
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
     await db.from('orders').update({ received_at: now, received_by: userName }).eq('id', selectedOrder.value.id)
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
@@ -733,9 +733,9 @@ async function revertToTransit() {
   try {
     const userName = userStore.currentUser?.name || 'Неизвестно'
     const orderId = selectedOrder.value.id
-    for (const item of drawerItems.value) {
-      await db.from('order_items').update({ received_qty: null }).eq('id', item.id)
-    }
+    await db.rpc('batch_update_received_qty', {
+      items: drawerItems.value.map(i => ({ id: i.id, received_qty: null }))
+    })
     await db.from('orders').update({ received_at: null, received_by: null }).eq('id', orderId)
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
     await db.from('audit_log').insert({

@@ -64,8 +64,8 @@ function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', random_
 function verifyAndMigratePassword($pdo, $userName, $inputPassword, $storedHash) {
     // Сначала проверяем bcrypt-хеш
     if (password_verify($inputPassword, $storedHash)) return true;
-    // Fallback: прямое сравнение (для plain text паролей)
-    if ($storedHash === $inputPassword) {
+    // Fallback: прямое сравнение (для plain text паролей, безопасное по времени)
+    if (hash_equals($storedHash, $inputPassword)) {
         // Ленивая миграция: хешируем и обновляем в БД
         $hash = password_hash($inputPassword, PASSWORD_BCRYPT);
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$hash, $userName]);
@@ -98,12 +98,14 @@ function getSessionUser($pdo) {
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) return null;
+    // Скользящая сессия: продлеваем на 7 дней при каждом обращении
+    $pdo->prepare("UPDATE user_sessions SET expires_at = ? WHERE token = ?")->execute([date('Y-m-d H:i:s', strtotime('+7 days')), $token]);
     return $row;
 }
 
 function createSessionToken($pdo, $userName) {
     $token = bin2hex(random_bytes(32));
-    $expires = date('Y-m-d H:i:s', strtotime('+30 days'));
+    $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
     // Ограничиваем количество сессий на пользователя (макс 5)
     $pdo->prepare("DELETE FROM user_sessions WHERE user_name = ? AND id NOT IN (SELECT id FROM (SELECT id FROM user_sessions WHERE user_name = ? ORDER BY created_at DESC LIMIT 4) AS t)")->execute([$userName, $userName]);
     $pdo->prepare("INSERT INTO user_sessions (user_name, token, expires_at) VALUES (?, ?, ?)")->execute([$userName, $token, $expires]);
@@ -327,9 +329,9 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT value FROM settings WHERE `key`='order_calculator_password'"); $s->execute();
         $stored = $s->fetchColumn();
         if ($stored) {
-            $ok = password_verify($pwd, $stored) || $stored === $pwd;
+            $ok = password_verify($pwd, $stored) || hash_equals($stored, $pwd);
             if ($ok) {
-                if ($stored === $pwd) {
+                if (hash_equals($stored, $pwd)) {
                     $hash = password_hash($pwd, PASSWORD_BCRYPT);
                     $pdo->prepare("UPDATE settings SET value=? WHERE `key`='order_calculator_password'")->execute([$hash]);
                 }
@@ -593,11 +595,33 @@ if ($endpoint === 'rpc') {
         $pdo->prepare("DELETE FROM notifications WHERE id = ? AND type = 'broadcast'")->execute([$id]);
         respond(['success' => true]);
     }
+    if ($fn === 'batch_update_received_qty') {
+        $items = $body['items'] ?? [];
+        if (!is_array($items) || empty($items)) respond(['error' => 'items required'], 400);
+        if (count($items) > 500) respond(['error' => 'Too many items (max 500)'], 400);
+        try {
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare("UPDATE `order_items` SET `received_qty` = ? WHERE `id` = ?");
+            foreach ($items as $item) {
+                $id = $item['id'] ?? null;
+                if (!$id) continue;
+                $qty = array_key_exists('received_qty', $item) ? $item['received_qty'] : null;
+                $stmt->execute([$qty, $id]);
+            }
+            $pdo->commit();
+            respond(['success' => true, 'count' => count($items)]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("batch_update_received_qty error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
     if ($fn === 'replace_analysis_data') {
         $legalEntity = $body['legal_entity'] ?? '';
         $items = $body['items'] ?? [];
         if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
         $allowed = ['id','legal_entity','sku','stock','consumption','period_days','updated_by','updated_at'];
         try {
             $pdo->beginTransaction();
@@ -624,6 +648,7 @@ if ($endpoint === 'rpc') {
         $items = $body['items'] ?? [];
         if (!$orderId) respond(['error' => 'order_id required'], 400);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
         try {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);
@@ -657,6 +682,7 @@ if ($endpoint === 'rpc') {
         $items = $body['items'] ?? [];
         if (!$restaurantId) respond(['error' => 'restaurant_id required'], 400);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        if (count($items) > 500) respond(['error' => 'Too many items (max 500)'], 400);
         try {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `delivery_schedule` WHERE `restaurant_id`=?")->execute([$restaurantId]);
@@ -693,6 +719,12 @@ $noInsertDelete = ['settings'];
 $appendOnly = ['audit_log'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
+
+// RBAC: viewer может только читать
+$sessionUser = getSessionUser($pdo);
+if ($sessionUser && ($sessionUser['role'] ?? '') === 'viewer' && $method !== 'GET') {
+    respond(['error' => 'Недостаточно прав (только просмотр)'], 403);
+}
 
 // Enforce read-only
 if (in_array($table, $readOnly) && $method !== 'GET') {
@@ -917,10 +949,11 @@ if ($method === 'DELETE') {
     }
     // Аудит-лог для удалений
     if ($s->rowCount() > 0 && !empty($deletedIds)) {
+        $deletedBy = $sessionUser ? $sessionUser['name'] : 'unknown';
         try {
             foreach ($deletedIds as $did) {
-                $pdo->prepare("INSERT INTO `audit_log` (`action`, `entity_type`, `entity_id`, `details`, `created_at`) VALUES (?, ?, ?, '{}', NOW())")
-                    ->execute([$table . '_deleted', $table, $did]);
+                $pdo->prepare("INSERT INTO `audit_log` (`action`, `entity_type`, `entity_id`, `user_name`, `details`, `created_at`) VALUES (?, ?, ?, ?, '{}', NOW())")
+                    ->execute([$table . '_deleted', $table, $did, $deletedBy]);
             }
         } catch (PDOException $e) { /* не блокируем ответ */ }
     }

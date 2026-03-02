@@ -10,6 +10,16 @@ function buildHeaders() {
   return h;
 }
 
+let _onAuthError = null;
+let _authErrorFired = false;
+export function setAuthErrorHandler(fn) { _onAuthError = fn; }
+function handleAuthError() {
+  if (_authErrorFired) return;
+  _authErrorFired = true;
+  _onAuthError?.();
+  setTimeout(() => { _authErrorFired = false; }, 5000);
+}
+
 async function fetchWithRetry(url, opts, maxRetries = 2) {
   for (let attempt = 0; ; attempt++) {
     const controller = new AbortController();
@@ -104,6 +114,7 @@ class QueryBuilder {
     try {
       if (this._method === 'GET') {
         const r = await fetchWithRetry(url, { headers: buildHeaders() });
+        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         let d = await r.json();
         if (Array.isArray(d)) d = d.map(row => parseJsonFields(row));
@@ -119,6 +130,7 @@ class QueryBuilder {
       if (this._method === 'POST') {
         const b = this._body.length === 1 ? this._body[0] : this._body;
         const r = await fetchWithRetry(url, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(b) });
+        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         let d = await r.json();
         if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
@@ -127,6 +139,7 @@ class QueryBuilder {
 
       if (this._method === 'PATCH') {
         const r = await fetchWithRetry(url, { method: 'PATCH', headers: buildHeaders(), body: JSON.stringify(this._body) });
+        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         let d = await r.json();
         if (Array.isArray(d)) d = d.map(parseJsonFields);
@@ -135,6 +148,7 @@ class QueryBuilder {
 
       if (this._method === 'DELETE') {
         const r = await fetchWithRetry(url, { method: 'DELETE', headers: buildHeaders() });
+        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
         return { data: await r.json(), error: null };
       }
@@ -156,6 +170,7 @@ function parseJsonFields(row) {
 async function rpc(fn, params = {}) {
   try {
     const r = await fetchWithRetry(`${API_BASE}/rpc/${fn}`, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) });
+    if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
     if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
     return { data: await r.json(), error: null };
   } catch (e) { return { data: null, error: e.message }; }
