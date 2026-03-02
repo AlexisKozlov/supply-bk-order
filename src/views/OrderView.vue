@@ -590,9 +590,30 @@ function onUnitChange(e) {
 }
 
 // ─── Сохранение в БД ──────────────────────────────────────────────────────────
-function openSaveModal() {
+async function openSaveModal() {
   const { lines } = buildOrderText();
   if (!lines.length) { toast.error('Нет позиций с заказом', ''); return; }
+
+  // Проверка дубля: только для новых заказов и если выбран поставщик
+  if (!orderStore.editingOrderId && orderStore.settings.supplier && orderStore.settings.deliveryDate) {
+    const dateStr = toLocalDateStr(orderStore.settings.deliveryDate);
+    const { data } = await db.from('orders')
+      .select('id, created_by, created_at')
+      .eq('legal_entity', orderStore.settings.legalEntity)
+      .eq('supplier', orderStore.settings.supplier)
+      .eq('delivery_date', dateStr)
+      .limit(1);
+    if (data && data.length) {
+      const existing = data[0];
+      const author = existing.created_by || 'неизвестно';
+      const ok = await confirmAction(
+        'Заказ уже существует',
+        `Заказ на «${orderStore.settings.supplier}» на ${dateStr} уже создан (автор: ${author}). Создать ещё один?`
+      );
+      if (!ok) return;
+    }
+  }
+
   saveModalLines.value = lines;
   showSaveModal.value = true;
 }

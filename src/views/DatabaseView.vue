@@ -47,10 +47,16 @@
 
     <!-- Товары -->
     <div v-if="activeTab==='products'">
+      <div v-if="!loading && filteredProducts.length" class="db-sort-bar">
+        <span class="db-sort-label">Сортировка:</span>
+        <button class="db-sort-btn" :class="{ active: prodSortKey === 'name' }" @click="toggleProdSort('name')">Название {{ prodSortIcon('name') }}</button>
+        <button class="db-sort-btn" :class="{ active: prodSortKey === 'sku' }" @click="toggleProdSort('sku')">Артикул {{ prodSortIcon('sku') }}</button>
+        <button class="db-sort-btn" :class="{ active: prodSortKey === 'supplier' }" @click="toggleProdSort('supplier')">Поставщик {{ prodSortIcon('supplier') }}</button>
+      </div>
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredProducts.length" style="text-align:center;padding:40px;color:var(--text-muted);">Карточки не найдены</div>
+      <div v-else-if="!sortedProducts.length" style="text-align:center;padding:40px;color:var(--text-muted);">Карточки не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="p in filteredProducts" :key="p.id" class="db-card" :class="{ 'db-card-inactive': p.is_active === 0 || p.is_active === '0' }" @click="!isViewer && editProduct(p)" :style="isViewer ? 'cursor:default' : ''">
+        <div v-for="p in sortedProducts" :key="p.id" class="db-card" :class="{ 'db-card-inactive': p.is_active === 0 || p.is_active === '0' }" @click="!isViewer && editProduct(p)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
             <div class="db-card-title">
               <span v-if="p.sku" class="db-card-sku">{{ p.sku }}</span>
@@ -74,10 +80,14 @@
 
     <!-- Поставщики -->
     <div v-if="activeTab==='suppliers'">
+      <div v-if="!loading && filteredSuppliers.length" class="db-sort-bar">
+        <span class="db-sort-label">Сортировка:</span>
+        <button class="db-sort-btn" :class="{ active: suppSortKey === 'short_name' }" @click="toggleSuppSort('short_name')">Название {{ suppSortIcon('short_name') }}</button>
+      </div>
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!filteredSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
+      <div v-else-if="!sortedSuppliers.length" style="text-align:center;padding:40px;color:var(--text-muted);">Поставщики не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="s in filteredSuppliers" :key="s.id" class="db-card" @click="!isViewer && editSupplier(s)" :style="isViewer ? 'cursor:default' : ''">
+        <div v-for="s in sortedSuppliers" :key="s.id" class="db-card" @click="!isViewer && editSupplier(s)" :style="isViewer ? 'cursor:default' : ''">
           <div class="db-card-top">
             <span class="db-card-supplier-name">{{ s.short_name }}</span>
             <span v-if="s.full_name" style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ s.full_name }}</span>
@@ -268,6 +278,29 @@ const expandedGroups = ref(new Set());
 const renameModal = ref({ show: false, oldName: '', newName: '' });
 const restModal = ref({ show: false, data: {}, saving: false });
 
+// ─── Сортировка ──────────────────────────────────────────────────────────────
+const prodSortKey = ref('name');
+const prodSortAsc = ref(true);
+const suppSortKey = ref('short_name');
+const suppSortAsc = ref(true);
+
+function toggleProdSort(key) {
+  if (prodSortKey.value === key) prodSortAsc.value = !prodSortAsc.value;
+  else { prodSortKey.value = key; prodSortAsc.value = true; }
+}
+function toggleSuppSort(key) {
+  if (suppSortKey.value === key) suppSortAsc.value = !suppSortAsc.value;
+  else { suppSortKey.value = key; suppSortAsc.value = true; }
+}
+function prodSortIcon(key) {
+  if (prodSortKey.value !== key) return '⇅';
+  return prodSortAsc.value ? '↑' : '↓';
+}
+function suppSortIcon(key) {
+  if (suppSortKey.value !== key) return '⇅';
+  return suppSortAsc.value ? '↑' : '↓';
+}
+
 const filteredProducts = computed(() => {
   const q = searchQuery.value.toLowerCase();
   let list = products.value;
@@ -276,12 +309,34 @@ const filteredProducts = computed(() => {
   if (!q) return list;
   return list.filter(p => (p.name||'').toLowerCase().includes(q) || (p.sku||'').toLowerCase().includes(q) || (p.supplier||'').toLowerCase().includes(q));
 });
+
+const sortedProducts = computed(() => {
+  const key = prodSortKey.value;
+  const asc = prodSortAsc.value;
+  return [...filteredProducts.value].sort((a, b) => {
+    const va = (a[key] || '').toString().toLowerCase();
+    const vb = (b[key] || '').toString().toLowerCase();
+    return asc ? va.localeCompare(vb, 'ru') : vb.localeCompare(va, 'ru');
+  });
+});
+
 const inactiveCount = computed(() => products.value.filter(p => p.is_active === 0 || p.is_active === '0').length);
 const noAnalogCount = computed(() => products.value.filter(p => !p.analog_group).length);
+
 const filteredSuppliers = computed(() => {
   const q = searchQuery.value.toLowerCase();
   if (!q) return suppliers.value;
   return suppliers.value.filter(s => (s.short_name||'').toLowerCase().includes(q) || (s.full_name||'').toLowerCase().includes(q));
+});
+
+const sortedSuppliers = computed(() => {
+  const key = suppSortKey.value;
+  const asc = suppSortAsc.value;
+  return [...filteredSuppliers.value].sort((a, b) => {
+    const va = (a[key] || '').toString().toLowerCase();
+    const vb = (b[key] || '').toString().toLowerCase();
+    return asc ? va.localeCompare(vb, 'ru') : vb.localeCompare(va, 'ru');
+  });
 });
 
 const analogGroups = computed(() => {
@@ -547,6 +602,39 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .db-card-inactive { opacity:0.5; }
 .db-card-inactive-badge { background:#FFEBEE; color:#E57373; font-weight:600; border:1px solid #E57373; }
 
+/* ═══ Sort bar ═══ */
+.db-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.db-sort-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.db-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: white;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.db-sort-btn:hover { border-color: var(--bk-orange); color: var(--text); }
+.db-sort-btn.active { border-color: var(--bk-orange); color: var(--bk-brown); background: #FFFBF5; }
+
 /* ═══ Toggle «Только активные» ═══ */
 .db-active-toggle {
   display: inline-flex;
@@ -650,6 +738,8 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 
   /* Toggle buttons wrap */
   .db-active-toggle { font-size: 11px; padding: 4px 8px; }
+  .db-sort-bar { gap: 4px; }
+  .db-sort-btn { font-size: 10px; padding: 3px 7px; }
 
   /* Contacts row */
   .db-card-contacts { margin-top: 2px; }

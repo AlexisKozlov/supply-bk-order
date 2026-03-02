@@ -90,6 +90,8 @@ const ACTION_LABELS = {
   plan_created: 'Создан',
   plan_updated: 'Изменён',
   plan_deleted: 'Удалён',
+  product_created: 'Создана',
+  product_updated: 'Изменена',
   delivery_date_changed: 'Дата доставки',
   received: 'Принят',
   reception_reverted: 'Приёмка отменена',

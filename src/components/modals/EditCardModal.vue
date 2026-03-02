@@ -4,7 +4,10 @@
       <div class="modal-box" style="width:480px;">
         <div class="modal-header">
           <h2><BkIcon v-if="product" name="edit" size="sm"/> <BkIcon v-else name="add" size="sm"/> {{ product ? 'Редактирование карточки' : 'Новый товар' }}</h2>
-          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
+            <button v-if="product" class="btn secondary" style="font-size:11px;padding:4px 10px;" @click="showAuditLog = true"><BkIcon name="note" size="xs"/> История</button>
+            <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
+          </div>
         </div>
 
         <div class="modal-row-2" style="grid-template-columns: 1fr 3fr;">
@@ -96,20 +99,32 @@
       @close="closeNewSupplier"
       @saved="onSupplierCreated"
     />
+
+    <!-- История изменений карточки -->
+    <AuditLogModal
+      v-if="showAuditLog"
+      :show="showAuditLog"
+      :loading="auditLoading"
+      :entries="auditEntries"
+      @close="showAuditLog = false"
+    />
   </Teleport>
 </template>
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { useFormDirty } from '@/composables/useFormDirty.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
+import AuditLogModal from '@/components/modals/AuditLogModal.vue';
 
 const orderStore = useOrderStore();
+const userStore = useUserStore();
 
 const props = defineProps({
   product: { type: Object, default: null },
@@ -121,6 +136,10 @@ const supplierOptions = ref([]);
 const showNewSupplier = ref(false);
 const showConfirmClose = ref(false);
 const prevSupplier = ref('');
+const showAuditLog = ref(false);
+const auditLoading = ref(false);
+const auditEntries = ref([]);
+const originalValues = ref(null);
 
 const form = ref({
   sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
@@ -159,9 +178,26 @@ onMounted(async () => {
     });
   }
   await loadSuppliers();
+  // Сохраняем снимок для отслеживания изменений (аудит)
+  originalValues.value = { ...form.value };
   saveSnapshot();
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
+
+// Загрузка истории изменений карточки
+watch(showAuditLog, async (val) => {
+  if (!val || !props.product?.id) return;
+  auditLoading.value = true;
+  try {
+    const { data } = await db.from('audit_log')
+      .select('*')
+      .eq('entity_type', 'product')
+      .eq('entity_id', String(props.product.id))
+      .order('created_at', { ascending: false })
+      .limit(50);
+    auditEntries.value = data || [];
+  } finally { auditLoading.value = false; }
+});
 
 function tryClose() {
   if (isDirty()) { showConfirmClose.value = true; return; }
@@ -205,6 +241,14 @@ async function onSupplierCreated() {
   }
 }
 
+// Подписи полей для аудит-лога
+const FIELD_LABELS = {
+  name: 'Наименование', sku: 'Артикул', supplier: 'Поставщик',
+  qty_per_box: 'Штук в коробке', boxes_per_pallet: 'Коробок на паллете',
+  multiplicity: 'Кратность', unit_of_measure: 'Ед. измерения',
+  analog_group: 'Группа аналогов', is_active: 'Видимость', category: 'Хранение',
+};
+
 async function save() {
   if (!form.value.name) { toast.error('Введите наименование', ''); return; }
   if (!form.value.qty_per_box || form.value.qty_per_box <= 0) { toast.error('Введите штук в коробке', ''); return; }
@@ -219,10 +263,44 @@ async function save() {
       is_active: form.value.is_active ? 1 : 0,
       category: form.value.category || null,
     };
-    let error;
-    if (props.product) { ({ error } = await db.from('products').update(payload).eq('id', props.product.id)); }
-    else { ({ error } = await db.from('products').insert([payload])); }
+    let error, insertedId;
+    if (props.product) {
+      ({ error } = await db.from('products').update(payload).eq('id', props.product.id));
+    } else {
+      const res = await db.from('products').insert([payload]);
+      error = res.error;
+      insertedId = res.data?.[0]?.id || res.data?.id;
+    }
     if (error) { toast.error('Ошибка', error.message || ''); return; }
+
+    // Аудит-лог
+    try {
+      const isEdit = !!props.product;
+      const entityId = isEdit ? props.product.id : insertedId;
+      const param_changes = [];
+      const old = originalValues.value || {};
+      const cur = form.value;
+      for (const key of Object.keys(FIELD_LABELS)) {
+        const oldVal = String(old[key] ?? '');
+        let curVal = String(cur[key] ?? '');
+        if (key === 'is_active') { curVal = cur[key] ? 'Да' : 'Нет'; }
+        const oldDisplay = key === 'is_active' ? (old[key] ? 'Да' : 'Нет') : oldVal;
+        if (isEdit && oldDisplay !== curVal) {
+          param_changes.push({ label: FIELD_LABELS[key], from: oldDisplay || '—', to: curVal || '—' });
+        }
+      }
+      // Пишем запись только если есть изменения (для update) или это создание
+      if (!isEdit || param_changes.length) {
+        await db.from('audit_log').insert([{
+          action: isEdit ? 'product_updated' : 'product_created',
+          entity_type: 'product',
+          entity_id: entityId ? String(entityId) : null,
+          user_name: userStore.currentUser?.name || null,
+          details: JSON.stringify(isEdit ? { param_changes } : { name: cur.name, sku: cur.sku }),
+        }]);
+      }
+    } catch (_) { /* аудит не должен блокировать сохранение */ }
+
     toast.success(props.product ? 'Обновлено' : 'Создано', '');
     emit('saved');
   } finally { saving.value = false; }
