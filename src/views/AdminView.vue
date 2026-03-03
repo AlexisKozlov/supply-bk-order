@@ -9,10 +9,6 @@
       <button class="adm-tab" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">
         <BkIcon name="user" size="sm"/> Пользователи <span class="adm-tab-count" :class="{ active: activeTab === 'users' }">{{ users.length }}</span>
       </button>
-      <button class="adm-tab" :class="{ active: activeTab === 'online' }" @click="activeTab = 'online'">
-        <BkIcon name="eye" size="sm"/> Онлайн
-        <span class="adm-tab-count" :class="{ active: activeTab === 'online' }">{{ onlineUsers.length }}</span>
-      </button>
       <button class="adm-tab" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
         <BkIcon name="warning" size="sm"/> Тех. работы
         <span v-if="maintenanceOn" class="adm-tab-dot"></span>
@@ -23,6 +19,16 @@
       <button class="adm-tab" :class="{ active: activeTab === 'audit' }" @click="activeTab = 'audit'">
         <BkIcon name="note" size="sm"/> Журнал
         <span class="adm-tab-count" :class="{ active: activeTab === 'audit' }">{{ auditTotal || '' }}</span>
+      </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'stats' }" @click="activeTab = 'stats'">
+        <BkIcon name="analytics" size="sm"/> Статистика
+      </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'backup' }" @click="activeTab = 'backup'">
+        <BkIcon name="database" size="sm"/> Бэкап
+      </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'">
+        <BkIcon name="key" size="sm"/> Сессии
+        <span class="adm-tab-count" :class="{ active: activeTab === 'sessions' }">{{ onlineUsers.length }}</span>
       </button>
     </div>
 
@@ -65,36 +71,6 @@
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ Онлайн ═══ -->
-    <div v-if="activeTab === 'online'" class="adm-section">
-      <div class="adm-toolbar">
-        <div class="adm-toolbar-info">{{ onlineUsers.length }} {{ onlineWord }} онлайн</div>
-        <button class="btn" @click="loadOnlineUsers" :disabled="onlineLoading">
-          <BkIcon name="redo" size="sm"/> Обновить
-        </button>
-      </div>
-
-      <div v-if="onlineLoading && !onlineUsers.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
-      <div v-else-if="!onlineUsers.length" class="adm-empty">Нет пользователей онлайн</div>
-
-      <div v-else class="adm-user-list">
-        <div v-for="u in onlineUsers" :key="u.user_name" class="adm-user-row" style="cursor:default;">
-          <div class="adm-user-avatar adm-avatar-online">
-            {{ initials(u.user_name) }}
-            <span class="adm-online-dot"></span>
-          </div>
-          <div class="adm-user-info">
-            <div class="adm-user-name">
-              {{ u.user_name }}
-              <span v-if="u.user_name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
-            </div>
-            <div class="adm-user-meta">{{ u.page || '—' }}</div>
-          </div>
-          <div class="adm-online-time">{{ formatOnlineTime(u.last_seen) }}</div>
         </div>
       </div>
     </div>
@@ -171,157 +147,474 @@
 
     <!-- ═══ Рассылка ═══ -->
     <div v-if="activeTab === 'broadcast'" class="adm-section">
-      <div class="adm-maint-card">
-        <div class="adm-maint-icon">
-          <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
-            <circle cx="24" cy="24" r="22" fill="rgba(253,189,16,0.08)" stroke="#FDBD10" stroke-width="2"/>
-            <path d="M24 12C24 12 12 18 12 28c0 3 0 5 1.5 6.5h21c1.5-1.5 1.5-3.5 1.5-6.5 0-10-12-16-12-16z" stroke="#FDBD10" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-            <rect x="20" y="34.5" width="8" height="3" rx="1.5" fill="#FDBD10" opacity=".5"/>
-            <path d="M21 37.5a3 3 0 006 0" stroke="#FDBD10" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <div class="adm-maint-body">
-          <h3 class="adm-maint-title">Рассылка уведомлений</h3>
-          <p class="adm-maint-desc">
-            Отправьте важное сообщение всем сотрудникам. Оно появится как всплывающее окно, которое нельзя пропустить.
-          </p>
-        </div>
-      </div>
-
-      <div class="adm-maint-msg-card" style="margin-top:16px;">
-        <h4 class="adm-maint-msg-title">Новое сообщение</h4>
-        <div style="display:flex;flex-direction:column;gap:10px;">
-          <input v-model="bcTitle" class="adm-maint-textarea" style="resize:none;height:auto;padding:10px 14px;" placeholder="Заголовок (необязательно)" />
-          <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения для всех сотрудников..."></textarea>
-        </div>
-        <button class="btn primary" style="margin-top:12px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim()">
-          {{ bcSending ? 'Отправка...' : 'Отправить всем' }}
+      <!-- Переключатель: Уведомления / Обновления -->
+      <div class="adm-audit-mode">
+        <button class="adm-audit-mode-btn" :class="{ active: broadcastMode === 'broadcast' }" @click="broadcastMode = 'broadcast'">
+          <BkIcon name="bell" size="sm"/> Уведомления
+        </button>
+        <button class="adm-audit-mode-btn" :class="{ active: broadcastMode === 'changelog' }" @click="broadcastMode = 'changelog'; loadChangelogIfNeeded()">
+          <BkIcon name="bulb" size="sm"/> Обновления
         </button>
       </div>
 
-      <div class="adm-maint-msg-card" style="margin-top:16px;">
-        <h4 class="adm-maint-msg-title">История рассылок</h4>
-        <div v-if="bcHistoryLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
-        <div v-else-if="!bcHistory.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Ещё не было рассылок</div>
-        <div v-else style="display:flex;flex-direction:column;gap:8px;">
-          <div v-for="b in bcHistory" :key="b.id" class="bc-history-item">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-              <div style="flex:1;min-width:0;">
-                <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
-                <div class="bc-history-msg">{{ b.message }}</div>
-                <div class="bc-history-meta">{{ b.created_by }} &middot; {{ formatBcDate(b.created_at) }}</div>
+      <!-- Уведомления -->
+      <template v-if="broadcastMode === 'broadcast'">
+        <div class="adm-maint-card">
+          <div class="adm-maint-icon">
+            <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
+              <circle cx="24" cy="24" r="22" fill="rgba(253,189,16,0.08)" stroke="#FDBD10" stroke-width="2"/>
+              <path d="M24 12C24 12 12 18 12 28c0 3 0 5 1.5 6.5h21c1.5-1.5 1.5-3.5 1.5-6.5 0-10-12-16-12-16z" stroke="#FDBD10" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <rect x="20" y="34.5" width="8" height="3" rx="1.5" fill="#FDBD10" opacity=".5"/>
+              <path d="M21 37.5a3 3 0 006 0" stroke="#FDBD10" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="adm-maint-body">
+            <h3 class="adm-maint-title">Рассылка уведомлений</h3>
+            <p class="adm-maint-desc">
+              Отправьте важное сообщение всем сотрудникам. Оно появится как всплывающее окно, которое нельзя пропустить.
+            </p>
+          </div>
+        </div>
+
+        <div class="adm-maint-msg-card" style="margin-top:16px;">
+          <h4 class="adm-maint-msg-title">Новое сообщение</h4>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <input v-model="bcTitle" class="adm-maint-textarea" style="resize:none;height:auto;padding:10px 14px;" placeholder="Заголовок (необязательно)" />
+            <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения для всех сотрудников..."></textarea>
+          </div>
+          <button class="btn primary" style="margin-top:12px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim()">
+            {{ bcSending ? 'Отправка...' : 'Отправить всем' }}
+          </button>
+        </div>
+
+        <div class="adm-maint-msg-card" style="margin-top:16px;">
+          <h4 class="adm-maint-msg-title">История рассылок</h4>
+          <div v-if="bcHistoryLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
+          <div v-else-if="!bcHistory.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Ещё не было рассылок</div>
+          <div v-else style="display:flex;flex-direction:column;gap:8px;">
+            <div v-for="b in bcHistory" :key="b.id" class="bc-history-item">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <div style="flex:1;min-width:0;">
+                  <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
+                  <div class="bc-history-msg">{{ b.message }}</div>
+                  <div class="bc-history-meta">{{ b.created_by }} &middot; {{ formatBcDate(b.created_at) }}</div>
+                </div>
+                <button class="bc-delete-btn" @click="deleteBroadcast(b)" :disabled="b._deleting" title="Удалить рассылку">
+                  <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h1v10a2 2 0 002 2h8a2 2 0 002-2V6h1a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 2h4v1H8V4zm-2 4a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"/></svg>
+                </button>
               </div>
-              <button class="bc-delete-btn" @click="deleteBroadcast(b)" :disabled="b._deleting" title="Удалить рассылку">
-                <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h1v10a2 2 0 002 2h8a2 2 0 002-2V6h1a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 2h4v1H8V4zm-2 4a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"/></svg>
-              </button>
             </div>
           </div>
         </div>
-      </div>
+      </template>
+
+      <!-- Обновления (Что нового) -->
+      <template v-if="broadcastMode === 'changelog'">
+        <div class="adm-maint-msg-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h4 class="adm-maint-msg-title" style="margin:0;">Что нового</h4>
+            <button class="btn primary" style="font-size:12px;padding:5px 14px;" @click="openChangelogModal(null)">
+              <BkIcon name="add" size="sm"/> Добавить
+            </button>
+          </div>
+          <p class="adm-maint-msg-hint">Записи об обновлениях системы. Все пользователи видят их в разделе «Уведомления».</p>
+
+          <div v-if="changelogLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
+          <div v-else-if="!changelogEntries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей об обновлениях</div>
+          <div v-else style="display:flex;flex-direction:column;gap:6px;">
+            <div v-for="entry in changelogEntries" :key="entry.id" class="bc-history-item">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <div style="flex:1;min-width:0;">
+                  <div class="bc-history-title">
+                    <span class="adm-changelog-version">v{{ entry.version }}</span>
+                    {{ entry.title }}
+                  </div>
+                  <div v-if="entry.description" class="bc-history-msg">{{ entry.description }}</div>
+                  <div class="bc-history-meta">{{ entry.created_by }} &middot; {{ formatBcDate(entry.created_at) }}</div>
+                </div>
+                <div style="display:flex;gap:2px;flex-shrink:0;">
+                  <button class="bc-delete-btn" @click="openChangelogModal(entry)" title="Редактировать">
+                    <BkIcon name="edit" size="sm"/>
+                  </button>
+                  <button class="bc-delete-btn" @click="deleteChangelog(entry)" title="Удалить">
+                    <BkIcon name="delete" size="sm"/>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- ═══ Журнал ═══ -->
     <div v-if="activeTab === 'audit'" class="adm-section">
-      <div class="adm-audit-filters">
-        <div class="adm-audit-filter-row">
-          <div class="adm-audit-chips">
-            <button v-for="cat in auditCategories" :key="cat.value" class="adm-audit-chip"
-              :class="{ active: auditFilter.category === cat.value }" @click="auditFilter.category = cat.value; loadAudit(true)">
-              {{ cat.label }}
+      <!-- Переключатель: Аудит / Ошибки -->
+      <div class="adm-audit-mode">
+        <button class="adm-audit-mode-btn" :class="{ active: auditMode === 'audit' }" @click="auditMode = 'audit'">
+          <BkIcon name="note" size="sm"/> Аудит
+        </button>
+        <button class="adm-audit-mode-btn" :class="{ active: auditMode === 'errors' }" @click="auditMode = 'errors'; loadErrorsIfNeeded()">
+          <BkIcon name="error" size="sm"/> Ошибки
+        </button>
+      </div>
+
+      <!-- Аудит -->
+      <template v-if="auditMode === 'audit'">
+        <div class="adm-audit-filters">
+          <div class="adm-audit-filter-row">
+            <div class="adm-audit-chips">
+              <button v-for="cat in auditCategories" :key="cat.value" class="adm-audit-chip"
+                :class="{ active: auditFilter.category === cat.value }" @click="auditFilter.category = cat.value; loadAudit(true)">
+                {{ cat.label }}
+              </button>
+            </div>
+            <div class="adm-audit-right-filters">
+              <select v-model="auditFilter.user" @change="loadAudit(true)" class="adm-audit-select">
+                <option value="">Все пользователи</option>
+                <option v-for="u in auditUsers" :key="u" :value="u">{{ u }}</option>
+              </select>
+              <input type="date" v-model="auditFilter.dateFrom" @change="loadAudit(true)" class="adm-audit-date" />
+              <input type="date" v-model="auditFilter.dateTo" @change="loadAudit(true)" class="adm-audit-date" />
+            </div>
+          </div>
+        </div>
+
+        <div v-if="auditLoading && !auditEntries.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка журнала..." /></div>
+        <div v-else-if="!auditEntries.length" class="adm-empty">Нет записей</div>
+
+        <div v-else class="adm-audit-list">
+          <div v-for="log in auditEntries" :key="log.id" class="adm-audit-entry">
+            <div class="adm-audit-head">
+              <span class="adm-audit-badge" :class="auditBadgeClass(log.action)">{{ auditBadgeLabel(log.action) }}</span>
+              <span class="adm-audit-entity-badge" :class="'adm-audit-et-' + log.entity_type">{{ auditEntityLabel(log.entity_type) }}</span>
+              <span class="adm-audit-author">{{ log.user_name || '—' }}</span>
+              <span class="adm-audit-date-text">{{ formatAuditDate(log.created_at) }}</span>
+            </div>
+
+            <div v-if="log.details?.supplier" class="adm-audit-ctx">{{ log.details.supplier }}</div>
+            <div v-if="log.details?.restaurant_number" class="adm-audit-ctx">Ресторан {{ log.details.restaurant_number }}</div>
+
+            <div v-if="log.details?.param_changes?.length" class="adm-audit-params">
+              <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="adm-audit-param-chip">
+                {{ pc.label }}: {{ pc.from }} → {{ pc.to }}
+              </span>
+            </div>
+
+            <div v-if="log.action === 'delivery_date_changed' && log.details?.old_date" class="adm-audit-delivery">
+              {{ log.details.old_date }} → {{ log.details.new_date }}
+            </div>
+
+            <div v-if="log.action === 'received'" class="adm-audit-received">
+              <span>{{ log.details?.items_count || 0 }} позиций</span>
+              <span v-if="log.details?.discrepancies" class="adm-audit-disc">{{ log.details.discrepancies }} расхождений</span>
+              <span v-else class="adm-audit-no-disc">без расхождений</span>
+            </div>
+            <div v-if="log.action === 'received' && log.details?.items_with_discrepancy?.length" class="adm-audit-changes">
+              <span v-for="(item, i) in log.details.items_with_discrepancy" :key="i" class="adm-audit-ch adm-audit-ch-upd">
+                {{ item.name }}: {{ item.ordered }} → {{ item.received }}
+              </span>
+            </div>
+
+            <div v-if="log.action === 'reception_reverted' && log.details?.reverted_from" class="adm-audit-ctx" style="font-style:italic;">
+              Отменена приёмка от {{ log.details.reverted_from }}
+            </div>
+
+            <div v-if="log.details?.full_schedule" class="adm-audit-sched-row">
+              <span v-for="day in ['ПН','ВТ','СР','ЧТ','ПТ','СБ']" :key="day" class="adm-audit-sched-cell" :class="{ has: log.details.full_schedule[day] }">
+                <span class="adm-audit-sched-day">{{ day }}</span>
+                <span class="adm-audit-sched-time">{{ log.details.full_schedule[day] || '—' }}</span>
+              </span>
+            </div>
+
+            <div v-if="log.details?.changes?.length" class="adm-audit-changes">
+              <span v-for="(c, ci) in log.details.changes.slice(0, expandedAudit.has(log.id) ? 999 : 5)" :key="ci" class="adm-audit-ch" :class="{ 'adm-audit-ch-add': c.type==='added', 'adm-audit-ch-del': c.type==='removed', 'adm-audit-ch-upd': c.type==='changed' }">
+                <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
+                <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
+                <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>
+              </span>
+              <button v-if="log.details.changes.length > 5 && !expandedAudit.has(log.id)" class="adm-audit-more" @click="expandedAudit.add(log.id)">
+                ещё {{ log.details.changes.length - 5 }}...
+              </button>
+            </div>
+
+            <div v-if="log.details?.items_count && log.action !== 'received' && !log.details?.changes?.length" class="adm-audit-meta">{{ log.details.items_count }} позиций</div>
+            <div v-if="log.details?.name && log.entity_type === 'product'" class="adm-audit-ctx">{{ log.details.name }} <span v-if="log.details?.sku" style="opacity:.6;">({{ log.details.sku }})</span></div>
+          </div>
+
+          <div v-if="auditHasMore" style="text-align:center;padding:16px;">
+            <button class="btn" @click="loadAudit(false)" :disabled="auditLoading">
+              {{ auditLoading ? 'Загрузка...' : 'Показать ещё' }}
             </button>
           </div>
-          <div class="adm-audit-right-filters">
-            <select v-model="auditFilter.user" @change="loadAudit(true)" class="adm-audit-select">
-              <option value="">Все пользователи</option>
-              <option v-for="u in auditUsers" :key="u" :value="u">{{ u }}</option>
-            </select>
-            <input type="date" v-model="auditFilter.dateFrom" @change="loadAudit(true)" class="adm-audit-date" />
-            <input type="date" v-model="auditFilter.dateTo" @change="loadAudit(true)" class="adm-audit-date" />
+        </div>
+      </template>
+
+      <!-- Ошибки -->
+      <template v-if="auditMode === 'errors'">
+        <div class="adm-audit-filters">
+          <div class="adm-audit-filter-row">
+            <div class="adm-audit-chips">
+              <button v-for="l in errorLevelOptions" :key="l.value" class="adm-audit-chip"
+                :class="{ active: errorFilter.level === l.value }" @click="errorFilter.level = l.value; loadErrors(true)">
+                {{ l.label }}
+              </button>
+            </div>
+            <div class="adm-audit-right-filters">
+              <select v-model="errorFilter.source" @change="loadErrors(true)" class="adm-audit-select">
+                <option value="">Все источники</option>
+                <option value="frontend">Фронтенд</option>
+                <option value="backend">Бэкенд</option>
+              </select>
+              <button class="btn" style="font-size:12px;padding:5px 12px;" @click="clearErrors" :disabled="errorsClearing">
+                <BkIcon name="delete" size="sm"/> Очистить
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div v-if="errorsLoading && !errorEntries.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
+        <div v-else-if="!errorEntries.length" class="adm-empty">Ошибок не обнаружено</div>
+
+        <div v-else class="adm-audit-list">
+          <div v-for="log in errorEntries" :key="log.id" class="adm-audit-entry adm-error-entry" @click="toggleErrorStack(log.id)">
+            <div class="adm-audit-head">
+              <span class="adm-audit-badge" :class="errorBadgeClass(log.level)">{{ log.level }}</span>
+              <span class="adm-audit-entity-badge">{{ log.source }}</span>
+              <span v-if="log.user_name" class="adm-audit-author">{{ log.user_name }}</span>
+              <span class="adm-audit-date-text">{{ formatAuditDate(log.created_at) }}</span>
+            </div>
+            <div class="adm-error-message">{{ log.message }}</div>
+            <div v-if="log.url" class="adm-error-url">{{ log.url }}</div>
+            <div v-if="expandedErrors.has(log.id) && log.stack" class="adm-error-stack">{{ log.stack }}</div>
+          </div>
+          <div v-if="errorsHasMore" style="text-align:center;padding:16px;">
+            <button class="btn" @click="loadErrors(false)" :disabled="errorsLoading">
+              {{ errorsLoading ? 'Загрузка...' : 'Показать ещё' }}
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ═══ Статистика ═══ -->
+    <div v-if="activeTab === 'stats'" class="adm-section">
+      <div class="adm-toolbar">
+        <div class="adm-toolbar-info">Общая статистика системы</div>
+        <div class="adm-stats-period">
+          <button v-for="p in statsPeriods" :key="p.value" class="adm-audit-chip"
+            :class="{ active: statsPeriod === p.value }" @click="statsPeriod = p.value; loadStats()">
+            {{ p.label }}
+          </button>
         </div>
       </div>
 
-      <div v-if="auditLoading && !auditEntries.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка журнала..." /></div>
-      <div v-else-if="!auditEntries.length" class="adm-empty">Нет записей</div>
-
-      <div v-else class="adm-audit-list">
-        <div v-for="log in auditEntries" :key="log.id" class="adm-audit-entry">
-          <div class="adm-audit-head">
-            <span class="adm-audit-badge" :class="auditBadgeClass(log.action)">{{ auditBadgeLabel(log.action) }}</span>
-            <span class="adm-audit-entity-badge" :class="'adm-audit-et-' + log.entity_type">{{ auditEntityLabel(log.entity_type) }}</span>
-            <span class="adm-audit-author">{{ log.user_name || '—' }}</span>
-            <span class="adm-audit-date-text">{{ formatAuditDate(log.created_at) }}</span>
+      <div v-if="statsLoading" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
+      <template v-else>
+        <div class="adm-stats-cards">
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.orders_today ?? 0 }}</div>
+            <div class="adm-stat-label">Заказов сегодня</div>
           </div>
-
-          <!-- Supplier / context -->
-          <div v-if="log.details?.supplier" class="adm-audit-ctx">{{ log.details.supplier }}</div>
-
-          <!-- Restaurant number -->
-          <div v-if="log.details?.restaurant_number" class="adm-audit-ctx">Ресторан {{ log.details.restaurant_number }}</div>
-
-          <!-- Param changes -->
-          <div v-if="log.details?.param_changes?.length" class="adm-audit-params">
-            <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="adm-audit-param-chip">
-              {{ pc.label }}: {{ pc.from }} → {{ pc.to }}
-            </span>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.orders_total ?? 0 }}</div>
+            <div class="adm-stat-label">Всего заказов</div>
           </div>
-
-          <!-- Delivery date changed -->
-          <div v-if="log.action === 'delivery_date_changed' && log.details?.old_date" class="adm-audit-delivery">
-            {{ log.details.old_date }} → {{ log.details.new_date }}
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.plans_total ?? 0 }}</div>
+            <div class="adm-stat-label">Планов</div>
           </div>
-
-          <!-- Received -->
-          <div v-if="log.action === 'received'" class="adm-audit-received">
-            <span>{{ log.details?.items_count || 0 }} позиций</span>
-            <span v-if="log.details?.discrepancies" class="adm-audit-disc">{{ log.details.discrepancies }} расхождений</span>
-            <span v-else class="adm-audit-no-disc">без расхождений</span>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.active_sessions ?? 0 }}</div>
+            <div class="adm-stat-label">Активных сессий</div>
           </div>
-          <div v-if="log.action === 'received' && log.details?.items_with_discrepancy?.length" class="adm-audit-changes">
-            <span v-for="(item, i) in log.details.items_with_discrepancy" :key="i" class="adm-audit-ch adm-audit-ch-upd">
-              {{ item.name }}: {{ item.ordered }} → {{ item.received }}
-            </span>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.products_count ?? 0 }}</div>
+            <div class="adm-stat-label">Товаров</div>
           </div>
-
-          <!-- Reception reverted -->
-          <div v-if="log.action === 'reception_reverted' && log.details?.reverted_from" class="adm-audit-ctx" style="font-style:italic;">
-            Отменена приёмка от {{ log.details.reverted_from }}
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.suppliers_count ?? 0 }}</div>
+            <div class="adm-stat-label">Поставщиков</div>
           </div>
-
-          <!-- Schedule snapshot -->
-          <div v-if="log.details?.full_schedule" class="adm-audit-sched-row">
-            <span v-for="day in ['ПН','ВТ','СР','ЧТ','ПТ','СБ']" :key="day" class="adm-audit-sched-cell" :class="{ has: log.details.full_schedule[day] }">
-              <span class="adm-audit-sched-day">{{ day }}</span>
-              <span class="adm-audit-sched-time">{{ log.details.full_schedule[day] || '—' }}</span>
-            </span>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.users_count ?? 0 }}</div>
+            <div class="adm-stat-label">Пользователей</div>
           </div>
-
-          <!-- Item changes -->
-          <div v-if="log.details?.changes?.length" class="adm-audit-changes">
-            <span v-for="(c, ci) in log.details.changes.slice(0, expandedAudit.has(log.id) ? 999 : 5)" :key="ci" class="adm-audit-ch" :class="{ 'adm-audit-ch-add': c.type==='added', 'adm-audit-ch-del': c.type==='removed', 'adm-audit-ch-upd': c.type==='changed' }">
-              <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
-              <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
-              <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>
-            </span>
-            <button v-if="log.details.changes.length > 5 && !expandedAudit.has(log.id)" class="adm-audit-more" @click="expandedAudit.add(log.id)">
-              ещё {{ log.details.changes.length - 5 }}...
-            </button>
-          </div>
-
-          <!-- Items count -->
-          <div v-if="log.details?.items_count && log.action !== 'received' && !log.details?.changes?.length" class="adm-audit-meta">{{ log.details.items_count }} позиций</div>
-
-          <!-- Product name -->
-          <div v-if="log.details?.name && log.entity_type === 'product'" class="adm-audit-ctx">{{ log.details.name }} <span v-if="log.details?.sku" style="opacity:.6;">({{ log.details.sku }})</span></div>
         </div>
 
-        <div v-if="auditHasMore" style="text-align:center;padding:16px;">
-          <button class="btn" @click="loadAudit(false)" :disabled="auditLoading">
-            {{ auditLoading ? 'Загрузка...' : 'Показать ещё' }}
+        <div class="adm-stats-blocks">
+          <div class="adm-maint-msg-card">
+            <h4 class="adm-maint-msg-title">Заказы по юрлицам</h4>
+            <div v-if="!statsData.orders_by_entity?.length" class="adm-stats-empty">Нет данных</div>
+            <div v-else class="adm-stats-bars">
+              <div v-for="e in statsData.orders_by_entity" :key="e.legal_entity" class="adm-stats-bar-row">
+                <div class="adm-stats-bar-label">{{ e.legal_entity || '—' }}</div>
+                <div class="adm-stats-bar-track">
+                  <div class="adm-stats-bar-fill" :style="{ width: statsBarWidth(e.cnt) }"></div>
+                </div>
+                <div class="adm-stats-bar-val">{{ e.cnt }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="adm-maint-msg-card">
+            <h4 class="adm-maint-msg-title">Самые активные</h4>
+            <div v-if="!statsData.top_users?.length" class="adm-stats-empty">Нет данных</div>
+            <div v-else class="adm-stats-top-list">
+              <div v-for="(u, i) in statsData.top_users" :key="u.user_name" class="adm-stats-top-row">
+                <span class="adm-stats-top-num">{{ i + 1 }}</span>
+                <span class="adm-stats-top-name">{{ u.user_name || '—' }}</span>
+                <span class="adm-stats-top-cnt">{{ u.cnt }} заказов</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ═══ Резервное копирование ═══ -->
+    <div v-if="activeTab === 'backup'" class="adm-section">
+      <div class="adm-maint-card">
+        <div class="adm-maint-icon">
+          <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
+            <circle cx="24" cy="24" r="22" fill="rgba(33,150,243,0.08)" stroke="#2196F3" stroke-width="2"/>
+            <rect x="14" y="18" width="20" height="14" rx="3" stroke="#2196F3" stroke-width="2.5" fill="none"/>
+            <path d="M18 18v-4a6 6 0 0112 0v4" stroke="#2196F3" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="24" cy="25" r="2" fill="#2196F3"/>
+          </svg>
+        </div>
+        <div class="adm-maint-body">
+          <h3 class="adm-maint-title">Резервное копирование</h3>
+          <p class="adm-maint-desc">Выберите таблицы и юрлицо для выгрузки данных в Excel-файл. Каждая таблица станет отдельным листом.</p>
+        </div>
+      </div>
+
+      <div class="adm-maint-msg-card" style="margin-top:16px;">
+        <h4 class="adm-maint-msg-title">Юридическое лицо</h4>
+        <select v-model="backupEntity" class="adm-audit-select" style="width:100%;margin-top:6px;padding:8px 12px;">
+          <option value="">Все юрлица</option>
+          <option v-for="le in allEntities" :key="le" :value="le">{{ le }}</option>
+        </select>
+      </div>
+
+      <div class="adm-maint-msg-card" style="margin-top:12px;">
+        <h4 class="adm-maint-msg-title">Таблицы для выгрузки</h4>
+        <div class="adm-backup-tables">
+          <label v-for="t in backupTables" :key="t.name" class="adm-le-option">
+            <input type="checkbox" :value="t.name" v-model="backupSelected" />
+            <span class="adm-le-box"><BkIcon name="success" size="sm"/></span>
+            <span>{{ t.label }}</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">
+          <button class="btn" @click="backupSelected = backupTables.map(t => t.name)">Выбрать все</button>
+          <button class="btn" @click="backupSelected = []">Снять все</button>
+          <button class="btn primary" @click="exportBackup" :disabled="!backupSelected.length || backupExporting">
+            <BkIcon name="excel" size="sm"/> {{ backupExporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
           </button>
         </div>
       </div>
     </div>
+
+    <!-- ═══ Сессии ═══ -->
+    <div v-if="activeTab === 'sessions'" class="adm-section">
+      <!-- Онлайн -->
+      <div class="adm-maint-msg-card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <h4 class="adm-maint-msg-title" style="margin:0;">Сейчас онлайн — {{ onlineUsers.length }} {{ onlineWord }}</h4>
+          <button class="btn" style="font-size:12px;padding:4px 10px;" @click="loadOnlineUsers" :disabled="onlineLoading">
+            <BkIcon name="redo" size="sm"/>
+          </button>
+        </div>
+        <div v-if="onlineLoading && !onlineUsers.length" style="text-align:center;padding:16px;"><BurgerSpinner text="Загрузка..." /></div>
+        <div v-else-if="!onlineUsers.length" style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;">Нет пользователей онлайн</div>
+        <div v-else class="adm-user-list">
+          <div v-for="u in onlineUsers" :key="u.user_name" class="adm-user-row" style="cursor:default;">
+            <div class="adm-user-avatar adm-avatar-online">
+              {{ initials(u.user_name) }}
+              <span class="adm-online-dot"></span>
+            </div>
+            <div class="adm-user-info">
+              <div class="adm-user-name">
+                {{ u.user_name }}
+                <span v-if="u.user_name === userStore.currentUser?.name" class="adm-badge adm-badge-you">вы</span>
+              </div>
+              <div class="adm-user-meta">{{ u.page || '—' }}</div>
+            </div>
+            <div class="adm-online-time">{{ formatOnlineTime(u.last_seen) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Активные сессии -->
+      <div class="adm-toolbar">
+        <div class="adm-toolbar-info">{{ sessionsList.length }} активных сессий</div>
+        <button class="btn" @click="loadSessions" :disabled="sessionsLoading">
+          <BkIcon name="redo" size="sm"/> Обновить
+        </button>
+      </div>
+
+      <div v-if="sessionsLoading && !sessionsList.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!sessionsList.length" class="adm-empty">Нет активных сессий</div>
+
+      <div v-else class="adm-user-list">
+        <div v-for="s in sessionsList" :key="s.id" class="adm-user-row" style="cursor:default;">
+          <div class="adm-user-avatar" :class="{ 'adm-avatar-online': isCurrentSession(s) }">
+            {{ initials(s.user_name) }}
+            <span v-if="isCurrentSession(s)" class="adm-online-dot"></span>
+          </div>
+          <div class="adm-user-info">
+            <div class="adm-user-name">
+              {{ s.user_name }}
+              <span v-if="isCurrentSession(s)" class="adm-badge adm-badge-you">текущая</span>
+            </div>
+            <div class="adm-user-meta">{{ parseUserAgent(s.user_agent) }}</div>
+            <div class="adm-user-email">IP: {{ s.ip_address || '—' }}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:11px;color:var(--text-muted);">Вход: {{ formatSessionDate(s.created_at) }}</div>
+            <div style="font-size:11px;color:var(--text-muted);">Истекает: {{ formatSessionDate(s.expires_at) }}</div>
+          </div>
+          <div class="adm-user-actions" style="opacity:1;">
+            <button class="adm-act-btn adm-act-del" @click="terminateSession(s)" :disabled="isCurrentSession(s)" title="Завершить сессию">
+              <BkIcon name="close" size="sm"/>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Модалка обновления (changelog) ═══ -->
+    <Teleport to="body">
+      <div v-if="changelogModal.show" class="modal" @click.self="changelogModal.show = false">
+        <div class="modal-box" style="width:460px;">
+          <div class="modal-header">
+            <h2>{{ changelogModal.entry ? 'Редактировать' : 'Новое обновление' }}</h2>
+            <button class="modal-close" @click="changelogModal.show = false"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div class="adm-form">
+            <div class="modal-field">
+              <span class="modal-field-label">Версия</span>
+              <input v-model="changelogForm.version" placeholder="1.0.0" />
+            </div>
+            <div class="modal-field">
+              <span class="modal-field-label">Заголовок</span>
+              <input v-model="changelogForm.title" placeholder="Что нового" />
+            </div>
+            <div class="modal-field">
+              <span class="modal-field-label">Описание</span>
+              <textarea v-model="changelogForm.description" class="adm-maint-textarea" rows="5" placeholder="Подробное описание изменений..."></textarea>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:20px;">
+            <button class="btn primary" @click="saveChangelog" :disabled="changelogSaving || !changelogForm.version.trim() || !changelogForm.title.trim()">
+              {{ changelogSaving ? 'Сохранение...' : (changelogModal.entry ? 'Сохранить' : 'Создать') }}
+            </button>
+            <button class="btn secondary" @click="changelogModal.show = false">Отмена</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- ═══ Модалка пользователя ═══ -->
     <Teleport to="body">
@@ -419,7 +712,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS } from '@/stores/userStore.js';
@@ -477,6 +770,7 @@ function getPermissionsDiff() {
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
 // ═══ Аудит-лог ═══
+const auditMode = ref('audit');
 const AUDIT_PAGE_SIZE = 50;
 const auditEntries = ref([]);
 const auditLoading = ref(false);
@@ -485,6 +779,13 @@ const auditTotal = ref(0);
 const expandedAudit = reactive(new Set());
 const auditUsers = ref([]);
 const auditFilter = reactive({ category: '', user: '', dateFrom: '', dateTo: '' });
+
+function loadErrorsIfNeeded() {
+  if (!errorEntries.value.length) loadErrors(true);
+}
+function loadChangelogIfNeeded() {
+  if (!changelogEntries.value.length) loadChangelog();
+}
 
 const auditCategories = [
   { value: '', label: 'Все' },
@@ -590,6 +891,7 @@ const maintenanceEndTimeDisplay = computed(() => {
 });
 
 // ═══ Broadcast ═══
+const broadcastMode = ref('broadcast');
 const bcTitle = ref('');
 const bcMessage = ref('');
 const bcSending = ref(false);
@@ -670,19 +972,321 @@ async function deleteBroadcast(b) {
 
 const formatBcDate = formatMoscowDateTime;
 
+// ═══ Статистика ═══
+const statsPeriod = ref('all');
+const statsData = ref({});
+const statsLoading = ref(false);
+const statsPeriods = [
+  { value: 'week', label: 'Неделя' },
+  { value: 'month', label: 'Месяц' },
+  { value: 'all', label: 'Всё время' },
+];
+
+function statsBarWidth(cnt) {
+  const max = Math.max(...(statsData.value.orders_by_entity || []).map(e => e.cnt), 1);
+  return Math.round((cnt / max) * 100) + '%';
+}
+
+async function loadStats() {
+  statsLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_admin_stats', { period: statsPeriod.value });
+    statsData.value = data || {};
+  } catch (e) { toast.error('Ошибка', 'Не удалось загрузить статистику'); }
+  finally { statsLoading.value = false; }
+}
+
+// ═══ Настройки системы ═══
+const sysSettings = ref([]);
+const sysSettingsLoading = ref(false);
+
+const SETTINGS_CATEGORIES = {
+  'maintenance_mode': 'Система', 'maintenance_message': 'Система', 'maintenance_end_time': 'Система',
+  'order_calculator_password': 'Безопасность',
+  'last_update': 'Данные',
+};
+
+const sysSettingsGrouped = computed(() => {
+  const groups = {};
+  for (const s of sysSettings.value) {
+    const cat = SETTINGS_CATEGORIES[s.key] || 'Прочее';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(s);
+  }
+  return Object.entries(groups).map(([name, items]) => ({ name, items }));
+});
+
+async function loadSysSettings() {
+  sysSettingsLoading.value = true;
+  try {
+    const { data } = await db.from('settings').select('*').order('key');
+    sysSettings.value = (data || []).map(s => ({ ...s, _editValue: s.value || '', _changed: false, _saving: false }));
+  } catch { toast.error('Ошибка', 'Не удалось загрузить настройки'); }
+  finally { sysSettingsLoading.value = false; }
+}
+
+async function saveSysSetting(s) {
+  s._saving = true;
+  try {
+    const { error } = await db.from('settings').update({ value: s._editValue }).eq('key', s.key);
+    if (error) { toast.error('Ошибка', ''); return; }
+    s.value = s._editValue;
+    s._changed = false;
+    toast.success('Сохранено', s.key);
+  } catch { toast.error('Ошибка', 'Не удалось сохранить'); }
+  finally { s._saving = false; }
+}
+
+// ═══ Резервное копирование ═══
+const backupEntity = ref('');
+const backupSelected = ref([]);
+const backupExporting = ref(false);
+
+const backupTables = [
+  { name: 'products', label: 'Товары' },
+  { name: 'suppliers', label: 'Поставщики' },
+  { name: 'orders', label: 'Заказы' },
+  { name: 'order_items', label: 'Позиции заказов' },
+  { name: 'plans', label: 'Планы' },
+  { name: 'settings', label: 'Настройки' },
+  { name: 'audit_log', label: 'Аудит-лог' },
+  { name: 'stock_1c', label: 'Остатки 1С' },
+  { name: 'analysis_data', label: 'Данные анализа' },
+  { name: 'cards', label: 'Карточки' },
+  { name: 'restaurants', label: 'Рестораны' },
+  { name: 'delivery_schedule', label: 'График доставки' },
+];
+
+async function exportBackup() {
+  backupExporting.value = true;
+  try {
+    const XLSX = await import('xlsx-js-style');
+    const wb = XLSX.utils.book_new();
+
+    for (const tableName of backupSelected.value) {
+      let query = db.from(tableName).select('*');
+      // Фильтр по юрлицу для таблиц с полем legal_entity
+      if (backupEntity.value) {
+        const tablesWithEntity = ['products', 'orders', 'plans', 'stock_1c', 'analysis_data', 'cards', 'suppliers'];
+        if (tablesWithEntity.includes(tableName)) {
+          query = query.eq('legal_entity', backupEntity.value);
+        }
+      }
+      try {
+        const { data } = await query;
+        const rows = data || [];
+        const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ info: 'Нет данных' }]);
+        const label = backupTables.find(t => t.name === tableName)?.label || tableName;
+        XLSX.utils.book_append_sheet(wb, ws, label.slice(0, 31));
+      } catch (e) {
+        const ws = XLSX.utils.json_to_sheet([{ error: 'Не удалось загрузить' }]);
+        XLSX.utils.book_append_sheet(wb, ws, tableName.slice(0, 31));
+      }
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+    const suffix = backupEntity.value ? '_' + backupEntity.value.replace(/[^\wа-яА-Я]/g, '') : '';
+    XLSX.writeFile(wb, `backup_${date}${suffix}.xlsx`);
+    toast.success('Готово', 'Файл скачан');
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось создать файл');
+  } finally {
+    backupExporting.value = false;
+  }
+}
+
+// ═══ Сессии ═══
+const sessionsList = ref([]);
+const sessionsLoading = ref(false);
+
+function isCurrentSession(s) {
+  const currentToken = localStorage.getItem('bk_session_token') || '';
+  return s.token === currentToken;
+}
+
+function parseUserAgent(ua) {
+  if (!ua) return '—';
+  if (ua.includes('Chrome') && !ua.includes('Edge')) return 'Chrome';
+  if (ua.includes('Firefox')) return 'Firefox';
+  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
+  if (ua.includes('Edge')) return 'Edge';
+  return ua.slice(0, 50);
+}
+
+function formatSessionDate(str) {
+  if (!str) return '—';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadSessions() {
+  sessionsLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_sessions');
+    sessionsList.value = data || [];
+  } catch (e) { toast.error('Ошибка', 'Не удалось загрузить сессии'); }
+  finally { sessionsLoading.value = false; }
+}
+
+async function terminateSession(s) {
+  if (isCurrentSession(s)) return;
+  const ok = await confirmAction('Завершить сессию?', `Сессия пользователя «${s.user_name}» будет завершена.`);
+  if (!ok) return;
+  try {
+    const { data } = await db.rpc('terminate_session', { session_id: s.id });
+    if (data?.success) {
+      toast.success('Сессия завершена', s.user_name);
+      sessionsList.value = sessionsList.value.filter(x => x.id !== s.id);
+    } else {
+      toast.error('Ошибка', data?.error || '');
+    }
+  } catch { toast.error('Ошибка', 'Не удалось завершить сессию'); }
+}
+
+// ═══ Логи ошибок ═══
+const ERROR_PAGE_SIZE = 50;
+const errorEntries = ref([]);
+const errorsLoading = ref(false);
+const errorsHasMore = ref(false);
+const errorsClearing = ref(false);
+const expandedErrors = reactive(new Set());
+const errorFilter = reactive({ level: '', source: '' });
+
+const errorLevelOptions = [
+  { value: '', label: 'Все' },
+  { value: 'error', label: 'Ошибки' },
+  { value: 'warning', label: 'Предупреждения' },
+  { value: 'info', label: 'Информация' },
+];
+
+function errorBadgeClass(level) {
+  if (level === 'error') return 'adm-audit-b-deleted';
+  if (level === 'warning') return 'adm-audit-b-updated';
+  return 'adm-audit-b-schedule';
+}
+
+function toggleErrorStack(id) {
+  if (expandedErrors.has(id)) expandedErrors.delete(id);
+  else expandedErrors.add(id);
+}
+
+async function loadErrors(reset = true) {
+  if (reset) {
+    errorEntries.value = [];
+  }
+  errorsLoading.value = true;
+  try {
+    const offset = reset ? 0 : errorEntries.value.length;
+    let query = db.from('error_logs').select('*').order('created_at', { ascending: false }).limit(ERROR_PAGE_SIZE).offset(offset);
+    if (errorFilter.level) query = query.eq('level', errorFilter.level);
+    if (errorFilter.source) query = query.eq('source', errorFilter.source);
+    const { data } = await query;
+    const rows = data || [];
+    if (reset) {
+      errorEntries.value = rows;
+    } else {
+      errorEntries.value.push(...rows);
+    }
+    errorsHasMore.value = rows.length >= ERROR_PAGE_SIZE;
+  } catch { toast.error('Ошибка', 'Не удалось загрузить логи'); }
+  finally { errorsLoading.value = false; }
+}
+
+async function clearErrors() {
+  const ok = await confirmAction('Очистить все ошибки?', 'Все записи логов ошибок будут удалены безвозвратно.');
+  if (!ok) return;
+  errorsClearing.value = true;
+  try {
+    const { data } = await db.rpc('clear_error_logs');
+    if (data?.success) {
+      errorEntries.value = [];
+      toast.success('Очищено', 'Логи ошибок удалены');
+    }
+  } catch { toast.error('Ошибка', 'Не удалось очистить логи'); }
+  finally { errorsClearing.value = false; }
+}
+
+// ═══ Обновления (Changelog) ═══
+const changelogEntries = ref([]);
+const changelogLoading = ref(false);
+const changelogSaving = ref(false);
+const changelogModal = ref({ show: false, entry: null });
+const changelogForm = ref({ version: '', title: '', description: '' });
+
+async function loadChangelog() {
+  changelogLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_changelog');
+    changelogEntries.value = data || [];
+  } catch { toast.error('Ошибка', 'Не удалось загрузить обновления'); }
+  finally { changelogLoading.value = false; }
+}
+
+function openChangelogModal(entry) {
+  changelogModal.value.entry = entry;
+  if (entry) {
+    changelogForm.value = { version: entry.version, title: entry.title, description: entry.description || '' };
+  } else {
+    changelogForm.value = { version: '', title: '', description: '' };
+  }
+  changelogModal.value.show = true;
+}
+
+async function saveChangelog() {
+  if (!changelogForm.value.version.trim() || !changelogForm.value.title.trim()) return;
+  changelogSaving.value = true;
+  try {
+    const payload = {
+      version: changelogForm.value.version.trim(),
+      title: changelogForm.value.title.trim(),
+      description: changelogForm.value.description.trim() || null,
+    };
+    if (changelogModal.value.entry) {
+      const { error } = await db.from('changelog').update(payload).eq('id', changelogModal.value.entry.id);
+      if (error) { toast.error('Ошибка', ''); return; }
+      toast.success('Обновлено', payload.title);
+    } else {
+      payload.created_by = userStore.currentUser?.name || '';
+      const { error } = await db.from('changelog').insert(payload);
+      if (error) { toast.error('Ошибка', ''); return; }
+      toast.success('Создано', payload.title);
+    }
+    changelogModal.value.show = false;
+    await loadChangelog();
+  } catch { toast.error('Ошибка', 'Не удалось сохранить'); }
+  finally { changelogSaving.value = false; }
+}
+
+async function deleteChangelog(entry) {
+  const ok = await confirmAction('Удалить запись?', `Обновление «${entry.title}» будет удалено.`);
+  if (!ok) return;
+  try {
+    const { error } = await db.from('changelog').delete().eq('id', entry.id);
+    if (error) { toast.error('Ошибка', ''); return; }
+    toast.success('Удалено', entry.title);
+    changelogEntries.value = changelogEntries.value.filter(e => e.id !== entry.id);
+  } catch { toast.error('Ошибка', 'Не удалось удалить'); }
+}
+
 watch(activeTab, (tab) => {
-  if (tab === 'online') {
+  if (tab === 'sessions') {
     loadOnlineUsers();
+    loadSessions();
     onlineTimer = setInterval(loadOnlineUsers, 15000);
   } else {
     if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
   }
   if (tab === 'broadcast') {
     loadBcHistory();
+    if (!changelogEntries.value.length) loadChangelog();
   }
   if (tab === 'audit') {
     if (!auditEntries.value.length) loadAudit(true);
     if (!auditUsers.value.length) loadAuditUsers();
+  }
+  if (tab === 'stats') {
+    if (!Object.keys(statsData.value).length) loadStats();
   }
 });
 
@@ -884,7 +1488,7 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 
 /* ═══ Tabs ═══ */
 .adm-tabs {
-  display: flex; gap: 0; margin-bottom: 20px;
+  display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 20px;
   border-bottom: 2px solid var(--border-light);
 }
 .adm-tab {
@@ -1278,5 +1882,107 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
   .adm-audit-right-filters { flex-wrap: wrap; }
   .adm-audit-date { width: 100%; flex: 1; }
   .adm-audit-select { width: 100%; }
+}
+
+/* ═══ Stats Cards ═══ */
+.adm-stats-period { display: flex; gap: 4px; }
+.adm-stats-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 16px;
+}
+.adm-stat-card {
+  padding: 16px; border-radius: 12px; text-align: center;
+  background: var(--card); border: 1.5px solid var(--border-light);
+}
+.adm-stat-value { font-size: 28px; font-weight: 800; color: var(--bk-brown); line-height: 1.2; }
+.adm-stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; font-weight: 500; }
+
+.adm-stats-blocks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 700px) { .adm-stats-blocks { grid-template-columns: 1fr; } }
+
+.adm-stats-bars { display: flex; flex-direction: column; gap: 8px; }
+.adm-stats-bar-row { display: flex; align-items: center; gap: 8px; }
+.adm-stats-bar-label { font-size: 12px; color: var(--text); width: 160px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-stats-bar-track { flex: 1; height: 20px; background: var(--bg); border-radius: 10px; overflow: hidden; }
+.adm-stats-bar-fill { height: 100%; background: linear-gradient(90deg, var(--bk-orange), #E8941A); border-radius: 10px; transition: width .3s; min-width: 4px; }
+.adm-stats-bar-val { font-size: 13px; font-weight: 700; color: var(--text); width: 36px; text-align: right; }
+.adm-stats-empty { text-align: center; padding: 24px; color: var(--text-muted); font-size: 13px; }
+
+.adm-stats-top-list { display: flex; flex-direction: column; gap: 4px; }
+.adm-stats-top-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; border-radius: 8px; font-size: 13px;
+}
+.adm-stats-top-row:hover { background: var(--bg); }
+.adm-stats-top-num { width: 22px; height: 22px; border-radius: 50%; background: var(--border-light); text-align: center; line-height: 22px; font-size: 11px; font-weight: 700; color: var(--text-muted); flex-shrink: 0; }
+.adm-stats-top-name { flex: 1; font-weight: 600; color: var(--text); }
+.adm-stats-top-cnt { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+
+/* ═══ System Settings ═══ */
+.adm-settings-list { display: flex; flex-direction: column; gap: 6px; }
+.adm-setting-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 0; border-bottom: 1px solid var(--border-light);
+}
+.adm-setting-row:last-child { border-bottom: none; }
+.adm-setting-key { font-size: 13px; font-weight: 600; color: var(--text); min-width: 180px; }
+.adm-setting-input-wrap { display: flex; gap: 6px; flex: 1; align-items: center; }
+.adm-setting-input {
+  flex: 1; padding: 6px 10px; border: 1.5px solid var(--border); border-radius: 6px;
+  font-size: 13px; font-family: inherit; background: var(--bg); min-width: 0;
+}
+.adm-setting-input:focus { border-color: var(--bk-orange); outline: none; }
+.adm-setting-save-btn { font-size: 12px !important; padding: 5px 12px !important; flex-shrink: 0; }
+
+/* ═══ Backup ═══ */
+.adm-backup-tables {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px; margin-top: 8px;
+}
+
+/* ═══ Audit Mode Toggle ═══ */
+.adm-audit-mode {
+  display: flex; gap: 0; margin-bottom: 14px;
+  background: var(--bg); border-radius: 10px; padding: 3px;
+  border: 1.5px solid var(--border-light); width: fit-content;
+}
+.adm-audit-mode-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all .15s;
+  border: none; background: none; color: var(--text-muted);
+}
+.adm-audit-mode-btn.active {
+  background: var(--card); color: var(--bk-brown);
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.adm-audit-mode-btn:hover:not(.active) { color: var(--text); }
+
+/* ═══ Error Logs ═══ */
+.adm-error-entry { cursor: pointer; }
+.adm-error-entry:hover { border-color: var(--border); }
+.adm-error-message { font-size: 13px; color: var(--text); margin-top: 4px; word-break: break-word; }
+.adm-error-url { font-size: 11px; color: var(--text-muted); margin-top: 2px; word-break: break-all; }
+.adm-error-stack {
+  margin-top: 6px; padding: 8px 10px; border-radius: 6px;
+  background: #F5F5F5; font-size: 11px; font-family: monospace;
+  white-space: pre-wrap; word-break: break-all; color: #333;
+  max-height: 200px; overflow-y: auto;
+}
+
+/* ═══ Changelog ═══ */
+.adm-changelog-version {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700;
+  background: #E8F5E9; color: #2E7D32;
+}
+.adm-changelog-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.adm-changelog-desc {
+  font-size: 13px; color: var(--text-secondary); margin-top: 4px;
+  line-height: 1.5; white-space: pre-line;
+}
+.adm-changelog-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 6px;
 }
 </style>

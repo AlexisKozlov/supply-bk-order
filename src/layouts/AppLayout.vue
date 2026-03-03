@@ -49,17 +49,6 @@
         </select>
       </div>
 
-      <!-- Уведомления -->
-      <div class="sidebar-notifications" v-if="!sidebarCollapsed" @click="showNotifications = true">
-        <BkIcon name="bell" size="sm" light/>
-        <span>Уведомления</span>
-        <span v-if="notificationStore.unreadCount" class="notification-badge-sidebar">{{ notificationStore.unreadCount }}</span>
-      </div>
-      <div v-else class="sidebar-notifications sidebar-notifications-collapsed" @click="showNotifications = true">
-        <BkIcon name="bell" size="sm" light/>
-        <span v-if="notificationStore.unreadCount" class="notification-badge-sidebar">{{ notificationStore.unreadCount }}</span>
-      </div>
-
       <!-- User section at bottom -->
       <div class="sidebar-bottom" v-if="userStore.currentUser">
         <!-- Dropdown menu -->
@@ -75,12 +64,18 @@
           </button>
         </div>
 
-        <div class="sidebar-user" @click="toggleUserMenu">
-          <div class="user-avatar-letters">{{ userInitials }}</div>
-          <div class="user-info" v-if="!sidebarCollapsed">
-            <div class="user-name">{{ userStore.currentUser.name }}</div>
-            <div class="user-role">{{ userStore.currentUser.display_role || 'Сотрудник' }}</div>
+        <div class="sidebar-user-row">
+          <div class="sidebar-user" @click="toggleUserMenu">
+            <div class="user-avatar-letters">{{ userInitials }}</div>
+            <div class="user-info" v-if="!sidebarCollapsed">
+              <div class="user-name">{{ userStore.currentUser.name }}</div>
+              <div class="user-role">{{ userStore.currentUser.display_role || 'Сотрудник' }}</div>
+            </div>
           </div>
+          <button class="sidebar-bell-btn" @click.stop="showNotifications = true" title="Уведомления">
+            <BkIcon name="bell" size="sm" light/>
+            <span v-if="notificationStore.unreadCount" class="notification-badge-sidebar">{{ notificationStore.unreadCount }}</span>
+          </button>
         </div>
       </div>
     </aside>
@@ -192,35 +187,68 @@
       <div v-if="showNotifications" class="modal" @click.self="showNotifications = false">
         <div class="modal-box" style="max-width: 480px;">
           <div class="modal-header">
-            <h2><BkIcon name="bell" size="sm"/> Уведомления</h2>
+            <h2><BkIcon name="bell" size="sm"/> {{ notifTab === 'changelog' ? 'Что нового' : 'Уведомления' }}</h2>
             <button class="modal-close" @click="showNotifications = false"><BkIcon name="close" size="sm"/></button>
           </div>
-          <div class="notif-list">
-            <div v-if="notificationStore.loading && !notificationStore.visibleNotifications.length" class="notif-empty">Загрузка...</div>
-            <div v-else-if="!notificationStore.visibleNotifications.length" class="notif-empty">Нет уведомлений</div>
-            <div v-else>
-              <div v-for="n in notificationStore.visibleNotifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n), 'notif-clickable': n.entity_id }">
-                <div class="notif-icon-col" @click="goToNotifEntity(n)">
-                  <div class="notif-icon" :class="n.entity_type === 'plan' ? 'notif-icon-plan' : 'notif-icon-order'">
-                    <BkIcon :name="n.entity_type === 'plan' ? 'planning' : 'package'" size="sm"/>
+
+          <!-- Переключатель -->
+          <div class="notif-tabs">
+            <button class="notif-tab" :class="{ active: notifTab === 'notifications' }" @click="notifTab = 'notifications'">
+              Уведомления
+              <span v-if="notificationStore.unreadCount" class="notif-tab-badge">{{ notificationStore.unreadCount }}</span>
+            </button>
+            <button class="notif-tab" :class="{ active: notifTab === 'changelog' }" @click="notifTab = 'changelog'">
+              Что нового
+            </button>
+          </div>
+
+          <!-- Уведомления -->
+          <template v-if="notifTab === 'notifications'">
+            <div class="notif-list">
+              <div v-if="notificationStore.loading && !notificationStore.visibleNotifications.length" class="notif-empty">Загрузка...</div>
+              <div v-else-if="!notificationStore.visibleNotifications.length" class="notif-empty">Нет уведомлений</div>
+              <div v-else>
+                <div v-for="n in notificationStore.visibleNotifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n), 'notif-clickable': n.entity_id }">
+                  <div class="notif-icon-col" @click="goToNotifEntity(n)">
+                    <div class="notif-icon" :class="n.entity_type === 'plan' ? 'notif-icon-plan' : 'notif-icon-order'">
+                      <BkIcon :name="n.entity_type === 'plan' ? 'planning' : 'package'" size="sm"/>
+                    </div>
                   </div>
-                </div>
-                <div class="notif-body" @click="goToNotifEntity(n)">
-                  <div class="notif-title">{{ n.title }}</div>
-                  <div v-if="n.message" class="notif-message">{{ n.message }}</div>
-                  <div class="notif-meta">
-                    {{ formatNotifDate(n.created_at) }}
-                    <span v-if="n.entity_id" class="notif-link">Открыть →</span>
+                  <div class="notif-body" @click="goToNotifEntity(n)">
+                    <div class="notif-title">{{ n.title }}</div>
+                    <div v-if="n.message" class="notif-message">{{ n.message }}</div>
+                    <div class="notif-meta">
+                      {{ formatNotifDate(n.created_at) }}
+                      <span v-if="n.entity_id" class="notif-link">Открыть →</span>
+                    </div>
                   </div>
+                  <button class="notif-delete-btn" @click.stop="notificationStore.deleteNotification(n.id)" title="Удалить">×</button>
                 </div>
-                <button class="notif-delete-btn" @click.stop="notificationStore.deleteNotification(n.id)" title="Удалить">×</button>
               </div>
             </div>
-          </div>
-          <div v-if="notificationStore.unreadCount > 0 || notificationStore.visibleNotifications.length > 0" class="notif-actions">
-            <button v-if="notificationStore.unreadCount > 0" class="btn primary" @click="notificationStore.markAllRead()">Прочитать все</button>
-            <button class="btn notif-delete-all-btn" @click="notificationStore.deleteAll()">Удалить все</button>
-          </div>
+            <div v-if="notificationStore.unreadCount > 0 || notificationStore.visibleNotifications.length > 0" class="notif-actions">
+              <button v-if="notificationStore.unreadCount > 0" class="btn primary" @click="notificationStore.markAllRead()">Прочитать все</button>
+              <button class="btn notif-delete-all-btn" @click="notificationStore.deleteAll()">Удалить все</button>
+            </div>
+          </template>
+
+          <!-- Что нового -->
+          <template v-if="notifTab === 'changelog'">
+            <div class="changelog-list">
+              <div v-if="changelogLoading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+              <div v-else-if="!changelogItems.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Пока нет записей об обновлениях</div>
+              <div v-else>
+                <div v-for="entry in changelogItems" :key="entry.id" class="changelog-item">
+                  <div class="changelog-header">
+                    <span class="changelog-version">v{{ entry.version }}</span>
+                    <span class="changelog-date">{{ formatChangelogDate(entry.created_at) }}</span>
+                  </div>
+                  <div class="changelog-title">{{ entry.title }}</div>
+                  <div v-if="entry.description" class="changelog-desc">{{ entry.description }}</div>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
       </div>
     </Teleport>
@@ -232,7 +260,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -249,6 +277,27 @@ const userStore = useUserStore();
 const orderStore = useOrderStore();
 const notificationStore = useNotificationStore();
 const showNotifications = ref(false);
+const notifTab = ref('notifications');
+const changelogItems = ref([]);
+const changelogLoading = ref(false);
+
+watch(notifTab, async (v) => {
+  if (v === 'changelog' && !changelogItems.value.length) {
+    changelogLoading.value = true;
+    try {
+      const { data } = await db.rpc('get_changelog', { limit: 30 });
+      changelogItems.value = data || [];
+    } catch (e) { console.warn('[changelog]', e); }
+    finally { changelogLoading.value = false; }
+  }
+});
+
+function formatChangelogDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
 const isOffline = ref(!navigator.onLine);
 function handleOnline() { isOffline.value = false; }
 function handleOffline() { isOffline.value = true; }
@@ -731,5 +780,59 @@ function confirmLogout() {
   .welcome-name { font-size: 22px; }
   .welcome-avatar-ring { width: 64px; height: 64px; }
   .welcome-avatar { font-size: 18px; }
+}
+
+/* ═══ User row with bell ═══ */
+.sidebar-user-row {
+  display: flex; align-items: center; gap: 0;
+}
+.sidebar-user-row .sidebar-user { flex: 1; min-width: 0; }
+.sidebar-bell-btn {
+  position: relative; flex-shrink: 0;
+  background: none; border: none; cursor: pointer;
+  padding: 8px; border-radius: 8px; color: rgba(255,255,255,.6);
+  transition: all .15s;
+}
+.sidebar-bell-btn:hover { color: #fff; background: rgba(255,255,255,.1); }
+
+/* ═══ Notification Tabs ═══ */
+.notif-tabs {
+  display: flex; gap: 0; margin-bottom: 12px;
+  background: var(--bg); border-radius: 10px; padding: 3px;
+  border: 1.5px solid var(--border-light);
+}
+.notif-tab {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all .15s;
+  border: none; background: none; color: var(--text-muted);
+}
+.notif-tab.active {
+  background: var(--card); color: var(--bk-brown);
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.notif-tab:hover:not(.active) { color: var(--text); }
+.notif-tab-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border-radius: 10px; background: var(--bk-orange); color: #fff;
+}
+
+/* ═══ Changelog ═══ */
+.changelog-list { max-height: 60vh; overflow-y: auto; }
+.changelog-item {
+  padding: 14px 0; border-bottom: 1px solid var(--border-light);
+}
+.changelog-item:last-child { border-bottom: none; }
+.changelog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.changelog-version {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700;
+  background: #E8F5E9; color: #2E7D32;
+}
+.changelog-date { font-size: 11px; color: var(--text-muted); }
+.changelog-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.changelog-desc {
+  font-size: 13px; color: var(--text-secondary); margin-top: 4px;
+  line-height: 1.5; white-space: pre-line;
 }
 </style>

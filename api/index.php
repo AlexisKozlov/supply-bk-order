@@ -132,9 +132,11 @@ function getSessionUser($pdo) {
 function createSessionToken($pdo, $userName) {
     $token = bin2hex(random_bytes(32));
     $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $ua = isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr($_SERVER['HTTP_USER_AGENT'], 0, 512) : null;
     // Ограничиваем количество сессий на пользователя (макс 5)
     $pdo->prepare("DELETE FROM user_sessions WHERE user_name = ? AND id NOT IN (SELECT id FROM (SELECT id FROM user_sessions WHERE user_name = ? ORDER BY created_at DESC LIMIT 4) AS t)")->execute([$userName, $userName]);
-    $pdo->prepare("INSERT INTO user_sessions (user_name, token, expires_at) VALUES (?, ?, ?)")->execute([$userName, $token, $expires]);
+    $pdo->prepare("INSERT INTO user_sessions (user_name, token, expires_at, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)")->execute([$userName, $token, $expires, $ip, $ua]);
     return $token;
 }
 
@@ -423,6 +425,36 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT `value` FROM settings WHERE `key`='last_update'"); $s->execute();
         $row = $s->fetch();
         respond($row ?: ['value' => null]);
+    }
+
+    // Логирование ошибок фронтенда (публичный, без авторизации)
+    if ($fn === 'log_frontend_error') {
+        $level = $body['level'] ?? 'error';
+        if (!in_array($level, ['error', 'warning', 'info'])) $level = 'error';
+        $message = mb_substr($body['message'] ?? 'Unknown error', 0, 5000);
+        $stack = isset($body['stack']) ? mb_substr($body['stack'], 0, 10000) : null;
+        $userName = $body['user_name'] ?? null;
+        $url = isset($body['url']) ? mb_substr($body['url'], 0, 2048) : null;
+        $ua = isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr($_SERVER['HTTP_USER_AGENT'], 0, 512) : null;
+        if (!checkRateLimit($pdo, $clientIp, 30, 1)) respond(['success' => true]); // Тихий rate-limit
+        try {
+            $pdo->prepare("INSERT INTO error_logs (level, source, message, stack, user_name, url, user_agent) VALUES (?, 'frontend', ?, ?, ?, ?, ?)")
+                ->execute([$level, $message, $stack, $userName, $url, $ua]);
+        } catch (PDOException $e) { /* таблица может не существовать */ }
+        respond(['success' => true]);
+    }
+
+    // Список обновлений (публичный)
+    if ($fn === 'get_changelog') {
+        try {
+            $limit = min(intval($body['limit'] ?? 50), 200);
+            $s = $pdo->prepare("SELECT id, version, title, description, created_by, created_at FROM changelog ORDER BY created_at DESC LIMIT " . $limit);
+            $s->execute();
+            respond($s->fetchAll());
+        } catch (PDOException $e) {
+            error_log("get_changelog error: " . $e->getMessage());
+            respond([]);
+        }
     }
 
     // Валидация сессии — проверяет session_token и возвращает данные пользователя
@@ -734,6 +766,69 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    // ─── Админские RPC (только admin) ───
+    if ($fn === 'get_admin_stats') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $period = $body['period'] ?? 'all';
+        $dateFilter = '';
+        if ($period === 'week') $dateFilter = " AND created_at > NOW() - INTERVAL 7 DAY";
+        elseif ($period === 'month') $dateFilter = " AND created_at > NOW() - INTERVAL 30 DAY";
+
+        $stats = [];
+        // Заказы
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM orders WHERE 1=1" . $dateFilter); $stats['orders_total'] = (int)$s->fetch()['cnt'];
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM orders WHERE DATE(created_at) = CURDATE()"); $stats['orders_today'] = (int)$s->fetch()['cnt'];
+        // Планы
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM plans WHERE 1=1" . $dateFilter); $stats['plans_total'] = (int)$s->fetch()['cnt'];
+        // Активные сессии
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM user_sessions WHERE expires_at > NOW()"); $stats['active_sessions'] = (int)$s->fetch()['cnt'];
+        // Товары, поставщики, пользователи
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM products"); $stats['products_count'] = (int)$s->fetch()['cnt'];
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM suppliers"); $stats['suppliers_count'] = (int)$s->fetch()['cnt'];
+        $s = $pdo->query("SELECT COUNT(*) as cnt FROM users"); $stats['users_count'] = (int)$s->fetch()['cnt'];
+        // Заказы по юрлицам
+        $s = $pdo->query("SELECT legal_entity, COUNT(*) as cnt FROM orders WHERE 1=1" . $dateFilter . " GROUP BY legal_entity ORDER BY cnt DESC");
+        $stats['orders_by_entity'] = $s->fetchAll();
+        // Топ пользователей
+        $s = $pdo->query("SELECT created_by as user_name, COUNT(*) as cnt FROM orders WHERE 1=1" . $dateFilter . " GROUP BY created_by ORDER BY cnt DESC LIMIT 10");
+        $stats['top_users'] = $s->fetchAll();
+
+        respond($stats);
+    }
+
+    if ($fn === 'get_sessions') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $s = $pdo->query("SELECT id, user_name, token, created_at, expires_at, ip_address, user_agent FROM user_sessions WHERE expires_at > NOW() ORDER BY created_at DESC");
+        respond($s->fetchAll());
+    }
+
+    if ($fn === 'terminate_session') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $sessionId = $body['session_id'] ?? '';
+        if (!$sessionId) respond(['success' => false, 'error' => 'session_id required'], 400);
+        $pdo->prepare("DELETE FROM user_sessions WHERE id = ?")->execute([$sessionId]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'clear_error_logs') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
+        $olderThan = $body['older_than_days'] ?? null;
+        try {
+            if ($olderThan && intval($olderThan) > 0) {
+                $pdo->prepare("DELETE FROM error_logs WHERE created_at < NOW() - INTERVAL ? DAY")->execute([intval($olderThan)]);
+            } else {
+                $pdo->exec("TRUNCATE TABLE error_logs");
+            }
+            respond(['success' => true]);
+        } catch (PDOException $e) {
+            respond(['success' => false, 'error' => 'Failed to clear logs'], 500);
+        }
+    }
+
     if ($fn === 'replace_restaurant_schedule') {
         $restaurantId = $body['restaurant_id'] ?? null;
         $items = $body['items'] ?? [];
@@ -767,9 +862,9 @@ if ($endpoint === 'rpc') {
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog'];
 // Защита: только чтение через REST, запись — через RPC
-$readOnly = ['search_logs', 'users'];
+$readOnly = ['search_logs', 'users', 'error_logs'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -823,6 +918,8 @@ $filterWhitelist = [
     'restaurants' => ['id','legal_entity','legal_entity_group'],
     'delivery_schedule' => ['id','restaurant_id','legal_entity'],
     'analysis_data' => ['id','legal_entity','sku'],
+    'error_logs'    => ['id','level','source','user_name','created_at'],
+    'changelog'     => ['id','version','created_at'],
 ];
 
 if ($method === 'GET') {
@@ -944,7 +1041,7 @@ if ($method === 'POST') {
     }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
