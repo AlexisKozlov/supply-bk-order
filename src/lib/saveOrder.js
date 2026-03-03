@@ -6,17 +6,17 @@ import { getQpb, getMultiplicity, toLocalDateStr } from './utils.js';
  * @returns {Promise<{orderId, itemsCount, error}>}
  */
 export async function saveOrder({ items, settings, editingOrderId, note, userName }) {
-  // Приводим все позиции к физическим коробкам (формат хранения)
+  // Приводим все позиции к учётным коробкам (формат хранения)
   const allItems = items.map(item => {
     const qpb  = getQpb(item) || 1;
     const mult = getMultiplicity(item) || 1;
-    const physBoxes = settings.unit === 'boxes'
-      ? item.finalOrder / mult
-      : item.finalOrder / (qpb * mult);
+    const accountingBoxes = settings.unit === 'boxes'
+      ? item.finalOrder
+      : item.finalOrder / qpb;
     return {
       sku:                item.sku || null,
       name:               item.name,
-      qty_boxes:          Math.round(Math.ceil(Math.max(0, physBoxes))),
+      qty_boxes:          Math.round(Math.ceil(Math.max(0, accountingBoxes))),
       qty_per_box:        Math.round(item.qtyPerBox || 1),
       multiplicity:       mult,
       consumption_period: Math.round(item.consumptionPeriod || 0),

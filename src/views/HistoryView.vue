@@ -189,7 +189,7 @@
                     <td class="ht-items-sku">{{ item.sku || '—' }}</td>
                     <td class="ht-items-name">{{ item.name }}</td>
                     <td class="ht-items-qty">{{ Math.round(item.qty_boxes) }}</td>
-                    <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1) * (item.multiplicity || 1))) }}</td>
+                    <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1))) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -481,9 +481,11 @@ async function copyOrder(order) {
     const prod = (item.sku && productMap[item.sku]) || {};
     const qpb  = prod.qty_per_box || parseInt(item.qty_per_box) || 1;
     const mult = prod.multiplicity || 1;
-    const pieces = Math.round(boxes * qpb * mult);
+    // qty_boxes теперь в учётных → штуки = boxes * qpb, физические = boxes / mult
+    const pieces = Math.round(boxes * qpb);
+    const physBoxes = Math.ceil(boxes / mult);
     const unit = prod.unit_of_measure || 'шт';
-    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${boxes} коробок (${nf.format(pieces)} ${unit})`;
+    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${physBoxes} коробок (${nf.format(pieces)} ${unit})`;
   }).filter(Boolean);
   if (!lines.length) { toast.error('Нет позиций', ''); return; }
   const text = `Добрый день!\nПросьба отгрузить товар для ${order.legal_entity}, дата поставки - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;

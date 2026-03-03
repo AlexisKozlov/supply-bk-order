@@ -4,6 +4,7 @@
       'has-order': item.finalOrder > 0,
       'shortage-warning': hasShortage,
       'dragging': isDragging,
+      'item-hidden': item._hidden,
     }"
     :draggable="dragActive"
     @dragstart="onDragStart"
@@ -20,6 +21,7 @@
     <!-- Наименование -->
     <td class="item-name" :title="compact ? metaTooltip : ''" :style="item.sku ? 'cursor:pointer' : ''" @dblclick="item.sku && $emit('edit-product', item.sku)">
       <b v-if="item.sku">{{ item.sku }}</b>{{ item.sku ? ' ' : '' }}{{ item.name }}
+      <span v-if="item._hidden" class="hidden-badge">скрыта</span>
       <div v-if="!compact" class="item-meta">
         {{ item.qtyPerBox ? item.qtyPerBox + ' ' + (item.unitOfMeasure || 'шт') + '/кор' : '' }}
         {{ item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : '' }}
@@ -39,7 +41,7 @@
         type="number"
         :value="item.consumptionPeriod"
         :class="{ 'consumption-warning': consumptionWarning }"
-        :title="consumptionWarning ? `⚠ Расход отличается от среднего (${nf.format(Math.round(avgConsumption))}), проверьте данные` : ''"
+        :title="consumptionWarning ? `⚠ Расход отличается от анализа запасов (${nf.format(Math.round(avgConsumption))}), проверьте данные` : ''"
         @focus="calcConsumption.onFocus"
         @keydown="(e) => handleCalcKeydown(e, 'consumptionPeriod', calcConsumption)"
         @change="(e) => updateField('consumptionPeriod', +e.target.value)"
@@ -120,6 +122,7 @@
         :data-col="4"
       />
       <button class="btn small calc-to-order mob-calc-btn" @click="applyCalc">→ Расчёт</button>
+      <div v-if="orderInfoText && !compact" class="order-info-line">{{ orderInfoText }}</div>
     </td>
 
     <!-- Хватит до (после заказа) -->
@@ -290,14 +293,15 @@ const calcDisplayText = computed(() => {
   const order = Math.round(calc.value.calculatedOrder || 0);
   if (!order || order <= 0 || isNaN(order)) return '0';
   const s = props.settings;
-  const physBoxes = s.unit === 'boxes'
-    ? Math.ceil(order / mult.value)
-    : Math.ceil(order / (qpb.value * mult.value));
+  // Учётные коробки
+  const accountingBoxes = s.unit === 'boxes' ? order : Math.ceil(order / qpb.value);
+  // Физические коробки
+  const physBoxes = Math.ceil(accountingBoxes / mult.value);
   const pieces = s.unit === 'pieces' ? order : order * qpb.value;
 
   const safeUnit = escHtml(props.item.unitOfMeasure || 'шт');
-  if (mult.value > 1) return `${physBoxes} кор (${nf.format(pieces)} ${safeUnit})`;
-  if (s.unit === 'pieces' && qpb.value > 1) return `${Math.ceil(order / qpb.value)} кор (${nf.format(order)} ${safeUnit})`;
+  if (mult.value > 1) return `${accountingBoxes} уч.кор (${nf.format(pieces)} ${safeUnit})`;
+  if (s.unit === 'pieces' && qpb.value > 1) return `${accountingBoxes} кор (${nf.format(order)} ${safeUnit})`;
   if (s.unit === 'boxes') return `${order} кор`;
   return String(order);
 });
@@ -329,25 +333,21 @@ const tooltipHtml = computed(() => {
 });
 
 // ─── Заказ: синхронизация штуки ↔ коробки ────────────────────────────────────
-const orderPieces = computed(() => {
-  if (props.settings.unit === 'pieces') return props.item.finalOrder || 0;
-  return (props.item.finalOrder || 0) * qpb.value;
-});
+// Левое поле: finalOrder напрямую (учётные коробки при boxes, штуки при pieces)
+const orderPieces = computed(() => props.item.finalOrder || 0);
 
+// Правое поле: физические коробки = finalOrder / mult (boxes) или finalOrder / (qpb * mult) (pieces)
 const orderBoxes = computed(() => {
-  const pieces = orderPieces.value;
-  return physBoxSize.value ? Math.ceil(pieces / physBoxSize.value) : 0;
+  const fo = props.item.finalOrder || 0;
+  if (props.settings.unit === 'boxes') {
+    return mult.value ? Math.ceil(fo / mult.value) : 0;
+  }
+  return physBoxSize.value ? Math.ceil(fo / physBoxSize.value) : 0;
 });
 
-function onOrderPiecesChange(pieces) {
-  const physBoxes = physBoxSize.value ? Math.ceil(pieces / physBoxSize.value) : 0;
-  let finalOrder;
-  if (props.settings.unit === 'pieces') {
-    finalOrder = pieces;
-  } else {
-    finalOrder = qpb.value ? Math.round(pieces / qpb.value) : pieces;
-  }
-  orderStore.updateItemField(props.item.id, 'finalOrder', finalOrder);
+function onOrderPiecesChange(value) {
+  // Левое поле: finalOrder = value напрямую (учётные при boxes, штуки при pieces)
+  orderStore.updateItemField(props.item.id, 'finalOrder', value);
   draftStore.save();
 }
 
@@ -402,6 +402,16 @@ function handleOrderBoxesKeydown(e) {
   }
   calcOrderBoxes.onKeydown(e);
 }
+
+// Информационная строка под полями заказа
+const orderInfoText = computed(() => {
+  const fo = props.item.finalOrder || 0;
+  if (!fo) return '';
+  if (props.settings.unit === 'boxes') {
+    return `${nf.format(fo * qpb.value)} ${props.item.unitOfMeasure || 'шт'}`;
+  }
+  return `${Math.ceil(fo / qpb.value)} уч.кор`;
+});
 
 // ─── Применить расчёт → в заказ ──────────────────────────────────────────────
 function applyCalc() {

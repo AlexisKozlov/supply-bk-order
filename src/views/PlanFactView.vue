@@ -167,7 +167,7 @@
                       <span class="pf-item-name">{{ item.name }}</span>
                       <span v-if="item.sku" class="pf-item-sku">{{ item.sku }}</span>
                     </td>
-                    <td class="pf-td pf-td-qty">{{ item.qty_boxes }}</td>
+                    <td class="pf-td pf-td-qty">{{ toAccountingBoxes(item) }}</td>
                     <td v-if="tab === 'overdue' || tab === 'transit'" class="pf-td pf-td-fact">
                       <input
                         class="pf-fact-input"
@@ -178,7 +178,7 @@
                       />
                     </td>
                     <td v-else-if="tab === 'received'" class="pf-td pf-td-fact">
-                      <span>{{ item.received_qty ?? '—' }}</span>
+                      <span>{{ item._factValue ?? '—' }}</span>
                     </td>
                     <td class="pf-td pf-td-delta">
                       <template v-if="item._factValue !== null && item._delta !== 0">
@@ -370,8 +370,12 @@ const emptyText = computed(() => {
 
 const receivedDiscrepancies = computed(() =>
   drawerItems.value.filter(i => {
-    const fact = tab.value === 'received' ? Number(i.received_qty ?? i.qty_boxes) : i._factValue
-    return fact !== null && fact !== Number(i.qty_boxes)
+    const orderAccounting = Number(i.qty_boxes) || 0
+    if (tab.value === 'received') {
+      const factAccounting = Number(i.received_qty ?? i.qty_boxes)
+      return factAccounting !== orderAccounting
+    }
+    return i._factValue !== null && i._factValue !== orderAccounting
   }).length
 )
 
@@ -385,8 +389,14 @@ function pluralOrders(n) {
   return 'заказов'
 }
 
+function toAccountingBoxes(item) {
+  return Number(item.qty_boxes) || 0
+}
+
 function sumOrderBoxes(order) {
-  return (order.order_items || []).reduce((s, i) => s + (parseFloat(String(i.qty_boxes || '0').replace(',', '.')) || 0), 0)
+  return (order.order_items || []).reduce((s, i) => {
+    return s + (parseFloat(String(i.qty_boxes || '0').replace(',', '.')) || 0)
+  }, 0)
 }
 
 onMounted(async () => {
@@ -507,11 +517,11 @@ function calcCoverageForItem(item, factQty, order) {
   const consumedBeforeDelivery = daily * transitDays
   const stockAfterDelivery = Math.max(0, (stock + transit) - consumedBeforeDelivery)
 
-  const mult = Number(item.multiplicity) || 1
   const qpb = Number(item.qty_per_box) || 1
   const unit = order?.unit || 'boxes'
-  const physBoxes = factQty ?? (Number(item.qty_boxes) || 0)
-  const effectiveQty = unit === 'boxes' ? physBoxes * mult : physBoxes * qpb * mult
+  // qty_boxes и factQty теперь в учётных коробках
+  const accountingBoxes = factQty ?? (Number(item.qty_boxes) || 0)
+  const effectiveQty = unit === 'boxes' ? accountingBoxes : accountingBoxes * qpb
 
   const available = stockAfterDelivery + effectiveQty
 
@@ -539,10 +549,12 @@ function openDrawer(order) {
   actFile.value = null
   editDeliveryDate.value = order.delivery_date || ''
   drawerItems.value = (order.order_items || []).map(item => {
-    const factVal = tab.value === 'received' ? (item.received_qty != null ? Number(item.received_qty) : null) : null
-    const delta = factVal !== null ? factVal - Number(item.qty_boxes) : 0
-    const cov = calcCoverageForItem(item, factVal, order)
-    return { ...item, _factValue: factVal, _delta: delta, _coverageDate: cov.date, _coverageDays: cov.days, _coverageDateStr: cov.str }
+    // qty_boxes и received_qty теперь в учётных коробках
+    const orderAccounting = Number(item.qty_boxes) || 0
+    const factAccounting = tab.value === 'received' ? (item.received_qty != null ? Number(item.received_qty) : null) : null
+    const delta = factAccounting !== null ? factAccounting - orderAccounting : 0
+    const cov = calcCoverageForItem(item, factAccounting, order)
+    return { ...item, _factValue: factAccounting, _delta: delta, _coverageDate: cov.date, _coverageDays: cov.days, _coverageDateStr: cov.str }
   })
   drawerOpen.value = true
 }
@@ -556,10 +568,11 @@ function closeDrawer() {
 
 function onFactInput(idx, event) {
   const val = event.target.value.replace(/[^0-9]/g, '')
-  const num = val === '' ? null : parseInt(val, 10)
+  const num = val === '' ? null : parseInt(val, 10) // учётные коробки
   const item = drawerItems.value[idx]
+  const orderAccounting = Number(item.qty_boxes) || 0
   item._factValue = num
-  item._delta = num !== null ? num - Number(item.qty_boxes) : 0
+  item._delta = num !== null ? num - orderAccounting : 0
   const cov = calcCoverageForItem(item, num, selectedOrder.value)
   item._coverageDate = cov.date
   item._coverageDays = cov.days
@@ -702,6 +715,7 @@ async function saveReceived() {
   saving.value = true
   try {
     const userName = userStore.currentUser?.name || 'Неизвестно'
+    // received_qty теперь в учётных коробках — записываем напрямую
     const allItems = drawerItems.value.map(i => ({
       id: i.id,
       received_qty: i._factValue !== null ? i._factValue : i.qty_boxes
@@ -714,7 +728,7 @@ async function saveReceived() {
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
       details: {
         supplier: selectedOrder.value.supplier, items_count: drawerItems.value.length, discrepancies,
-        items_with_discrepancy: itemsWithFact.filter(i => i._delta !== 0).map(i => ({ name: i.name, ordered: i.qty_boxes, received: i._factValue, delta: i._delta })),
+        items_with_discrepancy: itemsWithFact.filter(i => i._delta !== 0).map(i => ({ name: i.name, ordered: toAccountingBoxes(i), received: i._factValue, delta: i._delta })),
       },
       created_at: now,
     })

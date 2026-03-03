@@ -72,6 +72,24 @@
 
     <!-- Тулбар: действия -->
     <div class="order-toolbar" v-if="items.length && !(isViewer && !viewOnly && !editingPlanId)">
+      <div class="search-bar" v-if="!viewOnly" ref="searchBarRef" style="position:relative;display:flex;align-items:center;gap:8px;">
+        <div style="position:relative;display:inline-block;">
+          <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
+            @input="onSearchInput" ref="searchInputRef" style="width:280px;max-width:360px;padding-right:28px;"/>
+          <button v-if="searchQuery" @click="clearSearch"
+            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;"><BkIcon name="close" size="xs"/></button>
+          <div v-if="searchResults.length || (searchQuery.length >= 2 && searchDone)"
+            style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
+            <div v-for="p in searchResults" :key="p.id||p.sku"
+              @click="addFromSearch(p)"
+              class="search-result-item" :style="p.is_active === 0 ? 'opacity:0.7' : ''">
+              <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
+              <span v-if="p.is_active === 0" class="hidden-badge">скрыта</span>
+            </div>
+            <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
+          </div>
+        </div>
+      </div>
       <div class="order-actions">
         <button class="btn small" :disabled="!canUndo || viewOnly" @click="undo" title="Отменить"><BkIcon name="undo" size="sm"/></button>
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
@@ -105,10 +123,11 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(item, idx) in items" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item) }">
+          <tr v-for="(item, idx) in items" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
             <td class="plan-td-name" style="text-align:left;" :title="compactPlan ? planMetaTooltip(item) : ''" @dblclick="openProductEdit(item)">
               <div style="font-weight:600;color:var(--text);" :style="compactPlan ? 'font-size:12px' : 'font-size:13px'">
                 <b v-if="item.sku" style="color:var(--bk-orange);margin-right:4px;">{{ item.sku }}</b>{{ item.name }}
+                <span v-if="item._hidden" class="hidden-badge">скрыта</span>
               </div>
               <div v-if="!compactPlan" style="font-size:11px;color:var(--text-muted);font-weight:500;">{{ item.qtyPerBox }} {{ item.unitOfMeasure || 'шт' }}/кор{{ item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : '' }}{{ item.multiplicity > 1 ? ' · кратн.' + item.multiplicity : '' }}</div>
             </td>
@@ -120,7 +139,7 @@
             <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
               <template v-if="item.plan[0]?.orderBoxes > 0">
                 <span class="plan-result-value">{{ item.plan[0].orderBoxes }} кор</span>
-                <span v-if="!compactPlan" class="plan-result-sub">{{ nf.format(item.plan[0].orderUnits) }} {{ item.unitOfMeasure }}</span>
+                <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[0].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[0].orderUnits) }} {{ item.unitOfMeasure }}</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
             </td>
@@ -133,12 +152,12 @@
                 <template v-if="item.plan[m]?.orderBoxes > 0">
                   <span class="plan-result-value" :class="{ 'plan-cell-locked': item.plan[m]?.locked }">
                     {{ item.plan[m].orderBoxes }} кор
-                    <span v-if="!viewOnly && item.boxesPerPallet && item.plan[m].orderBoxes % item.boxesPerPallet !== 0" class="plan-pallet-period"
-                      :title="`До ${Math.ceil(item.plan[m].orderBoxes / item.boxesPerPallet)} пал (${Math.ceil(item.plan[m].orderBoxes / item.boxesPerPallet) * item.boxesPerPallet} кор)`"
+                    <span v-if="!viewOnly && item.boxesPerPallet && item.plan[m].orderBoxes % (item.boxesPerPallet * (item.multiplicity || 1)) !== 0" class="plan-pallet-period"
+                      :title="`До ${Math.ceil(item.plan[m].orderBoxes / (item.boxesPerPallet * (item.multiplicity || 1)))} пал (${Math.ceil(item.plan[m].orderBoxes / (item.boxesPerPallet * (item.multiplicity || 1))) * item.boxesPerPallet * (item.multiplicity || 1)} кор)`"
                       @click.stop="roundToPallet(idx, m)">⬆</span>
                     <span v-if="!viewOnly && item.plan[m]?.locked" class="plan-reset-cell" title="Сбросить" @click.stop="resetCell(idx, m)"><BkIcon name="close" size="sm"/></span>
                   </span>
-                  <span v-if="!compactPlan" class="plan-result-sub">{{ nf.format(item.plan[m].orderUnits) }} {{ item.unitOfMeasure }}</span>
+                  <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[m].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[m].orderUnits) }} {{ item.unitOfMeasure }}</span>
                 </template>
                 <span v-else class="plan-result-zero">—</span>
               </template>
@@ -153,7 +172,7 @@
             <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }">
               <template v-if="itemTotalBoxes(item) > 0">
                 <span class="plan-total-boxes">{{ nf.format(itemTotalBoxes(item)) }} кор</span>
-                <span class="plan-total-units">{{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }}</span>
+                <span class="plan-total-units">{{ (item.multiplicity || 1) > 1 ? nf.format(Math.ceil(itemTotalBoxes(item) / item.multiplicity)) + ' физ · ' : '' }}{{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }}</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
             </td>
@@ -164,9 +183,10 @@
 
     <!-- Мобильный карточный вид планирования -->
     <div v-if="items.length" class="plan-mobile-cards">
-      <div v-for="(item, idx) in items" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item) }">
+      <div v-for="(item, idx) in items" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
         <div class="plan-mob-name">
           <b v-if="item.sku">{{ item.sku }}</b> {{ item.name }}
+          <span v-if="item._hidden" class="hidden-badge">скрыта</span>
         </div>
         <div class="plan-mob-inputs">
           <div class="plan-mob-field">
@@ -365,6 +385,16 @@ const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 let _prevPlanItems = null;
 let _loadedCreatedBy = null;
 let _loadedNote = '';
+
+// ─── Search ───────────────────────────────────────────────────────────────
+const searchQuery           = ref('');
+const searchResults         = ref([]);
+const searchDone            = ref(false);
+const searchInputRef        = ref(null);
+const searchBarRef          = ref(null);
+let   searchTimer           = null;
+const searchCache           = new Map();
+const SEARCH_CACHE_MAX      = 20;
 
 // ─── Calculator for plan inputs (#3) ──────────────────────────────────────
 let _activeCalcIdx = null;
@@ -575,7 +605,7 @@ function recalcItem(idx, fromMonth = 0) {
     const old = item.plan || [];
     item.plan = headers.map((_, m) => { const o = old[m]; if (o && o.locked) return { ...o, month: m }; return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }; });
   }
-  const qpb = getQpb(item); const mult = getMultiplicity(item); const pbu = qpb * mult;
+  const qpb = getQpb(item); const pbu = qpb;
   const toBase = (v) => inputUnit.value === 'boxes' ? v * qpb : v;
   const periodDays = consumptionPeriodDays.value || 30;
   const daily = toBase(item.monthlyConsumption) / periodDays;
@@ -606,7 +636,7 @@ function startEdit(idx, m, event) {
 function applyEdit(idx, m, val) {
   const newVal = parseInt(val) || 0;
   const item = items.value[idx]; const p = item.plan[m]; if (!p) { editingCell.value = null; return; }
-  p.orderBoxes = newVal; p.orderUnits = newVal * getQpb(item) * getMultiplicity(item); p.locked = true;
+  p.orderBoxes = newVal; p.orderUnits = newVal * getQpb(item); p.locked = true;
   editingCell.value = null;
   recalcItem(idx, m + 1); _savePlanDraft();
 }
@@ -625,8 +655,11 @@ function startMobEdit(idx, m) {
 function roundToPallet(idx, m) {
   snapshot();
   const item = items.value[idx]; const p = item.plan[m]; if (!p || !item.boxesPerPallet) return;
-  p.orderBoxes = Math.ceil(p.orderBoxes / item.boxesPerPallet) * item.boxesPerPallet;
-  p.orderUnits = p.orderBoxes * getQpb(item) * getMultiplicity(item); p.locked = true;
+  // orderBoxes в учётных → паллета = boxesPerPallet физ. = boxesPerPallet * mult учётных
+  const mult = getMultiplicity(item);
+  const accountingPerPallet = item.boxesPerPallet * mult;
+  p.orderBoxes = Math.ceil(p.orderBoxes / accountingPerPallet) * accountingPerPallet;
+  p.orderUnits = p.orderBoxes * getQpb(item); p.locked = true;
   recalcItem(idx, m + 1); _savePlanDraft();
 }
 function resetCell(idx, m) { snapshot(); items.value[idx].plan[m].locked = false; recalcItem(idx, m); _savePlanDraft(); }
@@ -885,8 +918,14 @@ async function onCardSaved() {
   try {
     const { data } = await db.from('products').select('*').eq('sku', product.sku).single();
     if (!data) return;
+    if (!data.is_active) {
+      items.value = items.value.filter(i => i.sku !== product.sku);
+      _savePlanDraft();
+      return;
+    }
     const item = items.value.find(i => i.sku === product.sku);
     if (item) {
+      item._hidden = false;
       item.name = data.name || item.name; item.qtyPerBox = data.qty_per_box || item.qtyPerBox;
       item.boxesPerPallet = data.boxes_per_pallet || item.boxesPerPallet;
       item.multiplicity = data.multiplicity || item.multiplicity;
@@ -894,6 +933,63 @@ async function onCardSaved() {
       recalcAll(); _savePlanDraft();
     }
   } catch (e) { console.error(e); }
+}
+
+// ─── Search ───────────────────────────────────────────────────────────────
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  searchResults.value = []; searchDone.value = false;
+  const q = searchQuery.value.trim();
+  if (q.length < 2) return;
+  searchTimer = setTimeout(() => searchProducts(q), 300);
+}
+
+async function searchProducts(q) {
+  const cacheKey = `${q}_${orderStore.settings.legalEntity}_${supplier.value}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) { searchResults.value = cached; searchDone.value = true; return; }
+  const params = new URLSearchParams({ q, limit: '10', legal_entity: orderStore.settings.legalEntity });
+  if (supplier.value) params.set('supplier', supplier.value);
+  try {
+    const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
+    if (!r.ok) { searchResults.value = []; return; }
+    const results = await r.json();
+    if (!Array.isArray(results)) { searchResults.value = []; return; }
+    if (searchQuery.value.trim() !== q) return;
+    searchResults.value = results;
+    if (searchCache.size >= SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value);
+    searchCache.set(cacheKey, results);
+  } catch(e) { searchResults.value = []; }
+  finally { searchDone.value = true; }
+}
+
+function addFromSearch(product) {
+  if (items.value.find(i => i.sku === product.sku)) { toast.warning('Уже в списке', product.name); return; }
+  const qpb = product.qty_per_box || 1;
+  const newItem = {
+    sku: product.sku, name: product.name, qtyPerBox: qpb,
+    boxesPerPallet: product.boxes_per_pallet || 0,
+    multiplicity: product.multiplicity || 1,
+    unitOfMeasure: product.unit_of_measure || 'шт',
+    monthlyConsumption: 0, stockOnHand: 0, stockAtSupplier: 0,
+    plan: periodHeaders.value.map(() => ({ orderBoxes: 0, orderUnits: 0, locked: false })),
+    _cw: false, _ct: '',
+    _hidden: product.is_active === 0,
+  };
+  items.value.push(newItem);
+  searchQuery.value = ''; searchResults.value = [];
+  _savePlanDraft();
+}
+
+function clearSearch() {
+  searchQuery.value = ''; searchResults.value = []; searchDone.value = false;
+  searchInputRef.value?.focus();
+}
+
+function closeSearchDropdown(e) {
+  if (searchBarRef.value && !searchBarRef.value.contains(e.target)) {
+    searchResults.value = []; searchDone.value = false;
+  }
 }
 
 async function exportExcel() {
@@ -1015,7 +1111,8 @@ async function exportExcel() {
     setCell(ws, r, 1, item.name || '', sCellBold(stripe));
     item.plan.forEach((p, c) => {
       if (p.orderBoxes > 0) {
-        setCell(ws, r, c + 2, `${p.orderBoxes} кор (${nf.format(p.orderUnits)} ${item.unitOfMeasure || 'шт'})`, sPeriodVal(stripe, true));
+        const physB = Math.ceil(p.orderBoxes / (item.multiplicity || 1));
+        setCell(ws, r, c + 2, `${physB} кор (${nf.format(p.orderUnits)} ${item.unitOfMeasure || 'шт'})`, sPeriodVal(stripe, true));
       } else {
         setCell(ws, r, c + 2, '—', sPeriodVal(stripe, false));
       }
@@ -1023,16 +1120,19 @@ async function exportExcel() {
     // Итого по товару
     const tBoxes = itemTotalBoxes(item);
     const tUnits = itemTotalUnits(item);
+    const itemMult = item.multiplicity || 1;
     if (tBoxes > 0) {
-      setCell(ws, r, colTotal, `${nf.format(tBoxes)} кор (${nf.format(tUnits)} ${item.unitOfMeasure || 'шт'})`, sSummaryVal(stripe, true));
+      const tPhys = Math.ceil(tBoxes / itemMult);
+      setCell(ws, r, colTotal, `${nf.format(tPhys)} кор (${nf.format(tUnits)} ${item.unitOfMeasure || 'шт'})`, sSummaryVal(stripe, true));
     } else {
       setCell(ws, r, colTotal, '—', sSummaryVal(stripe, false));
     }
-    // Паллеты
+    // Паллеты (через физические = учётные / кратность)
     const bpp = item.boxesPerPallet || 0;
     if (bpp > 0 && tBoxes > 0) {
-      const pallets = Math.floor(tBoxes / bpp);
-      const remainder = tBoxes % bpp;
+      const physBoxes = Math.ceil(tBoxes / itemMult);
+      const pallets = Math.floor(physBoxes / bpp);
+      const remainder = physBoxes % bpp;
       const parts = [];
       if (pallets > 0) parts.push(`${pallets} пал`);
       if (remainder > 0) parts.push(`${remainder} кор`);
@@ -1065,7 +1165,9 @@ async function exportExcel() {
     itemsWithPlan.value.forEach(item => {
       const bpp = item.boxesPerPallet || 0;
       const boxes = item.plan[m]?.orderBoxes || 0;
-      if (bpp > 0 && boxes > 0) periodPal += Math.floor(boxes / bpp);
+      const itemMult = item.multiplicity || 1;
+      // Паллеты через физические = учётные / кратность
+      if (bpp > 0 && boxes > 0) periodPal += Math.floor(Math.ceil(boxes / itemMult) / bpp);
     });
     grandPallets += periodPal;
     setCell(ws, r, m + 2, periodPal > 0 ? `${periodPal} пал` : '—', sTotalVal);
@@ -1325,13 +1427,18 @@ function onPlanBeforeUnload(e) {
   if (hasPlanUnsavedData()) { e.preventDefault(); }
 }
 
-onMounted(() => { window.addEventListener('beforeunload', onPlanBeforeUnload); });
+onMounted(() => {
+  window.addEventListener('beforeunload', onPlanBeforeUnload);
+  document.addEventListener('click', closeSearchDropdown);
+});
 
 onBeforeUnmount(() => {
   clearTimeout(_vTimer);
   clearTimeout(_collapseHintTimer);
+  clearTimeout(searchTimer);
   if (planDraftTickTimer) clearInterval(planDraftTickTimer);
   window.removeEventListener('beforeunload', onPlanBeforeUnload);
+  document.removeEventListener('click', closeSearchDropdown);
 });
 
 onBeforeRouteLeave(() => {
@@ -1431,4 +1538,8 @@ watch(() => route.query.planId, async (newId) => {
 .plan-compact .plan-edit-input { width: 50px !important; font-size: 12px !important; padding: 1px 3px !important; }
 
 /* Mobile styles moved to global style.css — .planning-view scope */
+
+/* Hidden items */
+.item-hidden { opacity: 0.7; }
+.hidden-badge { background:#FFEBEE; color:#E57373; font-size:10px; font-weight:600; border:1px solid #E57373; border-radius:3px; padding:1px 4px; margin-left:6px; vertical-align:middle; }
 </style>

@@ -284,12 +284,11 @@ export const useOrderStore = defineStore('order', () => {
       addedItem.stock = Math.round(parseFloat(String(histItem.stock || '0').replace(',', '.')) || 0);
       addedItem.transit = Math.round(parseFloat(String(histItem.transit || '0').replace(',', '.')) || 0);
 
-      const physBoxes = parseFloat(String(histItem.qty_boxes || '0').replace(',', '.')) || 0;
-      const itemMult = getMultiplicity(addedItem);
+      const accountingBoxes = parseFloat(String(histItem.qty_boxes || '0').replace(',', '.')) || 0;
       const itemQpb = getQpb(addedItem);
       addedItem.finalOrder = settings.unit === 'boxes'
-        ? Math.round(physBoxes * itemMult)
-        : Math.round(physBoxes * itemQpb * itemMult);
+        ? Math.round(accountingBoxes)
+        : Math.round(accountingBoxes * itemQpb);
     }
 
     editingOrderId.value = (isEditing || isViewOnly) ? order.id : null;

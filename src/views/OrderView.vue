@@ -91,8 +91,9 @@
             style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
             <div v-for="p in searchResults" :key="p.id||p.sku"
               @click="addFromSearch(p)"
-              class="search-result-item">
+              class="search-result-item" :style="p.is_active === 0 ? 'opacity:0.7' : ''">
               <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
+              <span v-if="p.is_active === 0" class="hidden-badge">скрыта</span>
             </div>
             <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
           </div>
@@ -128,7 +129,7 @@
         </div>
       </div>
 
-      <OrderTable :data-validation-enabled="true" :compact="compactMode" @edit-product="openProductForEdit"/>
+      <OrderTable :compact="compactMode" :applied-analogs="appliedAnalogs" @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
       <div class="toolbar-row toolbar-finish">
@@ -275,6 +276,7 @@ const searchInputRef        = ref(null);
 const searchBarRef          = ref(null);
 const editCardModal         = ref({ show: false, product: null });
 const analogMergeModal      = ref({ show: false, merges: [] });
+const appliedAnalogs        = ref(new Map()); // SKU товара → Set<SKU применённых аналогов>
 const logModal              = ref({ show: false, loading: false, entries: [] });
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
@@ -339,12 +341,7 @@ function onSafetyDateChange(e) {
 const suppliers   = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
 
 const itemsWithOrderCount = computed(() => {
-  const s = orderStore.settings;
-  return orderStore.items.filter(item => {
-    const qpb = getQpb(item); const mult = getMultiplicity(item);
-    const boxes = s.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
-    return Math.ceil(Math.max(0, boxes)) > 0;
-  }).length;
+  return orderStore.items.filter(item => (item.finalOrder || 0) > 0).length;
 });
 
 // Показать подсказку «можно скрыть» когда параметры заполнены
@@ -765,6 +762,10 @@ async function searchProducts(q) {
 function addFromSearch(product) {
   const added = orderStore.addItem(product);
   if (!added) toast.warning('Уже в заказе', product.name);
+  else if (product.is_active === 0) {
+    const item = orderStore.items.find(i => i.sku === product.sku);
+    if (item) item._hidden = true;
+  }
   searchQuery.value = ''; searchResults.value = []; draftStore.save();
 }
 
@@ -825,6 +826,7 @@ async function onCardSaved() {
     }
     const item = orderStore.items.find(i => i.productId === product.id || i.sku === product.sku);
     if (item) {
+      item._hidden = false;
       item.sku = data.sku || item.sku; item.name = data.name || item.name;
       item.qtyPerBox = data.qty_per_box || item.qtyPerBox; item.boxesPerPallet = data.boxes_per_pallet || item.boxesPerPallet;
       item.multiplicity = data.multiplicity || item.multiplicity; item.unitOfMeasure = data.unit_of_measure || item.unitOfMeasure;
@@ -838,11 +840,13 @@ function buildOrderText() {
     ? orderStore.settings.deliveryDate.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' }) : '—';
   const lines = orderStore.items.map(item => {
     const qpb = getQpb(item); const mult = getMultiplicity(item);
-    const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
-    const rb = Math.ceil(physBoxes); if (rb <= 0) return null;
-    const pieces = rb * qpb * mult;
+    // qty_boxes теперь в учётных → accountingBoxes = finalOrder
+    const accountingBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb;
+    const physBoxes = Math.ceil(accountingBoxes / mult);
+    if (physBoxes <= 0) return null;
+    const pieces = Math.round(accountingBoxes * qpb);
     const unit = item.unitOfMeasure || 'шт';
-    return { text: `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`, boxes: rb, pieces: Math.round(pieces), name: item.name, sku: item.sku, unit, qpb };
+    return { text: `${item.sku ? item.sku + '  ' : ''}${item.name} - ${physBoxes} коробок (${nf.format(pieces)} ${unit})`, boxes: physBoxes, pieces, name: item.name, sku: item.sku, unit, qpb };
   }).filter(Boolean);
   return { lines, deliveryDate };
 }
@@ -872,12 +876,13 @@ async function share(channel) {
     ? orderStore.settings.deliveryDate.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' }) : '—';
   const lines = orderStore.items.map(item => {
     const qpb = getQpb(item); const mult = getMultiplicity(item);
-    const physBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder / mult : item.finalOrder / (qpb * mult);
-    const rb = Math.ceil(physBoxes);
-    if (rb <= 0) return null;
-    const pieces = rb * qpb * mult;
+    // qty_boxes теперь в учётных → accountingBoxes = finalOrder
+    const accountingBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb;
+    const physBoxes = Math.ceil(accountingBoxes / mult);
+    if (physBoxes <= 0) return null;
+    const pieces = Math.round(accountingBoxes * qpb);
     const unit = item.unitOfMeasure || 'шт';
-    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${rb} коробок (${nf.format(Math.round(pieces))} ${unit})`;
+    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${physBoxes} коробок (${nf.format(pieces)} ${unit})`;
   }).filter(Boolean);
   if (!lines.length) { toast.error('Нет позиций для отправки', ''); return; }
   const le       = orderStore.settings.legalEntity || '';
@@ -942,6 +947,16 @@ async function importFromExcel() {
 function onAnalogApply() {
   const { merges } = analogMergeModal.value;
   const applied = applyAnalogMerges(orderStore.items, merges, 'order');
+  // Запоминаем какие аналоги были применены для проверки данных
+  for (const merge of merges) {
+    const set = appliedAnalogs.value.get(merge.itemSku) || new Set();
+    for (const a of merge.analogs) {
+      if (a.checked) set.add(a.sku);
+      else set.delete(a.sku);
+    }
+    if (set.size > 0) appliedAnalogs.value.set(merge.itemSku, set);
+    else appliedAnalogs.value.delete(merge.itemSku);
+  }
   analogMergeModal.value.show = false;
   if (applied > 0) {
     orderStore.bumpDataVersion();
@@ -949,7 +964,14 @@ function onAnalogApply() {
     toast.success('Аналоги применены', `${applied} аналогов добавлены`);
   }
 }
-function onAnalogSkip() { analogMergeModal.value.show = false; }
+function onAnalogSkip() {
+  // При пропуске — убираем аналоги из отслеживания
+  const { merges } = analogMergeModal.value;
+  for (const merge of merges) {
+    appliedAnalogs.value.delete(merge.itemSku);
+  }
+  analogMergeModal.value.show = false;
+}
 
 
 // ─── Excel ────────────────────────────────────────────────────────────────────

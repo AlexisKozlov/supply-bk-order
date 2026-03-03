@@ -88,10 +88,12 @@ export async function exportToExcel(items, settings) {
     if (!item.finalOrder || item.finalOrder <= 0) return;
     const qpb  = getQpb(item);
     const mult = getMultiplicity(item);
-    const physBoxes = settings.unit === 'boxes'
-      ? Math.ceil(item.finalOrder / mult)
-      : Math.ceil(item.finalOrder / (qpb * mult));
-    const pieces = settings.unit === 'pieces' ? item.finalOrder : physBoxes * qpb;
+    // qty_boxes теперь в учётных коробках
+    const accountingBoxes = settings.unit === 'boxes'
+      ? Math.ceil(item.finalOrder)
+      : Math.ceil(item.finalOrder / qpb);
+    const physBoxes = Math.ceil(accountingBoxes / mult);
+    const pieces = accountingBoxes * qpb;
     const unit = item.unitOfMeasure || 'шт';
     const nameWithSku = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
     const stripe = count % 2 === 1;

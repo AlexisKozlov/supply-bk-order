@@ -26,7 +26,7 @@
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
           <th class="stock-col">Запас</th>
           <th>Расчёт</th>
-          <th>{{ settings.unit === 'boxes' ? 'Кор/Физ' : 'Шт/Кор' }}</th>
+          <th>{{ settings.unit === 'boxes' ? 'Уч/Физ' : 'Шт/Физ' }}</th>
           <th>До</th>
           <th>Пал.</th>
           <th style="width:24px;"></th>
@@ -50,7 +50,7 @@
           :settings="settings"
           :compact="compact"
           :avg-consumption="avgConsumptionMap[item.sku] || 0"
-          :data-validation="dataValidationEnabled"
+          :data-validation="true"
           :ref="el => { if (el) rowRefs[index] = el; }"
           @remove="orderStore.removeItem($event); draftStore.save();"
           @edit-product="$emit('edit-product', $event)"
@@ -87,8 +87,8 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 
 
 const props = defineProps({
-  dataValidationEnabled: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  appliedAnalogs: { type: Map, default: () => new Map() },
 });
 
 const emit = defineEmits(['edit-product']);
@@ -125,57 +125,70 @@ function onDragEnd() { draggedIndex = null; }
 const avgConsumptionMap = ref({});
 
 async function loadConsumptionHistory() {
-  const supplier = settings.value.supplier;
   const legalEntity = settings.value.legalEntity;
-  if (!supplier || !props.dataValidationEnabled) return;
+
+  const skus = orderStore.items.filter(i => i.sku).map(i => i.sku);
+  if (!skus.length) return;
+
+  // Собираем все SKU: товары + применённые аналоги
+  const allSkus = new Set(skus);
+  for (const [, analogSet] of props.appliedAnalogs) {
+    for (const aSku of analogSet) allSkus.add(aSku);
+  }
 
   const { data, error } = await db
-    .from('orders')
-    .select('*, order_items(sku, consumption_period)')
+    .from('analysis_data')
+    .select('sku, consumption, period_days')
     .eq('legal_entity', legalEntity)
-    .eq('supplier', supplier)
-    .order('created_at', { ascending: false })
-    .limit(2);
+    .in('sku', [...allSkus]);
 
   if (error || !data || !data.length) return;
 
-  // qtyPerBox берём из текущих загруженных товаров (из карточки products),
-  // НЕ из исторических order_items — там может быть записана кратность
+  // Карта analysis_data по SKU
+  const adMap = new Map();
+  data.forEach(d => { if (d.sku) adMap.set(d.sku, d); });
+
   const qpbBySku = {};
   orderStore.items.forEach(item => {
     if (item.sku) qpbBySku[item.sku] = item.qtyPerBox || 1;
   });
 
-  const bySku = {};
   const currentUnit = settings.value.unit;
-
-  data.forEach(order => {
-    const orderUnit = order.unit || 'pieces';
-    const periodDays = order.period_days || 30;
-    (order.order_items || []).forEach(item => {
-      if (!item.sku) return;
-      const cp = parseFloat(item.consumption_period) || 0;
-      if (cp === 0) return;
-      const daily = cp / periodDays;
-      let monthly = daily * 30;
-      // Конвертация pieces↔boxes через учётный qtyPerBox из карточки товара
-      // (без кратности multiplicity!)
-      const qpb = qpbBySku[item.sku] || 1;
-      if (orderUnit === 'pieces' && currentUnit === 'boxes') monthly = monthly / qpb;
-      else if (orderUnit === 'boxes' && currentUnit === 'pieces') monthly = monthly * qpb;
-      if (!bySku[item.sku]) bySku[item.sku] = [];
-      bySku[item.sku].push(monthly);
-    });
-  });
+  const periodDays = settings.value.periodDays || 30;
 
   const map = {};
-  Object.entries(bySku).forEach(([sku, vals]) => {
-    map[sku] = vals.reduce((a, b) => a + b, 0) / vals.length;
+  orderStore.items.forEach(item => {
+    if (!item.sku) return;
+    const d = adMap.get(item.sku);
+    if (!d) return;
+    const consumption = parseFloat(d.consumption) || 0;
+    const srcPeriod = d.period_days || 30;
+    const daily = srcPeriod > 0 ? consumption / srcPeriod : 0;
+    // Расход основного товара за период заказа (в штуках)
+    let totalPcs = daily * periodDays;
+
+    // Прибавляем расход применённых аналогов
+    const appliedSet = props.appliedAnalogs.get(item.sku);
+    if (appliedSet) {
+      for (const aSku of appliedSet) {
+        const ad = adMap.get(aSku);
+        if (!ad) continue;
+        const ac = parseFloat(ad.consumption) || 0;
+        const ap = ad.period_days || 30;
+        const aDaily = ap > 0 ? ac / ap : 0;
+        totalPcs += aDaily * periodDays;
+      }
+    }
+
+    if (totalPcs === 0) return;
+    // Конвертируем из штук в текущую единицу
+    const qpb = qpbBySku[item.sku] || 1;
+    map[item.sku] = currentUnit === 'boxes' ? totalPcs / qpb : totalPcs;
   });
   avgConsumptionMap.value = map;
 }
 
-watch(() => [settings.value.supplier, settings.value.unit, settings.value.legalEntity, props.dataValidationEnabled, orderStore.items.length, orderStore.dataVersion], () => {
-  if (props.dataValidationEnabled) loadConsumptionHistory();
+watch(() => [settings.value.unit, settings.value.legalEntity, settings.value.periodDays, orderStore.items.length, orderStore.dataVersion, props.appliedAnalogs.size], () => {
+  loadConsumptionHistory();
 }, { immediate: true });
 </script>
