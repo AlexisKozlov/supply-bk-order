@@ -1,1 +1,0 @@
-import{f as o,b as a,o as r}from"./vue-vendor-CPqDllzj.js";const s={class:"view-placeholder"},c={__name:"ShareView",setup(t){return(l,e)=>(r(),o("div",s,[...e[0]||(e[0]=[a("h2",null,"ShareView",-1),a("p",null,"Этот раздел будет реализован в следующих этапах.",-1)])]))}};export{c as default};

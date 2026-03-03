@@ -342,7 +342,7 @@ const draftStore = useDraftStore();
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
-const isViewer = computed(() => userStore.isViewer);
+const isViewer = computed(() => !userStore.hasAccess('planning', 'edit'));
 const supplier = ref('');
 const periodValue = ref('m3');
 const startDateStr = ref(toLocalDateStr(new Date()));
@@ -1397,7 +1397,7 @@ async function loadPlanFromHistory(planId) {
   toast.success('План загружен', `${plan.supplier} — ${items.value.length} позиций`);
 }
 
-watch(() => orderStore.settings.legalEntity, async () => { await supplierStore.loadSuppliers(orderStore.settings.legalEntity); supplier.value = ''; items.value = []; });
+watch(() => orderStore.settings.legalEntity, async () => { await supplierStore.loadSuppliers(orderStore.settings.legalEntity); supplier.value = ''; items.value = []; editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null; });
 const showCollapseHint = ref(false);
 let _collapseHintTimer = null;
 watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); } });

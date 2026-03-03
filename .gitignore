@@ -1,5 +1,6 @@
 node_modules/
 dist/
+public/assets/
 .DS_Store
 *.log
 src_backup_*
@@ -8,3 +9,4 @@ api/.env
 api/api/
 nohup.out
 *.xlsx
+.claude/

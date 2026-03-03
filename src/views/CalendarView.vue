@@ -185,6 +185,7 @@ async function load() {
     supplierColors.value = result.supplierColors;
   } catch (e) {
     orders.value = [];
+    toast.error('Ошибка загрузки', 'Не удалось загрузить данные календаря');
   } finally {
     loading.value = false;
   }

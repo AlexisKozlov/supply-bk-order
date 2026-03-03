@@ -39,8 +39,8 @@ export const useHistoryStore = defineStore('history', () => {
         .from('orders')
         .select(`id, delivery_date, today_date, supplier, legal_entity,
                  safety_days, period_days, unit, note, created_at, created_by,
-                 has_transit, show_stock_column, received_at,
-                 order_items(sku, name, qty_boxes, qty_per_box, consumption_period, stock, transit)`)
+                 has_transit, show_stock_column, received_at, updated_at,
+                 order_items(sku, name, qty_boxes, qty_per_box, multiplicity, consumption_period, stock, transit)`)
         .order('delivery_date', { ascending: false })
         .limit(PAGE_SIZE)
         .offset(offset);
@@ -76,7 +76,11 @@ export const useHistoryStore = defineStore('history', () => {
   }
 
   // ─── Загрузить историю планов ─────────────────────────────────────────────
+  let _planRequestId = 0;
+
   async function loadPlans({ legalEntity, supplier = '', reset = true, dateFrom = '', dateTo = '' } = {}) {
+    const myRequestId = reset ? ++_planRequestId : _planRequestId;
+
     if (reset) {
       loading.value = true;
       plans.value = [];
@@ -100,6 +104,7 @@ export const useHistoryStore = defineStore('history', () => {
       if (dateTo)      query = query.lte('created_at', dateTo + ' 23:59:59');
 
       const { data, error: err } = await query;
+      if (myRequestId !== _planRequestId) return plans.value;
       if (err) { error.value = err; return []; }
 
       const fetched = data || [];

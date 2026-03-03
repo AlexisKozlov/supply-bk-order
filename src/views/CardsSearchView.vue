@@ -368,6 +368,14 @@ import MaintenanceScreen from '@/components/MaintenanceScreen.vue'
 const API_BASE = '/api'
 const userStore = useUserStore()
 
+function fetchWithTimeout(url, opts = {}, timeout = 30000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+  return fetch(url, { ...opts, signal: controller.signal })
+    .then(r => { clearTimeout(timer); return r })
+    .catch(e => { clearTimeout(timer); throw e.name === 'AbortError' ? new Error('Сервер не отвечает (таймаут)') : e })
+}
+
 // --- Состояние ---
 const allCards = ref([])
 const query = ref('')
@@ -411,7 +419,7 @@ const searchWrapRef = ref(null)
 let maintenanceTimer = null
 async function checkMaintenance() {
   try {
-    const res = await fetch(`${API_BASE}/rpc/check_maintenance`, { method: 'POST' })
+    const res = await fetchWithTimeout(`${API_BASE}/rpc/check_maintenance`, { method: 'POST' })
     if (!res.ok) return
     const data = await res.json()
     maintenanceMode.value = !!data?.maintenance_mode
@@ -433,7 +441,7 @@ async function loadCards() {
   loading.value = true
   loadError.value = ''
   try {
-    const res = await fetch(`${API_BASE}/rpc/get_cards`)
+    const res = await fetchWithTimeout(`${API_BASE}/rpc/get_cards`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     allCards.value = data.map(c => {
@@ -458,7 +466,7 @@ async function loadCards() {
 // --- Загрузка даты обновления ---
 async function loadLastUpdate() {
   try {
-    const res = await fetch(`${API_BASE}/rpc/get_cards_last_update`)
+    const res = await fetchWithTimeout(`${API_BASE}/rpc/get_cards_last_update`)
     if (res.ok) {
       const data = await res.json()
       if (data.value) lastUpdate.value = data.value
@@ -471,7 +479,7 @@ async function loadLastUpdate() {
 // --- Логирование поиска ---
 async function logSearch(queryStr, found, matchType, matchedCardId) {
   try {
-    await fetch(`${API_BASE}/rpc/log_card_search`, {
+    await fetchWithTimeout(`${API_BASE}/rpc/log_card_search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -491,12 +499,12 @@ async function sendGuestHeartbeat() {
   // Не считаем гостя онлайн, если показана страница техработ
   if (maintenanceMode.value && !isAdmin.value) return;
   try {
-    await fetch(`${API_BASE}/rpc/guest_heartbeat`, {
+    await fetchWithTimeout(`${API_BASE}/rpc/guest_heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: guestSessionId, page: 'search-cards' })
     })
-    const res = await fetch(`${API_BASE}/rpc/get_guest_count`, {
+    const res = await fetchWithTimeout(`${API_BASE}/rpc/get_guest_count`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}'
@@ -726,7 +734,7 @@ async function loginAdmin() {
     return
   }
   try {
-    const res = await fetch(`${API_BASE}/rpc/check_user_password`, {
+    const res = await fetchWithTimeout(`${API_BASE}/rpc/check_user_password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_email: adminUserName.value, user_password: adminPassword.value })
@@ -770,7 +778,7 @@ async function updateLastUpdateDate() {
   const today = new Date().toLocaleDateString('ru-RU')
   lastUpdate.value = today
   try {
-    await fetch(`${API_BASE}/settings?key=eq.last_update`, {
+    await fetchWithTimeout(`${API_BASE}/settings?key=eq.last_update`, {
       method: 'PATCH',
       headers: adminHeaders(),
       body: JSON.stringify({ value: today })
@@ -789,7 +797,7 @@ async function addCard() {
     : []
 
   try {
-    const res = await fetch(`${API_BASE}/cards`, {
+    const res = await fetchWithTimeout(`${API_BASE}/cards`, {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ id: newCard.value.id.trim(), name: newCard.value.name.trim(), analogs })
@@ -849,18 +857,18 @@ async function updateCard() {
   try {
     // Если поменяли ID — сначала создаём новую, потом удаляем старую (безопасный порядок)
     if (oldId !== newId) {
-      const createRes = await fetch(`${API_BASE}/cards`, {
+      const createRes = await fetchWithTimeout(`${API_BASE}/cards`, {
         method: 'POST',
         headers: adminHeaders(),
         body: JSON.stringify({ id: newId, name: editForm.value.name.trim(), analogs })
       })
       if (!createRes.ok) throw new Error('Не удалось создать карточку с новым ID')
-      await fetch(`${API_BASE}/cards/${oldId}`, {
+      await fetchWithTimeout(`${API_BASE}/cards/${oldId}`, {
         method: 'DELETE',
         headers: adminHeaders()
       })
     } else {
-      await fetch(`${API_BASE}/cards/${oldId}`, {
+      await fetchWithTimeout(`${API_BASE}/cards/${oldId}`, {
         method: 'PATCH',
         headers: adminHeaders(),
         body: JSON.stringify({ name: editForm.value.name.trim(), analogs })
@@ -882,7 +890,7 @@ async function deleteCard() {
   if (!confirm(`Удалить карточку ${editingCard.value.id}?`)) return
 
   try {
-    await fetch(`${API_BASE}/cards/${editingCard.value.id}`, {
+    await fetchWithTimeout(`${API_BASE}/cards/${editingCard.value.id}`, {
       method: 'DELETE',
       headers: adminHeaders()
     })
@@ -918,7 +926,7 @@ async function loadAuditLogs() {
     if (auditFilter.value.dateTo) {
       url += `&created_at=lte.${auditFilter.value.dateTo}T23:59:59`
     }
-    const res = await fetch(url, { headers: adminHeaders() })
+    const res = await fetchWithTimeout(url, { headers: adminHeaders() })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     // MySQL отдаёт found как "0"/"1" (строка), приводим к boolean

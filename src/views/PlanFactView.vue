@@ -5,9 +5,9 @@
       <h1 class="page-title">Поставки</h1>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <div class="pf-tabs">
-          <button class="pf-tab" :class="{ active: tab === 'overdue' }" @click="tab = 'overdue'; loadOrders()">
+          <button class="pf-tab" :class="{ active: tab === 'pending' }" @click="tab = 'pending'; loadOrders()">
             Не принятые
-            <span v-if="overdueCount > 0" class="pf-badge pf-badge-warn">{{ overdueCount }}</span>
+            <span v-if="pendingCount > 0" class="pf-badge pf-badge-warn">{{ pendingCount }}</span>
           </button>
           <button class="pf-tab" :class="{ active: tab === 'transit' }" @click="tab = 'transit'; loadOrders()">
             В пути
@@ -61,7 +61,7 @@
             class="pf-mrow"
             :class="{
               'pf-mrow-selected': selectedOrder?.id === order.id,
-              'pf-mrow-overdue': tab === 'overdue',
+              'pf-mrow-overdue': tab !== 'transit' && isOverdue(order),
             }"
             @click="openDrawer(order)"
           >
@@ -84,11 +84,12 @@
                 <span v-else class="pf-chip pf-chip-ok">OK</span>
                 <span v-if="order.act_file" class="pf-chip pf-chip-file">Акт</span>
               </template>
-              <template v-else-if="tab === 'overdue'">
-                <span class="pf-chip pf-chip-overdue">Просрочен</span>
+              <template v-else-if="tab === 'transit'">
+                <span class="pf-chip pf-chip-transit">В пути</span>
               </template>
               <template v-else>
-                <span class="pf-chip pf-chip-transit">В пути</span>
+                <span v-if="isOverdue(order)" class="pf-chip pf-chip-overdue">Просрочено</span>
+                <span v-else class="pf-chip pf-chip-pending">Ожидает</span>
               </template>
             </td>
           </tr>
@@ -168,7 +169,7 @@
                       <span v-if="item.sku" class="pf-item-sku">{{ item.sku }}</span>
                     </td>
                     <td class="pf-td pf-td-qty">{{ toAccountingBoxes(item) }}</td>
-                    <td v-if="tab === 'overdue' || tab === 'transit'" class="pf-td pf-td-fact">
+                    <td v-if="tab === 'transit' || tab === 'pending'" class="pf-td pf-td-fact">
                       <input
                         class="pf-fact-input"
                         :value="item._factValue"
@@ -200,9 +201,9 @@
             </div>
 
             <div class="pf-drawer-footer">
-              <!-- В пути: принять досрочно -->
-              <template v-if="tab === 'transit'">
-                <div class="pf-act-upload">
+              <!-- В пути / Не принятые: ввод факта и принятие -->
+              <template v-if="tab === 'transit' || tab === 'pending'">
+                <div class="pf-act-upload" v-if="canEditPF">
                   <label class="pf-act-upload-btn" :class="{ 'pf-act-has-file': actFile }">
                     <BkIcon name="note" size="xs"/>
                     {{ actFile ? actFile.name : 'Акт расхожд.' }}
@@ -210,27 +211,7 @@
                   </label>
                   <button v-if="actFile" class="pf-act-remove" @click="actFile = null" title="Убрать">&times;</button>
                 </div>
-                <div class="pf-footer-buttons">
-                  <button class="btn" @click="acceptAsOrdered" :disabled="saving">
-                    Принять без расхождений
-                  </button>
-                  <button class="btn primary" @click="saveReceived" :disabled="saving || !hasAnyFact">
-                    {{ saving ? 'Сохранение...' : 'Принять с расхождениями' }}
-                  </button>
-                </div>
-              </template>
-
-              <!-- Не принятые: ввод факта -->
-              <template v-else-if="tab === 'overdue'">
-                <div class="pf-act-upload">
-                  <label class="pf-act-upload-btn" :class="{ 'pf-act-has-file': actFile }">
-                    <BkIcon name="note" size="xs"/>
-                    {{ actFile ? actFile.name : 'Акт расхожд.' }}
-                    <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" @change="onActFileChange" hidden />
-                  </label>
-                  <button v-if="actFile" class="pf-act-remove" @click="actFile = null" title="Убрать">&times;</button>
-                </div>
-                <div class="pf-footer-buttons">
+                <div class="pf-footer-buttons" v-if="canEditPF">
                   <button class="btn" @click="acceptAsOrdered" :disabled="saving">
                     Принять без расхождений
                   </button>
@@ -298,12 +279,14 @@ const draftStore = useDraftStore()
 const toast = useToastStore()
 const { confirmModal, confirm, onConfirm, onCancel } = useConfirm()
 
-const tab = ref('overdue')
+const canEditPF = computed(() => userStore.hasAccess('plan-fact', 'edit'))
+
+const tab = ref('pending')
 const loading = ref(false)
 const saving = ref(false)
 const orders = ref([])
 const transitCount = ref(0)
-const overdueCount = ref(0)
+const pendingCount = ref(0)
 const filterSupplier = ref('')
 const suppliers = ref([])
 
@@ -364,9 +347,14 @@ const hasAnyFact = computed(() => drawerItems.value.some(i => i._factValue !== n
 
 const emptyText = computed(() => {
   if (tab.value === 'transit') return 'Нет заказов в пути'
-  if (tab.value === 'overdue') return 'Нет непринятых доставок'
+  if (tab.value === 'pending') return 'Нет непринятых доставок'
   return 'Нет принятых заказов'
 })
+
+function isOverdue(order) {
+  if (!order?.delivery_date) return false
+  return order.delivery_date < todayStr()
+}
 
 const receivedDiscrepancies = computed(() =>
   drawerItems.value.filter(i => {
@@ -440,7 +428,7 @@ async function loadOrders() {
 
     if (tab.value === 'transit') {
       query = query.is('received_at', null).gt('delivery_date', today)
-    } else if (tab.value === 'overdue') {
+    } else if (tab.value === 'pending') {
       query = query.is('received_at', null).lte('delivery_date', today)
     } else {
       query = query.not('received_at', 'is', null)
@@ -456,8 +444,7 @@ async function loadOrders() {
     orders.value = data || []
 
     // Reset sort direction based on tab
-    if (tab.value === 'received') mainSortAsc.value = false
-    else mainSortAsc.value = true
+    mainSortAsc.value = tab.value !== 'received'
 
     await loadCounts(myRequestId)
   } finally {
@@ -468,14 +455,16 @@ async function loadOrders() {
 async function loadCounts(requestId) {
   const today = todayStr()
   const le = legalEntity.value
-
-  const [transitRes, overdueRes] = await Promise.all([
-    db.from('orders').select('id').eq('legal_entity', le).is('received_at', null).gt('delivery_date', today).limit(200),
-    db.from('orders').select('id').eq('legal_entity', le).is('received_at', null).lte('delivery_date', today).limit(200),
-  ])
+  let tq = db.from('orders').select('id').eq('legal_entity', le).is('received_at', null).gt('delivery_date', today).limit(200);
+  let pq = db.from('orders').select('id').eq('legal_entity', le).is('received_at', null).lte('delivery_date', today).limit(200);
+  if (filterSupplier.value) {
+    tq = tq.eq('supplier', filterSupplier.value);
+    pq = pq.eq('supplier', filterSupplier.value);
+  }
+  const [transitRes, pendingRes] = await Promise.all([tq, pq]);
   if (requestId !== undefined && requestId !== _loadRequestId) return
   transitCount.value = transitRes.data?.length ?? 0
-  overdueCount.value = overdueRes.data?.length ?? 0
+  pendingCount.value = pendingRes.data?.length ?? 0
 }
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
@@ -672,10 +661,8 @@ async function uploadActFile(orderId) {
 }
 
 async function acceptAsOrdered() {
-  const label = tab.value === 'transit' ? 'Принять досрочно?' : 'Принять согласно заказу?'
-  const msg = tab.value === 'transit'
-    ? `Заказ ${selectedOrder.value.supplier} будет принят досрочно. Дата доставки: ${formatDate(selectedOrder.value.delivery_date)}.`
-    : 'Все позиции будут приняты с количеством, указанным в заказе.'
+  const label = 'Принять поставку?'
+  const msg = 'Все позиции будут приняты с количеством, указанным в заказе.'
   const ok = await confirm(label, msg)
   if (!ok) return
 
@@ -863,6 +850,7 @@ async function revertToTransit() {
 .pf-chip-file { background: #E3F2FD; color: #1565C0; margin-left: 4px; }
 .pf-chip-overdue { background: #FFEBEE; color: #C62828; }
 .pf-chip-transit { background: #E3F2FD; color: #1565C0; }
+.pf-chip-pending { background: #FFF3E0; color: #E65100; }
 
 /* ═══ Table footer ═══ */
 .pf-table-footer {

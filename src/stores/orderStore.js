@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { reactive, ref, computed, watch } from 'vue';
 import { calculateItem } from '@/lib/calculations.js';
-import { getQpb, getMultiplicity } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
@@ -53,6 +53,7 @@ export const useOrderStore = defineStore('order', () => {
 
   const items = ref([]);
   const editingOrderId = ref(null);
+  const editingOrderUpdatedAt = ref(null);
   const viewOnlyMode = ref(false);
   const _history = new History(50);
   const _historyVersion = ref(0);
@@ -187,6 +188,7 @@ export const useOrderStore = defineStore('order', () => {
     items.value = [];
     settings.supplier = '';
     editingOrderId.value = null;
+    editingOrderUpdatedAt.value = null;
     viewOnlyMode.value = false;
     _history.clear(); _historyVersion.value++;
   }
@@ -258,7 +260,9 @@ export const useOrderStore = defineStore('order', () => {
     const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
     let productMap = {};
     if (skus.length > 0) {
-      const { data: productsData } = await db.from('products').select('*').in('sku', skus);
+      let prodQuery = db.from('products').select('*').in('sku', skus);
+      prodQuery = applyEntityFilter(prodQuery, settings.legalEntity);
+      const { data: productsData } = await prodQuery;
       if (myRequestId !== _loadRequestId) return; // Новый вызов перехватил — выходим
       if (productsData) productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));
     }
@@ -292,6 +296,7 @@ export const useOrderStore = defineStore('order', () => {
     }
 
     editingOrderId.value = (isEditing || isViewOnly) ? order.id : null;
+    editingOrderUpdatedAt.value = (isEditing || isViewOnly) ? (order.updated_at || null) : null;
     viewOnlyMode.value = isViewOnly;
     _history.clear(); _historyVersion.value++;
     _snapshot();
@@ -312,7 +317,7 @@ export const useOrderStore = defineStore('order', () => {
   function bumpDataVersion() { dataVersion.value++; }
 
   return {
-    settings, items, editingOrderId, viewOnlyMode, dataVersion,
+    settings, items, editingOrderId, editingOrderUpdatedAt, viewOnlyMode, dataVersion,
     canUndo, canRedo, pageTitle, finalSummary,
     addItem, removeItem, updateItemField, applyAllCalculated,
     moveItem, clearItems, clearAllData, resetOrder, clearHistory, undo, redo,

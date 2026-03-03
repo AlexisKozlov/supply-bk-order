@@ -5,7 +5,8 @@ import { getQpb, getMultiplicity, toLocalDateStr } from './utils.js';
  * Сохранить или обновить заказ в БД.
  * @returns {Promise<{orderId, itemsCount, error}>}
  */
-export async function saveOrder({ items, settings, editingOrderId, note, userName }) {
+export async function saveOrder({ items, settings, editingOrderId, note, userName, expectedUpdatedAt }) {
+ try {
   // Приводим все позиции к учётным коробкам (формат хранения)
   const allItems = items.map(item => {
     const qpb  = getQpb(item) || 1;
@@ -16,7 +17,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     return {
       sku:                item.sku || null,
       name:               item.name,
-      qty_boxes:          Math.round(Math.ceil(Math.max(0, accountingBoxes))),
+      qty_boxes:          Math.round(Math.max(0, accountingBoxes)),
       qty_per_box:        Math.round(item.qtyPerBox || 1),
       multiplicity:       mult,
       consumption_period: Math.round(item.consumptionPeriod || 0),
@@ -52,11 +53,16 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     // Загружаем старый заказ для diff параметров
     ({ data: oldOrder } = await db
       .from('orders')
-      .select('delivery_date, today_date, safety_days, period_days, unit, note, supplier, created_by')
+      .select('delivery_date, today_date, safety_days, period_days, unit, note, supplier, created_by, updated_at')
       .eq('id', editingOrderId)
       .single());
 
     if (!oldOrder) return { error: 'Заказ не найден — возможно, он был удалён' };
+
+    // Проверка на одновременное редактирование
+    if (expectedUpdatedAt && oldOrder.updated_at && oldOrder.updated_at !== expectedUpdatedAt) {
+      return { error: 'Заказ был изменён другим пользователем. Закройте и откройте заказ заново, чтобы увидеть актуальную версию.' };
+    }
 
     // Загружаем старые позиции для diff
     const { data: oldItems } = await db
@@ -194,4 +200,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
   }
 
   return { orderId, itemsCount: itemsWithOrder.length };
+ } catch (e) {
+  console.error('[saveOrder] unexpected error:', e);
+  return { error: 'Непредвиденная ошибка при сохранении: ' + (e.message || e) };
+ }
 }

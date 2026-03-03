@@ -281,7 +281,7 @@ const router = useRouter();
 const orderStore = useOrderStore();
 const userStore = useUserStore();
 const toast = useToastStore();
-const isViewer = computed(() => userStore.isViewer);
+const isViewer = computed(() => !userStore.hasAccess('analysis', 'edit'));
 
 const periodDays = ref(30);
 const unit = ref('pieces');
@@ -735,7 +735,11 @@ async function loadFrom1c() {
   }
 }
 
-watch(() => orderStore.settings.legalEntity, () => { loadProducts(); });
+watch(() => orderStore.settings.legalEntity, () => {
+  expandedSections.clear();
+  expandedSections.add('Сухой'); expandedSections.add('Холод'); expandedSections.add('Мороз'); expandedSections.add('');
+  loadProducts();
+});
 onMounted(() => { loadProducts(); });
 onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 </script>

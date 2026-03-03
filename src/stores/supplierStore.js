@@ -16,59 +16,65 @@ function getEntityGroup(legalEntity) {
 export const useSupplierStore = defineStore('supplier', () => {
   const suppliersByEntity = ref({});
   const loading = ref(false);
+  const _loadPromises = {};
 
   async function loadSuppliers(legalEntity) {
     if (!legalEntity) return [];
     const { cacheKey, entities } = getEntityGroup(legalEntity);
 
     if (suppliersByEntity.value[cacheKey]) return suppliersByEntity.value[cacheKey];
+    if (_loadPromises[cacheKey]) return _loadPromises[cacheKey];
 
     loading.value = true;
-    try {
-      let query = db
-        .from('suppliers')
-        .select('short_name, full_name, whatsapp, telegram, viber, email')
-        .order('short_name');
+    _loadPromises[cacheKey] = (async () => {
+      try {
+        let query = db
+          .from('suppliers')
+          .select('short_name, full_name, whatsapp, telegram, viber, email')
+          .order('short_name');
 
-      // Если одна сущность — простой eq, если несколько — or()
-      if (entities.length === 1) {
-        query = query.eq('legal_entity', entities[0]);
-      } else {
-        // or формат: legal_entity.eq.ООО "Бургер БК",legal_entity.eq.ООО "Воглия Матта"
-        query = query.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
-      }
-
-      const { data, error } = await query;
-
-      if (!error && data) {
-        // Дедупликация по short_name
-        const unique = [];
-        const seen = new Set();
-        for (const s of data) {
-          if (!seen.has(s.short_name)) {
-            seen.add(s.short_name);
-            unique.push(s);
-          }
-        }
-
-        // Убрать поставщиков, у которых все товары неактивны
-        let prodQuery = db.from('products').select('supplier').eq('is_active', 1);
+        // Если одна сущность — простой eq, если несколько — or()
         if (entities.length === 1) {
-          prodQuery = prodQuery.eq('legal_entity', entities[0]);
+          query = query.eq('legal_entity', entities[0]);
         } else {
-          prodQuery = prodQuery.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
+          // or формат: legal_entity.eq.ООО "Бургер БК",legal_entity.eq.ООО "Воглия Матта"
+          query = query.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
         }
-        const { data: activeProducts } = await prodQuery;
-        const activeSuppliers = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
-        const filtered = unique.filter(s => activeSuppliers.has(s.short_name));
 
-        suppliersByEntity.value[cacheKey] = filtered;
-        return filtered;
+        const { data, error } = await query;
+
+        if (!error && data) {
+          // Дедупликация по short_name
+          const unique = [];
+          const seen = new Set();
+          for (const s of data) {
+            if (!seen.has(s.short_name)) {
+              seen.add(s.short_name);
+              unique.push(s);
+            }
+          }
+
+          // Убрать поставщиков, у которых все товары неактивны
+          let prodQuery = db.from('products').select('supplier').eq('is_active', 1);
+          if (entities.length === 1) {
+            prodQuery = prodQuery.eq('legal_entity', entities[0]);
+          } else {
+            prodQuery = prodQuery.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
+          }
+          const { data: activeProducts } = await prodQuery;
+          const activeSuppliers = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
+          const filtered = unique.filter(s => activeSuppliers.has(s.short_name));
+
+          suppliersByEntity.value[cacheKey] = filtered;
+          return filtered;
+        }
+        return [];
+      } finally {
+        loading.value = false;
+        delete _loadPromises[cacheKey];
       }
-      return [];
-    } finally {
-      loading.value = false;
-    }
+    })();
+    return _loadPromises[cacheKey];
   }
 
   function getSuppliersForEntity(legalEntity) {

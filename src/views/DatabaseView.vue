@@ -259,8 +259,8 @@ const userStore = useUserStore();
 const supplierStore = useSupplierStore();
 const orderStore = useOrderStore();
 const restaurantStore = useRestaurantStore();
-const isViewer = computed(() => userStore.isViewer);
-const isAdmin = computed(() => userStore.isAdmin);
+const isViewer = computed(() => !userStore.hasAccess('database', 'edit'));
+const isAdmin = computed(() => userStore.hasAccess('database', 'full'));
 
 const activeTab = ref('products');
 const searchQuery = ref('');

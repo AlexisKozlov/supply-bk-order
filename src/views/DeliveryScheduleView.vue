@@ -278,7 +278,7 @@ const selectedDay = ref(1);
 const filterRegion = ref('');
 const searchQuery = ref('');
 
-const canEdit = computed(() => true);
+const canEdit = computed(() => userStore.hasAccess('delivery-schedule', 'edit'));
 const editMode = ref(false);
 const isEditing = computed(() => canEdit.value && editMode.value);
 

@@ -20,6 +20,10 @@
       <button class="adm-tab" :class="{ active: activeTab === 'broadcast' }" @click="activeTab = 'broadcast'">
         <BkIcon name="bell" size="sm"/> Рассылка
       </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'audit' }" @click="activeTab = 'audit'">
+        <BkIcon name="note" size="sm"/> Журнал
+        <span class="adm-tab-count" :class="{ active: activeTab === 'audit' }">{{ auditTotal || '' }}</span>
+      </button>
     </div>
 
     <!-- ═══ Пользователи ═══ -->
@@ -216,6 +220,109 @@
       </div>
     </div>
 
+    <!-- ═══ Журнал ═══ -->
+    <div v-if="activeTab === 'audit'" class="adm-section">
+      <div class="adm-audit-filters">
+        <div class="adm-audit-filter-row">
+          <div class="adm-audit-chips">
+            <button v-for="cat in auditCategories" :key="cat.value" class="adm-audit-chip"
+              :class="{ active: auditFilter.category === cat.value }" @click="auditFilter.category = cat.value; loadAudit(true)">
+              {{ cat.label }}
+            </button>
+          </div>
+          <div class="adm-audit-right-filters">
+            <select v-model="auditFilter.user" @change="loadAudit(true)" class="adm-audit-select">
+              <option value="">Все пользователи</option>
+              <option v-for="u in auditUsers" :key="u" :value="u">{{ u }}</option>
+            </select>
+            <input type="date" v-model="auditFilter.dateFrom" @change="loadAudit(true)" class="adm-audit-date" />
+            <input type="date" v-model="auditFilter.dateTo" @change="loadAudit(true)" class="adm-audit-date" />
+          </div>
+        </div>
+      </div>
+
+      <div v-if="auditLoading && !auditEntries.length" style="text-align:center;padding:48px;"><BurgerSpinner text="Загрузка журнала..." /></div>
+      <div v-else-if="!auditEntries.length" class="adm-empty">Нет записей</div>
+
+      <div v-else class="adm-audit-list">
+        <div v-for="log in auditEntries" :key="log.id" class="adm-audit-entry">
+          <div class="adm-audit-head">
+            <span class="adm-audit-badge" :class="auditBadgeClass(log.action)">{{ auditBadgeLabel(log.action) }}</span>
+            <span class="adm-audit-entity-badge" :class="'adm-audit-et-' + log.entity_type">{{ auditEntityLabel(log.entity_type) }}</span>
+            <span class="adm-audit-author">{{ log.user_name || '—' }}</span>
+            <span class="adm-audit-date-text">{{ formatAuditDate(log.created_at) }}</span>
+          </div>
+
+          <!-- Supplier / context -->
+          <div v-if="log.details?.supplier" class="adm-audit-ctx">{{ log.details.supplier }}</div>
+
+          <!-- Restaurant number -->
+          <div v-if="log.details?.restaurant_number" class="adm-audit-ctx">Ресторан {{ log.details.restaurant_number }}</div>
+
+          <!-- Param changes -->
+          <div v-if="log.details?.param_changes?.length" class="adm-audit-params">
+            <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="adm-audit-param-chip">
+              {{ pc.label }}: {{ pc.from }} → {{ pc.to }}
+            </span>
+          </div>
+
+          <!-- Delivery date changed -->
+          <div v-if="log.action === 'delivery_date_changed' && log.details?.old_date" class="adm-audit-delivery">
+            {{ log.details.old_date }} → {{ log.details.new_date }}
+          </div>
+
+          <!-- Received -->
+          <div v-if="log.action === 'received'" class="adm-audit-received">
+            <span>{{ log.details?.items_count || 0 }} позиций</span>
+            <span v-if="log.details?.discrepancies" class="adm-audit-disc">{{ log.details.discrepancies }} расхождений</span>
+            <span v-else class="adm-audit-no-disc">без расхождений</span>
+          </div>
+          <div v-if="log.action === 'received' && log.details?.items_with_discrepancy?.length" class="adm-audit-changes">
+            <span v-for="(item, i) in log.details.items_with_discrepancy" :key="i" class="adm-audit-ch adm-audit-ch-upd">
+              {{ item.name }}: {{ item.ordered }} → {{ item.received }}
+            </span>
+          </div>
+
+          <!-- Reception reverted -->
+          <div v-if="log.action === 'reception_reverted' && log.details?.reverted_from" class="adm-audit-ctx" style="font-style:italic;">
+            Отменена приёмка от {{ log.details.reverted_from }}
+          </div>
+
+          <!-- Schedule snapshot -->
+          <div v-if="log.details?.full_schedule" class="adm-audit-sched-row">
+            <span v-for="day in ['ПН','ВТ','СР','ЧТ','ПТ','СБ']" :key="day" class="adm-audit-sched-cell" :class="{ has: log.details.full_schedule[day] }">
+              <span class="adm-audit-sched-day">{{ day }}</span>
+              <span class="adm-audit-sched-time">{{ log.details.full_schedule[day] || '—' }}</span>
+            </span>
+          </div>
+
+          <!-- Item changes -->
+          <div v-if="log.details?.changes?.length" class="adm-audit-changes">
+            <span v-for="(c, ci) in log.details.changes.slice(0, expandedAudit.has(log.id) ? 999 : 5)" :key="ci" class="adm-audit-ch" :class="{ 'adm-audit-ch-add': c.type==='added', 'adm-audit-ch-del': c.type==='removed', 'adm-audit-ch-upd': c.type==='changed' }">
+              <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
+              <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
+              <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>
+            </span>
+            <button v-if="log.details.changes.length > 5 && !expandedAudit.has(log.id)" class="adm-audit-more" @click="expandedAudit.add(log.id)">
+              ещё {{ log.details.changes.length - 5 }}...
+            </button>
+          </div>
+
+          <!-- Items count -->
+          <div v-if="log.details?.items_count && log.action !== 'received' && !log.details?.changes?.length" class="adm-audit-meta">{{ log.details.items_count }} позиций</div>
+
+          <!-- Product name -->
+          <div v-if="log.details?.name && log.entity_type === 'product'" class="adm-audit-ctx">{{ log.details.name }} <span v-if="log.details?.sku" style="opacity:.6;">({{ log.details.sku }})</span></div>
+        </div>
+
+        <div v-if="auditHasMore" style="text-align:center;padding:16px;">
+          <button class="btn" @click="loadAudit(false)" :disabled="auditLoading">
+            {{ auditLoading ? 'Загрузка...' : 'Показать ещё' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ Модалка пользователя ═══ -->
     <Teleport to="body">
       <div v-if="userModal.show" class="modal" @click.self="userModal.show = false">
@@ -269,6 +376,30 @@
               </div>
               <div class="adm-le-hint">Если ничего не выбрано — доступны все</div>
             </div>
+
+            <!-- Доступ к модулям -->
+            <div class="modal-field">
+              <span class="modal-field-label">Доступ к модулям</span>
+              <div v-if="form.role === 'admin'" class="adm-perm-admin-note">
+                Администратор имеет полный доступ ко всем модулям
+              </div>
+              <div v-else class="adm-perm-grid">
+                <div class="adm-perm-header">
+                  <div class="adm-perm-module-col">Модуль</div>
+                  <div class="adm-perm-level-col" v-for="lvl in ['full','edit','view','none']" :key="lvl">{{ ACCESS_LEVEL_LABELS[lvl] }}</div>
+                </div>
+                <div v-for="mod in MODULES" :key="mod" class="adm-perm-row">
+                  <div class="adm-perm-module-col">{{ MODULE_LABELS[mod] || mod }}</div>
+                  <div class="adm-perm-level-col" v-for="lvl in ['full','edit','view','none']" :key="lvl">
+                    <label class="adm-perm-radio">
+                      <input type="radio" :name="'perm-' + mod" :checked="getFormModuleAccess(mod) === lvl" @change="setFormModuleAccess(mod, lvl)" />
+                      <span class="adm-perm-dot" :class="'adm-perm-' + lvl"></span>
+                    </label>
+                  </div>
+                </div>
+                <button v-if="Object.keys(form.permissions || {}).length" class="btn small adm-perm-reset" @click="resetPermissionsToTemplate">Сбросить к шаблону роли</button>
+              </div>
+            </div>
           </div>
 
           <div style="display:flex;gap:8px;margin-top:20px;">
@@ -291,7 +422,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
-import { useUserStore } from '@/stores/userStore.js';
+import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -309,8 +440,132 @@ const users = ref([]);
 const allEntities = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
 
 const userModal = ref({ show: false, user: null });
-const form = ref({ name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [] });
+const form = ref({ name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], permissions: {} });
+
+const ACCESS_LEVEL_LABELS = { full: 'Полный', edit: 'Редакт.', view: 'Просмотр', none: 'Нет' };
+
+function getFormModuleAccess(module) {
+  if (form.value.permissions && form.value.permissions[module] !== undefined) {
+    return form.value.permissions[module];
+  }
+  const tpl = ROLE_TEMPLATES[form.value.role] || ROLE_TEMPLATES.user;
+  return tpl[module] || 'none';
+}
+
+function setFormModuleAccess(module, level) {
+  const tpl = ROLE_TEMPLATES[form.value.role] || ROLE_TEMPLATES.user;
+  if (!form.value.permissions) form.value.permissions = {};
+  if (tpl[module] === level) {
+    delete form.value.permissions[module];
+  } else {
+    form.value.permissions[module] = level;
+  }
+}
+
+watch(() => form.value.role, () => {
+  form.value.permissions = {};
+});
+
+function resetPermissionsToTemplate() {
+  form.value.permissions = {};
+}
+
+function getPermissionsDiff() {
+  if (!form.value.permissions || Object.keys(form.value.permissions).length === 0) return null;
+  return { ...form.value.permissions };
+}
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
+
+// ═══ Аудит-лог ═══
+const AUDIT_PAGE_SIZE = 50;
+const auditEntries = ref([]);
+const auditLoading = ref(false);
+const auditHasMore = ref(false);
+const auditTotal = ref(0);
+const expandedAudit = reactive(new Set());
+const auditUsers = ref([]);
+const auditFilter = reactive({ category: '', user: '', dateFrom: '', dateTo: '' });
+
+const auditCategories = [
+  { value: '', label: 'Все' },
+  { value: 'order', label: 'Заказы' },
+  { value: 'plan', label: 'Планы' },
+  { value: 'product', label: 'Товары' },
+  { value: 'delivery_schedule', label: 'Расписание' },
+];
+
+const AUDIT_ACTION_LABELS = {
+  order_created: 'Создан', order_updated: 'Изменён', order_deleted: 'Удалён',
+  plan_created: 'Создан', plan_updated: 'Изменён', plan_deleted: 'Удалён',
+  product_created: 'Создана', product_updated: 'Изменена',
+  delivery_date_changed: 'Дата доставки', received: 'Принят', reception_reverted: 'Отмена приёмки',
+  schedule_updated: 'График', restaurant_updated: 'Ресторан',
+};
+const AUDIT_ENTITY_LABELS = { order: 'Заказ', plan: 'План', product: 'Товар', delivery_schedule: 'Расписание' };
+
+function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }
+function auditEntityLabel(et) { return AUDIT_ENTITY_LABELS[et] || et; }
+function auditBadgeClass(action) {
+  if (action === 'received') return 'adm-audit-b-received';
+  if (action === 'reception_reverted') return 'adm-audit-b-reverted';
+  if (action === 'delivery_date_changed') return 'adm-audit-b-delivery';
+  if (action === 'schedule_updated' || action === 'restaurant_updated') return 'adm-audit-b-schedule';
+  if (action.includes('created')) return 'adm-audit-b-created';
+  if (action.includes('updated')) return 'adm-audit-b-updated';
+  if (action.includes('deleted')) return 'adm-audit-b-deleted';
+  return '';
+}
+
+function formatAuditDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadAudit(reset = true) {
+  if (reset) {
+    auditEntries.value = [];
+    auditLoading.value = true;
+  } else {
+    auditLoading.value = true;
+  }
+  try {
+    const offset = reset ? 0 : auditEntries.value.length;
+    let query = db.from('audit_log').select('*').order('created_at', { ascending: false }).limit(AUDIT_PAGE_SIZE).offset(offset);
+    if (auditFilter.category) query = query.eq('entity_type', auditFilter.category);
+    if (auditFilter.user) query = query.eq('user_name', auditFilter.user);
+    if (auditFilter.dateFrom) query = query.gte('created_at', auditFilter.dateFrom);
+    if (auditFilter.dateTo) query = query.lte('created_at', auditFilter.dateTo + ' 23:59:59');
+
+    const { data } = await query;
+    const parsed = (data || []).map(e => {
+      if (e.details && typeof e.details === 'string') {
+        try { e.details = JSON.parse(e.details); } catch { e.details = null; }
+      }
+      return e;
+    });
+
+    if (reset) {
+      auditEntries.value = parsed;
+    } else {
+      auditEntries.value.push(...parsed);
+    }
+    auditHasMore.value = parsed.length >= AUDIT_PAGE_SIZE;
+    if (reset) auditTotal.value = auditHasMore.value ? parsed.length + '+' : parsed.length;
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось загрузить журнал');
+  } finally {
+    auditLoading.value = false;
+  }
+}
+
+async function loadAuditUsers() {
+  try {
+    const { data } = await db.from('users').select('name').order('name');
+    auditUsers.value = (data || []).map(u => u.name).filter(Boolean);
+  } catch { /* ok */ }
+}
 
 const maintenanceOn = ref(false);
 const maintenanceSaving = ref(false);
@@ -425,6 +680,10 @@ watch(activeTab, (tab) => {
   if (tab === 'broadcast') {
     loadBcHistory();
   }
+  if (tab === 'audit') {
+    if (!auditEntries.value.length) loadAudit(true);
+    if (!auditUsers.value.length) loadAuditUsers();
+  }
 });
 
 const usersWord = computed(() => {
@@ -454,7 +713,12 @@ async function loadUsers() {
   loading.value = true;
   try {
     const { data } = await db.from('users').select('*').order('name');
-    users.value = data || [];
+    users.value = (data || []).map(u => {
+      if (u.permissions && typeof u.permissions === 'string') {
+        try { u.permissions = JSON.parse(u.permissions); } catch { u.permissions = null; }
+      }
+      return u;
+    });
   } catch { toast.error('Ошибка', 'Не удалось загрузить пользователей'); }
   finally { loading.value = false; }
 }
@@ -483,6 +747,7 @@ async function saveMaintenanceMsg() {
 function openUserModal(user) {
   userModal.value.user = user;
   if (user) {
+    const perms = user.permissions;
     form.value = {
       name: user.name || '',
       email: user.email || '',
@@ -490,9 +755,10 @@ function openUserModal(user) {
       role: user.role || 'user',
       display_role: user.display_role || '',
       legal_entities: parseLe(user.legal_entities),
+      permissions: (perms && typeof perms === 'object') ? { ...perms } : {},
     };
   } else {
-    form.value = { name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [] };
+    form.value = { name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], permissions: {} };
   }
   userModal.value.show = true;
 }
@@ -509,6 +775,7 @@ async function saveUser() {
       role: form.value.role,
       display_role: form.value.display_role.trim() || null,
       legal_entities: JSON.stringify(form.value.legal_entities),
+      permissions: getPermissionsDiff(),
     };
     if (form.value.password) payload.password = form.value.password;
 
@@ -869,5 +1136,147 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 
   /* Online time */
   .adm-online-time { font-size: 11px; }
+}
+
+/* ═══ Permissions Grid ═══ */
+.adm-perm-admin-note {
+  padding: 10px 14px; border-radius: 8px; background: #E3F2FD;
+  color: #1565C0; font-size: 13px; border: 1px solid #BBDEFB;
+}
+.adm-perm-grid {
+  border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden;
+}
+.adm-perm-header {
+  display: grid; grid-template-columns: 1fr 60px 60px 64px 44px;
+  background: var(--bg); padding: 6px 12px; font-size: 11px; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px;
+  border-bottom: 1px solid var(--border-light);
+}
+.adm-perm-row {
+  display: grid; grid-template-columns: 1fr 60px 60px 64px 44px;
+  padding: 5px 12px; align-items: center; border-bottom: 1px solid var(--border-light);
+  transition: background .15s;
+}
+.adm-perm-row:last-of-type { border-bottom: none; }
+.adm-perm-row:hover { background: var(--bg); }
+.adm-perm-module-col { font-size: 13px; color: var(--text); }
+.adm-perm-level-col { text-align: center; }
+.adm-perm-radio { display: inline-flex; cursor: pointer; }
+.adm-perm-radio input { display: none; }
+.adm-perm-dot {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border);
+  transition: all .15s; position: relative;
+}
+.adm-perm-radio input:checked + .adm-perm-dot { border-color: var(--bk-orange); }
+.adm-perm-radio input:checked + .adm-perm-full { background: #4CAF50; border-color: #4CAF50; }
+.adm-perm-radio input:checked + .adm-perm-edit { background: var(--bk-orange); border-color: var(--bk-orange); }
+.adm-perm-radio input:checked + .adm-perm-view { background: #2196F3; border-color: #2196F3; }
+.adm-perm-radio input:checked + .adm-perm-none { background: #9E9E9E; border-color: #9E9E9E; }
+.adm-perm-reset { margin: 8px 12px; font-size: 11px; }
+
+/* ═══ Audit Log ═══ */
+.adm-audit-filters { margin-bottom: 16px; }
+.adm-audit-filter-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.adm-audit-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.adm-audit-chip {
+  padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all .15s;
+  border: 1.5px solid var(--border); background: var(--card); color: var(--text-muted);
+}
+.adm-audit-chip:hover { border-color: var(--bk-orange); color: var(--text); }
+.adm-audit-chip.active { border-color: var(--bk-orange); background: #FFFBF5; color: var(--bk-brown); }
+
+.adm-audit-right-filters { display: flex; gap: 6px; align-items: center; }
+.adm-audit-select, .adm-audit-date {
+  padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 8px;
+  font-size: 12px; font-family: inherit; background: var(--card); color: var(--text);
+}
+.adm-audit-select:focus, .adm-audit-date:focus { border-color: var(--bk-orange); outline: none; }
+.adm-audit-date { width: 120px; }
+
+.adm-audit-list { display: flex; flex-direction: column; gap: 2px; }
+.adm-audit-entry {
+  padding: 10px 14px; border-radius: 10px;
+  background: var(--card); border: 1.5px solid transparent;
+  transition: all .15s;
+}
+.adm-audit-entry:hover { border-color: var(--border-light); }
+
+.adm-audit-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.adm-audit-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 10px; font-weight: 700;
+}
+.adm-audit-b-created { background: #E8F5E9; color: #2E7D32; }
+.adm-audit-b-updated { background: #FFF3E0; color: #E65100; }
+.adm-audit-b-deleted { background: #FFEBEE; color: #C62828; }
+.adm-audit-b-received { background: #E0F2F1; color: #00695C; }
+.adm-audit-b-reverted { background: #FFF3E0; color: #BF360C; }
+.adm-audit-b-delivery { background: #E3F2FD; color: #1565C0; }
+.adm-audit-b-schedule { background: #E8EAF6; color: #283593; }
+
+.adm-audit-entity-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  font-size: 10px; font-weight: 600; background: var(--bg); color: var(--text-muted);
+}
+.adm-audit-et-order { background: #FFF8E1; color: #E65100; }
+.adm-audit-et-plan { background: #E8F5E9; color: #2E7D32; }
+.adm-audit-et-product { background: #E3F2FD; color: #1565C0; }
+.adm-audit-et-delivery_schedule { background: #E8EAF6; color: #283593; }
+
+.adm-audit-author { font-weight: 600; font-size: 12px; color: var(--text); }
+.adm-audit-date-text { font-size: 11px; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
+
+.adm-audit-ctx { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+.adm-audit-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.adm-audit-params { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.adm-audit-param-chip {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  font-size: 11px; background: #EDE7F6; color: #4A148C; font-weight: 500;
+}
+
+.adm-audit-delivery {
+  display: inline-flex; margin-top: 5px; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; background: #E3F2FD; color: #1565C0;
+}
+.adm-audit-received { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px; font-size: 11px; }
+.adm-audit-disc { padding: 1px 7px; border-radius: 4px; background: #FFF8E1; color: #E65100; font-weight: 600; }
+.adm-audit-no-disc { padding: 1px 7px; border-radius: 4px; background: #E8F5E9; color: #2E7D32; font-weight: 500; }
+
+.adm-audit-changes { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.adm-audit-ch {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 600; line-height: 1.5;
+}
+.adm-audit-ch-add { background: #E8F5E9; color: #2E7D32; }
+.adm-audit-ch-del { background: #FFEBEE; color: #C62828; }
+.adm-audit-ch-upd { background: #FFF8E1; color: #5D4037; }
+.adm-audit-more {
+  padding: 1px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;
+  background: var(--bg); color: var(--text-muted); border: 1px solid var(--border-light);
+  cursor: pointer; font-family: inherit;
+}
+.adm-audit-more:hover { border-color: var(--bk-orange); color: var(--text); }
+
+.adm-audit-sched-row { display: flex; gap: 3px; margin-top: 6px; flex-wrap: wrap; }
+.adm-audit-sched-cell {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 48px; padding: 3px 4px; border-radius: 4px;
+  background: #F5F5F5; border: 1px solid #E0E0E0;
+}
+.adm-audit-sched-cell.has { background: #E8F5E9; border-color: #A5D6A7; }
+.adm-audit-sched-day { font-size: 9px; font-weight: 700; color: #888; }
+.adm-audit-sched-cell.has .adm-audit-sched-day { color: #2E7D32; }
+.adm-audit-sched-time { font-size: 10px; font-weight: 700; color: #BDBDBD; }
+.adm-audit-sched-cell.has .adm-audit-sched-time { color: #1B5E20; }
+
+@media (max-width: 600px) {
+  .adm-audit-filter-row { flex-direction: column; align-items: stretch; }
+  .adm-audit-right-filters { flex-wrap: wrap; }
+  .adm-audit-date { width: 100%; flex: 1; }
+  .adm-audit-select { width: 100%; }
 }
 </style>

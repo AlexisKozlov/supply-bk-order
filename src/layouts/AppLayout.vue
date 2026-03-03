@@ -15,54 +15,20 @@
         </button>
       </div>
 
-      <div class="sidebar-section" v-if="!sidebarCollapsed">Заказы</div>
       <div class="sidebar-nav-scroll">
-      <nav class="sidebar-nav">
-        <router-link :to="{ name: 'order' }" class="sidebar-item" :class="{ active: currentRoute === 'order' }">
-          <span class="sidebar-icon"><BkIcon name="package" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Новый заказ</span>
-        </router-link>
-        <router-link :to="{ name: 'planning' }" class="sidebar-item" :class="{ active: currentRoute === 'planning' }">
-          <span class="sidebar-icon"><BkIcon name="planning" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Планирование</span>
-        </router-link>
-        <router-link :to="{ name: 'plan-fact' }" class="sidebar-item" :class="{ active: currentRoute === 'plan-fact' }">
-          <span class="sidebar-icon"><BkIcon name="delivery" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Поставки</span>
-        </router-link>
-        <router-link :to="{ name: 'history' }" class="sidebar-item" :class="{ active: currentRoute === 'history' }">
-          <span class="sidebar-icon"><BkIcon name="history" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">История</span>
-        </router-link>
-      </nav>
-
-      <div class="sidebar-section" v-if="!sidebarCollapsed">Данные</div>
-      <nav class="sidebar-nav">
-        <router-link :to="{ name: 'database' }" class="sidebar-item" :class="{ active: currentRoute === 'database' }">
-          <span class="sidebar-icon"><BkIcon name="database" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">База данных</span>
-        </router-link>
-        <router-link :to="{ name: 'delivery-schedule' }" class="sidebar-item" :class="{ active: currentRoute === 'delivery-schedule' }">
-          <span class="sidebar-icon"><BkIcon name="schedule" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">График доставки</span>
-        </router-link>
-      </nav>
-
-      <div class="sidebar-section" v-if="!sidebarCollapsed">Отчёты</div>
-      <nav class="sidebar-nav">
-        <router-link :to="{ name: 'analytics' }" class="sidebar-item" :class="{ active: currentRoute === 'analytics' }">
-          <span class="sidebar-icon"><BkIcon name="analytics" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Аналитика</span>
-        </router-link>
-        <router-link :to="{ name: 'calendar' }" class="sidebar-item" :class="{ active: currentRoute === 'calendar' }">
-          <span class="sidebar-icon"><BkIcon name="calendar" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Календарь</span>
-        </router-link>
-        <router-link :to="{ name: 'analysis' }" class="sidebar-item" :class="{ active: currentRoute === 'analysis' }">
-          <span class="sidebar-icon"><BkIcon name="ruler" size="sm" light/></span>
-          <span v-if="!sidebarCollapsed">Анализ</span>
-        </router-link>
-      </nav>
+      <template v-for="section in sidebarSections" :key="section.title">
+        <template v-if="section.items.some(i => userStore.hasAccess(i.module, 'view'))">
+          <div class="sidebar-section" v-if="!sidebarCollapsed">{{ section.title }}</div>
+          <nav class="sidebar-nav">
+            <template v-for="item in section.items" :key="item.module">
+              <router-link v-if="userStore.hasAccess(item.module, 'view')" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }">
+                <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
+                <span v-if="!sidebarCollapsed">{{ item.label }}</span>
+              </router-link>
+            </template>
+          </nav>
+        </template>
+      </template>
 
       <template v-if="userStore.isAdmin">
         <div class="sidebar-section" v-if="!sidebarCollapsed">Администрирование</div>
@@ -289,6 +255,24 @@ function handleOffline() { isOffline.value = true; }
 
 const sidebarCollapsed = ref(localStorage.getItem('bk_sidebar_collapsed') === 'true');
 const sidebarOpen = ref(false);
+
+const sidebarSections = [
+  { title: 'Заказы', items: [
+    { module: 'order', route: 'order', icon: 'package', label: 'Новый заказ' },
+    { module: 'planning', route: 'planning', icon: 'planning', label: 'Планирование' },
+    { module: 'plan-fact', route: 'plan-fact', icon: 'delivery', label: 'Поставки' },
+    { module: 'history', route: 'history', icon: 'history', label: 'История' },
+  ]},
+  { title: 'Данные', items: [
+    { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
+    { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
+  ]},
+  { title: 'Отчёты', items: [
+    { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
+    { module: 'calendar', route: 'calendar', icon: 'calendar', label: 'Календарь' },
+    { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ' },
+  ]},
+];
 
 const showUserMenu = ref(false);
 const showChangePassword = ref(false);

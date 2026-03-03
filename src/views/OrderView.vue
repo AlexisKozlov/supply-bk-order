@@ -234,7 +234,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityFilter } from '@/lib/utils.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import OrderTable from '@/components/order/OrderTable.vue';
@@ -256,7 +256,7 @@ const supplierStore = useSupplierStore();
 const toast         = useToastStore();
 const userStore     = useUserStore();
 
-const isViewer = computed(() => userStore.isViewer);
+const isViewer = computed(() => !userStore.hasAccess('order', 'edit'));
 let _orderLoadId = 0;
 const orderVisible          = ref(true);
 const settingsExpanded      = ref(false);
@@ -407,7 +407,9 @@ onMounted(async () => {
     orderStore.items = [];
     supplierLoading.value = true;
     try {
-      const { data } = await db.from('products').select('*').eq('supplier', sup).eq('is_active', 1);
+      let pq = db.from('products').select('*').eq('supplier', sup).eq('is_active', 1);
+      pq = applyEntityFilter(pq, orderStore.settings.legalEntity);
+      const { data } = await pq;
       (data || []).forEach(p => orderStore.addItem(p, true));
       await orderStore.restoreItemOrder();
       draftStore.save();
@@ -538,7 +540,9 @@ async function onSupplierChange(e) {
   if (!newSupplier) return;
   supplierLoading.value = true;
   try {
-    const { data } = await db.from('products').select('*').eq('supplier', newSupplier).eq('is_active', 1);
+    let pq2 = db.from('products').select('*').eq('supplier', newSupplier).eq('is_active', 1);
+    pq2 = applyEntityFilter(pq2, orderStore.settings.legalEntity);
+    const { data } = await pq2;
     (data || []).forEach(p => orderStore.addItem(p, true));
     await orderStore.restoreItemOrder();
     draftStore.save();
@@ -574,7 +578,7 @@ function onUnitChange(e) {
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
         item.stock   = item.stock   ? Math.round(item.stock   / qpb * 100) / 100 : 0;
         item.transit = item.transit ? Math.round(item.transit / qpb * 100) / 100 : 0;
-        item.finalOrder = item.finalOrder ? Math.ceil(item.finalOrder / qpb) : 0;
+        item.finalOrder = item.finalOrder ? Math.round(item.finalOrder / qpb) : 0;
       } else {
         item.consumptionPeriod = Math.round(item.consumptionPeriod * qpb);
         item.stock   = Math.round(item.stock   * qpb);
@@ -616,6 +620,7 @@ async function openSaveModal() {
 }
 
 async function onSaveConfirm(note) {
+  if (savingOrder.value) return;
   savingOrder.value = true;
   try {
     const result = await saveOrder({
@@ -624,6 +629,7 @@ async function onSaveConfirm(note) {
       editingOrderId: orderStore.editingOrderId,
       note,
       userName:       userStore.currentUser?.name || null,
+      expectedUpdatedAt: orderStore.editingOrderUpdatedAt,
     });
 
     if (result.error) { toast.error('Ошибка сохранения', result.error); return; }
@@ -644,6 +650,7 @@ async function onSaveConfirm(note) {
     orderStore.settings.periodDays = 30;
     orderStore.settings.hasTransit = false;
     orderStore.settings.note = '';
+    orderStore.settings.unit = 'boxes';
     orderStore.items.splice(0);
   } finally { savingOrder.value = false; }
 }
@@ -872,19 +879,9 @@ function showOrderResult() {
 async function share(channel) {
   showShareDropdown.value = false;
   if (!orderStore.items.length) { toast.error('Заказ пуст', ''); return; }
-  const deliveryDate = orderStore.settings.deliveryDate
-    ? orderStore.settings.deliveryDate.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' }) : '—';
-  const lines = orderStore.items.map(item => {
-    const qpb = getQpb(item); const mult = getMultiplicity(item);
-    // qty_boxes теперь в учётных → accountingBoxes = finalOrder
-    const accountingBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb;
-    const physBoxes = Math.ceil(accountingBoxes / mult);
-    if (physBoxes <= 0) return null;
-    const pieces = Math.round(accountingBoxes * qpb);
-    const unit = item.unitOfMeasure || 'шт';
-    return `${item.sku ? item.sku + '  ' : ''}${item.name} - ${physBoxes} коробок (${nf.format(pieces)} ${unit})`;
-  }).filter(Boolean);
-  if (!lines.length) { toast.error('Нет позиций для отправки', ''); return; }
+  const { lines: orderLines, deliveryDate } = buildOrderText();
+  if (!orderLines.length) { toast.error('Нет позиций для отправки', ''); return; }
+  const lines = orderLines.map(l => l.text);
   const le       = orderStore.settings.legalEntity || '';
   const supplier = orderStore.settings.supplier    || '';
   const text = `Добрый день!\nПросьба отгрузить товар для ${le}, дата поставки - ${deliveryDate}:\n\n${lines.join('\n')}\n\nСпасибо!`;

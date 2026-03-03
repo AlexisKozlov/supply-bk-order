@@ -44,6 +44,32 @@ try {
     exit;
 }
 
+// ═══ ROLE TEMPLATES & PERMISSIONS ═══
+$ROLE_TEMPLATES = [
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view'],
+];
+$ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
+$TABLE_TO_MODULE = [
+    'orders'=>'order','order_items'=>'order',
+    'plans'=>'planning',
+    'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'database',
+    'delivery_schedule'=>'delivery-schedule',
+    'analysis_data'=>'analysis','stock_1c'=>'analysis',
+    'audit_log'=>'history','notifications'=>'history',
+    'settings'=>'database','item_order'=>'order',
+];
+
+function resolvePermissions($role, $permissionsJson, $templates) {
+    $base = $templates[$role] ?? $templates['user'];
+    if ($role === 'admin') return $templates['admin'];
+    if (!$permissionsJson) return $base;
+    $overrides = is_string($permissionsJson) ? json_decode($permissionsJson, true) : $permissionsJson;
+    if (!is_array($overrides)) return $base;
+    return array_merge($base, $overrides);
+}
+
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
 $uri = trim($uri, '/');
@@ -94,7 +120,7 @@ function getSessionUser($pdo) {
     if (!$token) return null;
     // Удаляем протухшие сессии (раз в запрос — дёшево)
     $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
-    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
+    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) return null;
@@ -291,7 +317,6 @@ if ($endpoint === 'search_products') {
         $params[] = $supplier;
     }
     
-    $where[] = "`is_active` = 1";
     $sql = "SELECT * FROM `products` WHERE " . implode(' AND ', $where) . " LIMIT " . $limit;
     $s = $pdo->prepare($sql);
     $s->execute($params);
@@ -309,19 +334,21 @@ if ($endpoint === 'rpc') {
         $email = $body['user_email'] ?? ''; $pass = $body['user_password'] ?? '';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success'=>false,'error'=>'invalid_email'], 400);
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,created_at FROM users WHERE email=?");
+        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,permissions,created_at FROM users WHERE email=?");
         $s->execute([$email]); $u = $s->fetch();
         if (!$u) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
         if (!verifyAndMigratePassword($pdo, $u['name'], $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
         $le = $u['legal_entities'];
         $le = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
         $displayRole = $u['display_role'] ?? null;
+        $permsRaw = $u['permissions'] ?? null;
+        $permsDecoded = ($permsRaw && is_string($permsRaw)) ? json_decode($permsRaw, true) : null;
         $sessionToken = createSessionToken($pdo, $u['name']);
         try { $pdo->prepare("INSERT INTO login_log (email, user_name, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([$email, $u['name'], $clientIp]); } catch (PDOException $e) {}
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
         foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
-        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'created_at'=>$u['created_at'] ?? null],'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
+        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'permissions'=>$permsDecoded,'created_at'=>$u['created_at'] ?? null],'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
@@ -405,7 +432,9 @@ if ($endpoint === 'rpc') {
             respond(['valid' => false]);
         }
         $le = ($sessionUser['legal_entities'] && is_string($sessionUser['legal_entities'])) ? (json_decode($sessionUser['legal_entities'], true) ?? []) : [];
-        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'created_at' => $sessionUser['created_at'] ?? null]]);
+        $permsRaw2 = $sessionUser['permissions'] ?? null;
+        $permsDecoded2 = ($permsRaw2 && is_string($permsRaw2)) ? json_decode($permsRaw2, true) : null;
+        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'permissions' => $permsDecoded2, 'created_at' => $sessionUser['created_at'] ?? null]]);
     }
 
     // --- Приватные RPC (требуют авторизацию) ---
@@ -444,15 +473,17 @@ if ($endpoint === 'rpc') {
         $role = $body['role'] ?? 'user';
         $displayRole = $body['display_role'] ?? null;
         $legalEntities = $body['legal_entities'] ?? '[]';
+        $permissions = $body['permissions'] ?? null;
         if (!$name) respond(['success' => false, 'error' => 'name required'], 400);
         if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success' => false, 'error' => 'invalid_email'], 400);
         if (!$password || mb_strlen($password) < 8) respond(['success' => false, 'error' => 'password required (min 8 chars)'], 400);
         if (!in_array($role, ['admin', 'user', 'viewer'])) $role = 'user';
         $hash = password_hash($password, PASSWORD_BCRYPT);
+        $permJson = ($permissions && is_array($permissions) && count($permissions) > 0) ? json_encode($permissions, JSON_UNESCAPED_UNICODE) : null;
         $id = uuid();
         try {
-            $pdo->prepare("INSERT INTO users (id, name, email, password, role, display_role, legal_entities, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())")
-                ->execute([$id, $name, $email ?: null, $hash, $role, $displayRole, is_array($legalEntities) ? json_encode($legalEntities, JSON_UNESCAPED_UNICODE) : $legalEntities]);
+            $pdo->prepare("INSERT INTO users (id, name, email, password, role, display_role, legal_entities, permissions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())")
+                ->execute([$id, $name, $email ?: null, $hash, $role, $displayRole, is_array($legalEntities) ? json_encode($legalEntities, JSON_UNESCAPED_UNICODE) : $legalEntities, $permJson]);
         } catch (PDOException $e) {
             respond(['success' => false, 'error' => 'User already exists or DB error'], 400);
         }
@@ -474,6 +505,11 @@ if ($endpoint === 'rpc') {
         if (isset($body['role']) && in_array($body['role'], ['admin', 'user', 'viewer'])) { $sets[] = "role=?"; $params[] = $body['role']; }
         if (array_key_exists('display_role', $body)) { $sets[] = "display_role=?"; $params[] = $body['display_role']; }
         if (array_key_exists('legal_entities', $body)) { $sets[] = "legal_entities=?"; $params[] = is_array($body['legal_entities']) ? json_encode($body['legal_entities'], JSON_UNESCAPED_UNICODE) : $body['legal_entities']; }
+        if (array_key_exists('permissions', $body)) {
+            $pv = $body['permissions'];
+            $sets[] = "permissions=?";
+            $params[] = ($pv && is_array($pv) && count($pv) > 0) ? json_encode($pv, JSON_UNESCAPED_UNICODE) : null;
+        }
         $passwordChanged = false;
         if (isset($body['password']) && $body['password'] !== '') {
             if (mb_strlen($body['password']) < 8) respond(['success' => false, 'error' => 'password_too_short'], 400);
@@ -596,6 +632,13 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'batch_update_received_qty') {
+        $caller = getSessionUser($pdo);
+        if ($caller) {
+            $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+            if (($ACCESS_LEVELS[$perms['plan-fact'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+                respond(['error' => 'Недостаточно прав'], 403);
+            }
+        }
         $items = $body['items'] ?? [];
         if (!is_array($items) || empty($items)) respond(['error' => 'items required'], 400);
         if (count($items) > 500) respond(['error' => 'Too many items (max 500)'], 400);
@@ -617,6 +660,13 @@ if ($endpoint === 'rpc') {
         }
     }
     if ($fn === 'replace_analysis_data') {
+        $caller = getSessionUser($pdo);
+        if ($caller) {
+            $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+            if (($ACCESS_LEVELS[$perms['analysis'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+                respond(['error' => 'Недостаточно прав'], 403);
+            }
+        }
         $legalEntity = $body['legal_entity'] ?? '';
         $items = $body['items'] ?? [];
         if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
@@ -644,6 +694,13 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'replace_order_items') {
+        $caller = getSessionUser($pdo);
+        if ($caller) {
+            $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+            if (($ACCESS_LEVELS[$perms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+                respond(['error' => 'Недостаточно прав'], 403);
+            }
+        }
         $orderId = $body['order_id'] ?? '';
         $items = $body['items'] ?? [];
         if (!$orderId) respond(['error' => 'order_id required'], 400);
@@ -720,10 +777,21 @@ $appendOnly = ['audit_log'];
 if (!in_array($endpoint, $allowed)) { respond(['error'=>'Not found'], 404); }
 $table = $endpoint;
 
-// RBAC: viewer может только читать (кроме графика доставки)
+// RBAC: модульная проверка прав
 $sessionUser = getSessionUser($pdo);
-if ($sessionUser && ($sessionUser['role'] ?? '') === 'viewer' && $method !== 'GET' && $table !== 'delivery_schedule') {
-    respond(['error' => 'Недостаточно прав (только просмотр)'], 403);
+if ($sessionUser && $method !== 'GET') {
+    $userRole = $sessionUser['role'] ?? 'user';
+    if ($userRole !== 'admin') {
+        $module = $TABLE_TO_MODULE[$table] ?? null;
+        if ($module) {
+            $perms = resolvePermissions($userRole, $sessionUser['permissions'] ?? null, $ROLE_TEMPLATES);
+            $level = $ACCESS_LEVELS[$perms[$module] ?? 'none'] ?? 0;
+            $requiredLevel = ($method === 'DELETE') ? $ACCESS_LEVELS['full'] : $ACCESS_LEVELS['edit'];
+            if ($level < $requiredLevel) {
+                respond(['error' => 'Недостаточно прав'], 403);
+            }
+        }
+    }
 }
 
 // Enforce read-only

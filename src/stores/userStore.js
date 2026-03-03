@@ -2,6 +2,23 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { db, setSessionToken } from '@/lib/apiClient.js';
 
+// ═══ Система модульных прав ═══
+export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis'];
+
+export const ROLE_TEMPLATES = {
+  admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full' },
+  user:   { order: 'edit', planning: 'edit', history: 'edit', 'plan-fact': 'edit', database: 'edit', 'delivery-schedule': 'edit', analytics: 'view', calendar: 'view', analysis: 'edit' },
+  viewer: { order: 'view', planning: 'view', history: 'view', 'plan-fact': 'view', database: 'view', 'delivery-schedule': 'view', analytics: 'view', calendar: 'view', analysis: 'view' },
+};
+
+export const ACCESS_LEVELS = { full: 3, edit: 2, view: 1, none: 0 };
+
+export const MODULE_LABELS = {
+  order: 'Новый заказ', planning: 'Планирование', history: 'История',
+  'plan-fact': 'Поставки', database: 'База товаров', 'delivery-schedule': 'График доставки',
+  analytics: 'Аналитика', calendar: 'Календарь', analysis: 'Анализ',
+};
+
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref(null);
   const maintenanceMode = ref(false);
@@ -11,6 +28,19 @@ export const useUserStore = defineStore('user', () => {
   const isAuthenticated = computed(() => !!currentUser.value);
   const isAdmin = computed(() => currentUser.value?.role === 'admin');
   const isViewer = computed(() => currentUser.value?.role === 'viewer');
+
+  function getAccess(module) {
+    if (!currentUser.value) return 'none';
+    if (currentUser.value.role === 'admin') return 'full';
+    const role = currentUser.value.role || 'user';
+    const base = ROLE_TEMPLATES[role] || ROLE_TEMPLATES.user;
+    const overrides = currentUser.value.permissions || {};
+    return overrides[module] ?? base[module] ?? 'none';
+  }
+
+  function hasAccess(module, minLevel = 'view') {
+    return ACCESS_LEVELS[getAccess(module)] >= ACCESS_LEVELS[minLevel];
+  }
 
   function restoreSession() {
     try {
@@ -35,7 +65,7 @@ export const useUserStore = defineStore('user', () => {
       if (data.session_token) setSessionToken(data.session_token);
       // Обновить роль из сервера (защита от подмены в localStorage)
       if (data.user) {
-        const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities };
+        const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null };
         currentUser.value = updated;
         localStorage.setItem('bk_user', JSON.stringify(updated));
       }
@@ -106,5 +136,7 @@ export const useUserStore = defineStore('user', () => {
     logout,
     getAllowedEntities,
     checkMaintenance,
+    getAccess,
+    hasAccess,
   };
 });

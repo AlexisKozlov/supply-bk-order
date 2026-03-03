@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "rm -rf dist && vite build && ln -sf /var/www/bk-calc/api /var/www/bk-calc/dist/api",
+    "build": "rm -rf dist && vite build && ln -sf \"$(pwd)/api\" \"$(pwd)/dist/api\"",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -50,7 +50,7 @@
           :settings="settings"
           :compact="compact"
           :avg-consumption="avgConsumptionMap[item.sku] || 0"
-          :data-validation="true"
+          :data-validation="!orderStore.viewOnlyMode"
           :ref="el => { if (el) rowRefs[index] = el; }"
           @remove="orderStore.removeItem($event); draftStore.save();"
           @edit-product="$emit('edit-product', $event)"
@@ -77,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { db } from '@/lib/apiClient.js';

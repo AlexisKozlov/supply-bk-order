@@ -95,7 +95,7 @@
                 <button class="ht-act" title="Скопировать" @click="copyOrder(order)"><BkIcon name="copy" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyOrderLink(order)"><BkIcon name="link" size="sm"/></button>
                 <button class="ht-act" title="История изменений" @click="openLogModal(order.id, 'order')"><BkIcon name="note" size="sm"/></button>
-                <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
+                <button v-if="canDelete" class="ht-act ht-act-danger" title="Удалить" @click="deleteOrder(order)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
         </tbody>
@@ -137,7 +137,7 @@
                 <button v-if="!isViewer" class="ht-act" title="Редактировать" @click="loadPlan(plan)"><BkIcon name="edit" size="sm"/></button>
                 <button class="ht-act" title="Ссылка" @click="copyPlanLink(plan)"><BkIcon name="link" size="sm"/></button>
                 <button class="ht-act" title="История изменений" @click="openLogModal(plan.id, 'plan')"><BkIcon name="note" size="sm"/></button>
-                <button v-if="!isViewer" class="ht-act ht-act-danger" title="Удалить" @click="deletePlan(plan)"><BkIcon name="delete" size="sm"/></button>
+                <button v-if="canDelete" class="ht-act ht-act-danger" title="Удалить" @click="deletePlan(plan)"><BkIcon name="delete" size="sm"/></button>
               </td>
             </tr>
         </tbody>
@@ -268,7 +268,9 @@ const toast         = useToastStore();
 const userStore     = useUserStore();
 const router        = useRouter();
 
-const isViewer = computed(() => userStore.isViewer);
+const canEdit = computed(() => userStore.hasAccess('history', 'edit'));
+const canDelete = computed(() => userStore.hasAccess('history', 'full'));
+const isViewer = computed(() => !canEdit.value);
 const filterType        = ref('orders');
 const filterSupplier    = ref('');
 const filterAuthor      = ref('');
@@ -406,11 +408,14 @@ onMounted(async () => {
   await load();
 });
 watch(() => orderStore.settings.legalEntity, async () => {
+  compareMode.value = false;
+  compareSelection.value = [];
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   await load();
 });
 async function load() {
   await historyStore.loadOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, type: filterType.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value, search: filterType.value === 'orders' ? searchQuery.value : '' });
+  if (historyStore.error) toast.error('Ошибка загрузки', historyStore.error);
 }
 async function loadMore() {
   await historyStore.loadMoreOrders({ legalEntity: orderStore.settings.legalEntity, supplier: filterSupplier.value, dateFrom: filterDateFrom.value, dateTo: filterDateTo.value, author: filterAuthor.value, search: searchQuery.value });

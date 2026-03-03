@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useToastStore } from '@/stores/toastStore.js';
 
 const DAY_NAMES = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота' };
 const DAY_SHORT = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ' };
@@ -48,6 +49,8 @@ export const useRestaurantStore = defineStore('restaurant', () => {
       loadedGroup.value = group;
     } catch (e) {
       console.error('restaurantStore load error:', e);
+      const toastStore = useToastStore();
+      toastStore.error('Ошибка загрузки', 'Не удалось загрузить данные ресторанов');
     } finally {
       loading.value = false;
     }

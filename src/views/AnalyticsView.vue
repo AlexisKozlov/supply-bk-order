@@ -322,7 +322,7 @@
                 <option v-for="s in forecast.suppliers" :key="s" :value="s">{{ s }}</option>
               </select>
             </div>
-            <button v-if="forecastSupplier" class="btn primary fc-order-btn" @click="createOrderFromForecast" :disabled="!filteredForecast.length">
+            <button v-if="forecastSupplier && canCreateOrder" class="btn primary fc-order-btn" @click="createOrderFromForecast" :disabled="!filteredForecast.length">
               <BkIcon name="order" size="sm"/> Заказ для {{ forecastSupplier }}
             </button>
           </div>
@@ -554,6 +554,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -562,6 +563,8 @@ const router = useRouter();
 const orderStore = useOrderStore();
 const draftStore = useDraftStore();
 const toast = useToastStore();
+const userStore = useUserStore();
+const canCreateOrder = computed(() => userStore.hasAccess('analytics', 'edit'));
 
 const days = ref(30);
 const loading = ref(false);
@@ -755,17 +758,25 @@ function trendLabel(trend) {
 
 async function createOrderFromForecast() {
   if (!forecast.value || !forecastSupplier.value) return;
-  const items = filteredForecast.value;
-  if (!items.length) return;
+  const fcItems = filteredForecast.value;
+  if (!fcItems.length) return;
+  // Загрузить полные карточки товаров из БД
+  const skus = fcItems.map(i => i.sku).filter(Boolean);
+  let productMap = {};
+  if (skus.length) {
+    const { data: products } = await db.from('products').select('*').in('sku', skus);
+    if (products) productMap = Object.fromEntries(products.map(p => [p.sku, p]));
+  }
   orderStore.resetOrder();
   orderStore.settings.supplier = forecastSupplier.value;
   let count = 0;
-  for (const item of items) {
-    const added = orderStore.addItem({
+  for (const item of fcItems) {
+    const fullProduct = productMap[item.sku] || {
       sku: item.sku,
       name: item.name,
       qty_per_box: item.qtyPerBox,
-    });
+    };
+    const added = orderStore.addItem(fullProduct);
     if (added) count++;
   }
   draftStore.saveNow();
@@ -791,6 +802,7 @@ async function exportAnalytics() {
 watch(() => orderStore.settings.legalEntity, () => {
   seasonality.value = null;
   forecast.value = null;
+  forecastSupplier.value = '';
   load();
 });
 onMounted(() => load());
