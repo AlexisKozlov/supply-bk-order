@@ -115,17 +115,24 @@ function checkAuth($pdo) {
 }
 
 // Получить пользователя по сессионному токену из заголовка X-Session-Token
+// Результат кэшируется — безопасно вызывать многократно за один запрос
+$_sessionUserCache = ['done' => false, 'result' => null];
 function getSessionUser($pdo) {
+    global $_sessionUserCache;
+    if ($_sessionUserCache['done']) return $_sessionUserCache['result'];
+    $_sessionUserCache['done'] = true;
+
     $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
-    if (!$token) return null;
-    // Удаляем протухшие сессии (раз в запрос — дёшево)
+    if (!$token) { $_sessionUserCache['result'] = null; return null; }
+    // Удаляем протухшие сессии (раз в запрос)
     $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
     $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();
-    if (!$row) return null;
+    if (!$row) { $_sessionUserCache['result'] = null; return null; }
     // Скользящая сессия: продлеваем на 7 дней при каждом обращении
     $pdo->prepare("UPDATE user_sessions SET expires_at = ? WHERE token = ?")->execute([date('Y-m-d H:i:s', strtotime('+7 days')), $token]);
+    $_sessionUserCache['result'] = $row;
     return $row;
 }
 
@@ -166,7 +173,9 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     elseif (strpos($val,'lt.')===0) { $where[]="`$key`<?"; $params[]=substr($val,3); }
     elseif (strpos($val,'in.')===0) {
         $inv = str_replace(['in.(',')',' '], '', $val);
-        $arr = explode(',', $inv);
+        // Разбиваем по запятой, но не по экранированной \,
+        $arr = preg_split('/(?<!\\\\),/', $inv);
+        $arr = array_map(fn($x) => str_replace('\\,', ',', $x), $arr);
         $ph = implode(',', array_fill(0, count($arr), '?'));
         $where[] = "`$key` IN($ph)";
         $params = array_merge($params, $arr);
@@ -204,6 +213,11 @@ function parseOr($orStr, &$where, &$params, $allowedFields = []) {
 // ═══ DELETE ACT ═══
 if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
     if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
+    $su = getSessionUser($pdo);
+    if ($su && $su['role'] !== 'admin') {
+        $p = resolvePermissions($su['role'], $su['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$p['plan-fact'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+    }
     $orderId = $_GET['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
 
@@ -220,6 +234,11 @@ if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
 if ($endpoint === 'upload' && $subpoint === 'act') {
     if ($method !== 'POST') respond(['error' => 'Method not allowed'], 405);
     if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
+    $su = getSessionUser($pdo);
+    if ($su && $su['role'] !== 'admin') {
+        $p = resolvePermissions($su['role'], $su['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$p['plan-fact'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+    }
 
     $orderId = $_POST['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
@@ -469,6 +488,14 @@ if ($endpoint === 'rpc') {
         respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'permissions' => $permsDecoded2, 'created_at' => $sessionUser['created_at'] ?? null]]);
     }
 
+    if ($fn === 'logout') {
+        $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
+        if ($token) {
+            $pdo->prepare("DELETE FROM user_sessions WHERE token = ?")->execute([$token]);
+        }
+        respond(['success' => true]);
+    }
+
     // --- Приватные RPC (требуют авторизацию) ---
     if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
@@ -665,11 +692,10 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'batch_update_received_qty') {
         $caller = getSessionUser($pdo);
-        if ($caller) {
-            $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
-            if (($ACCESS_LEVELS[$perms['plan-fact'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
-                respond(['error' => 'Недостаточно прав'], 403);
-            }
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['plan-fact'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
         }
         $items = $body['items'] ?? [];
         if (!is_array($items) || empty($items)) respond(['error' => 'items required'], 400);
@@ -693,16 +719,16 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'replace_analysis_data') {
         $caller = getSessionUser($pdo);
-        if ($caller) {
-            $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
-            if (($ACCESS_LEVELS[$perms['analysis'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
-                respond(['error' => 'Недостаточно прав'], 403);
-            }
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['analysis'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
         }
         $legalEntity = $body['legal_entity'] ?? '';
         $items = $body['items'] ?? [];
         if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        if (empty($items)) respond(['error' => 'items cannot be empty'], 400);
         if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
         $allowed = ['id','legal_entity','sku','stock','consumption','period_days','updated_by','updated_at'];
         try {
@@ -727,11 +753,10 @@ if ($endpoint === 'rpc') {
 
     if ($fn === 'replace_order_items') {
         $caller = getSessionUser($pdo);
-        if ($caller) {
-            $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
-            if (($ACCESS_LEVELS[$perms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
-                respond(['error' => 'Недостаточно прав'], 403);
-            }
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
         }
         $orderId = $body['order_id'] ?? '';
         $items = $body['items'] ?? [];
@@ -762,6 +787,56 @@ if ($endpoint === 'rpc') {
         } catch (PDOException $e) {
             $pdo->rollBack();
             error_log("replace_order_items error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
+
+    if ($fn === 'delete_order') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+        $orderId = $body['order_id'] ?? '';
+        if (!$orderId) respond(['error' => 'order_id required'], 400);
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);
+            $pdo->prepare("DELETE FROM `orders` WHERE `id`=?")->execute([$orderId]);
+            $pdo->commit();
+            respond(['success' => true]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("delete_order error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
+
+    if ($fn === 'replace_item_order') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['order'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+        $supplier = $body['supplier'] ?? '';
+        $legalEntity = $body['legal_entity'] ?? '';
+        $items = $body['items'] ?? [];
+        if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
+        if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM `item_order` WHERE `supplier`=? AND `legal_entity`=?")->execute([$supplier, $legalEntity]);
+            foreach ($items as $item) {
+                $pdo->prepare("INSERT INTO `item_order` (`supplier`,`legal_entity`,`item_id`,`position`) VALUES (?,?,?,?)")
+                    ->execute([$supplier, $legalEntity, $item['item_id'], $item['position']]);
+            }
+            $pdo->commit();
+            respond(['success' => true, 'count' => count($items)]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("replace_item_order error: " . $e->getMessage());
             respond(['error' => 'Transaction failed'], 500);
         }
     }
@@ -830,6 +905,12 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'replace_restaurant_schedule') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['delivery-schedule'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
         $restaurantId = $body['restaurant_id'] ?? null;
         $items = $body['items'] ?? [];
         if (!$restaurantId) respond(['error' => 'restaurant_id required'], 400);
@@ -874,6 +955,9 @@ $table = $endpoint;
 
 // RBAC: модульная проверка прав
 $sessionUser = getSessionUser($pdo);
+if ($method !== 'GET' && !$sessionUser) {
+    respond(['error' => 'Требуется авторизация по сессии для операций записи'], 401);
+}
 if ($sessionUser && $method !== 'GET') {
     $userRole = $sessionUser['role'] ?? 'user';
     if ($userRole !== 'admin') {

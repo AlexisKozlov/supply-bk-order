@@ -95,6 +95,8 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function logout() {
+    // Инвалидация сессии на сервере (не ждём ответа)
+    db.rpc('logout').catch(() => {});
     currentUser.value = null;
     maintenanceMode.value = false;
     maintenanceMessage.value = '';

@@ -16,8 +16,9 @@ export const MONTH_NAMES = ['Январь','Февраль','Март','Апре
 export const DAY_NAMES = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
 export async function loadCalendarData(year, month, legalEntity) {
-  const from = new Date(year, month - 2, 1);
-  const to = new Date(year, month + 3, 0);
+  // month — 0-based (январь = 0), как в JS Date
+  const from = new Date(year, month - 1, 1);
+  const to = new Date(year, month + 2, 0);
 
   const { data, error } = await db
     .from('orders')

@@ -85,7 +85,7 @@
         <!-- Найдено -->
         <div v-if="searched && results.length" class="results-list">
           <div class="results-header">
-            <span class="results-count">{{ results.length }} {{ results.length === 1 ? 'результат' : results.length < 5 ? 'результата' : 'результатов' }}</span>
+            <span class="results-count">{{ results.length }} {{ (() => { const n = results.length % 100; const d = results.length % 10; if (n >= 11 && n <= 19) return 'результатов'; if (d === 1) return 'результат'; if (d >= 2 && d <= 4) return 'результата'; return 'результатов'; })() }}</span>
           </div>
           <div
             v-for="card in results"
@@ -1134,7 +1134,6 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   overflow-x: auto;
   scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
 }
 .nav-links::-webkit-scrollbar { display: none; }
 .nav-link {

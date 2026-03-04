@@ -57,7 +57,6 @@ export const useOrderStore = defineStore('order', () => {
   const viewOnlyMode = ref(false);
   const _history = new History(50);
   const _historyVersion = ref(0);
-  let _snapshotTimer = null;
   let _loadRequestId = 0;
 
   const canUndo = computed(() => { _historyVersion.value; return _history.canUndo(); });
@@ -94,11 +93,6 @@ export const useOrderStore = defineStore('order', () => {
     if (_history.states.length === 0) {
       _snapshot();
     }
-  }
-
-  function _debouncedSnapshot() {
-    clearTimeout(_snapshotTimer);
-    _snapshotTimer = setTimeout(() => _snapshot(), 800);
   }
 
   function addItem(product, skipSnapshot = false) {
@@ -198,7 +192,6 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function undo() {
-    clearTimeout(_snapshotTimer);
     const state = _history.undo();
     if (!state) return;
     items.value = JSON.parse(JSON.stringify(state));
@@ -206,7 +199,6 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function redo() {
-    clearTimeout(_snapshotTimer);
     const state = _history.redo();
     if (!state) return;
     items.value = JSON.parse(JSON.stringify(state));
@@ -216,16 +208,13 @@ export const useOrderStore = defineStore('order', () => {
   async function saveItemOrder() {
     const supplier = settings.supplier || 'all';
     const legalEntity = settings.legalEntity;
-    const { error: delErr } = await db.from('item_order').delete().eq('supplier', supplier).eq('legal_entity', legalEntity);
-    if (delErr) { console.error('saveItemOrder delete error:', delErr); return; }
     const orderData = items.value.map((item, index) => ({
-      supplier, legal_entity: legalEntity,
       item_id: item.productId || item.id, position: index,
     }));
-    if (orderData.length > 0) {
-      const { error: insErr } = await db.from('item_order').insert(orderData);
-      if (insErr) console.error('saveItemOrder insert error:', insErr);
-    }
+    const { error } = await db.rpc('replace_item_order', {
+      supplier, legal_entity: legalEntity, items: orderData,
+    });
+    if (error) console.error('saveItemOrder error:', error);
   }
 
   async function restoreItemOrder() {

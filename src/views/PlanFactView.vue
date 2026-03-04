@@ -387,14 +387,12 @@ function sumOrderBoxes(order) {
   }, 0)
 }
 
-onMounted(async () => {
-  await loadSuppliers()
-  await loadOrders()
+onMounted(() => {
+  Promise.all([loadSuppliers(), loadOrders()])
 })
 
-watch(legalEntity, async () => {
-  await loadSuppliers()
-  await loadOrders()
+watch(legalEntity, () => {
+  Promise.all([loadSuppliers(), loadOrders()])
 })
 
 async function loadSuppliers() {

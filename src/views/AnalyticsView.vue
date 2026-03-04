@@ -556,6 +556,7 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
+import { applyEntityFilter } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 
@@ -577,6 +578,8 @@ const forecastLoading = ref(false);
 const forecastPeriod = ref(7);
 const forecastSupplier = ref('');
 const forecastSort = ref({ col: 'default', asc: true });
+
+let _analyticsLoadId = 0;
 
 const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 function nf(v) { return formatter.format(v || 0); }
@@ -625,14 +628,18 @@ async function loadOrder(orderId) {
 }
 
 async function load() {
+  const myLoadId = ++_analyticsLoadId;
   loading.value = true;
   try {
-    data.value = await getOrdersAnalytics(orderStore.settings.legalEntity, days.value);
+    const result = await getOrdersAnalytics(orderStore.settings.legalEntity, days.value);
+    if (myLoadId !== _analyticsLoadId) return;
+    data.value = result;
   } catch (e) {
+    if (myLoadId !== _analyticsLoadId) return;
     toast.error('Ошибка', 'Не удалось загрузить аналитику');
     data.value = null;
   } finally {
-    loading.value = false;
+    if (myLoadId === _analyticsLoadId) loading.value = false;
   }
 }
 
@@ -764,7 +771,9 @@ async function createOrderFromForecast() {
   const skus = fcItems.map(i => i.sku).filter(Boolean);
   let productMap = {};
   if (skus.length) {
-    const { data: products } = await db.from('products').select('*').in('sku', skus);
+    let prodQuery = db.from('products').select('*').in('sku', skus);
+    prodQuery = applyEntityFilter(prodQuery, orderStore.settings.legalEntity);
+    const { data: products } = await prodQuery;
     if (products) productMap = Object.fromEntries(products.map(p => [p.sku, p]));
   }
   orderStore.resetOrder();
@@ -1091,7 +1100,7 @@ onMounted(() => load());
 
 @media (max-width: 768px) {
   .an-kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .an-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .an-tabs { overflow-x: auto; }
   .an-tab { padding: 7px 10px; font-size: 11px; white-space: nowrap; }
 }
 @media (max-width: 480px) {

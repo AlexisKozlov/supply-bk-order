@@ -278,7 +278,7 @@ const missingSuppliersCount = ref(0);
 // ─── Парсинг Excel ──────────────────────────────────────────────────────
 
 async function parseExcel(file) {
-  const XLSX = await import('xlsx');
+  const XLSX = await import('xlsx-js-style');
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];

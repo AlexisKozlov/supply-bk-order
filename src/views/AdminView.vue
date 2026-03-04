@@ -1067,7 +1067,7 @@ async function exportBackup() {
       let query = db.from(tableName).select('*');
       // Фильтр по юрлицу для таблиц с полем legal_entity
       if (backupEntity.value) {
-        const tablesWithEntity = ['products', 'orders', 'plans', 'stock_1c', 'analysis_data', 'cards', 'suppliers'];
+        const tablesWithEntity = ['products', 'orders', 'plans', 'stock_1c', 'analysis_data', 'cards', 'suppliers', 'item_order'];
         if (tablesWithEntity.includes(tableName)) {
           query = query.eq('legal_entity', backupEntity.value);
         }

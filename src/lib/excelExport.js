@@ -150,7 +150,7 @@ export async function exportToExcel(items, settings) {
  * Экспорт карточек товаров в Excel
  */
 export async function exportProductsToExcel(products, legalEntity) {
-  const XLSX = await import('xlsx');
+  const XLSX = await import('xlsx-js-style');
 
   const headerRow = [
     'Артикул', 'Наименование', 'Поставщик', 'Шт/кор', 'Кор/пал',

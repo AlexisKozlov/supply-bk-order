@@ -63,7 +63,7 @@ class QueryBuilder {
 
   insert(d) { this._method = 'POST'; this._body = Array.isArray(d) ? d : [d]; return this; }
   update(d) { this._method = 'PATCH'; this._body = d; return this; }
-  upsert(d) { this._method = 'POST'; this._body = Array.isArray(d) ? d : [d]; return this; }
+  upsert(d) { this._method = 'POST'; this._body = Array.isArray(d) ? d : [d]; this._upsert = true; return this; }
   delete() { this._method = 'DELETE'; return this; }
 
   eq(c, v)    { this._f[c] = `eq.${v}`;     return this; }
@@ -72,7 +72,7 @@ class QueryBuilder {
   gte(c, v)   { this._f[c] = `gte.${v}`;    return this; }
   lt(c, v)    { this._f[c] = `lt.${v}`;     return this; }
   lte(c, v)   { this._f[c] = `lte.${v}`;    return this; }
-  in(c, v)    { this._f[c] = `in.(${v.join(',')})`; return this; }
+  in(c, v)    { this._f[c] = `in.(${v.map(x => String(x).replace(/,/g, '\\,')).join(',')})`; return this; }
   is(c, v)    { this._f[c] = v === null ? 'is.null' : `eq.${v}`; return this; }
   not(c, op, v) {
     if (op === 'is' && v === null) { this._f[c] = 'not.is.null'; return this; }
@@ -103,6 +103,7 @@ class QueryBuilder {
     if (this._ord) p.set('order', this._ord);
     if (this._lim) p.set('limit', String(this._lim));
     if (this._off) p.set('offset', String(this._off));
+    if (this._upsert) p.set('upsert', 'true');
     if (this._rawParams) { for (const [k, v] of Object.entries(this._rawParams)) p.set(k, v); }
     let qs = p.toString();
     if (this._or) {

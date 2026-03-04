@@ -92,10 +92,11 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
 
     // Diff для аудит-лога
     if (oldItems) {
-      const oldMap = new Map(oldItems.map(i => [i.sku || i.name, i]));
+      const diffKey = (i) => i.sku ? `sku:${i.sku}` : `name:${i.name}`;
+      const oldMap = new Map(oldItems.map(i => [diffKey(i), i]));
       const changes = [];
       allItems.forEach(newItem => {
-        const key = newItem.sku || newItem.name;
+        const key = diffKey(newItem);
         const old = oldMap.get(key);
         if (!old) {
           if (newItem.qty_boxes > 0) changes.push({ item: key, type: 'added', boxes: newItem.qty_boxes });

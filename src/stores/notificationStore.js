@@ -176,5 +176,16 @@ export const useNotificationStore = defineStore('notification', () => {
     if (!user) stopPolling();
   });
 
+  // Приостанавливаем polling при скрытии вкладки
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopPolling();
+      } else if (userStore.currentUser) {
+        startPolling();
+      }
+    });
+  }
+
   return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling };
 });

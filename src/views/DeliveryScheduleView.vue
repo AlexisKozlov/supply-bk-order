@@ -1159,7 +1159,7 @@ function formatLastUpdate(upd) {
   .ds-mode-toggle { justify-content: center; }
 
   /* Таблица — горизонтальный скролл */
-  .pf-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+  .pf-wrap { overflow-x: auto !important; }
   .pf-main-table { min-width: 600px; font-size: 11px !important; }
 
   /* Скрываем комментарий и кол-во дней */

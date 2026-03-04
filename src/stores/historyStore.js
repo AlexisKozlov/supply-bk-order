@@ -135,10 +135,8 @@ export const useHistoryStore = defineStore('history', () => {
 
   // ─── Удалить заказ ────────────────────────────────────────────────────────
   async function deleteOrder(orderId) {
-    const { error: itemsErr } = await db.from('order_items').delete().eq('order_id', orderId);
-    if (itemsErr) return { error: 'Не удалось удалить позиции заказа: ' + itemsErr };
-    const { error: err } = await db.from('orders').delete().eq('id', orderId);
-    if (err) return { error: err };
+    const { error } = await db.rpc('delete_order', { order_id: orderId });
+    if (error) return { error: 'Не удалось удалить заказ: ' + error };
     await db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} });
     orders.value = orders.value.filter(o => o.id !== orderId);
     return { success: true };

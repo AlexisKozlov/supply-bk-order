@@ -231,7 +231,7 @@ async function parseFile(file, legalEntity) {
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'csv' || ext === 'tsv') return parseCSV(file, ext === 'tsv' ? '\t' : null, legalEntity);
 
-  const XLSX = await import('xlsx');
+  const XLSX = await import('xlsx-js-style');
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];

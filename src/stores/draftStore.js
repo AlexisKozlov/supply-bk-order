@@ -84,7 +84,7 @@ export const useDraftStore = defineStore('draft', () => {
       timestamp: new Date().toISOString(),
     };
     const json = JSON.stringify(draft);
-    localStorage.setItem(DRAFT_KEY, json);
+    try { localStorage.setItem(DRAFT_KEY, json); } catch(e) { /* хранилище переполнено */ }
     idbSet(DRAFT_KEY, draft);
     lastSaved.value = new Date();
   }

@@ -63,7 +63,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'vue-vendor': ['vue', 'vue-router', 'pinia'],
-          'xlsx': ['xlsx'],
+          'xlsx': ['xlsx-js-style'],
         },
       },
     },

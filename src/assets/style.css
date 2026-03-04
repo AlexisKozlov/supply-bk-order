@@ -3,7 +3,7 @@
    Burger King Style: Sidebar Layout
    ═══════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+/* Plus Jakarta Sans подключается в index.html через <link> */
 
 @font-face {
   font-family: 'Flame';
@@ -74,52 +74,7 @@ body {
 .hidden { display: none !important; }
 
 /* ═══════ LOGIN ═══════ */
-/* .login-overlay — определён в components.css */
-
-.login-box {
-  background: var(--card);
-  border-radius: 20px;
-  padding: 40px 36px 32px;
-  width: min(380px, calc(100vw - 32px));
-  text-align: center;
-  box-shadow: var(--shadow-lg);
-}
-
-.login-box h2 {
-  font-size: 22px;
-  font-weight: 400;
-  color: var(--bk-brown);
-  margin-bottom: 4px;
-  font-family: 'Flame', 'Plus Jakarta Sans', sans-serif;
-}
-
-.login-box p {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 20px;
-}
-
-.login-box select,
-.login-box input {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-family: inherit;
-  margin-bottom: 10px;
-  color: var(--text);
-  transition: border-color var(--transition);
-}
-
-.login-box select:focus,
-.login-box input:focus {
-  border-color: var(--accent);
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.login-box .btn { width: 100%; margin-top: 6px; }
+/* Стили .login-box определены в components.css */
 
 /* ═══════ APP LAYOUT ═══════ */
 .app-layout {
@@ -782,7 +737,6 @@ button:focus-visible, .btn:focus-visible {
   overflow-x: auto;
   overflow-y: auto;
   max-height: 70vh;
-  -webkit-overflow-scrolling: touch;
 }
 
 table {
