@@ -3,12 +3,12 @@ import { ref, computed } from 'vue';
 import { db, setSessionToken } from '@/lib/apiClient.js';
 
 // ═══ Система модульных прав ═══
-export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis'];
+export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis', 'shelf-life'];
 
 export const ROLE_TEMPLATES = {
-  admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full' },
-  user:   { order: 'edit', planning: 'edit', history: 'edit', 'plan-fact': 'edit', database: 'edit', 'delivery-schedule': 'edit', analytics: 'view', calendar: 'view', analysis: 'edit' },
-  viewer: { order: 'view', planning: 'view', history: 'view', 'plan-fact': 'view', database: 'view', 'delivery-schedule': 'view', analytics: 'view', calendar: 'view', analysis: 'view' },
+  admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'shelf-life': 'full' },
+  user:   { order: 'edit', planning: 'edit', history: 'edit', 'plan-fact': 'edit', database: 'edit', 'delivery-schedule': 'edit', analytics: 'view', calendar: 'view', analysis: 'edit', 'shelf-life': 'edit' },
+  viewer: { order: 'view', planning: 'view', history: 'view', 'plan-fact': 'view', database: 'view', 'delivery-schedule': 'view', analytics: 'view', calendar: 'view', analysis: 'view', 'shelf-life': 'view' },
 };
 
 export const ACCESS_LEVELS = { full: 3, edit: 2, view: 1, none: 0 };
@@ -17,6 +17,7 @@ export const MODULE_LABELS = {
   order: 'Новый заказ', planning: 'Планирование', history: 'История',
   'plan-fact': 'Поставки', database: 'База товаров', 'delivery-schedule': 'График доставки',
   analytics: 'Аналитика', calendar: 'Календарь', analysis: 'Анализ',
+  'shelf-life': 'Сроки годности',
 };
 
 export const useUserStore = defineStore('user', () => {

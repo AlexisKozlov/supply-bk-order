@@ -24,6 +24,7 @@ const routes = [
       { path: 'analysis', name: 'analysis', component: () => import('@/views/AnalysisView.vue'), meta: { title: 'Анализ', module: 'analysis' } },
       { path: 'database', name: 'database', component: () => import('@/views/DatabaseView.vue'), meta: { title: 'База товаров', module: 'database' } },
       { path: 'delivery-schedule', name: 'delivery-schedule', component: () => import('@/views/DeliveryScheduleView.vue'), meta: { title: 'График доставки', module: 'delivery-schedule' } },
+      { path: 'shelf-life', name: 'shelf-life', component: () => import('@/views/ShelfLifeView.vue'), meta: { title: 'Сроки годности', module: 'shelf-life' } },
       { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true, title: 'Админ-панель' } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
     ],
@@ -76,7 +77,7 @@ router.beforeEach((to) => {
   // Модульная проверка прав
   if (to.meta.module && !userStore.hasAccess(to.meta.module, 'view')) {
     // Редирект на первый доступный модуль
-    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule'];
+    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life'];
     const first = modules.find(m => userStore.hasAccess(m, 'view'));
     return first ? { name: first } : { name: 'home' };
   }

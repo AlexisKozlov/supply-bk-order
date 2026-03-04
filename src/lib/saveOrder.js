@@ -42,6 +42,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     note:              note || null,
     has_transit:       settings.hasTransit ? 1 : 0,
     show_stock_column: settings.showStockColumn ? 1 : 0,
+    cda_mode:          settings.cdaMode ? 1 : 0,
+    safety_coef:       settings.safetyCoef || 1.0,
   };
 
   let orderId;

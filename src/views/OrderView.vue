@@ -45,11 +45,11 @@
           <input type="date" :value="todayStr" :class="{ 'param-required-pulse': !orderStore.settings.today }" @change="onTodayChange" :disabled="orderStore.viewOnlyMode"/>
         </div>
         <div class="pf-group">
-          <label>Дата прихода</label>
+          <label>Дата прихода <span v-if="currentSupplierDlt" class="cda-hint">DLT: {{ currentSupplierDlt }} дн.</span></label>
           <input type="date" :value="deliveryStr" :class="{ 'param-required-pulse': !orderStore.settings.deliveryDate }" @change="onDeliveryChange" :disabled="orderStore.viewOnlyMode"/>
         </div>
         <div class="pf-group">
-          <label>Запас (дн.) <small v-if="safetyDateDisplay" style="font-weight:400;color:var(--text-muted);">– {{ safetyDateDisplay }}</small></label>
+          <label>Запас (дн.) <span v-if="currentSupplierDoc" class="cda-hint">DOC: {{ currentSupplierDoc }} дн.</span> <small v-if="safetyDateDisplay" style="font-weight:400;color:var(--text-muted);">– {{ safetyDateDisplay }}</small></label>
           <div style="display:flex;gap:4px;align-items:center;">
             <input type="number" min="0" :value="orderStore.settings.safetyDays" :class="{ 'param-required-pulse': !orderStore.settings.safetyDays }" @change="onSafetyDaysChange" style="width:60px;" :disabled="orderStore.viewOnlyMode"/>
             <input type="date" :value="safetyDateStr" @change="onSafetyDateChange" :min="deliveryStr" style="flex:1;" :disabled="orderStore.viewOnlyMode"/>
@@ -129,7 +129,12 @@
         </div>
       </div>
 
-      <OrderTable :compact="compactMode" :applied-analogs="appliedAnalogs" @edit-product="openProductForEdit"/>
+      <OrderTable :compact="compactMode" :applied-analogs="appliedAnalogs" :adu-map="aduMap"
+        :cda-mode="orderStore.settings.cdaMode"
+        :cda-supplier-dlt="currentSupplierDlt || 1"
+        :cda-supplier-doc="currentSupplierDoc || 7"
+        :cda-safety-coef="orderStore.settings.safetyCoef"
+        @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
       <div class="toolbar-row toolbar-finish">
@@ -236,6 +241,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityFilter } from '@/lib/utils.js';
 import { saveOrder } from '@/lib/saveOrder.js';
+import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import OrderTable from '@/components/order/OrderTable.vue';
 import SaveOrderModal from '@/components/modals/SaveOrderModal.vue';
@@ -267,6 +273,8 @@ const showSaveModal         = ref(false);
 const saveModalLines        = ref([]);
 const savingOrder           = ref(false);
 const fillLoading           = ref(false);
+const aduLoading            = ref(false);
+const aduMap                = ref(new Map());
 const load1cLoading         = ref(false);
 const importLoading         = ref(false);
 const searchQuery           = ref('');
@@ -339,6 +347,9 @@ function onSafetyDateChange(e) {
 }
 
 const suppliers   = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
+const currentSupplierData = computed(() => suppliers.value.find(s => s.short_name === orderStore.settings.supplier) || null);
+const currentSupplierDlt = computed(() => currentSupplierData.value?.dlt ?? null);
+const currentSupplierDoc = computed(() => currentSupplierData.value?.doc ?? null);
 
 const itemsWithOrderCount = computed(() => {
   return orderStore.items.filter(item => (item.finalOrder || 0) > 0).length;
@@ -545,6 +556,18 @@ async function onSupplierChange(e) {
     const { data } = await pq2;
     (data || []).forEach(p => orderStore.addItem(p, true));
     await orderStore.restoreItemOrder();
+    // Автоподстановка DLT → дата прихода, DOC → запас
+    const sup = suppliers.value.find(s => s.short_name === newSupplier);
+    if (sup) {
+      if (sup.dlt && !orderStore.settings.deliveryDate) {
+        const d = new Date(orderStore.settings.today || new Date());
+        d.setDate(d.getDate() + sup.dlt);
+        orderStore.settings.deliveryDate = d;
+      }
+      if (sup.doc && !orderStore.settings.safetyDays) {
+        orderStore.settings.safetyDays = sup.doc;
+      }
+    }
     draftStore.save();
     orderVisible.value = true;
     setTimeout(() => searchInputRef.value?.focus(), 100);
@@ -684,6 +707,36 @@ async function fillFromLastOrder() {
     console.error('[fillFromLastOrder]', err);
     toast.error('Ошибка', 'Не удалось загрузить данные анализа');
   } finally { fillLoading.value = false; }
+}
+
+// ─── Загрузка ADU/CV для буферного расчёта ───────────────────────────────────
+async function loadAduForCda() {
+  if (!orderStore.items.length) return;
+  aduLoading.value = true;
+  try {
+    const lookbackDays = orderStore.settings.periodDays || 30;
+    await recalculateAdu(orderStore.settings.legalEntity, orderStore.settings.supplier || null, lookbackDays);
+    const skus = orderStore.items.filter(i => i.sku).map(i => i.sku);
+    aduMap.value = await loadAduData(skus, orderStore.settings.legalEntity);
+  } catch (err) {
+    console.error('[loadAduForCda]', err);
+  } finally { aduLoading.value = false; }
+}
+
+async function onCdaModeChange(e) {
+  const isCda = e.target.value === 'cda';
+  orderStore.settings.cdaMode = isCda;
+  if (isCda) {
+    // Проверяем DLT/DOC
+    if (!currentSupplierDlt.value || !currentSupplierDoc.value) {
+      toast.warning('Внимание', 'У поставщика не заданы DLT/DOC — буферный расчёт будет неточным. Заполните в настройках поставщика.');
+    }
+    // Загружаем ADU/CV для буферного расчёта
+    if (!aduMap.value.size && orderStore.items.length) {
+      await loadAduForCda();
+    }
+  }
+  draftStore.save();
 }
 
 // ─── Загрузить из 1С ──────────────────────────────────────────────────────────

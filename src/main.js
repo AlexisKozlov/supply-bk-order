@@ -37,8 +37,23 @@ function logErrorToServer(level, message, stack) {
   } catch (e) { /* store not ready */ }
 }
 
+// Ошибки, которые не нужно логировать (внешние скрипты, SW и т.д.)
+function shouldIgnoreError(message, source) {
+  const msg = String(message || '');
+  const src = String(source || '');
+  // "Script error." без источника — внешний скрипт (расширения, CORS)
+  if (msg === 'Script error.' || (msg.startsWith('Script error') && (!src || src === ''))) return true;
+  // Service Worker ошибки регистрации
+  if (msg.includes('registerSW') || src.includes('registerSW')) return true;
+  if (msg.includes('service-worker') || msg.includes('serviceWorker')) return true;
+  // Ошибки расширений браузера
+  if (src.includes('extension://') || src.includes('moz-extension://')) return true;
+  return false;
+}
+
 // Перехват JS-ошибок
 window.onerror = (message, source, lineno, colno, error) => {
+  if (shouldIgnoreError(message, source)) return;
   const msg = `${message} (${source}:${lineno}:${colno})`;
   logErrorToServer('error', msg, error?.stack || null);
 };
@@ -47,7 +62,9 @@ window.onerror = (message, source, lineno, colno, error) => {
 window.onunhandledrejection = (event) => {
   const reason = event.reason;
   const msg = reason?.message || String(reason);
-  logErrorToServer('error', `Unhandled rejection: ${msg}`, reason?.stack || null);
+  const stack = reason?.stack || '';
+  if (shouldIgnoreError(msg, stack)) return;
+  logErrorToServer('error', `Unhandled rejection: ${msg}`, stack || null);
 };
 
 // Перехват ошибок Vue-компонентов

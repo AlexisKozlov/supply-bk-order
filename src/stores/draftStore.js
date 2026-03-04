@@ -167,8 +167,8 @@ export const useDraftStore = defineStore('draft', () => {
   let _planTimer = null;
 
   function savePlan(planState) {
-    // Не сохраняем просмотр/редактирование
-    if (planState.viewOnly || planState.editingPlanId) return;
+    // Не сохраняем в режиме просмотра
+    if (planState.viewOnly) return;
     clearTimeout(_planTimer);
     _planTimer = setTimeout(() => {
       // Не сохраняем если нет товаров
@@ -179,6 +179,7 @@ export const useDraftStore = defineStore('draft', () => {
         startDateStr: planState.startDateStr,
         inputUnit: planState.inputUnit,
         consumptionPeriodDays: planState.consumptionPeriodDays,
+        editingPlanId: planState.editingPlanId || null,
         items: JSON.parse(JSON.stringify(toRaw(planState.items))),
         timestamp: new Date().toISOString(),
       };

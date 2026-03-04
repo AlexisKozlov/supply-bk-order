@@ -9,6 +9,7 @@
           <th>Остаток</th>
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
           <th class="stock-col">Запас</th>
+          <th v-if="cdaMode">Буфер</th>
           <th>Расчёт<br><small>заказа</small></th>
           <th>
             Заказ<br>
@@ -25,6 +26,7 @@
           <th>Остаток</th>
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
           <th class="stock-col">Запас</th>
+          <th v-if="cdaMode">Буф.</th>
           <th>Расчёт</th>
           <th>{{ settings.unit === 'boxes' ? 'Уч/Физ' : 'Шт/Физ' }}</th>
           <th>До</th>
@@ -51,6 +53,9 @@
           :compact="compact"
           :avg-consumption="avgConsumptionMap[item.sku] || 0"
           :data-validation="!orderStore.viewOnlyMode"
+          :adu-value="props.aduMap.get(item.sku)?.adu || 0"
+          :cda-mode="props.cdaMode"
+          :cda-params="props.cdaMode ? getCdaParams(item) : null"
           :ref="el => { if (el) rowRefs[index] = el; }"
           @remove="orderStore.removeItem($event); draftStore.save();"
           @edit-product="$emit('edit-product', $event)"
@@ -89,6 +94,11 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 const props = defineProps({
   compact: { type: Boolean, default: false },
   appliedAnalogs: { type: Map, default: () => new Map() },
+  aduMap: { type: Map, default: () => new Map() },
+  cdaMode: { type: Boolean, default: false },
+  cdaSupplierDlt: { type: Number, default: 0 },
+  cdaSupplierDoc: { type: Number, default: 0 },
+  cdaSafetyCoef: { type: Number, default: 1.0 },
 });
 
 const emit = defineEmits(['edit-product']);
@@ -99,8 +109,20 @@ const settings = computed(() => orderStore.settings);
 const colSpan = computed(() => {
   let c = 9; // базовые колонки (включая запас)
   if (settings.value.hasTransit) c++;
+  if (props.cdaMode) c++;
   return c;
 });
+
+function getCdaParams(item) {
+  const aduInfo = props.aduMap.get(item.sku);
+  return {
+    adu: aduInfo?.adu || 0,
+    cv: aduInfo?.cv || 0,
+    dlt: props.cdaSupplierDlt || 1,
+    doc: props.cdaSupplierDoc || 7,
+    safetyCoef: props.cdaSafetyCoef || 1.0,
+  };
+}
 
 const rowRefs = ref([]);
 

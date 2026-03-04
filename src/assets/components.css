@@ -1812,3 +1812,77 @@ td.stock-high::before {
   width: 5px; height: 5px; border-radius: 50%;
   background: #8E24AA;
 }
+
+/* ═══════ CDA — метки DLT/DOC/ADU ═══════ */
+.cda-hint {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  background: #FFF3E0;
+  color: #E65100;
+  border: 1px solid #FFCC80;
+  margin-left: 4px;
+  vertical-align: middle;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.adu-hint {
+  font-size: 9px;
+  color: #E65100;
+  font-weight: 600;
+  margin-top: 1px;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+/* ═══════ CDA — полоска буфера ═══════ */
+.buffer-cell {
+  min-width: 80px;
+  padding: 4px 6px !important;
+}
+
+.buffer-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  position: relative;
+  cursor: help;
+}
+
+.buffer-seg {
+  height: 100%;
+  min-width: 0;
+  transition: width 0.3s ease;
+}
+
+.buffer-green { background: #4CAF50; }
+.buffer-yellow { background: #FF9800; }
+.buffer-red { background: #F44336; }
+
+.buffer-marker {
+  position: absolute;
+  top: -8px;
+  transform: translateX(-5px);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid #2C1810;
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+}
+
+.buffer-text {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 1px;
+}

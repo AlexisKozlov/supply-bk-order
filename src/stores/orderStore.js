@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { reactive, ref, computed, watch } from 'vue';
-import { calculateItem } from '@/lib/calculations.js';
+import { calculateItem, calculateBufferItem } from '@/lib/calculations.js';
 import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
@@ -45,6 +45,8 @@ export const useOrderStore = defineStore('order', () => {
     hasTransit: false,
     showStockColumn: true,
     note: '',
+    cdaMode: false,
+    safetyCoef: 1.0,
   });
 
   watch(() => settings.legalEntity, (le) => {
@@ -245,6 +247,8 @@ export const useOrderStore = defineStore('order', () => {
     settings.hasTransit = order.has_transit === true || order.has_transit === 'true' || order.has_transit === '1' || order.has_transit === 1;
     settings.showStockColumn = true; // всегда показываем запас при просмотре
     settings.note = order.note || '';
+    settings.cdaMode = order.cda_mode === true || order.cda_mode === 1 || order.cda_mode === '1';
+    settings.safetyCoef = parseFloat(order.safety_coef) || 1.0;
 
     const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
     let productMap = {};

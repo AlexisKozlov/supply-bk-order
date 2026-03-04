@@ -33,6 +33,20 @@
           </div>
         </div>
 
+        <div style="margin-top:12px;font-size:13px;font-weight:600;color:#555;margin-bottom:6px;">Параметры доставки</div>
+        <div class="modal-row-2">
+          <div class="modal-field">
+            <span class="modal-field-label">Срок доставки (дн.)</span>
+            <input type="number" v-model.number="form.dlt" min="0" placeholder="напр. 2" />
+            <span class="modal-field-hint">Через сколько дней приезжает товар</span>
+          </div>
+          <div class="modal-field">
+            <span class="modal-field-label">Частота заказа (дн.)</span>
+            <input type="number" v-model.number="form.doc" min="0" placeholder="напр. 7" />
+            <span class="modal-field-hint">Как часто заказываете</span>
+          </div>
+        </div>
+
         <div class="actions" style="display:flex;gap:8px;margin-top:16px;">
           <button class="btn primary" @click="save" :disabled="saving">
             {{ saving ? 'Сохранение...' : (supplier ? 'Сохранить' : 'Создать') }}
@@ -76,6 +90,7 @@ const oldShortName = ref('');
 const form = ref({
   short_name: '', full_name: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
   whatsapp: '', telegram: '', viber: '', email: '',
+  dlt: null, doc: null,
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
 
@@ -93,6 +108,8 @@ onMounted(() => {
       telegram: props.supplier.telegram || '',
       viber: props.supplier.viber || '',
       email: props.supplier.email || '',
+      dlt: props.supplier.dlt ?? null,
+      doc: props.supplier.doc ?? null,
     });
     oldShortName.value = props.supplier.short_name || '';
   }
@@ -117,6 +134,8 @@ async function save() {
       telegram: form.value.telegram.trim() || null,
       viber: form.value.viber.trim() || null,
       email: form.value.email.trim() || null,
+      dlt: form.value.dlt || null,
+      doc: form.value.doc || null,
     };
     let error;
     if (props.supplier) {

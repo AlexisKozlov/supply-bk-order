@@ -52,7 +52,7 @@
         </div>
         <div class="pf-group">
           <label>Единицы</label>
-          <select :value="inputUnit" @change="onUnitChange">
+          <select :value="inputUnit" @change="onUnitChange" :disabled="viewOnly">
             <option value="pieces">Штуки</option>
             <option value="boxes">Коробки</option>
           </select>
@@ -346,7 +346,7 @@ const isViewer = computed(() => !userStore.hasAccess('planning', 'edit'));
 const supplier = ref('');
 const periodValue = ref('m3');
 const startDateStr = ref(toLocalDateStr(new Date()));
-const inputUnit = ref('pieces');
+const inputUnit = ref('boxes');
 const consumptionPeriodDays = ref(30);
 const items = ref([]);
 const suppLoading = ref(false);
@@ -1235,7 +1235,7 @@ async function restoreItemOrder() {
 }
 
 function onParamsChange() { supplierStore.loadSuppliers(orderStore.settings.legalEntity); recalcAll(); _savePlanDraft(); }
-function onPeriodChange() { items.value.forEach(i => { i.plan = []; }); recalcAll(); }
+function onPeriodChange() { items.value.forEach(i => { i.plan = []; }); recalcAll(); triggerValidation(); _savePlanDraft(); }
 function onConsumptionPeriodChange() {
   _validationCache = null;
   items.value.forEach(i => { i.plan = []; });
@@ -1257,6 +1257,7 @@ async function confirmSave() {
     legal_entity: orderStore.settings.legalEntity, supplier: supplier.value,
     period_type: periodType.value, period_count: periodCount.value, start_date: startDateStr.value,
     consumption_period_days: consumptionPeriodDays.value || 30,
+    input_unit: inputUnit.value,
     note: saveNote.value.trim() || null,
     items: itemsWithPlan.value.map(i => ({
       sku: i.sku, name: i.name, qty_per_box: i.qtyPerBox, boxes_per_pallet: i.boxesPerPallet,
@@ -1379,6 +1380,7 @@ async function loadPlanFromHistory(planId) {
   periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
+  inputUnit.value = plan.input_unit || 'boxes';
   editingPlanId.value = plan.id;
   _loadedCreatedBy = plan.created_by || null;
   _loadedNote = plan.note || '';
@@ -1413,7 +1415,7 @@ onMounted(async () => {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
       const ok = await confirmAction('Восстановить черновик?', `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`);
-      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); inputUnit.value = d.inputUnit || 'pieces'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
+      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }

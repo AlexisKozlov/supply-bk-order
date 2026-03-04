@@ -30,7 +30,7 @@ export const useSupplierStore = defineStore('supplier', () => {
       try {
         let query = db
           .from('suppliers')
-          .select('short_name, full_name, whatsapp, telegram, viber, email')
+          .select('short_name, full_name, whatsapp, telegram, viber, email, dlt, doc')
           .order('short_name');
 
         // Если одна сущность — простой eq, если несколько — or()

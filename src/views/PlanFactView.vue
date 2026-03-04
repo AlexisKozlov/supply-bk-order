@@ -502,7 +502,7 @@ function calcCoverageForItem(item, factQty, order) {
   const stock = Number(item.stock) || 0
   const transit = Number(item.transit) || 0
   const consumedBeforeDelivery = daily * transitDays
-  const stockAfterDelivery = Math.max(0, (stock + transit) - consumedBeforeDelivery)
+  const stockAfterDelivery = (stock + transit) - consumedBeforeDelivery
 
   const qpb = Number(item.qty_per_box) || 1
   const unit = order?.unit || 'boxes'

@@ -30,6 +30,24 @@
         </template>
       </template>
 
+      <!-- Инструменты — ряд иконок -->
+      <template v-if="toolsItems.some(t => userStore.hasAccess(t.module, 'view'))">
+        <div class="sidebar-section" v-if="!sidebarCollapsed">Инструменты</div>
+        <div class="sidebar-tools-row" :class="{ 'sidebar-tools-row-collapsed': sidebarCollapsed }">
+          <template v-for="item in toolsItems" :key="item.module">
+            <router-link
+              v-if="userStore.hasAccess(item.module, 'view')"
+              :to="{ name: item.route }"
+              class="sidebar-tool-icon"
+              :class="{ active: currentRoute === item.route }"
+              :title="item.label"
+            >
+              <BkIcon :name="item.icon" size="sm" light/>
+            </router-link>
+          </template>
+        </div>
+      </template>
+
       <template v-if="userStore.isAdmin">
         <div class="sidebar-section" v-if="!sidebarCollapsed">Администрирование</div>
         <nav class="sidebar-nav">
@@ -314,14 +332,19 @@ const sidebarSections = [
   ]},
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
-    { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
-  ]},
-  { title: 'Отчёты', items: [
-    { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
     { module: 'calendar', route: 'calendar', icon: 'calendar', label: 'Календарь' },
-    { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ' },
   ]},
 ];
+
+const toolsItems = [
+  { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
+  { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
+  { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
+  { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
+];
+
+const showToolsMenu = ref(false); // legacy, не используется
+const isToolsRouteActive = computed(() => toolsItems.some(t => route.name === t.route));
 
 const showUserMenu = ref(false);
 const showChangePassword = ref(false);
@@ -410,6 +433,7 @@ const pageNames = {
   admin: 'Админ панель',
   'plan-fact': 'Поставки',
   'delivery-schedule': 'График доставки',
+  'shelf-life': 'Сроки годности',
 };
 
 function sendHeartbeat() {
@@ -427,6 +451,7 @@ let removeAfterEach = null;
 
 removeAfterEach = router.afterEach(() => {
   sidebarOpen.value = false;
+  showToolsMenu.value = false;
   if (!userStore.isAdmin) userStore.checkMaintenance();
   sendHeartbeat();
 });
@@ -525,6 +550,9 @@ function formatNotifDate(str) {
 function handleOutsideClick(e) {
   if (showUserMenu.value && !e.target.closest('.sidebar-bottom')) {
     showUserMenu.value = false;
+  }
+  if (showToolsMenu.value && !e.target.closest('.sidebar-tools-wrap')) {
+    showToolsMenu.value = false;
   }
 }
 
@@ -627,6 +655,45 @@ function confirmLogout() {
 </script>
 
 <style scoped>
+/* ═══ Tools row (иконки в ряд) ═══ */
+.sidebar-tools-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 10px 8px;
+}
+.sidebar-tools-row-collapsed {
+  flex-direction: column;
+  padding: 2px 6px 4px;
+  align-items: center;
+}
+.sidebar-tool-icon {
+  flex: 1;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.04);
+  transition: all 0.15s;
+  text-decoration: none;
+  cursor: pointer;
+}
+.sidebar-tool-icon:hover {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+}
+.sidebar-tool-icon.active {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  box-shadow: inset 0 -2px 0 #4FC3F7;
+}
+.sidebar-tools-row-collapsed .sidebar-tool-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
 /* Notification bell - mobile topbar */
 .notification-bell-mobile {
   position: relative; background: none; border: none; cursor: pointer;

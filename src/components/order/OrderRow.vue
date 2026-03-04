@@ -48,6 +48,7 @@
         ref="inputConsumption"
         :data-col="0"
       />
+      <div v-if="aduValue > 0 && !compact" class="adu-hint">ADU: {{ aduValue.toFixed(1) }}</div>
     </td>
 
     <!-- Остаток -->
@@ -78,6 +79,18 @@
 
     <!-- Хватит до (текущий запас) -->
     <td class="stock-col stock-display td-stock-until" :class="stockCurrentHighlight" data-label="Запас" :title="compact ? stockUntilDisplay : ''">{{ compact ? stockUntilShort : stockUntilDisplay }}</td>
+
+    <!-- Буфер CDA (только в CDA-режиме) -->
+    <td v-if="cdaMode" class="buffer-cell">
+      <div v-if="calc.buffer" class="buffer-bar" :title="bufferTooltip">
+        <div class="buffer-seg buffer-red" :style="{ width: bufferSegWidth('red') }"></div>
+        <div class="buffer-seg buffer-yellow" :style="{ width: bufferSegWidth('yellow') }"></div>
+        <div class="buffer-seg buffer-green" :style="{ width: bufferSegWidth('green') }"></div>
+        <div class="buffer-marker" :style="{ left: bufferMarkerPos }" :title="'Остаток: ' + nf.format(Math.round((item.stock || 0) + (item.transit || 0)))"></div>
+      </div>
+      <div v-if="calc.buffer && !compact" class="buffer-text">{{ nf.format(Math.round(calc.buffer.total)) }}</div>
+      <div v-else-if="!calc.buffer" class="buffer-text" style="color:#999">—</div>
+    </td>
 
     <!-- Расчёт заказа -->
     <td class="calc">
@@ -143,7 +156,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import { calculateItem } from '@/lib/calculations.js';
+import { calculateItem, calculateBufferItem } from '@/lib/calculations.js';
 import { getQpb, getMultiplicity } from '@/lib/utils.js';
 import { useCalculator } from '@/lib/useCalculator.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -158,6 +171,9 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
   avgConsumption: { type: Number, default: 0 },
   dataValidation: { type: Boolean, default: false },
+  aduValue: { type: Number, default: 0 },
+  cdaMode: { type: Boolean, default: false },
+  cdaParams: { type: Object, default: null },
 });
 
 const emit = defineEmits(['remove', 'edit-product', 'drag-start', 'drag-over', 'drop', 'drag-end', 'nav']);
@@ -273,7 +289,12 @@ function updateField(field, value) {
 }
 
 // ─── Расчёт ───────────────────────────────────────────────────────────────────
-const calc = computed(() => calculateItem(props.item, props.settings));
+const calc = computed(() => {
+  if (props.cdaMode && props.cdaParams) {
+    return calculateBufferItem(props.item, props.settings, props.cdaParams);
+  }
+  return calculateItem(props.item, props.settings);
+});
 
 const qpb  = computed(() => getQpb(props.item));
 const mult = computed(() => getMultiplicity(props.item));
@@ -319,17 +340,63 @@ const tooltipHtml = computed(() => {
   const transitDays = Math.ceil((s.deliveryDate - s.today) / 86400000);
   const consumed = daily * transitDays;
   const totalStock = (props.item.stock || 0) + (props.item.transit || 0);
-  const stockAfter = Math.max(0, totalStock - consumed);
+  const stockAfter = totalStock - consumed;
+  const deficitLine = stockAfter < 0
+    ? `<div class="calc-tip-row" style="color:#D32F2F"><span class="calc-tip-lbl">Дефицит до прихода:</span><span class="calc-tip-val">${fmt(Math.abs(stockAfter))} ${inputUnit}</span></div>`
+    : '';
+
+  // CDA-режим: показываем зоны буфера
+  if (props.cdaMode && calc.value.buffer) {
+    const b = calc.value.buffer;
+    return `
+      <div class="calc-tip-row"><span class="calc-tip-lbl">Суточный расход:</span><span class="calc-tip-val">${fmt(daily)} ${inputUnit}</span></div>
+      <div class="calc-tip-row"><span class="calc-tip-lbl">Дней до прихода:</span><span class="calc-tip-val">${transitDays} дн.</span></div>
+      <div class="calc-tip-row"><span class="calc-tip-lbl">Остаток к приходу:</span><span class="calc-tip-val">${stockAfter < 0 ? 0 : fmt(stockAfter)} ${inputUnit}</span></div>
+      ${deficitLine}
+      <hr class="calc-tip-hr">
+      <div class="calc-tip-row" style="color:#4CAF50"><span class="calc-tip-lbl">Зелёная зона (DOC):</span><span class="calc-tip-val">${fmt(b.green)} ${inputUnit}</span></div>
+      <div class="calc-tip-row" style="color:#FF9800"><span class="calc-tip-lbl">Жёлтая зона (CV):</span><span class="calc-tip-val">${fmt(b.yellow)} ${inputUnit}</span></div>
+      <div class="calc-tip-row" style="color:#F44336"><span class="calc-tip-lbl">Красная зона (DLT):</span><span class="calc-tip-val">${fmt(b.red)} ${inputUnit}</span></div>
+      <hr class="calc-tip-hr">
+      <div class="calc-tip-row"><span class="calc-tip-lbl">Буфер:</span><span class="calc-tip-val">${fmt(b.total)} ${inputUnit}</span></div>
+      <div class="calc-tip-row"><span class="calc-tip-lbl">Итого к заказу:</span><span class="calc-tip-val">${calcDisplayText.value}</span></div>
+    `;
+  }
+
+  // Простой режим
   const need = daily * (s.safetyDays || 0);
   return `
     <div class="calc-tip-row"><span class="calc-tip-lbl">Суточный расход:</span><span class="calc-tip-val">${fmt(daily)} ${inputUnit}</span></div>
     <div class="calc-tip-row"><span class="calc-tip-lbl">Дней до прихода:</span><span class="calc-tip-val">${transitDays} дн.</span></div>
     <div class="calc-tip-row"><span class="calc-tip-lbl">Расход до прихода:</span><span class="calc-tip-val">${fmt(consumed)} ${inputUnit}</span></div>
-    <div class="calc-tip-row"><span class="calc-tip-lbl">Остаток к приходу:</span><span class="calc-tip-val">${fmt(stockAfter)} ${inputUnit}</span></div>
+    <div class="calc-tip-row"><span class="calc-tip-lbl">Остаток к приходу:</span><span class="calc-tip-val">${stockAfter < 0 ? 0 : fmt(stockAfter)} ${inputUnit}</span></div>
+    ${deficitLine}
     <hr class="calc-tip-hr">
     <div class="calc-tip-row"><span class="calc-tip-lbl">Нужно после прихода (запас ${s.safetyDays || 0} дн.):</span><span class="calc-tip-val">${fmt(need)} ${inputUnit}</span></div>
     <div class="calc-tip-row"><span class="calc-tip-lbl">Итого к заказу:</span><span class="calc-tip-val">${calcDisplayText.value}</span></div>
   `;
+});
+
+// ─── Буфер CDA ────────────────────────────────────────────────────────────────
+function bufferSegWidth(zone) {
+  const b = calc.value.buffer;
+  if (!b || b.total <= 0) return '0%';
+  return Math.round((b[zone] / b.total) * 100) + '%';
+}
+
+const bufferMarkerPos = computed(() => {
+  const b = calc.value.buffer;
+  if (!b || b.total <= 0) return '0%';
+  const stock = (props.item.stock || 0) + (props.item.transit || 0);
+  const pct = Math.min(100, Math.max(0, (stock / b.total) * 100));
+  return pct + '%';
+});
+
+const bufferTooltip = computed(() => {
+  const b = calc.value.buffer;
+  if (!b) return '';
+  const inputUnit = props.settings.unit === 'boxes' ? 'кор' : (props.item.unitOfMeasure || 'шт');
+  return `Зелёная: ${nf.format(Math.round(b.green))} ${inputUnit}\nЖёлтая: ${nf.format(Math.round(b.yellow))} ${inputUnit}\nКрасная: ${nf.format(Math.round(b.red))} ${inputUnit}\nИтого буфер: ${nf.format(Math.round(b.total))} ${inputUnit}`;
 });
 
 // ─── Заказ: синхронизация штуки ↔ коробки ────────────────────────────────────

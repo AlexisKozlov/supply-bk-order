@@ -121,6 +121,7 @@ body {
 .sidebar.collapsed .sidebar-brand-text,
 .sidebar.collapsed .sidebar-section,
 .sidebar.collapsed .sidebar-entity-selector,
+.sidebar.collapsed .sidebar-bell-btn,
 .sidebar.collapsed .sidebar-user-info,
 .sidebar.collapsed .sidebar-version {
   display: none;
@@ -129,8 +130,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 10px 4px 8px;
-  gap: 6px;
+  gap: 4px;
 }
 .sidebar.collapsed .sidebar-brand-icon {
   display: flex;
@@ -146,13 +146,26 @@ body {
 }
 .sidebar.collapsed .sidebar-nav { padding: 0 4px; }
 .sidebar.collapsed .sidebar-item {
-  justify-content: center; padding: 9px 6px;
+  justify-content: center; padding: 7px 4px;
   font-size: 0;
   white-space: nowrap;
 }
-.sidebar.collapsed .sidebar-item .sidebar-icon { font-size: 16px; margin: 0; }
+.sidebar.collapsed .sidebar-item .sidebar-icon { font-size: 18px; margin: 0; }
 .sidebar.collapsed .sidebar-user { justify-content: center; }
-.sidebar.collapsed .sidebar-bottom { padding: 8px 4px 12px; position: relative; }
+.sidebar.collapsed .sidebar-bottom { padding: 6px 4px 8px; position: relative; }
+.sidebar.collapsed .sidebar-nav-scroll { overflow: hidden; }
+.sidebar.collapsed .sidebar-brand {
+  padding: 8px 4px 6px;
+}
+.sidebar.collapsed .sidebar-tools-row {
+  flex-wrap: wrap;
+  padding: 2px 4px 4px;
+  gap: 3px;
+}
+.sidebar.collapsed .sidebar-tool-icon {
+  width: 22px; height: 22px; flex: none;
+  border-radius: 5px;
+}
 
 .sidebar-brand-icon {
   display: flex; align-items: center; justify-content: center;
@@ -226,24 +239,24 @@ body {
 }
 
 .sidebar-entity-selector {
-  padding: 6px 8px 10px;
+  padding: 4px 8px 6px;
 }
 
 .sidebar-entity-selector label {
   display: block;
-  font-size: 9px; font-weight: 700;
+  font-size: 8px; font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.35);
-  margin-bottom: 4px;
+  color: rgba(255,255,255,0.3);
+  margin-bottom: 2px;
 }
 
 .sidebar-entity-selector select {
   width: 100%;
-  padding: 6px 8px;
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 5px;
+  font-size: 11px;
   font-family: inherit;
   font-weight: 600;
   color: white;
@@ -1876,12 +1889,12 @@ input[type="number"]:focus {
 
 /* ═══════ SIDEBAR SCROLL FOR SMALL SCREENS ═══════ */
 @media (max-height: 680px) {
-  .sidebar {
+  .sidebar:not(.collapsed) {
     overflow-y: auto;
     overflow-x: hidden;
   }
-  .sidebar::-webkit-scrollbar { width: 4px; }
-  .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+  .sidebar:not(.collapsed)::-webkit-scrollbar { width: 4px; }
+  .sidebar:not(.collapsed)::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 }
 
 /* Sidebar nav scroll wrapper */

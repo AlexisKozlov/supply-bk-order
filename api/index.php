@@ -46,9 +46,9 @@ try {
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','shelf-life'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','shelf-life'=>'edit'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','shelf-life'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
@@ -57,6 +57,7 @@ $TABLE_TO_MODULE = [
     'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'database',
     'delivery_schedule'=>'delivery-schedule',
     'analysis_data'=>'analysis','stock_1c'=>'analysis',
+    'stock_malling'=>'shelf-life',
     'audit_log'=>'history','notifications'=>'history',
     'settings'=>'database','item_order'=>'order',
 ];
@@ -124,8 +125,10 @@ function getSessionUser($pdo) {
 
     $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
     if (!$token) { $_sessionUserCache['result'] = null; return null; }
-    // Удаляем протухшие сессии (раз в запрос)
-    $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
+    // Очистка протухших сессий — в ~1% запросов (вместо каждого)
+    if (mt_rand(1, 100) === 1) {
+        $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
+    }
     $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();
@@ -751,6 +754,38 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    if ($fn === 'replace_stock_malling') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['shelf-life'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+        $items = $body['items'] ?? [];
+        if (!is_array($items)) respond(['error' => 'items must be array'], 400);
+        if (empty($items)) respond(['error' => 'items cannot be empty'], 400);
+        if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
+        $allowed = ['customer','warehouse','product_name','production_date','expiry_date','block_reason','expiry_status','quantity','uploaded_at','uploaded_by'];
+        try {
+            $pdo->beginTransaction();
+            $pdo->exec("DELETE FROM `stock_malling`");
+            foreach ($items as $item) {
+                $item = array_intersect_key($item, array_flip($allowed));
+                if (empty($item)) continue;
+                $cols = array_keys($item);
+                $ph = implode(',', array_fill(0, count($cols), '?'));
+                $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
+                $pdo->prepare("INSERT INTO `stock_malling` ($cn) VALUES ($ph)")->execute(array_values($item));
+            }
+            $pdo->commit();
+            respond(['success' => true, 'count' => count($items)]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("replace_stock_malling error: " . $e->getMessage());
+            respond(['error' => 'Transaction failed'], 500);
+        }
+    }
+
     if ($fn === 'replace_order_items') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
@@ -839,6 +874,77 @@ if ($endpoint === 'rpc') {
             error_log("replace_item_order error: " . $e->getMessage());
             respond(['error' => 'Transaction failed'], 500);
         }
+    }
+
+    // ─── RPC: calculate_adu — расчёт среднего суточного расхода ───
+    if ($fn === 'calculate_adu') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $legalEntity = $body['legal_entity'] ?? '';
+        if (!$legalEntity) respond(['error' => 'legal_entity обязателен'], 400);
+        $supplier = $body['supplier'] ?? null;
+        $lookbackDays = intval($body['lookback_days'] ?? 90);
+        if ($lookbackDays < 7) $lookbackDays = 90;
+
+        // Загружаем order_items за последние N дней
+        $sql = "SELECT oi.sku, oi.consumption_period, oi.qty_per_box, o.period_days, o.unit, o.delivery_date
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE o.legal_entity = ?
+                  AND o.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                  AND oi.sku IS NOT NULL AND oi.sku != ''
+                  AND oi.consumption_period > 0";
+        $params = [$legalEntity, $lookbackDays];
+        if ($supplier) {
+            $sql .= " AND o.supplier = ?";
+            $params[] = $supplier;
+        }
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        $rows = $s->fetchAll();
+
+        // Группируем по SKU → массив суточных расходов (в штуках/день)
+        $skuData = [];
+        foreach ($rows as $r) {
+            $sku = $r['sku'];
+            $period = intval($r['period_days']) ?: 30;
+            $consumption = floatval($r['consumption_period']);
+            $qpb = intval($r['qty_per_box']) ?: 1;
+            $unit = $r['unit'] ?? 'pieces';
+            // Конвертируем в штуки
+            $consumptionPcs = ($unit === 'boxes') ? $consumption * $qpb : $consumption;
+            $daily = $period > 0 ? $consumptionPcs / $period : 0;
+            if ($daily > 0) {
+                if (!isset($skuData[$sku])) $skuData[$sku] = ['dailies' => [], 'lastDate' => null];
+                $skuData[$sku]['dailies'][] = $daily;
+                $dd = $r['delivery_date'];
+                if ($dd && (!$skuData[$sku]['lastDate'] || $dd > $skuData[$sku]['lastDate'])) {
+                    $skuData[$sku]['lastDate'] = $dd;
+                }
+            }
+        }
+
+        // Считаем ADU и CV, upsert в product_adu
+        $upsertSql = "INSERT INTO product_adu (sku, legal_entity, adu, cv, sample_count, last_order_date)
+                      VALUES (?, ?, ?, ?, ?, ?)
+                      ON DUPLICATE KEY UPDATE adu=VALUES(adu), cv=VALUES(cv), sample_count=VALUES(sample_count), last_order_date=VALUES(last_order_date)";
+        $upsertStmt = $pdo->prepare($upsertSql);
+        $count = 0;
+        foreach ($skuData as $sku => $info) {
+            $dailies = $info['dailies'];
+            $n = count($dailies);
+            $mean = array_sum($dailies) / $n;
+            $cv = 0;
+            if ($n > 1 && $mean > 0) {
+                $variance = 0;
+                foreach ($dailies as $d) $variance += ($d - $mean) ** 2;
+                $stddev = sqrt($variance / ($n - 1));
+                $cv = round($stddev / $mean, 3);
+            }
+            $upsertStmt->execute([$sku, $legalEntity, round($mean, 2), $cv, $n, $info['lastDate']]);
+            $count++;
+        }
+        respond(['success' => true, 'updated' => $count]);
     }
 
     // ─── Админские RPC (только admin) ───
@@ -943,7 +1049,7 @@ if ($endpoint === 'rpc') {
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling'];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users', 'error_logs'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
@@ -989,7 +1095,7 @@ if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
 // Белый список полей, доступных для фильтрации через GET-параметры
 $filterWhitelist = [
     'products'    => ['id','sku','name','supplier','legal_entity','is_active','analog_group','category'],
-    'suppliers'   => ['id','short_name','legal_entity','is_active'],
+    'suppliers'   => ['id','short_name','legal_entity','is_active','dlt','doc'],
     'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit','received_at'],
     'order_items' => ['id','order_id','sku','name'],
     'plans'       => ['id','supplier','legal_entity','created_at'],
@@ -1004,6 +1110,10 @@ $filterWhitelist = [
     'analysis_data' => ['id','legal_entity','sku'],
     'error_logs'    => ['id','level','source','user_name','created_at'],
     'changelog'     => ['id','version','created_at'],
+    'product_adu'   => ['id','sku','legal_entity'],
+    'stock_malling' => ['id','customer','warehouse','product_name','expiry_date','expiry_status'],
+    'search_logs'   => ['id','user_name','created_at'],
+    'users'         => ['id','name','role'],
 ];
 
 if ($method === 'GET') {
