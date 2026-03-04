@@ -170,11 +170,11 @@
 
     <!-- ═══ TIME EDIT MODAL (card mode) ═══ -->
     <Teleport to="body">
-      <div v-if="cardEditing" class="modal" @click.self="cardEditing = null">
+      <div v-if="cardEditing" class="modal" @click.self="tryCloseCard">
         <div class="modal-box" style="max-width: 360px;">
           <div class="modal-header">
             <h2>Время доставки</h2>
-            <button class="modal-close" @click="cardEditing = null"><BkIcon name="close" size="sm"/></button>
+            <button class="modal-close" @click="tryCloseCard"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="ds-modal-body">
             <div class="ds-edit-info">
@@ -196,21 +196,22 @@
           </div>
           <div class="ds-modal-footer">
             <div class="ds-modal-footer-right">
-              <button class="btn" @click="cardEditing = null">Отмена</button>
+              <button class="btn" @click="tryCloseCard">Отмена</button>
               <button class="btn primary" @click="saveCardEdit">Сохранить</button>
             </div>
           </div>
         </div>
       </div>
+      <ConfirmModal v-if="showCardConfirm" title="Закрыть без сохранения?" message="Изменённое время не будет сохранено." @confirm="cardEditing = null; showCardConfirm = false" @cancel="showCardConfirm = false" />
     </Teleport>
 
     <!-- ═══ RESTAURANT EDIT MODAL ═══ -->
     <Teleport to="body">
-      <div v-if="editingRestaurant" class="modal" @click.self="editingRestaurant = null">
+      <div v-if="editingRestaurant" class="modal" @click.self="tryCloseRestaurant">
         <div class="modal-box" style="max-width: 440px;">
           <div class="modal-header">
             <h2>Редактирование ресторана</h2>
-            <button class="modal-close" @click="editingRestaurant = null"><BkIcon name="close" size="sm"/></button>
+            <button class="modal-close" @click="tryCloseRestaurant"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="ds-modal-body">
             <label class="ds-label">
@@ -238,12 +239,13 @@
           </div>
           <div class="ds-modal-footer">
             <div class="ds-modal-footer-right">
-              <button class="btn" @click="editingRestaurant = null">Отмена</button>
+              <button class="btn" @click="tryCloseRestaurant">Отмена</button>
               <button class="btn primary" @click="saveRestaurantEdit">Сохранить</button>
             </div>
           </div>
         </div>
       </div>
+      <ConfirmModal v-if="showRestConfirm" title="Закрыть без сохранения?" message="Изменения ресторана не будут сохранены." @confirm="editingRestaurant = null; showRestConfirm = false" @cancel="showRestConfirm = false" />
     </Teleport>
 
     <!-- ═══ AUDIT LOG MODAL ═══ -->
@@ -265,6 +267,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import AuditLogModal from '@/components/modals/AuditLogModal.vue';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { db } from '@/lib/apiClient.js';
 import { exportScheduleToExcel } from '@/lib/excelExport.js';
 
@@ -306,8 +309,9 @@ const colCount = computed(() => 3 + dayNames.length + 1); // №, Адрес, Д
 
 function onKey(e) {
   if (e.key === 'Escape') {
-    if (cardEditing.value) { cardEditing.value = null; return; }
-    if (editingRestaurant.value) { editingRestaurant.value = null; return; }
+    if (showCardConfirm.value || showRestConfirm.value) return;
+    if (cardEditing.value) { tryCloseCard(); return; }
+    if (editingRestaurant.value) { tryCloseRestaurant(); return; }
   }
 }
 
@@ -491,10 +495,21 @@ function onDragEnd(e) {
 
 // ═══ Restaurant edit (dblclick on address/card) ═══
 const editingRestaurant = ref(null);
+let _restSnapshot = '';
+const showRestConfirm = ref(false);
 
 function startEditRestaurant(restaurant) {
   if (!isEditing.value) return;
   editingRestaurant.value = { ...restaurant };
+  _restSnapshot = JSON.stringify(editingRestaurant.value);
+}
+
+function tryCloseRestaurant() {
+  if (editingRestaurant.value && JSON.stringify(editingRestaurant.value) !== _restSnapshot) {
+    showRestConfirm.value = true;
+    return;
+  }
+  editingRestaurant.value = null;
 }
 
 async function saveRestaurantEdit() {
@@ -510,6 +525,8 @@ async function saveRestaurantEdit() {
 
 // ═══ Card edit (by-day mode — dblclick) ═══
 const cardEditing = ref(null);
+let _cardSnapshot = '';
+const showCardConfirm = ref(false);
 
 function startCardEdit(item, dayNum) {
   if (!isEditing.value) return;
@@ -521,6 +538,15 @@ function startCardEdit(item, dayNum) {
     dayLabel: d?.full || '',
     value: item.delivery_time || '',
   };
+  _cardSnapshot = cardEditing.value.value;
+}
+
+function tryCloseCard() {
+  if (cardEditing.value && cardEditing.value.value !== _cardSnapshot) {
+    showCardConfirm.value = true;
+    return;
+  }
+  cardEditing.value = null;
 }
 
 async function saveCardEdit() {

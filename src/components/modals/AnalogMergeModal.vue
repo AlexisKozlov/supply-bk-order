@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('skip')">
+    <div class="modal" @click.self="trySkip">
       <div class="modal-box" style="width: min(560px, calc(100% - 32px));">
         <div class="modal-header">
           <h2>Найдены аналоги</h2>
-          <button class="modal-close" @click="$emit('skip')">&times;</button>
+          <button class="modal-close" @click="trySkip">&times;</button>
         </div>
 
         <div class="am-warning">Убедитесь, что единицы в файле (коробки/штуки) совпадают с единицами в параметрах заказа.</div>
@@ -35,19 +35,23 @@
         </div>
 
         <div class="modal-actions" style="margin-top: 16px;">
-          <button class="btn" @click="$emit('skip')">Пропустить</button>
+          <button class="btn" @click="trySkip">Пропустить</button>
           <button class="btn primary" @click="$emit('apply')" :disabled="!hasChecked">Применить</button>
         </div>
       </div>
     </div>
+    <ConfirmModal v-if="showConfirmClose" title="Закрыть без применения?" message="Выбранные аналоги не будут применены." @confirm="emit('skip')" @cancel="showConfirmClose = false" />
   </Teleport>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import ConfirmModal from './ConfirmModal.vue';
 
 const props = defineProps({ merges: Array });
 const emit = defineEmits(['apply', 'skip']);
+const showConfirmClose = ref(false);
+let initialState = '';
 
 const hasChecked = computed(() => props.merges?.some(m => m.analogs.some(a => a.checked)));
 
@@ -80,11 +84,23 @@ function toggleAnalog(a) {
   a.checked = !a.checked;
 }
 
+function getAnalogState() {
+  return JSON.stringify(props.merges?.map(m => m.analogs.map(a => a.checked)));
+}
+
+function trySkip() {
+  if (getAnalogState() !== initialState) { showConfirmClose.value = true; return; }
+  emit('skip');
+}
+
 function onKey(e) {
-  if (e.key === 'Escape') { e.preventDefault(); emit('skip'); }
+  if (e.key === 'Escape') { e.preventDefault(); if (!showConfirmClose.value) trySkip(); }
   else if (e.key === 'Enter') { e.preventDefault(); if (hasChecked.value) emit('apply'); }
 }
-onMounted(() => document.addEventListener('keydown', onKey));
+onMounted(() => {
+  initialState = getAnalogState();
+  document.addEventListener('keydown', onKey);
+});
 onUnmounted(() => document.removeEventListener('keydown', onKey));
 </script>
 

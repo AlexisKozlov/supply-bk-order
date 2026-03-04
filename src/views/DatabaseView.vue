@@ -159,11 +159,11 @@
 
     <!-- Переименование группы -->
     <Teleport to="body">
-      <div v-if="renameModal.show" class="modal" @click.self="renameModal.show = false">
+      <div v-if="renameModal.show" class="modal" @click.self="tryCloseRename">
         <div class="modal-box" style="width:380px;">
           <div class="modal-header">
             <h2>Переименовать группу</h2>
-            <button class="modal-close" @click="renameModal.show = false"><BkIcon name="close" size="sm"/></button>
+            <button class="modal-close" @click="tryCloseRename"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="modal-field" style="margin-bottom:12px;">
             <span class="modal-field-label">Название группы</span>
@@ -171,7 +171,7 @@
           </div>
           <div style="display:flex;gap:8px;">
             <button class="btn primary" @click="saveRenameGroup" :disabled="!renameModal.newName.trim()">Сохранить</button>
-            <button class="btn secondary" @click="renameModal.show = false">Отмена</button>
+            <button class="btn secondary" @click="tryCloseRename">Отмена</button>
           </div>
         </div>
       </div>
@@ -179,11 +179,11 @@
 
     <!-- Модалка ресторана -->
     <Teleport to="body">
-      <div v-if="restModal.show" class="modal" @click.self="restModal.show = false">
+      <div v-if="restModal.show" class="modal" @click.self="tryCloseRestModal">
         <div class="modal-box" style="max-width: 480px;">
           <div class="modal-header">
             <h2>{{ restModal.data.id ? 'Ресторан ' + restModal.data.number : 'Новый ресторан' }}</h2>
-            <button class="modal-close" @click="restModal.show = false"><BkIcon name="close" size="sm"/></button>
+            <button class="modal-close" @click="tryCloseRestModal"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="db-rest-modal-body">
             <div class="db-rest-form-row">
@@ -217,7 +217,7 @@
               <BkIcon name="delete" size="xs"/> Удалить
             </button>
             <div class="db-rest-modal-footer-right">
-              <button class="btn" @click="restModal.show = false">Отмена</button>
+              <button class="btn" @click="tryCloseRestModal">Отмена</button>
               <button class="btn primary" @click="saveRestaurant" :disabled="restModal.saving">
                 {{ restModal.saving ? 'Сохранение...' : 'Сохранить' }}
               </button>
@@ -271,12 +271,37 @@ let _dbLoadId = 0;
 const editCardModal = ref({ show: false, product: null });
 const editSupplierModal = ref({ show: false, supplier: null });
 const confirmModal = ref({ show: false, title: '', message: '', resolve: null });
+function confirmAction(title, message) {
+  return new Promise(r => { confirmModal.value = { show: true, title, message, resolve: r }; });
+}
 const showImportModal = ref(false);
 const showOnlyActive = ref(true);
 const showNoAnalog = ref(false);
 const expandedGroups = ref(new Set());
 const renameModal = ref({ show: false, oldName: '', newName: '' });
+let _renameInitial = '';
 const restModal = ref({ show: false, data: {}, saving: false });
+let _restModalSnapshot = '';
+
+function tryCloseRename() {
+  if (renameModal.value.newName.trim() !== _renameInitial.trim()) {
+    confirmAction('Закрыть без сохранения?', 'Введённое название будет потеряно.').then(ok => {
+      if (ok) renameModal.value.show = false;
+    });
+    return;
+  }
+  renameModal.value.show = false;
+}
+
+function tryCloseRestModal() {
+  if (JSON.stringify(restModal.value.data) !== _restModalSnapshot) {
+    confirmAction('Закрыть без сохранения?', 'Данные ресторана не будут сохранены.').then(ok => {
+      if (ok) restModal.value.show = false;
+    });
+    return;
+  }
+  restModal.value.show = false;
+}
 
 // ─── Сортировка ──────────────────────────────────────────────────────────────
 const prodSortKey = ref('name');
@@ -457,6 +482,7 @@ function toggleGroup(name) {
 
 function editAnalogGroup(group) {
   renameModal.value = { show: true, oldName: group.name, newName: group.name };
+  _renameInitial = group.name;
 }
 
 async function saveRenameGroup() {
@@ -518,6 +544,7 @@ function openRestaurantModal(r) {
       saving: false,
     };
   }
+  _restModalSnapshot = JSON.stringify(restModal.value.data);
 }
 
 async function saveRestaurant() {

@@ -128,6 +128,7 @@
         </div>
       </div>
     </div>
+    <ConfirmModal v-if="showConfirmClose" title="Закрыть без импорта?" message="Загруженные данные будут потеряны." @confirm="emit('close')" @cancel="showConfirmClose = false" />
   </Teleport>
 </template>
 
@@ -136,6 +137,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ConfirmModal from './ConfirmModal.vue';
 
 const props = defineProps({
   legalEntity: { type: String, required: true },
@@ -494,7 +496,13 @@ function reset() {
   if (fileInput.value) fileInput.value.value = '';
 }
 
+const showConfirmClose = ref(false);
+
 function tryClose() {
+  if (step.value === 'preview' && parsedRows.value.length > 0) {
+    showConfirmClose.value = true;
+    return;
+  }
   emit('close');
 }
 
@@ -508,7 +516,7 @@ function pluralize(n, one, few, many) {
 }
 
 function onKey(e) {
-  if (e.key === 'Escape') tryClose();
+  if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
 }
 onMounted(() => document.addEventListener('keydown', onKey));
 onUnmounted(() => document.removeEventListener('keydown', onKey));

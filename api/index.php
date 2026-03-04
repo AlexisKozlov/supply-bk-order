@@ -127,7 +127,7 @@ function getSessionUser($pdo) {
     if (!$token) { $_sessionUserCache['result'] = null; return null; }
     // Очистка протухших сессий — в ~1% запросов (вместо каждого)
     if (mt_rand(1, 100) === 1) {
-        $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
+        try { $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()"); } catch (PDOException $e) { /* не критично */ }
     }
     $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
@@ -469,7 +469,7 @@ if ($endpoint === 'rpc') {
     // Список обновлений (публичный)
     if ($fn === 'get_changelog') {
         try {
-            $limit = min(intval($body['limit'] ?? 50), 200);
+            $limit = max(1, min(intval($body['limit'] ?? 50), 200));
             $s = $pdo->prepare("SELECT id, version, title, description, created_by, created_at FROM changelog ORDER BY created_at DESC LIMIT " . $limit);
             $s->execute();
             respond($s->fetchAll());
@@ -507,6 +507,8 @@ if ($endpoint === 'rpc') {
     $authUserName = $authUser ? $authUser['name'] : '';
 
     if ($fn === 'get_user_list') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
         $s = $pdo->query("SELECT name, email FROM users ORDER BY name");
         respond($s->fetchAll());
     }
@@ -981,7 +983,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_sessions') {
         $caller = getSessionUser($pdo);
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'forbidden'], 403);
-        $s = $pdo->query("SELECT id, user_name, token, created_at, expires_at, ip_address, user_agent FROM user_sessions WHERE expires_at > NOW() ORDER BY created_at DESC");
+        $s = $pdo->query("SELECT id, user_name, CONCAT(LEFT(token, 8), '…') AS token_prefix, created_at, expires_at, ip_address, user_agent FROM user_sessions WHERE expires_at > NOW() ORDER BY created_at DESC");
         respond($s->fetchAll());
     }
 
@@ -1029,7 +1031,7 @@ if ($endpoint === 'rpc') {
                 $day = intval($item['day_of_week'] ?? 0);
                 $time = $item['delivery_time'] ?? null;
                 $notes = $item['notes'] ?? null;
-                if ($day < 1 || $day > 6) continue;
+                if ($day < 1 || $day > 7) continue;
                 $pdo->prepare("INSERT INTO `delivery_schedule` (`restaurant_id`, `day_of_week`, `delivery_time`, `notes`) VALUES (?, ?, ?, ?)")
                     ->execute([$restaurantId, $day, $time, $notes]);
             }
@@ -1064,14 +1066,14 @@ $sessionUser = getSessionUser($pdo);
 if ($method !== 'GET' && !$sessionUser) {
     respond(['error' => 'Требуется авторизация по сессии для операций записи'], 401);
 }
-if ($sessionUser && $method !== 'GET') {
+if ($sessionUser) {
     $userRole = $sessionUser['role'] ?? 'user';
     if ($userRole !== 'admin') {
         $module = $TABLE_TO_MODULE[$table] ?? null;
         if ($module) {
             $perms = resolvePermissions($userRole, $sessionUser['permissions'] ?? null, $ROLE_TEMPLATES);
             $level = $ACCESS_LEVELS[$perms[$module] ?? 'none'] ?? 0;
-            $requiredLevel = ($method === 'DELETE') ? $ACCESS_LEVELS['full'] : $ACCESS_LEVELS['edit'];
+            $requiredLevel = ($method === 'GET') ? $ACCESS_LEVELS['view'] : (($method === 'DELETE') ? $ACCESS_LEVELS['full'] : $ACCESS_LEVELS['edit']);
             if ($level < $requiredLevel) {
                 respond(['error' => 'Недостаточно прав'], 403);
             }

@@ -252,11 +252,11 @@
 
     <!-- Модалка сохранения плана -->
     <Teleport to="body">
-      <div v-if="showSaveModal" class="modal" @click.self="showSaveModal = false">
+      <div v-if="showSaveModal" class="modal" @click.self="tryCloseSaveModal">
         <div class="modal-box" style="max-width:420px;">
           <div class="modal-header">
             <h2><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</h2>
-            <button class="modal-close" @click="showSaveModal = false"><BkIcon name="close" size="sm"/></button>
+            <button class="modal-close" @click="tryCloseSaveModal"><BkIcon name="close" size="sm"/></button>
           </div>
           <div style="margin-bottom:16px;color:#555;font-size:14px;">
             <div>Поставщик: <b>{{ supplier }}</b></div>
@@ -268,10 +268,10 @@
             <BkIcon name="warning" size="sm"/> Существующий план будет перезаписан
           </div>
           <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:600;color:#555;">Примечание (необязательно)</label>
-          <input v-model="saveNote" type="text" placeholder="Например: согласовано с поставщиком..." style="width:100%;margin-bottom:16px;" ref="saveNoteInput" @keydown.enter="confirmSave" @keydown.esc="showSaveModal = false"/>
+          <input v-model="saveNote" type="text" placeholder="Например: согласовано с поставщиком..." style="width:100%;margin-bottom:16px;" ref="saveNoteInput" @keydown.enter="confirmSave" @keydown.esc="tryCloseSaveModal"/>
           <div class="actions" style="display:flex;gap:8px;">
             <button class="btn primary" @click="confirmSave" :disabled="saving">{{ saving ? 'Сохранение...' : (editingPlanId ? 'Обновить план' : 'Сохранить план') }}</button>
-            <button class="btn secondary" @click="showSaveModal = false" :disabled="saving">Отмена</button>
+            <button class="btn secondary" @click="tryCloseSaveModal" :disabled="saving">Отмена</button>
           </div>
         </div>
       </div>
@@ -379,6 +379,17 @@ const editingCell = ref(null);
 const showSaveModal = ref(false);
 const saveNote = ref('');
 const saveNoteInput = ref(null);
+let _saveNoteInitial = '';
+
+function tryCloseSaveModal() {
+  if (saveNote.value.trim() !== _saveNoteInitial.trim()) {
+    confirmAction('Закрыть без сохранения?', 'Введённые данные будут потеряны.').then(ok => {
+      if (ok) showSaveModal.value = false;
+    });
+    return;
+  }
+  showSaveModal.value = false;
+}
 const saving = ref(false); // { idx, m } for inline edit (#6)
 const isFullscreen = ref(false);
 const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
@@ -1246,6 +1257,7 @@ function onConsumptionPeriodChange() {
 async function savePlan() {
   if (!itemsWithPlan.value.length) { toast.error('Нет данных', ''); return; }
   saveNote.value = editingPlanId.value ? _loadedNote : '';
+  _saveNoteInitial = saveNote.value;
   showSaveModal.value = true;
   nextTick(() => setTimeout(() => saveNoteInput.value?.focus(), 50));
 }

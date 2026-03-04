@@ -30,43 +30,45 @@
       <span class="anv-alert-arrow">&rarr;</span>
     </div>
 
-    <!-- KPI Cards -->
-    <div v-if="hasData" class="anv-kpi-grid">
-      <div class="anv-kpi-card">
-        <div class="anv-kpi-head">Групп аналогов</div>
-        <div class="anv-kpi-val">{{ groupsWithData.length }}</div>
+    <!-- Dashboard toggle + KPI Cards -->
+    <template v-if="hasData">
+      <div v-if="!dashboardHidden" class="anv-kpi-grid">
+        <div class="anv-kpi-card">
+          <div class="anv-kpi-head">Групп аналогов</div>
+          <div class="anv-kpi-val">{{ groupsWithData.length }}</div>
+        </div>
+        <div class="anv-kpi-card">
+          <div class="anv-kpi-head">Товаров с данными</div>
+          <div class="anv-kpi-val">{{ totalItemsWithData }}</div>
+          <div class="anv-kpi-sub">из {{ items.length }}</div>
+        </div>
+        <div class="anv-kpi-card anv-kpi-danger" v-if="statusCounts.red">
+          <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
+          <div class="anv-kpi-val">{{ statusCounts.red }}</div>
+        </div>
+        <div class="anv-kpi-card anv-kpi-danger" v-else>
+          <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
+          <div class="anv-kpi-val" style="color:var(--green)">0</div>
+        </div>
+        <div class="anv-kpi-card anv-kpi-warn" v-if="statusCounts.orange">
+          <div class="anv-kpi-head">Требуют внимания</div>
+          <div class="anv-kpi-val">{{ statusCounts.orange }}</div>
+        </div>
+        <div class="anv-kpi-card" v-else>
+          <div class="anv-kpi-head">Требуют внимания</div>
+          <div class="anv-kpi-val" style="color:var(--green)">0</div>
+        </div>
       </div>
-      <div class="anv-kpi-card">
-        <div class="anv-kpi-head">Товаров с данными</div>
-        <div class="anv-kpi-val">{{ totalItemsWithData }}</div>
-        <div class="anv-kpi-sub">из {{ items.length }}</div>
-      </div>
-      <div class="anv-kpi-card anv-kpi-danger" v-if="statusCounts.red">
-        <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
-        <div class="anv-kpi-val">{{ statusCounts.red }}</div>
-      </div>
-      <div class="anv-kpi-card anv-kpi-danger" v-else>
-        <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
-        <div class="anv-kpi-val" style="color:var(--green)">0</div>
-      </div>
-      <div class="anv-kpi-card anv-kpi-warn" v-if="statusCounts.orange">
-        <div class="anv-kpi-head">Требуют внимания</div>
-        <div class="anv-kpi-val">{{ statusCounts.orange }}</div>
-      </div>
-      <div class="anv-kpi-card" v-else>
-        <div class="anv-kpi-head">Требуют внимания</div>
-        <div class="anv-kpi-val" style="color:var(--green)">0</div>
-      </div>
-    </div>
 
-    <!-- Distribution bar -->
-    <div v-if="hasData && groupsWithData.length" class="anv-dist-bar">
-      <div v-if="statusCounts.red" class="anv-dist-seg anv-dist-red" :style="{ flex: statusCounts.red }" :title="'<3 дн: ' + statusCounts.red"></div>
-      <div v-if="statusCounts.orange" class="anv-dist-seg anv-dist-orange" :style="{ flex: statusCounts.orange }" :title="'<7 дн: ' + statusCounts.orange"></div>
-      <div v-if="statusCounts.yellow" class="anv-dist-seg anv-dist-yellow" :style="{ flex: statusCounts.yellow }" :title="'<14 дн: ' + statusCounts.yellow"></div>
-      <div v-if="statusCounts.green" class="anv-dist-seg anv-dist-green" :style="{ flex: statusCounts.green }" :title="'14-30 дн: ' + statusCounts.green"></div>
-      <div v-if="statusCounts.purple" class="anv-dist-seg anv-dist-purple" :style="{ flex: statusCounts.purple }" :title="'30+ дн: ' + statusCounts.purple"></div>
-    </div>
+      <!-- Distribution bar -->
+      <div v-if="!dashboardHidden && groupsWithData.length" class="anv-dist-bar">
+        <div v-if="statusCounts.red" class="anv-dist-seg anv-dist-red" :style="{ flex: statusCounts.red }" :title="'<3 дн: ' + statusCounts.red"></div>
+        <div v-if="statusCounts.orange" class="anv-dist-seg anv-dist-orange" :style="{ flex: statusCounts.orange }" :title="'<7 дн: ' + statusCounts.orange"></div>
+        <div v-if="statusCounts.yellow" class="anv-dist-seg anv-dist-yellow" :style="{ flex: statusCounts.yellow }" :title="'<14 дн: ' + statusCounts.yellow"></div>
+        <div v-if="statusCounts.green" class="anv-dist-seg anv-dist-green" :style="{ flex: statusCounts.green }" :title="'14-30 дн: ' + statusCounts.green"></div>
+        <div v-if="statusCounts.purple" class="anv-dist-seg anv-dist-purple" :style="{ flex: statusCounts.purple }" :title="'30+ дн: ' + statusCounts.purple"></div>
+      </div>
+    </template>
 
     <!-- Tabs -->
     <div v-if="hasData" class="anv-tabs">
@@ -97,8 +99,11 @@
         <BkIcon v-if="load1cLoading" name="loading" size="sm"/>
         <BkIcon v-else name="oneC" size="sm"/> 1С
       </button>
-      <button class="anv-compact-btn" :class="{ active: compactMode }" @click="toggleCompact">
+      <button class="anv-compact-btn" :class="{ active: compactMode }" @click="toggleCompact" title="Компактный вид">
         <BkIcon name="menu" size="sm"/>
+      </button>
+      <button class="anv-compact-btn" :class="{ active: dashboardHidden }" @click="toggleDashboard" title="Скрыть/показать дашборд">
+        <BkIcon name="eye" size="sm"/>
       </button>
       <div class="anv-toolbar-sep"></div>
       <div class="anv-chip-filter" v-if="hasData">
@@ -300,12 +305,18 @@ const filterCategory = ref('');
 const activeTab = ref('all');
 const expandedSections = reactive(new Set(['Сухой', 'Холод', 'Мороз', '']));
 const compactMode = ref(localStorage.getItem('bk_analysis_compact') === '1');
+const dashboardHidden = ref(localStorage.getItem('bk_analysis_dash_hidden') === '1');
 
 const isBoxes = computed(() => unit.value === 'boxes');
 
 function toggleCompact() {
   compactMode.value = !compactMode.value;
   localStorage.setItem('bk_analysis_compact', compactMode.value ? '1' : '0');
+}
+
+function toggleDashboard() {
+  dashboardHidden.value = !dashboardHidden.value;
+  localStorage.setItem('bk_analysis_dash_hidden', dashboardHidden.value ? '1' : '0');
 }
 
 function localNow() {

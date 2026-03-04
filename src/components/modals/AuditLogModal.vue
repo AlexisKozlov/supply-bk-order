@@ -74,6 +74,7 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 defineProps({
@@ -81,7 +82,11 @@ defineProps({
   loading: { type: Boolean, default: false },
   entries: { type: Array, default: () => [] },
 });
-defineEmits(['close']);
+const emit = defineEmits(['close']);
+
+function onKey(e) { if (e.key === 'Escape') emit('close'); }
+onMounted(() => document.addEventListener('keydown', onKey));
+onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 const ACTION_LABELS = {
   order_created: 'Создан',

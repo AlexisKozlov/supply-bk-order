@@ -121,6 +121,8 @@ export const useDraftStore = defineStore('draft', () => {
       orderStore.settings.hasTransit   = data.settings.hasTransit    || false;
       orderStore.settings.showStockColumn = data.settings.showStockColumn ?? true;
       orderStore.settings.note         = data.settings.note          || '';
+      if (data.settings.cdaMode !== undefined) orderStore.settings.cdaMode = data.settings.cdaMode;
+      if (data.settings.safetyCoef !== undefined) orderStore.settings.safetyCoef = data.settings.safetyCoef;
 
       // Загружаем поставщиков для юр. лица если передан загрузчик
       if (supplierLoader) {

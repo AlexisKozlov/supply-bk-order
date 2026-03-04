@@ -139,7 +139,7 @@ export const useOrderStore = defineStore('order', () => {
     _ensureInitialState();
     item[field] = value;
     if (field === 'finalOrder') item._manualOrder = true;
-    if (['consumptionPeriod', 'stock', 'transit'].includes(field)) item._manualOrder = false;
+    if (field === 'consumptionPeriod') item._manualOrder = false;
     _snapshot();
   }
 
@@ -248,7 +248,8 @@ export const useOrderStore = defineStore('order', () => {
     settings.showStockColumn = true; // всегда показываем запас при просмотре
     settings.note = order.note || '';
     settings.cdaMode = order.cda_mode === true || order.cda_mode === 1 || order.cda_mode === '1';
-    settings.safetyCoef = parseFloat(order.safety_coef) || 1.0;
+    settings.safetyCoef = parseFloat(order.safety_coef) ?? 1.0;
+    if (isNaN(settings.safetyCoef)) settings.safetyCoef = 1.0;
 
     const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
     let productMap = {};

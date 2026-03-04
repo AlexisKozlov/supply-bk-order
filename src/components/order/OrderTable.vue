@@ -120,7 +120,7 @@ function getCdaParams(item) {
     cv: aduInfo?.cv || 0,
     dlt: props.cdaSupplierDlt || 1,
     doc: props.cdaSupplierDoc || 7,
-    safetyCoef: props.cdaSafetyCoef || 1.0,
+    safetyCoef: props.cdaSafetyCoef ?? 1.0,
   };
 }
 

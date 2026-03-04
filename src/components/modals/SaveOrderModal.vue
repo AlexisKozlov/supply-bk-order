@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('cancel')">
+    <div class="modal" @click.self="tryClose">
       <div class="modal-box save-modal">
         <div class="modal-header">
           <h2><BkIcon name="save" size="sm"/> {{ isEditing ? 'Обновить заказ' : 'Сохранить заказ' }}</h2>
-          <button class="modal-close" @click="$emit('cancel')"><BkIcon name="close" size="sm"/></button>
+          <button class="modal-close" @click="tryClose"><BkIcon name="close" size="sm"/></button>
         </div>
 
         <!-- Summary cards -->
@@ -49,7 +49,7 @@
         <div class="sm-note-section">
           <label>Примечание</label>
           <input v-model="note" type="text" placeholder="Например: срочный заказ, акция..."
-            ref="noteInput" @keydown.enter="doConfirm" @keydown.esc="$emit('cancel')"/>
+            ref="noteInput" @keydown.enter="doConfirm" @keydown.esc="tryClose"/>
         </div>
 
         <!-- Actions -->
@@ -57,16 +57,18 @@
           <button class="btn primary" @click="doConfirm" :disabled="saving">
             <BkIcon name="save" size="sm"/> {{ saving ? 'Сохранение...' : (isEditing ? 'Обновить заказ' : 'Сохранить заказ') }}
           </button>
-          <button class="btn secondary" @click="$emit('cancel')" :disabled="saving">Отмена</button>
+          <button class="btn secondary" @click="tryClose" :disabled="saving">Отмена</button>
         </div>
       </div>
     </div>
+    <ConfirmModal v-if="showConfirmClose" title="Закрыть без сохранения?" message="Введённые данные будут потеряны." @confirm="emit('cancel')" @cancel="showConfirmClose = false" />
   </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ConfirmModal from './ConfirmModal.vue';
 
 const props = defineProps({
   supplier:       { type: String,  default: '' },
@@ -83,12 +85,18 @@ const note = ref(props.existingNote || '');
 const noteInput = ref(null);
 const nf = new Intl.NumberFormat('ru-RU');
 const isEditing = computed(() => !!props.editingOrderId);
+const showConfirmClose = ref(false);
+const initialNote = props.existingNote || '';
 const deliveryDateStr = computed(() => {
   if (!props.deliveryDate) return '—';
   return new Date(props.deliveryDate).toLocaleDateString('ru-RU');
 });
+function tryClose() {
+  if (note.value.trim() !== initialNote.trim()) { showConfirmClose.value = true; return; }
+  emit('cancel');
+}
 function onKey(e) {
-  if (e.key === 'Escape') emit('cancel');
+  if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
 }
 onMounted(() => {
   document.addEventListener('keydown', onKey);

@@ -153,8 +153,11 @@ const sortAsc = ref(true);
 const currentPage = ref(1);
 const PAGE_SIZE = 100;
 
-const today = new Date();
-today.setHours(0, 0, 0, 0);
+function getToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
 // ═══ Маппинг заказчиков ═══
 const CUSTOMER_MAP = {
@@ -205,7 +208,7 @@ const enrichedData = computed(() =>
     if (row.expiry_date) {
       const exp = new Date(row.expiry_date);
       exp.setHours(0, 0, 0, 0);
-      daysLeft = Math.floor((exp - today) / 86400000);
+      daysLeft = Math.floor((exp - getToday()) / 86400000);
     }
     return { ...row, customer: normalizeCustomer(row.customer), warehouse: normalizeWarehouse(row.warehouse), days_left: daysLeft };
   })

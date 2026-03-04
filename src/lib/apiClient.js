@@ -151,7 +151,8 @@ class QueryBuilder {
         const r = await fetchWithRetry(url, { method: 'DELETE', headers: buildHeaders() });
         if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
         if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
-        return { data: await r.json(), error: null };
+        const d = await r.json().catch(() => null);
+        return { data: d, error: null };
       }
     } catch (e) { return { data: null, error: e.message }; }
   }
