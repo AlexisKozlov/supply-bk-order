@@ -341,6 +341,8 @@ const toolsItems = [
   { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
   { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
   { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
+  { module: 'order', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
+  { module: 'order', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
 ];
 
 const showToolsMenu = ref(false); // legacy, не используется
@@ -434,6 +436,7 @@ const pageNames = {
   'plan-fact': 'Поставки',
   'delivery-schedule': 'График доставки',
   'shelf-life': 'Сроки годности',
+  'deficit': 'Распределение дефицита',
 };
 
 function sendHeartbeat() {
@@ -658,16 +661,19 @@ function confirmLogout() {
 /* ═══ Tools row (иконки в ряд) ═══ */
 .sidebar-tools-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 2px 10px 8px;
 }
 .sidebar-tools-row-collapsed {
   flex-direction: column;
+  flex-wrap: nowrap;
   padding: 2px 6px 4px;
   align-items: center;
 }
 .sidebar-tool-icon {
-  flex: 1;
+  width: calc(33.333% - 3px);
+  flex: none;
   height: 34px;
   display: flex;
   align-items: center;
