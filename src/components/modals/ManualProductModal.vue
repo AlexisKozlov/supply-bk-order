@@ -116,6 +116,7 @@ function tryClose() {
 }
 
 async function submit() {
+  if (saving.value) return;
   if (!form.value.name) { toast.error('Введите наименование', ''); return; }
   if (!form.value.sku)  { toast.error('Введите артикул', ''); return; }
   if (!form.value.supplier) { toast.error('Выберите поставщика', ''); return; }

@@ -149,7 +149,7 @@ const form = ref({
 const { saveSnapshot, isDirty } = useFormDirty(form);
 
 function onKey(e) {
-  if (e.key === 'Escape' && !showConfirmClose.value && !showNewSupplier.value) tryClose();
+  if (e.key === 'Escape' && !showConfirmClose.value && !showNewSupplier.value && !showAuditLog.value) tryClose();
 }
 onMounted(async () => {
   document.addEventListener('keydown', onKey);
@@ -211,9 +211,13 @@ async function loadSuppliers() {
   supplierOptions.value = (data || []).map(s => s.short_name);
 }
 
+let _lastRealSupplier = '';
+watch(() => form.value.supplier, (newVal, oldVal) => {
+  if (oldVal && oldVal !== '__new_supplier__') _lastRealSupplier = oldVal;
+});
 function onSupplierChange() {
   if (form.value.supplier === '__new_supplier__') {
-    prevSupplier.value = '';
+    prevSupplier.value = _lastRealSupplier;
     form.value.supplier = '';
     showNewSupplier.value = true;
   }
@@ -250,6 +254,7 @@ const FIELD_LABELS = {
 };
 
 async function save() {
+  if (saving.value) return;
   if (!form.value.name) { toast.error('Введите наименование', ''); return; }
   if (!form.value.qty_per_box || form.value.qty_per_box <= 0) { toast.error('Введите штук в коробке', ''); return; }
   saving.value = true;

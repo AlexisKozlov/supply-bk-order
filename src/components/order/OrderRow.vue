@@ -464,7 +464,9 @@ const orderInfoText = computed(() => {
 
 // ─── Применить расчёт → в заказ ──────────────────────────────────────────────
 function applyCalc() {
-  orderStore.updateItemField(props.item.id, 'finalOrder', calc.value.calculatedOrder);
+  const order = calc.value.calculatedOrder;
+  if (order == null || isNaN(order) || order < 0) return;
+  orderStore.updateItemField(props.item.id, 'finalOrder', Math.round(order));
   orderStore.updateItemField(props.item.id, '_manualOrder', false);
   draftStore.save();
 }

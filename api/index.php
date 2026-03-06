@@ -664,6 +664,12 @@ if ($endpoint === 'rpc') {
         $collId = intval($body['collection_id'] ?? 0);
         $uname = $authUserName ?: ($body['user_name'] ?? '');
         if (!$collId) respond(['error' => 'missing_params'], 400);
+        // Проверяем доступ к юрлицу коллекции
+        $collCheck = $pdo->prepare("SELECT legal_entity FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
+        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $token = bin2hex(random_bytes(32));
         $expires = date('Y-m-d H:i:s', strtotime('+48 hours'));
         $s = $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)");
@@ -673,12 +679,24 @@ if ($endpoint === 'rpc') {
     if ($fn === 'sc_close_collection') {
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'missing_params'], 400);
+        // Проверяем доступ к юрлицу коллекции
+        $collCheck = $pdo->prepare("SELECT legal_entity FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
+        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $pdo->prepare("UPDATE stock_collections SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$collId]);
         respond(['success' => true]);
     }
     if ($fn === 'sc_get_collection_data') {
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'missing_params'], 400);
+        // Проверяем доступ к юрлицу коллекции
+        $collCheck = $pdo->prepare("SELECT legal_entity FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
+        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         // Товары
         $s = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
         $s->execute([$collId]);
@@ -800,7 +818,7 @@ if ($endpoint === 'rpc') {
         if (!$user || empty($ids)) respond(['success' => false, 'error' => 'missing params']);
         $ids = array_slice($ids, 0, 100); // Лимит на количество ID
         $ph = implode(',', array_fill(0, count($ids), '?'));
-        $pdo->prepare("UPDATE notifications SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?) WHERE id IN ($ph) AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))")->execute(array_merge([$user], $ids, [$user]));
+        $pdo->prepare("UPDATE notifications SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?) WHERE id IN ($ph) AND (target_user IS NULL OR target_user = '' OR target_user = ? OR type = 'broadcast') AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))")->execute(array_merge([$user], $ids, [$user, $user]));
         respond(['success' => true]);
     }
     if ($fn === 'heartbeat') {
@@ -849,7 +867,7 @@ if ($endpoint === 'rpc') {
         $id = $body['id'] ?? null;
         $userName = $authUserName;
         if (!$id || !$userName) respond(['success' => false, 'error' => 'missing params'], 400);
-        $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE id = ? AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $id, $userName]);
+        $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE id = ? AND (target_user IS NULL OR target_user = '' OR target_user = ? OR type = 'broadcast') AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $id, $userName, $userName]);
         respond(['success' => true]);
     }
     if ($fn === 'delete_all_notifications_for_user') {

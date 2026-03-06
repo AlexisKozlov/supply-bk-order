@@ -123,6 +123,7 @@ function tryClose() {
 }
 
 async function save() {
+  if (saving.value) return;
   if (!form.value.short_name.trim()) { toast.error('Введите краткое наименование', ''); return; }
   saving.value = true;
   try {
