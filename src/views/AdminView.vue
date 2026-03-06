@@ -1392,6 +1392,7 @@ function openUserModal(user) {
 }
 
 async function saveUser() {
+  if (saving.value) return;
   if (!form.value.name.trim()) { toast.error('Введите имя', ''); return; }
   if (!userModal.value.user && !form.value.password) { toast.error('Введите пароль', ''); return; }
   if (form.value.password && form.value.password.length < 8) { toast.error('Короткий пароль', 'Минимум 8 символов'); return; }
