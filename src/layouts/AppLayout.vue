@@ -101,6 +101,11 @@
       </div>
     </aside>
 
+    <!-- Entity switch wave -->
+    <Transition name="entity-wave">
+      <div v-if="entityWave" class="entity-wave-overlay" :class="entityClass"></div>
+    </Transition>
+
     <!-- MAIN CONTENT -->
     <div class="main-wrapper">
       <!-- Мобильный оверлей -->
@@ -572,6 +577,7 @@ function goToAdmin() {
 }
 
 const entityTransition = ref(false);
+const entityWave = ref(false);
 const entityClass = computed(() => {
   const le = orderStore.settings.legalEntity;
   if (le.includes('Воглия')) return 'entity-voglya';
@@ -615,6 +621,7 @@ function cancelEntityChange() {
 
 function applyEntityChange(le) {
   entityTransition.value = true;
+  entityWave.value = true;
   setTimeout(() => {
     orderStore.settings.legalEntity = le;
     if (route.name === 'order') {
@@ -623,7 +630,8 @@ function applyEntityChange(le) {
       orderStore.settings.supplier = '';
     }
     setTimeout(() => { entityTransition.value = false; }, 350);
-  }, 250);
+    setTimeout(() => { entityWave.value = false; }, 500);
+  }, 300);
 }
 
 function resetPwdForm() {
@@ -710,8 +718,35 @@ function confirmLogout() {
 
 @keyframes entityFade {
   0% { opacity: 1; }
-  40% { opacity: 0.15; }
+  40% { opacity: 0.3; }
   100% { opacity: 1; }
+}
+
+/* ═══ Entity wave overlay ═══ */
+.entity-wave-overlay {
+  position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+}
+.entity-burger .entity-wave-overlay,
+.entity-wave-overlay.entity-burger { background: radial-gradient(ellipse at left center, rgba(232,122,30,0.25) 0%, transparent 70%); }
+.entity-voglya .entity-wave-overlay,
+.entity-wave-overlay.entity-voglya { background: radial-gradient(ellipse at left center, rgba(66,165,245,0.25) 0%, transparent 70%); }
+.entity-pizza .entity-wave-overlay,
+.entity-wave-overlay.entity-pizza { background: radial-gradient(ellipse at left center, rgba(186,104,200,0.25) 0%, transparent 70%); }
+
+.entity-wave-enter-active {
+  animation: waveIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.entity-wave-leave-active {
+  animation: waveOut 0.4s ease-in forwards;
+}
+@keyframes waveIn {
+  0% { clip-path: inset(0 100% 0 0); opacity: 0; }
+  50% { opacity: 1; }
+  100% { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+@keyframes waveOut {
+  0% { opacity: 1; clip-path: inset(0 0 0 0); }
+  100% { opacity: 0; clip-path: inset(0 0 0 0); }
 }
 
 /* ═══ Tools row (иконки в ряд) ═══ */
