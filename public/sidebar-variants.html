@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Варианты сайдбара</title>
+<style>
+  @font-face { font-family: 'Flame'; src: url('/FlameRegular.otf') format('opentype'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    background: #F5F0EB;
+    padding: 32px;
+    color: #1a1a1a;
+  }
+  h1 {
+    font-family: 'Flame', sans-serif;
+    font-size: 28px;
+    color: #502314;
+    margin-bottom: 8px;
+  }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 32px;
+  }
+  .variant {
+    background: #fff;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border: 2px solid transparent;
+    transition: border-color 0.2s;
+  }
+  .variant:hover { border-color: #E87A1E; }
+  .variant-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #502314;
+    margin-bottom: 4px;
+  }
+  .variant-desc {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+  .variant-saving {
+    display: inline-block;
+    background: #E8F5E9;
+    color: #2E7D32;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+
+  /* ═══ Sidebar mock ═══ */
+  .sb {
+    width: 200px;
+    background: linear-gradient(180deg, #1A0E08 0%, #251610 100%);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 0 auto;
+    font-size: 13px;
+    position: relative;
+  }
+  .sb-brand {
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .sb-logo {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #D62700, #FF8733);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 14px; font-weight: 900;
+    flex-shrink: 0;
+  }
+  .sb-brand-text {
+    font-family: 'Flame', sans-serif;
+    font-size: 13px;
+    color: #fff;
+    line-height: 1.15;
+  }
+  .sb-brand-text small {
+    font-family: sans-serif;
+    font-size: 9px;
+    color: rgba(255,255,255,0.4);
+    display: block;
+    margin-top: 1px;
+  }
+  .sb-section {
+    padding: 12px 14px 4px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: rgba(255,255,255,0.3);
+  }
+  .sb-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 6px 14px;
+  }
+  .sb-nav { padding: 0 6px; }
+  .sb-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: rgba(255,255,255,0.7);
+    font-weight: 600;
+    font-size: 12px;
+    cursor: default;
+  }
+  .sb-item.active {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    box-shadow: inset 3px 0 0 #4FC3F7;
+  }
+  .sb-item-compact {
+    padding: 6px 10px;
+  }
+  .sb-icon {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+    opacity: 0.8;
+  }
+  .sb-bottom {
+    border-top: 1px solid rgba(255,255,255,0.08);
+    padding: 8px;
+  }
+  .sb-entity {
+    padding: 4px 8px 6px;
+  }
+  .sb-entity-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255,255,255,0.3);
+    margin-bottom: 3px;
+  }
+  .sb-entity-select {
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 5px;
+    font-size: 11px;
+    color: #fff;
+    background: rgba(255,255,255,0.06);
+    font-weight: 600;
+  }
+  .sb-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 6px;
+  }
+  .sb-avatar {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #D62700, #FF8733);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 10px;
+    flex-shrink: 0;
+  }
+  .sb-user-name { font-size: 11px; color: #fff; font-weight: 600; }
+  .sb-user-role { font-size: 9px; color: rgba(255,255,255,0.3); }
+  .sb-bell {
+    margin-left: auto;
+    font-size: 12px;
+    opacity: 0.5;
+  }
+
+  /* Tools row */
+  .sb-tools-row {
+    display: flex;
+    gap: 4px;
+    padding: 4px 10px 8px;
+  }
+  .sb-tool-icon {
+    width: 36px; height: 32px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.6);
+    font-size: 13px;
+    cursor: default;
+    flex: 1;
+  }
+  .sb-tool-icon.active {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+  }
+
+  /* Accordion */
+  .sb-accordion-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    color: rgba(255,255,255,0.5);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: default;
+  }
+  .sb-accordion-arrow { font-size: 8px; }
+  .sb-accordion-collapsed {
+    color: rgba(255,255,255,0.25);
+    font-size: 10px;
+    padding: 2px 14px 6px;
+  }
+
+  /* Topbar variant */
+  .variant-topbar-wrap {
+    display: flex;
+    gap: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 0 auto;
+    max-width: 500px;
+  }
+  .sb-topbar {
+    background: #f8f5f2;
+    padding: 6px 12px;
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid #e8e0d8;
+    flex: 1;
+  }
+  .sb-topbar-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .sb-topbar-item.active {
+    background: #fff;
+    color: #502314;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  /* Mega menu */
+  .sb-mega-popup {
+    background: rgba(30,18,10,0.97);
+    border-radius: 10px;
+    padding: 12px;
+    margin: 8px 6px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+  }
+  .sb-mega-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    color: rgba(255,255,255,0.65);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: default;
+  }
+  .sb-mega-item:hover { background: rgba(255,255,255,0.06); }
+  .sb-mega-item.active { color: #fff; background: rgba(255,255,255,0.1); }
+
+  /* 2x2 grid */
+  .sb-tools-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px 10px 8px;
+  }
+  .sb-tool-grid-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 4px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    color: rgba(255,255,255,0.5);
+    font-size: 8px;
+    font-weight: 600;
+    cursor: default;
+  }
+  .sb-tool-grid-item .tgi { font-size: 14px; }
+
+  /* Narrow variant */
+  .sb-narrow { width: 130px; }
+  .sb-narrow .sb-item { font-size: 11px; gap: 6px; padding: 7px 8px; }
+  .sb-narrow .sb-icon { width: 14px; height: 14px; font-size: 11px; }
+  .sb-narrow .sb-brand { padding: 10px 10px; gap: 6px; }
+  .sb-narrow .sb-brand-text { font-size: 11px; }
+  .sb-narrow .sb-user { padding: 6px; gap: 6px; }
+  .sb-narrow .sb-avatar { width: 24px; height: 24px; font-size: 9px; }
+
+  /* entity inline */
+  .sb-entity-inline {
+    font-size: 9px;
+    color: rgba(255,255,255,0.35);
+    font-weight: 600;
+    margin-top: 1px;
+  }
+
+  .note {
+    margin-top: 32px;
+    padding: 16px 20px;
+    background: #FFF8E1;
+    border-radius: 12px;
+    font-size: 13px;
+    color: #795548;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<h1>Варианты сайдбара</h1>
+<p class="subtitle">Задача: убрать скролл на ноутбуках с маленьким экраном (768px высота)</p>
+
+<div class="grid">
+
+<!-- ═══ ВАРИАНТ 1: Компактный ═══ -->
+<div class="variant">
+  <div class="variant-title">1. Компактный</div>
+  <div class="variant-desc">Без заголовков секций, тонкие разделители, уменьшены отступы, юрлицо под именем</div>
+  <span class="variant-saving">−80px</span>
+
+  <div class="sb">
+    <div class="sb-brand">
+      <div class="sb-logo">🔥</div>
+      <div class="sb-brand-text">Supply Department<small>Отдел закупок</small></div>
+    </div>
+    <div class="sb-nav" style="padding-top:6px;">
+      <div class="sb-item sb-item-compact active"><span class="sb-icon">📦</span> Новый заказ</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">📋</span> Планирование</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">🚚</span> Поставки</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">🕐</span> История</div>
+    </div>
+    <div class="sb-divider"></div>
+    <div class="sb-nav">
+      <div class="sb-item sb-item-compact"><span class="sb-icon">💾</span> База данных</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">📅</span> Календарь</div>
+    </div>
+    <div class="sb-divider"></div>
+    <div class="sb-nav">
+      <div class="sb-item sb-item-compact"><span class="sb-icon">🧩</span> Инструменты <span style="margin-left:auto;opacity:0.4;font-size:10px;">▾</span></div>
+    </div>
+    <div class="sb-divider"></div>
+    <div class="sb-nav">
+      <div class="sb-item sb-item-compact"><span class="sb-icon">⚙</span> Админ панель</div>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">АД</div>
+        <div>
+          <div class="sb-user-name">Админ</div>
+          <div class="sb-user-role">Администратор</div>
+          <div class="sb-entity-inline">Бургер БК ▾</div>
+        </div>
+        <span class="sb-bell">🔔</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 2: Иконки в ряд ═══ -->
+<div class="variant">
+  <div class="variant-title">2. Инструменты в ряд</div>
+  <div class="variant-desc">Инструменты = 4 иконки в одну строку с тултипами. Раскрывающийся список не нужен</div>
+  <span class="variant-saving">−120px</span>
+
+  <div class="sb">
+    <div class="sb-brand">
+      <div class="sb-logo">🔥</div>
+      <div class="sb-brand-text">Supply Department<small>Отдел закупок</small></div>
+    </div>
+    <div class="sb-section">Заказы</div>
+    <div class="sb-nav">
+      <div class="sb-item active"><span class="sb-icon">📦</span> Новый заказ</div>
+      <div class="sb-item"><span class="sb-icon">📋</span> Планирование</div>
+      <div class="sb-item"><span class="sb-icon">🚚</span> Поставки</div>
+      <div class="sb-item"><span class="sb-icon">🕐</span> История</div>
+    </div>
+    <div class="sb-section">Данные</div>
+    <div class="sb-nav">
+      <div class="sb-item"><span class="sb-icon">💾</span> База данных</div>
+      <div class="sb-item"><span class="sb-icon">📅</span> Календарь</div>
+    </div>
+    <div class="sb-section">Инструменты</div>
+    <div class="sb-tools-row">
+      <div class="sb-tool-icon" title="Аналитика">📊</div>
+      <div class="sb-tool-icon active" title="Анализ">📏</div>
+      <div class="sb-tool-icon" title="Сроки">⏳</div>
+      <div class="sb-tool-icon" title="График">🗓</div>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-item"><span class="sb-icon">⚙</span> Админ панель</div>
+    </div>
+    <div class="sb-entity">
+      <div class="sb-entity-label">Юр. лицо</div>
+      <select class="sb-entity-select"><option>ООО «Бургер БК»</option></select>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">АД</div>
+        <div>
+          <div class="sb-user-name">Админ</div>
+          <div class="sb-user-role">Администратор</div>
+        </div>
+        <span class="sb-bell">🔔</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 3: Аккордеон ═══ -->
+<div class="variant">
+  <div class="variant-title">3. Аккордеон</div>
+  <div class="variant-desc">Три секции-гармошки. Открыта только текущая, остальные свёрнуты в одну строку</div>
+  <span class="variant-saving">−130px</span>
+
+  <div class="sb">
+    <div class="sb-brand">
+      <div class="sb-logo">🔥</div>
+      <div class="sb-brand-text">Supply Department<small>Отдел закупок</small></div>
+    </div>
+    <div class="sb-accordion-header"><span class="sb-accordion-arrow">▾</span> ЗАКАЗЫ</div>
+    <div class="sb-nav">
+      <div class="sb-item active"><span class="sb-icon">📦</span> Новый заказ</div>
+      <div class="sb-item"><span class="sb-icon">📋</span> Планирование</div>
+      <div class="sb-item"><span class="sb-icon">🚚</span> Поставки</div>
+      <div class="sb-item"><span class="sb-icon">🕐</span> История</div>
+    </div>
+    <div class="sb-accordion-header" style="opacity:0.5;"><span class="sb-accordion-arrow">▸</span> ДАННЫЕ</div>
+    <div class="sb-accordion-header" style="opacity:0.5;"><span class="sb-accordion-arrow">▸</span> ИНСТРУМЕНТЫ</div>
+    <div class="sb-nav">
+      <div class="sb-item"><span class="sb-icon">⚙</span> Админ панель</div>
+    </div>
+    <div class="sb-entity">
+      <div class="sb-entity-label">Юр. лицо</div>
+      <select class="sb-entity-select"><option>ООО «Бургер БК»</option></select>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">АД</div>
+        <div>
+          <div class="sb-user-name">Админ</div>
+          <div class="sb-user-role">Администратор</div>
+        </div>
+        <span class="sb-bell">🔔</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 4: Топбар ═══ -->
+<div class="variant">
+  <div class="variant-title">4. Инструменты в топбаре</div>
+  <div class="variant-desc">Инструменты переезжают в горизонтальную полоску над контентом. Сайдбар — только основное</div>
+  <span class="variant-saving">−160px из сайдбара</span>
+
+  <div class="variant-topbar-wrap">
+    <div class="sb" style="width:140px;border-radius:12px 0 0 12px;flex-shrink:0;">
+      <div class="sb-brand" style="padding:10px;">
+        <div class="sb-logo" style="width:24px;height:24px;font-size:12px;">🔥</div>
+        <div class="sb-brand-text" style="font-size:11px;">Supply<small>Закупки</small></div>
+      </div>
+      <div class="sb-nav" style="padding-top:4px;">
+        <div class="sb-item active" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">📦</span> Заказ</div>
+        <div class="sb-item" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">📋</span> Планир.</div>
+        <div class="sb-item" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">🚚</span> Поставки</div>
+        <div class="sb-item" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">🕐</span> История</div>
+        <div class="sb-item" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">💾</span> База</div>
+        <div class="sb-item" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">📅</span> Календ.</div>
+        <div class="sb-item" style="font-size:11px;padding:7px 8px;gap:6px;"><span class="sb-icon" style="font-size:11px;">⚙</span> Админ</div>
+      </div>
+      <div class="sb-bottom" style="padding:6px;">
+        <div class="sb-user" style="padding:4px;">
+          <div class="sb-avatar" style="width:22px;height:22px;font-size:8px;">АД</div>
+          <div>
+            <div class="sb-user-name" style="font-size:10px;">Админ</div>
+            <div class="sb-entity-inline">БК ▾</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:1;background:#f8f5f2;border-radius:0 12px 12px 0;">
+      <div class="sb-topbar">
+        <div class="sb-topbar-item">📊 Аналитика</div>
+        <div class="sb-topbar-item active">📏 Анализ</div>
+        <div class="sb-topbar-item">⏳ Сроки</div>
+        <div class="sb-topbar-item">🗓 График</div>
+      </div>
+      <div style="padding:24px;color:#aaa;font-size:12px;text-align:center;">Содержимое страницы</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 5: Адаптивный ═══ -->
+<div class="variant">
+  <div class="variant-title">5. Адаптивный</div>
+  <div class="variant-desc">На больших экранах — как сейчас. На маленьких автоматически: без заголовков, мелкие отступы, инструменты в ряд</div>
+  <span class="variant-saving">автоматически 0−150px</span>
+
+  <div style="display:flex;gap:16px;justify-content:center;">
+    <!-- Большой экран -->
+    <div>
+      <div style="text-align:center;font-size:10px;color:#aaa;margin-bottom:6px;">Большой экран</div>
+      <div class="sb" style="width:140px;font-size:11px;">
+        <div class="sb-brand" style="padding:8px 10px;">
+          <div class="sb-logo" style="width:20px;height:20px;font-size:10px;">🔥</div>
+          <div class="sb-brand-text" style="font-size:10px;">Supply</div>
+        </div>
+        <div class="sb-section" style="padding:8px 10px 3px;font-size:8px;">Заказы</div>
+        <div class="sb-nav">
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📦</span> Заказ</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📋</span> Планир.</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">🚚</span> Поставки</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">🕐</span> История</div>
+        </div>
+        <div class="sb-section" style="padding:8px 10px 3px;font-size:8px;">Данные</div>
+        <div class="sb-nav">
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">💾</span> База</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📅</span> Календ.</div>
+        </div>
+        <div class="sb-section" style="padding:8px 10px 3px;font-size:8px;">Инструменты</div>
+        <div class="sb-nav">
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📊</span> Аналит.</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📏</span> Анализ</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">⏳</span> Сроки</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">🗓</span> График</div>
+        </div>
+      </div>
+    </div>
+    <!-- Маленький экран -->
+    <div>
+      <div style="text-align:center;font-size:10px;color:#aaa;margin-bottom:6px;">Ноутбук</div>
+      <div class="sb" style="width:140px;font-size:11px;">
+        <div class="sb-brand" style="padding:8px 10px;">
+          <div class="sb-logo" style="width:20px;height:20px;font-size:10px;">🔥</div>
+          <div class="sb-brand-text" style="font-size:10px;">Supply</div>
+        </div>
+        <div class="sb-nav" style="padding-top:4px;">
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📦</span> Заказ</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📋</span> Планир.</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">🚚</span> Поставки</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">🕐</span> История</div>
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-nav">
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">💾</span> База</div>
+          <div class="sb-item" style="font-size:10px;padding:5px 8px;gap:5px;"><span class="sb-icon" style="font-size:10px;">📅</span> Календ.</div>
+        </div>
+        <div class="sb-divider"></div>
+        <div class="sb-tools-row" style="padding:4px 8px 6px;">
+          <div class="sb-tool-icon" style="width:28px;height:26px;font-size:11px;">📊</div>
+          <div class="sb-tool-icon" style="width:28px;height:26px;font-size:11px;">📏</div>
+          <div class="sb-tool-icon" style="width:28px;height:26px;font-size:11px;">⏳</div>
+          <div class="sb-tool-icon" style="width:28px;height:26px;font-size:11px;">🗓</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 6: Мегаменю ═══ -->
+<div class="variant">
+  <div class="variant-title">6. Мегаменю</div>
+  <div class="variant-desc">В сайдбаре — только 4 основных пункта. Кнопка «Ещё» открывает красивую сетку со всеми страницами</div>
+  <span class="variant-saving">−150px</span>
+
+  <div class="sb">
+    <div class="sb-brand">
+      <div class="sb-logo">🔥</div>
+      <div class="sb-brand-text">Supply Department<small>Отдел закупок</small></div>
+    </div>
+    <div class="sb-nav" style="padding-top:8px;">
+      <div class="sb-item active"><span class="sb-icon">📦</span> Новый заказ</div>
+      <div class="sb-item"><span class="sb-icon">📋</span> Планирование</div>
+      <div class="sb-item"><span class="sb-icon">🚚</span> Поставки</div>
+      <div class="sb-item"><span class="sb-icon">🕐</span> История</div>
+    </div>
+    <div class="sb-mega-popup">
+      <div class="sb-mega-item"><span class="sb-icon">💾</span> База</div>
+      <div class="sb-mega-item"><span class="sb-icon">📅</span> Календарь</div>
+      <div class="sb-mega-item"><span class="sb-icon">📊</span> Аналитика</div>
+      <div class="sb-mega-item active"><span class="sb-icon">📏</span> Анализ</div>
+      <div class="sb-mega-item"><span class="sb-icon">⏳</span> Сроки</div>
+      <div class="sb-mega-item"><span class="sb-icon">🗓</span> График</div>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-item" style="color:rgba(255,255,255,0.4);"><span class="sb-icon">🧩</span> Все разделы ▴</div>
+    </div>
+    <div class="sb-entity">
+      <div class="sb-entity-label">Юр. лицо</div>
+      <select class="sb-entity-select"><option>ООО «Бургер БК»</option></select>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">АД</div>
+        <div>
+          <div class="sb-user-name">Админ</div>
+          <div class="sb-user-role">Администратор</div>
+        </div>
+        <span class="sb-bell">🔔</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 7: Сетка 2×2 ═══ -->
+<div class="variant">
+  <div class="variant-title">7. Сетка 2×2</div>
+  <div class="variant-desc">Инструменты — квадратные кнопки-иконки в сетке 2×2 с подписями. Компактно и наглядно</div>
+  <span class="variant-saving">−100px</span>
+
+  <div class="sb">
+    <div class="sb-brand">
+      <div class="sb-logo">🔥</div>
+      <div class="sb-brand-text">Supply Department<small>Отдел закупок</small></div>
+    </div>
+    <div class="sb-section">Заказы</div>
+    <div class="sb-nav">
+      <div class="sb-item active"><span class="sb-icon">📦</span> Новый заказ</div>
+      <div class="sb-item"><span class="sb-icon">📋</span> Планирование</div>
+      <div class="sb-item"><span class="sb-icon">🚚</span> Поставки</div>
+      <div class="sb-item"><span class="sb-icon">🕐</span> История</div>
+    </div>
+    <div class="sb-section">Данные</div>
+    <div class="sb-nav">
+      <div class="sb-item"><span class="sb-icon">💾</span> База данных</div>
+      <div class="sb-item"><span class="sb-icon">📅</span> Календарь</div>
+    </div>
+    <div class="sb-section">Инструменты</div>
+    <div class="sb-tools-grid">
+      <div class="sb-tool-grid-item"><span class="tgi">📊</span>Аналит.</div>
+      <div class="sb-tool-grid-item"><span class="tgi">📏</span>Анализ</div>
+      <div class="sb-tool-grid-item"><span class="tgi">⏳</span>Сроки</div>
+      <div class="sb-tool-grid-item"><span class="tgi">🗓</span>График</div>
+    </div>
+    <div class="sb-nav">
+      <div class="sb-item"><span class="sb-icon">⚙</span> Админ панель</div>
+    </div>
+    <div class="sb-entity">
+      <div class="sb-entity-label">Юр. лицо</div>
+      <select class="sb-entity-select"><option>ООО «Бургер БК»</option></select>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">АД</div>
+        <div>
+          <div class="sb-user-name">Админ</div>
+          <div class="sb-user-role">Администратор</div>
+        </div>
+        <span class="sb-bell">🔔</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ВАРИАНТ 8: Комбо ═══ -->
+<div class="variant">
+  <div class="variant-title">8. Комбо: компактный + иконки</div>
+  <div class="variant-desc">Без заголовков секций + инструменты в ряд иконок + юрлицо под именем. Максимальная экономия</div>
+  <span class="variant-saving">−180px</span>
+
+  <div class="sb">
+    <div class="sb-brand">
+      <div class="sb-logo">🔥</div>
+      <div class="sb-brand-text">Supply Department<small>Отдел закупок</small></div>
+    </div>
+    <div class="sb-nav" style="padding-top:6px;">
+      <div class="sb-item sb-item-compact active"><span class="sb-icon">📦</span> Новый заказ</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">📋</span> Планирование</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">🚚</span> Поставки</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">🕐</span> История</div>
+    </div>
+    <div class="sb-divider"></div>
+    <div class="sb-nav">
+      <div class="sb-item sb-item-compact"><span class="sb-icon">💾</span> База данных</div>
+      <div class="sb-item sb-item-compact"><span class="sb-icon">📅</span> Календарь</div>
+    </div>
+    <div class="sb-divider"></div>
+    <div class="sb-tools-row">
+      <div class="sb-tool-icon" title="Аналитика">📊</div>
+      <div class="sb-tool-icon" title="Анализ">📏</div>
+      <div class="sb-tool-icon" title="Сроки">⏳</div>
+      <div class="sb-tool-icon" title="График">🗓</div>
+    </div>
+    <div class="sb-divider"></div>
+    <div class="sb-nav">
+      <div class="sb-item sb-item-compact"><span class="sb-icon">⚙</span> Админ панель</div>
+    </div>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">АД</div>
+        <div>
+          <div class="sb-user-name">Админ</div>
+          <div class="sb-user-role">Администратор</div>
+          <div class="sb-entity-inline">Бургер БК ▾</div>
+        </div>
+        <span class="sb-bell">🔔</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="note">
+  <strong>Сравнение:</strong> Сейчас сайдбар занимает ~540px (без инструментов) / ~675px (с открытыми). На экране 768px — скроллит.<br>
+  Варианты 1, 8 — самые простые в реализации. Вариант 3 (аккордеон) — самый компактный. Вариант 4 (топбар) — кардинально другой подход.
+</div>
+
+</body>
+</html>

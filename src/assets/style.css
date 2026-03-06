@@ -1798,6 +1798,23 @@ input[type="number"]:focus {
   min-width: 260px;
   max-width: 380px;
 }
+.calc-tip-portal {
+  background: #2c2c2c;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  min-width: 260px;
+  max-width: 380px;
+}
+.calc-tip-portal .calc-tip-row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.calc-tip-portal .calc-tip-lbl { color: #b0ada8; }
+.calc-tip-portal .calc-tip-val { font-weight: 600; white-space: nowrap; }
+.calc-tip-portal .calc-tip-hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 5px 0; }
+
 .plan-period-tip { position: relative; cursor: help; }
 .plan-period-tip .plan-tip {
   display: none;

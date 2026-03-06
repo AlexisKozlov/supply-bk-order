@@ -341,6 +341,12 @@ const drawerItems = ref([])
 const actFile = ref(null)
 const editDeliveryDate = ref('')
 
+function nowLocal() {
+  const d = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 const legalEntity = computed(() => orderStore.settings.legalEntity)
 let _loadRequestId = 0
 const hasAnyFact = computed(() => drawerItems.value.some(i => i._factValue !== null))
@@ -576,7 +582,7 @@ async function onDeliveryDateChange(e) {
   try {
     await db.from('orders').update({ delivery_date: newDate }).eq('id', selectedOrder.value.id)
     const userName = userStore.currentUser?.name || 'Неизвестно'
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    const now = nowLocal()
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'delivery_date_changed',
       user_name: userName,
@@ -671,7 +677,7 @@ async function acceptAsOrdered() {
     await db.rpc('batch_update_received_qty', {
       items: items.map(i => ({ id: i.id, received_qty: i.qty_boxes }))
     })
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    const now = nowLocal()
     await db.from('orders').update({ received_at: now, received_by: userName }).eq('id', selectedOrder.value.id)
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
@@ -706,7 +712,7 @@ async function saveReceived() {
       received_qty: i._factValue !== null ? i._factValue : i.qty_boxes
     }))
     await db.rpc('batch_update_received_qty', { items: allItems })
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    const now = nowLocal()
     await db.from('orders').update({ received_at: now, received_by: userName }).eq('id', selectedOrder.value.id)
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
@@ -736,7 +742,7 @@ async function revertToTransit() {
       items: drawerItems.value.map(i => ({ id: i.id, received_qty: null }))
     })
     await db.from('orders').update({ received_at: null, received_by: null }).eq('id', orderId)
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    const now = nowLocal()
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: orderId, action: 'reception_reverted', user_name: userName,
       details: { supplier: selectedOrder.value.supplier, reverted_from: selectedOrder.value.received_by },

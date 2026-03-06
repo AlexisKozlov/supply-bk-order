@@ -60,6 +60,8 @@ $TABLE_TO_MODULE = [
     'stock_malling'=>'shelf-life',
     'audit_log'=>'history','notifications'=>'history',
     'settings'=>'database','item_order'=>'order',
+    'deficit_sessions'=>'order','deficit_results'=>'order','deficit_tokens'=>'order','deficit_restaurant_stock'=>'order',
+    'stock_collections'=>'order','stock_collection_products'=>'order','stock_collection_data'=>'order','stock_collection_tokens'=>'order',
 ];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
@@ -133,8 +135,17 @@ function getSessionUser($pdo) {
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) { $_sessionUserCache['result'] = null; return null; }
-    // Скользящая сессия: продлеваем на 7 дней при каждом обращении
-    $pdo->prepare("UPDATE user_sessions SET expires_at = ? WHERE token = ?")->execute([date('Y-m-d H:i:s', strtotime('+7 days')), $token]);
+    // Скользящая сессия: продлеваем на 7 дней, но не чаще раза в час (экономия UPDATE-запросов)
+    static $sessionUpdated = false;
+    if (!$sessionUpdated) {
+        $s2 = $pdo->prepare("SELECT expires_at FROM user_sessions WHERE token = ?");
+        $s2->execute([$token]);
+        $exp = $s2->fetchColumn();
+        if ($exp && strtotime($exp) - time() < 6 * 86400) { // осталось < 6 дней — продлить
+            $pdo->prepare("UPDATE user_sessions SET expires_at = ? WHERE token = ?")->execute([date('Y-m-d H:i:s', strtotime('+7 days')), $token]);
+        }
+        $sessionUpdated = true;
+    }
     $_sessionUserCache['result'] = $row;
     return $row;
 }
@@ -449,6 +460,99 @@ if ($endpoint === 'rpc') {
         respond($row ?: ['value' => null]);
     }
 
+    // ═══ DEFICIT: публичные RPC (форма сбора остатков — legacy) ═══
+    if ($fn === 'deficit_validate_token') {
+        $tokenVal = $body['token_value'] ?? '';
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $s = $pdo->prepare("SELECT id, legal_entity, product_name, expires_at FROM deficit_tokens WHERE token = ?");
+        $s->execute([$tokenVal]);
+        $row = $s->fetch();
+        if (!$row) respond(['error' => 'not_found', 'expired' => true]);
+        if (strtotime($row['expires_at']) < time()) respond(['error' => 'expired', 'expired' => true]);
+        respond(['id' => $row['id'], 'legal_entity' => $row['legal_entity'], 'product_name' => $row['product_name']]);
+    }
+    if ($fn === 'deficit_get_restaurants') {
+        $tokenVal = $body['token_value'] ?? '';
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $s = $pdo->prepare("SELECT legal_entity FROM deficit_tokens WHERE token = ? AND expires_at > NOW()");
+        $s->execute([$tokenVal]);
+        $row = $s->fetch();
+        if (!$row) respond(['error' => 'expired']);
+        $le = $row['legal_entity'];
+        $group = (strpos($le, 'Пицца Стар') !== false) ? 'PS' : 'BK_VM';
+        $s2 = $pdo->prepare("SELECT id, number, address, city FROM restaurants WHERE legal_entity_group = ? ORDER BY sort_order");
+        $s2->execute([$group]);
+        respond($s2->fetchAll());
+    }
+    if ($fn === 'deficit_submit_stock') {
+        $tokenVal = $body['token_value'] ?? '';
+        $restNum = $body['restaurant_num'] ?? '';
+        $stockVal = floatval($body['stock_value'] ?? 0);
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
+        if (!checkRateLimit($pdo, $clientIp, 60, 5)) respond(['error' => 'too_many_attempts'], 429);
+        $s = $pdo->prepare("SELECT id FROM deficit_tokens WHERE token = ? AND expires_at > NOW()");
+        $s->execute([$tokenVal]);
+        $tok = $s->fetch();
+        if (!$tok) respond(['error' => 'expired']);
+        $s2 = $pdo->prepare("INSERT INTO deficit_restaurant_stock (token_id, restaurant_number, stock, submitted_at) VALUES (?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE stock = VALUES(stock), submitted_at = NOW()");
+        $s2->execute([$tok['id'], $restNum, $stockVal]);
+        respond(['success' => true]);
+    }
+
+    // ═══ STOCK COLLECTION: публичные RPC (новая форма) ═══
+    if ($fn === 'sc_validate_token') {
+        $tokenVal = $body['token_value'] ?? '';
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $s = $pdo->prepare("SELECT t.id as token_id, t.collection_id, t.expires_at, c.legal_entity, c.name as collection_name FROM stock_collection_tokens t JOIN stock_collections c ON c.id = t.collection_id WHERE t.token = ?");
+        $s->execute([$tokenVal]);
+        $row = $s->fetch();
+        if (!$row) respond(['error' => 'not_found', 'expired' => true]);
+        if (strtotime($row['expires_at']) < time()) respond(['error' => 'expired', 'expired' => true]);
+        // Товары
+        $s2 = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
+        $s2->execute([$row['collection_id']]);
+        $products = $s2->fetchAll();
+        // Рестораны, которые уже ответили
+        $s3 = $pdo->prepare("SELECT DISTINCT restaurant_number FROM stock_collection_data WHERE collection_id = ?");
+        $s3->execute([$row['collection_id']]);
+        $submitted = array_column($s3->fetchAll(), 'restaurant_number');
+        respond(['collection_id' => $row['collection_id'], 'legal_entity' => $row['legal_entity'], 'collection_name' => $row['collection_name'], 'products' => $products, 'submitted_restaurants' => $submitted]);
+    }
+    if ($fn === 'sc_get_restaurants') {
+        $tokenVal = $body['token_value'] ?? '';
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $s = $pdo->prepare("SELECT c.legal_entity FROM stock_collection_tokens t JOIN stock_collections c ON c.id = t.collection_id WHERE t.token = ? AND t.expires_at > NOW()");
+        $s->execute([$tokenVal]);
+        $row = $s->fetch();
+        if (!$row) respond(['error' => 'expired']);
+        $le = $row['legal_entity'];
+        $group = (strpos($le, 'Пицца Стар') !== false) ? 'PS' : 'BK_VM';
+        $s2 = $pdo->prepare("SELECT id, number, address, city FROM restaurants WHERE legal_entity_group = ? ORDER BY sort_order");
+        $s2->execute([$group]);
+        respond($s2->fetchAll());
+    }
+    if ($fn === 'sc_submit_stock') {
+        $tokenVal = $body['token_value'] ?? '';
+        $restNum = $body['restaurant_num'] ?? '';
+        $items = $body['items'] ?? []; // [{product_id, stock}]
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
+        if (!checkRateLimit($pdo, $clientIp, 60, 5)) respond(['error' => 'too_many_attempts'], 429);
+        $s = $pdo->prepare("SELECT collection_id FROM stock_collection_tokens WHERE token = ? AND expires_at > NOW()");
+        $s->execute([$tokenVal]);
+        $tok = $s->fetch();
+        if (!$tok) respond(['error' => 'expired']);
+        $collId = $tok['collection_id'];
+        $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW()) ON DUPLICATE KEY UPDATE stock = VALUES(stock), submitted_at = NOW()");
+        foreach ($items as $item) {
+            $pid = intval($item['product_id'] ?? 0);
+            $sv = floatval($item['stock'] ?? 0);
+            if ($pid > 0) $ins->execute([$collId, $pid, $restNum, $sv]);
+        }
+        respond(['success' => true]);
+    }
+
     // Логирование ошибок фронтенда (публичный, без авторизации)
     if ($fn === 'log_frontend_error') {
         $level = $body['level'] ?? 'error';
@@ -505,6 +609,72 @@ if ($endpoint === 'rpc') {
     // Получаем имя авторизованного пользователя из сессии (для защиты от подмены user_name)
     $authUser = getSessionUser($pdo);
     $authUserName = $authUser ? $authUser['name'] : '';
+
+    // ═══ DEFICIT: приватные RPC ═══
+    if ($fn === 'deficit_create_token') {
+        $le = $body['legal_entity'] ?? '';
+        $pname = mb_substr($body['product_name'] ?? '', 0, 255);
+        $uname = $authUserName ?: ($body['user_name'] ?? '');
+        if (!$le || !$pname) respond(['error' => 'missing_params'], 400);
+        $token = bin2hex(random_bytes(32)); // 64 hex chars
+        $expires = date('Y-m-d H:i:s', strtotime('+48 hours'));
+        $s = $pdo->prepare("INSERT INTO deficit_tokens (token, legal_entity, product_name, created_by, expires_at) VALUES (?, ?, ?, ?, ?)");
+        $s->execute([$token, $le, $pname, $uname, $expires]);
+        respond(['token' => $token, 'token_id' => $pdo->lastInsertId(), 'expires_at' => $expires]);
+    }
+
+    // ═══ STOCK COLLECTION: приватные RPC ═══
+    if ($fn === 'sc_create_collection') {
+        $le = $body['legal_entity'] ?? '';
+        $name = mb_substr($body['name'] ?? '', 0, 255);
+        $products = $body['products'] ?? []; // [{name, sku?, unit}]
+        $uname = $authUserName ?: ($body['user_name'] ?? '');
+        if (!$le || !$name || empty($products)) respond(['error' => 'missing_params'], 400);
+        $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, name, created_by) VALUES (?, ?, ?)");
+        $s->execute([$le, $name, $uname]);
+        $collId = $pdo->lastInsertId();
+        $ins = $pdo->prepare("INSERT INTO stock_collection_products (collection_id, product_name, product_sku, unit, sort_order) VALUES (?, ?, ?, ?, ?)");
+        foreach ($products as $i => $p) {
+            $pname = mb_substr($p['name'] ?? '', 0, 255);
+            $psku = mb_substr($p['sku'] ?? '', 0, 50) ?: null;
+            $punit = in_array($p['unit'] ?? '', ['boxes', 'pieces']) ? $p['unit'] : 'pieces';
+            $ins->execute([$collId, $pname, $psku, $punit, $i]);
+        }
+        respond(['id' => $collId]);
+    }
+    if ($fn === 'sc_create_token') {
+        $collId = intval($body['collection_id'] ?? 0);
+        $uname = $authUserName ?: ($body['user_name'] ?? '');
+        if (!$collId) respond(['error' => 'missing_params'], 400);
+        $token = bin2hex(random_bytes(32));
+        $expires = date('Y-m-d H:i:s', strtotime('+48 hours'));
+        $s = $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)");
+        $s->execute([$collId, $token, $uname, $expires]);
+        respond(['token' => $token, 'token_id' => $pdo->lastInsertId(), 'expires_at' => $expires]);
+    }
+    if ($fn === 'sc_close_collection') {
+        $collId = intval($body['collection_id'] ?? 0);
+        if (!$collId) respond(['error' => 'missing_params'], 400);
+        $pdo->prepare("UPDATE stock_collections SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$collId]);
+        respond(['success' => true]);
+    }
+    if ($fn === 'sc_get_collection_data') {
+        $collId = intval($body['collection_id'] ?? 0);
+        if (!$collId) respond(['error' => 'missing_params'], 400);
+        // Товары
+        $s = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
+        $s->execute([$collId]);
+        $products = $s->fetchAll();
+        // Данные
+        $s2 = $pdo->prepare("SELECT id, product_id, restaurant_number, stock, source, submitted_at FROM stock_collection_data WHERE collection_id = ? ORDER BY restaurant_number");
+        $s2->execute([$collId]);
+        $data = $s2->fetchAll();
+        // Ответы по ресторанам
+        $s3 = $pdo->prepare("SELECT DISTINCT restaurant_number FROM stock_collection_data WHERE collection_id = ?");
+        $s3->execute([$collId]);
+        $restaurants = array_column($s3->fetchAll(), 'restaurant_number');
+        respond(['products' => $products, 'data' => $data, 'restaurants' => $restaurants]);
+    }
 
     if ($fn === 'get_user_list') {
         $caller = getSessionUser($pdo);
@@ -1051,7 +1221,7 @@ if ($endpoint === 'rpc') {
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens'];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users', 'error_logs'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
@@ -1116,6 +1286,14 @@ $filterWhitelist = [
     'stock_malling' => ['id','customer','warehouse','product_name','expiry_date','expiry_status'],
     'search_logs'   => ['id','user_name','created_at'],
     'users'         => ['id','name','role'],
+    'deficit_sessions'  => ['id','legal_entity','created_by','created_at'],
+    'deficit_results'   => ['id','session_id','restaurant_number'],
+    'deficit_tokens'    => ['id','legal_entity','created_by'],
+    'deficit_restaurant_stock' => ['id','token_id','restaurant_number'],
+    'stock_collections'       => ['id','legal_entity','status'],
+    'stock_collection_products' => ['id','collection_id'],
+    'stock_collection_data'   => ['id','collection_id','product_id','restaurant_number'],
+    'stock_collection_tokens' => ['id','collection_id'],
 ];
 
 if ($method === 'GET') {
@@ -1176,9 +1354,9 @@ if ($method === 'GET') {
             $sql .= " ORDER BY `{$op[0]}` " . (($op[1]??'asc')==='desc'?'DESC':'ASC');
         }
     }
-    if (isset($_GET['limit'])) $sql .= " LIMIT " . min(intval($_GET['limit']), 5000);
+    $limit = isset($_GET['limit']) ? min(intval($_GET['limit']), 5000) : 1000;
+    $sql .= " LIMIT " . $limit;
     if (isset($_GET['offset'])) {
-        if (!isset($_GET['limit'])) $sql .= " LIMIT 5000";
         $sql .= " OFFSET " . intval($_GET['offset']);
     }
 

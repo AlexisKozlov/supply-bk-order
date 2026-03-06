@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDA — Понятным языком</title>
+<style>
+@font-face { font-family: 'Flame'; src: url('/Flame-Bold.otf') format('opentype'); font-weight: 700; }
+@font-face { font-family: 'Flame'; src: url('/Flame-Regular.otf') format('opentype'); font-weight: 400; }
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #FAF6EF; --brown: #502314; --red: #D62300; --orange: #FF8733; --yellow: #FDBD10;
+  --green: #4CAF50; --blue: #42A5F5; --cream: #FFF8F0; --text: #333; --text-dim: #888;
+  --card: #fff; --border: #e8e0d4; --shadow: 0 2px 12px rgba(80,35,20,.08);
+}
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+
+/* Slides */
+.slide { display: none; flex-direction: column; padding: 40px 60px; height: 100vh; overflow-y: auto; animation: fadeIn .3s ease; }
+.slide.active { display: flex; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+h1 { font-family: 'Flame', sans-serif; font-size: 2.4em; color: var(--brown); margin-bottom: 8px; line-height: 1.2; }
+h2 { font-family: 'Flame', sans-serif; font-size: 1.7em; color: var(--brown); margin-bottom: 8px; }
+h3 { font-size: 1.15em; font-weight: 700; color: #555; margin-bottom: 6px; }
+.subtitle { font-size: 1.15em; color: var(--text-dim); margin-bottom: 24px; }
+p, li { font-size: 1.05em; line-height: 1.55; }
+ul { padding-left: 22px; margin-bottom: 10px; }
+
+/* Cards */
+.cards { display: grid; gap: 16px; margin: 16px 0; }
+.cards-2 { grid-template-columns: 1fr 1fr; }
+.cards-3 { grid-template-columns: 1fr 1fr 1fr; }
+.cards-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); }
+
+/* Boxes */
+.box { padding: 14px 18px; border-radius: 10px; margin: 10px 0; font-size: 1.05em; line-height: 1.5; }
+.box-orange { background: #fff3e0; border-left: 5px solid #e67e22; }
+.box-green { background: #e8f5e9; border-left: 5px solid #43a047; }
+.box-red { background: #ffeaea; border-left: 5px solid #e53935; }
+.box-yellow { background: #fffde7; border-left: 5px solid #f9a825; }
+.box-blue { background: #e3f2fd; border-left: 5px solid #1e88e5; }
+.box-gray { background: #f5f5f5; border-left: 5px solid #9e9e9e; }
+
+/* Formula */
+.formula { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--card); border: 2px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 16px 0; font-size: 1.1em; }
+.f-part { text-align: center; padding: 8px 14px; border-radius: 8px; }
+.f-label { font-size: .7em; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+.f-value { font-family: 'Flame', sans-serif; font-size: 1.1em; }
+.f-op { font-size: 1.6em; color: var(--orange); font-weight: 300; }
+.f-green { background: #e8f5e9; }
+.f-yellow { background: #fffde7; }
+.f-red { background: #ffeaea; }
+.f-result { background: #e8f5e9; border: 2px solid #4CAF50; border-radius: 10px; }
+
+/* Example */
+.example { background: #f0f7ff; border: 1px solid #bbdefb; border-radius: 12px; padding: 18px 22px; margin: 12px 0; }
+.example-title { font-weight: 700; color: #1565C0; margin-bottom: 8px; font-size: .95em; }
+.example table { width: 100%; border-collapse: collapse; font-size: .95em; margin-top: 8px; }
+.example th { text-align: left; padding: 6px 10px; background: #e3f2fd; border-bottom: 2px solid #90CAF9; font-weight: 600; color: #1565C0; }
+.example td { padding: 6px 10px; border-bottom: 1px solid #e0e0e0; }
+.example .result { font-weight: 700; color: #2E7D32; }
+
+/* Compare */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+.compare-abm, .compare-us { padding: 18px 20px; border-radius: 12px; }
+.compare-abm { background: #f5f5f5; border: 1px solid #ddd; }
+.compare-us { background: #e8f5e9; border: 1px solid #a5d6a7; }
+.compare h3 { margin-bottom: 10px; }
+.compare-abm h3 { color: #666; }
+.compare-us h3 { color: #2E7D32; }
+
+/* Status badges */
+.status { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: .8em; font-weight: 600; }
+.status-done { background: #e8f5e9; color: #2E7D32; }
+.status-partial { background: #fff3e0; color: #E65100; }
+.status-todo { background: #ffeaea; color: #c62828; }
+
+/* Buffer bar */
+.buffer-bar { display: flex; height: 40px; border-radius: 8px; overflow: hidden; margin: 12px 0; font-size: .85em; font-weight: 600; }
+.buf-green { background: #4CAF50; color: #fff; display: flex; align-items: center; justify-content: center; }
+.buf-yellow { background: #FDBD10; color: #333; display: flex; align-items: center; justify-content: center; }
+.buf-red { background: #D62300; color: #fff; display: flex; align-items: center; justify-content: center; }
+
+/* Nav */
+.nav { position: fixed; bottom: 20px; right: 30px; display: flex; gap: 10px; z-index: 50; }
+.nav button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--brown); cursor: pointer; font-size: 1.2em; box-shadow: var(--shadow); transition: all .2s; }
+.nav button:hover { border-color: var(--orange); background: #fff3e0; }
+.nav button:disabled { opacity: .3; cursor: default; }
+.counter-text { position: fixed; bottom: 28px; left: 30px; font-size: .85em; color: var(--text-dim); z-index: 50; }
+
+/* Progress dots */
+.dots { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 50; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #d4c8b8; cursor: pointer; border: none; transition: all .2s; }
+.dot.active { background: var(--orange); transform: scale(1.4); }
+
+/* Highlight number */
+.big-num { font-family: 'Flame', sans-serif; font-size: 2.6em; color: var(--orange); }
+.big-num-green { font-family: 'Flame', sans-serif; font-size: 2.6em; color: var(--green); }
+
+/* Timeline */
+.timeline { display: flex; flex-direction: column; gap: 14px; margin: 14px 0; }
+.tl-step { display: flex; gap: 14px; align-items: flex-start; }
+.tl-num { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; flex-shrink: 0; font-size: .9em; }
+.tl-content { flex: 1; }
+.tl-content strong { display: block; margin-bottom: 2px; }
+
+/* Checklist table */
+.check-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: .95em; }
+.check-table th { text-align: left; padding: 8px 12px; background: #f5ebe0; border-bottom: 2px solid var(--border); color: var(--brown); font-weight: 700; }
+.check-table td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+.check-table tr:hover { background: #faf5ee; }
+
+@media (max-width: 900px) {
+  .slide { padding: 24px 20px; }
+  .cards-2, .cards-3, .cards-4, .compare { grid-template-columns: 1fr; }
+  h1 { font-size: 1.8em; }
+  h2 { font-size: 1.4em; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ SLIDE 0: Титул ═══ -->
+<div class="slide active">
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+    <div style="font-size:3em;margin-bottom:16px">&#x1F4E6;</div>
+    <h1 style="font-size:2.8em">CDA: Умный расчёт заказа</h1>
+    <p class="subtitle" style="max-width:600px">Как алгоритм ABM Inventory работает, что из него уже есть в нашем приложении, и что осталось доработать</p>
+    <p style="color:var(--text-dim);font-size:.9em;margin-top:40px">Supply Department &middot; Портал закупок</p>
+  </div>
+</div>
+
+<!-- ═══ SLIDE 1: Зачем это нужно ═══ -->
+<div class="slide">
+  <h1>Зачем вообще нужен умный расчёт?</h1>
+  <p class="subtitle">Проблема простого подхода &laquo;расход &times; дни&raquo;</p>
+
+  <div class="cards cards-2">
+    <div class="card">
+      <h3>&#x274C; Простой расчёт (как сейчас)</h3>
+      <p>Берём средний расход, умножаем на количество дней, вычитаем остаток. Готово.</p>
+      <div class="box box-red" style="margin-top:12px">
+        <strong>Что не так:</strong>
+        <ul style="margin-top:6px">
+          <li>Не учитывает, что расход &laquo;прыгает&raquo; (понедельник &ne; суббота)</li>
+          <li>Страховочные дни ставятся &laquo;на глаз&raquo;</li>
+          <li>Нет защиты от резких скачков спроса</li>
+          <li>Не знает, когда следующая поставка</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card">
+      <h3>&#x2705; Умный расчёт CDA</h3>
+      <p>Считает буфер из трёх зон, каждая защищает от своего типа проблем.</p>
+      <div class="box box-green" style="margin-top:12px">
+        <strong>Что даёт:</strong>
+        <ul style="margin-top:6px">
+          <li>Автоматическая страховка на основе реальных данных</li>
+          <li>Чем нестабильнее расход &mdash; тем больше запас</li>
+          <li>Учитывает время доставки и частоту заказов</li>
+          <li>Сам адаптируется при изменении спроса</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SLIDE 2: Словарь терминов ═══ -->
+<div class="slide">
+  <h1>Словарь: что есть что</h1>
+  <p class="subtitle">Все термины из оригинальной презентации ABM &mdash; простым языком</p>
+
+  <div class="cards cards-2">
+    <div class="card">
+      <h3 style="color:var(--orange)">Основные параметры</h3>
+      <table style="width:100%;font-size:.95em;border-collapse:collapse;margin-top:8px">
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>ADU</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Средний расход в день (в штуках). В нашем приложении &mdash; это поле &laquo;Расход за период&raquo; делённое на количество дней</td></tr>
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>DOC</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Дни между поставками. Если заказываем раз в неделю &mdash; DOC = 7</td></tr>
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>DLT</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Время доставки (в днях). От момента заказа до приёмки на складе</td></tr>
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>MOQ</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Минимальный размер заказа. В нашем случае &mdash; кратность упаковки</td></tr>
+        <tr><td style="padding:6px 8px"><strong>CV</strong></td><td style="padding:6px">Коэффициент вариации &mdash; насколько &laquo;прыгает&raquo; расход. 0 = стабильный, 1 = хаотичный</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--orange)">Дополнительные (ABM)</h3>
+      <table style="width:100%;font-size:.95em;border-collapse:collapse;margin-top:8px">
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>deviation</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Отклонение расхода от среднего (в ABM считается отдельно)</td></tr>
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>VF</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Фактор вариабельности &mdash; множитель для жёлтой зоны</td></tr>
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>coef_basic</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Базовый коэффициент красной зоны (для всех товаров)</td></tr>
+        <tr><td style="padding:6px 8px;border-bottom:1px solid #eee"><strong>coef_kvi</strong></td><td style="padding:6px;border-bottom:1px solid #eee">Коэффициент для важных товаров (KVI = Key Value Item)</td></tr>
+        <tr><td style="padding:6px 8px"><strong>KDN</strong></td><td style="padding:6px">Коэффициенты дней недели &mdash; учитывают, что в пятницу расход больше, чем во вторник</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SLIDE 3: Три зоны буфера ═══ -->
+<div class="slide">
+  <h1>Три зоны буфера</h1>
+  <p class="subtitle">Буфер &mdash; это &laquo;подушка безопасности&raquo; запаса. Он состоит из трёх частей</p>
+
+  <div class="buffer-bar">
+    <div class="buf-green" style="width:50%">Зелёная зона</div>
+    <div class="buf-yellow" style="width:30%">Жёлтая</div>
+    <div class="buf-red" style="width:20%">Красная</div>
+  </div>
+
+  <div class="cards cards-3">
+    <div class="card" style="border-top:4px solid #4CAF50">
+      <h3 style="color:#2E7D32">Зелёная зона</h3>
+      <p style="font-size:.9em;color:var(--text-dim);margin-bottom:8px">Основной запас на цикл поставки</p>
+      <div class="box box-green" style="margin:8px 0">
+        <strong>= ADU &times; DOC</strong><br>
+        <span style="font-size:.9em">Расход в день &times; дни между поставками</span>
+      </div>
+      <p style="font-size:.9em"><strong>Смысл:</strong> столько товара нужно, чтобы дожить от одной поставки до следующей при обычном расходе</p>
+    </div>
+    <div class="card" style="border-top:4px solid #FDBD10">
+      <h3 style="color:#F57F17">Жёлтая зона</h3>
+      <p style="font-size:.9em;color:var(--text-dim);margin-bottom:8px">Страховка от &laquo;прыгающего&raquo; расхода</p>
+      <div class="box box-yellow" style="margin:8px 0">
+        <strong>= Зелёная зона &times; CV</strong><br>
+        <span style="font-size:.9em">Основной запас &times; коэффициент нестабильности</span>
+      </div>
+      <p style="font-size:.9em"><strong>Смысл:</strong> если расход скачет &mdash; нужен запас побольше. Стабильный товар &mdash; жёлтая зона маленькая</p>
+    </div>
+    <div class="card" style="border-top:4px solid #D62300">
+      <h3 style="color:#C62828">Красная зона</h3>
+      <p style="font-size:.9em;color:var(--text-dim);margin-bottom:8px">Защита на время доставки</p>
+      <div class="box box-red" style="margin:8px 0">
+        <strong>= ADU &times; DLT &times; коэфф.</strong><br>
+        <span style="font-size:.9em">Расход в день &times; время доставки</span>
+      </div>
+      <p style="font-size:.9em"><strong>Смысл:</strong> пока едет заказ, товар продолжает расходоваться. Красная зона &mdash; это &laquo;НЗ&raquo; на это время</p>
+    </div>
+  </div>
+
+  <div class="box box-orange" style="margin-top:8px">
+    <strong>Итого буфер = Зелёная + Жёлтая + Красная.</strong> Это целевой уровень запаса. Если реальный остаток ниже буфера &mdash; пора заказывать.
+  </div>
+</div>
+
+<!-- ═══ SLIDE 4: Пример из нашего приложения ═══ -->
+<div class="slide">
+  <h1>Пример: как считается заказ</h1>
+  <p class="subtitle">Булочки для бургеров, поставщик привозит раз в неделю, доставка 2 дня</p>
+
+  <div class="example">
+    <div class="example-title">Исходные данные</div>
+    <table>
+      <tr><th>Параметр</th><th>Значение</th><th>Откуда берём</th></tr>
+      <tr><td>ADU (расход в день)</td><td><strong>100 шт</strong></td><td>Из анализа расхода: 3000 шт за 30 дней</td></tr>
+      <tr><td>DOC (дней между поставками)</td><td><strong>7 дней</strong></td><td>Заказываем раз в неделю</td></tr>
+      <tr><td>DLT (время доставки)</td><td><strong>2 дня</strong></td><td>Заказ в понедельник &rarr; приезжает в среду</td></tr>
+      <tr><td>CV (нестабильность)</td><td><strong>0.3</strong></td><td>Расход довольно стабильный</td></tr>
+      <tr><td>Остаток на складе</td><td><strong>400 шт</strong></td><td>Из 1С или ручного ввода</td></tr>
+      <tr><td>В пути</td><td><strong>0 шт</strong></td><td>Ничего не едет</td></tr>
+    </table>
+  </div>
+
+  <div class="formula">
+    <div class="f-part f-green"><div class="f-label">Зелёная</div><div class="f-value">100 &times; 7 = <strong>700</strong></div></div>
+    <div class="f-op">+</div>
+    <div class="f-part f-yellow"><div class="f-label">Жёлтая</div><div class="f-value">700 &times; 0.3 = <strong>210</strong></div></div>
+    <div class="f-op">+</div>
+    <div class="f-part f-red"><div class="f-label">Красная</div><div class="f-value">100 &times; 2 = <strong>200</strong></div></div>
+    <div class="f-op">=</div>
+    <div class="f-part f-result"><div class="f-label">Буфер</div><div class="f-value"><strong>1 110 шт</strong></div></div>
+  </div>
+
+  <div class="formula">
+    <div class="f-part" style="background:#e3f2fd"><div class="f-label">Буфер</div><div class="f-value">1 110</div></div>
+    <div class="f-op">&minus;</div>
+    <div class="f-part" style="background:#fff3e0"><div class="f-label">Остаток</div><div class="f-value">400</div></div>
+    <div class="f-op">&minus;</div>
+    <div class="f-part" style="background:#fff3e0"><div class="f-label">В пути</div><div class="f-value">0</div></div>
+    <div class="f-op">=</div>
+    <div class="f-part f-result"><div class="f-label">Заказ</div><div class="f-value"><strong>710 шт</strong></div></div>
+  </div>
+
+  <div class="box box-blue">
+    <strong>Результат:</strong> Нужно заказать 710 штук. С округлением по кратности упаковки (например, по 50 шт) &mdash; получится 750 шт (15 коробок).
+  </div>
+</div>
+
+<!-- ═══ SLIDE 5: Полный алгоритм ABM ═══ -->
+<div class="slide">
+  <h1>Полный алгоритм ABM (оригинал)</h1>
+  <p class="subtitle">Все шаги расчёта из презентации ABM Inventory &mdash; что и когда считается</p>
+
+  <div class="timeline">
+    <div class="tl-step">
+      <div class="tl-num" style="background:#4CAF50">1</div>
+      <div class="tl-content">
+        <strong>Считаем буфер (три зоны)</strong>
+        <p style="font-size:.9em">Зелёная = max(MOQ, ADU&times;(DOC+DLT)). Жёлтая = max(ADU+dev, (ADU+dev)&times;ln(DOC+DLT+1)&times;VF). Красная = coef &times; (ADU+dev)</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#FF9800">2</div>
+      <div class="tl-content">
+        <strong>Считаем потребность</strong>
+        <p style="font-size:.9em">Потребность = ADU&times;(DOC+DLT) + Жёлтая + Красная + доп.резервы &minus; Остаток &minus; В пути</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#D62300">3</div>
+      <div class="tl-content">
+        <strong>Проверяем два условия</strong>
+        <p style="font-size:.9em"><strong>Условие А:</strong> Потребность &gt; 0 И расход за время доставки (ADU&times;DLT) &lt; Остаток+В пути &rarr; Заказ по полной формуле<br>
+        <strong>Условие Б:</strong> Потребность &gt; 0 И расход за время доставки &ge; Остаток+В пути &rarr; Заказ по сокращённой формуле (без остатков)</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#1565C0">4</div>
+      <div class="tl-content">
+        <strong>Проверяем порог MOQ</strong>
+        <p style="font-size:.9em">Если потребность &lt; MOQ &times; Порог &rarr; не заказываем (слишком мало). Если потребность &ge; MOQ &times; Порог &rarr; заказываем не менее MOQ</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#7B1FA2">5</div>
+      <div class="tl-content">
+        <strong>Округляем и считаем итоговый буфер</strong>
+        <p style="font-size:.9em">Округление по математическим правилам. Итоговый буфер = Заказ + Остаток + В пути (для отображения на графике)</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box box-gray">
+    <strong>Есть ещё:</strong> коэффициенты дней недели (расход в пятницу != вторник), расчёт для акций (повышенный спрос), и для последнего заказа перед окончанием акции. Это продвинутые функции, которые можно добавить позже.
+  </div>
+</div>
+
+<!-- ═══ SLIDE 6: Два условия заказа ═══ -->
+<div class="slide">
+  <h1>Два сценария: когда остатка хватает и когда нет</h1>
+  <p class="subtitle">ABM проверяет, хватит ли товара на складе, пока едет текущий заказ</p>
+
+  <div class="cards cards-2">
+    <div class="card" style="border-top:4px solid #4CAF50">
+      <h3 style="color:#2E7D32">Остатка хватает до прихода</h3>
+      <p style="font-size:.9em;color:var(--text-dim);margin-bottom:10px">ADU &times; DLT &lt; Остаток + В пути</p>
+      <div class="box box-green">
+        <strong>Полная формула:</strong><br>
+        Заказ = ADU&times;(DOC+DLT) + Жёлтая + Красная &minus; Остаток &minus; В пути
+      </div>
+      <div class="example" style="margin-top:10px">
+        <div class="example-title">Пример: булочки</div>
+        <p style="font-size:.9em">ADU=100, DLT=2, остаток=400.<br>
+        100&times;2 = 200 &lt; 400 &#x2714; Остатка хватит!<br>
+        Заказ = 100&times;(7+2) + 210 + 200 &minus; 400 = <strong>910</strong></p>
+      </div>
+    </div>
+    <div class="card" style="border-top:4px solid #D62300">
+      <h3 style="color:#C62828">Остатка НЕ хватает до прихода</h3>
+      <p style="font-size:.9em;color:var(--text-dim);margin-bottom:10px">ADU &times; DLT &ge; Остаток + В пути</p>
+      <div class="box box-red">
+        <strong>Сокращённая формула:</strong><br>
+        Заказ = ADU&times;DOC + (Жёлтая+Красная)&times;DOC/(DOC+DLT)
+      </div>
+      <div class="example" style="margin-top:10px">
+        <div class="example-title">Пример: булочки (мало осталось)</div>
+        <p style="font-size:.9em">ADU=100, DLT=2, остаток=150.<br>
+        100&times;2 = 200 &gt; 150 &#x274C; Не хватит!<br>
+        Заказ = 100&times;7 + (210+200)&times;7/9 = <strong>1 019</strong></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box box-orange">
+    <strong>Зачем два варианта?</strong> Когда остатка мало &mdash; не имеет смысла его вычитать из заказа, нужно заказать &laquo;с запасом&raquo;. Система сама решает, какой вариант использовать.
+  </div>
+</div>
+
+<!-- ═══ SLIDE 7: ABM vs Наше сравнение ═══ -->
+<div class="slide">
+  <h1>Что у нас есть vs что в ABM</h1>
+  <p class="subtitle">Сопоставление: наш текущий расчёт и полный алгоритм ABM Inventory</p>
+
+  <table class="check-table">
+    <tr><th style="width:35%">Функция</th><th style="width:30%">ABM Inventory</th><th style="width:20%">Наше приложение</th><th style="width:15%">Статус</th></tr>
+    <tr><td><strong>ADU (средний расход)</strong></td><td>Автоматический расчёт по истории продаж</td><td>Есть: таблица product_adu, расчёт на сервере</td><td><span class="status status-done">Готово</span></td></tr>
+    <tr><td><strong>CV (нестабильность)</strong></td><td>Считается по истории</td><td>Есть: рассчитывается вместе с ADU</td><td><span class="status status-done">Готово</span></td></tr>
+    <tr><td><strong>DOC (дни между поставками)</strong></td><td>Из графика поставок</td><td>Вычисляется из настроек заказа</td><td><span class="status status-done">Готово</span></td></tr>
+    <tr><td><strong>DLT (время доставки)</strong></td><td>Настройка на поставщике</td><td>Параметр в настройках заказа</td><td><span class="status status-done">Готово</span></td></tr>
+    <tr><td><strong>Зелёная зона</strong></td><td>max(MOQ, ADU&times;(DOC+DLT))</td><td>ADU &times; DOC (упрощённо)</td><td><span class="status status-partial">Частично</span></td></tr>
+    <tr><td><strong>Жёлтая зона</strong></td><td>Сложная формула с ln() и VF</td><td>Зелёная &times; CV (упрощённо)</td><td><span class="status status-partial">Частично</span></td></tr>
+    <tr><td><strong>Красная зона</strong></td><td>coef &times; (ADU + deviation)</td><td>ADU &times; DLT &times; коэфф. безопасности</td><td><span class="status status-partial">Частично</span></td></tr>
+    <tr><td><strong>Буфер-бар (визуализация)</strong></td><td>График SKU с зонами</td><td>Полоска зелёный/жёлтый/красный + маркер остатка</td><td><span class="status status-done">Готово</span></td></tr>
+    <tr><td><strong>Два условия заказа</strong></td><td>Полная и сокращённая формулы</td><td>Одна формула (буфер &minus; остаток)</td><td><span class="status status-todo">Нет</span></td></tr>
+    <tr><td><strong>Порог MOQ</strong></td><td>Не заказываем, если мало</td><td>Нет порога &mdash; всегда округляем вверх</td><td><span class="status status-todo">Нет</span></td></tr>
+    <tr><td><strong>Коэфф. дней недели</strong></td><td>7 коэффициентов на товар</td><td>Нет</td><td><span class="status status-todo">Нет</span></td></tr>
+    <tr><td><strong>Расчёт для акций</strong></td><td>Отдельная ADU для акций</td><td>Нет (нет акций в системе)</td><td><span class="status status-todo">Нет</span></td></tr>
+    <tr><td><strong>Простой расчёт (без буфера)</strong></td><td>Нет &mdash; всегда буфер</td><td>Есть: расход &times; дни &minus; остаток</td><td><span class="status status-done">Готово</span></td></tr>
+  </table>
+</div>
+
+<!-- ═══ SLIDE 8: Наш CDA режим подробно ═══ -->
+<div class="slide">
+  <h1>Как CDA работает в нашем приложении</h1>
+  <p class="subtitle">Что сейчас происходит, когда включаешь режим CDA в заказе</p>
+
+  <div class="timeline">
+    <div class="tl-step">
+      <div class="tl-num" style="background:#1565C0">1</div>
+      <div class="tl-content">
+        <strong>Загружаются данные ADU из базы</strong>
+        <p style="font-size:.9em">Для каждого товара в заказе система берёт из таблицы product_adu: средний расход (ADU) и коэффициент нестабильности (CV). Эти данные рассчитаны заранее по истории заказов.</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#4CAF50">2</div>
+      <div class="tl-content">
+        <strong>Считаются три зоны буфера</strong>
+        <p style="font-size:.9em">Зелёная = ADU &times; DOC. Жёлтая = Зелёная &times; CV (макс. 1.0). Красная = ADU &times; DLT &times; коэфф. безопасности. Всё в текущих единицах (штуки или коробки).</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#FF9800">3</div>
+      <div class="tl-content">
+        <strong>Вычисляется заказ</strong>
+        <p style="font-size:.9em">Заказ = Буфер &minus; (Остаток + В пути &minus; Расход до поставки). Если результат отрицательный &mdash; заказ = 0 (запаса и так хватает).</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#D62300">4</div>
+      <div class="tl-content">
+        <strong>Округление по кратности</strong>
+        <p style="font-size:.9em">Результат округляется вверх до кратности упаковки. Например, при кратности 50 шт: 710 &rarr; 750.</p>
+      </div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-num" style="background:#7B1FA2">5</div>
+      <div class="tl-content">
+        <strong>Показываем подсказку при наведении</strong>
+        <p style="font-size:.9em">В подсказке видно: суточный расход, дней до прихода, остаток к приходу, зелёная/жёлтая/красная зоны, итого буфер и итоговый заказ.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SLIDE 9: Разница формул ═══ -->
+<div class="slide">
+  <h1>Разница формул: ABM vs Наша</h1>
+  <p class="subtitle">Где мы упростили и почему это пока нормально</p>
+
+  <div class="compare">
+    <div class="compare-abm">
+      <h3>ABM Inventory (оригинал)</h3>
+      <div class="box box-gray">
+        <strong>Зелёная:</strong> max(MOQ, ADU&times;(DOC+DLT))<br>
+        <span style="font-size:.85em;color:#888">Включает время доставки в зелёную зону</span>
+      </div>
+      <div class="box box-gray">
+        <strong>Жёлтая:</strong> max(ADU+dev, (ADU+dev)&times;ln(DOC+DLT+1)&times;VF)<br>
+        <span style="font-size:.85em;color:#888">Натуральный логарифм + фактор вариабельности</span>
+      </div>
+      <div class="box box-gray">
+        <strong>Красная:</strong> coef_basic &times; (ADU + deviation)<br>
+        <span style="font-size:.85em;color:#888">Отдельный коэффициент, учитывает отклонение</span>
+      </div>
+    </div>
+    <div class="compare-us">
+      <h3>Наше приложение</h3>
+      <div class="box box-green">
+        <strong>Зелёная:</strong> ADU &times; DOC<br>
+        <span style="font-size:.85em;color:#666">Без DLT (он в красной зоне) и без MOQ</span>
+      </div>
+      <div class="box box-green">
+        <strong>Жёлтая:</strong> Зелёная &times; min(CV, 1.0)<br>
+        <span style="font-size:.85em;color:#666">Проще, но тот же смысл: нестабильность = больше запаса</span>
+      </div>
+      <div class="box box-green">
+        <strong>Красная:</strong> ADU &times; DLT &times; safetyCoef<br>
+        <span style="font-size:.85em;color:#666">Время доставки &times; расход &times; настраиваемый коэффициент</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="box box-blue">
+    <strong>Итог:</strong> Наша формула проще, но покрывает 80% случаев. Главное отличие &mdash; ABM включает DLT в зелёную зону и использует более сложную математику для жёлтой. На практике для фастфуда с частыми поставками разница небольшая.
+  </div>
+</div>
+
+<!-- ═══ SLIDE 10: Что доработать ═══ -->
+<div class="slide">
+  <h1>Что осталось доработать</h1>
+  <p class="subtitle">Приоритеты: от простого к сложному</p>
+
+  <div class="cards cards-3">
+    <div class="card" style="border-left:4px solid #D62300">
+      <h3 style="color:#C62828">Приоритет 1 (легко)</h3>
+      <ul style="font-size:.9em">
+        <li><strong>Зелёная зона:</strong> добавить DLT &rarr; ADU&times;(DOC+DLT)</li>
+        <li><strong>MOQ в зелёной:</strong> max(MOQ, ADU&times;(DOC+DLT))</li>
+        <li><strong>Два условия заказа:</strong> проверка &laquo;хватит ли остатка до прихода&raquo;</li>
+      </ul>
+      <p style="font-size:.85em;color:var(--text-dim);margin-top:8px">Это несколько строк кода в calculations.js</p>
+    </div>
+    <div class="card" style="border-left:4px solid #FF9800">
+      <h3 style="color:#E65100">Приоритет 2 (средне)</h3>
+      <ul style="font-size:.9em">
+        <li><strong>Жёлтая зона по ABM:</strong> формула с логарифмом</li>
+        <li><strong>deviation</strong> (отклонение) в жёлтой и красной зонах</li>
+        <li><strong>Порог MOQ:</strong> не заказывать, если потребность слишком маленькая</li>
+        <li><strong>DLT и DOC в справочниках</strong> поставщиков</li>
+      </ul>
+      <p style="font-size:.85em;color:var(--text-dim);margin-top:8px">Нужны новые поля в БД и доработка расчёта</p>
+    </div>
+    <div class="card" style="border-left:4px solid #1565C0">
+      <h3 style="color:#1565C0">Приоритет 3 (на будущее)</h3>
+      <ul style="font-size:.9em">
+        <li><strong>Коэффициенты дней недели</strong> (расход пн != сб)</li>
+        <li><strong>Товары KVI</strong> (ключевые, с повышенной красной зоной)</li>
+        <li><strong>Акции</strong> (временно повышенный спрос)</li>
+        <li><strong>Автоподстройка буфера</strong> при изменении спроса</li>
+      </ul>
+      <p style="font-size:.85em;color:var(--text-dim);margin-top:8px">Продвинутые функции, когда базовый CDA стабильно работает</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SLIDE 11: Итог ═══ -->
+<div class="slide">
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+    <h1>Итого</h1>
+    <p class="subtitle" style="max-width:700px">CDA &mdash; это не магия, а понятная система из трёх &laquo;подушек безопасности&raquo;. Базовый вариант уже работает, улучшения можно внедрять поэтапно.</p>
+    <div class="cards cards-3" style="max-width:800px;margin-top:20px">
+      <div class="card" style="text-align:center;border-top:4px solid #4CAF50">
+        <div class="big-num-green">7</div>
+        <p style="font-size:.9em;color:var(--text-dim)">из 12 функций ABM уже есть</p>
+      </div>
+      <div class="card" style="text-align:center;border-top:4px solid #FF9800">
+        <div class="big-num">3</div>
+        <p style="font-size:.9em;color:var(--text-dim)">доработки первого приоритета</p>
+      </div>
+      <div class="card" style="text-align:center;border-top:4px solid #1565C0">
+        <div style="font-family:'Flame',sans-serif;font-size:2.6em;color:#42A5F5">80%</div>
+        <p style="font-size:.9em;color:var(--text-dim)">случаев покрывает текущий расчёт</p>
+      </div>
+    </div>
+    <p style="margin-top:32px;font-family:'Flame',sans-serif;font-size:1.4em;color:var(--brown)">Supply Department</p>
+  </div>
+</div>
+
+<!-- NAV -->
+<div class="dots" id="dots"></div>
+<div class="nav">
+  <button id="prevBtn" onclick="go(-1)" disabled>&larr;</button>
+  <button id="nextBtn" onclick="go(1)">&rarr;</button>
+</div>
+<div class="counter-text" id="counter"></div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+let cur = 0;
+function show(n) {
+  slides[cur].classList.remove('active');
+  cur = Math.max(0, Math.min(n, slides.length - 1));
+  slides[cur].classList.add('active');
+  document.getElementById('prevBtn').disabled = cur === 0;
+  document.getElementById('nextBtn').disabled = cur === slides.length - 1;
+  document.getElementById('counter').textContent = (cur + 1) + ' / ' + slides.length;
+  document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === cur));
+}
+function go(d) { show(cur + d); }
+// Dots
+const dotsEl = document.getElementById('dots');
+slides.forEach((_, i) => {
+  const d = document.createElement('button');
+  d.className = 'dot' + (i === 0 ? ' active' : '');
+  d.onclick = () => show(i);
+  dotsEl.appendChild(d);
+});
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(1); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+});
+// Touch
+let tx = 0;
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+document.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - tx;
+  if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1);
+});
+show(0);
+</script>
+</body>
+</html>

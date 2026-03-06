@@ -357,8 +357,9 @@ const itemsWithOrderCount = computed(() => {
 
 // Показать подсказку «можно скрыть» когда параметры заполнены
 const showCollapseHint = ref(false);
+let _collapseHintTimer = null;
 watch(paramsReady, (ready) => {
-  if (ready && settingsExpanded.value) { showCollapseHint.value = true; setTimeout(() => { showCollapseHint.value = false; }, 4000); }
+  if (ready && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); }
 });
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
@@ -466,6 +467,7 @@ onUnmounted(() => {
   document.removeEventListener('click', closeShareDropdown);
   document.removeEventListener('click', closeSearchDropdown);
   clearTimeout(searchTimer);
+  clearTimeout(_collapseHintTimer);
   if (draftTickTimer) clearInterval(draftTickTimer);
   window.removeEventListener('beforeunload', onBeforeUnload);
 });

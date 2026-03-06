@@ -13,59 +13,44 @@ export const useHistoryStore = defineStore('history', () => {
   const error   = ref(null);
   const hasMoreOrders = ref(false);
   const hasMorePlans  = ref(false);
-  let _loadRequestId = 0;
 
   const userStore  = useUserStore();
 
-  // ─── Загрузить историю ────────────────────────────────────────────────────
-  async function loadOrders({ legalEntity, supplier = '', type = 'orders', reset = true, dateFrom = '', dateTo = '', author = '', search = '' } = {}) {
-    if (type === 'plans') return loadPlans({ legalEntity, supplier, reset, dateFrom, dateTo });
+  // ─── Общая функция пагинированной загрузки ──────────────────────────────────
+  let _requestIds = { orders: 0, plans: 0 };
 
-    const myRequestId = reset ? ++_loadRequestId : _loadRequestId;
+  async function _loadPaginated(type, { reset, buildQuery }) {
+    const listRef = type === 'orders' ? orders : plans;
+    const hasMoreRef = type === 'orders' ? hasMoreOrders : hasMorePlans;
+    const myRequestId = reset ? ++_requestIds[type] : _requestIds[type];
 
     if (reset) {
       loading.value = true;
-      orders.value = [];
+      listRef.value = [];
     } else {
-      if (loadingMore.value) return orders.value;
+      if (loadingMore.value) return listRef.value;
       loadingMore.value = true;
     }
     error.value = null;
 
-    const offset = reset ? 0 : orders.value.length;
+    const offset = reset ? 0 : listRef.value.length;
 
     try {
-      let query = db
-        .from('orders')
-        .select(`id, delivery_date, today_date, supplier, legal_entity,
-                 safety_days, period_days, unit, note, created_at, created_by,
-                 has_transit, show_stock_column, received_at, updated_at,
-                 order_items(sku, name, qty_boxes, qty_per_box, multiplicity, consumption_period, stock, transit)`)
-        .order('delivery_date', { ascending: false })
-        .limit(PAGE_SIZE)
-        .offset(offset);
-
-      if (legalEntity) query = query.eq('legal_entity', legalEntity);
-      if (supplier)    query = query.eq('supplier', supplier);
-      if (dateFrom)    query = query.gte('delivery_date', dateFrom);
-      if (dateTo)      query = query.lte('delivery_date', dateTo);
-      if (author)      query = query.eq('created_by', author);
-      if (search)      query = query.rawParam('search', search);
-
+      const query = buildQuery(offset);
       const { data, error: err } = await query;
 
-      if (myRequestId !== _loadRequestId) return orders.value;
+      if (myRequestId !== _requestIds[type]) return listRef.value;
       if (err) { error.value = err; return []; }
 
       const fetched = data || [];
-      hasMoreOrders.value = fetched.length >= PAGE_SIZE;
+      hasMoreRef.value = fetched.length >= PAGE_SIZE;
 
       if (reset) {
-        orders.value = fetched;
+        listRef.value = fetched;
       } else {
-        orders.value.push(...fetched);
+        listRef.value.push(...fetched);
       }
-      return orders.value;
+      return listRef.value;
     } catch (e) {
       error.value = e.message || 'Ошибка загрузки';
       return [];
@@ -75,54 +60,51 @@ export const useHistoryStore = defineStore('history', () => {
     }
   }
 
+  // ─── Загрузить историю ────────────────────────────────────────────────────
+  async function loadOrders({ legalEntity, supplier = '', type = 'orders', reset = true, dateFrom = '', dateTo = '', author = '', search = '' } = {}) {
+    if (type === 'plans') return loadPlans({ legalEntity, supplier, reset, dateFrom, dateTo });
+
+    return _loadPaginated('orders', {
+      reset,
+      buildQuery: (offset) => {
+        let query = db
+          .from('orders')
+          .select(`id, delivery_date, today_date, supplier, legal_entity,
+                   safety_days, period_days, unit, note, created_at, created_by,
+                   has_transit, show_stock_column, received_at, updated_at,
+                   order_items(sku, name, qty_boxes, qty_per_box, multiplicity, consumption_period, stock, transit)`)
+          .order('delivery_date', { ascending: false })
+          .limit(PAGE_SIZE)
+          .offset(offset);
+
+        if (legalEntity) query = query.eq('legal_entity', legalEntity);
+        if (supplier)    query = query.eq('supplier', supplier);
+        if (dateFrom)    query = query.gte('delivery_date', dateFrom);
+        if (dateTo)      query = query.lte('delivery_date', dateTo);
+        if (author)      query = query.eq('created_by', author);
+        if (search)      query = query.rawParam('search', search);
+        return query;
+      },
+    });
+  }
+
   // ─── Загрузить историю планов ─────────────────────────────────────────────
-  let _planRequestId = 0;
-
   async function loadPlans({ legalEntity, supplier = '', reset = true, dateFrom = '', dateTo = '' } = {}) {
-    const myRequestId = reset ? ++_planRequestId : _planRequestId;
+    return _loadPaginated('plans', {
+      reset,
+      buildQuery: (offset) => {
+        let query = db.from('plans').select('*')
+          .order('created_at', { ascending: false })
+          .limit(PAGE_SIZE)
+          .offset(offset);
 
-    if (reset) {
-      loading.value = true;
-      plans.value = [];
-    } else {
-      if (loadingMore.value) return plans.value;
-      loadingMore.value = true;
-    }
-    error.value = null;
-
-    const offset = reset ? 0 : plans.value.length;
-
-    try {
-      let query = db.from('plans').select('*')
-        .order('created_at', { ascending: false })
-        .limit(PAGE_SIZE)
-        .offset(offset);
-
-      if (legalEntity) query = query.eq('legal_entity', legalEntity);
-      if (supplier)    query = query.eq('supplier', supplier);
-      if (dateFrom)    query = query.gte('created_at', dateFrom);
-      if (dateTo)      query = query.lte('created_at', dateTo + ' 23:59:59');
-
-      const { data, error: err } = await query;
-      if (myRequestId !== _planRequestId) return plans.value;
-      if (err) { error.value = err; return []; }
-
-      const fetched = data || [];
-      hasMorePlans.value = fetched.length >= PAGE_SIZE;
-
-      if (reset) {
-        plans.value = fetched;
-      } else {
-        plans.value.push(...fetched);
-      }
-      return plans.value;
-    } catch (e) {
-      error.value = e.message || 'Ошибка загрузки';
-      return [];
-    } finally {
-      loading.value = false;
-      loadingMore.value = false;
-    }
+        if (legalEntity) query = query.eq('legal_entity', legalEntity);
+        if (supplier)    query = query.eq('supplier', supplier);
+        if (dateFrom)    query = query.gte('created_at', dateFrom);
+        if (dateTo)      query = query.lte('created_at', dateTo + ' 23:59:59');
+        return query;
+      },
+    });
   }
 
   // ─── Подгрузить ещё ────────────────────────────────────────────────────────

@@ -165,6 +165,7 @@ const CUSTOMER_MAP = {
   'сбарро': 'Пицца Стар',
   'dodo': 'Пицца Стар',
   'sbarro': 'Пицца Стар',
+  'бургер бк': 'Бургер БК',
 };
 
 function normalizeCustomer(raw) {
@@ -216,10 +217,9 @@ const enrichedData = computed(() =>
 
 const counts = computed(() => {
   let expired = 0, days7 = 0, days14 = 0, days30 = 0;
-  // Считаем по данным с учётом текущего фильтра заказчика (чтобы KPI соответствовали видимым данным)
-  const base = filterCustomer.value
-    ? enrichedData.value.filter(r => r.customer === filterCustomer.value)
-    : enrichedData.value;
+  let base = enrichedData.value;
+  if (filterCustomer.value) base = base.filter(r => r.customer === filterCustomer.value);
+  if (filterWarehouse.value) base = base.filter(r => r.warehouse === filterWarehouse.value);
   for (const r of base) {
     if (r.days_left == null) continue;
     if (r.days_left < 0) expired++;
@@ -388,7 +388,9 @@ async function handleUpload() {
       const items = await parseStockMailing(file);
       if (!items.length) { toastStore.error('Не удалось распознать данные в файле'); return; }
       const userName = userStore.currentUser?.name || '';
-      const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const now = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
       const payload = items.map(item => ({ ...item, uploaded_at: now, uploaded_by: userName }));
       const { data, error } = await db.rpc('replace_stock_malling', { items: payload });
       if (error) throw error;

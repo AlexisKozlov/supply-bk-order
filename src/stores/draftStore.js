@@ -78,14 +78,14 @@ export const useDraftStore = defineStore('draft', () => {
     // Не сохраняем если нет товаров
     if (!orderStore.items || orderStore.items.length === 0) return;
     // JSON.stringify автоматически конвертирует Date → ISO строки
-    const draft = {
-      settings: JSON.parse(JSON.stringify(toRaw(orderStore.settings))),
-      items: JSON.parse(JSON.stringify(toRaw(orderStore.items))),
+    const json = JSON.stringify({
+      settings: toRaw(orderStore.settings),
+      items: toRaw(orderStore.items),
       timestamp: new Date().toISOString(),
-    };
-    const json = JSON.stringify(draft);
+    });
     try { localStorage.setItem(DRAFT_KEY, json); } catch(e) { /* хранилище переполнено */ }
-    idbSet(DRAFT_KEY, draft);
+    // В IndexedDB сохраняем распарсенную копию (структурированный клон — без реактивности)
+    try { idbSet(DRAFT_KEY, JSON.parse(json)); } catch(e) { /* ignore */ }
     lastSaved.value = new Date();
   }
 

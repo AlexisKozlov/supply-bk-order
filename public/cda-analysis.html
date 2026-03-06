@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Анализ алгоритма CDA для фастфуда</title>
+<style>
+  @font-face { font-family: 'Flame'; src: url('/Flame-Regular.otf'); font-weight: 400; }
+  @font-face { font-family: 'Flame'; src: url('/Flame-Bold.otf'); font-weight: 700; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Flame', 'Segoe UI', system-ui, sans-serif;
+    background: #f4f4f4;
+    color: #333;
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  .slide {
+    display: none;
+    flex-direction: column;
+    padding: 40px 60px;
+    height: 100vh;
+    overflow-y: auto;
+    animation: fadeIn 0.3s ease;
+  }
+  .slide.active { display: flex; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  h1 { font-size: 2.4em; font-weight: 700; margin-bottom: 14px; color: #d35400; line-height: 1.2; }
+  h2 { font-size: 1.8em; font-weight: 700; margin-bottom: 12px; color: #d35400; }
+  h3 { font-size: 1.2em; font-weight: 700; margin-bottom: 6px; color: #555; }
+  p, li { font-size: 1.1em; line-height: 1.55; margin-bottom: 6px; }
+  ul { padding-left: 24px; margin-bottom: 10px; }
+  li { margin-bottom: 4px; }
+  .subtitle { font-size: 1.3em; color: #888; margin-bottom: 20px; }
+
+  /* Блоки */
+  .box { padding: 14px 18px; border-radius: 10px; margin: 10px 0; font-size: 1.05em; line-height: 1.5; }
+  .box-orange { background: #fff3e0; border-left: 5px solid #e67e22; }
+  .box-green  { background: #e8f5e9; border-left: 5px solid #43a047; }
+  .box-red    { background: #ffeaea; border-left: 5px solid #e53935; }
+  .box-yellow { background: #fffde7; border-left: 5px solid #f9a825; }
+  .box-blue   { background: #e3f2fd; border-left: 5px solid #1e88e5; }
+  .box-gray   { background: #f5f5f5; border-left: 5px solid #9e9e9e; }
+  .box-green strong { color: #2e7d32; }
+  .box-red strong { color: #c62828; }
+  .box-yellow strong { color: #e65100; }
+
+  /* Оригинальная формула */
+  .orig {
+    background: #fff;
+    border: 2px solid #b0bec5;
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin: 8px 0;
+    font-size: 0.95em;
+    color: #455a64;
+  }
+  .orig-label {
+    font-size: 0.8em;
+    font-weight: 700;
+    color: #78909c;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .orig code {
+    font-family: 'Courier New', monospace;
+    font-size: 1.05em;
+    color: #37474f;
+  }
+
+  /* Словарь терминов */
+  .dict {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 14px;
+    margin: 8px 0;
+    font-size: 0.95em;
+  }
+  .dict-term {
+    font-weight: 700;
+    color: #d35400;
+    font-family: 'Courier New', monospace;
+    white-space: nowrap;
+  }
+  .dict-def { color: #555; }
+
+  /* Зоны */
+  .zones { display: flex; gap: 14px; margin: 12px 0; }
+  .zone { flex: 1; padding: 14px; border-radius: 12px; text-align: center; }
+  .zone h3 { margin-bottom: 4px; font-size: 1.1em; }
+  .zone p { font-size: 0.95em; margin: 0; }
+  .z-green  { background: #e8f5e9; border: 2px solid #66bb6a; }
+  .z-yellow { background: #fffde7; border: 2px solid #ffca28; }
+  .z-red    { background: #ffebee; border: 2px solid #ef5350; }
+  .z-green h3  { color: #2e7d32; }
+  .z-yellow h3 { color: #f57f17; }
+  .z-red h3    { color: #c62828; }
+
+  /* Колонки */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 10px 0; }
+  .col { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+
+  /* Пример */
+  .example { background: #fff; border: 2px dashed #ccc; border-radius: 10px; padding: 14px 16px; margin: 8px 0; }
+  .example-title { font-weight: 700; color: #d35400; font-size: 0.95em; margin-bottom: 4px; }
+
+  /* Бейджи */
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.85em; font-weight: 700; }
+  .b-yes   { background: #43a047; color: #fff; }
+  .b-no    { background: #e53935; color: #fff; }
+  .b-later { background: #f9a825; color: #fff; }
+  .b-maybe { background: #78909c; color: #fff; }
+
+  /* Таблица */
+  .tbl { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 1em; }
+  .tbl th { background: #d35400; color: #fff; padding: 8px 12px; text-align: left; }
+  .tbl td { padding: 8px 12px; border-bottom: 1px solid #eee; background: #fff; }
+  .tbl tr:last-child td { border-bottom: none; }
+
+  /* Шаги */
+  .steps { counter-reset: step; list-style: none; padding-left: 0; }
+  .steps li { counter-increment: step; padding-left: 40px; position: relative; margin-bottom: 10px; }
+  .steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 2px;
+    width: 28px; height: 28px;
+    background: #d35400; color: #fff; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.85em; font-weight: 700;
+  }
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.8em; font-weight: 700; vertical-align: middle; margin-left: 6px; }
+  .t-now { background: #43a047; color: #fff; }
+  .t-later { background: #f9a825; color: #fff; }
+
+  /* Навигация */
+  .nav {
+    position: fixed; bottom: 20px; right: 30px;
+    display: flex; gap: 8px; align-items: center; z-index: 100;
+  }
+  .nav button {
+    background: #d35400; border: none; color: #fff;
+    padding: 9px 20px; border-radius: 8px; font-size: 0.95em;
+    cursor: pointer; font-family: inherit; transition: 0.2s;
+  }
+  .nav button:hover { background: #b84700; }
+  .nav button:disabled { background: #ccc; cursor: default; }
+  .counter { color: #999; font-size: 0.9em; padding: 0 6px; }
+
+  @media (max-width: 900px) {
+    .slide { padding: 20px 16px; }
+    h1 { font-size: 1.6em; }
+    h2 { font-size: 1.25em; }
+    p, li { font-size: 0.95em; }
+    .zones { flex-direction: column; }
+    .cols { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 1. Титульный -->
+<div class="slide active">
+  <h1>Умный расчёт заказов<br>для Бургер Кинг</h1>
+  <p class="subtitle">Разбираем алгоритм CDA из системы ABM Inventory:<br>что из него полезно для наших ресторанов?</p>
+  <div class="box box-orange">
+    <strong>CDA</strong> (Consumption Driven Algorithm) — готовый метод расчёта заказов, основанный на реальном потреблении. Используется в системе ABM Inventory.
+  </div>
+  <p style="color:#aaa; margin-top: 12px;">Март 2026</p>
+</div>
+
+<!-- 2. Словарь терминов -->
+<div class="slide">
+  <h2>Словарь: термины CDA простым языком</h2>
+  <p>В презентации ABM используются сокращения. Вот что они значат:</p>
+
+  <div class="cols">
+    <div class="col">
+      <h3>Основные параметры</h3>
+      <div class="dict">
+        <span class="dict-term">ADU</span>
+        <span class="dict-def">Средний расход в день (Average Daily Usage)</span>
+        <span class="dict-term">DOC</span>
+        <span class="dict-def">Дней между заказами — как часто заказываем (Days of Coverage)</span>
+        <span class="dict-term">DLT</span>
+        <span class="dict-def">Срок доставки — сколько дней едет товар (Delivery Lead Time)</span>
+        <span class="dict-term">MOQ</span>
+        <span class="dict-def">Минимальный заказ — меньше поставщик не привезёт (Minimum Order Quantity)</span>
+        <span class="dict-term">USQ</span>
+        <span class="dict-def">Кратность заказа — заказ округляется до этого числа</span>
+      </div>
+    </div>
+    <div class="col">
+      <h3>Страховочные параметры</h3>
+      <div class="dict">
+        <span class="dict-term">deviation</span>
+        <span class="dict-def">Отклонение — на сколько расход обычно «гуляет» от среднего</span>
+        <span class="dict-term">VF</span>
+        <span class="dict-def">Фактор вариабельности — насколько «скачет» расход (0 = стабильно, 1 = сильно)</span>
+        <span class="dict-term">coef_basic</span>
+        <span class="dict-def">Базовый коэффициент страховки для всех товаров</span>
+        <span class="dict-term">coef_kvi</span>
+        <span class="dict-def">Доп. коэффициент для ключевых товаров (KVI = Key Value Items)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h3>Запасы</h3>
+      <div class="dict">
+        <span class="dict-term">Остаток</span>
+        <span class="dict-def">Сколько товара на складе сейчас (вечер вчера)</span>
+        <span class="dict-term">В пути</span>
+        <span class="dict-def">Уже заказано, но ещё не приехало</span>
+        <span class="dict-term">ЕЗ</span>
+        <span class="dict-def">Единоразовый заказ — разовая потребность сверх нормы</span>
+        <span class="dict-term">Резерв</span>
+        <span class="dict-def">Зарезервировано под конкретного клиента (нам не нужно)</span>
+      </div>
+    </div>
+    <div class="col">
+      <h3>Для акций</h3>
+      <div class="dict">
+        <span class="dict-term">ADU_P</span>
+        <span class="dict-def">Прогнозируемый расход во время акции (повышенный)</span>
+        <span class="dict-term">КДН</span>
+        <span class="dict-def">Коэффициенты дней недели — насколько каждый день сильнее/слабее среднего</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 3. Как считаем сейчас -->
+<div class="slide">
+  <h2>Как мы считаем заказ сейчас</h2>
+  <div class="box box-blue">
+    Приложение берёт <strong>средний расход</strong> за период, умножает на <strong>страховочные дни</strong> и вычитает то, что уже есть на складе. Просто и понятно.
+  </div>
+
+  <h3 style="margin-top: 12px;">Но есть 4 проблемы:</h3>
+  <div class="cols">
+    <div class="col">
+      <div class="box-red box"><strong>1. Одинаковая страховка для всех</strong><br>Булочки расходуются стабильно, а соус барбекю — скачками. Но страховочных дней у них поровну.</div>
+    </div>
+    <div class="col">
+      <div class="box-red box"><strong>2. Не учитываются дни недели</strong><br>В пятницу-субботу продаём в 1,5–2 раза больше, чем во вторник. Формула считает все дни одинаково.</div>
+    </div>
+    <div class="col">
+      <div class="box-red box"><strong>3. Одна формула на всё</strong><br>Неважно, хватает товара до поставки или нет — расчёт одинаковый. А должен быть разный.</div>
+    </div>
+    <div class="col">
+      <div class="box-red box"><strong>4. Всё вручную</strong><br>Человек сам решает, сколько дней страховки ставить. Приложение не подсказывает.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 4. Идея «Светофор» -->
+<div class="slide">
+  <h2>Идея CDA: «Светофор запасов»</h2>
+  <p>Вместо одного числа «страховочные дни» CDA делит целевой запас (<strong>буфер</strong>) на три зоны:</p>
+
+  <div class="zones">
+    <div class="zone z-green">
+      <h3>Зелёная зона</h3>
+      <p>Основной запас — хватит до следующей поставки</p>
+    </div>
+    <div class="zone z-yellow">
+      <h3>Жёлтая зона</h3>
+      <p>Страховка от скачков расхода</p>
+    </div>
+    <div class="zone z-red">
+      <h3>Красная зона</h3>
+      <p>Подушка на форс-мажор</p>
+    </div>
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Формула буфера из CDA</div>
+    <code>Буфер = Зелёная зона + Жёлтая зона + Красная зона</code>
+  </div>
+
+  <div class="box box-green">
+    <strong>Главный плюс:</strong> страховка автоматически подстраивается под каждый товар. Стабильный — маленькая. Непредсказуемый — большая.
+  </div>
+</div>
+
+<!-- 5. Зелёная зона -->
+<div class="slide">
+  <h2>Зелёная зона — основной запас</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> сколько товара нужно, чтобы хватило от заказа до следующей поставки.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Формула из CDA (слайд 4 оригинала)</div>
+    <code>Зелёная зона = max( MOQ,  ADU × (DOC + DLT) )</code><br>
+    <span style="font-size:0.85em; color:#888;">
+      Берём большее из: минимальный заказ (MOQ) или расход в день (ADU) × (дней между заказами (DOC) + дней на доставку (DLT))
+    </span>
+  </div>
+
+  <div class="example">
+    <div class="example-title">Пример: Булочки для Воппера</div>
+    <div class="dict" style="margin: 4px 0;">
+      <span class="dict-term">ADU</span><span class="dict-def">= 10 кор/день (средний расход)</span>
+      <span class="dict-term">DOC</span><span class="dict-def">= 7 дней (заказываем раз в неделю)</span>
+      <span class="dict-term">DLT</span><span class="dict-def">= 2 дня (доставка)</span>
+      <span class="dict-term">MOQ</span><span class="dict-def">= 1 коробка</span>
+    </div>
+    <p>Зелёная зона = max(1, 10 × (7 + 2)) = max(1, 90) = <strong style="color:#2e7d32;">90 коробок</strong></p>
+  </div>
+
+  <div class="box box-green"><span class="badge b-yes">БЕРЁМ</span> Мы уже примерно так считаем. Нужно только разделить «страховочные дни» на DOC и DLT.</div>
+</div>
+
+<!-- 6. Жёлтая зона -->
+<div class="slide">
+  <h2>Жёлтая зона — страховка от скачков</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> допзапас на случай, если расход выше обычного. Чем сильнее «прыгает» расход — тем больше страховка.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Формула из CDA (слайд 5 оригинала)</div>
+    <code>Жёлтая зона = max( ADU + deviation,  (ADU + deviation) × ln(DOC + DLT + 1) × VF )</code><br>
+    <span style="font-size:0.85em; color:#888;">
+      <strong>deviation</strong> — на сколько расход «гуляет» от среднего<br>
+      <strong>ln</strong> — логарифм (чем длиннее период, тем больше страховка, но не линейно)<br>
+      <strong>VF</strong> — фактор вариабельности (0 = стабильно, 1 = сильно прыгает)
+    </span>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="example">
+        <div class="example-title">Булочки (стабильные)</div>
+        <p><span class="dict-term" style="font-size:0.9em;">deviation</span> маленький, <span class="dict-term" style="font-size:0.9em;">VF</span> маленький</p>
+        <p style="color:#2e7d32; font-weight:700;">Жёлтая зона = маленькая</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="example">
+        <div class="example-title">Соус барбекю (скачет)</div>
+        <p><span class="dict-term" style="font-size:0.9em;">deviation</span> большой, <span class="dict-term" style="font-size:0.9em;">VF</span> большой</p>
+        <p style="color:#e65100; font-weight:700;">Жёлтая зона = большая</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box box-yellow">
+    <strong>Важно:</strong> чтобы рассчитать <strong>deviation</strong> и <strong>VF</strong>, нужна <strong>история расхода за 2–3 месяца</strong>. Сейчас её нет.
+  </div>
+  <p style="text-align:center;"><span class="badge b-later">ПОЗЖЕ — когда накопим данные</span></p>
+</div>
+
+<!-- 7. Красная зона -->
+<div class="slide">
+  <h2>Красная зона — подушка безопасности</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> запас на форс-мажор — поставщик задержал машину, сломался холодильник, неожиданный наплыв гостей.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Формула из CDA (слайд 6 оригинала)</div>
+    <code>Красная зона = coef_basic × (ADU + deviation) + coef_kvi × (ADU + deviation)</code><br>
+    <span style="font-size:0.85em; color:#888;">
+      <strong>coef_basic</strong> — базовый коэффициент для всех товаров (обычно 0 или маленький)<br>
+      <strong>coef_kvi</strong> — повышенный коэффициент для ключевых товаров (мясо, булочки)
+    </span>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="example">
+        <div class="example-title">Ключевые товары (мясо, булочки)</div>
+        <p><span class="dict-term" style="font-size:0.9em;">coef_kvi</span> = 3 → красная зона большая</p>
+        <p>Без них ресторан <strong>встанет</strong>.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="example">
+        <div class="example-title">Второстепенные (трубочки, салфетки)</div>
+        <p><span class="dict-term" style="font-size:0.9em;">coef_kvi</span> = 0 → красная зона ноль</p>
+        <p>Без них неприятно, но ресторан <strong>работает</strong>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box box-red">
+    <strong>Осторожно!</strong> В фастфуде короткий срок годности. Слишком большая красная зона = списания.
+  </div>
+  <p style="text-align:center;"><span class="badge b-maybe">ЧАСТИЧНО — только для долгохрана</span></p>
+</div>
+
+<!-- 8. Расчёт потребности -->
+<div class="slide">
+  <h2>Расчёт потребности — полная формула</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> сначала считаем «потребность» — сколько товара нужно в идеале. Это сумма всего буфера, минус то, что уже есть.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Формула из CDA (слайд 8 оригинала)</div>
+    <code>Потребность = ADU × (DOC + DLT) + Красная + Жёлтая + ББ + Резерв + ЕЗ − Остаток − В пути</code>
+  </div>
+
+  <h3>Что значит каждый элемент:</h3>
+  <div class="dict" style="font-size: 1em;">
+    <span class="dict-term">ADU × (DOC + DLT)</span>
+    <span class="dict-def">Расход за полный период (зелёная зона)</span>
+    <span class="dict-term">Красная + Жёлтая</span>
+    <span class="dict-def">Страховочный запас (две зоны)</span>
+    <span class="dict-term">ББ</span>
+    <span class="dict-def">Буфер безопасности — ручная доп. страховка (если нужна)</span>
+    <span class="dict-term">Резерв</span>
+    <span class="dict-def">Зарезервировано под клиента (<em>нам не нужно</em>)</span>
+    <span class="dict-term">ЕЗ</span>
+    <span class="dict-def">Единоразовый заказ — разовая потребность сверх нормы</span>
+    <span class="dict-term">Остаток</span>
+    <span class="dict-def">Что на складе</span>
+    <span class="dict-term">В пути</span>
+    <span class="dict-def">Что уже заказано, но ещё не приехало</span>
+  </div>
+
+  <div class="box box-gray">
+    <strong>По сути:</strong> Потребность = (сколько нужно в идеале) − (что уже есть). Это базовая логика любого расчёта заказа.
+  </div>
+</div>
+
+<!-- 9. Два сценария -->
+<div class="slide">
+  <h2>Два сценария: хватит ли до поставки?</h2>
+  <div class="box box-blue">
+    CDA проверяет два условия и в зависимости от ответа считает по-разному:
+  </div>
+
+  <div class="cols">
+    <div class="col" style="border: 3px solid #43a047;">
+      <h3 style="color:#2e7d32;">Сценарий А: Остатка хватает</h3>
+      <div class="orig" style="border-color: #a5d6a7;">
+        <div class="orig-label">Условие</div>
+        <code>ADU × DLT &lt; Остаток + В пути</code>
+      </div>
+      <p style="font-size:0.95em; color:#555;">Расход за время доставки меньше, чем то, что есть. Товар не кончится.</p>
+      <div class="orig" style="border-color: #a5d6a7;">
+        <div class="orig-label">Формула заказа (слайд 9)</div>
+        <code>Заказ = ADU × (DOC + DLT) + Красная + Жёлтая + ... − Остаток − В пути</code>
+      </div>
+      <p style="font-size:0.95em;">Заказываем спокойно на полный период.</p>
+    </div>
+    <div class="col" style="border: 3px solid #e53935;">
+      <h3 style="color:#c62828;">Сценарий Б: Остатка НЕ хватает</h3>
+      <div class="orig" style="border-color: #ef9a9a;">
+        <div class="orig-label">Условие</div>
+        <code>ADU × DLT &gt; Остаток + В пути</code>
+      </div>
+      <p style="font-size:0.95em; color:#555;">Расход за время доставки больше остатка. Товар кончится до приезда!</p>
+      <div class="orig" style="border-color: #ef9a9a;">
+        <div class="orig-label">Формула заказа (слайд 10)</div>
+        <code>Заказ = ADU × DOC + (Красная + Жёлтая) × DOC / (DOC + DLT) + ...</code>
+      </div>
+      <p style="font-size:0.95em;">Страховка уменьшается (пропорция DOC/(DOC+DLT)), чтобы заказать больше основного.</p>
+    </div>
+  </div>
+
+  <div class="box box-green"><span class="badge b-yes">БЕРЁМ</span> Можно внедрить уже сейчас. Сейчас у нас одна формула на всё — а должно быть две.</div>
+</div>
+
+<!-- 10. Пример с числами -->
+<div class="slide">
+  <h2>Пример расчёта с числами</h2>
+  <p>Из оригинальной презентации (слайды 9–10):</p>
+
+  <div class="orig">
+    <div class="orig-label">Исходные данные</div>
+    <div class="dict" style="font-size: 0.95em;">
+      <span class="dict-term">ADU</span><span class="dict-def">= 1 кор/день</span>
+      <span class="dict-term">deviation</span><span class="dict-def">= 0,191</span>
+      <span class="dict-term">DOC</span><span class="dict-def">= 7 дней</span>
+      <span class="dict-term">DLT</span><span class="dict-def">= 5 дней</span>
+      <span class="dict-term">MOQ</span><span class="dict-def">= 1</span>
+      <span class="dict-term">VF</span><span class="dict-def">= 0,5</span>
+      <span class="dict-term">Красная</span><span class="dict-def">= 0 (coef_basic и coef_kvi оба = 0)</span>
+      <span class="dict-term">Жёлтая</span><span class="dict-def">= 1,53</span>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col" style="border: 2px solid #43a047;">
+      <h3 style="color:#2e7d32;">Сценарий А: Остаток = 9</h3>
+      <p style="font-size:0.95em;">ADU × DLT = 1 × 5 = 5 &lt; 9 → <strong>хватает</strong></p>
+      <p style="font-size:0.95em;">Заказ = 1 × (7+5) + 0 + 1,53 − 9 − 0 = <strong style="color:#2e7d32;">5 коробок</strong></p>
+    </div>
+    <div class="col" style="border: 2px solid #e53935;">
+      <h3 style="color:#c62828;">Сценарий Б: Остаток = 3</h3>
+      <p style="font-size:0.95em;">ADU × DLT = 1 × 5 = 5 &gt; 3 → <strong>не хватает!</strong></p>
+      <p style="font-size:0.95em;">Заказ = 1 × 7 + (0 + 1,53) × 7/(7+5) = <strong style="color:#c62828;">8 коробок</strong></p>
+      <p style="font-size:0.85em; color:#888;">Заказали больше, потому что товар кончается</p>
+    </div>
+  </div>
+
+  <div class="box box-gray">
+    <strong>Обратите внимание:</strong> при одинаковом расходе, но разном остатке — заказ отличается на 3 коробки. Это и есть «умная» часть алгоритма.
+  </div>
+</div>
+
+<!-- 11. Порог MOQ -->
+<div class="slide">
+  <h2>Порог MOQ: заказывать или подождать?</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> если потребность совсем маленькая — может, не стоит делать заказ?
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Логика из CDA (слайд 11 оригинала)</div>
+    <code>
+      Потребность &gt; MOQ → Заказ = Потребность<br>
+      MOQ × Порог &lt; Потребность ≤ MOQ → Заказ = MOQ<br>
+      Потребность ≤ MOQ × Порог → Заказ = 0
+    </code><br>
+    <span style="font-size:0.85em; color:#888;"><strong>Порог</strong> — настройка: 0 (заказывать всегда), 0,1, 0,2, 0,3, 0,4 или 0,5</span>
+  </div>
+
+  <div class="example">
+    <div class="example-title">Пример из оригинала</div>
+    <p><span class="dict-term" style="font-size:0.9em;">MOQ</span> = 50 шт, <span class="dict-term" style="font-size:0.9em;">Порог</span> = 0,5 → граница = 50 × 0,5 = 25 шт</p>
+    <ul>
+      <li>Потребность 30 шт (30 &gt; 25) → <span style="color:#2e7d32; font-weight:700;">заказываем 50</span></li>
+      <li>Потребность 10 шт (10 &lt; 25) → <span style="color:#c62828; font-weight:700;">не заказываем</span></li>
+    </ul>
+  </div>
+
+  <div class="box box-red">
+    <strong>Для фастфуда опасно.</strong> Ресторан не может «подождать» — он работает каждый день.
+  </div>
+  <p style="text-align:center;"><span class="badge b-maybe">ЧАСТИЧНО — только для мелочёвки</span></p>
+</div>
+
+<!-- 12. Дни недели -->
+<div class="slide">
+  <h2>КДН — коэффициенты дней недели</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> в пятницу продаём больше, чем во вторник. КДН учитывает эту разницу при расчёте.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Из CDA (слайды 13–17 оригинала)</div>
+    <code>Вместо ADU × кол-во_дней → используем ADU × сумма_КДН_за_эти_дни</code><br>
+    <span style="font-size:0.85em; color:#888;">Сумма всех 7 дней = 7. Каждому дню — свой вес. Слабый день = 0,7, сильный = 1,5</span>
+  </div>
+
+  <div class="example">
+    <div class="example-title">Пример: Картошка фри, ADU = 10 кор/день</div>
+    <p>Заказ в среду, поставка в понедельник (ср, чт, пт, сб, вс = 5 дней)</p>
+    <div class="cols" style="margin-top:8px;">
+      <div class="col" style="border: 2px solid #e53935;">
+        <h3 style="color:#c62828;">Без КДН</h3>
+        <p>10 × 5 = <strong>50 коробок</strong></p>
+        <p style="color:#c62828; font-size:0.9em;">В субботу кончится!</p>
+      </div>
+      <div class="col" style="border: 2px solid #43a047;">
+        <h3 style="color:#2e7d32;">С КДН</h3>
+        <p>Ср:0,9 + Чт:1,0 + Пт:1,4 + Сб:1,5 + Вс:1,2 = 6,0</p>
+        <p>10 × 6,0 = <strong>60 коробок</strong></p>
+        <p style="color:#2e7d32; font-size:0.9em;">Хватит!</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="box box-yellow">
+    <strong>Нужна история продаж по дням.</strong> Приложение само рассчитает коэффициенты. Пока данных нет — нужно копить.
+  </div>
+  <p style="text-align:center;"><span class="badge b-later">ПОЗЖЕ — самая полезная штука!</span></p>
+</div>
+
+<!-- 13. Акции -->
+<div class="slide">
+  <h2>Расчёт в акции</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> во время промо-акции используется <span class="dict-term" style="font-size:0.9em;">ADU_P</span> (повышенный расход) вместо обычного <span class="dict-term" style="font-size:0.9em;">ADU</span>.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Из CDA (слайды 20–26 оригинала)</div>
+    <code>Заказ в акции = ADU_P × (DOC + DLT) + Красная + Жёлтая + ... − Остаток − В пути</code><br><br>
+    <div class="orig-label">Последний заказ в акции (слайды 27–31)</div>
+    <code>Заказ = ADU_P × (до конца акции) + ADU × (после акции до след. поставки) + ...</code><br>
+    <span style="font-size:0.85em; color:#888;">Плавный переход от акционного расхода к обычному</span>
+  </div>
+
+  <div class="box box-red">
+    <strong>Нам не нужно.</strong> Акции планирует центральный офис. Закупщик не управляет промо.
+  </div>
+  <p style="text-align:center;"><span class="badge b-no">НЕ БЕРЁМ</span></p>
+</div>
+
+<!-- 14. Окончательный буфер -->
+<div class="slide">
+  <h2>Окончательный буфер и «Светофор»</h2>
+  <div class="box box-blue">
+    <strong>Простыми словами:</strong> после расчёта заказа CDA пересчитывает итоговый уровень запаса — чтобы показать на графике, в какой зоне товар.
+  </div>
+
+  <div class="orig">
+    <div class="orig-label">Из CDA (слайд 12 оригинала)</div>
+    <code>Если заказ &gt; 0: Буфер = Заказ + Остаток + В пути − ЕЗ − Резерв − ББ</code><br>
+    <code>Если заказ = 0: Буфер = Остаток + В пути − ЕЗ − Резерв − ББ</code>
+  </div>
+
+  <div class="zones" style="margin: 16px 0;">
+    <div class="zone z-green">
+      <h3>Зелёный</h3>
+      <p>Товара достаточно</p>
+    </div>
+    <div class="zone z-yellow">
+      <h3>Жёлтый</h3>
+      <p>Запас тает, пора заказывать</p>
+    </div>
+    <div class="zone z-red">
+      <h3>Красный</h3>
+      <p>Мало! Срочно!</p>
+    </div>
+  </div>
+
+  <div class="box box-green">
+    <strong>Очень удобно.</strong> Открыл приложение — сразу видишь, у каких товаров проблема.
+  </div>
+  <p style="text-align:center;"><span class="badge b-later">ПОЗЖЕ — после внедрения зон</span></p>
+</div>
+
+<!-- 15. Сводная таблица -->
+<div class="slide">
+  <h2>Итог: что берём, а что нет</h2>
+  <table class="tbl">
+    <tr>
+      <th>Элемент CDA</th>
+      <th>Слайды</th>
+      <th>Берём?</th>
+      <th>Почему</th>
+    </tr>
+    <tr>
+      <td>Зелёная зона (ADU, DOC, DLT, MOQ)</td>
+      <td>3–4</td>
+      <td><span class="badge b-yes">Да</span></td>
+      <td>Почти так работаем, нужно разделить DOC и DLT</td>
+    </tr>
+    <tr>
+      <td>Два сценария расчёта</td>
+      <td>9–10</td>
+      <td><span class="badge b-yes">Да</span></td>
+      <td>Можно добавить прямо сейчас</td>
+    </tr>
+    <tr>
+      <td>Жёлтая зона (deviation, VF)</td>
+      <td>5</td>
+      <td><span class="badge b-later">Позже</span></td>
+      <td>Нужна история расхода 2–3 мес.</td>
+    </tr>
+    <tr>
+      <td>Красная зона (coef_basic, coef_kvi)</td>
+      <td>6</td>
+      <td><span class="badge b-maybe">Частично</span></td>
+      <td>Для долгохрана — да, скоропорт — осторожно</td>
+    </tr>
+    <tr>
+      <td>КДН (коэффициенты дней недели)</td>
+      <td>13–18</td>
+      <td><span class="badge b-later">Позже</span></td>
+      <td>Самое полезное! Нужна история по дням</td>
+    </tr>
+    <tr>
+      <td>Порог MOQ</td>
+      <td>11</td>
+      <td><span class="badge b-maybe">Частично</span></td>
+      <td>Только для мелочёвки</td>
+    </tr>
+    <tr>
+      <td>Светофор (буфер)</td>
+      <td>12</td>
+      <td><span class="badge b-later">Позже</span></td>
+      <td>После внедрения зон</td>
+    </tr>
+    <tr>
+      <td>Акции (ADU_P)</td>
+      <td>20–33</td>
+      <td><span class="badge b-no">Нет</span></td>
+      <td>Управляет центральный офис</td>
+    </tr>
+  </table>
+</div>
+
+<!-- 16. План -->
+<div class="slide">
+  <h2>План: что и когда делаем</h2>
+
+  <div class="col" style="margin-bottom: 12px; border: 3px solid #43a047; border-radius: 12px; padding: 16px;">
+    <h3 style="color: #2e7d32;">Этап 1 — Сейчас <span class="tag t-now">можно начать</span></h3>
+    <ul class="steps">
+      <li>Разделить настройки на <span class="dict-term" style="font-size:0.9em;">DOC</span> (как часто заказываем) и <span class="dict-term" style="font-size:0.9em;">DLT</span> (сколько дней едет)</li>
+      <li>Добавить проверку <code>ADU × DLT</code> vs <code>Остаток + В пути</code> и два сценария расчёта</li>
+      <li>Начать сохранять расход из каждого заказа (копить для <span class="dict-term" style="font-size:0.9em;">deviation</span> и <span class="dict-term" style="font-size:0.9em;">VF</span>)</li>
+    </ul>
+  </div>
+
+  <div class="col" style="margin-bottom: 12px; border: 3px solid #f9a825; border-radius: 12px; padding: 16px;">
+    <h3 style="color: #e65100;">Этап 2 — Через 2–3 месяца <span class="tag t-later">когда накопим данные</span></h3>
+    <ul class="steps">
+      <li>Рассчитать <span class="dict-term" style="font-size:0.9em;">deviation</span> и <span class="dict-term" style="font-size:0.9em;">VF</span> → автоматическая жёлтая зона</li>
+      <li>Автоматическая страховка вместо ручных «страховочных дней»</li>
+      <li>Рассчитать <span class="dict-term" style="font-size:0.9em;">КДН</span> → учёт дней недели</li>
+    </ul>
+  </div>
+
+  <div class="col" style="border: 3px solid #d35400; border-radius: 12px; padding: 16px;">
+    <h3 style="color: #d35400;">Этап 3 — Будущее</h3>
+    <ul class="steps">
+      <li><span class="dict-term" style="font-size:0.9em;">coef_basic</span> / <span class="dict-term" style="font-size:0.9em;">coef_kvi</span> → красная зона с приоритетами</li>
+      <li>Визуальный «Светофор» в приложении</li>
+      <li>Автокоррекция буфера при изменении спроса</li>
+    </ul>
+  </div>
+</div>
+
+<!-- 17. Вывод -->
+<div class="slide">
+  <h1>Вывод</h1>
+  <div class="box box-green" style="font-size: 1.15em; margin: 16px 0;">
+    Алгоритм CDA <strong>хорошо подходит</strong> для фастфуда. Главное — <strong>каждый товар получает свою страховку</strong>: стабильные — меньше, непредсказуемые — больше.
+  </div>
+  <div class="box box-red" style="font-size: 1.05em;">
+    <strong>Не подходит:</strong> расчёт акций (<span class="dict-term" style="font-size:0.85em;">ADU_P</span> — акции управляет офис) и агрессивный порог MOQ (нельзя «не заказать» критичный товар).
+  </div>
+  <div class="box box-yellow" style="font-size: 1.05em;">
+    <strong>Ограничение:</strong> для жёлтой зоны нужны <span class="dict-term" style="font-size:0.85em;">deviation</span> и <span class="dict-term" style="font-size:0.85em;">VF</span>, а для них — история расхода. Первый шаг: начать копить данные.
+  </div>
+</div>
+
+<!-- Навигация -->
+<div class="nav">
+  <button id="prevBtn" onclick="go(-1)">&#8592; Назад</button>
+  <span class="counter" id="counter">1 / 17</span>
+  <button id="nextBtn" onclick="go(1)">Далее &#8594;</button>
+</div>
+
+<script>
+  let cur = 0;
+  const sl = document.querySelectorAll('.slide');
+  const tot = sl.length;
+  function go(d) {
+    sl[cur].classList.remove('active');
+    cur = Math.max(0, Math.min(tot - 1, cur + d));
+    sl[cur].classList.add('active');
+    document.getElementById('counter').textContent = (cur+1) + ' / ' + tot;
+    document.getElementById('prevBtn').disabled = cur === 0;
+    document.getElementById('nextBtn').disabled = cur === tot - 1;
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+  });
+  let tx = 0;
+  document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+  document.addEventListener('touchend', e => {
+    const d = tx - e.changedTouches[0].clientX;
+    if (Math.abs(d) > 50) go(d > 0 ? 1 : -1);
+  });
+  go(0);
+</script>
+</body>
+</html>

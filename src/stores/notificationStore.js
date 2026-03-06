@@ -177,14 +177,18 @@ export const useNotificationStore = defineStore('notification', () => {
   });
 
   // Приостанавливаем polling при скрытии вкладки
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        stopPolling();
-      } else if (userStore.currentUser) {
-        startPolling();
-      }
-    });
+  // Обработчик создаётся один раз, не дублируется
+  let _visibilityBound = false;
+  function _onVisibilityChange() {
+    if (document.hidden) {
+      stopPolling();
+    } else if (userStore.currentUser) {
+      startPolling();
+    }
+  }
+  if (typeof document !== 'undefined' && !_visibilityBound) {
+    _visibilityBound = true;
+    document.addEventListener('visibilitychange', _onVisibilityChange);
   }
 
   return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling };

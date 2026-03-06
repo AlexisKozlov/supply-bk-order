@@ -43,7 +43,10 @@ export const useUserStore = defineStore('user', () => {
     return ACCESS_LEVELS[getAccess(module)] >= ACCESS_LEVELS[minLevel];
   }
 
+  let _sessionRestored = false;
   function restoreSession() {
+    if (_sessionRestored) return;
+    _sessionRestored = true;
     try {
       const stored = localStorage.getItem('bk_user');
       if (stored) {

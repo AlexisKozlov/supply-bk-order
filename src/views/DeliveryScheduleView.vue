@@ -117,7 +117,23 @@
                   <span v-else class="ds-time-empty">—</span>
                 </template>
               </td>
-              <td class="pf-mtd ds-td-note">{{ r.notes || '' }}</td>
+              <td
+                class="pf-mtd ds-td-note"
+                :class="{ 'ds-td-note-editable': isEditing, 'ds-td-editing': editingNote?.rid === r.id }"
+                @dblclick="isEditing && startNoteEdit(r)"
+              >
+                <template v-if="editingNote?.rid === r.id">
+                  <input
+                    v-model="editingNote.value"
+                    class="ds-note-input"
+                    @blur="saveNoteEdit"
+                    @keydown.enter.prevent="saveNoteEdit"
+                    @keydown.escape.prevent="cancelNoteEdit"
+                    placeholder="Комментарий..."
+                  />
+                </template>
+                <template v-else>{{ r.notes || '' }}</template>
+              </td>
             </tr>
           </tbody>
         </template>
@@ -289,6 +305,7 @@ function toggleEditMode() {
   if (editMode.value) {
     // Выходим из режима — отменяем все текущие правки
     editingCell.value = null;
+    editingNote.value = null;
     editingRestaurant.value = null;
     cardEditing.value = null;
     dragState.value = null;
@@ -427,6 +444,42 @@ async function saveEdit() {
 
 function cancelEdit() {
   editingCell.value = null;
+}
+
+// ═══ Inline note edit (table — dblclick on comment) ═══
+const editingNote = ref(null);
+let savingNote = false;
+
+function startNoteEdit(restaurant) {
+  if (!isEditing.value) return;
+  editingNote.value = {
+    rid: restaurant.id,
+    value: restaurant.notes || '',
+    original: restaurant.notes || '',
+  };
+  nextTick(() => {
+    const inp = document.querySelector('.ds-note-input');
+    if (inp) { inp.focus(); inp.select(); }
+  });
+}
+
+async function saveNoteEdit() {
+  if (!editingNote.value || savingNote) return;
+  savingNote = true;
+  const { rid, value, original } = editingNote.value;
+  editingNote.value = null;
+  if (value === original) { savingNote = false; return; }
+  try {
+    await store.saveRestaurantNote(rid, value);
+  } catch (e) {
+    toastStore.error('Ошибка сохранения комментария');
+  } finally {
+    savingNote = false;
+  }
+}
+
+function cancelNoteEdit() {
+  editingNote.value = null;
 }
 
 // ═══ Drag & drop (move delivery between days) ═══
@@ -856,7 +909,19 @@ function formatLastUpdate(upd) {
 }
 .ds-cell-input::placeholder { color: var(--text-muted); font-weight: 400; }
 
-.ds-td-note { text-align: left; color: var(--text-secondary); font-size: 11px; max-width: 120px; }
+.ds-td-note { text-align: left; color: var(--text-secondary); font-size: 11px; max-width: 200px; }
+.ds-td-note-editable { cursor: pointer; }
+.ds-td-note-editable:hover { background: #FFF8F0; }
+.ds-note-input {
+  width: 100%; padding: 3px 4px;
+  border: 2px solid var(--bk-orange);
+  border-radius: 3px; font-size: 11px; text-align: left;
+  outline: none; background: #fff; font-family: inherit; font-weight: 500;
+  color: var(--text);
+  box-shadow: 0 0 0 2px rgba(255, 135, 50, 0.12);
+  min-width: 120px;
+}
+.ds-note-input::placeholder { color: var(--text-muted); font-weight: 400; }
 
 /* ═══ Totals row ═══ */
 .ds-totals-row td {

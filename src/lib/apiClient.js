@@ -37,6 +37,9 @@ async function fetchWithRetry(url, opts, maxRetries = 2) {
   }
 }
 
+// Дедупликация одинаковых GET-запросов, летящих одновременно
+const _inflightGets = new Map();
+
 class QueryBuilder {
   constructor(t) {
     this._t = t;
@@ -112,48 +115,49 @@ class QueryBuilder {
     }
     const url = `${API_BASE}/${this._t}${qs ? '?' + qs : ''}`;
 
+    // Дедупликация GET-запросов: если точно такой же запрос уже летит — ждём его результат
+    if (this._method === 'GET') {
+      const existing = _inflightGets.get(url);
+      if (existing) return existing;
+    }
+
+    const promise = this._exec(url);
+
+    if (this._method === 'GET') {
+      _inflightGets.set(url, promise);
+      promise.finally(() => _inflightGets.delete(url));
+    }
+
+    return promise;
+  }
+
+  async _exec(url) {
     try {
-      if (this._method === 'GET') {
-        const r = await fetchWithRetry(url, { headers: buildHeaders() });
-        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
-        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
-        let d = await r.json();
-        if (Array.isArray(d)) d = d.map(row => parseJsonFields(row));
-        else if (d && typeof d === 'object') d = parseJsonFields(d);
-        if (this._head) return { data: null, count: Array.isArray(d) ? d.length : 0, error: null };
-        if (this._single) {
-          if (Array.isArray(d)) d = d[0] || null;
-          if (!d && !this._maybe) return { data: null, error: 'Row not found' };
+      const opts = { headers: buildHeaders() };
+      if (this._method !== 'GET') {
+        opts.method = this._method;
+        if (this._method === 'POST') {
+          const b = this._body.length === 1 ? this._body[0] : this._body;
+          opts.body = JSON.stringify(b);
+        } else if (this._method === 'PATCH') {
+          opts.body = JSON.stringify(this._body);
         }
-        return { data: d, error: null };
       }
 
-      if (this._method === 'POST') {
-        const b = this._body.length === 1 ? this._body[0] : this._body;
-        const r = await fetchWithRetry(url, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(b) });
-        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
-        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
-        let d = await r.json();
-        if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
-        return { data: d, error: null };
-      }
+      const r = await fetchWithRetry(url, opts);
+      if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
+      if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
 
-      if (this._method === 'PATCH') {
-        const r = await fetchWithRetry(url, { method: 'PATCH', headers: buildHeaders(), body: JSON.stringify(this._body) });
-        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
-        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
-        let d = await r.json();
-        if (Array.isArray(d)) d = d.map(parseJsonFields);
-        return { data: Array.isArray(d) ? d : [d], error: null };
-      }
+      let d = await r.json().catch(() => null);
+      if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
 
-      if (this._method === 'DELETE') {
-        const r = await fetchWithRetry(url, { method: 'DELETE', headers: buildHeaders() });
-        if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
-        if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
-        const d = await r.json().catch(() => null);
-        return { data: d, error: null };
+      if (this._head) return { data: null, count: Array.isArray(d) ? d.length : 0, error: null };
+      if (this._single) {
+        if (Array.isArray(d)) d = d[0] || null;
+        if (!d && !this._maybe) return { data: null, error: 'Row not found' };
       }
+      if (this._method === 'PATCH' && d && !Array.isArray(d)) d = [d];
+      return { data: d, error: null };
     } catch (e) { return { data: null, error: e.message }; }
   }
 }

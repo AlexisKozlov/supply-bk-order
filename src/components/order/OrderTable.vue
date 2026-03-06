@@ -210,7 +210,9 @@ async function loadConsumptionHistory() {
   avgConsumptionMap.value = map;
 }
 
+let _consumptionTimer = null;
 watch(() => [settings.value.unit, settings.value.legalEntity, settings.value.periodDays, orderStore.items.length, orderStore.dataVersion, props.appliedAnalogs.size], () => {
-  loadConsumptionHistory();
+  clearTimeout(_consumptionTimer);
+  _consumptionTimer = setTimeout(() => loadConsumptionHistory(), 300);
 }, { immediate: true });
 </script>

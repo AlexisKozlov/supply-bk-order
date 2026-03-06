@@ -100,11 +100,11 @@
               <div class="login-form-sub">Введите email и пароль</div>
               <div class="login-field">
                 <label>Email</label>
-                <input v-model="selectedUser" type="email" placeholder="Введите email" autocomplete="email" :disabled="loginLoading" @keydown.enter="$refs.passwordInput?.focus()" />
+                <input v-model="selectedUser" type="email" placeholder="Введите email" autocomplete="email" :disabled="loginLoading" @keydown.enter="passwordInput?.focus()" />
               </div>
               <div class="login-field">
                 <label>Пароль</label>
-                <input v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
+                <input ref="passwordInput" v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
               </div>
               <div v-if="loginError" class="login-error">{{ loginError }}</div>
               <button class="login-submit" @click="doLogin" :disabled="loginLoading || !selectedUser">
@@ -180,6 +180,7 @@ let _loaderTimers = [];
 
 const selectedUser = ref('');
 const password = ref('');
+const passwordInput = ref(null);
 const loginError = ref('');
 const loginLoading = ref(false);
 const isMaintenance = ref(false);

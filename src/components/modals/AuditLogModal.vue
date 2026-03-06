@@ -20,7 +20,7 @@
               <div v-if="log.details?.restaurant_number" class="audit-restaurant-num">Ресторан {{ log.details.restaurant_number }}</div>
               <!-- Param changes -->
               <div v-if="log.details?.param_changes?.length" class="audit-params">
-                <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="audit-param-chip">
+                <span v-for="(pc, pi) in log.details.param_changes" :key="pc.label + pi" class="audit-param-chip">
                   {{ pc.label }}: {{ pc.from }} → {{ pc.to }}
                 </span>
               </div>
@@ -47,7 +47,7 @@
                 <span v-else class="audit-no-discrepancy">без расхождений</span>
               </div>
               <div v-if="log.action === 'received' && log.details?.items_with_discrepancy?.length" class="audit-changes">
-                <span v-for="(item, i) in log.details.items_with_discrepancy" :key="i" class="audit-ch-chip audit-ch-upd">
+                <span v-for="(item, i) in log.details.items_with_discrepancy" :key="item.name || i" class="audit-ch-chip audit-ch-upd">
                   {{ item.name }}: {{ item.ordered }} → {{ item.received }}
                 </span>
               </div>
@@ -59,7 +59,7 @@
               <div v-if="log.details?.items_count && log.action !== 'received'" class="audit-meta">{{ log.details.items_count }} позиций</div>
               <!-- Item changes -->
               <div v-if="log.details?.changes?.length" class="audit-changes">
-                <span v-for="(c, ci) in log.details.changes" :key="ci" class="audit-ch-chip" :class="{ 'audit-ch-add': c.type==='added', 'audit-ch-del': c.type==='removed', 'audit-ch-upd': c.type==='changed' }">
+                <span v-for="(c, ci) in log.details.changes" :key="c.item || ci" class="audit-ch-chip" :class="{ 'audit-ch-add': c.type==='added', 'audit-ch-del': c.type==='removed', 'audit-ch-upd': c.type==='changed' }">
                   <template v-if="c.type === 'added'">+ {{ c.item }} {{ c.boxes }}кор</template>
                   <template v-else-if="c.type === 'removed'">− {{ c.item }} {{ c.boxes }}кор</template>
                   <template v-else>{{ c.item }}: {{ c.diffs?.join(', ') }}</template>

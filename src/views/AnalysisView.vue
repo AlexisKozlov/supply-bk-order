@@ -26,7 +26,7 @@
       @click="activeTab = 'red'"
     >
       <span class="anv-alert-icon">!</span>
-      <span>{{ criticalGroups.length }} {{ criticalGroups.length === 1 ? 'критичная группа' : criticalGroups.length < 5 ? 'критичные группы' : 'критичных групп' }} — менее 3 дней запаса</span>
+      <span>{{ criticalGroups.length }} {{ criticalGroups.length === 1 ? 'критичная группа' : criticalGroups.length < 5 ? 'критичные группы' : 'критичных групп' }} — менее 5 дней запаса</span>
       <span class="anv-alert-arrow">&rarr;</span>
     </div>
 
@@ -43,11 +43,11 @@
           <div class="anv-kpi-sub">из {{ items.length }}</div>
         </div>
         <div class="anv-kpi-card anv-kpi-danger" v-if="statusCounts.red">
-          <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
+          <div class="anv-kpi-head">Критичных &lt;6 дн.</div>
           <div class="anv-kpi-val">{{ statusCounts.red }}</div>
         </div>
         <div class="anv-kpi-card anv-kpi-danger" v-else>
-          <div class="anv-kpi-head">Критичных &lt;3 дн.</div>
+          <div class="anv-kpi-head">Критичных &lt;6 дн.</div>
           <div class="anv-kpi-val" style="color:var(--green)">0</div>
         </div>
         <div class="anv-kpi-card anv-kpi-warn" v-if="statusCounts.orange">
@@ -62,10 +62,9 @@
 
       <!-- Distribution bar -->
       <div v-if="!dashboardHidden && groupsWithData.length" class="anv-dist-bar">
-        <div v-if="statusCounts.red" class="anv-dist-seg anv-dist-red" :style="{ flex: statusCounts.red }" :title="'<3 дн: ' + statusCounts.red"></div>
-        <div v-if="statusCounts.orange" class="anv-dist-seg anv-dist-orange" :style="{ flex: statusCounts.orange }" :title="'<7 дн: ' + statusCounts.orange"></div>
-        <div v-if="statusCounts.yellow" class="anv-dist-seg anv-dist-yellow" :style="{ flex: statusCounts.yellow }" :title="'<14 дн: ' + statusCounts.yellow"></div>
-        <div v-if="statusCounts.green" class="anv-dist-seg anv-dist-green" :style="{ flex: statusCounts.green }" :title="'14-30 дн: ' + statusCounts.green"></div>
+        <div v-if="statusCounts.red" class="anv-dist-seg anv-dist-red" :style="{ flex: statusCounts.red }" :title="'0–5 дн: ' + statusCounts.red"></div>
+        <div v-if="statusCounts.orange" class="anv-dist-seg anv-dist-orange" :style="{ flex: statusCounts.orange }" :title="'6–10 дн: ' + statusCounts.orange"></div>
+        <div v-if="statusCounts.green" class="anv-dist-seg anv-dist-green" :style="{ flex: statusCounts.green }" :title="'10–30 дн: ' + statusCounts.green"></div>
         <div v-if="statusCounts.purple" class="anv-dist-seg anv-dist-purple" :style="{ flex: statusCounts.purple }" :title="'30+ дн: ' + statusCounts.purple"></div>
       </div>
     </template>
@@ -76,13 +75,13 @@
         Все <span class="anv-tab-cnt">{{ groupsWithData.length }}</span>
       </button>
       <button class="anv-tab" :class="{ active: activeTab === 'red' }" @click="activeTab = 'red'">
-        <span class="anv-tab-dot" style="background:#EF5350"></span> 0–3 дн <span v-if="statusCounts.red" class="anv-tab-cnt anv-tab-cnt-red">{{ statusCounts.red }}</span>
+        <span class="anv-tab-dot" style="background:#EF5350"></span> 0–5 дн <span v-if="statusCounts.red" class="anv-tab-cnt anv-tab-cnt-red">{{ statusCounts.red }}</span>
       </button>
       <button class="anv-tab" :class="{ active: activeTab === 'orange' }" @click="activeTab = 'orange'">
-        <span class="anv-tab-dot" style="background:#FF9800"></span> 3–7 дн <span v-if="statusCounts.orange" class="anv-tab-cnt anv-tab-cnt-orange">{{ statusCounts.orange }}</span>
+        <span class="anv-tab-dot" style="background:#FF9800"></span> 6–10 дн <span v-if="statusCounts.orange" class="anv-tab-cnt anv-tab-cnt-orange">{{ statusCounts.orange }}</span>
       </button>
       <button class="anv-tab" :class="{ active: activeTab === 'normal' }" @click="activeTab = 'normal'">
-        <span class="anv-tab-dot" style="background:#66BB6A"></span> Норма <span v-if="statusCounts.yellow + statusCounts.green" class="anv-tab-cnt">{{ statusCounts.yellow + statusCounts.green }}</span>
+        <span class="anv-tab-dot" style="background:#66BB6A"></span> Норма <span v-if="statusCounts.green" class="anv-tab-cnt">{{ statusCounts.green }}</span>
       </button>
       <button class="anv-tab" :class="{ active: activeTab === 'purple' }" @click="activeTab = 'purple'">
         <span class="anv-tab-dot" style="background:#AB47BC"></span> 30+ <span v-if="statusCounts.purple" class="anv-tab-cnt anv-tab-cnt-purple">{{ statusCounts.purple }}</span>
@@ -184,8 +183,11 @@
                     <td class="anv-td-name">
                       <span class="anv-group-name">{{ group.name }}</span>
                       <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
+                      <span v-if="group.totalStock === 0 && group.totalConsumption > 0" class="anv-no-stock">нет на складе</span>
                     </td>
-                    <td class="anv-td-num">{{ nf(group.totalStock) }}</td>
+                    <td class="anv-td-num">
+                      {{ nf(group.totalStock) }}
+                    </td>
                     <td class="anv-td-num">{{ nf(group.totalConsumption) }}</td>
                     <td class="anv-td-days">
                       <span class="anv-days-badge" :class="daysClass(group.groupDays)">{{ formatDays(group.groupDays) }}</span>
@@ -209,7 +211,10 @@
                         <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'stock'"
                           v-model="editingValue" class="anv-inline-input" type="text" inputmode="decimal"
                           @keydown.enter="commitEdit(item)" @keydown.escape="cancelEdit" @blur="commitEdit(item)"/>
-                        <span v-else>{{ nf(item.displayStock) }}</span>
+                        <template v-else>
+                          <span>{{ nf(item.displayStock) }}</span>
+                          <span v-if="!item._foreign && item.displayStock === 0 && item.displayConsumption > 0" class="anv-no-stock">нет</span>
+                        </template>
                       </td>
                       <td class="anv-td-num anv-editable" @dblclick="startEdit(item, 'consumption')">
                         <input v-if="editingCell && editingCell.itemId === item.id && editingCell.field === 'consumption'"
@@ -505,9 +510,8 @@ function getStatusKey(days) {
   if (days === Infinity) return 'purple';
   const d = Math.round(days);
   if (d >= 30) return 'purple';
-  if (d >= 14) return 'green';
-  if (d >= 7) return 'yellow';
-  if (d >= 3) return 'orange';
+  if (d >= 10) return 'green';
+  if (d >= 6) return 'orange';
   return 'red';
 }
 
@@ -586,10 +590,7 @@ const filteredGroups = computed(() => {
   } else if (activeTab.value === 'orange') {
     result = result.filter(g => getStatusKey(g.groupDays) === 'orange');
   } else if (activeTab.value === 'normal') {
-    result = result.filter(g => {
-      const s = getStatusKey(g.groupDays);
-      return s === 'yellow' || s === 'green';
-    });
+    result = result.filter(g => getStatusKey(g.groupDays) === 'green');
   } else if (activeTab.value === 'purple') {
     result = result.filter(g => getStatusKey(g.groupDays) === 'purple');
   }
@@ -1212,6 +1213,21 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   color: var(--text-muted);
   margin-left: 6px;
   opacity: 0.7;
+}
+
+.anv-no-stock {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #FFEBEE;
+  color: #C62828;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  line-height: 1.6;
+  vertical-align: middle;
 }
 
 /* ═══ Inline editing ═══ */

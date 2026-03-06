@@ -95,15 +95,12 @@
     <!-- Расчёт заказа -->
     <td class="calc">
       <div class="calc-value" @click="compact && applyCalc()" :title="compact ? 'Клик — применить в заказ' : ''">
-        <span class="calc-wrap" v-if="tooltipHtml"
-              @mouseenter="positionTooltip" @mouseleave="hideTooltip">
+        <span class="calc-wrap" v-if="hasTooltipData"
+          @mouseenter="showCalcTip" @mouseleave="hideCalcTip" @mousemove="moveCalcTip">
           {{ calcDisplayText }}
         </span>
         <template v-else>{{ calcDisplayText }}</template>
       </div>
-      <Teleport to="body">
-        <div class="calc-tip" ref="calcTipEl" v-html="tooltipHtml" v-if="tooltipHtml"></div>
-      </Teleport>
       <button class="btn small calc-to-order" style="margin-top:4px;font-size:11px;padding:4px 8px;" @click="applyCalc">
         → В заказ
       </button>
@@ -152,6 +149,9 @@
       <button class="delete-item-x" title="Удалить" @click="$emit('remove', item.id)"><BkIcon name="close" size="xs"/></button>
     </td>
   </tr>
+  <Teleport to="body">
+    <div v-if="tipVisible && tooltipHtml" class="calc-tip-portal" :style="tipStyle" v-html="tooltipHtml"></div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -219,29 +219,22 @@ function handleCalcKeydown(e, field, calcInstance) {
 
 // ─── Excel-навигация ──────────────────────────────────────────────────────────
 const inputConsumption = ref(null);
-const calcTipEl = ref(null);
 
-function positionTooltip(e) {
-  const tip = calcTipEl.value;
-  if (!tip) return;
-  const wrap = e.currentTarget;
-  const rect = wrap.getBoundingClientRect();
-  tip.style.display = 'block';
-  tip.style.left = (rect.left + rect.width / 2 - tip.offsetWidth / 2) + 'px';
-  tip.style.top = (rect.top - tip.offsetHeight - 8) + 'px';
-  // Если уходит за верхний край — показать снизу
-  if (rect.top - tip.offsetHeight - 8 < 0) {
-    tip.style.top = (rect.bottom + 8) + 'px';
-  }
-}
-function hideTooltip() {
-  const tip = calcTipEl.value;
-  if (tip) tip.style.display = 'none';
-}
 const inputStock       = ref(null);
 const inputTransit     = ref(null);
 const inputOrderPieces = ref(null);
 const inputOrderBoxes  = ref(null);
+
+const tipVisible = ref(false);
+const tipX = ref(0);
+const tipY = ref(0);
+const tipStyle = computed(() => ({
+  position: 'fixed',
+  left: tipX.value + 'px',
+  top: tipY.value + 'px',
+  zIndex: 999999,
+  pointerEvents: 'none',
+}));
 
 const colRefs = computed(() => [
   inputConsumption.value,
@@ -250,6 +243,27 @@ const colRefs = computed(() => [
   inputOrderPieces.value,
   inputOrderBoxes.value,
 ]);
+
+function showCalcTip(e) {
+  tipVisible.value = true;
+  placeTip(e.currentTarget);
+}
+function hideCalcTip() {
+  tipVisible.value = false;
+}
+function moveCalcTip(e) {
+  placeTip(e.currentTarget);
+}
+function placeTip(el) {
+  const rect = el.getBoundingClientRect();
+  let top = rect.bottom + 8;
+  let left = rect.left + rect.width / 2 - 130;
+  if (left < 8) left = 8;
+  if (left + 280 > window.innerWidth) left = window.innerWidth - 288;
+  if (top + 200 > window.innerHeight) top = rect.top - 208;
+  tipX.value = left;
+  tipY.value = top;
+}
 
 function handleExcelNav(e) {
   const col = parseInt(e.target.dataset.col ?? '-1');
@@ -331,6 +345,8 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+const hasTooltipData = computed(() => !!props.settings.deliveryDate && !!props.settings.today);
+
 const tooltipHtml = computed(() => {
   const s = props.settings;
   if (!s.deliveryDate || !s.today) return '';
@@ -345,7 +361,6 @@ const tooltipHtml = computed(() => {
     ? `<div class="calc-tip-row" style="color:#D32F2F"><span class="calc-tip-lbl">Дефицит до прихода:</span><span class="calc-tip-val">${fmt(Math.abs(stockAfter))} ${inputUnit}</span></div>`
     : '';
 
-  // CDA-режим: показываем зоны буфера
   if (props.cdaMode && calc.value.buffer) {
     const b = calc.value.buffer;
     return `
@@ -363,7 +378,6 @@ const tooltipHtml = computed(() => {
     `;
   }
 
-  // Простой режим
   const need = daily * (s.safetyDays || 0);
   return `
     <div class="calc-tip-row"><span class="calc-tip-lbl">Суточный расход:</span><span class="calc-tip-val">${fmt(daily)} ${inputUnit}</span></div>
@@ -431,43 +445,11 @@ function onOrderBoxesChange(physBoxes) {
 }
 
 function handleOrderPiecesKeydown(e) {
-  if (['+', '-', '*', '/'].includes(e.key) || (calcOrderPieces.hasPendingOp() && /[0-9.]/.test(e.key))) {
-    calcOrderPieces.onKeydown(e);
-    return;
-  }
-  if (e.key === 'Enter' && calcOrderPieces.hasPendingOp()) {
-    calcOrderPieces.onKeydown(e);
-    return;
-  }
-  if (e.key === 'Escape' && calcOrderPieces.hasPendingOp()) {
-    calcOrderPieces.onKeydown(e);
-    return;
-  }
-  if (['Enter', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    handleExcelNav(e);
-    return;
-  }
-  calcOrderPieces.onKeydown(e);
+  handleCalcKeydown(e, 'finalOrder', calcOrderPieces);
 }
 
 function handleOrderBoxesKeydown(e) {
-  if (['+', '-', '*', '/'].includes(e.key) || (calcOrderBoxes.hasPendingOp() && /[0-9.]/.test(e.key))) {
-    calcOrderBoxes.onKeydown(e);
-    return;
-  }
-  if (e.key === 'Enter' && calcOrderBoxes.hasPendingOp()) {
-    calcOrderBoxes.onKeydown(e);
-    return;
-  }
-  if (e.key === 'Escape' && calcOrderBoxes.hasPendingOp()) {
-    calcOrderBoxes.onKeydown(e);
-    return;
-  }
-  if (['Enter', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-    handleExcelNav(e);
-    return;
-  }
-  calcOrderBoxes.onKeydown(e);
+  handleCalcKeydown(e, 'finalOrder', calcOrderBoxes);
 }
 
 // Информационная строка под полями заказа
@@ -504,12 +486,12 @@ function roundToPallet() {
 }
 
 // ─── Отображение "хватит до" (текущий запас) ─────────────────────────────────
-const stockUntilDisplay = computed(() => {
+const stockUntilInfo = computed(() => {
   const s = props.settings;
   const stock = (props.item.stock || 0) + (props.item.transit || 0);
   const period = s.periodDays || 30;
   const daily = period > 0 ? (props.item.consumptionPeriod || 0) / period : 0;
-  if (daily <= 0) return stock > 0 ? '∞ (расход=0)' : '0 дн.';
+  if (daily <= 0) return { days: Infinity, display: stock > 0 ? '∞ (расход=0)' : '0 дн.', short: stock > 0 ? '∞' : '0' };
   const days = Math.floor(stock / daily);
   const today = s.today instanceof Date ? s.today : new Date();
   const d = new Date(today);
@@ -517,19 +499,10 @@ const stockUntilDisplay = computed(() => {
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const yy = String(d.getFullYear()).slice(-2);
-  return `${dd}.${mm}.${yy} (${days} дн.)`;
+  return { days, display: `${dd}.${mm}.${yy} (${days} дн.)`, short: `${days} дн.` };
 });
-
-// Compact: only days
-const stockUntilShort = computed(() => {
-  const s = props.settings;
-  const stock = (props.item.stock || 0) + (props.item.transit || 0);
-  const period = s.periodDays || 30;
-  const daily = period > 0 ? (props.item.consumptionPeriod || 0) / period : 0;
-  if (daily <= 0) return stock > 0 ? '∞' : '0';
-  const days = Math.floor(stock / daily);
-  return `${days} дн.`;
-});
+const stockUntilDisplay = computed(() => stockUntilInfo.value.display);
+const stockUntilShort = computed(() => stockUntilInfo.value.short);
 
 // ─── Отображение "хватит до" (после заказа) ──────────────────────────────────
 const coverageDateDisplay = computed(() => {
@@ -557,12 +530,8 @@ const coverageDateShort = computed(() => {
 // ─── Подсветка запаса: мягкий цвет текста + точка ────────────────────────────
 const stockCurrentHighlight = computed(() => {
   if (!props.item.consumptionPeriod || props.item.consumptionPeriod <= 0) return '';
-  const s = props.settings;
-  const stock = (props.item.stock || 0) + (props.item.transit || 0);
-  const period = s.periodDays || 30;
-  const daily = period > 0 ? props.item.consumptionPeriod / period : 0;
-  if (daily <= 0) return '';
-  const days = Math.floor(stock / daily);
+  const days = stockUntilInfo.value.days;
+  if (days === Infinity) return '';
   if (days < 7) return 'stock-low';
   if (days > 30) return 'stock-high';
   return '';
@@ -585,39 +554,27 @@ const palletDisplay = computed(() => {
   return `${p.pallets} пал. + ${p.boxesLeft} кор.`;
 });
 
-// ─── Дефицит до поставки ────────────────────────────────────────────────────
-const hasShortage = computed(() => {
+// ─── Дефицит до поставки (объединённый computed) ─────────────────────────────
+const shortageInfo = computed(() => {
   const s = props.settings;
-  if (!s.deliveryDate || !s.today || !props.item.consumptionPeriod) return false;
+  if (!s.deliveryDate || !s.today || !props.item.consumptionPeriod) return null;
   const daily = s.periodDays > 0 ? props.item.consumptionPeriod / s.periodDays : 0;
-  if (daily <= 0) return false;
+  if (daily <= 0) return null;
   const totalStock = (props.item.stock || 0) + (props.item.transit || 0);
   const days = Math.ceil((s.deliveryDate - s.today) / 86400000);
-  return totalStock < daily * days;
-});
-
-const shortageText = computed(() => {
-  if (!hasShortage.value) return '';
-  const s = props.settings;
-  const daily = s.periodDays > 0 ? props.item.consumptionPeriod / s.periodDays : 0;
-  const days = Math.ceil((s.deliveryDate - s.today) / 86400000);
-  const totalStock = (props.item.stock || 0) + (props.item.transit || 0);
-  const deficit = daily * days - totalStock;
+  const consumed = daily * days;
+  if (totalStock >= consumed) return null;
+  const deficit = consumed - totalStock;
   const unit = props.item.unitOfMeasure || 'шт';
-  if (s.unit === 'boxes') return `${Math.ceil(deficit)} кор.`;
-  if (qpb.value > 1) return `${Math.ceil(deficit)} ${unit} (${Math.ceil(deficit / qpb.value)} кор.)`;
-  return `${Math.ceil(deficit)} ${unit}`;
+  let text;
+  if (s.unit === 'boxes') text = `${Math.ceil(deficit)} кор.`;
+  else if (qpb.value > 1) text = `${Math.ceil(deficit)} ${unit} (${Math.ceil(deficit / qpb.value)} кор.)`;
+  else text = `${Math.ceil(deficit)} ${unit}`;
+  return { text, days: Math.ceil(deficit / daily) };
 });
-
-const shortageDays = computed(() => {
-  if (!hasShortage.value) return 0;
-  const s = props.settings;
-  const daily = s.periodDays > 0 ? props.item.consumptionPeriod / s.periodDays : 0;
-  if (daily <= 0) return 0;
-  const totalStock = (props.item.stock || 0) + (props.item.transit || 0);
-  const days = Math.ceil((s.deliveryDate - s.today) / 86400000);
-  return Math.ceil((daily * days - totalStock) / daily);
-});
+const hasShortage = computed(() => !!shortageInfo.value);
+const shortageText = computed(() => shortageInfo.value?.text || '');
+const shortageDays = computed(() => shortageInfo.value?.days || 0);
 
 // ─── Проверка расхода (аномалия) ─────────────────────────────────────────────
 const consumptionWarning = computed(() => {

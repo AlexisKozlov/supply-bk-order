@@ -27,7 +27,21 @@ const routes = [
       { path: 'shelf-life', name: 'shelf-life', component: () => import('@/views/ShelfLifeView.vue'), meta: { title: 'Сроки годности', module: 'shelf-life' } },
       { path: 'admin', name: 'admin', component: () => import('@/views/AdminView.vue'), meta: { requiresAdmin: true, title: 'Админ-панель' } },
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
+      { path: 'deficit', name: 'deficit', component: () => import('@/views/DeficitView.vue'), meta: { title: 'Распределение дефицита', module: 'order' } },
+      { path: 'stock-collection', name: 'stock-collection', component: () => import('@/views/StockCollectionView.vue'), meta: { title: 'Сбор остатков', module: 'order' } },
     ],
+  },
+  {
+    path: '/deficit-form/:token',
+    name: 'deficit-form',
+    component: () => import('@/views/DeficitFormView.vue'),
+    meta: { title: 'Остатки ресторана' },
+  },
+  {
+    path: '/stock-form/:token',
+    name: 'stock-form',
+    component: () => import('@/views/StockFormView.vue'),
+    meta: { title: 'Остатки ресторана' },
   },
   {
     path: '/search-cards',
@@ -56,6 +70,20 @@ const routes = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+// Перезагрузка страницы при ошибке загрузки модулей (после деплоя новой версии)
+router.onError((error, to) => {
+  const msg = error?.message || '';
+  if (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Unable to preload CSS') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('error loading dynamically imported module')
+  ) {
+    // Перезагружаем на целевую страницу, чтобы получить свежие файлы
+    window.location.href = to?.fullPath || window.location.href;
+  }
 });
 
 router.afterEach((to) => {

@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Вопросы по CDA — встреча</title>
+<style>
+  @font-face { font-family: 'Flame'; src: url('/Flame-Regular.otf'); font-weight: 400; }
+  @font-face { font-family: 'Flame'; src: url('/Flame-Bold.otf'); font-weight: 700; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Flame', 'Segoe UI', system-ui, sans-serif;
+    background: #fff;
+    color: #333;
+    padding: 0;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 30px 40px;
+  }
+
+  h1 {
+    font-size: 1.6em;
+    color: #d35400;
+    margin-bottom: 4px;
+  }
+
+  .meta {
+    color: #999;
+    font-size: 0.9em;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #d35400;
+  }
+
+  .section {
+    margin-bottom: 28px;
+    break-inside: avoid;
+  }
+
+  .section-header {
+    background: #fff3e0;
+    border-left: 4px solid #d35400;
+    padding: 8px 14px;
+    font-weight: 700;
+    font-size: 1.1em;
+    color: #d35400;
+    margin-bottom: 12px;
+    border-radius: 0 6px 6px 0;
+  }
+
+  .section-hint {
+    font-size: 0.85em;
+    color: #999;
+    font-weight: 400;
+    margin-left: 8px;
+  }
+
+  .question-block {
+    margin-bottom: 16px;
+    break-inside: avoid;
+  }
+
+  .question-text {
+    font-weight: 700;
+    font-size: 0.95em;
+    margin-bottom: 6px;
+    padding-left: 2px;
+  }
+
+  .question-num {
+    color: #d35400;
+    margin-right: 4px;
+  }
+
+  .answer-area {
+    width: 100%;
+    min-height: 60px;
+    border: 1.5px solid #ddd;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 0.95em;
+    color: #333;
+    background: #fafafa;
+    resize: vertical;
+    outline: none;
+    transition: border 0.2s;
+    line-height: 1.5;
+  }
+
+  .answer-area:focus {
+    border-color: #d35400;
+    background: #fff;
+  }
+
+  /* Кнопки */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    padding: 12px 0;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+    z-index: 10;
+  }
+
+  .btn {
+    padding: 8px 20px;
+    border: 2px solid #d35400;
+    border-radius: 8px;
+    background: #fff;
+    color: #d35400;
+    font-family: inherit;
+    font-size: 0.9em;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
+  .btn:hover {
+    background: #d35400;
+    color: #fff;
+  }
+
+  .btn-primary {
+    background: #d35400;
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: #b84700;
+  }
+
+  .save-status {
+    font-size: 0.85em;
+    color: #999;
+    align-self: center;
+    margin-left: auto;
+  }
+
+  /* Печать */
+  @media print {
+    .toolbar { display: none; }
+    body { padding: 0; font-size: 11pt; }
+    .page { padding: 15px 20px; }
+    h1 { font-size: 14pt; }
+    .section-header { font-size: 11pt; }
+    .question-text { font-size: 10pt; }
+
+    .answer-area {
+      border: 1px solid #ccc;
+      min-height: 50px;
+      background: #fff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* Показать текст из textarea при печати */
+    .answer-print {
+      display: block !important;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-height: 50px;
+      font-size: 10pt;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #fff;
+    }
+
+    .answer-area { display: none !important; }
+    .section { break-inside: avoid; }
+    .question-block { break-inside: avoid; }
+  }
+
+  .answer-print { display: none; }
+
+  @media (max-width: 600px) {
+    .page { padding: 16px; }
+    h1 { font-size: 1.3em; }
+    .toolbar { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="window.print()">Распечатать</button>
+    <button class="btn" onclick="saveAll()">Сохранить ответы</button>
+    <button class="btn" onclick="clearAll()">Очистить</button>
+    <span class="save-status" id="saveStatus">Ответы сохраняются автоматически</span>
+  </div>
+
+  <h1>Вопросы по алгоритму CDA (ABM Inventory)</h1>
+  <div class="meta">Встреча с начальником товародвижения сети зоотоваров | Дата: _______________</div>
+
+  <div id="questionsContainer"></div>
+</div>
+
+<script>
+const SECTIONS = [
+  {
+    title: "Общее про ABM и CDA",
+    hint: "",
+    questions: [
+      "Давно ли работаете с ABM Inventory? Сколько времени ушло на запуск и настройку?",
+      "Сколько товарных позиций (SKU) ведёте в системе?",
+      "Как считали заказы до ABM? (вручную, Excel, 1С?) Что не устраивало?",
+      "Сколько человек в отделе закупок? Стало ли меньше ручной работы после ABM?"
+    ]
+  },
+  {
+    title: "Буфер и три зоны",
+    hint: "слайды 3–6 оригинала",
+    questions: [
+      "Зелёная зона — откуда берётся ADU (средний расход)? ABM сам считает из истории или вводите вручную?",
+      "Жёлтая зона — как система определяет, что товар «скачет»? VF настраиваете сами или ABM считает автоматически?",
+      "Красная зона — какие коэффициенты у вас стоят (coef_basic, coef_kvi)? Для каких товаров ставите повышенный?",
+      "Бывает ли, что буфер получается слишком большим? Что делаете — уменьшаете вручную или система сама подстраивается?"
+    ]
+  },
+  {
+    title: "DOC и DLT — цикл заказа и доставка",
+    hint: "слайды 4, 8 оригинала",
+    questions: [
+      "DOC (дней между заказами) — задаёте вручную или система сама определяет оптимальный цикл?",
+      "DLT (срок доставки) — у разных поставщиков разный? Как часто меняется?",
+      "ABM сам отслеживает фактический срок доставки или вы вбиваете фиксированный?",
+      "Что происходит, если поставщик опоздал? Система пересчитывает или вмешиваетесь вручную?"
+    ]
+  },
+  {
+    title: "Два сценария расчёта",
+    hint: "слайды 9–10 оригинала",
+    questions: [
+      "Часто ли случается «сценарий Б» — когда остатка не хватает до поставки? Как система ведёт себя?",
+      "Бывает ли, что система рекомендует заказать, а вы решаете не заказывать (или наоборот)? Как часто вмешиваетесь руками?"
+    ]
+  },
+  {
+    title: "Порог MOQ",
+    hint: "слайд 11 оригинала",
+    questions: [
+      "Используете ли порог MOQ? Если да — какой процент ставите?",
+      "Были ли ситуации, когда из-за порога товар не заказали, а он понадобился?"
+    ]
+  },
+  {
+    title: "КДН — коэффициенты дней недели",
+    hint: "слайды 13–18 оригинала",
+    questions: [
+      "Используете ли КДН? Есть ли у вас разница в продажах по дням недели?",
+      "Как настраивали — ABM сам рассчитал из истории или вбивали вручную?",
+      "Для всех товаров или только для ходовых?"
+    ]
+  },
+  {
+    title: "Акции",
+    hint: "слайды 20–33 оригинала",
+    questions: [
+      "Используете ли расчёт в акции (ADU_P)? Часто ли бывают промо?",
+      "Как задаёте прогноз расхода в акции — вручную или система предлагает из прошлых акций?",
+      "Работает ли «последний заказ в акции» — плавный переход? Реально помогает или переусложнение?"
+    ]
+  },
+  {
+    title: "Данные и история",
+    hint: "",
+    questions: [
+      "Откуда ABM берёт данные о продажах? Из кассовой системы, 1С, вручную?",
+      "Сколько истории нужно для нормальной работы? Когда система начала давать адекватные рекомендации?",
+      "Как часто данные обновляются — раз в день, в реальном времени?"
+    ]
+  },
+  {
+    title: "Результаты и подводные камни",
+    hint: "",
+    questions: [
+      "Что реально улучшилось после внедрения? Меньше дефицитов? Меньше излишков?",
+      "Что не оправдало ожиданий? Что оказалось сложнее, чем думали?",
+      "Какие товары система считает хорошо, а какие плохо? Есть ли категории, где считаете вручную?",
+      "Сколько стоит ABM — лицензия, внедрение, поддержка? (если готов поделиться)"
+    ]
+  },
+  {
+    title: "Наша ситуация — совет",
+    hint: "",
+    questions: [
+      "У нас центральный склад → рестораны фастфуда. Поставщики пн-пт, рестораны забирают пн-сб. Как бы подошли к настройке CDA для такой модели?",
+      "У нас нет истории расхода — всё вручную. С чего порекомендуете начать?",
+      "Есть ли смысл делать свою упрощённую версию CDA или лучше сразу брать ABM?"
+    ]
+  }
+];
+
+function render() {
+  const container = document.getElementById('questionsContainer');
+  let html = '';
+  let qNum = 1;
+
+  SECTIONS.forEach((section, sIdx) => {
+    html += `<div class="section">`;
+    html += `<div class="section-header">${section.title}`;
+    if (section.hint) html += `<span class="section-hint">(${section.hint})</span>`;
+    html += `</div>`;
+
+    section.questions.forEach((q, qIdx) => {
+      const key = `q_${sIdx}_${qIdx}`;
+      const saved = localStorage.getItem(key) || '';
+      html += `<div class="question-block">`;
+      html += `<div class="question-text"><span class="question-num">${qNum}.</span> ${q}</div>`;
+      html += `<textarea class="answer-area" data-key="${key}" placeholder="Ответ...">${saved}</textarea>`;
+      html += `<div class="answer-print">${saved || '(нет ответа)'}</div>`;
+      html += `</div>`;
+      qNum++;
+    });
+
+    html += `</div>`;
+  });
+
+  container.innerHTML = html;
+
+  // Автосохранение при вводе
+  document.querySelectorAll('.answer-area').forEach(ta => {
+    ta.addEventListener('input', () => {
+      localStorage.setItem(ta.dataset.key, ta.value);
+      // Обновить print-версию
+      const printDiv = ta.nextElementSibling;
+      if (printDiv) printDiv.textContent = ta.value || '(нет ответа)';
+      showSaved();
+    });
+
+    // Авторазмер
+    ta.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.max(60, this.scrollHeight) + 'px';
+    });
+  });
+}
+
+function saveAll() {
+  document.querySelectorAll('.answer-area').forEach(ta => {
+    localStorage.setItem(ta.dataset.key, ta.value);
+  });
+  showSaved();
+}
+
+function showSaved() {
+  const el = document.getElementById('saveStatus');
+  el.textContent = 'Сохранено!';
+  el.style.color = '#43a047';
+  setTimeout(() => {
+    el.textContent = 'Ответы сохраняются автоматически';
+    el.style.color = '#999';
+  }, 2000);
+}
+
+function clearAll() {
+  if (!confirm('Очистить все ответы? Это действие нельзя отменить.')) return;
+  document.querySelectorAll('.answer-area').forEach(ta => {
+    ta.value = '';
+    ta.style.height = '';
+    localStorage.removeItem(ta.dataset.key);
+    const printDiv = ta.nextElementSibling;
+    if (printDiv) printDiv.textContent = '(нет ответа)';
+  });
+}
+
+render();
+</script>
+</body>
+</html>

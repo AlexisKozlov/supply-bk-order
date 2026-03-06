@@ -1,9 +1,13 @@
 import { defineStore } from 'pinia';
-import { reactive, ref, computed, watch } from 'vue';
+import { reactive, ref, computed, watch, toRaw } from 'vue';
 import { calculateItem, calculateBufferItem } from '@/lib/calculations.js';
 import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
+
+const _clone = typeof structuredClone === 'function'
+  ? structuredClone
+  : (v) => JSON.parse(JSON.stringify(v));
 
 class History {
   constructor(maxSize = 50) {
@@ -13,16 +17,16 @@ class History {
   }
   push(state) {
     this.states = this.states.slice(0, this.currentIndex + 1);
-    this.states.push(JSON.parse(JSON.stringify(state)));
+    this.states.push(_clone(state));
     if (this.states.length > this.maxSize) this.states.shift();
     this.currentIndex = this.states.length - 1;
   }
   undo() {
-    if (this.canUndo()) { this.currentIndex--; return JSON.parse(JSON.stringify(this.states[this.currentIndex])); }
+    if (this.canUndo()) { this.currentIndex--; return _clone(this.states[this.currentIndex]); }
     return null;
   }
   redo() {
-    if (this.canRedo()) { this.currentIndex++; return JSON.parse(JSON.stringify(this.states[this.currentIndex])); }
+    if (this.canRedo()) { this.currentIndex++; return _clone(this.states[this.currentIndex]); }
     return null;
   }
   canUndo() { return this.currentIndex > 0; }
@@ -70,23 +74,27 @@ export const useOrderStore = defineStore('order', () => {
     return 'Новый заказ';
   });
 
+  // Итоговая сводка — зависит только от items и unit (не от всех settings)
   const finalSummary = computed(() => {
     const activeItems = items.value.filter(i => (i.finalOrder || 0) > 0);
     if (!activeItems.length) return null;
     let totalPallets = 0;
     let totalBoxesLeft = 0;
+    const unit = settings.unit;
     activeItems.forEach(item => {
-      const calc = calculateItem(item, settings);
-      if (calc.palletsInfo) {
-        totalPallets += calc.palletsInfo.pallets;
-        totalBoxesLeft += calc.palletsInfo.boxesLeft;
-      }
+      if (!item.boxesPerPallet || !item.finalOrder) return;
+      const qpb = item.qtyPerBox || 1;
+      const mult = item.multiplicity || 1;
+      const accountingBoxes = Math.round(unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb);
+      const physBoxes = Math.round(accountingBoxes / mult);
+      totalPallets += Math.floor(physBoxes / item.boxesPerPallet);
+      totalBoxesLeft += physBoxes % item.boxesPerPallet;
     });
     return { positions: activeItems.length, pallets: totalPallets, boxesLeft: totalBoxesLeft };
   });
 
   function _snapshot() {
-    _history.push(items.value); // History.push уже делает deep clone
+    _history.push(toRaw(items.value).map(i => ({ ...toRaw(i) })));
     _historyVersion.value++;
   }
 
@@ -196,14 +204,14 @@ export const useOrderStore = defineStore('order', () => {
   function undo() {
     const state = _history.undo();
     if (!state) return;
-    items.value = JSON.parse(JSON.stringify(state));
+    items.value = state; // History уже возвращает клон
     _historyVersion.value++;
   }
 
   function redo() {
     const state = _history.redo();
     if (!state) return;
-    items.value = JSON.parse(JSON.stringify(state));
+    items.value = state; // History уже возвращает клон
     _historyVersion.value++;
   }
 

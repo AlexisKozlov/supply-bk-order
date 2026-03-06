@@ -63,6 +63,16 @@ window.onunhandledrejection = (event) => {
   const reason = event.reason;
   const msg = reason?.message || String(reason);
   const stack = reason?.stack || '';
+  // Ошибки загрузки модулей/CSS после деплоя новой версии — перезагружаем страницу
+  if (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Unable to preload CSS') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('error loading dynamically imported module')
+  ) {
+    window.location.reload();
+    return;
+  }
   if (shouldIgnoreError(msg, stack)) return;
   logErrorToServer('error', `Unhandled rejection: ${msg}`, stack || null);
 };

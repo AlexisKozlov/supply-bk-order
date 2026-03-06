@@ -1,16 +1,12 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { getEntityGroup as _getGroup } from '@/lib/utils.js';
 
-/**
- * ООО "Бургер БК" и ООО "Воглия Матта" — общие поставщики и товары.
- * ООО "Пицца Стар" — отдельные.
- */
 function getEntityGroup(legalEntity) {
-  if (legalEntity === 'ООО "Пицца Стар"') {
-    return { cacheKey: 'ООО "Пицца Стар"', entities: ['ООО "Пицца Стар"'] };
-  }
-  return { cacheKey: 'BK_VM', entities: ['ООО "Бургер БК"', 'ООО "Воглия Матта"'] };
+  const entities = _getGroup(legalEntity);
+  const cacheKey = entities.length === 1 ? entities[0] : 'BK_VM';
+  return { cacheKey, entities };
 }
 
 export const useSupplierStore = defineStore('supplier', () => {

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { getEntityGroup } from '@/lib/utils.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 
@@ -16,21 +17,24 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   let loadPromise = null;
 
   function entityToGroup(legalEntity) {
-    if (legalEntity && legalEntity.includes('Пицца Стар')) return 'PS';
-    return 'BK_VM';
+    const group = getEntityGroup(legalEntity);
+    return group.length === 1 ? 'PS' : 'BK_VM';
   }
 
+  let _loadingGroup = '';
   async function load(legalEntity) {
     const group = entityToGroup(legalEntity);
     if (loaded.value && loadedGroup.value === group) return;
-    // Защита от параллельных вызовов
-    if (loading.value && loadPromise) return loadPromise;
+    // Защита от параллельных вызовов той же группы
+    if (loading.value && loadPromise && _loadingGroup === group) return loadPromise;
     loading.value = true;
+    _loadingGroup = group;
     loadPromise = _doLoad(group);
     try {
       await loadPromise;
     } finally {
       loadPromise = null;
+      _loadingGroup = '';
     }
   }
 
@@ -238,6 +242,36 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     }
   }
 
+  async function saveRestaurantNote(restaurantId, notes) {
+    const rid = Number(restaurantId);
+    const rest = restaurants.value.find(r => r.id === rid);
+    if (!rest) return;
+    const oldNotes = rest.notes || '';
+    const newNotes = (notes || '').trim();
+    if (oldNotes === newNotes) return;
+
+    const { data, error } = await db.from('restaurants').update({ notes: newNotes }).eq('id', rid);
+    if (error) throw new Error(error);
+    rest.notes = newNotes;
+
+    // Аудит-лог
+    try {
+      const meta = _meta();
+      await db.from('audit_log').insert({
+        entity_type: 'delivery_schedule',
+        entity_id: rid,
+        action: 'restaurant_updated',
+        user_name: meta.updated_by,
+        details: JSON.stringify({
+          restaurant_number: rest.number || rid,
+          param_changes: [{ label: 'Комментарий', from: oldNotes || '—', to: newNotes || '—' }],
+        }),
+      });
+    } catch (e) {
+      console.warn('Audit log error (note):', e);
+    }
+  }
+
   async function deleteRestaurant(id) {
     const { error } = await db.from('restaurants').delete().eq('id', id);
     if (error) throw new Error(error);
@@ -253,6 +287,6 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   return {
     restaurants, schedule, loading, loaded,
     scheduleByRestaurant, restaurantsByDay, regions, lastUpdate,
-    load, saveScheduleCell, saveRestaurant, deleteRestaurant, invalidate, entityToGroup,
+    load, saveScheduleCell, saveRestaurant, saveRestaurantNote, deleteRestaurant, invalidate, entityToGroup,
   };
 });
