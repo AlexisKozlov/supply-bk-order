@@ -280,9 +280,15 @@ const missingSuppliersCount = ref(0);
 // ─── Парсинг Excel ──────────────────────────────────────────────────────
 
 async function parseExcel(file) {
-  const XLSX = await import('xlsx-js-style');
-  const buffer = await file.arrayBuffer();
-  const wb = XLSX.read(buffer, { type: 'array' });
+  let XLSX, buffer, wb;
+  try {
+    XLSX = await import('xlsx-js-style');
+    buffer = await file.arrayBuffer();
+    wb = XLSX.read(buffer, { type: 'array' });
+  } catch (e) {
+    toast.error('Ошибка чтения файла', 'Не удалось распознать формат файла');
+    return;
+  }
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rawData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
@@ -493,6 +499,7 @@ function reset() {
   parsedRows.value = [];
   skippedInactive.value = 0;
   fileName.value = '';
+  result.value = { added: 0, duplicates: 0, inactive: 0, errors: 0 };
   if (fileInput.value) fileInput.value.value = '';
 }
 

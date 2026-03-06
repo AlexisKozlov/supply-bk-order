@@ -173,11 +173,13 @@ export const useNotificationStore = defineStore('notification', () => {
 
   // Останавливаем polling при разлогине
   watch(() => userStore.currentUser, (user) => {
-    if (!user) stopPolling();
+    if (!user) {
+      stopPolling();
+      cleanup();
+    }
   });
 
   // Приостанавливаем polling при скрытии вкладки
-  // Обработчик создаётся один раз, не дублируется
   let _visibilityBound = false;
   function _onVisibilityChange() {
     if (document.hidden) {
@@ -191,5 +193,12 @@ export const useNotificationStore = defineStore('notification', () => {
     document.addEventListener('visibilitychange', _onVisibilityChange);
   }
 
-  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling };
+  function cleanup() {
+    if (_visibilityBound && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', _onVisibilityChange);
+      _visibilityBound = false;
+    }
+  }
+
+  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling, cleanup };
 });

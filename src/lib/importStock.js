@@ -5,7 +5,7 @@
  */
 
 import { db } from '@/lib/apiClient.js';
-import { debug, getQpb } from '@/lib/utils.js';
+import { debug, getQpb, applyEntityFilter } from '@/lib/utils.js';
 
 const LEGAL_ENTITY_MAP = {
   'сбарро':              'ООО "Пицца Стар"',
@@ -298,7 +298,7 @@ function detectDelimiter(text) {
 
 // ─── Маппинг данных файла → items ──────────────────────────────────────────
 
-async function matchData(items, fileData, target, unit) {
+async function matchData(items, fileData, target, unit, legalEntity) {
   let matched = 0;
 
   // Build SKU lookup with multiple normalization variants
@@ -401,12 +401,14 @@ async function matchData(items, fileData, target, unit) {
       // 1. Собрать SKU всех позиций заказа/плана
       const itemSkus = new Set(items.map(i => i.sku).filter(Boolean));
 
-      // 2. Запросить analog_group для всех SKU позиций
+      // 2. Запросить analog_group для всех SKU позиций (с фильтром по юрлицу)
       if (itemSkus.size > 0) {
         const skuList = [...itemSkus];
-        const { data: products } = await db.from('products')
+        let prodQuery = db.from('products')
           .select('sku,name,analog_group')
           .in('sku', skuList);
+        if (legalEntity) prodQuery = applyEntityFilter(prodQuery, legalEntity);
+        const { data: products } = await prodQuery;
 
         if (products?.length) {
           // Карта SKU → analog_group
@@ -423,9 +425,11 @@ async function matchData(items, fileData, target, unit) {
           // 3. Запросить все продукты с analog_group и отфильтровать на клиенте
           // (in() не работает с запятыми в значениях, напр. «Стакан Пепси 0,5л»)
           if (groups.size > 0) {
-            const { data: allAnalogProducts } = await db.from('products')
+            let analogQuery = db.from('products')
               .select('sku,name,analog_group,qty_per_box')
               .neq('analog_group', '');
+            if (legalEntity) analogQuery = applyEntityFilter(analogQuery, legalEntity);
+            const { data: allAnalogProducts } = await analogQuery;
             const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
 
             // Карта group → [sku, ...], SKU → qtyPerBox
@@ -648,9 +652,11 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
     const itemSkus = new Set(items.map(i => i.sku).filter(Boolean));
     if (itemSkus.size > 0) {
       const skuList = [...itemSkus];
-      const { data: products } = await db.from('products')
+      let prodQ = db.from('products')
         .select('sku,name,analog_group')
         .in('sku', skuList);
+      if (legalEntity) prodQ = applyEntityFilter(prodQ, legalEntity);
+      const { data: products } = await prodQ;
 
       if (products?.length) {
         const skuToGroup = new Map();
@@ -665,9 +671,11 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
         }
 
         if (groups.size > 0) {
-          const { data: allAnalogProducts } = await db.from('products')
+          let analogQ = db.from('products')
             .select('sku,name,analog_group,qty_per_box')
             .neq('analog_group', '');
+          if (legalEntity) analogQ = applyEntityFilter(analogQ, legalEntity);
+          const { data: allAnalogProducts } = await analogQ;
           const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
 
           const groupToSkus = new Map();
@@ -814,7 +822,7 @@ export function importFromFile(target, items, legalEntity, unit) {
           resolve({ items, matched: 0, total: 0, error: `Не удалось распознать товары в файле "${file.name}". Проверьте формат файла.` });
           return;
         }
-        const result = await matchData(items, data, target, unit);
+        const result = await matchData(items, data, target, unit, legalEntity);
         debug(`[importStock] File: ${file.name}, parsed: ${data.length} items, matched: ${result.matched}/${items.length}, legalEntity: ${legalEntity}`);
         if (result.matched < items.length) {
           const unmatched = items.filter((item, idx) => {

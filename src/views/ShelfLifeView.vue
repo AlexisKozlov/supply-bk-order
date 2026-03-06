@@ -381,6 +381,7 @@ async function handleUpload() {
   input.type = 'file';
   input.accept = '.xlsx,.xls';
   input.addEventListener('change', async (e) => {
+    input.remove();
     const file = e.target.files[0];
     if (!file) return;
     uploading.value = true;

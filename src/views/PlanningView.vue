@@ -453,7 +453,7 @@ async function loadSupplierProducts() {
   } catch { allSupplierProducts.value = []; }
 }
 
-watch(supplier, () => loadSupplierProducts(), { immediate: true });
+watch(supplier, () => { _validationCache = null; loadSupplierProducts(); }, { immediate: true });
 
 // ─── Calculator for plan inputs (#3) ──────────────────────────────────────
 let _activeCalcIdx = null;

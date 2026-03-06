@@ -134,8 +134,8 @@ async function save() {
       telegram: form.value.telegram.trim() || null,
       viber: form.value.viber.trim() || null,
       email: form.value.email.trim() || null,
-      dlt: form.value.dlt || null,
-      doc: form.value.doc || null,
+      dlt: form.value.dlt != null && form.value.dlt !== '' ? form.value.dlt : null,
+      doc: form.value.doc != null && form.value.doc !== '' ? form.value.doc : null,
     };
     let error;
     if (props.supplier) {

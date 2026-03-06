@@ -275,6 +275,9 @@ onUnmounted(() => {
 });
 
 function initEmberGlow() {
+  // Очищаем предыдущий listener/анимацию, если были
+  if (bgResize) { window.removeEventListener('resize', bgResize); bgResize = null; }
+  if (bgRaf) { cancelAnimationFrame(bgRaf); bgRaf = null; }
   const c = bgCanvas.value;
   if (!c) return;
   const ctx = c.getContext('2d');

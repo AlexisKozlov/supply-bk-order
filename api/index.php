@@ -70,8 +70,24 @@ function resolvePermissions($role, $permissionsJson, $templates) {
     if (!$permissionsJson) return $base;
     $overrides = is_string($permissionsJson) ? json_decode($permissionsJson, true) : $permissionsJson;
     if (!is_array($overrides)) return $base;
-    return array_merge($base, $overrides);
+    // Только ключи, существующие в базовом шаблоне — без эскалации привилегий
+    return array_merge($base, array_intersect_key($overrides, $base));
 }
+
+// Проверка доступа к юр. лицу: пользователь может работать только со своими юрлицами
+function checkLegalEntityAccess($sessionUser, $legalEntity) {
+    if (!$sessionUser || !$legalEntity) return true; // нет сессии или нет фильтра — пропускаем (API-ключ)
+    if (($sessionUser['role'] ?? '') === 'admin') return true;
+    $userEntities = $sessionUser['legal_entities'] ?? '';
+    if (is_string($userEntities)) {
+        $userEntities = json_decode($userEntities, true);
+    }
+    if (!is_array($userEntities) || empty($userEntities)) return true; // нет ограничений
+    return in_array($legalEntity, $userEntities);
+}
+
+// Таблицы, в которых есть поле legal_entity и нужна проверка доступа
+$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','delivery_schedule','deficit_sessions','deficit_tokens','stock_collections'];
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
@@ -616,6 +632,7 @@ if ($endpoint === 'rpc') {
         $pname = mb_substr($body['product_name'] ?? '', 0, 255);
         $uname = $authUserName ?: ($body['user_name'] ?? '');
         if (!$le || !$pname) respond(['error' => 'missing_params'], 400);
+        if (!checkLegalEntityAccess($authUser, $le)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $token = bin2hex(random_bytes(32)); // 64 hex chars
         $expires = date('Y-m-d H:i:s', strtotime('+48 hours'));
         $s = $pdo->prepare("INSERT INTO deficit_tokens (token, legal_entity, product_name, created_by, expires_at) VALUES (?, ?, ?, ?, ?)");
@@ -630,6 +647,7 @@ if ($endpoint === 'rpc') {
         $products = $body['products'] ?? []; // [{name, sku?, unit}]
         $uname = $authUserName ?: ($body['user_name'] ?? '');
         if (!$le || !$name || empty($products)) respond(['error' => 'missing_params'], 400);
+        if (!checkLegalEntityAccess($authUser, $le)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, name, created_by) VALUES (?, ?, ?)");
         $s->execute([$le, $name, $uname]);
         $collId = $pdo->lastInsertId();
@@ -902,6 +920,7 @@ if ($endpoint === 'rpc') {
         $legalEntity = $body['legal_entity'] ?? '';
         $items = $body['items'] ?? [];
         if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
         if (empty($items)) respond(['error' => 'items cannot be empty'], 400);
         if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
@@ -1031,6 +1050,7 @@ if ($endpoint === 'rpc') {
         $legalEntity = $body['legal_entity'] ?? '';
         $items = $body['items'] ?? [];
         if (!$legalEntity) respond(['error' => 'legal_entity required'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
         try {
             $pdo->beginTransaction();
@@ -1054,6 +1074,7 @@ if ($endpoint === 'rpc') {
         if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
         $legalEntity = $body['legal_entity'] ?? '';
         if (!$legalEntity) respond(['error' => 'legal_entity обязателен'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $supplier = $body['supplier'] ?? null;
         $lookbackDays = intval($body['lookback_days'] ?? 90);
         if ($lookbackDays < 7) $lookbackDays = 90;
@@ -1262,6 +1283,26 @@ if (in_array($table, $noInsertDelete) && ($method === 'POST' || $method === 'DEL
 // Enforce append-only (allow GET + POST, block PATCH/PUT/DELETE)
 if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
     respond(['error' => 'Only read and insert allowed for this table'], 403);
+}
+
+// Проверка доступа к юр. лицу в REST-запросах
+if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
+    $leFilt = $_GET['legal_entity'] ?? null;
+    if ($leFilt) {
+        // Извлекаем значение из фильтра eq.XXX
+        $leVal = (strpos($leFilt, 'eq.') === 0) ? substr($leFilt, 3) : $leFilt;
+        $leVal = urldecode($leVal);
+        if (!checkLegalEntityAccess($sessionUser, $leVal)) {
+            respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+    }
+    // Для операций записи проверяем legal_entity в теле запроса
+    if ($method !== 'GET' && !empty($body)) {
+        $bodyLE = $body['legal_entity'] ?? null;
+        if ($bodyLE && !checkLegalEntityAccess($sessionUser, $bodyLE)) {
+            respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
+    }
 }
 
 // Белый список полей, доступных для фильтрации через GET-параметры

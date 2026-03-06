@@ -103,7 +103,12 @@ onMounted(() => {
   setTimeout(() => noteInput.value?.focus(), 50);
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
-function doConfirm() { emit('confirm', note.value.trim()); }
+let _confirmed = false;
+function doConfirm() {
+  if (_confirmed || props.saving) return;
+  _confirmed = true;
+  emit('confirm', note.value.trim());
+}
 </script>
 
 <style scoped>
@@ -140,7 +145,7 @@ function doConfirm() { emit('confirm', note.value.trim()); }
   padding: 6px 8px; text-align: left; font-size: 10px; font-weight: 700;
   text-transform: uppercase; color: var(--text-muted);
   background: var(--bg); border-bottom: 1px solid var(--border);
-  position: sticky; top: 0;
+  position: sticky; top: 0; z-index: 1;
 }
 .sm-table tbody td { padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
 .sm-table tbody tr:last-child td { border-bottom: none; }
