@@ -1,5 +1,5 @@
 <template>
-  <div class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+  <div class="app-layout" :class="[entityClass, { 'sidebar-collapsed': sidebarCollapsed, 'entity-transition': entityTransition }]">
 
     <!-- SIDEBAR -->
     <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, open: sidebarOpen }">
@@ -61,10 +61,13 @@
 
       <!-- Юр. лицо (над пользователем, внизу) -->
       <div class="sidebar-entity-selector" v-if="!sidebarCollapsed">
-        <label>Юр. лицо</label>
+        <label><span class="entity-dot"></span> Юр. лицо</label>
         <select :value="orderStore.settings.legalEntity" @change="onLegalEntityChange">
           <option v-for="le in availableEntities" :key="le" :value="le">{{ le }}</option>
         </select>
+      </div>
+      <div v-else class="sidebar-entity-dot-collapsed" :title="orderStore.settings.legalEntity">
+        <span class="entity-dot entity-dot-lg"></span>
       </div>
 
       <!-- User section at bottom -->
@@ -568,6 +571,14 @@ function goToAdmin() {
   router.push({ name: 'admin' });
 }
 
+const entityTransition = ref(false);
+const entityClass = computed(() => {
+  const le = orderStore.settings.legalEntity;
+  if (le.includes('Воглия')) return 'entity-voglya';
+  if (le.includes('Пицца')) return 'entity-pizza';
+  return 'entity-burger';
+});
+
 const showEntityConfirm = ref(false);
 const pendingEntity = ref('');
 
@@ -603,13 +614,16 @@ function cancelEntityChange() {
 }
 
 function applyEntityChange(le) {
-  orderStore.settings.legalEntity = le;
-  // Сброс данных если на странице заказа
-  if (route.name === 'order') {
-    orderStore.resetOrder();
-  } else {
-    orderStore.settings.supplier = '';
-  }
+  entityTransition.value = true;
+  setTimeout(() => {
+    orderStore.settings.legalEntity = le;
+    if (route.name === 'order') {
+      orderStore.resetOrder();
+    } else {
+      orderStore.settings.supplier = '';
+    }
+    setTimeout(() => { entityTransition.value = false; }, 350);
+  }, 250);
 }
 
 function resetPwdForm() {
@@ -658,6 +672,48 @@ function confirmLogout() {
 </script>
 
 <style scoped>
+/* ═══ Entity dot indicator ═══ */
+.entity-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 4px; vertical-align: middle;
+  transition: background 0.4s ease;
+}
+.entity-dot-lg { width: 10px; height: 10px; margin: 0; }
+.entity-burger .entity-dot { background: #E87A1E; box-shadow: 0 0 6px rgba(232,122,30,0.5); }
+.entity-voglya .entity-dot { background: #42A5F5; box-shadow: 0 0 6px rgba(66,165,245,0.5); }
+.entity-pizza .entity-dot { background: #BA68C8; box-shadow: 0 0 6px rgba(186,104,200,0.5); }
+
+.sidebar-entity-dot-collapsed {
+  display: flex; justify-content: center; padding: 8px 0;
+}
+
+/* ═══ Entity themes ═══ */
+.entity-burger .sidebar { background: linear-gradient(180deg, #1A0E08 0%, #251610 100%); }
+.entity-voglya .sidebar { background: linear-gradient(180deg, #0A1628 0%, #122040 100%); }
+.entity-pizza .sidebar { background: linear-gradient(180deg, #1A0A1E 0%, #2D1236 100%); }
+
+.entity-burger .sidebar-entity-selector select { border-color: rgba(232,122,30,0.3); }
+.entity-voglya .sidebar-entity-selector select { border-color: rgba(66,165,245,0.3); }
+.entity-pizza .sidebar-entity-selector select { border-color: rgba(186,104,200,0.3); }
+
+.entity-voglya .sidebar-item.active { background: rgba(66,165,245,0.12); }
+.entity-pizza .sidebar-item.active { background: rgba(186,104,200,0.12); }
+.entity-voglya .sidebar-tool-icon.active { box-shadow: inset 0 -2px 0 #42A5F5; }
+.entity-pizza .sidebar-tool-icon.active { box-shadow: inset 0 -2px 0 #BA68C8; }
+
+.entity-voglya .welcome-overlay { background: linear-gradient(135deg, #0A1628 0%, #1A3060 40%, #2E5090 100%); }
+.entity-pizza .welcome-overlay { background: linear-gradient(135deg, #1A0A1E 0%, #3D1A50 40%, #6A3080 100%); }
+
+/* ═══ Entity transition animation ═══ */
+.entity-transition .main-wrapper { animation: entityFade 0.6s ease; }
+.entity-transition .sidebar { transition: background 0.5s ease; }
+
+@keyframes entityFade {
+  0% { opacity: 1; }
+  40% { opacity: 0.15; }
+  100% { opacity: 1; }
+}
+
 /* ═══ Tools row (иконки в ряд) ═══ */
 .sidebar-tools-row {
   display: flex;
