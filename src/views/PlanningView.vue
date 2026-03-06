@@ -1372,6 +1372,7 @@ async function savePlan() {
 }
 
 async function confirmSave() {
+  if (saving.value) return;
   saving.value = true;
   try {
   const planData = {
