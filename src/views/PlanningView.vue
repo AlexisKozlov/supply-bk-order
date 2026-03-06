@@ -330,7 +330,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, triggerRef } from 'vue';
 import { useRoute, onBeforeRouteLeave } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -919,6 +919,7 @@ async function fillConsumption() {
 
     _validationCache = null;
     _appliedAnalogs = new Map();
+    triggerRef(items);
     recalcAll(); _savePlanDraft();
 
     const dateStr = result.updatedAt
@@ -964,6 +965,7 @@ async function loadFrom1c() {
       f++;
     });
     _validationCache = null;
+    triggerRef(items);
     recalcAll(); triggerValidation(); _savePlanDraft();
     toast.success('Из 1С загружено', `${f} из ${items.value.length} позиций`);
   } catch { toast.error('Ошибка', 'stock_1c не найдена'); }
