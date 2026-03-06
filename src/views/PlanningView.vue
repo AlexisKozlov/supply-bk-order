@@ -115,7 +115,6 @@
             <th v-for="h in currentWeekHeaders" :key="'cw-' + h.label" class="plan-th-current" :title="h.sublabel">
               {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
             </th>
-            <th v-if="currentWeekHeaders.length" class="plan-th-divider"></th>
             <!-- Будущие периоды -->
             <th v-for="h in periodHeaders" :key="'fp-' + h.label" class="plan-th-month" :title="compactPlan ? h.label + ' ' + h.sublabel : ''">
               {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
@@ -141,7 +140,6 @@
               <input type="number" class="plan-calc-input cw-transit-input" :value="item.transit?.[wi]?.qty || ''" @change="e => onTransitInput(idx, wi, e.target.value)" :disabled="viewOnly" placeholder="0" title="Транзит"/>
               <div class="cw-days" :title="'Остаток: ' + nf.format(cw.stockAfter)">{{ cw.daysRemaining !== null ? cw.daysRemaining + ' дн' : '—' }}</div>
             </td>
-            <td v-if="currentWeekHeaders.length" class="plan-td-divider"></td>
             <!-- Период 0 — readonly -->
             <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
               <template v-if="item.plan[0]?.orderBoxes > 0">
@@ -188,7 +186,7 @@
           </tr>
           <!-- Строка добавления товара -->
           <tr v-if="showAddRow" class="add-product-row">
-            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length + (currentWeekHeaders.length ? 1 : 0) + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
+            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
               <select class="add-product-select" @change="addProduct">
                 <option value="">+ Добавить товар…</option>
                 <option v-for="p in availableToAdd" :key="p.sku" :value="p.sku">{{ p.sku }} — {{ p.name }}{{ p.is_active === 0 ? ' (скрыта)' : '' }}</option>
