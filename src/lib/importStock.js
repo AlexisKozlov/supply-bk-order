@@ -710,15 +710,34 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
             }
 
             if (foundAnalogs.length > 0) {
-              // Сохраняем базовые значения (до аналогов) для идемпотентного применения
+              // Базу берём из analysis_data (не из текущего item, который мог содержать предыдущие аналоги)
+              const mainData = adMap.get(item.sku) || adMap.get(normSku(item.sku));
+              const itemQpb = item.qtyPerBox || 1;
+              let baseStock, baseConsumption;
+              if (mainData) {
+                const srcPeriod = mainData.period_days || 30;
+                const cPcs = srcPeriod === targetPeriodDays
+                  ? Math.round((mainData.consumption || 0) * 10) / 10
+                  : Math.round(((mainData.consumption || 0) / srcPeriod) * targetPeriodDays * 10) / 10;
+                const sPcs = Math.round((mainData.stock || 0) * 10) / 10;
+                if (target === 'order') {
+                  baseStock = unit === 'boxes' ? Math.round(sPcs / itemQpb * 10) / 10 : sPcs;
+                  baseConsumption = unit === 'boxes' ? Math.round(cPcs / itemQpb * 10) / 10 : cPcs;
+                } else {
+                  baseStock = sPcs;
+                  baseConsumption = unit === 'boxes' ? Math.round(cPcs / itemQpb * 100) / 100 : cPcs;
+                }
+              } else {
+                baseStock = 0; baseConsumption = 0;
+              }
               analogMerges.push({
                 itemSku: item.sku,
                 itemName: item.name || skuToName.get(item.sku) || item.sku,
                 itemIdx: idx,
                 analogs: foundAnalogs,
                 _base: target === 'order'
-                  ? { stock: item.stock, consumption: item.consumptionPeriod, transit: item.transit }
-                  : { stockOnHand: item.stockOnHand, consumption: item.monthlyConsumption },
+                  ? { stock: baseStock, consumption: baseConsumption, transit: 0 }
+                  : { stockOnHand: baseStock, consumption: baseConsumption },
               });
             }
           }
