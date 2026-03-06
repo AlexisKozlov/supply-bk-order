@@ -203,7 +203,12 @@ function mapRows(rows, legalEntity) {
 
   let data = allData;
   if (colMap.legalEntity >= 0 && legalEntity && allData.length > 0) {
-    const filtered = allData.filter(e => { const m = mapLegalEntity(e._rawEntity); return !m || m === legalEntity; });
+    const filtered = allData.filter(e => {
+      const raw = (e._rawEntity || '').trim();
+      if (!raw) return true; // нет значения юрлица — включаем
+      const m = mapLegalEntity(raw);
+      return m === legalEntity; // включаем только точное совпадение
+    });
     if (filtered.length > 0) data = filtered;
   }
   return aggregateByProduct(data);
@@ -351,7 +356,12 @@ async function matchData(items, fileData, target, unit) {
       }
     }
 
-    if (!match) return item;
+    if (!match) {
+      // Для анализа: сбрасываем данные у позиций, которых нет в файле,
+      // чтобы старые данные от предыдущего импорта не сохранялись
+      if (target === 'analysis') return { ...item, stock: 0, consumption: 0 };
+      return item;
+    }
     if (isFuzzy) usedFuzzy.add(match);
     matchedFileEntries.add(match);
     matched++;

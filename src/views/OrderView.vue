@@ -79,24 +79,14 @@
       </div>
     </div>
 
-    <!-- Тулбар: поиск + действия -->
+    <!-- Тулбар: фильтр + действия -->
     <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="order-toolbar">
-      <div class="search-bar" v-if="!orderStore.viewOnlyMode" ref="searchBarRef" style="position:relative;display:flex;align-items:center;gap:8px;">
+      <div class="search-bar" v-if="!orderStore.viewOnlyMode" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
-          <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
-            @input="onSearchInput" ref="searchInputRef" style="width:280px;max-width:360px;padding-right:28px;"/>
-          <button v-if="searchQuery" @click="clearSearch"
+          <input type="text" v-model="filterQuery" placeholder="Фильтр по названию / артикулу..."
+            style="width:280px;max-width:360px;padding-right:28px;"/>
+          <button v-if="filterQuery" @click="filterQuery = ''"
             style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;"><BkIcon name="close" size="xs"/></button>
-          <div v-if="searchResults.length || (searchQuery.length >= 2 && searchDone)"
-            style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
-            <div v-for="p in searchResults" :key="p.id||p.sku"
-              @click="addFromSearch(p)"
-              class="search-result-item" :style="p.is_active === 0 ? 'opacity:0.7' : ''">
-              <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
-              <span v-if="p.is_active === 0" class="hidden-badge">скрыта</span>
-            </div>
-            <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
-          </div>
         </div>
       </div>
       <div class="order-actions">
@@ -134,6 +124,7 @@
         :cda-supplier-dlt="currentSupplierDlt || 1"
         :cda-supplier-doc="currentSupplierDoc || 7"
         :cda-safety-coef="orderStore.settings.safetyCoef"
+        :filter-query="filterQuery"
         @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
@@ -277,11 +268,7 @@ const aduLoading            = ref(false);
 const aduMap                = ref(new Map());
 const load1cLoading         = ref(false);
 const importLoading         = ref(false);
-const searchQuery           = ref('');
-const searchResults         = ref([]);
-const searchDone            = ref(false);
-const searchInputRef        = ref(null);
-const searchBarRef          = ref(null);
+const filterQuery           = ref('');
 const editCardModal         = ref({ show: false, product: null });
 const analogMergeModal      = ref({ show: false, merges: [] });
 const appliedAnalogs        = ref(new Map()); // SKU товара → Set<SKU применённых аналогов>
@@ -306,9 +293,6 @@ const draftStatusText = computed(() => {
 const orderResultModal      = ref({ show: false, text: '', supplier: '', deliveryDate: '', lines: [] });
 const isFullscreen          = ref(false);
 const compactMode           = ref(localStorage.getItem('bk_compact_mode') === '1');
-let   searchTimer           = null;
-const searchCache           = new Map();
-const SEARCH_CACHE_MAX      = 20;
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
@@ -365,11 +349,7 @@ watch(paramsReady, (ready) => {
 // ─── Init ──────────────────────────────────────────────────────────────────────
 // Перезагружать поставщиков при смене юр. лица в сайдбаре
 watch(() => orderStore.settings.legalEntity, async (le) => {
-  searchQuery.value = '';
-  searchResults.value = [];
-  searchDone.value = false;
-  clearTimeout(searchTimer);
-  searchCache.clear();
+  filterQuery.value = '';
   await supplierStore.loadSuppliers(le);
 });
 
@@ -449,7 +429,6 @@ onMounted(async () => {
     }
   }
   document.addEventListener('click', closeShareDropdown);
-  document.addEventListener('click', closeSearchDropdown);
   draftTickTimer = setInterval(() => { draftTick.value++; }, 30000);
 });
 
@@ -465,30 +444,22 @@ onMounted(() => { window.addEventListener('beforeunload', onBeforeUnload); });
 
 onUnmounted(() => {
   document.removeEventListener('click', closeShareDropdown);
-  document.removeEventListener('click', closeSearchDropdown);
-  clearTimeout(searchTimer);
   clearTimeout(_collapseHintTimer);
   if (draftTickTimer) clearInterval(draftTickTimer);
   window.removeEventListener('beforeunload', onBeforeUnload);
 });
 
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (hasUnsavedData()) {
     draftStore.saveNow();
-    if (!window.confirm('Есть несохранённые данные. Уйти?')) return false;
+    const ok = await confirmAction('Несохранённые данные', 'Вы не сохранили заказ. Уйти со страницы?');
+    if (!ok) return false;
   }
   // Снимаем блокировку редактирования при уходе (после подтверждения)
   if (orderStore.editingOrderId) {
     db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '' }).catch(() => {});
   }
 });
-
-function closeSearchDropdown(e) {
-  if (searchBarRef.value && !searchBarRef.value.contains(e.target)) {
-    searchResults.value = [];
-    searchDone.value = false;
-  }
-}
 
 // Реактивная навигация: если query изменился когда компонент уже смонтирован
 watch(() => route.query.orderId, async (newId) => {
@@ -548,7 +519,6 @@ async function onSupplierChange(e) {
   orderStore.settings.note = '';
   orderStore.items = [];
   orderStore.clearHistory();
-  searchCache.clear();
   draftStore.save();
   if (!newSupplier) return;
   supplierLoading.value = true;
@@ -572,7 +542,6 @@ async function onSupplierChange(e) {
     }
     draftStore.save();
     orderVisible.value = true;
-    setTimeout(() => searchInputRef.value?.focus(), 100);
   } catch { toast.error('Ошибка', 'Не удалось загрузить товары'); }
   finally { supplierLoading.value = false; }
 }
@@ -784,56 +753,6 @@ async function loadFrom1c() {
     toast.success('Данные из 1С загружены', `${filled} из ${orderStore.items.length} позиций${freshLabel ? ' · обновлено ' + freshLabel : ''}`);
   } catch { toast.error('Ошибка', 'Таблица stock_1c не найдена'); }
   finally { load1cLoading.value = false; }
-}
-
-// ─── Поиск ────────────────────────────────────────────────────────────────────
-function onSearchInput() {
-  clearTimeout(searchTimer);
-  searchResults.value = []; searchDone.value = false;
-  const q = searchQuery.value.trim();
-  if (q.length < 2) return;
-  searchTimer = setTimeout(() => searchProducts(q), 300);
-}
-
-async function searchProducts(q) {
-  const cacheKey = `${q}_${orderStore.settings.legalEntity}_${orderStore.settings.supplier}`;
-  const cached = searchCache.get(cacheKey);
-  if (cached) {
-    searchResults.value = cached;
-    searchDone.value = true;
-    return;
-  }
-  const params = new URLSearchParams({ q, limit: '10', legal_entity: orderStore.settings.legalEntity });
-  if (orderStore.settings.supplier) params.set('supplier', orderStore.settings.supplier);
-  try {
-    const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
-    if (!r.ok) { searchResults.value = []; return; }
-    const results = await r.json();
-    if (!Array.isArray(results)) { searchResults.value = []; return; }
-    // Защита от гонки: проверяем, что запрос ещё актуален
-    if (searchQuery.value.trim() !== q) return;
-    searchResults.value = results;
-    if (searchCache.size >= SEARCH_CACHE_MAX) {
-      searchCache.delete(searchCache.keys().next().value);
-    }
-    searchCache.set(cacheKey, results);
-  } catch(e) { searchResults.value = []; }
-  finally { searchDone.value = true; }
-}
-
-function addFromSearch(product) {
-  const added = orderStore.addItem(product);
-  if (!added) toast.warning('Уже в заказе', product.name);
-  else if (product.is_active === 0) {
-    const item = orderStore.items.find(i => i.sku === product.sku);
-    if (item) item._hidden = true;
-  }
-  searchQuery.value = ''; searchResults.value = []; draftStore.save();
-}
-
-function clearSearch() {
-  searchQuery.value = ''; searchResults.value = []; searchDone.value = false;
-  searchInputRef.value?.focus();
 }
 
 // ─── История изменений ────────────────────────────────────────────────────────────

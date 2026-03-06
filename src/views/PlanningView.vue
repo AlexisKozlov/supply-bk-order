@@ -24,6 +24,7 @@
         <span class="ps-chip"><b>{{ supplier || 'Не выбран' }}</b></span>
         <span class="ps-chip">{{ periodLabel }}</span>
         <span class="ps-chip">с {{ startDateDisplay }}</span>
+        <span v-if="planningDateStr" class="ps-chip">план с {{ planningDateDisplay }}</span>
         <span class="ps-chip">{{ inputUnit === 'boxes' ? 'коробки' : 'штуки' }}</span>
         <span class="ps-chip">расход/{{ consumptionPeriodDays }}дн</span>
         <span class="params-toggle-hint">
@@ -51,6 +52,10 @@
           <input type="date" v-model="startDateStr" @change="onParamsChange" :disabled="viewOnly"/>
         </div>
         <div class="pf-group">
+          <label>Дата планирования</label>
+          <input type="date" v-model="planningDateStr" @change="onPlanningDateChange" :disabled="viewOnly" :min="startDateStr"/>
+        </div>
+        <div class="pf-group">
           <label>Единицы</label>
           <select :value="inputUnit" @change="onUnitChange" :disabled="viewOnly">
             <option value="pieces">Штуки</option>
@@ -72,22 +77,12 @@
 
     <!-- Тулбар: действия -->
     <div class="order-toolbar" v-if="items.length && !(isViewer && !viewOnly && !editingPlanId)">
-      <div class="search-bar" v-if="!viewOnly" ref="searchBarRef" style="position:relative;display:flex;align-items:center;gap:8px;">
+      <div class="search-bar" v-if="!viewOnly" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
-          <input type="text" v-model="searchQuery" placeholder="Поиск товара..."
-            @input="onSearchInput" ref="searchInputRef" style="width:280px;max-width:360px;padding-right:28px;"/>
-          <button v-if="searchQuery" @click="clearSearch"
+          <input type="text" v-model="filterQuery" placeholder="Фильтр по названию / артикулу..."
+            style="width:280px;max-width:360px;padding-right:28px;"/>
+          <button v-if="filterQuery" @click="filterQuery = ''"
             style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;"><BkIcon name="close" size="xs"/></button>
-          <div v-if="searchResults.length || (searchQuery.length >= 2 && searchDone)"
-            style="position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #ddd;border-radius:4px;min-width:320px;max-height:300px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);font-size:11px;">
-            <div v-for="p in searchResults" :key="p.id||p.sku"
-              @click="addFromSearch(p)"
-              class="search-result-item" :style="p.is_active === 0 ? 'opacity:0.7' : ''">
-              <b v-if="p.sku">{{ p.sku }}</b> {{ p.name }}
-              <span v-if="p.is_active === 0" class="hidden-badge">скрыта</span>
-            </div>
-            <div v-if="!searchResults.length" style="padding:5px 10px;color:#999;font-size:11px;">Ничего не найдено</div>
-          </div>
         </div>
       </div>
       <div class="order-actions">
@@ -116,14 +111,20 @@
             <th>{{ compactPlan ? 'Склад' : 'Склад' }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Пост.' : 'У постав.' }} ({{ unitLabel }})</th>
             <th class="plan-th-reserve">Запас<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">дней</small></th>
-            <th v-for="h in periodHeaders" :key="h.label" class="plan-th-month" :title="compactPlan ? h.label + ' ' + h.sublabel : ''">
+            <!-- Текущие недели -->
+            <th v-for="h in currentWeekHeaders" :key="'cw-' + h.label" class="plan-th-current" :title="h.sublabel">
+              {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
+            </th>
+            <th v-if="currentWeekHeaders.length" class="plan-th-divider"></th>
+            <!-- Будущие периоды -->
+            <th v-for="h in periodHeaders" :key="'fp-' + h.label" class="plan-th-month" :title="compactPlan ? h.label + ' ' + h.sublabel : ''">
               {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
             </th>
             <th class="plan-th-total">Итого</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(item, idx) in items" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
+          <tr v-for="{ item, idx } in filteredItems" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
             <td class="plan-td-name" style="text-align:left;" :title="compactPlan ? planMetaTooltip(item) : ''" @dblclick="openProductEdit(item)">
               <div style="font-weight:600;color:var(--text);" :style="compactPlan ? 'font-size:12px' : 'font-size:13px'">
                 <b v-if="item.sku" style="color:var(--bk-orange);margin-right:4px;">{{ item.sku }}</b>{{ item.name }}
@@ -135,6 +136,12 @@
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockOnHand')" @change="e => onInput(idx, 'stock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'stock')" @keydown="e => onCalcKeydown(e, idx, 'stock')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockAtSupplier')" @change="e => onInput(idx, 'supplierStock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'supplierStock')" @keydown="e => onCalcKeydown(e, idx, 'supplierStock')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-reserve" :class="reserveDaysClass(item)">{{ reserveDaysText(item) }}</td>
+            <!-- Текущие недели: транзит + дни запаса -->
+            <td v-for="(cw, wi) in (item._cwData || [])" :key="'cw-' + wi" class="plan-td-current" :class="cwDaysClass(cw.daysRemaining)">
+              <input type="number" class="plan-calc-input cw-transit-input" :value="item.transit?.[wi]?.qty || ''" @change="e => onTransitInput(idx, wi, e.target.value)" :disabled="viewOnly" placeholder="0" title="Транзит"/>
+              <div class="cw-days" :title="'Остаток: ' + nf.format(cw.stockAfter)">{{ cw.daysRemaining !== null ? cw.daysRemaining + ' дн' : '—' }}</div>
+            </td>
+            <td v-if="currentWeekHeaders.length" class="plan-td-divider"></td>
             <!-- Период 0 — readonly -->
             <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
               <template v-if="item.plan[0]?.orderBoxes > 0">
@@ -142,6 +149,7 @@
                 <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[0].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[0].orderUnits) }} {{ item.unitOfMeasure }}</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
+              <div v-if="item.plan[0]?.daysRemaining !== undefined" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[0].daysRemaining)">{{ item.plan[0].daysRemaining !== null ? item.plan[0].daysRemaining + ' дн' : '—' }}</div>
             </td>
             <!-- Периоды 1+ — dblclick -->
             <td v-for="m in periodHeaders.length - 1" :key="m" class="plan-td-result"
@@ -168,6 +176,7 @@
                 @blur="applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
+              <div v-if="item.plan[m]?.daysRemaining !== undefined" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining !== null ? item.plan[m].daysRemaining + ' дн' : '—' }}</div>
             </td>
             <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }">
               <template v-if="itemTotalBoxes(item) > 0">
@@ -177,13 +186,22 @@
               <span v-else class="plan-result-zero">—</span>
             </td>
           </tr>
+          <!-- Строка добавления товара -->
+          <tr v-if="showAddRow" class="add-product-row">
+            <td :colspan="5 + currentWeekHeaders.length + (currentWeekHeaders.length ? 1 : 0) + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
+              <select class="add-product-select" @change="addProduct">
+                <option value="">+ Добавить товар…</option>
+                <option v-for="p in availableToAdd" :key="p.sku" :value="p.sku">{{ p.sku }} — {{ p.name }}{{ p.is_active === 0 ? ' (скрыта)' : '' }}</option>
+              </select>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
 
     <!-- Мобильный карточный вид планирования -->
     <div v-if="items.length" class="plan-mobile-cards">
-      <div v-for="(item, idx) in items" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
+      <div v-for="{ item, idx } in filteredItems" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
         <div class="plan-mob-name">
           <b v-if="item.sku">{{ item.sku }}</b> {{ item.name }}
           <span v-if="item._hidden" class="hidden-badge">скрыта</span>
@@ -346,6 +364,7 @@ const isViewer = computed(() => !userStore.hasAccess('planning', 'edit'));
 const supplier = ref('');
 const periodValue = ref('m3');
 const startDateStr = ref(toLocalDateStr(new Date()));
+const planningDateStr = ref('');
 const inputUnit = ref('boxes');
 const consumptionPeriodDays = ref(30);
 const items = ref([]);
@@ -397,15 +416,42 @@ let _prevPlanItems = null;
 let _loadedCreatedBy = null;
 let _loadedNote = '';
 
-// ─── Search ───────────────────────────────────────────────────────────────
-const searchQuery           = ref('');
-const searchResults         = ref([]);
-const searchDone            = ref(false);
-const searchInputRef        = ref(null);
-const searchBarRef          = ref(null);
-let   searchTimer           = null;
-const searchCache           = new Map();
-const SEARCH_CACHE_MAX      = 20;
+// ─── Фильтр и добавление ──────────────────────────────────────────────────
+const filterQuery           = ref('');
+const allSupplierProducts   = ref([]);
+
+const filteredItems = computed(() => {
+  const q = (filterQuery.value || '').trim().toLowerCase();
+  if (!q) return items.value.map((item, idx) => ({ item, idx }));
+  return items.value.reduce((acc, item, idx) => {
+    const haystack = `${item.sku || ''} ${item.name || ''}`.toLowerCase();
+    if (haystack.includes(q)) acc.push({ item, idx });
+    return acc;
+  }, []);
+});
+
+const availableToAdd = computed(() => {
+  const existingSkus = new Set(items.value.map(i => i.sku).filter(Boolean));
+  return allSupplierProducts.value.filter(p => !existingSkus.has(p.sku));
+});
+
+const showAddRow = computed(() => {
+  if (!supplier.value || viewOnly.value) return false;
+  return availableToAdd.value.length > 0;
+});
+
+async function loadSupplierProducts() {
+  const sup = supplier.value;
+  if (!sup) { allSupplierProducts.value = []; return; }
+  try {
+    let q = db.from('products').select('*').eq('supplier', sup);
+    q = applyEntityFilter(q, orderStore.settings.legalEntity);
+    const { data } = await q;
+    allSupplierProducts.value = data || [];
+  } catch { allSupplierProducts.value = []; }
+}
+
+watch(supplier, () => loadSupplierProducts(), { immediate: true });
 
 // ─── Calculator for plan inputs (#3) ──────────────────────────────────────
 let _activeCalcIdx = null;
@@ -523,30 +569,56 @@ const consumptionColumnLabel = computed(() => {
 const periodType = computed(() => periodValue.value.startsWith('w') ? 'weeks' : 'months');
 const periodCount = computed(() => parseInt(periodValue.value.slice(1)));
 const startDate = computed(() => new Date(startDateStr.value));
+const planningDate = computed(() => planningDateStr.value ? new Date(planningDateStr.value) : null);
 
+const _fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
+const _mn = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+// Текущие недели: от startDate до planningDate
+const currentWeekHeaders = computed(() => {
+  const headers = [];
+  const pd = planningDate.value;
+  if (!pd || pd <= startDate.value) return headers;
+  let ws = new Date(startDate.value);
+  while (ws < pd) {
+    let we = new Date(ws); we.setDate(we.getDate() + 6);
+    if (we >= pd) { we = new Date(pd); we.setDate(we.getDate() - 1); }
+    const days = Math.max(Math.round((we - ws) / 86400000) + 1, 1);
+    headers.push({ label: `Тек ${headers.length + 1}`, sublabel: `${_fmt(ws)}–${_fmt(we)}`, days });
+    ws = new Date(we); ws.setDate(ws.getDate() + 1);
+  }
+  return headers;
+});
+
+// Будущие периоды: от planningDate (или startDate если planningDate не задана)
 const periodHeaders = computed(() => {
-  const headers = []; const start = startDate.value;
-  const fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
-  const mn = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const headers = [];
+  const start = planningDate.value && planningDate.value > startDate.value ? planningDate.value : startDate.value;
   if (periodType.value === 'weeks') {
     const dow = start.getDay(); const dlw = dow === 0 ? 0 : 7 - dow;
     const fwe = new Date(start); fwe.setDate(fwe.getDate() + Math.max(dlw - 1, 0));
-    headers.push({ label: 'Тек. нед', sublabel: `${fmt(start)}–${fmt(fwe)}`, ratio: Math.max(dlw, 1) / 7 });
+    headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: Math.max(dlw, 1) / 7 });
     for (let i = 0; i < periodCount.value; i++) {
       const ws = new Date(fwe); ws.setDate(ws.getDate() + 1 + i * 7);
       const we = new Date(ws); we.setDate(we.getDate() + 6);
-      headers.push({ label: `Нед ${i+1}`, sublabel: `${fmt(ws)}–${fmt(we)}`, ratio: 1 });
+      headers.push({ label: `Нед ${i+1}`, sublabel: `${_fmt(ws)}–${_fmt(we)}`, ratio: 1 });
     }
   } else {
     const dim = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
     const dl = dim - start.getDate() + 1;
-    headers.push({ label: mn[start.getMonth()], sublabel: `ост. ${dl} дн.`, ratio: dl / dim });
+    headers.push({ label: _mn[start.getMonth()], sublabel: `ост. ${dl} дн.`, ratio: dl / dim });
     for (let i = 1; i <= periodCount.value; i++) {
       const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-      headers.push({ label: mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
+      headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
     }
   }
   return headers;
+});
+
+const planningDateDisplay = computed(() => {
+  if (!planningDateStr.value) return '—';
+  const d = new Date(planningDateStr.value);
+  return !isNaN(d) ? d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
 });
 
 function toggleCompactPlan() {
@@ -611,17 +683,37 @@ function onInput(idx, type, rawValue) {
 }
 
 function recalcItem(idx, fromMonth = 0) {
-  const item = items.value[idx]; const headers = periodHeaders.value;
-  if (!item.plan.length || item.plan.length !== headers.length) {
-    const old = item.plan || [];
-    item.plan = headers.map((_, m) => { const o = old[m]; if (o && o.locked) return { ...o, month: m }; return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }; });
-  }
+  const item = items.value[idx];
+  const cwHeaders = currentWeekHeaders.value;
+  const headers = periodHeaders.value;
   const qpb = getQpb(item); const pbu = qpb;
   const toBase = (v) => inputUnit.value === 'boxes' ? v * qpb : v;
   const periodDays = consumptionPeriodDays.value || 30;
   const daily = toBase(item.monthlyConsumption) / periodDays;
-  const mu = daily * 30; const wu = daily * 7;
+
+  // ─── Фаза 1: текущие недели (от startDate до planningDate) ───
+  if (!item.transit || item.transit.length !== cwHeaders.length) {
+    const old = item.transit || [];
+    item.transit = cwHeaders.map((_, w) => old[w] || { qty: 0 });
+  }
   let co = item.stockOnHand + item.stockAtSupplier;
+  item._cwData = cwHeaders.map((h, w) => {
+    const weekConsumption = daily * h.days;
+    const transitUnits = toBase(item.transit[w]?.qty || 0);
+    co = co - weekConsumption + transitUnits;
+    if (co < 0) co = 0;
+    const daysRemaining = daily > 0 ? Math.round(co / daily) : null;
+    return { daysRemaining, stockAfter: Math.round(co) };
+  });
+
+  // ─── Фаза 2: будущие периоды (планирование заказов) ───
+  if (!item.plan.length || item.plan.length !== headers.length) {
+    const old = item.plan || [];
+    item.plan = headers.map((_, m) => { const o = old[m]; if (o && o.locked) return { ...o, month: m }; return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }; });
+  }
+  const mu = daily * 30; const wu = daily * 7;
+  // Если нет текущих недель — начальный остаток как раньше
+  if (!cwHeaders.length) co = item.stockOnHand + item.stockAtSupplier;
   for (let m = 0; m < fromMonth && m < headers.length; m++) { co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m].orderUnits || 0); if (co < 0) co = 0; }
   for (let m = fromMonth; m < headers.length; m++) {
     const need = (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio;
@@ -629,6 +721,7 @@ function recalcItem(idx, fromMonth = 0) {
     if (item.plan[m].locked) { item.plan[m].need = Math.round(need); item.plan[m].deficit = Math.round(deficit); item.plan[m].orderUnits = item.plan[m].orderBoxes * pbu; co = co - need + item.plan[m].orderUnits; }
     else { let ob = 0, ou = 0; if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); ou = ob * pbu; } item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false }; co = co - need + ou; }
     if (co < 0) co = 0;
+    item.plan[m].daysRemaining = daily > 0 ? Math.round(co / daily) : null;
   }
 }
 function recalcAll() { items.value.forEach((_, i) => recalcItem(i, 0)); }
@@ -652,6 +745,24 @@ function applyEdit(idx, m, val) {
   recalcItem(idx, m + 1); _savePlanDraft();
 }
 function cancelEdit() { editingCell.value = null; }
+
+function onTransitInput(idx, weekIdx, rawValue) {
+  snapshot();
+  const value = parseFloat(rawValue) || 0;
+  const item = items.value[idx];
+  if (!item.transit) item.transit = [];
+  if (!item.transit[weekIdx]) item.transit[weekIdx] = { qty: 0 };
+  item.transit[weekIdx].qty = value;
+  recalcItem(idx, 0);
+  _savePlanDraft();
+}
+
+function cwDaysClass(days) {
+  if (days === null) return '';
+  if (days <= 3) return 'cw-danger';
+  if (days <= 7) return 'cw-warning';
+  return 'cw-ok';
+}
 
 function startMobEdit(idx, m) {
   if (viewOnly.value) return;
@@ -946,61 +1057,25 @@ async function onCardSaved() {
   } catch (e) { console.error(e); }
 }
 
-// ─── Search ───────────────────────────────────────────────────────────────
-function onSearchInput() {
-  clearTimeout(searchTimer);
-  searchResults.value = []; searchDone.value = false;
-  const q = searchQuery.value.trim();
-  if (q.length < 2) return;
-  searchTimer = setTimeout(() => searchProducts(q), 300);
-}
-
-async function searchProducts(q) {
-  const cacheKey = `${q}_${orderStore.settings.legalEntity}_${supplier.value}`;
-  const cached = searchCache.get(cacheKey);
-  if (cached) { searchResults.value = cached; searchDone.value = true; return; }
-  const params = new URLSearchParams({ q, limit: '10', legal_entity: orderStore.settings.legalEntity });
-  if (supplier.value) params.set('supplier', supplier.value);
-  try {
-    const r = await fetch(`/api/search_products?${params}`, { headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' } });
-    if (!r.ok) { searchResults.value = []; return; }
-    const results = await r.json();
-    if (!Array.isArray(results)) { searchResults.value = []; return; }
-    if (searchQuery.value.trim() !== q) return;
-    searchResults.value = results;
-    if (searchCache.size >= SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value);
-    searchCache.set(cacheKey, results);
-  } catch(e) { searchResults.value = []; }
-  finally { searchDone.value = true; }
-}
-
-function addFromSearch(product) {
-  if (items.value.find(i => i.sku === product.sku)) { toast.warning('Уже в списке', product.name); return; }
+// ─── Добавление товара ────────────────────────────────────────────────────
+function addProduct(e) {
+  const sku = e.target.value;
+  if (!sku) return;
+  const product = allSupplierProducts.value.find(p => p.sku === sku);
+  if (!product || items.value.find(i => i.sku === product.sku)) return;
   const qpb = product.qty_per_box || 1;
-  const newItem = {
+  items.value.push({
     sku: product.sku, name: product.name, qtyPerBox: qpb,
     boxesPerPallet: product.boxes_per_pallet || 0,
     multiplicity: product.multiplicity || 1,
     unitOfMeasure: product.unit_of_measure || 'шт',
-    monthlyConsumption: 0, stockOnHand: 0, stockAtSupplier: 0,
+    monthlyConsumption: 0, stockOnHand: 0, stockAtSupplier: 0, transit: [],
     plan: periodHeaders.value.map(() => ({ orderBoxes: 0, orderUnits: 0, locked: false })),
     _cw: false, _ct: '',
     _hidden: product.is_active === 0,
-  };
-  items.value.push(newItem);
-  searchQuery.value = ''; searchResults.value = [];
+  });
+  e.target.value = '';
   _savePlanDraft();
-}
-
-function clearSearch() {
-  searchQuery.value = ''; searchResults.value = []; searchDone.value = false;
-  searchInputRef.value?.focus();
-}
-
-function closeSearchDropdown(e) {
-  if (searchBarRef.value && !searchBarRef.value.contains(e.target)) {
-    searchResults.value = []; searchDone.value = false;
-  }
 }
 
 async function exportExcel() {
@@ -1210,7 +1285,7 @@ async function exportExcel() {
 }
 
 function _savePlanDraft() {
-  draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
+  draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
 }
 
 // ─── Загрузка товаров (#3 — порядок из item_order) ────────────────────────
@@ -1226,7 +1301,7 @@ async function loadProducts() {
       productId: p.id, sku: p.sku || '', name: p.name, qtyPerBox: p.qty_per_box || 1,
       boxesPerPallet: p.boxes_per_pallet || null, unitOfMeasure: p.unit_of_measure || 'шт',
       multiplicity: p.multiplicity || 1, monthlyConsumption: 0,
-      stockOnHand: 0, stockAtSupplier: 0, plan: [], _cw: false, _ct: '',
+      stockOnHand: 0, stockAtSupplier: 0, transit: [], plan: [], _cw: false, _ct: '',
     }));
     // (#3) Применяем порядок товаров из item_order (как в заказе)
     await restoreItemOrder();
@@ -1246,6 +1321,7 @@ async function restoreItemOrder() {
 }
 
 function onParamsChange() { supplierStore.loadSuppliers(orderStore.settings.legalEntity); recalcAll(); _savePlanDraft(); }
+function onPlanningDateChange() { items.value.forEach(i => { i.plan = []; i.transit = []; }); recalcAll(); _savePlanDraft(); }
 function onPeriodChange() { items.value.forEach(i => { i.plan = []; }); recalcAll(); triggerValidation(); _savePlanDraft(); }
 function onConsumptionPeriodChange() {
   _validationCache = null;
@@ -1268,6 +1344,7 @@ async function confirmSave() {
   const planData = {
     legal_entity: orderStore.settings.legalEntity, supplier: supplier.value,
     period_type: periodType.value, period_count: periodCount.value, start_date: startDateStr.value,
+    planning_date: planningDateStr.value || null,
     consumption_period_days: consumptionPeriodDays.value || 30,
     input_unit: inputUnit.value,
     note: saveNote.value.trim() || null,
@@ -1275,6 +1352,7 @@ async function confirmSave() {
       sku: i.sku, name: i.name, qty_per_box: i.qtyPerBox, boxes_per_pallet: i.boxesPerPallet,
       multiplicity: i.multiplicity || 1, unit_of_measure: i.unitOfMeasure,
       monthly_consumption: i.monthlyConsumption, stock_on_hand: i.stockOnHand, stock_at_supplier: i.stockAtSupplier,
+      transit: (i.transit || []).map(t => ({ qty: t.qty || 0 })),
       plan: i.plan.map(p => ({ month: p.month, order_boxes: p.orderBoxes, order_units: p.orderUnits, locked: p.locked || false }))
     })),
   };
@@ -1391,6 +1469,7 @@ async function loadPlanFromHistory(planId) {
   supplier.value = plan.supplier || '';
   periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());
+  planningDateStr.value = plan.planning_date || '';
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
   inputUnit.value = plan.input_unit || 'boxes';
   editingPlanId.value = plan.id;
@@ -1403,6 +1482,7 @@ async function loadPlanFromHistory(planId) {
     boxesPerPallet: i.boxes_per_pallet || null, unitOfMeasure: i.unit_of_measure || 'шт',
     multiplicity: i.multiplicity || 1, monthlyConsumption: i.monthly_consumption || 0,
     stockOnHand: i.stock_on_hand || 0, stockAtSupplier: i.stock_at_supplier || 0, _cw: false, _ct: '',
+    transit: (i.transit || []).map(t => ({ qty: t.qty || 0 })),
     plan: (i.plan || []).map(p => ({ month: p.month, need: 0, deficit: 0, orderBoxes: p.order_boxes || 0, orderUnits: p.order_units || 0, locked: p.locked || false }))
   }));
   undoStack.value = []; redoStack.value = [];
@@ -1427,7 +1507,7 @@ onMounted(async () => {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
       const ok = await confirmAction('Восстановить черновик?', `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`);
-      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
+      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }
@@ -1443,22 +1523,20 @@ function onPlanBeforeUnload(e) {
 
 onMounted(() => {
   window.addEventListener('beforeunload', onPlanBeforeUnload);
-  document.addEventListener('click', closeSearchDropdown);
 });
 
 onBeforeUnmount(() => {
   clearTimeout(_vTimer);
   clearTimeout(_collapseHintTimer);
-  clearTimeout(searchTimer);
   if (planDraftTickTimer) clearInterval(planDraftTickTimer);
   window.removeEventListener('beforeunload', onPlanBeforeUnload);
-  document.removeEventListener('click', closeSearchDropdown);
 });
 
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (hasPlanUnsavedData()) {
-    draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
-    if (!window.confirm('Есть несохранённые данные. Уйти?')) return false;
+    draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
+    const ok = await confirmAction('Несохранённые данные', 'Вы не сохранили план. Уйти со страницы?');
+    if (!ok) return false;
   }
 });
 

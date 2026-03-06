@@ -179,6 +179,7 @@ export const useDraftStore = defineStore('draft', () => {
         supplier: planState.supplier,
         periodValue: planState.periodValue,
         startDateStr: planState.startDateStr,
+        planningDateStr: planState.planningDateStr || '',
         inputUnit: planState.inputUnit,
         consumptionPeriodDays: planState.consumptionPeriodDays,
         editingPlanId: planState.editingPlanId || null,

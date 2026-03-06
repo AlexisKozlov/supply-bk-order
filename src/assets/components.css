@@ -662,6 +662,17 @@ tbody tr td[colspan] {
   background: rgba(255,255,255,0.06);
 }
 
+/* Текущие недели */
+.plan-th-current { min-width: 80px; background: rgba(255,255,255,0.15) !important; text-align: center; border-left: 1px solid rgba(255,255,255,0.2) !important; }
+.plan-th-current small { opacity: 0.8; }
+.plan-td-current { text-align: center; padding: 3px 2px !important; background: #FFF8E1; min-width: 80px; }
+.plan-th-divider, .plan-td-divider { width: 3px !important; min-width: 3px !important; max-width: 3px !important; padding: 0 !important; background: var(--bk-orange) !important; border: none !important; }
+.cw-transit-input { width: 50px !important; text-align: center; font-size: 11px !important; padding: 2px !important; }
+.cw-days { font-size: 10px; font-weight: 700; margin-top: 2px; line-height: 1; }
+.cw-danger .cw-days, .cw-days.cw-danger { color: #d32f2f; }
+.cw-warning .cw-days, .cw-days.cw-warning { color: #e65100; }
+.cw-ok .cw-days, .cw-days.cw-ok { color: #2e7d32; }
+.plan-period-days { margin-top: 4px; font-size: 10px; opacity: 0.85; }
 
 .plan-table td {
   padding: 8px 6px;
@@ -1264,6 +1275,15 @@ td.plan-td-result:hover {
   font-weight: 600;
   color: var(--green);
 }
+
+/* ─── Add product row ─── */
+.add-product-row td { border-top: 1px dashed #e0e0e0 !important; background: #fafafa; text-align: left !important; padding: 2px 8px !important; }
+.add-product-select {
+  width: 300px; max-width: 100%; padding: 1px 6px; font-size: 11px;
+  border: 1px solid #ddd; border-radius: 4px; background: #fff;
+  color: #999; cursor: pointer; height: 24px; font-style: italic;
+}
+.add-product-select:focus { border-color: var(--bk-orange); color: var(--text); font-style: normal; }
 
 /* ─── Calc tooltip ─── */
 .calc-wrap {

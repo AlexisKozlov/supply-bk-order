@@ -39,32 +39,41 @@
           <td :colspan="colSpan" class="order-empty-cell">
             <div class="order-empty-hint">
               <span class="order-empty-icon"><BkIcon name="order" size="sm"/></span>
-              <span class="order-empty-text" v-if="!settings.supplier">Выберите поставщика или добавьте товары через поиск</span>
+              <span class="order-empty-text" v-if="!settings.supplier">Выберите поставщика</span>
               <span class="order-empty-text" v-else>Товары загружены. Заполните параметры и данные заказа</span>
             </div>
           </td>
         </tr>
-        <OrderRow
-          v-for="(item, index) in orderStore.items"
-          :key="item.id"
-          :item="item"
-          :row-index="index"
-          :settings="settings"
-          :compact="compact"
-          :avg-consumption="avgConsumptionMap[item.sku] || 0"
-          :data-validation="!orderStore.viewOnlyMode"
-          :adu-value="props.aduMap.get(item.sku)?.adu || 0"
-          :cda-mode="props.cdaMode"
-          :cda-params="props.cdaMode ? getCdaParams(item) : null"
-          :ref="el => { if (el) rowRefs[index] = el; }"
-          @remove="orderStore.removeItem($event); draftStore.save();"
-          @edit-product="$emit('edit-product', $event)"
-          @drag-start="onDragStart"
-          @drag-over="onDragOver"
-          @drop="onDrop"
-          @drag-end="onDragEnd"
-          @nav="onNav"
-        />
+        <template v-for="index in filteredIndices" :key="orderStore.items[index]?.id">
+          <OrderRow
+            :item="orderStore.items[index]"
+            :row-index="index"
+            :settings="settings"
+            :compact="compact"
+            :avg-consumption="avgConsumptionMap[orderStore.items[index]?.sku] || 0"
+            :data-validation="!orderStore.viewOnlyMode"
+            :adu-value="props.aduMap.get(orderStore.items[index]?.sku)?.adu || 0"
+            :cda-mode="props.cdaMode"
+            :cda-params="props.cdaMode ? getCdaParams(orderStore.items[index]) : null"
+            :ref="el => { if (el) rowRefs[index] = el; }"
+            @remove="orderStore.removeItem($event); draftStore.save();"
+            @edit-product="$emit('edit-product', $event)"
+            @drag-start="onDragStart"
+            @drag-over="onDragOver"
+            @drop="onDrop"
+            @drag-end="onDragEnd"
+            @nav="onNav"
+          />
+        </template>
+        <!-- Строка добавления товара -->
+        <tr v-if="showAddRow" class="add-product-row">
+          <td :colspan="colSpan" style="padding:2px 8px;text-align:left;">
+            <select class="add-product-select" @change="addProduct">
+              <option value="">+ Добавить товар…</option>
+              <option v-for="p in availableToAdd" :key="p.sku" :value="p.sku">{{ p.sku }} — {{ p.name }}{{ p.is_active === 0 ? ' (скрыта)' : '' }}</option>
+            </select>
+          </td>
+        </tr>
       </tbody>
     </table>
 
@@ -86,7 +95,7 @@ import { ref, computed, watch } from 'vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
 import OrderRow from './OrderRow.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -99,6 +108,7 @@ const props = defineProps({
   cdaSupplierDlt: { type: Number, default: 0 },
   cdaSupplierDoc: { type: Number, default: 0 },
   cdaSafetyCoef: { type: Number, default: 1.0 },
+  filterQuery: { type: String, default: '' },
 });
 
 const emit = defineEmits(['edit-product']);
@@ -106,6 +116,53 @@ const emit = defineEmits(['edit-product']);
 const orderStore = useOrderStore();
 const draftStore = useDraftStore();
 const settings = computed(() => orderStore.settings);
+
+// ─── Фильтрация ───────────────────────────────────────────────────────────
+const filteredIndices = computed(() => {
+  const q = (props.filterQuery || '').trim().toLowerCase();
+  if (!q) return orderStore.items.map((_, i) => i);
+  return orderStore.items.reduce((acc, item, i) => {
+    const haystack = `${item.sku || ''} ${item.name || ''}`.toLowerCase();
+    if (haystack.includes(q)) acc.push(i);
+    return acc;
+  }, []);
+});
+
+// ─── Строка добавления товара ─────────────────────────────────────────────
+const allSupplierProducts = ref([]);
+
+const availableToAdd = computed(() => {
+  const existingSkus = new Set(orderStore.items.map(i => i.sku).filter(Boolean));
+  return allSupplierProducts.value.filter(p => !existingSkus.has(p.sku));
+});
+
+const showAddRow = computed(() => {
+  if (!settings.value.supplier || orderStore.viewOnlyMode) return false;
+  return availableToAdd.value.length > 0;
+});
+
+async function loadSupplierProducts() {
+  const sup = settings.value.supplier;
+  if (!sup) { allSupplierProducts.value = []; return; }
+  try {
+    let q = db.from('products').select('*').eq('supplier', sup);
+    q = applyEntityFilter(q, settings.value.legalEntity);
+    const { data } = await q;
+    allSupplierProducts.value = data || [];
+  } catch { allSupplierProducts.value = []; }
+}
+
+watch(() => settings.value.supplier, () => loadSupplierProducts(), { immediate: true });
+
+function addProduct(e) {
+  const sku = e.target.value;
+  if (!sku) return;
+  const product = allSupplierProducts.value.find(p => p.sku === sku);
+  if (!product) return;
+  orderStore.addItem(product);
+  draftStore.save();
+  e.target.value = '';
+}
 const colSpan = computed(() => {
   let c = 9; // базовые колонки (включая запас)
   if (settings.value.hasTransit) c++;
@@ -215,4 +272,5 @@ watch(() => [settings.value.unit, settings.value.legalEntity, settings.value.per
   clearTimeout(_consumptionTimer);
   _consumptionTimer = setTimeout(() => loadConsumptionHistory(), 300);
 }, { immediate: true });
+
 </script>
