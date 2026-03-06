@@ -110,7 +110,7 @@
             <th>{{ compactPlan ? 'Расх.' : consumptionColumnLabel }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Склад' : 'Склад' }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Пост.' : 'У постав.' }} ({{ unitLabel }})</th>
-            <th class="plan-th-reserve">Запас<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">дней</small></th>
+            <th v-if="!currentWeekHeaders.length" class="plan-th-reserve">Запас<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">дней</small></th>
             <!-- Текущие недели -->
             <th v-for="h in currentWeekHeaders" :key="'cw-' + h.label" class="plan-th-current" :title="h.sublabel">
               {{ h.label }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">{{ h.sublabel }}</small>
@@ -135,7 +135,7 @@
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="item.monthlyConsumption || ''" :class="{ 'consumption-warning': item._cw }" :title="item._ct || ''" @change="e => onInput(idx, 'consumption', e.target.value)" @focus="e => onCalcFocus(e, idx, 'consumption')" @keydown="e => onCalcKeydown(e, idx, 'consumption')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockOnHand')" @change="e => onInput(idx, 'stock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'stock')" @keydown="e => onCalcKeydown(e, idx, 'stock')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockAtSupplier')" @change="e => onInput(idx, 'supplierStock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'supplierStock')" @keydown="e => onCalcKeydown(e, idx, 'supplierStock')" :disabled="viewOnly" placeholder="0"/></td>
-            <td class="plan-td-reserve" :class="reserveDaysClass(item)">{{ reserveDaysText(item) }}</td>
+            <td v-if="!currentWeekHeaders.length" class="plan-td-reserve" :class="reserveDaysClass(item)">{{ reserveDaysText(item) }}</td>
             <!-- Текущие недели: транзит + дни запаса -->
             <td v-for="(cw, wi) in (item._cwData || [])" :key="'cw-' + wi" class="plan-td-current" :class="cwDaysClass(cw.daysRemaining)">
               <input type="number" class="plan-calc-input cw-transit-input" :value="item.transit?.[wi]?.qty || ''" @change="e => onTransitInput(idx, wi, e.target.value)" :disabled="viewOnly" placeholder="0" title="Транзит"/>
@@ -149,7 +149,7 @@
                 <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[0].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[0].orderUnits) }} {{ item.unitOfMeasure }}</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
-              <div v-if="item.plan[0]?.daysRemaining !== undefined" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[0].daysRemaining)">{{ item.plan[0].daysRemaining !== null ? item.plan[0].daysRemaining + ' дн' : '—' }}</div>
+              <div v-if="item.plan[0]?.daysRemaining > 0" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[0].daysRemaining)">{{ item.plan[0].daysRemaining }} дн</div>
             </td>
             <!-- Периоды 1+ — dblclick -->
             <td v-for="m in periodHeaders.length - 1" :key="m" class="plan-td-result"
@@ -176,7 +176,7 @@
                 @blur="applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
-              <div v-if="item.plan[m]?.daysRemaining !== undefined" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining !== null ? item.plan[m].daysRemaining + ' дн' : '—' }}</div>
+              <div v-if="item.plan[m]?.daysRemaining > 0" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
             </td>
             <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }">
               <template v-if="itemTotalBoxes(item) > 0">
@@ -188,7 +188,7 @@
           </tr>
           <!-- Строка добавления товара -->
           <tr v-if="showAddRow" class="add-product-row">
-            <td :colspan="5 + currentWeekHeaders.length + (currentWeekHeaders.length ? 1 : 0) + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
+            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length + (currentWeekHeaders.length ? 1 : 0) + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
               <select class="add-product-select" @change="addProduct">
                 <option value="">+ Добавить товар…</option>
                 <option v-for="p in availableToAdd" :key="p.sku" :value="p.sku">{{ p.sku }} — {{ p.name }}{{ p.is_active === 0 ? ' (скрыта)' : '' }}</option>
