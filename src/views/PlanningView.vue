@@ -138,7 +138,7 @@
             <!-- Текущие недели: транзит + дни запаса -->
             <td v-for="(cw, wi) in (item._cwData || [])" :key="'cw-' + wi" class="plan-td-current" :class="cwDaysClass(cw.daysRemaining)">
               <input type="number" class="plan-calc-input cw-transit-input" :value="item.transit?.[wi]?.qty || ''" @change="e => onTransitInput(idx, wi, e.target.value)" :disabled="viewOnly" placeholder="0" title="Транзит"/>
-              <div class="cw-days" :title="'Остаток: ' + nf.format(cw.stockAfter)">{{ cw.daysRemaining !== null ? cw.daysRemaining + ' дн' : '—' }}</div>
+              <div class="cw-days" :title="cw.stockAfter >= 0 ? 'Остаток: ' + nf.format(cw.stockAfter) : 'Дефицит: ' + nf.format(Math.abs(cw.stockAfter))">{{ cw.daysRemaining !== null ? (cw.daysRemaining >= 0 ? cw.daysRemaining + ' дн' : cw.daysRemaining + ' дн') : '—' }}</div>
             </td>
             <!-- Период 0 — readonly -->
             <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
@@ -710,10 +710,10 @@ function recalcItem(idx, fromMonth = 0) {
     const weekConsumption = daily * h.days;
     const transitUnits = toBase(item.transit[w]?.qty || 0);
     co = co - weekConsumption + transitUnits;
-    if (co < 0) co = 0;
     const daysRemaining = daily > 0 ? Math.round(co / daily) : null;
     return { daysRemaining, stockAfter: Math.round(co) };
   });
+  if (co < 0) co = 0;
 
   // ─── Фаза 2: будущие периоды (планирование заказов) ───
   if (!item.plan.length || item.plan.length !== headers.length) {
