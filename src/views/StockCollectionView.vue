@@ -290,7 +290,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -341,6 +341,7 @@ function handleDocClick(e) {
 }
 onMounted(() => { loadCollections(); restaurantStore.load(orderStore.settings.legalEntity); document.addEventListener('click', handleDocClick); });
 onUnmounted(() => { document.removeEventListener('click', handleDocClick); });
+watch(() => orderStore.settings.legalEntity, () => { collectionData.value = null; loadCollections(); restaurantStore.invalidate(); restaurantStore.load(orderStore.settings.legalEntity); });
 
 const uniqueRestaurants = computed(() => {
   if (!collectionData.value?.data) return 0;

@@ -330,7 +330,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
@@ -401,6 +401,7 @@ onMounted(async () => {
   document.addEventListener('click', closeDrop);
 });
 onUnmounted(() => { document.removeEventListener('click', closeDrop); clearTimeout(searchTimeout); });
+watch(() => orderStore.settings.legalEntity, () => { sessions.value = []; loadHistory(); loadCollections(); });
 
 function closeDrop(e) {
   if (!e.target.closest('.dfc-search-box') && !e.target.closest('.dfc-drop')) showProductDropdown.value = false;

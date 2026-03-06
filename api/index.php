@@ -987,6 +987,11 @@ if ($endpoint === 'rpc') {
         $orderId = $body['order_id'] ?? '';
         $items = $body['items'] ?? [];
         if (!$orderId) respond(['error' => 'order_id required'], 400);
+        // Проверяем доступ к юрлицу заказа
+        $orderCheck = $pdo->prepare("SELECT legal_entity FROM orders WHERE id=?");
+        $orderCheck->execute([$orderId]);
+        $orderRow = $orderCheck->fetch();
+        if ($orderRow && !checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
         if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
         try {
@@ -1026,6 +1031,12 @@ if ($endpoint === 'rpc') {
         }
         $orderId = $body['order_id'] ?? '';
         if (!$orderId) respond(['error' => 'order_id required'], 400);
+        // Проверяем, что пользователь имеет доступ к юрлицу заказа
+        $orderCheck = $pdo->prepare("SELECT legal_entity FROM orders WHERE id=?");
+        $orderCheck->execute([$orderId]);
+        $orderRow = $orderCheck->fetch();
+        if (!$orderRow) respond(['error' => 'Заказ не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         try {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);

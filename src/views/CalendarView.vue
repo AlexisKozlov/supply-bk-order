@@ -177,17 +177,21 @@ async function openOrder(orderId) {
 function prevMonth() { showMonthPicker.value = false; month.value--; if (month.value < 0) { month.value = 11; year.value--; } load(); }
 function nextMonth() { showMonthPicker.value = false; month.value++; if (month.value > 11) { month.value = 0; year.value++; } load(); }
 
+let _loadRequestId = 0;
 async function load() {
+  const requestId = ++_loadRequestId;
   loading.value = true;
   try {
     const result = await loadCalendarData(year.value, month.value, orderStore.settings.legalEntity);
+    if (requestId !== _loadRequestId) return;
     orders.value = result.orders;
     supplierColors.value = result.supplierColors;
   } catch (e) {
+    if (requestId !== _loadRequestId) return;
     orders.value = [];
     toast.error('Ошибка загрузки', 'Не удалось загрузить данные календаря');
   } finally {
-    loading.value = false;
+    if (requestId === _loadRequestId) loading.value = false;
   }
 }
 
