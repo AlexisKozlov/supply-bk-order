@@ -576,15 +576,20 @@ const planningDate = computed(() => planningDateStr.value ? new Date(planningDat
 const _fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
 const _mn = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
-// Текущие недели: от startDate до planningDate
+// Текущие недели: от startDate до planningDate, привязаны к пн–вс
 const currentWeekHeaders = computed(() => {
   const headers = [];
   const pd = planningDate.value;
   if (!pd || pd <= startDate.value) return headers;
   let ws = new Date(startDate.value);
   while (ws < pd) {
-    let we = new Date(ws); we.setDate(we.getDate() + 6);
+    // Конец недели — ближайшее воскресенье (день 0)
+    const dow = ws.getDay(); // 0=вс, 1=пн, ...
+    let we = new Date(ws);
+    we.setDate(we.getDate() + (dow === 0 ? 0 : 7 - dow)); // до воскресенья
+    // Не выходим за дату планирования
     if (we >= pd) { we = new Date(pd); we.setDate(we.getDate() - 1); }
+    if (we < ws) break;
     const days = Math.max(Math.round((we - ws) / 86400000) + 1, 1);
     headers.push({ label: `Тек ${headers.length + 1}`, sublabel: `${_fmt(ws)}–${_fmt(we)}`, days });
     ws = new Date(we); ws.setDate(ws.getDate() + 1);
@@ -597,22 +602,21 @@ const periodHeaders = computed(() => {
   const headers = [];
   const start = planningDate.value && planningDate.value > startDate.value ? planningDate.value : startDate.value;
   if (periodType.value === 'weeks') {
-    const hasCW = planningDate.value && planningDate.value > startDate.value;
-    const dow = start.getDay(); const dlw = dow === 0 ? 0 : 7 - dow;
-    // Если есть текущие недели — пропускаем огрызок, начинаем с полной недели
-    let firstWeekStart;
-    if (hasCW && dlw > 0 && dlw < 7) {
-      firstWeekStart = new Date(start); firstWeekStart.setDate(firstWeekStart.getDate() + dlw);
+    const dow = start.getDay(); // 0=вс, 1=пн, ...
+    const isMonday = dow === 1;
+    // Первая неделя: от start до ближайшего воскресенья (огрызок если не понедельник)
+    let firstFullMonday;
+    if (!isMonday) {
+      const daysToSun = dow === 0 ? 0 : 7 - dow;
+      const fwe = new Date(start); fwe.setDate(fwe.getDate() + daysToSun);
+      const days = Math.max(Math.round((fwe - start) / 86400000) + 1, 1);
+      headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: days / 7 });
+      firstFullMonday = new Date(fwe); firstFullMonday.setDate(firstFullMonday.getDate() + 1);
     } else {
-      // Нет текущих недель или start уже понедельник — добавляем огрызок
-      const fwe = new Date(start); fwe.setDate(fwe.getDate() + Math.max(dlw - 1, 0));
-      if (dlw > 0 && dlw < 7) {
-        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: Math.max(dlw, 1) / 7 });
-      }
-      firstWeekStart = new Date(fwe); firstWeekStart.setDate(firstWeekStart.getDate() + 1);
+      firstFullMonday = new Date(start);
     }
     for (let i = 0; i < periodCount.value; i++) {
-      const ws = new Date(firstWeekStart); ws.setDate(ws.getDate() + i * 7);
+      const ws = new Date(firstFullMonday); ws.setDate(ws.getDate() + i * 7);
       const we = new Date(ws); we.setDate(we.getDate() + 6);
       headers.push({ label: `Нед ${i+1}`, sublabel: `${_fmt(ws)}–${_fmt(we)}`, ratio: 1 });
     }
