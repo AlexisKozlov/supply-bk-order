@@ -469,6 +469,9 @@ async function matchData(items, fileData, target, unit) {
                   itemName: item.name || skuToName.get(item.sku) || item.sku,
                   itemIdx: idx,
                   analogs: foundAnalogs,
+                  _base: target === 'order'
+                    ? { stock: item.stock, consumption: item.consumptionPeriod, transit: item.transit }
+                    : { stockOnHand: item.stockOnHand, consumption: item.monthlyConsumption },
                 });
               }
             }
@@ -516,6 +519,17 @@ export function applyAnalogMerges(storeItems, analogMerges, target) {
       ? storeItems.find(i => i.sku === merge.itemSku)
       : storeItems[merge.itemIdx];
     if (!item) continue;
+    // Восстанавливаем базовые значения (до аналогов) чтобы не накапливать при повторной загрузке
+    if (merge._base) {
+      if (target === 'order') {
+        if (merge._base.stock !== undefined) item.stock = merge._base.stock;
+        if (merge._base.consumption !== undefined) item.consumptionPeriod = merge._base.consumption;
+        if (merge._base.transit !== undefined) item.transit = merge._base.transit;
+      } else {
+        if (merge._base.stockOnHand !== undefined) item.stockOnHand = merge._base.stockOnHand;
+        if (merge._base.consumption !== undefined) item.monthlyConsumption = merge._base.consumption;
+      }
+    }
     for (const a of merge.analogs) {
       if (!a.checked) continue;
       if (target === 'order') {
@@ -696,11 +710,15 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
             }
 
             if (foundAnalogs.length > 0) {
+              // Сохраняем базовые значения (до аналогов) для идемпотентного применения
               analogMerges.push({
                 itemSku: item.sku,
                 itemName: item.name || skuToName.get(item.sku) || item.sku,
                 itemIdx: idx,
                 analogs: foundAnalogs,
+                _base: target === 'order'
+                  ? { stock: item.stock, consumption: item.consumptionPeriod, transit: item.transit }
+                  : { stockOnHand: item.stockOnHand, consumption: item.monthlyConsumption },
               });
             }
           }
