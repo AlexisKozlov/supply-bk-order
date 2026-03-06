@@ -138,7 +138,11 @@
             <!-- Текущие недели: транзит + дни запаса -->
             <td v-for="(cw, wi) in (item._cwData || [])" :key="'cw-' + wi" class="plan-td-current" :class="cwDaysClass(cw.daysRemaining)">
               <input type="number" class="plan-calc-input cw-transit-input" :value="item.transit?.[wi]?.qty || ''" @change="e => onTransitInput(idx, wi, e.target.value)" :disabled="viewOnly" placeholder="0" title="Транзит"/>
-              <div class="cw-days" :title="cw.stockAfter >= 0 ? 'Остаток: ' + nf.format(cw.stockAfter) : 'Дефицит: ' + nf.format(Math.abs(cw.stockAfter))">{{ cw.daysRemaining !== null ? (cw.daysRemaining >= 0 ? cw.daysRemaining + ' дн' : cw.daysRemaining + ' дн') : '—' }}</div>
+              <div class="cw-days" v-if="cw.daysRemaining !== null">
+                <template v-if="cw.stockAfter >= 0">{{ cw.daysRemaining }} дн</template>
+                <template v-else>{{ cwDeficitDisplay(cw.stockAfter, item) }}</template>
+              </div>
+              <div class="cw-days" v-else>—</div>
             </td>
             <!-- Период 0 — readonly -->
             <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
@@ -766,6 +770,15 @@ function onTransitInput(idx, weekIdx, rawValue) {
   _savePlanDraft();
 }
 
+function cwDeficitDisplay(stockAfter, item) {
+  const deficit = Math.abs(stockAfter);
+  const qpb = getQpb(item);
+  if (inputUnit.value === 'boxes' && qpb > 1) {
+    return '−' + Math.ceil(deficit / qpb) + ' кор';
+  }
+  return '−' + Math.ceil(deficit) + ' шт';
+}
+
 function cwDaysClass(days) {
   if (days === null) return '';
   if (days <= 3) return 'cw-danger';
@@ -1014,6 +1027,7 @@ function onAnalogApply() {
   const applied = applyAnalogMerges(items.value, merges, 'planning');
   analogMergeModal.value.show = false;
   if (applied > 0) {
+    triggerRef(items);
     recalcAll(); _savePlanDraft();
     toast.success('Аналоги применены', `${applied} аналогов добавлены`);
   }
