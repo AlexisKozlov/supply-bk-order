@@ -91,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { db } from '@/lib/apiClient.js';
@@ -272,5 +272,7 @@ watch(() => [settings.value.unit, settings.value.legalEntity, settings.value.per
   clearTimeout(_consumptionTimer);
   _consumptionTimer = setTimeout(() => loadConsumptionHistory(), 300);
 }, { immediate: true });
+
+onBeforeUnmount(() => { clearTimeout(_consumptionTimer); });
 
 </script>

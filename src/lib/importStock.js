@@ -264,7 +264,21 @@ function parseCSV(file, delimiter, legalEntity) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = e.target.result;
+      let text = e.target.result;
+      // Если кириллица не распозналась (кракозябры из Windows-1251), перечитываем в windows-1251
+      if (/[\ufffd]/.test(text) || (!/[а-яА-ЯёЁ]/.test(text) && text.length > 50)) {
+        const reader2 = new FileReader();
+        reader2.onload = (e2) => {
+          const text2 = e2.target.result;
+          const delim = delimiter || detectDelimiter(text2);
+          const lines = text2.split('\n').filter(l => l.trim());
+          const rows = lines.map(l => l.split(delim).map(c => c.trim().replace(/^["']|["']$/g, '')));
+          resolve(mapRows(rows, legalEntity));
+        };
+        reader2.onerror = () => resolve([]);
+        reader2.readAsText(file, 'windows-1251');
+        return;
+      }
       const delim = delimiter || detectDelimiter(text);
       const lines = text.split('\n').filter(l => l.trim());
       const rows = lines.map(l => l.split(delim).map(c => c.trim().replace(/^["']|["']$/g, '')));
@@ -702,7 +716,7 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
                 foundAnalogs.push({
                   sku: analogSku,
                   name: analogSkuToName.get(analogSku) || '',
-                  stock: analogStockPcs,
+                  stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb * 10) / 10 : analogStockPcs,
                   consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb * 10) / 10 : analogConsumptionPcs,
                   checked: true,
                 });

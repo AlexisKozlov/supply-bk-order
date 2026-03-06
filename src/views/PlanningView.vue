@@ -652,7 +652,7 @@ function planMetaTooltip(item) {
 }
 
 function displayStock(item, field) {
-  const val = item[field]; if (!val) return '';
+  const val = item[field]; if (val == null) return '';
   return inputUnit.value === 'boxes' ? Math.ceil(val / getQpb(item)) : val;
 }
 
@@ -692,7 +692,8 @@ function onInput(idx, type, rawValue) {
   snapshot();
   let value = 0; const raw = rawValue.trim();
   if (/^[\d\s+\-*/().]+$/.test(raw) && raw) { try { value = _safeCalc(raw); } catch { value = parseFloat(raw) || 0; } if (!isFinite(value)) value = 0; value = Math.round(value * 100) / 100; }
-  const item = items.value[idx]; const qpb = getQpb(item);
+  const item = items.value[idx]; if (!item) return;
+  const qpb = getQpb(item);
   if (type === 'consumption') { item.monthlyConsumption = value; triggerValidation(); }
   else if (type === 'stock') { item.stockOnHand = inputUnit.value === 'boxes' ? value * qpb : value; }
   else if (type === 'supplierStock') { item.stockAtSupplier = inputUnit.value === 'boxes' ? value * qpb : value; }
@@ -731,7 +732,7 @@ function recalcItem(idx, fromMonth = 0) {
   const mu = daily * 30; const wu = daily * 7;
   // Если нет текущих недель — начальный остаток как раньше
   if (!cwHeaders.length) co = item.stockOnHand + item.stockAtSupplier;
-  for (let m = 0; m < fromMonth && m < headers.length; m++) { co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m].orderUnits || 0); if (co < 0) co = 0; }
+  for (let m = 0; m < fromMonth && m < headers.length; m++) { co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m]?.orderUnits || 0); if (co < 0) co = 0; }
   for (let m = fromMonth; m < headers.length; m++) {
     const need = (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio;
     const deficit = need - Math.min(co, need);
@@ -810,7 +811,7 @@ function roundToPallet(idx, m) {
   p.orderUnits = p.orderBoxes * getQpb(item); p.locked = true;
   recalcItem(idx, m + 1); _savePlanDraft();
 }
-function resetCell(idx, m) { snapshot(); items.value[idx].plan[m].locked = false; recalcItem(idx, m); _savePlanDraft(); }
+function resetCell(idx, m) { snapshot(); const item = items.value[idx]; if (!item?.plan[m]) return; item.plan[m].locked = false; recalcItem(idx, m); _savePlanDraft(); }
 
 function reserveDays(item) {
   const qpb = getQpb(item);
@@ -1318,12 +1319,15 @@ function _savePlanDraft() {
 }
 
 // ─── Загрузка товаров (#3 — порядок из item_order) ────────────────────────
+let _loadProductsGen = 0;
 async function loadProducts() {
   _appliedAnalogs = new Map();
   if (!supplier.value) { items.value = []; return; }
+  const gen = ++_loadProductsGen;
   suppLoading.value = true;
   try {
     const { data, error } = await db.from('products').select('*').eq('supplier', supplier.value).eq('is_active', 1).order('name');
+    if (gen !== _loadProductsGen) return; // устаревший запрос
     if (error) { toast.error('Ошибка', ''); return; }
     const group = getEntityGroup(orderStore.settings.legalEntity);
     items.value = (data || []).filter(p => group.includes(p.legal_entity)).map(p => ({
@@ -1485,8 +1489,11 @@ function resetPlan() {
   recalcAll(); draftStore.clearPlanDraft();
 }
 
+let _loadPlanGen = 0;
 async function loadPlanFromHistory(planId) {
+  const gen = ++_loadPlanGen;
   const { data: plan, error } = await db.from('plans').select('*').eq('id', planId).single();
+  if (gen !== _loadPlanGen) return; // устаревший запрос
   if (error || !plan) { toast.error('Ошибка', ''); return; }
   const planEntity = plan.legal_entity || 'ООО "Бургер БК"';
   const allowed = userStore.getAllowedEntities();
@@ -1525,8 +1532,17 @@ const showCollapseHint = ref(false);
 let _collapseHintTimer = null;
 watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
 
+function hasPlanUnsavedData() {
+  return items.value.length > 0 && !viewOnly.value;
+}
+
+function onPlanBeforeUnload(e) {
+  if (hasPlanUnsavedData()) { e.preventDefault(); }
+}
+
 onMounted(async () => {
   planDraftTickTimer = setInterval(() => { planDraftTick.value++; }, 30000);
+  window.addEventListener('beforeunload', onPlanBeforeUnload);
   if (!supplier.value) settingsExpanded.value = true;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (route.query.planId) {
@@ -1540,18 +1556,6 @@ onMounted(async () => {
       else { draftStore.clearPlanDraft(); }
     }
   }
-});
-
-function hasPlanUnsavedData() {
-  return items.value.length > 0 && !viewOnly.value;
-}
-
-function onPlanBeforeUnload(e) {
-  if (hasPlanUnsavedData()) { e.preventDefault(); }
-}
-
-onMounted(() => {
-  window.addEventListener('beforeunload', onPlanBeforeUnload);
 });
 
 onBeforeUnmount(() => {

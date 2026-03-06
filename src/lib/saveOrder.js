@@ -9,8 +9,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
  try {
   // Приводим все позиции к учётным коробкам (формат хранения)
   const allItems = items.map(item => {
-    const qpb  = getQpb(item) || 1;
-    const mult = getMultiplicity(item) || 1;
+    const qpb  = Math.max(getQpb(item), 1);
+    const mult = Math.max(getMultiplicity(item), 1);
     const accountingBoxes = settings.unit === 'boxes'
       ? item.finalOrder
       : item.finalOrder / qpb;
