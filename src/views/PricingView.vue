@@ -155,6 +155,13 @@
         <div v-if="priceForm.currency === 'RUB' && priceForm.price > 0" style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:8px;">
           = {{ formatPrice(priceForm.price * rubToBynRate) }} BYN (курс {{ rubToBynRate }})
         </div>
+        <div class="form-group">
+          <label>Протокол (ПСЦ)</label>
+          <select v-model="priceForm.agreement_id" class="form-input">
+            <option :value="null">— Без протокола —</option>
+            <option v-for="a in agreements.filter(x => !priceForm.supplier || x.supplier === priceForm.supplier)" :key="a.id" :value="a.id">{{ a.number }} ({{ statusLabel(a.status) }})</option>
+          </select>
+        </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="btn secondary" @click="showPriceModal = false">Отмена</button>
           <button class="btn primary" @click="savePrice" :disabled="savingPrice">{{ savingPrice ? 'Сохранение...' : 'Сохранить' }}</button>
@@ -422,22 +429,22 @@ function getAgreementLabel(id) {
 const showPriceModal = ref(false);
 const editingPrice = ref(null);
 const savingPrice = ref(false);
-const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN' });
+const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null });
 
 function openNewPrice() {
   editingPrice.value = null;
-  priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN' };
+  priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
   showPriceModal.value = true;
 }
 function editPrice(p) {
   editingPrice.value = p;
-  priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN' };
+  priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
   showPriceModal.value = true;
 }
 
 async function savePrice() {
   if (savingPrice.value) return;
-  const { sku, supplier, price, unit_type, currency } = priceForm.value;
+  const { sku, supplier, price, unit_type, currency, agreement_id } = priceForm.value;
   if (!sku || !supplier) { toast.error('Ошибка', 'Укажите артикул и поставщика'); return; }
   savingPrice.value = true;
   try {
@@ -445,6 +452,7 @@ async function savePrice() {
       legal_entity: orderStore.settings.legalEntity,
       supplier,
       currency,
+      agreement_id: agreement_id || null,
       prices: [{ sku: sku.trim(), price: parseFloat(price) || 0, unit_type }],
     });
     if (error) { toast.error('Ошибка', error); return; }
