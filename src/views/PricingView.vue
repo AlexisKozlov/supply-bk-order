@@ -48,6 +48,18 @@
       <div v-else-if="!filteredPrices.length" style="text-align:center;padding:40px;color:var(--text-muted);">Цены не найдены</div>
       <div v-else>
         <table class="pricing-table">
+          <colgroup>
+            <col style="width:90px;">
+            <col>
+            <col style="width:140px;">
+            <col style="width:90px;">
+            <col style="width:40px;">
+            <col style="width:45px;">
+            <col v-if="hasRubPrices" style="width:90px;">
+            <col style="width:50px;">
+            <col style="width:90px;">
+            <col v-if="!isViewer" style="width:60px;">
+          </colgroup>
           <thead>
             <tr>
               <th @click="toggleSort('sku')" style="cursor:pointer;">Артикул {{ sortIcon('sku') }}</th>
@@ -59,7 +71,7 @@
               <th v-if="hasRubPrices" class="text-right">В BYN</th>
               <th>ПСЦ</th>
               <th @click="toggleSort('updated_at')" style="cursor:pointer;">Обновлено {{ sortIcon('updated_at') }}</th>
-              <th v-if="!isViewer" style="width:60px;"></th>
+              <th v-if="!isViewer"></th>
             </tr>
           </thead>
           <tbody>
@@ -268,6 +280,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { applyEntityFilter } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -349,7 +362,8 @@ async function loadProductNames() {
   const skus = prices.value.map(p => p.sku).filter(Boolean);
   if (!skus.length) return;
   // Загружаем все продукты для юрлица и кэшируем имена
-  const { data } = await db.from('products').select('sku,name').eq('legal_entity', le);
+  const query = db.from('products').select('sku,name');
+  const { data } = await applyEntityFilter(query, le);
   const map = {};
   if (data) {
     for (const p of data) map[p.sku] = p.name;
