@@ -109,7 +109,7 @@
             <a :href="apiBase + '/' + a.file_path + '?download=1'" @click.stop class="psc-file-link" target="_blank">{{ a.file_name }}</a>
           </div>
           <div v-if="!isViewer" class="db-card-btns">
-            <button v-if="a.status === 'draft' && hasFullAccess" class="db-card-btn" style="color:#4CAF50;" @click.stop="approveAgreement(a)" title="Согласовать"><BkIcon name="check" size="sm"/></button>
+            <button v-if="a.status === 'draft' && hasFullAccess" class="approve-btn" @click.stop="approveAgreement(a)"><BkIcon name="check" size="sm"/> Согласовать</button>
             <button class="db-card-btn" @click.stop="editAgreement(a)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button v-if="hasFullAccess" class="db-card-btn db-card-btn-del" @click.stop="deleteAgreement(a)" title="Удалить"><BkIcon name="delete" size="sm"/></button>
           </div>
@@ -682,6 +682,15 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .db-card-btn { background:none; border:1px solid var(--border-light); border-radius:5px; padding:2px 5px; cursor:pointer; font-size:11px; transition:all .15s; }
 .db-card-btn:hover { background:var(--bg); border-color:var(--border); }
 .db-card-btn-del:hover { background:#FFF0F0; border-color:#E57373; }
+
+.approve-btn {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:5px 12px; border-radius:8px;
+  border:1.5px solid #4CAF50; background:#E8F5E9;
+  color:#2E7D32; font-size:11px; font-weight:600;
+  font-family:inherit; cursor:pointer; transition:all .15s;
+}
+.approve-btn:hover { background:#C8E6C9; border-color:#388E3C; }
 
 /* ═══ Filter buttons ═══ */
 .db-sort-btn { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; border:1.5px solid var(--border); background:white; font-size:11px; font-weight:600; font-family:inherit; color:var(--text-muted); cursor:pointer; transition:all .15s; white-space:nowrap; }
