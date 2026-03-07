@@ -121,9 +121,16 @@
     <div v-if="showPriceModal" class="modal-overlay" @click.self="showPriceModal = false">
       <div class="modal-card" style="max-width:420px;">
         <h3 style="margin:0 0 16px;">{{ editingPrice ? 'Редактировать цену' : 'Новая цена' }}</h3>
+        <div class="form-group">
+          <label>Поставщик</label>
+          <select v-model="priceForm.supplier" class="form-input" @change="onPriceSupplierChange">
+            <option value="">— Выберите —</option>
+            <option v-for="s in supplierNames" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
         <div class="form-group" style="position:relative;">
-          <label>Артикул (SKU)</label>
-          <input v-model="priceForm.sku" class="form-input" placeholder="Начните вводить артикул или название..." @input="onSkuInput" @focus="onSkuInput" @blur="hideSkuHintsDelayed" autocomplete="off" />
+          <label>Товар</label>
+          <input v-model="priceForm.sku" class="form-input" placeholder="Артикул или название..." @input="onSkuInput" @focus="onSkuInput" @blur="hideSkuHintsDelayed" autocomplete="off" />
           <div v-if="priceForm.sku && skuFoundName" style="font-size:11px;color:#388E3C;margin-top:2px;">{{ skuFoundName }}</div>
           <div v-if="skuHints.length" class="sku-hints">
             <div v-for="h in skuHints" :key="h.sku" class="sku-hint" @mousedown.prevent="selectSkuHint(h)">
@@ -131,12 +138,13 @@
             </div>
           </div>
         </div>
-        <div class="form-group">
-          <label>Поставщик</label>
-          <select v-model="priceForm.supplier" class="form-input">
-            <option value="">— Выберите —</option>
-            <option v-for="s in supplierNames" :key="s" :value="s">{{ s }}</option>
-          </select>
+        <div v-if="supplierProducts.length && !priceForm.sku" class="form-group">
+          <label>Или выберите из списка</label>
+          <div class="supplier-products-list">
+            <div v-for="sp in supplierProducts" :key="sp.sku" class="sku-hint" @click="selectSkuHint(sp)">
+              <span class="mono" style="font-weight:600;">{{ sp.sku }}</span> <span style="color:var(--text-muted);">{{ sp.name }}</span>
+            </div>
+          </div>
         </div>
         <div class="form-group" style="display:flex;gap:12px;">
           <div style="flex:1;">
@@ -439,22 +447,44 @@ const editingPrice = ref(null);
 const savingPrice = ref(false);
 const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null });
 const skuHints = ref([]);
+const supplierProducts = ref([]);
 const skuFoundName = computed(() => {
   const sku = priceForm.value.sku?.trim();
   return sku ? (productNames.value[sku] || '') : '';
 });
 let skuSearchTimer = null;
 
+async function searchProducts(q, supplier) {
+  const le = orderStore.settings.legalEntity;
+  if (!le) return [];
+  const params = new URLSearchParams({ q, legal_entity: le, limit: '50' });
+  if (supplier) params.set('supplier', supplier);
+  try {
+    const r = await fetch(`/api/search_products?${params}`, {
+      headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' },
+    });
+    if (r.ok) return await r.json();
+  } catch {}
+  return [];
+}
+
 function onSkuInput() {
   clearTimeout(skuSearchTimer);
   const q = (priceForm.value.sku || '').trim();
   if (q.length < 2) { skuHints.value = []; return; }
   skuSearchTimer = setTimeout(async () => {
-    const le = orderStore.settings.legalEntity;
-    if (!le) return;
-    const { data } = await db.rpc('search_products', { term: q, legal_entity: le });
-    skuHints.value = (data || []).slice(0, 8);
+    skuHints.value = (await searchProducts(q, priceForm.value.supplier)).slice(0, 8);
   }, 250);
+}
+async function onPriceSupplierChange() {
+  supplierProducts.value = [];
+  const sup = priceForm.value.supplier;
+  if (!sup) return;
+  const le = orderStore.settings.legalEntity;
+  if (!le) return;
+  const query = db.from('products').select('sku,name').eq('supplier', sup);
+  const { data } = await applyEntityFilter(query, le);
+  supplierProducts.value = (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 }
 function selectSkuHint(h) {
   priceForm.value.sku = h.sku;
@@ -469,7 +499,9 @@ function openNewPrice() {
   editingPrice.value = null;
   priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
   skuHints.value = [];
+  supplierProducts.value = [];
   showPriceModal.value = true;
+  if (supplierNames.value[0]) onPriceSupplierChange();
 }
 function editPrice(p) {
   editingPrice.value = p;
@@ -762,6 +794,8 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .sku-hints { position: absolute; left: 0; right: 0; top: 100%; background: white; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; max-height: 200px; overflow-y: auto; }
 .sku-hint { padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .sku-hint:hover { background: rgba(245,166,35,0.08); }
+
+.supplier-products-list { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
 .text-muted { color: var(--text-muted); }
 .mono { font-family: monospace; font-size: 12px; }
 
