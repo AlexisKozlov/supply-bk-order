@@ -185,18 +185,20 @@
 
     <!-- Модалка: Редактирование/создание протокола -->
     <div v-if="showAgreementModal" class="modal-overlay" @click.self="showAgreementModal = false">
-      <div class="modal-card" style="max-width:480px;">
+      <div class="modal-card" style="max-width:620px;">
         <h3 style="margin:0 0 16px;">{{ editingAgreement ? 'Редактировать протокол' : 'Новый протокол (ПСЦ)' }}</h3>
-        <div class="form-group">
-          <label>Номер протокола</label>
-          <input v-model="agForm.number" class="form-input" placeholder="ПСЦ-001" />
-        </div>
-        <div class="form-group">
-          <label>Поставщик</label>
-          <select v-model="agForm.supplier" class="form-input">
-            <option value="">— Выберите —</option>
-            <option v-for="s in supplierNames" :key="s" :value="s">{{ s }}</option>
-          </select>
+        <div style="display:flex;gap:12px;">
+          <div class="form-group" style="flex:1;">
+            <label>Номер протокола</label>
+            <input v-model="agForm.number" class="form-input" placeholder="ПСЦ-001" />
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Поставщик</label>
+            <select v-model="agForm.supplier" class="form-input" @change="onAgSupplierChange">
+              <option value="">— Выберите —</option>
+              <option v-for="s in supplierNames" :key="s" :value="s">{{ s }}</option>
+            </select>
+          </div>
         </div>
         <div class="form-group" style="display:flex;gap:12px;">
           <div style="flex:1;">
@@ -220,6 +222,38 @@
           </div>
           <input ref="pscFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" @change="onPscFileSelected" style="font-size:12px;" />
           <div v-if="uploadingFile" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Загрузка файла...</div>
+        </div>
+        <!-- Товары протокола -->
+        <div v-if="agForm.supplier" class="form-group">
+          <label>Товары и цены в протоколе <span style="font-weight:400;color:var(--text-muted);">({{ agPriceItems.filter(x => x.selected).length }} выбрано)</span></label>
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <input v-model="agProductSearch" class="form-input" placeholder="Поиск по артикулу или названию..." style="flex:1;padding:5px 8px;font-size:11px;" />
+            <div style="display:flex;gap:4px;align-items:center;">
+              <label style="font-size:10px;margin:0;white-space:nowrap;">Валюта:</label>
+              <select v-model="agCurrency" class="form-input" style="width:70px;padding:4px;font-size:11px;">
+                <option value="BYN">BYN</option>
+                <option value="RUB">RUB</option>
+              </select>
+            </div>
+          </div>
+          <div class="ag-products-list">
+            <div v-if="agProductsLoading" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Загрузка товаров...</div>
+            <div v-else-if="!filteredAgProducts.length" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Товары не найдены</div>
+            <div v-for="item in filteredAgProducts" :key="item.sku" class="ag-product-row" :class="{ selected: item.selected }">
+              <label class="ag-product-check">
+                <input type="checkbox" v-model="item.selected" />
+                <span class="mono" style="font-size:11px;min-width:60px;">{{ item.sku }}</span>
+                <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.name }}</span>
+              </label>
+              <div v-if="item.selected" style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
+                <input type="number" v-model.number="item.price" step="0.01" min="0" class="form-input" style="width:80px;padding:3px 5px;font-size:11px;text-align:right;" placeholder="Цена" />
+                <select v-model="item.unit_type" class="form-input" style="width:55px;padding:3px;font-size:10px;">
+                  <option value="piece">шт</option>
+                  <option value="box">кор</option>
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="btn secondary" @click="showAgreementModal = false; pendingPscFile = null">Отмена</button>
@@ -570,21 +604,77 @@ const savingAgreement = ref(false);
 const uploadingFile = ref(false);
 const pscFileInput = ref(null);
 const agForm = ref({ number: '', supplier: '', valid_from: '', valid_to: '', note: '', file_name: '', file_path: '' });
+const agPriceItems = ref([]); // [{sku, name, selected, price, unit_type}]
+const agProductSearch = ref('');
+const agCurrency = ref('RUB');
+const agProductsLoading = ref(false);
+
+const filteredAgProducts = computed(() => {
+  const q = agProductSearch.value.toLowerCase().trim();
+  if (!q) return agPriceItems.value;
+  return agPriceItems.value.filter(p =>
+    p.sku.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)
+  );
+});
+
+async function loadAgProducts(supplier, agreementId) {
+  agProductsLoading.value = true;
+  try {
+    const le = orderStore.settings.legalEntity;
+    const query = db.from('products').select('sku,name').eq('supplier', supplier);
+    const { data } = await applyEntityFilter(query, le);
+    // Загрузить текущие цены этого протокола (при редактировании)
+    let existingPrices = {};
+    if (agreementId) {
+      const pp = prices.value.filter(p => p.agreement_id === agreementId);
+      for (const p of pp) existingPrices[p.sku] = { price: parseFloat(p.price), unit_type: p.unit_type, currency: p.currency };
+    }
+    agPriceItems.value = (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(p => {
+      const ex = existingPrices[p.sku];
+      return {
+        sku: p.sku, name: p.name,
+        selected: !!ex,
+        price: ex ? ex.price : 0,
+        unit_type: ex ? ex.unit_type : 'piece',
+      };
+    });
+    if (Object.keys(existingPrices).length) {
+      const firstCur = Object.values(existingPrices).find(x => x.currency);
+      if (firstCur) agCurrency.value = firstCur.currency;
+    }
+  } finally {
+    agProductsLoading.value = false;
+  }
+}
+
+function onAgSupplierChange() {
+  agPriceItems.value = [];
+  agProductSearch.value = '';
+  if (agForm.value.supplier) loadAgProducts(agForm.value.supplier, editingAgreement.value?.id);
+}
 
 function openNewAgreement() {
   editingAgreement.value = null;
   pendingPscFile.value = null;
+  agPriceItems.value = [];
+  agProductSearch.value = '';
+  agCurrency.value = 'RUB';
   agForm.value = { number: '', supplier: supplierNames.value[0] || '', valid_from: '', valid_to: '', note: '', file_name: '', file_path: '' };
   showAgreementModal.value = true;
+  if (supplierNames.value[0]) loadAgProducts(supplierNames.value[0], null);
 }
 function editAgreement(a) {
   editingAgreement.value = a;
+  agPriceItems.value = [];
+  agProductSearch.value = '';
+  agCurrency.value = 'RUB';
   agForm.value = {
     number: a.number, supplier: a.supplier,
     valid_from: a.valid_from || '', valid_to: a.valid_to || '',
     note: a.note || '', file_name: a.file_name || '', file_path: a.file_path || '',
   };
   showAgreementModal.value = true;
+  if (a.supplier) loadAgProducts(a.supplier, a.id);
 }
 
 async function saveAgreement() {
@@ -599,6 +689,7 @@ async function saveAgreement() {
       valid_from: valid_from || null, valid_to: valid_to || null,
       note: note || null,
     };
+    let newId = null;
     if (editingAgreement.value) {
       const { error } = await db.from('price_agreements').update(payload).eq('id', editingAgreement.value.id);
       if (error) { toast.error('Ошибка', error); return; }
@@ -607,14 +698,26 @@ async function saveAgreement() {
       payload.status = 'draft';
       const { data, error } = await db.from('price_agreements').insert(payload);
       if (error) { toast.error('Ошибка', error); return; }
-      // Загрузить файл, если выбран, для нового протокола
-      const newId = Array.isArray(data) ? data[0]?.id : data?.id;
+      newId = Array.isArray(data) ? data[0]?.id : data?.id;
       if (pendingPscFile.value && newId) {
         await uploadPscFile(newId);
       }
     }
+    // Сохранить цены товаров, привязанных к протоколу
+    const selectedItems = agPriceItems.value.filter(x => x.selected && x.price > 0);
+    const agId = editingAgreement.value?.id || newId;
+    if (selectedItems.length && agId) {
+      await db.rpc('import_prices', {
+        legal_entity: orderStore.settings.legalEntity,
+        supplier: agForm.value.supplier,
+        currency: agCurrency.value,
+        agreement_id: agId,
+        prices: selectedItems.map(x => ({ sku: x.sku, price: x.price, unit_type: x.unit_type })),
+      });
+    }
     toast.success('Сохранено');
     showAgreementModal.value = false;
+    await loadPrices();
     await loadAgreements();
   } finally {
     savingAgreement.value = false;
@@ -828,6 +931,13 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .sku-hint:hover { background: rgba(245,166,35,0.08); }
 
 .supplier-products-list { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+
+.ag-products-list { max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.ag-product-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
+.ag-product-row:last-child { border-bottom: none; }
+.ag-product-row.selected { background: rgba(76,175,80,0.06); }
+.ag-product-check { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.ag-product-check input[type="checkbox"] { margin: 0; cursor: pointer; }
 .text-muted { color: var(--text-muted); }
 .mono { font-family: monospace; font-size: 12px; }
 
