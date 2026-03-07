@@ -733,6 +733,7 @@ async function loadPrices() {
       const rate = data.rub_to_byn_rate || 0.0375;
       for (const p of prices) {
         let price = parseFloat(p.price);
+        if (isNaN(price) || price <= 0) continue;
         if (p.currency === 'RUB') price = +(price * rate).toFixed(2);
         map[p.sku] = { price, unit_type: p.unit_type };
       }

@@ -405,6 +405,14 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'psc' && isset($parts[2])) 
     $filename = basename($parts[2]);
     $filepath = __DIR__ . '/uploads/psc/' . $filename;
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
+    // Проверка доступа к юрлицу
+    $caller = getSessionUser($pdo);
+    if ($caller) {
+        $fchk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE file_path LIKE ?");
+        $fchk->execute(['%' . $filename]);
+        $fle = $fchk->fetchColumn();
+        if ($fle && !checkLegalEntityAccess($caller, $fle)) respond(['error' => 'Нет доступа'], 403);
+    }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $filepath);
     finfo_close($finfo);
@@ -1377,6 +1385,12 @@ if ($endpoint === 'rpc') {
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        // Проверка что agreement_id принадлежит тому же юрлицу
+        if ($agreementId) {
+            $agChk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE id=?"); $agChk->execute([$agreementId]);
+            $agLE = $agChk->fetchColumn();
+            if (!$agLE || $agLE !== $le) respond(['error' => 'Протокол не принадлежит указанному юр. лицу'], 400);
+        }
         $imported = 0;
         try {
             $pdo->beginTransaction();
@@ -1446,6 +1460,28 @@ if ($endpoint === 'rpc') {
         if ($rate <= 0 || $rate > 1) respond(['error' => 'Некорректный курс (ожидается число от 0 до 1)'], 400);
         $pdo->prepare("INSERT INTO settings (`key`, value) VALUES ('rub_to_byn_rate', ?) ON DUPLICATE KEY UPDATE value=?")->execute([(string)$rate, (string)$rate]);
         respond(['success' => true, 'rate' => $rate]);
+    }
+
+    if ($fn === 'delete_agreement') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) respond(['error' => 'Недостаточно прав'], 403);
+        $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
+        if (!$ag) respond(['error' => 'Протокол не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        // Удалить файл с диска
+        if ($ag['file_path']) {
+            $fp = __DIR__ . '/' . $ag['file_path'];
+            if (file_exists($fp)) @unlink($fp);
+        }
+        // Обнулить ссылки в ценах
+        $pdo->prepare("UPDATE product_prices SET agreement_id=NULL WHERE agreement_id=?")->execute([$id]);
+        // Удалить запись
+        $pdo->prepare("DELETE FROM price_agreements WHERE id=?")->execute([$id]);
+        respond(['success' => true]);
     }
 
     if ($fn === 'delete_price') {

@@ -661,7 +661,7 @@ async function approveAgreement(a) {
 
 async function deleteAgreement(a) {
   if (!await confirm('Удалить протокол?', `Удалить протокол «${a.number}»?`)) return;
-  const { error } = await db.from('price_agreements').delete().eq('id', a.id);
+  const { error } = await db.rpc('delete_agreement', { id: a.id });
   if (error) { toast.error('Ошибка', error); return; }
   toast.success('Удалено');
   agreements.value = agreements.value.filter(x => x.id !== a.id);
