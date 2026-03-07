@@ -713,7 +713,7 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .pricing-table tbody tr:hover { background: rgba(245,166,35,0.04); }
 
 .col-sku { width: 80px; }
-.col-name { min-width: 120px; }
+.col-name { min-width: 120px; text-align: center !important; }
 .col-supplier { width: 140px; }
 .col-price { width: 80px; text-align: right !important; }
 .col-unit { width: 36px; }
