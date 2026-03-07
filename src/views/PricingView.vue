@@ -222,7 +222,7 @@
           <div v-if="uploadingFile" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Загрузка файла...</div>
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
-          <button class="btn secondary" @click="showAgreementModal = false">Отмена</button>
+          <button class="btn secondary" @click="showAgreementModal = false; pendingPscFile = null">Отмена</button>
           <button class="btn primary" @click="saveAgreement" :disabled="savingAgreement">{{ savingAgreement ? 'Сохранение...' : 'Сохранить' }}</button>
         </div>
       </div>
@@ -282,7 +282,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -461,6 +461,7 @@ const skuFoundName = computed(() => {
   return sku ? (productNames.value[sku] || '') : '';
 });
 let skuSearchTimer = null;
+let hideHintsTimer = null;
 
 async function searchProducts(q, supplier) {
   const le = orderStore.settings.legalEntity;
@@ -502,8 +503,14 @@ function selectSkuHint(h) {
   if (h.name && !productNames.value[h.sku]) productNames.value[h.sku] = h.name;
 }
 function hideSkuHintsDelayed() {
-  setTimeout(() => { skuHints.value = []; }, 150);
+  clearTimeout(hideHintsTimer);
+  hideHintsTimer = setTimeout(() => { skuHints.value = []; }, 150);
 }
+
+onUnmounted(() => {
+  clearTimeout(skuSearchTimer);
+  clearTimeout(hideHintsTimer);
+});
 
 function openNewPrice() {
   editingPrice.value = null;
@@ -617,6 +624,7 @@ async function saveAgreement() {
 const pendingPscFile = ref(null);
 
 function onPscFileSelected(e) {
+  if (uploadingFile.value) return;
   const file = e.target.files?.[0];
   if (!file) return;
   if (editingAgreement.value) {
@@ -747,9 +755,15 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
   if (!le) return;
   filterSupplier.value = '';
   searchQuery.value = '';
+  // Закрыть модалки — данные старого юрлица
+  showPriceModal.value = false;
+  showAgreementModal.value = false;
+  showImportModal.value = false;
+  prices.value = [];
+  agreements.value = [];
   await supplierStore.loadSuppliers(le);
-  if (activeTab.value === 'prices') await loadPrices();
-  else await loadAgreements();
+  await loadPrices();
+  loadAgreements();
 });
 </script>
 
