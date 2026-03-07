@@ -121,9 +121,15 @@
     <div v-if="showPriceModal" class="modal-overlay" @click.self="showPriceModal = false">
       <div class="modal-card" style="max-width:420px;">
         <h3 style="margin:0 0 16px;">{{ editingPrice ? 'Редактировать цену' : 'Новая цена' }}</h3>
-        <div class="form-group">
+        <div class="form-group" style="position:relative;">
           <label>Артикул (SKU)</label>
-          <input v-model="priceForm.sku" class="form-input" placeholder="Например: 10234" />
+          <input v-model="priceForm.sku" class="form-input" placeholder="Начните вводить артикул или название..." @input="onSkuInput" @focus="onSkuInput" @blur="hideSkuHintsDelayed" autocomplete="off" />
+          <div v-if="priceForm.sku && skuFoundName" style="font-size:11px;color:#388E3C;margin-top:2px;">{{ skuFoundName }}</div>
+          <div v-if="skuHints.length" class="sku-hints">
+            <div v-for="h in skuHints" :key="h.sku" class="sku-hint" @mousedown.prevent="selectSkuHint(h)">
+              <span class="mono" style="font-weight:600;">{{ h.sku }}</span> <span style="color:var(--text-muted);">{{ h.name }}</span>
+            </div>
+          </div>
         </div>
         <div class="form-group">
           <label>Поставщик</label>
@@ -432,15 +438,43 @@ const showPriceModal = ref(false);
 const editingPrice = ref(null);
 const savingPrice = ref(false);
 const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null });
+const skuHints = ref([]);
+const skuFoundName = computed(() => {
+  const sku = priceForm.value.sku?.trim();
+  return sku ? (productNames.value[sku] || '') : '';
+});
+let skuSearchTimer = null;
+
+function onSkuInput() {
+  clearTimeout(skuSearchTimer);
+  const q = (priceForm.value.sku || '').trim();
+  if (q.length < 2) { skuHints.value = []; return; }
+  skuSearchTimer = setTimeout(async () => {
+    const le = orderStore.settings.legalEntity;
+    if (!le) return;
+    const { data } = await db.rpc('search_products', { term: q, legal_entity: le });
+    skuHints.value = (data || []).slice(0, 8);
+  }, 250);
+}
+function selectSkuHint(h) {
+  priceForm.value.sku = h.sku;
+  skuHints.value = [];
+  if (h.name && !productNames.value[h.sku]) productNames.value[h.sku] = h.name;
+}
+function hideSkuHintsDelayed() {
+  setTimeout(() => { skuHints.value = []; }, 150);
+}
 
 function openNewPrice() {
   editingPrice.value = null;
   priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
+  skuHints.value = [];
   showPriceModal.value = true;
 }
 function editPrice(p) {
   editingPrice.value = p;
   priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
+  skuHints.value = [];
   showPriceModal.value = true;
 }
 
@@ -724,6 +758,10 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .col-actions { width: 50px; text-align: center !important; }
 
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
+
+.sku-hints { position: absolute; left: 0; right: 0; top: 100%; background: white; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 10; max-height: 200px; overflow-y: auto; }
+.sku-hint { padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.sku-hint:hover { background: rgba(245,166,35,0.08); }
 .text-muted { color: var(--text-muted); }
 .mono { font-family: monospace; font-size: 12px; }
 
