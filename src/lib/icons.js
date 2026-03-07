@@ -117,8 +117,6 @@ export const icons = {
   schedule: `<svg viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="18" rx="2.5" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><rect x="2" y="3" width="20" height="5" rx="2.5" fill="#FF8733"/><path d="M2 11h20M2 15h20M8 8v12M14 8v12" stroke="#D62700" stroke-width="1" opacity="0.3"/><circle cx="11" cy="13" r="1.5" fill="#D62700"/><circle cx="17" cy="13" r="1.5" fill="#FF8733"/><circle cx="5" cy="17" r="1.5" fill="#FDBD10"/><circle cx="11" cy="17" r="1.5" fill="#FF8733"/></svg>`,
 
   shelfLife: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="14" height="16" rx="2" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><rect x="3" y="4" width="14" height="5" rx="2" fill="#FF8733"/><path d="M7 2v3M13 2v3" stroke="#D62700" stroke-width="1.8" stroke-linecap="round"/><circle cx="18" cy="17" r="5" fill="#FFEBEE" stroke="#D62700" stroke-width="1.5"/><path d="M18 14.5v3l1.5 1" stroke="#D62700" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="6" y="12" width="4" height="2" rx=".8" fill="#D62700" opacity="0.4"/><rect x="6" y="16" width="5" height="2" rx=".8" fill="#FF8733" opacity="0.4"/></svg>`,
-
-  history: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="9" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><polyline points="12 8 12 13 15.5 15" stroke="#D62700" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4v4h4" stroke="#FF8733" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8a9 9 0 1 1 .8 4" stroke="#FF8733" stroke-width="1.5" stroke-linecap="round"/></svg>`,
 };
 
 /**
