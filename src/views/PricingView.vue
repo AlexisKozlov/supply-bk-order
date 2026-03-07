@@ -48,30 +48,18 @@
       <div v-else-if="!filteredPrices.length" style="text-align:center;padding:40px;color:var(--text-muted);">Цены не найдены</div>
       <div v-else>
         <table class="pricing-table">
-          <colgroup>
-            <col style="width:90px;">
-            <col>
-            <col style="width:140px;">
-            <col style="width:90px;">
-            <col style="width:40px;">
-            <col style="width:45px;">
-            <col v-if="hasRubPrices" style="width:90px;">
-            <col style="width:50px;">
-            <col style="width:90px;">
-            <col v-if="!isViewer" style="width:60px;">
-          </colgroup>
           <thead>
             <tr>
-              <th @click="toggleSort('sku')" style="cursor:pointer;">Артикул {{ sortIcon('sku') }}</th>
+              <th style="cursor:pointer;width:90px;" @click="toggleSort('sku')">Артикул {{ sortIcon('sku') }}</th>
               <th>Название</th>
-              <th @click="toggleSort('supplier')" style="cursor:pointer;">Поставщик {{ sortIcon('supplier') }}</th>
-              <th @click="toggleSort('price')" style="cursor:pointer;" class="text-right">Цена {{ sortIcon('price') }}</th>
-              <th>За</th>
-              <th>Вал.</th>
-              <th v-if="hasRubPrices" class="text-right">В BYN</th>
-              <th>ПСЦ</th>
-              <th @click="toggleSort('updated_at')" style="cursor:pointer;">Обновлено {{ sortIcon('updated_at') }}</th>
-              <th v-if="!isViewer"></th>
+              <th style="cursor:pointer;width:140px;" @click="toggleSort('supplier')">Поставщик {{ sortIcon('supplier') }}</th>
+              <th style="cursor:pointer;width:90px;" class="text-right" @click="toggleSort('price')">Цена {{ sortIcon('price') }}</th>
+              <th style="width:40px;">За</th>
+              <th style="width:45px;">Вал.</th>
+              <th v-if="hasRubPrices" style="width:90px;" class="text-right">В BYN</th>
+              <th style="width:50px;">ПСЦ</th>
+              <th style="cursor:pointer;width:90px;" @click="toggleSort('updated_at')">Обновлено {{ sortIcon('updated_at') }}</th>
+              <th v-if="!isViewer" style="width:60px;"></th>
             </tr>
           </thead>
           <tbody>
@@ -718,7 +706,7 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .db-sort-btn { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; border:1.5px solid var(--border); background:white; font-size:11px; font-weight:600; font-family:inherit; color:var(--text-muted); cursor:pointer; transition:all .15s; white-space:nowrap; }
 .db-sort-btn:hover { border-color:var(--bk-orange); color:var(--text); }
 .db-sort-btn.active { border-color:var(--bk-orange); color:var(--bk-brown); background:#FFFBF5; }
-.pricing-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pricing-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .pricing-table th { background: var(--card); padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; user-select: none; }
 .pricing-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
 .pricing-table tbody tr:hover { background: rgba(245,166,35,0.04); }
