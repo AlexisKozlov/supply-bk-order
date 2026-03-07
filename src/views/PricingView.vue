@@ -50,33 +50,33 @@
         <table class="pricing-table">
           <thead>
             <tr>
-              <th style="cursor:pointer;width:90px;" @click="toggleSort('sku')">Артикул {{ sortIcon('sku') }}</th>
-              <th>Название</th>
-              <th style="cursor:pointer;width:140px;" @click="toggleSort('supplier')">Поставщик {{ sortIcon('supplier') }}</th>
-              <th style="cursor:pointer;width:90px;" class="text-right" @click="toggleSort('price')">Цена {{ sortIcon('price') }}</th>
-              <th style="width:40px;">За</th>
-              <th style="width:45px;">Вал.</th>
-              <th v-if="hasRubPrices" style="width:90px;" class="text-right">В BYN</th>
-              <th style="width:50px;">ПСЦ</th>
-              <th style="cursor:pointer;width:90px;" @click="toggleSort('updated_at')">Обновлено {{ sortIcon('updated_at') }}</th>
-              <th v-if="!isViewer" style="width:60px;"></th>
+              <th class="col-sku" @click="toggleSort('sku')">Артикул {{ sortIcon('sku') }}</th>
+              <th class="col-name">Название</th>
+              <th class="col-supplier" @click="toggleSort('supplier')">Поставщик {{ sortIcon('supplier') }}</th>
+              <th class="col-price" @click="toggleSort('price')">Цена {{ sortIcon('price') }}</th>
+              <th class="col-unit">За</th>
+              <th class="col-cur">Вал.</th>
+              <th v-if="hasRubPrices" class="col-byn">В BYN</th>
+              <th class="col-psc">ПСЦ</th>
+              <th class="col-date" @click="toggleSort('updated_at')">Обновлено {{ sortIcon('updated_at') }}</th>
+              <th v-if="!isViewer" class="col-actions"></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="p in sortedPrices" :key="p.id" @click="!isViewer && editPrice(p)" :style="!isViewer ? 'cursor:pointer' : ''">
-              <td class="mono">{{ p.sku }}</td>
-              <td>{{ productNames[p.sku] || '—' }}</td>
-              <td>{{ p.supplier }}</td>
-              <td class="text-right mono">{{ formatPrice(p.price) }}</td>
-              <td>{{ p.unit_type === 'box' ? 'кор' : 'шт' }}</td>
-              <td><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
-              <td v-if="hasRubPrices" class="text-right mono">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
-              <td>
+              <td class="col-sku mono">{{ p.sku }}</td>
+              <td class="col-name ellipsis">{{ productNames[p.sku] || '—' }}</td>
+              <td class="col-supplier ellipsis">{{ p.supplier }}</td>
+              <td class="col-price mono">{{ formatPrice(p.price) }}</td>
+              <td class="col-unit">{{ p.unit_type === 'box' ? 'кор' : 'шт' }}</td>
+              <td class="col-cur"><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
+              <td v-if="hasRubPrices" class="col-byn mono">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
+              <td class="col-psc">
                 <span v-if="p.agreement_id" class="psc-badge" :title="getAgreementLabel(p.agreement_id)">ПСЦ</span>
                 <span v-else class="psc-badge psc-manual">Руч.</span>
               </td>
-              <td class="text-muted" style="font-size:11px;">{{ formatDate(p.updated_at) }}</td>
-              <td v-if="!isViewer" style="text-align:center;">
+              <td class="col-date text-muted">{{ formatDate(p.updated_at) }}</td>
+              <td v-if="!isViewer" class="col-actions">
                 <button class="db-card-btn db-card-btn-del" @click.stop="deletePrice(p)" title="Удалить">
                   <BkIcon name="delete" size="sm"/>
                 </button>
@@ -706,11 +706,24 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .db-sort-btn { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; border:1.5px solid var(--border); background:white; font-size:11px; font-weight:600; font-family:inherit; color:var(--text-muted); cursor:pointer; transition:all .15s; white-space:nowrap; }
 .db-sort-btn:hover { border-color:var(--bk-orange); color:var(--text); }
 .db-sort-btn.active { border-color:var(--bk-orange); color:var(--bk-brown); background:#FFFBF5; }
-.pricing-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-.pricing-table th { background: var(--card); padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; user-select: none; }
-.pricing-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.pricing-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pricing-table th, .pricing-table td { padding: 7px 10px; text-align: left; vertical-align: middle; }
+.pricing-table th { background: var(--card); font-size: 11px; color: var(--text-muted); font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; user-select: none; cursor: default; }
+.pricing-table td { border-bottom: 1px solid var(--border); }
 .pricing-table tbody tr:hover { background: rgba(245,166,35,0.04); }
-.text-right { text-align: right; }
+
+.col-sku { width: 80px; }
+.col-name { min-width: 120px; }
+.col-supplier { width: 140px; }
+.col-price { width: 80px; text-align: right !important; }
+.col-unit { width: 36px; }
+.col-cur { width: 42px; }
+.col-byn { width: 80px; text-align: right !important; }
+.col-psc { width: 44px; text-align: center !important; }
+.col-date { width: 85px; font-size: 11px; }
+.col-actions { width: 50px; text-align: center !important; }
+
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
 .text-muted { color: var(--text-muted); }
 .mono { font-family: monospace; font-size: 12px; }
 
