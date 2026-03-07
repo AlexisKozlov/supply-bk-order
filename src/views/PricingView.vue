@@ -82,7 +82,7 @@
                 <span v-else class="psc-badge psc-manual">Руч.</span>
               </td>
               <td class="col-date text-muted">{{ formatDate(p.updated_at) }}</td>
-              <td class="col-actions" style="display:flex;gap:2px;justify-content:center;">
+              <td class="col-actions">
                 <button class="db-card-btn" @click.stop="showHistory(p)" title="История цены">
                   <BkIcon name="history" size="sm"/>
                 </button>
@@ -1187,7 +1187,7 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .col-byn { width: 80px; text-align: right !important; }
 .col-psc { width: 44px; text-align: center !important; }
 .col-date { width: 85px; font-size: 11px; }
-.col-actions { width: 50px; text-align: center !important; }
+.col-actions { width: 60px; text-align: center !important; white-space: nowrap; }
 
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
 
