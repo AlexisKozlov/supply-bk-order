@@ -618,6 +618,32 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 
 <style scoped>
 .pricing-view { padding: 0; }
+
+/* ═══ Tabs (из DatabaseView) ═══ */
+.db-tabs { display:flex; justify-content:center; gap:0; margin-bottom:14px; border-bottom:2px solid var(--border-light); }
+.db-tab { padding:9px 20px; font-size:14px; font-weight:600; color:var(--text-muted); background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-2px; cursor:pointer; transition:all .15s; display:inline-flex; align-items:center; gap:6px; }
+.db-tab.active { color:var(--bk-brown); border-bottom-color:var(--bk-brown); }
+.db-tab:hover:not(.active) { color:var(--text); background:rgba(139,115,85,.05); }
+.db-tab-count { display:inline-block; background:var(--border-light); color:var(--text-muted); font-size:11px; font-weight:700; padding:1px 7px; border-radius:10px; margin-left:4px; }
+.db-tab.active .db-tab-count { background:var(--bk-brown); color:#fff; }
+
+/* ═══ Cards grid ═══ */
+.db-grid { display:flex; flex-direction:column; gap:4px; }
+.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s; display:flex; align-items:center; gap:10px; }
+.db-card:hover { border-color:var(--bk-orange); }
+.db-card-top { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
+.db-card-meta { display:flex; flex-wrap:nowrap; gap:5px; font-size:10px; color:var(--text-muted); flex-shrink:0; }
+.db-card-meta span { background:var(--bg); padding:1px 5px; border-radius:3px; white-space:nowrap; }
+.db-card-btns { display:flex; gap:3px; opacity:0; transition:opacity .15s; flex-shrink:0; }
+.db-card:hover .db-card-btns { opacity:1; }
+.db-card-btn { background:none; border:1px solid var(--border-light); border-radius:5px; padding:2px 5px; cursor:pointer; font-size:11px; transition:all .15s; }
+.db-card-btn:hover { background:var(--bg); border-color:var(--border); }
+.db-card-btn-del:hover { background:#FFF0F0; border-color:#E57373; }
+
+/* ═══ Filter buttons ═══ */
+.db-sort-btn { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; border:1.5px solid var(--border); background:white; font-size:11px; font-weight:600; font-family:inherit; color:var(--text-muted); cursor:pointer; transition:all .15s; white-space:nowrap; }
+.db-sort-btn:hover { border-color:var(--bk-orange); color:var(--text); }
+.db-sort-btn.active { border-color:var(--bk-orange); color:var(--bk-brown); background:#FFFBF5; }
 .pricing-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pricing-table th { background: var(--card); padding: 8px 10px; text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; user-select: none; }
 .pricing-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
