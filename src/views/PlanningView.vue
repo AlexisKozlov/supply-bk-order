@@ -878,7 +878,9 @@ function planItemSum(item) {
   if (!pi) return 0;
   const totalBoxes = itemTotalBoxes(item);
   if (!totalBoxes) return 0;
+  if (pi.unit_type === 'kg' || pi.unit_type === 'liter') return 0;
   if (pi.unit_type === 'box') return totalBoxes * pi.price;
+  if (pi.unit_type === 'thousand') return itemTotalUnits(item) * pi.price / 1000;
   return itemTotalUnits(item) * pi.price;
 }
 
@@ -886,7 +888,8 @@ function planItemPriceTooltip(item) {
   const pi = planPriceMap.value[item.sku];
   if (!pi) return '';
   const sum = planItemSum(item);
-  const unit = pi.unit_type === 'box' ? 'кор' : 'шт';
+  const units = { box: 'кор', piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter: 'л' };
+  const unit = units[pi.unit_type] || 'шт';
   return `Цена: ${parseFloat(pi.price).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} / ${unit}` + (sum > 0 ? ` · Сумма: ${sum.toLocaleString('ru-RU', { minimumFractionDigits: 0 })} \u20BD` : '');
 }
 

@@ -74,7 +74,7 @@
               <td class="col-name ellipsis">{{ productNames[p.sku] || '—' }}</td>
               <td class="col-supplier ellipsis">{{ p.supplier }}</td>
               <td class="col-price mono">{{ formatPrice(p.price) }}</td>
-              <td class="col-unit">{{ p.unit_type === 'box' ? 'кор' : 'шт' }}</td>
+              <td class="col-unit">{{ unitLabel(p.unit_type) }}</td>
               <td class="col-cur"><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
               <td v-if="hasRubPrices" class="col-byn mono">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
               <td class="col-psc">
@@ -181,6 +181,9 @@
             <label>За</label>
             <select v-model="priceForm.unit_type" class="form-input">
               <option value="piece">штуку</option>
+              <option value="thousand">тыс/шт</option>
+              <option value="kg">кг</option>
+              <option value="liter">литр</option>
               <option value="box">коробку</option>
             </select>
           </div>
@@ -280,8 +283,11 @@
               </span>
               <div v-if="item.selected" style="display:flex;gap:4px;align-items:center;flex-shrink:0;" @click.stop>
                 <input type="number" v-model.number="item.price" step="0.01" min="0" class="form-input" style="width:80px;padding:3px 5px;font-size:11px;text-align:right;" placeholder="Цена" />
-                <select v-model="item.unit_type" class="form-input" style="width:55px;padding:3px;font-size:10px;">
+                <select v-model="item.unit_type" class="form-input" style="width:65px;padding:3px;font-size:10px;">
                   <option value="piece">шт</option>
+                  <option value="thousand">тыс/шт</option>
+                  <option value="kg">кг</option>
+                  <option value="liter">л</option>
                   <option value="box">кор</option>
                 </select>
               </div>
@@ -332,7 +338,7 @@
               <tr v-for="(p, i) in importPreview.slice(0, 10)" :key="i">
                 <td class="mono">{{ p.sku }}</td>
                 <td class="text-right mono">{{ formatPrice(p.price) }}</td>
-                <td>{{ p.unit_type === 'box' ? 'кор' : 'шт' }}</td>
+                <td>{{ unitLabel(p.unit_type) }}</td>
               </tr>
             </tbody>
           </table>
@@ -555,6 +561,10 @@ function formatDate(d) {
 function statusLabel(s) {
   return { draft: 'Черновик', active: 'Действует', archived: 'Архив' }[s] || s;
 }
+const UNIT_LABELS = { piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter: 'л', box: 'кор' };
+const UNIT_LABELS_FULL = { piece: 'штуку', thousand: 'тыс/шт', kg: 'кг', liter: 'литр', box: 'коробку' };
+function unitLabel(type) { return UNIT_LABELS[type] || type || 'шт'; }
+
 function getAgreementLabel(id) {
   const a = agreements.value.find(x => x.id === id);
   return a ? `${a.number} (${statusLabel(a.status)})` : `ПСЦ #${id}`;
@@ -905,6 +915,9 @@ async function onImportFileSelected(e) {
       if (unitCol) {
         const uv = String(row[unitCol] || '').toLowerCase();
         if (/кор|box|упак/i.test(uv)) unit_type = 'box';
+        else if (/тыс|thousand/i.test(uv)) unit_type = 'thousand';
+        else if (/\bкг\b|kilogram/i.test(uv)) unit_type = 'kg';
+        else if (/\bл\b|литр|liter/i.test(uv)) unit_type = 'liter';
       }
       parsed.push({ sku, price, unit_type });
     }
@@ -1034,7 +1047,7 @@ async function exportPriceList() {
         { v: productNames.value[p.sku] || '', s: sCell },
         { v: p.supplier, s: sCell },
         { v: parseFloat(p.price) || 0, t: 'n', s: sCellRight },
-        { v: p.unit_type === 'box' ? 'коробку' : 'штуку', s: sCell },
+        { v: UNIT_LABELS_FULL[p.unit_type] || 'штуку', s: sCell },
         { v: p.currency || 'BYN', s: sCell },
       ];
       if (hasRubPrices.value) {

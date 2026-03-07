@@ -119,8 +119,12 @@ export async function exportToExcel(items, settings, priceMap) {
       const pi = priceMap[item.sku];
       if (pi) {
         const price = parseFloat(pi.price);
-        const unitLabel = pi.unit_type === 'box' ? '/кор' : '/шт';
-        const lineSum = pi.unit_type === 'box' ? price * physBoxes : price * pieces;
+        const unitLabels = { box: '/кор', piece: '/шт', thousand: '/тыс', kg: '/кг', liter: '/л' };
+        const unitLabel = unitLabels[pi.unit_type] || '/шт';
+        let lineSum = 0;
+        if (pi.unit_type === 'box') lineSum = price * physBoxes;
+        else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
+        else if (pi.unit_type !== 'kg' && pi.unit_type !== 'liter') lineSum = price * pieces;
         setCell(ws, r, 3, `${price.toLocaleString('ru-RU', { minimumFractionDigits: 2 })}${unitLabel}`, sCell(stripe));
         setCell(ws, r, 4, lineSum, { ...sOrder(stripe), numFmt: '#,##0.00' });
       } else {
@@ -154,7 +158,10 @@ export async function exportToExcel(items, settings, priceMap) {
         const ab = settings.unit === 'boxes' ? Math.ceil(item.finalOrder) : Math.ceil(item.finalOrder / qpb_);
         const pb = Math.ceil(ab / mult_);
         const pc = ab * qpb_;
-        totalSum += pi.unit_type === 'box' ? parseFloat(pi.price) * pb : parseFloat(pi.price) * pc;
+        const pr = parseFloat(pi.price);
+        if (pi.unit_type === 'box') totalSum += pr * pb;
+        else if (pi.unit_type === 'thousand') totalSum += pr * pc / 1000;
+        else if (pi.unit_type !== 'kg' && pi.unit_type !== 'liter') totalSum += pr * pc;
       });
       setCell(ws, r, 3, '', sTotalLabel);
       setCell(ws, r, 4, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });

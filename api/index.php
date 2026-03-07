@@ -1396,13 +1396,23 @@ if ($endpoint === 'rpc') {
             $pdo->beginTransaction();
             $currency = in_array($body['currency'] ?? '', ['BYN', 'RUB']) ? $body['currency'] : 'BYN';
             $stmt = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, unit_type, currency, agreement_id, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type=VALUES(unit_type), currency=VALUES(currency), agreement_id=VALUES(agreement_id), updated_by=VALUES(updated_by), updated_at=NOW()");
+            $oldStmt = $pdo->prepare("SELECT price, currency FROM product_prices WHERE sku=? AND supplier=? AND legal_entity=?");
+            $histStmt = $pdo->prepare("INSERT INTO price_history (sku, supplier, legal_entity, old_price, new_price, old_currency, new_currency, agreement_id, changed_by) VALUES (?,?,?,?,?,?,?,?,?)");
             foreach ($prices as $p) {
                 $sku = trim($p['sku'] ?? '');
                 $price = floatval($p['price'] ?? 0);
-                $unitType = ($p['unit_type'] ?? 'piece') === 'box' ? 'box' : 'piece';
+                $ut = $p['unit_type'] ?? 'piece';
+                $unitType = in_array($ut, ['piece', 'box', 'thousand', 'kg', 'liter']) ? $ut : 'piece';
                 $cur = in_array($p['currency'] ?? '', ['BYN', 'RUB']) ? $p['currency'] : $currency;
                 if (!$sku || $price < 0) continue;
+                // Сохранить старую цену для истории
+                $oldStmt->execute([$sku, $supplier, $le]);
+                $old = $oldStmt->fetch();
                 $stmt->execute([$sku, $supplier, $le, $price, $unitType, $cur, $agreementId, $caller['name']]);
+                // Записать в историю если цена изменилась или новая
+                if (!$old || floatval($old['price']) != $price || ($old['currency'] ?? '') !== $cur) {
+                    $histStmt->execute([$sku, $supplier, $le, $old ? $old['price'] : null, $price, $old ? $old['currency'] : null, $cur, $agreementId, $caller['name']]);
+                }
                 $imported++;
             }
             $pdo->commit();
@@ -1496,6 +1506,38 @@ if ($endpoint === 'rpc') {
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
         $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$id]);
         respond(['success' => true]);
+    }
+
+    if ($fn === 'get_price_history') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $sku = $body['sku'] ?? '';
+        $le = $body['legal_entity'] ?? '';
+        $supplier = $body['supplier'] ?? '';
+        if (!$sku || !$le) respond(['error' => 'Не указаны обязательные поля'], 400);
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
+        $sql = "SELECT * FROM price_history WHERE sku=? AND legal_entity=?";
+        $params = [$sku, $le];
+        if ($supplier) { $sql .= " AND supplier=?"; $params[] = $supplier; }
+        $sql .= " ORDER BY changed_at DESC LIMIT 20";
+        $s = $pdo->prepare($sql); $s->execute($params);
+        respond($s->fetchAll());
+    }
+
+    if ($fn === 'get_products_without_prices') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $le = $body['legal_entity'] ?? '';
+        $supplier = $body['supplier'] ?? '';
+        if (!$le || !$supplier) respond(['error' => 'Не указаны обязательные поля'], 400);
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
+        // Товары поставщика для группы юрлиц, у которых нет цены
+        $leFilter = (strpos($le, 'Пицца Стар') !== false)
+            ? "`legal_entity` LIKE '%Пицца Стар%'"
+            : "(`legal_entity` LIKE '%Бургер БК%' OR `legal_entity` LIKE '%Воглия Матта%')";
+        $sql = "SELECT p.sku, p.name FROM products p WHERE p.supplier=? AND $leFilter AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku=p.sku AND pp.supplier=? AND pp.legal_entity=?) ORDER BY p.name";
+        $s = $pdo->prepare($sql); $s->execute([$supplier, $supplier, $le]);
+        respond($s->fetchAll());
     }
 
     respond(['error'=>'Not found'], 404);

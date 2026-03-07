@@ -888,7 +888,9 @@ const orderResultTotalSum = computed(() => {
   for (const l of lines) {
     const pi = priceMap.value[l.sku];
     if (!pi) continue;
+    if (pi.unit_type === 'kg' || pi.unit_type === 'liter') continue;
     if (pi.unit_type === 'box') sum += l.boxes * pi.price;
+    else if (pi.unit_type === 'thousand') sum += l.pieces * pi.price / 1000;
     else sum += l.pieces * pi.price;
   }
   return sum;
@@ -897,7 +899,11 @@ const orderResultTotalSum = computed(() => {
 function getLineSum(l) {
   const pi = priceMap.value[l.sku];
   if (!pi) return '—';
-  const sum = pi.unit_type === 'box' ? l.boxes * pi.price : l.pieces * pi.price;
+  let sum = 0;
+  if (pi.unit_type === 'kg' || pi.unit_type === 'liter') return '—';
+  if (pi.unit_type === 'box') sum = l.boxes * pi.price;
+  else if (pi.unit_type === 'thousand') sum = l.pieces * pi.price / 1000;
+  else sum = l.pieces * pi.price;
   return sum > 0 ? sum.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—';
 }
 

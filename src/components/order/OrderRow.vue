@@ -569,7 +569,10 @@ const palletDisplay = computed(() => {
 const rowSum = computed(() => {
   if (!props.priceInfo || !props.item.finalOrder) return 0;
   const boxes = props.item.finalOrder;
-  if (props.priceInfo.unit_type === 'box') return boxes * props.priceInfo.price;
+  const ut = props.priceInfo.unit_type;
+  if (ut === 'box') return boxes * props.priceInfo.price;
+  if (ut === 'thousand') return boxes * qpb.value * props.priceInfo.price / 1000;
+  if (ut === 'kg' || ut === 'liter') return 0;
   return boxes * qpb.value * props.priceInfo.price;
 });
 const rowSumDisplay = computed(() => {
@@ -579,7 +582,8 @@ const rowSumDisplay = computed(() => {
 const priceTooltip = computed(() => {
   if (!props.priceInfo) return 'Цена не задана';
   const p = parseFloat(props.priceInfo.price);
-  const unit = props.priceInfo.unit_type === 'box' ? 'кор' : 'шт';
+  const units = { box: 'кор', piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter: 'л' };
+  const unit = units[props.priceInfo.unit_type] || 'шт';
   return `Цена: ${p.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} / ${unit}`;
 });
 
