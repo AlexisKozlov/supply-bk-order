@@ -572,7 +572,6 @@ const rowSum = computed(() => {
   const ut = props.priceInfo.unit_type;
   if (ut === 'box') return boxes * props.priceInfo.price;
   if (ut === 'thousand') return boxes * qpb.value * props.priceInfo.price / 1000;
-  if (ut === 'kg' || ut === 'liter') return 0;
   return boxes * qpb.value * props.priceInfo.price;
 });
 const rowSumDisplay = computed(() => {

@@ -878,7 +878,6 @@ function planItemSum(item) {
   if (!pi) return 0;
   const totalBoxes = itemTotalBoxes(item);
   if (!totalBoxes) return 0;
-  if (pi.unit_type === 'kg' || pi.unit_type === 'liter') return 0;
   if (pi.unit_type === 'box') return totalBoxes * pi.price;
   if (pi.unit_type === 'thousand') return itemTotalUnits(item) * pi.price / 1000;
   return itemTotalUnits(item) * pi.price;

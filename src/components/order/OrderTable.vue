@@ -136,7 +136,6 @@ const totalOrderSum = computed(() => {
     if (!pi || !item.finalOrder) continue;
     const qpb = getQpb(item);
     const boxes = item.finalOrder;
-    if (pi.unit_type === 'kg' || pi.unit_type === 'liter') continue;
     if (pi.unit_type === 'box') sum += boxes * pi.price;
     else if (pi.unit_type === 'thousand') sum += boxes * qpb * pi.price / 1000;
     else sum += boxes * qpb * pi.price;
