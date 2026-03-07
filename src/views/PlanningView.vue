@@ -1454,6 +1454,7 @@ async function confirmSave() {
   let error;
   let newPlanId = null;
   if (editingPlanId.value) {
+    planData.updated_by = userStore.currentUser?.name || null;
     ({ error } = await db.from('plans').update(planData).eq('id', editingPlanId.value));
   } else {
     planData.created_by = userStore.currentUser?.name || null;
