@@ -568,11 +568,15 @@ const palletDisplay = computed(() => {
 // ─── Цена и сумма ────────────────────────────────────────────────────────────
 const rowSum = computed(() => {
   if (!props.priceInfo || !props.item.finalOrder) return 0;
-  const boxes = props.item.finalOrder;
+  const fo = props.item.finalOrder;
   const ut = props.priceInfo.unit_type;
-  if (ut === 'box') return boxes * props.priceInfo.price;
-  if (ut === 'thousand') return boxes * qpb.value * props.priceInfo.price / 1000;
-  return boxes * qpb.value * props.priceInfo.price;
+  const isBoxes = props.settings.unit === 'boxes';
+  // Привести к нужным единицам для расчёта
+  const physBoxes = isBoxes ? fo : Math.ceil(fo / qpb.value);
+  const pieces = isBoxes ? fo * qpb.value : fo;
+  if (ut === 'box') return physBoxes * props.priceInfo.price;
+  if (ut === 'thousand') return pieces * props.priceInfo.price / 1000;
+  return pieces * props.priceInfo.price;
 });
 const rowSumDisplay = computed(() => {
   if (!rowSum.value) return '';

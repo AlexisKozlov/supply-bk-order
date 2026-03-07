@@ -209,7 +209,7 @@
     </div>
 
     <!-- Модалка: Редактирование/создание протокола -->
-    <div v-if="showAgreementModal" class="modal-overlay" @click.self="showAgreementModal = false">
+    <div v-if="showAgreementModal" class="modal-overlay" @click.self="tryCloseAgreementModal">
       <div class="modal-card" style="max-width:620px;">
         <h3 style="margin:0 0 16px;">{{ editingAgreement ? 'Редактировать протокол' : 'Новый протокол (ПСЦ)' }}</h3>
         <div style="display:flex;gap:12px;">
@@ -459,18 +459,21 @@ const supplierNames = computed(() => {
 });
 
 // Загрузка данных
+let _loadPricesGen = 0;
 async function loadPrices() {
   const le = orderStore.settings.legalEntity;
   if (!le) return;
+  const gen = ++_loadPricesGen;
   loading.value = true;
   try {
     const { data, error } = await db.rpc('get_current_prices', { legal_entity: le });
+    if (gen !== _loadPricesGen) return; // устаревший запрос
     if (error) { toast.error('Ошибка', error); return; }
     prices.value = data?.prices || [];
     if (data?.rub_to_byn_rate) rubToBynRate.value = parseFloat(data.rub_to_byn_rate);
     await loadProductNames();
   } finally {
-    loading.value = false;
+    if (gen === _loadPricesGen) loading.value = false;
   }
 }
 
@@ -703,12 +706,17 @@ async function savePrice() {
   }
 }
 
+const deletingPrice = ref(false);
 async function deletePrice(p) {
+  if (deletingPrice.value) return;
   if (!await confirm('Удалить цену?', `Удалить цену для ${p.sku}?`)) return;
-  const { error } = await db.rpc('delete_price', { id: p.id });
-  if (error) { toast.error('Ошибка', error); return; }
-  toast.success('Удалено');
-  prices.value = prices.value.filter(x => x.id !== p.id);
+  deletingPrice.value = true;
+  try {
+    const { error } = await db.rpc('delete_price', { id: p.id });
+    if (error) { toast.error('Ошибка', error); return; }
+    toast.success('Удалено');
+    prices.value = prices.value.filter(x => x.id !== p.id);
+  } finally { deletingPrice.value = false; }
 }
 
 // === Протоколы: создание/редактирование ===
@@ -773,6 +781,15 @@ function onAgSupplierChange() {
   agPriceItems.value = [];
   agProductSearch.value = '';
   if (agForm.value.supplier) loadAgProducts(agForm.value.supplier, editingAgreement.value?.id);
+}
+
+async function tryCloseAgreementModal() {
+  const hasData = agForm.value.number || agPriceItems.value.some(x => x.selected);
+  if (hasData) {
+    if (!await confirm('Закрыть?', 'Введённые данные будут потеряны.')) return;
+  }
+  showAgreementModal.value = false;
+  pendingPscFile.value = null;
 }
 
 function openNewAgreement() {
@@ -892,12 +909,17 @@ async function approveAgreement(a) {
   await loadAgreements();
 }
 
+const deletingAgreement = ref(false);
 async function deleteAgreement(a) {
+  if (deletingAgreement.value) return;
   if (!await confirm('Удалить протокол?', `Удалить протокол «${a.number}»?`)) return;
+  deletingAgreement.value = true;
+  try {
   const { error } = await db.rpc('delete_agreement', { id: a.id });
   if (error) { toast.error('Ошибка', error); return; }
   toast.success('Удалено');
   agreements.value = agreements.value.filter(x => x.id !== a.id);
+  } finally { deletingAgreement.value = false; }
 }
 
 // === Импорт цен из файла ===

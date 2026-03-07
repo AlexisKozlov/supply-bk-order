@@ -579,15 +579,21 @@ function onUnitChange(e) {
     orderStore.items.forEach(item => {
       const qpb = getQpb(item);
       if (oldUnit === 'pieces' && newUnit === 'boxes') {
+        // Сохраняем оригиналы в штуках для обратной конвертации без потери точности
+        item._stockPcs = item.stock;
+        item._transitPcs = item.transit;
+        item._cpPcs = item.consumptionPeriod;
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
         item.stock   = item.stock   ? Math.round(item.stock   / qpb * 100) / 100 : 0;
         item.transit = item.transit ? Math.round(item.transit / qpb * 100) / 100 : 0;
         item.finalOrder = item.finalOrder ? Math.round(item.finalOrder / qpb) : 0;
       } else {
-        item.consumptionPeriod = Math.round(item.consumptionPeriod * qpb);
-        item.stock   = Math.round(item.stock   * qpb);
-        item.transit = Math.round(item.transit * qpb);
+        // Восстановить из оригиналов если есть, иначе пересчитать
+        item.consumptionPeriod = item._cpPcs ?? Math.round(item.consumptionPeriod * qpb);
+        item.stock   = item._stockPcs ?? Math.round(item.stock * qpb);
+        item.transit = item._transitPcs ?? Math.round(item.transit * qpb);
         item.finalOrder = Math.round(item.finalOrder * qpb);
+        delete item._stockPcs; delete item._transitPcs; delete item._cpPcs;
       }
     });
   }

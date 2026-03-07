@@ -89,7 +89,7 @@ function checkLegalEntityAccess($sessionUser, $legalEntity) {
 }
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
-$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','delivery_schedule','deficit_sessions','deficit_tokens','stock_collections','restaurants','price_agreements','product_prices'];
+$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices'];
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
@@ -332,6 +332,13 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
     $filename = basename($parts[2]);
     $filepath = __DIR__ . '/uploads/acts/' . $filename;
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
+    // Проверка доступа к юрлицу заказа, к которому привязан акт
+    $caller = getSessionUser($pdo);
+    if ($caller) {
+        $actS = $pdo->prepare("SELECT legal_entity FROM orders WHERE act_file LIKE ?"); $actS->execute(['%' . $filename]);
+        $actRow = $actS->fetch();
+        if ($actRow && !checkLegalEntityAccess($caller, $actRow['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+    }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $filepath);
     finfo_close($finfo);
@@ -431,7 +438,11 @@ if ($endpoint === 'search_products') {
     $le = $_GET['legal_entity'] ?? '';
     $supplier = $_GET['supplier'] ?? '';
     $limit = min(intval($_GET['limit'] ?? 10), 100);
-    
+
+    // Проверка доступа к юрлицу
+    $caller = getSessionUser($pdo);
+    if ($caller && $le && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
+
     if (mb_strlen($q, 'UTF-8') < 2) respond([]);
     
     $where = [];
@@ -1648,6 +1659,24 @@ $filterWhitelist = [
     'product_prices'   => ['id','sku','supplier','legal_entity','agreement_id','updated_by','updated_at'],
 ];
 
+// Белый список колонок для записи (POST/PATCH)
+$writeWhitelist = [
+    'orders'       => ['id','supplier','legal_entity','delivery_date','delivery_date_2','unit','notes','items','details','created_by','updated_at','cda_mode','safety_coef','act_file','received_at','received_by'],
+    'order_items'  => ['id','order_id','sku','name','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category'],
+    'plans'        => ['id','supplier','legal_entity','data','created_by','created_at','notes'],
+    'products'     => ['id','sku','name','supplier','qty_per_box','boxes_per_pallet','unit_of_measure','legal_entity','multiplicity','analog_group','is_active','category'],
+    'suppliers'    => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','palletization','notes','schedule'],
+    'notifications'=> ['id','type','title','message','target_user','entity_type','entity_id','legal_entity','created_by','created_at','read_by','deleted_by'],
+    'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','note','file_name','file_path','created_by','approved_by','created_at'],
+    'product_prices'   => ['id','sku','supplier','legal_entity','price','unit_type','currency','agreement_id','updated_by','updated_at'],
+    'audit_log'    => ['action','entity_type','entity_id','user_name','details','changes','created_at'],
+    'analysis_data'=> ['id','sku','legal_entity','data','updated_at'],
+    'stock_1c'     => ['id','sku','legal_entity','stock','updated_at'],
+    'cards'        => ['id','sku','name','supplier','legal_entity','is_active','data','category'],
+    'settings'     => ['key','value'],
+    'item_order'   => ['id','supplier','legal_entity','item_id','sort_order'],
+];
+
 if ($method === 'GET') {
     $where = []; $params = [];
     $allowedFields = $filterWhitelist[$table] ?? [];
@@ -1775,6 +1804,8 @@ if ($method === 'POST') {
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
+        // Белый список колонок для записи
+        if (isset($writeWhitelist[$table])) { $rec = array_intersect_key($rec, array_flip($writeWhitelist[$table])); if (empty($rec)) respond(['error' => 'No allowed columns'], 400); }
         $cols = array_keys($rec); $ph = implode(',', array_fill(0, count($cols), '?')); $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
         try {
             if ($table === 'analysis_data') {
@@ -1801,12 +1832,21 @@ if ($method === 'PATCH' || $method === 'PUT') {
     $allowedFields = $filterWhitelist[$table] ?? [];
     foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); }
     if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields);
-    if ($subpoint) { $where = ["`id`=?"]; $params = [$subpoint]; }
+    if ($subpoint) {
+        $where = ["`id`=?"]; $params = [$subpoint];
+        // Проверка доступа к юрлицу при обновлении по ID
+        if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES)) {
+            $chk = $pdo->prepare("SELECT legal_entity FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+            if ($row && isset($row['legal_entity']) && !checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        }
+    }
     if (!$where) respond(['error'=>'No filters'], 400);
     if (!is_array($body) || count($body) === 0) respond(['error' => 'Empty body'], 400);
     foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($body[$jc]) && is_array($body[$jc])) $body[$jc] = json_encode($body[$jc], JSON_UNESCAPED_UNICODE); }
     // Валидация имён колонок
     foreach (array_keys($body) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
+    // Белый список колонок для записи
+    if (isset($writeWhitelist[$table])) { $body = array_intersect_key($body, array_flip($writeWhitelist[$table])); if (empty($body)) respond(['error' => 'No allowed columns'], 400); }
     $set = []; $sp = [];
     foreach ($body as $c => $v) { $set[] = "`$c`=?"; $sp[] = $v; }
     $all = array_merge($sp, $params);
@@ -1824,8 +1864,14 @@ if ($method === 'PATCH' || $method === 'PUT') {
 
 if ($method === 'DELETE') {
     $where = []; $params = [];
-    if ($subpoint) { $where[] = "`id`=?"; $params[] = $subpoint; }
-    else { $allowedFields = $filterWhitelist[$table] ?? []; foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields); }
+    if ($subpoint) {
+        $where[] = "`id`=?"; $params[] = $subpoint;
+        // Проверка доступа к юрлицу при удалении по ID
+        if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES)) {
+            $chk = $pdo->prepare("SELECT legal_entity FROM `$table` WHERE id=?"); $chk->execute([$subpoint]); $row = $chk->fetch();
+            if ($row && isset($row['legal_entity']) && !checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        }
+    } else { $allowedFields = $filterWhitelist[$table] ?? []; foreach ($_GET as $k => $v) { if (in_array($k, ['select','order','limit','offset','or'])) continue; if (!empty($allowedFields) && !in_array($k, $allowedFields)) continue; parseFilter($k, $v, $where, $params, $pdo, $table); } if (isset($_GET['or'])) parseOr($_GET['or'], $where, $params, $allowedFields); }
     if (!$where) respond(['error'=>'No filters'], 400);
     // Запоминаем ID удаляемых записей для аудита
     $deletedIds = [];

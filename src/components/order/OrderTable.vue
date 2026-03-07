@@ -131,14 +131,17 @@ const hasPrices = computed(() => Object.keys(props.priceMap).length > 0);
 const totalOrderSum = computed(() => {
   if (!hasPrices.value) return 0;
   let sum = 0;
+  const isBoxes = settings.value.unit === 'boxes';
   for (const item of orderStore.items) {
     const pi = props.priceMap[item.sku];
     if (!pi || !item.finalOrder) continue;
     const qpb = getQpb(item);
-    const boxes = item.finalOrder;
-    if (pi.unit_type === 'box') sum += boxes * pi.price;
-    else if (pi.unit_type === 'thousand') sum += boxes * qpb * pi.price / 1000;
-    else sum += boxes * qpb * pi.price;
+    const fo = item.finalOrder;
+    const physBoxes = isBoxes ? fo : Math.ceil(fo / qpb);
+    const pieces = isBoxes ? fo * qpb : fo;
+    if (pi.unit_type === 'box') sum += physBoxes * pi.price;
+    else if (pi.unit_type === 'thousand') sum += pieces * pi.price / 1000;
+    else sum += pieces * pi.price;
   }
   return sum;
 });
