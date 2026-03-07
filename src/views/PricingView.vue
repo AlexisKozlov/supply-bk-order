@@ -220,8 +220,11 @@
           <div v-if="agForm.file_name" style="margin-bottom:6px;font-size:12px;">
             Текущий: <a :href="apiBase + '/' + agForm.file_path + '?download=1'" target="_blank">{{ agForm.file_name }}</a>
           </div>
-          <input ref="pscFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" @change="onPscFileSelected" style="font-size:12px;" />
-          <div v-if="uploadingFile" style="font-size:11px;color:var(--text-muted);margin-top:4px;">Загрузка файла...</div>
+          <input ref="pscFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" @change="onPscFileSelected" style="display:none;" />
+          <button class="file-upload-btn" @click="pscFileInput?.click()" :disabled="uploadingFile">
+            <BkIcon name="import" size="sm"/>
+            {{ uploadingFile ? 'Загрузка...' : (pendingPscFile ? pendingPscFile.name : 'Выбрать файл') }}
+          </button>
         </div>
         <!-- Товары протокола -->
         <div v-if="agForm.supplier" class="form-group">
@@ -239,13 +242,11 @@
           <div class="ag-products-list">
             <div v-if="agProductsLoading" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Загрузка товаров...</div>
             <div v-else-if="!filteredAgProducts.length" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Товары не найдены</div>
-            <div v-for="item in filteredAgProducts" :key="item.sku" class="ag-product-row" :class="{ selected: item.selected }">
-              <label class="ag-product-check">
-                <input type="checkbox" v-model="item.selected" />
-                <span class="mono" style="font-size:11px;min-width:60px;">{{ item.sku }}</span>
-                <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.name }}</span>
-              </label>
-              <div v-if="item.selected" style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
+            <div v-for="item in filteredAgProducts" :key="item.sku" class="ag-product-row" :class="{ selected: item.selected }" @click="item.selected = !item.selected">
+              <span class="ag-toggle" :class="{ on: item.selected }">{{ item.selected ? '✓' : '' }}</span>
+              <span class="mono" style="font-size:11px;min-width:60px;">{{ item.sku }}</span>
+              <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.name }}</span>
+              <div v-if="item.selected" style="display:flex;gap:4px;align-items:center;flex-shrink:0;" @click.stop>
                 <input type="number" v-model.number="item.price" step="0.01" min="0" class="form-input" style="width:80px;padding:3px 5px;font-size:11px;text-align:right;" placeholder="Цена" />
                 <select v-model="item.unit_type" class="form-input" style="width:55px;padding:3px;font-size:10px;">
                   <option value="piece">шт</option>
@@ -933,11 +934,18 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .supplier-products-list { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
 
 .ag-products-list { max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
-.ag-product-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
+.ag-product-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border-light); cursor: pointer; transition: background .1s; }
 .ag-product-row:last-child { border-bottom: none; }
+.ag-product-row:hover { background: rgba(245,166,35,0.05); }
 .ag-product-row.selected { background: rgba(76,175,80,0.06); }
-.ag-product-check { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
-.ag-product-check input[type="checkbox"] { margin: 0; cursor: pointer; }
+.ag-product-row.selected:hover { background: rgba(76,175,80,0.1); }
+
+.ag-toggle { width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; transition: all .15s; color: transparent; }
+.ag-toggle.on { background: #4CAF50; border-color: #4CAF50; color: white; }
+
+.file-upload-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; border: 1.5px dashed var(--border); background: var(--card); color: var(--text-muted); font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer; transition: all .15s; }
+.file-upload-btn:hover { border-color: var(--bk-orange); color: var(--text); background: #FFFBF5; }
+.file-upload-btn:disabled { opacity: 0.6; cursor: wait; }
 .text-muted { color: var(--text-muted); }
 .mono { font-family: monospace; font-size: 12px; }
 
