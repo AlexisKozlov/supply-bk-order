@@ -10,6 +10,7 @@
           <span class="rate-label">BYN</span>
         </div>
         <span v-else-if="rubToBynRate" class="rate-display">1 RUB = {{ rubToBynRate }} BYN</span>
+        <button v-if="activeTab === 'prices'" class="btn secondary" @click="exportPriceList" style="font-size:11px;padding:5px 12px;">Экспорт</button>
         <button v-if="!isViewer && activeTab === 'prices'" class="btn primary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт цен</button>
         <button v-if="!isViewer && activeTab === 'prices'" class="btn secondary" @click="openNewPrice" style="font-size:11px;padding:5px 12px;">+ Цена</button>
         <button v-if="!isViewer && activeTab === 'agreements'" class="btn primary" @click="openNewAgreement" style="font-size:11px;padding:5px 12px;">+ Протокол</button>
@@ -37,9 +38,14 @@
     </div>
 
     <!-- Фильтр по поставщику -->
-    <div v-if="supplierNames.length > 1" style="margin-bottom:14px;display:flex;gap:6px;flex-wrap:wrap;">
-      <button class="db-sort-btn" :class="{ active: !filterSupplier }" @click="filterSupplier = ''" style="font-size:11px;">Все</button>
-      <button v-for="s in supplierNames" :key="s" class="db-sort-btn" :class="{ active: filterSupplier === s }" @click="filterSupplier = s" style="font-size:11px;">{{ s }}</button>
+    <div style="margin-bottom:14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <template v-if="supplierNames.length > 1">
+        <button class="db-sort-btn" :class="{ active: !filterSupplier }" @click="filterSupplier = ''" style="font-size:11px;">Все</button>
+        <button v-for="s in supplierNames" :key="s" class="db-sort-btn" :class="{ active: filterSupplier === s }" @click="filterSupplier = s" style="font-size:11px;">{{ s }}</button>
+      </template>
+      <button v-if="activeTab === 'prices' && filterSupplier" class="db-sort-btn" :class="{ active: showNoPriceFilter }" @click="toggleNoPriceFilter" style="font-size:11px;margin-left:auto;">
+        Без цены <span v-if="noPriceProducts.length" style="font-size:10px;opacity:0.7;">({{ noPriceProducts.length }})</span>
+      </button>
     </div>
 
     <!-- ПРАЙС-ЛИСТ -->
@@ -76,10 +82,29 @@
                 <span v-else class="psc-badge psc-manual">Руч.</span>
               </td>
               <td class="col-date text-muted">{{ formatDate(p.updated_at) }}</td>
-              <td v-if="!isViewer" class="col-actions">
+              <td v-if="!isViewer" class="col-actions" style="display:flex;gap:2px;justify-content:center;">
+                <button class="db-card-btn" @click.stop="showHistory(p)" title="История цены">
+                  <BkIcon name="history" size="sm"/>
+                </button>
                 <button class="db-card-btn db-card-btn-del" @click.stop="deletePrice(p)" title="Удалить">
                   <BkIcon name="delete" size="sm"/>
                 </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Товары без цены -->
+      <div v-if="showNoPriceFilter && noPriceProducts.length" class="no-price-list">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">Товары без цены ({{ filterSupplier }}):</div>
+        <table class="pricing-table" style="font-size:12px;">
+          <thead><tr><th>Артикул</th><th>Название</th><th v-if="!isViewer"></th></tr></thead>
+          <tbody>
+            <tr v-for="np in noPriceProducts" :key="np.sku">
+              <td class="mono">{{ np.sku }}</td>
+              <td>{{ np.name }}</td>
+              <td v-if="!isViewer" style="width:60px;text-align:center;">
+                <button class="btn secondary" style="font-size:10px;padding:2px 8px;" @click="openNewPriceForSku(np)">+ Цена</button>
               </td>
             </tr>
           </tbody>
@@ -92,10 +117,11 @@
       <div v-if="loadingAgreements" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredAgreements.length" style="text-align:center;padding:40px;color:var(--text-muted);">Протоколы не найдены</div>
       <div v-else class="db-grid">
-        <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="{ 'agreement-active': a.status === 'active', 'agreement-archived': a.status === 'archived' }" @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
+        <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="agreementCardClass(a)" @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
           <div class="db-card-top" style="display:flex;align-items:center;gap:8px;">
             <span class="agreement-status" :class="'st-' + a.status">{{ statusLabel(a.status) }}</span>
             <span style="font-weight:600;">{{ a.number }}</span>
+            <span v-if="agreementExpiry(a)" class="expiry-badge" :class="agreementExpiry(a).cls">{{ agreementExpiry(a).text }}</span>
           </div>
           <div class="db-card-meta">
             <span>{{ a.supplier }}</span>
@@ -246,6 +272,12 @@
               <span class="ag-toggle" :class="{ on: item.selected }">{{ item.selected ? '✓' : '' }}</span>
               <span class="mono" style="font-size:11px;min-width:60px;">{{ item.sku }}</span>
               <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.name }}</span>
+              <span v-if="item.oldPrice" class="old-price-hint" :title="'Текущая цена: ' + formatPrice(item.oldPrice)">
+                {{ formatPrice(item.oldPrice) }}
+                <span v-if="item.selected && item.price > 0" :class="item.price > item.oldPrice ? 'diff-up' : item.price < item.oldPrice ? 'diff-down' : 'diff-same'">
+                  {{ item.price > item.oldPrice ? '+' : '' }}{{ ((item.price - item.oldPrice) / item.oldPrice * 100).toFixed(1) }}%
+                </span>
+              </span>
               <div v-if="item.selected" style="display:flex;gap:4px;align-items:center;flex-shrink:0;" @click.stop>
                 <input type="number" v-model.number="item.price" step="0.01" min="0" class="form-input" style="width:80px;padding:3px 5px;font-size:11px;text-align:right;" placeholder="Цена" />
                 <select v-model="item.unit_type" class="form-input" style="width:55px;padding:3px;font-size:10px;">
@@ -308,6 +340,50 @@
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="btn secondary" @click="showImportModal = false; importPreview = [];">Отмена</button>
           <button class="btn primary" @click="doImport" :disabled="importing || !importPreview.length || !importSupplier">{{ importing ? 'Импорт...' : `Импортировать (${importPreview.length})` }}</button>
+        </div>
+      </div>
+    </div>
+    <!-- Модалка: История цены -->
+    <div v-if="showHistoryModal" class="modal-overlay" @click.self="showHistoryModal = false">
+      <div class="modal-card" style="max-width:560px;">
+        <h3 style="margin:0 0 16px;">История цены — {{ historyItem?.sku }}</h3>
+        <div v-if="historyItem" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+          {{ productNames[historyItem.sku] || '' }} &middot; {{ historyItem.supplier }}
+        </div>
+        <div v-if="historyLoading" style="text-align:center;padding:20px;"><BurgerSpinner text="Загрузка..." /></div>
+        <template v-else>
+          <!-- CSS-график динамики цен -->
+          <div v-if="historyData.length > 1" class="price-chart">
+            <div class="price-chart-title">Динамика цены</div>
+            <div class="price-chart-bars">
+              <div v-for="(h, i) in historyChartData" :key="i" class="price-chart-bar-wrap" :title="h.date + ': ' + formatPrice(h.price)">
+                <div class="price-chart-bar" :style="{ height: h.height + '%' }" :class="h.cls"></div>
+                <div class="price-chart-label">{{ h.shortDate }}</div>
+              </div>
+            </div>
+          </div>
+          <!-- Таблица истории -->
+          <div v-if="historyData.length" style="max-height:300px;overflow-y:auto;">
+            <table class="pricing-table" style="font-size:11px;">
+              <thead><tr><th>Дата</th><th>Было</th><th>Стало</th><th>Разница</th><th>Вал.</th><th>Кто</th></tr></thead>
+              <tbody>
+                <tr v-for="h in historyData" :key="h.id">
+                  <td class="text-muted" style="white-space:nowrap;">{{ formatDateTime(h.changed_at) }}</td>
+                  <td class="mono" style="text-align:right;">{{ h.old_price ? formatPrice(h.old_price) : '—' }}</td>
+                  <td class="mono" style="text-align:right;font-weight:600;">{{ formatPrice(h.new_price) }}</td>
+                  <td style="text-align:right;">
+                    <span v-if="h.old_price" :class="priceDiffClass(h)">{{ priceDiffText(h) }}</span>
+                  </td>
+                  <td><span class="currency-badge" :class="'cur-' + (h.new_currency || 'BYN')">{{ h.new_currency || 'BYN' }}</span></td>
+                  <td class="text-muted" style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ h.changed_by }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px;">Нет записей об изменениях цены</div>
+        </template>
+        <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+          <button class="btn secondary" @click="showHistoryModal = false">Закрыть</button>
         </div>
       </div>
     </div>
@@ -555,6 +631,14 @@ function openNewPrice() {
   showPriceModal.value = true;
   if (supplierNames.value[0]) onPriceSupplierChange();
 }
+function openNewPriceForSku(np) {
+  editingPrice.value = null;
+  priceForm.value = { sku: np.sku, supplier: filterSupplier.value, price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
+  skuHints.value = [];
+  supplierProducts.value = [];
+  showPriceModal.value = true;
+  if (filterSupplier.value) onPriceSupplierChange(true);
+}
 function editPrice(p) {
   editingPrice.value = p;
   priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
@@ -630,6 +714,11 @@ async function loadAgProducts(supplier, agreementId) {
       const pp = prices.value.filter(p => p.agreement_id === agreementId);
       for (const p of pp) existingPrices[p.sku] = { price: parseFloat(p.price), unit_type: p.unit_type, currency: p.currency };
     }
+    // Загрузить все текущие цены поставщика для сравнения
+    const currentPriceMap = {};
+    const supplierPrices = prices.value.filter(p => p.supplier === supplier);
+    for (const p of supplierPrices) currentPriceMap[p.sku] = parseFloat(p.price);
+
     agPriceItems.value = (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(p => {
       const ex = existingPrices[p.sku];
       return {
@@ -637,6 +726,7 @@ async function loadAgProducts(supplier, agreementId) {
         selected: !!ex,
         price: ex ? ex.price : 0,
         unit_type: ex ? ex.unit_type : 'piece',
+        oldPrice: currentPriceMap[p.sku] || null,
       };
     });
     if (Object.keys(existingPrices).length) {
@@ -846,6 +936,172 @@ async function doImport() {
   }
 }
 
+// === История цены ===
+const showHistoryModal = ref(false);
+const historyItem = ref(null);
+const historyData = ref([]);
+const historyLoading = ref(false);
+
+async function showHistory(p) {
+  historyItem.value = p;
+  historyData.value = [];
+  showHistoryModal.value = true;
+  historyLoading.value = true;
+  try {
+    const { data, error } = await db.rpc('get_price_history', {
+      sku: p.sku,
+      legal_entity: orderStore.settings.legalEntity,
+      supplier: p.supplier,
+    });
+    if (error) { toast.error('Ошибка', error); return; }
+    historyData.value = data || [];
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+function formatDateTime(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString('ru-RU') + ' ' + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function priceDiffClass(h) {
+  if (!h.old_price) return '';
+  const diff = parseFloat(h.new_price) - parseFloat(h.old_price);
+  if (diff > 0) return 'diff-up';
+  if (diff < 0) return 'diff-down';
+  return 'diff-same';
+}
+
+function priceDiffText(h) {
+  if (!h.old_price) return '';
+  const old = parseFloat(h.old_price);
+  const cur = parseFloat(h.new_price);
+  const diff = cur - old;
+  const pct = old > 0 ? ((diff / old) * 100).toFixed(1) : '—';
+  return `${diff > 0 ? '+' : ''}${formatPrice(diff)} (${diff > 0 ? '+' : ''}${pct}%)`;
+}
+
+const historyChartData = computed(() => {
+  if (historyData.value.length < 2) return [];
+  // Показываем от старого к новому (реверс)
+  const items = [...historyData.value].reverse();
+  const prices = items.map(h => parseFloat(h.new_price));
+  const max = Math.max(...prices);
+  const min = Math.min(...prices);
+  const range = max - min || 1;
+  return items.map(h => {
+    const price = parseFloat(h.new_price);
+    const height = 20 + ((price - min) / range) * 70; // от 20% до 90%
+    const dt = new Date(h.changed_at);
+    return {
+      price,
+      height,
+      date: formatDate(h.changed_at),
+      shortDate: dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      cls: h.old_price && price > parseFloat(h.old_price) ? 'bar-up' : h.old_price && price < parseFloat(h.old_price) ? 'bar-down' : 'bar-same',
+    };
+  });
+});
+
+// === Экспорт прайс-листа в Excel ===
+async function exportPriceList() {
+  if (!sortedPrices.value.length) { toast.error('Нет данных для экспорта'); return; }
+  try {
+    const XLSX = await import('xlsx-js-style');
+    const brown = '502314';
+    const borderClr = 'E0D6CC';
+    const border = { style: 'thin', color: { rgb: borderClr } };
+    const borders = { top: border, bottom: border, left: border, right: border };
+    const sHeader = {
+      font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+      fill: { fgColor: { rgb: brown } },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      border: borders,
+    };
+    const sCell = { font: { sz: 11, name: 'Calibri' }, border: borders, alignment: { vertical: 'center' } };
+    const sCellRight = { ...sCell, alignment: { ...sCell.alignment, horizontal: 'right' } };
+
+    const headers = ['Артикул', 'Название', 'Поставщик', 'Цена', 'За', 'Валюта'];
+    if (hasRubPrices.value) headers.push('В BYN');
+    headers.push('ПСЦ', 'Обновлено');
+
+    const rows = sortedPrices.value.map(p => {
+      const row = [
+        { v: p.sku, s: sCell },
+        { v: productNames.value[p.sku] || '', s: sCell },
+        { v: p.supplier, s: sCell },
+        { v: parseFloat(p.price) || 0, t: 'n', s: sCellRight },
+        { v: p.unit_type === 'box' ? 'коробку' : 'штуку', s: sCell },
+        { v: p.currency || 'BYN', s: sCell },
+      ];
+      if (hasRubPrices.value) {
+        row.push(p.currency === 'RUB' ? { v: +(p.price * rubToBynRate.value).toFixed(2), t: 'n', s: sCellRight } : { v: '', s: sCell });
+      }
+      row.push({ v: getAgreementLabel(p.agreement_id) || '—', s: sCell });
+      row.push({ v: formatDate(p.updated_at), s: sCell });
+      return row;
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([
+      headers.map(h => ({ v: h, s: sHeader })),
+      ...rows,
+    ]);
+    ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 6 }];
+    if (hasRubPrices.value) ws['!cols'].push({ wch: 10 });
+    ws['!cols'].push({ wch: 14 }, { wch: 12 });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист');
+    const le = orderStore.settings.legalEntity || '';
+    XLSX.writeFile(wb, `Прайс-лист_${le.replace(/[^\wа-яА-Я]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) {
+    toast.error('Ошибка экспорта', err.message);
+  }
+}
+
+// === Фильтр «Без цены» ===
+const showNoPriceFilter = ref(false);
+const noPriceProducts = ref([]);
+
+async function toggleNoPriceFilter() {
+  if (showNoPriceFilter.value) {
+    showNoPriceFilter.value = false;
+    noPriceProducts.value = [];
+    return;
+  }
+  if (!filterSupplier.value) { toast.error('Сначала выберите поставщика'); return; }
+  const le = orderStore.settings.legalEntity;
+  const { data, error } = await db.rpc('get_products_without_prices', { legal_entity: le, supplier: filterSupplier.value });
+  if (error) { toast.error('Ошибка', error); return; }
+  noPriceProducts.value = data || [];
+  showNoPriceFilter.value = true;
+  if (!noPriceProducts.value.length) toast.info('Все товары этого поставщика имеют цены');
+}
+
+// === Подсветка истечения ПСЦ ===
+function agreementCardClass(a) {
+  const cls = [];
+  if (a.status === 'active') cls.push('agreement-active');
+  if (a.status === 'archived') cls.push('agreement-archived');
+  const exp = agreementExpiry(a);
+  if (exp && exp.cls === 'expiry-danger') cls.push('agreement-expiring');
+  return cls;
+}
+
+function agreementExpiry(a) {
+  if (a.status !== 'active' || !a.valid_to) return null;
+  const now = new Date();
+  const end = new Date(a.valid_to);
+  const diff = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+  if (diff < 0) return { text: 'Истёк', cls: 'expiry-danger' };
+  if (diff <= 7) return { text: `${diff} дн.`, cls: 'expiry-danger' };
+  if (diff <= 30) return { text: `${diff} дн.`, cls: 'expiry-warning' };
+  return null;
+}
+
 // Инициализация
 onMounted(async () => {
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
@@ -855,6 +1111,11 @@ onMounted(async () => {
 });
 
 // При смене юрлица — перезагрузить
+watch(filterSupplier, () => {
+  showNoPriceFilter.value = false;
+  noPriceProducts.value = [];
+});
+
 watch(() => orderStore.settings.legalEntity, async (le) => {
   if (!le) return;
   filterSupplier.value = '';
@@ -863,6 +1124,9 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
   showPriceModal.value = false;
   showAgreementModal.value = false;
   showImportModal.value = false;
+  showHistoryModal.value = false;
+  showNoPriceFilter.value = false;
+  noPriceProducts.value = [];
   prices.value = [];
   agreements.value = [];
   await supplierStore.loadSuppliers(le);
@@ -982,4 +1246,33 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .rate-input { width:70px; padding:3px 6px; border:1.5px solid var(--border); border-radius:5px; font-size:12px; text-align:center; background:var(--card); }
 .rate-input:focus { border-color:var(--bk-orange); outline:none; }
 .rate-display { font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap; padding:4px 8px; background:var(--card); border-radius:5px; border:1px solid var(--border-light); }
+
+/* ═══ Expiry badges ═══ */
+.expiry-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; margin-left:auto; }
+.expiry-badge.expiry-danger { background:rgba(229,57,53,0.12); color:#C62828; animation: pulse-danger 2s infinite; }
+.expiry-badge.expiry-warning { background:rgba(255,183,77,0.2); color:#EF6C00; }
+.agreement-card.agreement-expiring { border-color:#E53935; border-left:3px solid #E53935; }
+@keyframes pulse-danger { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+
+/* ═══ No-price list ═══ */
+.no-price-list { margin-top:16px; padding:12px; background:rgba(255,183,77,0.06); border:1px solid rgba(255,183,77,0.2); border-radius:8px; }
+
+/* ═══ Price diff ═══ */
+.diff-up { color:#C62828; font-size:10px; font-weight:600; }
+.diff-down { color:#2E7D32; font-size:10px; font-weight:600; }
+.diff-same { color:var(--text-muted); font-size:10px; font-weight:600; }
+
+/* ═══ Old price hint in agreement form ═══ */
+.old-price-hint { font-size:10px; color:var(--text-muted); white-space:nowrap; flex-shrink:0; padding:2px 6px; background:var(--bg); border-radius:4px; }
+
+/* ═══ Price chart ═══ */
+.price-chart { margin-bottom:16px; padding:12px; background:var(--card); border:1px solid var(--border-light); border-radius:8px; }
+.price-chart-title { font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:8px; }
+.price-chart-bars { display:flex; align-items:flex-end; gap:3px; height:100px; }
+.price-chart-bar-wrap { flex:1; display:flex; flex-direction:column; align-items:center; min-width:0; }
+.price-chart-bar { width:100%; max-width:28px; border-radius:3px 3px 0 0; transition:height .3s; min-height:4px; }
+.price-chart-bar.bar-up { background:linear-gradient(to top, #FFCDD2, #E53935); }
+.price-chart-bar.bar-down { background:linear-gradient(to top, #C8E6C9, #43A047); }
+.price-chart-bar.bar-same { background:linear-gradient(to top, #E0E0E0, #9E9E9E); }
+.price-chart-label { font-size:9px; color:var(--text-muted); margin-top:3px; white-space:nowrap; }
 </style>
