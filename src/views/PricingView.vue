@@ -3,6 +3,13 @@
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
       <h1 class="page-title">Цены и ПСЦ</h1>
       <div style="display:flex;gap:8px;align-items:center;">
+        <!-- Курс RUB→BYN -->
+        <div v-if="!isViewer" class="rate-control">
+          <span class="rate-label">1 RUB =</span>
+          <input type="number" step="0.0001" min="0.001" max="1" :value="rubToBynRate" @change="onRateChange" class="rate-input" />
+          <span class="rate-label">BYN</span>
+        </div>
+        <span v-else-if="rubToBynRate" class="rate-display">1 RUB = {{ rubToBynRate }} BYN</span>
         <button v-if="!isViewer && activeTab === 'prices'" class="btn primary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт цен</button>
         <button v-if="!isViewer && activeTab === 'prices'" class="btn secondary" @click="openNewPrice" style="font-size:11px;padding:5px 12px;">+ Цена</button>
         <button v-if="!isViewer && activeTab === 'agreements'" class="btn primary" @click="openNewAgreement" style="font-size:11px;padding:5px 12px;">+ Протокол</button>
@@ -48,6 +55,8 @@
               <th @click="toggleSort('supplier')" style="cursor:pointer;">Поставщик {{ sortIcon('supplier') }}</th>
               <th @click="toggleSort('price')" style="cursor:pointer;" class="text-right">Цена {{ sortIcon('price') }}</th>
               <th>За</th>
+              <th>Вал.</th>
+              <th v-if="hasRubPrices" class="text-right">В BYN</th>
               <th>ПСЦ</th>
               <th @click="toggleSort('updated_at')" style="cursor:pointer;">Обновлено {{ sortIcon('updated_at') }}</th>
               <th v-if="!isViewer" style="width:60px;"></th>
@@ -60,6 +69,8 @@
               <td>{{ p.supplier }}</td>
               <td class="text-right mono">{{ formatPrice(p.price) }}</td>
               <td>{{ p.unit_type === 'box' ? 'кор' : 'шт' }}</td>
+              <td><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
+              <td v-if="hasRubPrices" class="text-right mono">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
               <td>
                 <span v-if="p.agreement_id" class="psc-badge" :title="getAgreementLabel(p.agreement_id)">ПСЦ</span>
                 <span v-else class="psc-badge psc-manual">Руч.</span>
@@ -133,6 +144,16 @@
               <option value="box">коробку</option>
             </select>
           </div>
+          <div style="flex:0 0 80px;">
+            <label>Валюта</label>
+            <select v-model="priceForm.currency" class="form-input">
+              <option value="BYN">BYN</option>
+              <option value="RUB">RUB</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="priceForm.currency === 'RUB' && priceForm.price > 0" style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:8px;">
+          = {{ formatPrice(priceForm.price * rubToBynRate) }} BYN (курс {{ rubToBynRate }})
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="btn secondary" @click="showPriceModal = false">Отмена</button>
@@ -198,6 +219,13 @@
           </select>
         </div>
         <div class="form-group">
+          <label>Валюта цен в файле</label>
+          <select v-model="importCurrency" class="form-input" style="width:120px;">
+            <option value="BYN">BYN</option>
+            <option value="RUB">RUB</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Привязать к протоколу (необязательно)</label>
           <select v-model="importAgreementId" class="form-input">
             <option :value="null">— Без привязки —</option>
@@ -252,6 +280,7 @@ const isViewer = computed(() => !userStore.hasAccess('pricing', 'edit'));
 const hasFullAccess = computed(() => userStore.hasAccess('pricing', 'full'));
 
 const activeTab = ref('prices');
+const rubToBynRate = ref(0.0375);
 const searchQuery = ref('');
 const filterSupplier = ref('');
 const loading = ref(false);
@@ -275,6 +304,17 @@ function sortIcon(key) {
 }
 
 // Поставщики
+const hasRubPrices = computed(() => prices.value.some(p => p.currency === 'RUB'));
+
+async function onRateChange(e) {
+  const val = parseFloat(e.target.value);
+  if (!val || val <= 0 || val > 1) { toast.error('Некорректный курс'); e.target.value = rubToBynRate.value; return; }
+  const { error } = await db.rpc('update_exchange_rate', { rate: val });
+  if (error) { toast.error('Ошибка', error); return; }
+  rubToBynRate.value = val;
+  toast.success('Курс обновлён', `1 RUB = ${val} BYN`);
+}
+
 const supplierNames = computed(() => {
   const list = supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity);
   return list.map(s => s.short_name);
@@ -288,8 +328,8 @@ async function loadPrices() {
   try {
     const { data, error } = await db.rpc('get_current_prices', { legal_entity: le });
     if (error) { toast.error('Ошибка', error); return; }
-    prices.value = data || [];
-    // Загрузить названия товаров
+    prices.value = data?.prices || [];
+    if (data?.rub_to_byn_rate) rubToBynRate.value = parseFloat(data.rub_to_byn_rate);
     await loadProductNames();
   } finally {
     loading.value = false;
@@ -382,28 +422,29 @@ function getAgreementLabel(id) {
 const showPriceModal = ref(false);
 const editingPrice = ref(null);
 const savingPrice = ref(false);
-const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece' });
+const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN' });
 
 function openNewPrice() {
   editingPrice.value = null;
-  priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece' };
+  priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN' };
   showPriceModal.value = true;
 }
 function editPrice(p) {
   editingPrice.value = p;
-  priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type };
+  priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN' };
   showPriceModal.value = true;
 }
 
 async function savePrice() {
   if (savingPrice.value) return;
-  const { sku, supplier, price, unit_type } = priceForm.value;
+  const { sku, supplier, price, unit_type, currency } = priceForm.value;
   if (!sku || !supplier) { toast.error('Ошибка', 'Укажите артикул и поставщика'); return; }
   savingPrice.value = true;
   try {
     const { error } = await db.rpc('import_prices', {
       legal_entity: orderStore.settings.legalEntity,
       supplier,
+      currency,
       prices: [{ sku: sku.trim(), price: parseFloat(price) || 0, unit_type }],
     });
     if (error) { toast.error('Ошибка', error); return; }
@@ -535,6 +576,7 @@ async function deleteAgreement(a) {
 // === Импорт цен из файла ===
 const showImportModal = ref(false);
 const importSupplier = ref('');
+const importCurrency = ref('RUB');
 const importAgreementId = ref(null);
 const importPreview = ref([]);
 const importing = ref(false);
@@ -584,6 +626,7 @@ async function doImport() {
     const { data, error } = await db.rpc('import_prices', {
       legal_entity: orderStore.settings.legalEntity,
       supplier: importSupplier.value,
+      currency: importCurrency.value,
       prices: importPreview.value,
       agreement_id: importAgreementId.value,
     });
@@ -674,4 +717,15 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; }
 .modal-card { background: var(--bg); border-radius: 12px; padding: 24px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+
+/* ═══ Currency ═══ */
+.currency-badge { display:inline-block; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:700; }
+.currency-badge.cur-BYN { background:rgba(76,175,80,0.12); color:#2E7D32; }
+.currency-badge.cur-RUB { background:rgba(33,150,243,0.12); color:#1565C0; }
+
+.rate-control { display:flex; align-items:center; gap:4px; }
+.rate-label { font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap; }
+.rate-input { width:70px; padding:3px 6px; border:1.5px solid var(--border); border-radius:5px; font-size:12px; text-align:center; background:var(--card); }
+.rate-input:focus { border-color:var(--bk-orange); outline:none; }
+.rate-display { font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap; padding:4px 8px; background:var(--card); border-radius:5px; border:1px solid var(--border-light); }
 </style>

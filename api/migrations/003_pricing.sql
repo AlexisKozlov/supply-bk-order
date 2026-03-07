@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS product_prices (
     legal_entity VARCHAR(255) NOT NULL,
     price DECIMAL(12,2) NOT NULL DEFAULT 0,
     unit_type ENUM('piece','box') NOT NULL DEFAULT 'piece' COMMENT 'Цена за штуку или за коробку',
+    currency ENUM('BYN','RUB') NOT NULL DEFAULT 'BYN' COMMENT 'Валюта цены',
     agreement_id INT DEFAULT NULL COMMENT 'Ссылка на ПСЦ, из которого пришла цена',
     updated_by VARCHAR(100) DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

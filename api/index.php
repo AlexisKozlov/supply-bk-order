@@ -1380,13 +1380,15 @@ if ($endpoint === 'rpc') {
         $imported = 0;
         try {
             $pdo->beginTransaction();
-            $stmt = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, unit_type, agreement_id, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type=VALUES(unit_type), agreement_id=VALUES(agreement_id), updated_by=VALUES(updated_by), updated_at=NOW()");
+            $currency = in_array($body['currency'] ?? '', ['BYN', 'RUB']) ? $body['currency'] : 'BYN';
+            $stmt = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, unit_type, currency, agreement_id, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type=VALUES(unit_type), currency=VALUES(currency), agreement_id=VALUES(agreement_id), updated_by=VALUES(updated_by), updated_at=NOW()");
             foreach ($prices as $p) {
                 $sku = trim($p['sku'] ?? '');
                 $price = floatval($p['price'] ?? 0);
                 $unitType = ($p['unit_type'] ?? 'piece') === 'box' ? 'box' : 'piece';
+                $cur = in_array($p['currency'] ?? '', ['BYN', 'RUB']) ? $p['currency'] : $currency;
                 if (!$sku || $price < 0) continue;
-                $stmt->execute([$sku, $supplier, $le, $price, $unitType, $agreementId, $caller['name']]);
+                $stmt->execute([$sku, $supplier, $le, $price, $unitType, $cur, $agreementId, $caller['name']]);
                 $imported++;
             }
             $pdo->commit();
@@ -1424,11 +1426,26 @@ if ($endpoint === 'rpc') {
         if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
         if ($caller && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $supplier = $body['supplier'] ?? ($_GET['supplier'] ?? '');
-        $sql = "SELECT pp.sku, pp.price, pp.unit_type, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity=?";
+        $sql = "SELECT pp.id, pp.sku, pp.price, pp.unit_type, pp.currency, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity=?";
         $params = [$le];
         if ($supplier) { $sql .= " AND pp.supplier=?"; $params[] = $supplier; }
         $s = $pdo->prepare($sql); $s->execute($params);
-        respond($s->fetchAll());
+        $rows = $s->fetchAll();
+        // Получаем курс RUB→BYN
+        $rateStmt = $pdo->prepare("SELECT value FROM settings WHERE `key`='rub_to_byn_rate'"); $rateStmt->execute();
+        $rate = floatval($rateStmt->fetchColumn() ?: '0.0375');
+        respond(['prices' => $rows, 'rub_to_byn_rate' => $rate]);
+    }
+
+    if ($fn === 'update_exchange_rate') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        $rate = floatval($body['rate'] ?? 0);
+        if ($rate <= 0 || $rate > 1) respond(['error' => 'Некорректный курс (ожидается число от 0 до 1)'], 400);
+        $pdo->prepare("INSERT INTO settings (`key`, value) VALUES ('rub_to_byn_rate', ?) ON DUPLICATE KEY UPDATE value=?")->execute([(string)$rate, (string)$rate]);
+        respond(['success' => true, 'rate' => $rate]);
     }
 
     if ($fn === 'delete_price') {

@@ -729,7 +729,13 @@ async function loadPrices() {
     const { data } = await db.rpc('get_current_prices', { legal_entity: le, supplier });
     const map = {};
     if (data) {
-      for (const p of data) map[p.sku] = { price: parseFloat(p.price), unit_type: p.unit_type };
+      const prices = data.prices || data;
+      const rate = data.rub_to_byn_rate || 0.0375;
+      for (const p of prices) {
+        let price = parseFloat(p.price);
+        if (p.currency === 'RUB') price = +(price * rate).toFixed(2);
+        map[p.sku] = { price, unit_type: p.unit_type };
+      }
     }
     priceMap.value = map;
   } catch { priceMap.value = {}; }
