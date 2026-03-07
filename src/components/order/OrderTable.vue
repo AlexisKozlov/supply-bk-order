@@ -211,7 +211,7 @@ function getCdaParams(item) {
   };
 }
 
-const rowRefs = ref([]);
+const rowRefs = ref({});
 
 function onNav({ row, col }) {
   if (row < 0 || row >= orderStore.items.length) return;

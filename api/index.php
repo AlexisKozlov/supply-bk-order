@@ -236,8 +236,9 @@ function parseOr($orStr, &$where, &$params, $allowedFields = []) {
         } elseif (preg_match('/^(\w+)\.ilike\.(.+)$/', $part, $m)) {
             if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $m[1])) continue;
             if (!empty($allowedFields) && !in_array($m[1], $allowedFields)) continue;
-            $orClauses[] = "`{$m[1]}` LIKE ?";
-            $params[] = str_replace(['%25','*'], '%', $m[2]);
+            $orClauses[] = "`{$m[1]}` LIKE ? ESCAPE '\\\\'";
+            $likeVal = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $m[2]);
+            $params[] = str_replace(['%25','*'], '%', $likeVal);
         }
     }
     if ($orClauses) $where[] = '(' . implode(' OR ', $orClauses) . ')';
@@ -1806,6 +1807,8 @@ if ($method === 'POST') {
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Invalid column name: '.$col], 400); }
         // Белый список колонок для записи
         if (isset($writeWhitelist[$table])) { $rec = array_intersect_key($rec, array_flip($writeWhitelist[$table])); if (empty($rec)) respond(['error' => 'No allowed columns'], 400); }
+        // audit_log: принудительно ставить user_name из сессии
+        if ($table === 'audit_log' && $sessionUser) { $rec['user_name'] = $sessionUser['name']; }
         $cols = array_keys($rec); $ph = implode(',', array_fill(0, count($cols), '?')); $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
         try {
             if ($table === 'analysis_data') {

@@ -497,35 +497,31 @@ function onCalcKeydown(e, idx, field) {
     planCalc.onKeydown(e);
     return;
   }
-  // Arrow nav between plan inputs
+  // Arrow nav between plan inputs — навигация по видимым строкам
   if (['ArrowDown', 'ArrowUp'].includes(e.key)) {
     e.preventDefault();
     const colMap = { consumption: 0, stock: 1, supplierStock: 2 };
     const col = colMap[field] ?? 0;
-    const dir = e.key === 'ArrowDown' ? 1 : -1;
-    const newIdx = idx + dir;
-    if (newIdx >= 0 && newIdx < items.value.length) {
-      const row = e.target.closest('tr')?.parentElement;
-      const targetRow = row?.children[newIdx];
-      const inputs = targetRow?.querySelectorAll('.plan-calc-input');
+    const currentRow = e.target.closest('tr');
+    const targetRow = e.key === 'ArrowDown' ? currentRow?.nextElementSibling : currentRow?.previousElementSibling;
+    if (targetRow) {
+      const inputs = targetRow.querySelectorAll('.plan-calc-input');
       if (inputs?.[col]) { inputs[col].focus(); inputs[col].select(); }
     }
   }
   if (e.key === 'Enter') {
     e.preventDefault();
-    // Apply current value and move down
     onInput(idx, field, e.target.value);
     const colMap = { consumption: 0, stock: 1, supplierStock: 2 };
     const col = colMap[field] ?? 0;
-    const newIdx = idx + 1;
-    if (newIdx < items.value.length) {
-      nextTick(() => {
-        const tbody = document.querySelector('.plan-table tbody');
-        const targetRow = tbody?.children[newIdx];
-        const inputs = targetRow?.querySelectorAll('.plan-calc-input');
+    nextTick(() => {
+      const currentRow = e.target.closest('tr');
+      const targetRow = currentRow?.nextElementSibling;
+      if (targetRow) {
+        const inputs = targetRow.querySelectorAll('.plan-calc-input');
         if (inputs?.[col]) { inputs[col].focus(); inputs[col].select(); }
-      });
-    }
+      }
+    });
   }
 }
 
@@ -1593,7 +1589,14 @@ async function loadPlanFromHistory(planId) {
   toast.success('План загружен', `${plan.supplier} — ${items.value.length} позиций`);
 }
 
-watch(() => orderStore.settings.legalEntity, async () => { await supplierStore.loadSuppliers(orderStore.settings.legalEntity); supplier.value = ''; items.value = []; editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null; });
+watch(() => orderStore.settings.legalEntity, async () => {
+  await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
+  const prev = supplier.value;
+  supplier.value = '';
+  items.value = []; editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null;
+  // Если был тот же поставщик — watch(supplier) не сработает, очистим вручную
+  if (prev === '') { allSupplierProducts.value = []; }
+});
 const showCollapseHint = ref(false);
 let _collapseHintTimer = null;
 watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
@@ -1613,7 +1616,7 @@ onMounted(async () => {
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   if (route.query.planId) {
     await loadPlanFromHistory(route.query.planId);
-    if (route.query.mode === 'view') { viewOnly.value = true; }
+    if (route.query.mode === 'view' || isViewer.value) { viewOnly.value = true; }
   } else {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
