@@ -8,6 +8,10 @@ export function useConfirm() {
   const confirmModal = ref({ show: false, title: '', message: '', resolve: null });
 
   function confirm(title, message) {
+    // Если уже открыта другая модалка — отклоняем предыдущий промис
+    if (confirmModal.value.show && confirmModal.value.resolve) {
+      confirmModal.value.resolve(false);
+    }
     return new Promise(resolve => {
       confirmModal.value = { show: true, title, message, resolve };
     });

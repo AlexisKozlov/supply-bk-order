@@ -190,14 +190,18 @@ function onNav({ row, col }) {
 }
 
 let draggedIndex = null;
+let _savingOrder = false;
 function onDragStart(index) { draggedIndex = index; }
 function onDragOver(index) {}
 async function onDrop(toIndex) {
-  if (draggedIndex === null || draggedIndex === toIndex) return;
+  if (draggedIndex === null || draggedIndex === toIndex || _savingOrder) return;
   orderStore.moveItem(draggedIndex, toIndex);
   draggedIndex = null;
-  await orderStore.saveItemOrder();
-  draftStore.save();
+  _savingOrder = true;
+  try {
+    await orderStore.saveItemOrder();
+    draftStore.save();
+  } finally { _savingOrder = false; }
 }
 function onDragEnd() { draggedIndex = null; }
 

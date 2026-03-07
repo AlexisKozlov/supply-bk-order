@@ -34,7 +34,7 @@
               <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
             </thead>
             <tbody>
-              <tr v-for="(l, idx) in lines" :key="idx">
+              <tr v-for="(l, idx) in lines" :key="l.sku || idx">
                 <td class="sm-num">{{ idx + 1 }}</td>
                 <td class="sm-sku">{{ l.sku || '—' }}</td>
                 <td class="sm-name">{{ l.name }}</td>

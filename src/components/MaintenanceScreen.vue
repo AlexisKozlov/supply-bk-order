@@ -110,7 +110,7 @@ const emit = defineEmits(['logout', 'expired']);
 
 const now = ref(Date.now());
 let tickTimer = null;
-let expired = false;
+const expired = ref(false);
 
 function emberStyle(n) {
   const seed = n * 7.3;
@@ -176,8 +176,8 @@ function pad(n) { return String(n).padStart(2, '0'); }
 
 // Когда таймер истекает — перезагружаем страницу (сервер сам выключит техработы)
 watch(hasTimer, (val, oldVal) => {
-  if (oldVal === true && val === false && endTimestamp.value && !expired) {
-    expired = true;
+  if (oldVal === true && val === false && endTimestamp.value && !expired.value) {
+    expired.value = true;
     setTimeout(() => { window.location.reload(); }, 2000);
   }
 });

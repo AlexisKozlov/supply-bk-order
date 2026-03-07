@@ -613,7 +613,10 @@ function cancelEntityChange() {
   pendingEntity.value = '';
 }
 
+let _entityChanging = false;
 function applyEntityChange(le) {
+  if (_entityChanging) return;
+  _entityChanging = true;
   entityTransition.value = true;
   setTimeout(() => {
     orderStore.settings.legalEntity = le;
@@ -622,7 +625,7 @@ function applyEntityChange(le) {
     } else {
       orderStore.settings.supplier = '';
     }
-    setTimeout(() => { entityTransition.value = false; }, 300);
+    setTimeout(() => { entityTransition.value = false; _entityChanging = false; }, 300);
   }, 200);
 }
 

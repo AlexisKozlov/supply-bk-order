@@ -393,6 +393,7 @@ async function parseExcel(file) {
 // ─── Импорт в API ───────────────────────────────────────────────────────
 
 async function doImport() {
+  if (importing.value) return;
   importing.value = true;
   const rows = newRows.value;
   const updRows = updateRows.value;

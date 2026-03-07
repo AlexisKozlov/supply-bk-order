@@ -201,7 +201,7 @@
                 <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
               </thead>
               <tbody>
-                <tr v-for="(l, idx) in orderResultModal.lines" :key="idx">
+                <tr v-for="(l, idx) in orderResultModal.lines" :key="l.sku || idx">
                   <td class="or-num">{{ idx + 1 }}</td>
                   <td class="or-sku">{{ l.sku || '—' }}</td>
                   <td class="or-name">{{ l.name }}</td>

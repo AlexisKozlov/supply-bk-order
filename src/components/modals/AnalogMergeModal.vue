@@ -81,6 +81,7 @@ const hasSharedConflict = computed(() => {
 });
 
 function toggleAnalog(a) {
+  // Мутируем напрямую — merges передан по ссылке из родителя для двустороннего взаимодействия
   a.checked = !a.checked;
 }
 

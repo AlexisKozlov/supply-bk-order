@@ -232,7 +232,7 @@ const tipStyle = computed(() => ({
   position: 'fixed',
   left: tipX.value + 'px',
   top: tipY.value + 'px',
-  zIndex: 999999,
+  zIndex: 99999,
   pointerEvents: 'none',
 }));
 

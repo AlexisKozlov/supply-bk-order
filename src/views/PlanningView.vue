@@ -1338,6 +1338,7 @@ async function loadProducts() {
     }));
     // (#3) Применяем порядок товаров из item_order (как в заказе)
     await restoreItemOrder();
+    if (gen !== _loadProductsGen) return; // устаревший запрос после restoreItemOrder
     editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null;
     undoStack.value = []; redoStack.value = [];
     recalcAll(); triggerValidation(); _savePlanDraft();

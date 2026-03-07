@@ -257,7 +257,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(u, idx) in unmatchedItems" :key="idx">
+                <tr v-for="(u, idx) in unmatchedItems" :key="u.sku || idx">
                   <td class="anv-sku">{{ u.sku || '—' }}</td>
                   <td>{{ u.name || '—' }}</td>
                   <td style="text-align:right">{{ u.stock ? nf(u.stock) : '—' }}</td>

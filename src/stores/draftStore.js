@@ -2,9 +2,14 @@ import { defineStore } from 'pinia';
 import { ref, toRaw } from 'vue';
 import { useOrderStore } from './orderStore.js';
 
-const DRAFT_KEY = 'bk_draft';
+const DRAFT_KEY_PREFIX = 'bk_draft';
 const IDB_NAME = 'bk_drafts';
 const IDB_STORE = 'drafts';
+
+function getDraftKey(orderStore) {
+  const le = orderStore?.settings?.legalEntity || '';
+  return le ? `${DRAFT_KEY_PREFIX}_${le}` : DRAFT_KEY_PREFIX;
+}
 
 // ─── IndexedDB хелперы ───
 function openIDB() {
@@ -77,35 +82,39 @@ export const useDraftStore = defineStore('draft', () => {
   function _doSave(orderStore) {
     // Не сохраняем если нет товаров
     if (!orderStore.items || orderStore.items.length === 0) return;
+    const key = getDraftKey(orderStore);
     // JSON.stringify автоматически конвертирует Date → ISO строки
     const json = JSON.stringify({
       settings: toRaw(orderStore.settings),
       items: toRaw(orderStore.items),
       timestamp: new Date().toISOString(),
     });
-    try { localStorage.setItem(DRAFT_KEY, json); } catch(e) { /* хранилище переполнено */ }
+    try { localStorage.setItem(key, json); } catch(e) { /* хранилище переполнено */ }
     // В IndexedDB сохраняем распарсенную копию (структурированный клон — без реактивности)
-    try { idbSet(DRAFT_KEY, JSON.parse(json)); } catch(e) { /* ignore */ }
+    try { idbSet(key, JSON.parse(json)); } catch(e) { /* ignore */ }
     lastSaved.value = new Date();
   }
 
   function clear() {
     clearTimeout(_timer);
-    localStorage.removeItem(DRAFT_KEY);
-    idbDelete(DRAFT_KEY);
+    const orderStore = useOrderStore();
+    const key = getDraftKey(orderStore);
+    localStorage.removeItem(key);
+    idbDelete(key);
   }
 
   /** Восстановить черновик. Возвращает true если черновик был загружен. */
   async function load(supplierLoader) {
-    let data = await idbGet(DRAFT_KEY);
+    const orderStore = useOrderStore();
+    const key = getDraftKey(orderStore);
+    let data = await idbGet(key);
     if (!data) {
-      const raw = localStorage.getItem(DRAFT_KEY);
+      const raw = localStorage.getItem(key);
       if (!raw) return false;
       try { data = JSON.parse(raw); } catch { return false; }
     }
 
     try {
-      const orderStore = useOrderStore();
       isLoading.value = true;
 
       // Настройки
@@ -151,7 +160,9 @@ export const useDraftStore = defineStore('draft', () => {
 
   /** Проверить наличие черновика (без загрузки) */
   function hasDraft() {
-    const raw = localStorage.getItem(DRAFT_KEY);
+    const orderStore = useOrderStore();
+    const key = getDraftKey(orderStore);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     try {
       const data = JSON.parse(raw);
@@ -165,8 +176,14 @@ export const useDraftStore = defineStore('draft', () => {
   }
 
   // ═══ ПЛАНИРОВАНИЕ — черновик ═══
-  const PLAN_DRAFT_KEY = 'bk_plan_draft';
+  const PLAN_DRAFT_PREFIX = 'bk_plan_draft';
   let _planTimer = null;
+
+  function getPlanDraftKey() {
+    const orderStore = useOrderStore();
+    const le = orderStore?.settings?.legalEntity || '';
+    return le ? `${PLAN_DRAFT_PREFIX}_${le}` : PLAN_DRAFT_PREFIX;
+  }
 
   function savePlan(planState) {
     // Не сохраняем в режиме просмотра
@@ -186,18 +203,18 @@ export const useDraftStore = defineStore('draft', () => {
         items: JSON.parse(JSON.stringify(toRaw(planState.items))),
         timestamp: new Date().toISOString(),
       };
-      localStorage.setItem(PLAN_DRAFT_KEY, JSON.stringify(draft));
+      localStorage.setItem(getPlanDraftKey(), JSON.stringify(draft));
       lastPlanSaved.value = new Date();
     }, 500);
   }
 
   function clearPlanDraft() {
     clearTimeout(_planTimer);
-    localStorage.removeItem(PLAN_DRAFT_KEY);
+    localStorage.removeItem(getPlanDraftKey());
   }
 
   function hasPlanDraft() {
-    const raw = localStorage.getItem(PLAN_DRAFT_KEY);
+    const raw = localStorage.getItem(getPlanDraftKey());
     if (!raw) return null;
     try {
       const data = JSON.parse(raw);
@@ -207,7 +224,7 @@ export const useDraftStore = defineStore('draft', () => {
   }
 
   function loadPlanDraft() {
-    const raw = localStorage.getItem(PLAN_DRAFT_KEY);
+    const raw = localStorage.getItem(getPlanDraftKey());
     if (!raw) return null;
     try { return JSON.parse(raw); } catch { return null; }
   }

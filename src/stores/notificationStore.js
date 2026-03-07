@@ -158,6 +158,11 @@ export const useNotificationStore = defineStore('notification', () => {
     checkBroadcasts();
     pollTimer = setInterval(() => load(), POLL_INTERVAL);
     broadcastTimer = setInterval(() => checkBroadcasts(), BROADCAST_POLL_INTERVAL);
+    // Восстанавливаем обработчик видимости вкладки (мог быть снят при разлогине)
+    if (typeof document !== 'undefined' && !_visibilityBound) {
+      _visibilityBound = true;
+      document.addEventListener('visibilitychange', _onVisibilityChange);
+    }
   }
 
   function stopPolling() {

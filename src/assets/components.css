@@ -15,7 +15,7 @@
 
 /* ===== Z-INDEX FIX (confirm поверх database modal) ===== */
 #confirmModal {
-  z-index: 10000;
+  z-index: 10001;
 }
 
 #databaseModal {

@@ -76,18 +76,19 @@ function resolvePermissions($role, $permissionsJson, $templates) {
 
 // Проверка доступа к юр. лицу: пользователь может работать только со своими юрлицами
 function checkLegalEntityAccess($sessionUser, $legalEntity) {
-    if (!$sessionUser || !$legalEntity) return true; // нет сессии или нет фильтра — пропускаем (API-ключ)
+    if (!$sessionUser) return true; // нет сессии (API-ключ) — пропускаем
+    if (!$legalEntity) return false; // юрлицо обязательно для авторизованных пользователей
     if (($sessionUser['role'] ?? '') === 'admin') return true;
     $userEntities = $sessionUser['legal_entities'] ?? '';
     if (is_string($userEntities)) {
         $userEntities = json_decode($userEntities, true);
     }
-    if (!is_array($userEntities) || empty($userEntities)) return true; // нет ограничений
+    if (!is_array($userEntities) || empty($userEntities)) return false; // нет назначенных юрлиц — доступ закрыт
     return in_array($legalEntity, $userEntities);
 }
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
-$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','delivery_schedule','deficit_sessions','deficit_tokens','stock_collections'];
+$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','delivery_schedule','deficit_sessions','deficit_tokens','stock_collections','restaurants'];
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
@@ -211,7 +212,10 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
         $params = array_merge($params, $arr);
     }
     elseif (strpos($val,'ilike.')===0) {
-        $where[] = "`$key` LIKE ?"; $params[] = str_replace('*', '%', substr($val, 6));
+        $raw = substr($val, 6);
+        // Экранируем спецсимволы LIKE, затем заменяем * на %
+        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $raw);
+        $where[] = "`$key` LIKE ? ESCAPE '\\\\'"; $params[] = str_replace('*', '%', $escaped);
     }
     elseif ($val === 'is.null') { $where[] = "`$key` IS NULL"; }
     elseif ($val === 'not.is.null') { $where[] = "`$key` IS NOT NULL"; }
@@ -250,8 +254,11 @@ if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
     }
     $orderId = $_GET['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
-
-    $s = $pdo->prepare("SELECT act_file FROM orders WHERE id=?"); $s->execute([$orderId]); $old = $s->fetchColumn();
+    // Проверка доступа к юрлицу заказа
+    $orderChk = $pdo->prepare("SELECT legal_entity, act_file FROM orders WHERE id=?"); $orderChk->execute([$orderId]); $orderRow = $orderChk->fetch();
+    if (!$orderRow) respond(['error' => 'Order not found'], 404);
+    if ($su && !checkLegalEntityAccess($su, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу заказа'], 403);
+    $old = $orderRow['act_file'];
     if ($old) {
         $filepath = __DIR__ . '/uploads/acts/' . basename($old);
         if (file_exists($filepath)) unlink($filepath);
@@ -273,9 +280,11 @@ if ($endpoint === 'upload' && $subpoint === 'act') {
     $orderId = $_POST['order_id'] ?? '';
     if (!$orderId) respond(['error' => 'order_id required'], 400);
 
-    // Проверяем существование заказа
-    $chk = $pdo->prepare("SELECT id FROM orders WHERE id=?"); $chk->execute([$orderId]);
-    if (!$chk->fetch()) respond(['error' => 'Order not found'], 404);
+    // Проверяем существование заказа и доступ к юрлицу
+    $chk = $pdo->prepare("SELECT id, legal_entity FROM orders WHERE id=?"); $chk->execute([$orderId]);
+    $orderRow = $chk->fetch();
+    if (!$orderRow) respond(['error' => 'Order not found'], 404);
+    if ($su && !checkLegalEntityAccess($su, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу заказа'], 403);
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         $code = $_FILES['file']['error'] ?? -1;
@@ -455,7 +464,7 @@ if ($endpoint === 'rpc') {
         respond($s->fetch());
     }
     if ($fn === 'log_card_search') {
-        if (!checkRateLimit($pdo, $clientIp, 60, 1)) respond(['success' => true]); // Тихий rate-limit
+        if (!checkRateLimit($pdo, $clientIp, 30, 1)) respond(['success' => true]); // Тихий rate-limit: макс 30 поисков/мин
         $q = $body['query'] ?? '';
         $found = $body['found'] ?? false;
         $matchType = $body['match_type'] ?? null;
@@ -578,7 +587,7 @@ if ($endpoint === 'rpc') {
         $userName = $body['user_name'] ?? null;
         $url = isset($body['url']) ? mb_substr($body['url'], 0, 2048) : null;
         $ua = isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr($_SERVER['HTTP_USER_AGENT'], 0, 512) : null;
-        if (!checkRateLimit($pdo, $clientIp, 30, 1)) respond(['success' => true]); // Тихий rate-limit
+        if (!checkRateLimit($pdo, $clientIp, 10, 1)) respond(['success' => true]); // Тихий rate-limit: макс 10 ошибок/мин
         try {
             $pdo->prepare("INSERT INTO error_logs (level, source, message, stack, user_name, url, user_agent) VALUES (?, 'frontend', ?, ?, ?, ?, ?)")
                 ->execute([$level, $message, $stack, $userName, $url, $ua]);
@@ -911,6 +920,17 @@ if ($endpoint === 'rpc') {
         $items = $body['items'] ?? [];
         if (!is_array($items) || empty($items)) respond(['error' => 'items required'], 400);
         if (count($items) > 500) respond(['error' => 'Too many items (max 500)'], 400);
+        // Собираем ID позиций и проверяем доступ к юрлицам заказов
+        $itemIds = array_filter(array_map(fn($i) => $i['id'] ?? null, $items));
+        if (!empty($itemIds) && $caller['role'] !== 'admin') {
+            $ph = implode(',', array_fill(0, count($itemIds), '?'));
+            $chk = $pdo->prepare("SELECT DISTINCT o.legal_entity FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.id IN ($ph)");
+            $chk->execute(array_values($itemIds));
+            $entities = $chk->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($entities as $le) {
+                if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу заказа'], 403);
+            }
+        }
         try {
             $pdo->beginTransaction();
             $stmt = $pdo->prepare("UPDATE `order_items` SET `received_qty` = ? WHERE `id` = ?");
@@ -1009,7 +1029,8 @@ if ($endpoint === 'rpc') {
         $orderCheck = $pdo->prepare("SELECT legal_entity FROM orders WHERE id=?");
         $orderCheck->execute([$orderId]);
         $orderRow = $orderCheck->fetch();
-        if ($orderRow && !checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if (!$orderRow) respond(['error' => 'Заказ не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
         if (count($items) > 5000) respond(['error' => 'Too many items (max 5000)'], 400);
         try {
@@ -1244,6 +1265,12 @@ if ($endpoint === 'rpc') {
         if (!$restaurantId) respond(['error' => 'restaurant_id required'], 400);
         if (!is_array($items)) respond(['error' => 'items must be array'], 400);
         if (count($items) > 500) respond(['error' => 'Too many items (max 500)'], 400);
+        // Проверка доступа к юрлицу ресторана
+        if ($caller['role'] !== 'admin') {
+            $rChk = $pdo->prepare("SELECT legal_entity FROM restaurants WHERE id=?"); $rChk->execute([$restaurantId]); $rRow = $rChk->fetch();
+            if (!$rRow) respond(['error' => 'Ресторан не найден'], 404);
+            if (!checkLegalEntityAccess($caller, $rRow['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу ресторана'], 403);
+        }
         try {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `delivery_schedule` WHERE `restaurant_id`=?")->execute([$restaurantId]);
@@ -1273,7 +1300,7 @@ if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 // ═══ REST ═══
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens'];
 // Защита: только чтение через REST, запись — через RPC
-$readOnly = ['search_logs', 'users', 'error_logs'];
+$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -1316,6 +1343,7 @@ if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
 
 // Проверка доступа к юр. лицу в REST-запросах
 if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
+    $userRole = $sessionUser['role'] ?? 'user';
     $leFilt = $_GET['legal_entity'] ?? null;
     if ($leFilt) {
         // Извлекаем значение из фильтра eq.XXX
@@ -1324,6 +1352,9 @@ if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
         if (!checkLegalEntityAccess($sessionUser, $leVal)) {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
+    } elseif ($method === 'GET' && $userRole !== 'admin') {
+        // Без фильтра по юрлицу неадмины не могут читать таблицы с юрлицами
+        respond(['error' => 'Требуется фильтр legal_entity'], 400);
     }
     // Для операций записи проверяем legal_entity в теле запроса
     if ($method !== 'GET' && !empty($body)) {
@@ -1378,6 +1409,10 @@ if ($method === 'GET') {
 
     if ($subpoint) {
         $s = $pdo->prepare("SELECT * FROM `$table` WHERE id=?"); $s->execute([$subpoint]); $row = $s->fetch();
+        // Проверка доступа к юрлицу при запросе по ID
+        if ($row && $sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && isset($row['legal_entity'])) {
+            if (!checkLegalEntityAccess($sessionUser, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        }
         if ($row && $table === 'orders') { $s2 = $pdo->prepare("SELECT * FROM order_items WHERE order_id=?"); $s2->execute([$subpoint]); $row['order_items'] = $s2->fetchAll(); }
         respond($row ?: ['error'=>'not found'], $row ? 200 : 404);
     }
@@ -1424,10 +1459,10 @@ if ($method === 'GET') {
             $sql .= " ORDER BY `{$op[0]}` " . (($op[1]??'asc')==='desc'?'DESC':'ASC');
         }
     }
-    $limit = isset($_GET['limit']) ? min(intval($_GET['limit']), 5000) : 1000;
+    $limit = isset($_GET['limit']) ? max(1, min(intval($_GET['limit']), 5000)) : 1000;
     $sql .= " LIMIT " . $limit;
     if (isset($_GET['offset'])) {
-        $sql .= " OFFSET " . intval($_GET['offset']);
+        $sql .= " OFFSET " . max(0, intval($_GET['offset']));
     }
 
     try {

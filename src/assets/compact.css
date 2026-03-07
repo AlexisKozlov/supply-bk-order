@@ -35,7 +35,7 @@
 }
 .compact-mode .order-table thead th {
   padding: 6px 6px;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.3px;
 }
 
@@ -131,8 +131,8 @@
 
 /* ─── Delete button ─── */
 .compact-mode .delete-item-x {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   font-size: 12px;
 }
 .compact-mode td.delete-cell {

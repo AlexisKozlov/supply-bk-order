@@ -10,7 +10,7 @@ export function getEntityGroup(legalEntity) {
 
 /**
  * Применяет фильтр юр. лица к db query.
- * Использует .or() вместо .in() т.к. PHP бэкенд удаляет пробелы из in.()
+ * Использует .or() вместо .in() т.к. PHP бэкенд удаляет пробелы из значений в in.()
  */
 export function applyEntityFilter(query, legalEntity, column = 'legal_entity') {
   const group = getEntityGroup(legalEntity);

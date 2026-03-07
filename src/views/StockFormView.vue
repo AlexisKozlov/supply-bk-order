@@ -231,7 +231,7 @@ onMounted(async () => {
 
 async function submit() {
   error.value = '';
-  if (!selectedRestaurant.value) return;
+  if (!selectedRestaurant.value || !info.value) return;
   submitting.value = true;
   try {
     const items = info.value.products.map(p => ({
@@ -250,6 +250,7 @@ async function submit() {
 
 async function submitEdit() {
   error.value = '';
+  if (!info.value) return;
   submitting.value = true;
   try {
     const items = info.value.products.map(p => ({
