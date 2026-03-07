@@ -180,11 +180,7 @@
           <div style="flex:0 0 100px;">
             <label>За</label>
             <select v-model="priceForm.unit_type" class="form-input">
-              <option value="piece">штуку</option>
-              <option value="thousand">тыс/шт</option>
-              <option value="kg">кг</option>
-              <option value="liter">литр</option>
-              <option value="box">коробку</option>
+              <option v-for="u in priceUnitOptions" :key="u.value" :value="u.value">{{ u.label }}</option>
             </select>
           </div>
           <div style="flex:0 0 80px;">
@@ -284,11 +280,7 @@
               <div v-if="item.selected" style="display:flex;gap:4px;align-items:center;flex-shrink:0;" @click.stop>
                 <input type="number" v-model.number="item.price" step="0.01" min="0" class="form-input" style="width:80px;padding:3px 5px;font-size:11px;text-align:right;" placeholder="Цена" />
                 <select v-model="item.unit_type" class="form-input" style="width:65px;padding:3px;font-size:10px;">
-                  <option value="piece">шт</option>
-                  <option value="thousand">тыс/шт</option>
-                  <option value="kg">кг</option>
-                  <option value="liter">л</option>
-                  <option value="box">кор</option>
+                  <option v-for="u in allowedUnitTypes(item.uom)" :key="u.value" :value="u.value">{{ UNIT_LABELS[u.value] || u.value }}</option>
                 </select>
               </div>
             </div>
@@ -434,6 +426,7 @@ const loading = ref(false);
 const prices = ref([]);
 const agreements = ref([]);
 const productNames = ref({}); // sku -> name
+const productUnits = ref({}); // sku -> unit_of_measure ('шт','кг','л')
 
 // Сортировка
 const sortKey = ref('sku');
@@ -487,13 +480,18 @@ async function loadProductNames() {
   const skus = prices.value.map(p => p.sku).filter(Boolean);
   if (!skus.length) return;
   // Загружаем все продукты для юрлица и кэшируем имена
-  const query = db.from('products').select('sku,name');
+  const query = db.from('products').select('sku,name,unit_of_measure');
   const { data } = await applyEntityFilter(query, le);
   const map = {};
+  const umap = {};
   if (data) {
-    for (const p of data) map[p.sku] = p.name;
+    for (const p of data) {
+      map[p.sku] = p.name;
+      umap[p.sku] = p.unit_of_measure || 'шт';
+    }
   }
   productNames.value = map;
+  productUnits.value = umap;
 }
 
 const loadingAgreements = ref(false);
@@ -565,6 +563,13 @@ const UNIT_LABELS = { piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter:
 const UNIT_LABELS_FULL = { piece: 'штуку', thousand: 'тыс/шт', kg: 'кг', liter: 'литр', box: 'коробку' };
 function unitLabel(type) { return UNIT_LABELS[type] || type || 'шт'; }
 
+// Допустимые единицы цены в зависимости от единицы измерения товара
+function allowedUnitTypes(productUom) {
+  if (productUom === 'кг') return [{ value: 'kg', label: 'кг' }, { value: 'box', label: 'коробку' }];
+  if (productUom === 'л') return [{ value: 'liter', label: 'литр' }, { value: 'box', label: 'коробку' }];
+  return [{ value: 'piece', label: 'штуку' }, { value: 'thousand', label: 'тыс/шт' }, { value: 'box', label: 'коробку' }];
+}
+
 function getAgreementLabel(id) {
   const a = agreements.value.find(x => x.id === id);
   return a ? `${a.number} (${statusLabel(a.status)})` : `ПСЦ #${id}`;
@@ -580,6 +585,11 @@ const supplierProducts = ref([]);
 const skuFoundName = computed(() => {
   const sku = priceForm.value.sku?.trim();
   return sku ? (productNames.value[sku] || '') : '';
+});
+const priceUnitOptions = computed(() => {
+  const sku = priceForm.value.sku?.trim();
+  const uom = sku ? (productUnits.value[sku] || 'шт') : 'шт';
+  return allowedUnitTypes(uom);
 });
 let skuSearchTimer = null;
 let hideHintsTimer = null;
@@ -614,14 +624,23 @@ async function onPriceSupplierChange(keepSku = false) {
   if (!sup) return;
   const le = orderStore.settings.legalEntity;
   if (!le) return;
-  const query = db.from('products').select('sku,name').eq('supplier', sup);
+  const query = db.from('products').select('sku,name,unit_of_measure').eq('supplier', sup);
   const { data } = await applyEntityFilter(query, le);
   supplierProducts.value = (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  // Обновить кэш единиц измерения
+  if (data) for (const p of data) productUnits.value[p.sku] = p.unit_of_measure || 'шт';
 }
 function selectSkuHint(h) {
   priceForm.value.sku = h.sku;
   skuHints.value = [];
   if (h.name && !productNames.value[h.sku]) productNames.value[h.sku] = h.name;
+  if (h.unit_of_measure) productUnits.value[h.sku] = h.unit_of_measure;
+  // Автоматически выбрать подходящую единицу цены
+  const uom = productUnits.value[h.sku] || 'шт';
+  const allowed = allowedUnitTypes(uom);
+  if (!allowed.find(u => u.value === priceForm.value.unit_type)) {
+    priceForm.value.unit_type = allowed[0].value;
+  }
 }
 function hideSkuHintsDelayed() {
   clearTimeout(hideHintsTimer);
@@ -716,7 +735,7 @@ async function loadAgProducts(supplier, agreementId) {
   agProductsLoading.value = true;
   try {
     const le = orderStore.settings.legalEntity;
-    const query = db.from('products').select('sku,name').eq('supplier', supplier);
+    const query = db.from('products').select('sku,name,unit_of_measure').eq('supplier', supplier);
     const { data } = await applyEntityFilter(query, le);
     // Загрузить текущие цены этого протокола (при редактировании)
     let existingPrices = {};
@@ -731,11 +750,13 @@ async function loadAgProducts(supplier, agreementId) {
 
     agPriceItems.value = (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(p => {
       const ex = existingPrices[p.sku];
+      const uom = p.unit_of_measure || 'шт';
+      const defaultUnit = uom === 'кг' ? 'kg' : uom === 'л' ? 'liter' : 'piece';
       return {
-        sku: p.sku, name: p.name,
+        sku: p.sku, name: p.name, uom,
         selected: !!ex,
         price: ex ? ex.price : 0,
-        unit_type: ex ? ex.unit_type : 'piece',
+        unit_type: ex ? ex.unit_type : defaultUnit,
         oldPrice: currentPriceMap[p.sku] || null,
       };
     });
