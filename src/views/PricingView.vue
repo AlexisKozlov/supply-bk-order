@@ -478,6 +478,8 @@ function onSkuInput() {
 }
 async function onPriceSupplierChange() {
   supplierProducts.value = [];
+  priceForm.value.sku = '';
+  skuHints.value = [];
   const sup = priceForm.value.supplier;
   if (!sup) return;
   const le = orderStore.settings.legalEntity;
@@ -514,6 +516,10 @@ async function savePrice() {
   if (savingPrice.value) return;
   const { sku, supplier, price, unit_type, currency, agreement_id } = priceForm.value;
   if (!sku || !supplier) { toast.error('Ошибка', 'Укажите артикул и поставщика'); return; }
+  if (supplierProducts.value.length && !supplierProducts.value.some(p => p.sku === sku.trim())) {
+    toast.error('Ошибка', 'Этот товар не относится к выбранному поставщику');
+    return;
+  }
   savingPrice.value = true;
   try {
     const { error } = await db.rpc('import_prices', {
