@@ -89,7 +89,7 @@
 
     <!-- ПРОТОКОЛЫ (ПСЦ) -->
     <div v-if="activeTab === 'agreements'">
-      <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-if="loadingAgreements" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredAgreements.length" style="text-align:center;padding:40px;color:var(--text-muted);">Протоколы не найдены</div>
       <div v-else class="db-grid">
         <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="{ 'agreement-active': a.status === 'active', 'agreement-archived': a.status === 'archived' }" @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
@@ -379,16 +379,18 @@ async function loadProductNames() {
   productNames.value = map;
 }
 
+const loadingAgreements = ref(false);
+
 async function loadAgreements() {
   const le = orderStore.settings.legalEntity;
   if (!le) return;
-  loading.value = true;
+  loadingAgreements.value = true;
   try {
     const { data, error } = await db.from('price_agreements').select('*').eq('legal_entity', le).order('created_at', { ascending: false });
     if (error) { toast.error('Ошибка', error); return; }
     agreements.value = data || [];
   } finally {
-    loading.value = false;
+    loadingAgreements.value = false;
   }
 }
 
@@ -466,7 +468,7 @@ async function searchProducts(q, supplier) {
   const params = new URLSearchParams({ q, legal_entity: le, limit: '50' });
   if (supplier) params.set('supplier', supplier);
   try {
-    const r = await fetch(`/api/search_products?${params}`, {
+    const r = await fetch(`${API_BASE}/search_products?${params}`, {
       headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' },
     });
     if (r.ok) return await r.json();
@@ -482,9 +484,9 @@ function onSkuInput() {
     skuHints.value = (await searchProducts(q, priceForm.value.supplier)).slice(0, 8);
   }, 250);
 }
-async function onPriceSupplierChange() {
+async function onPriceSupplierChange(keepSku = false) {
   supplierProducts.value = [];
-  priceForm.value.sku = '';
+  if (!keepSku) priceForm.value.sku = '';
   skuHints.value = [];
   const sup = priceForm.value.supplier;
   if (!sup) return;
@@ -515,7 +517,9 @@ function editPrice(p) {
   editingPrice.value = p;
   priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
   skuHints.value = [];
+  supplierProducts.value = [];
   showPriceModal.value = true;
+  if (p.supplier) onPriceSupplierChange(true);
 }
 
 async function savePrice() {
@@ -562,6 +566,7 @@ const agForm = ref({ number: '', supplier: '', valid_from: '', valid_to: '', not
 
 function openNewAgreement() {
   editingAgreement.value = null;
+  pendingPscFile.value = null;
   agForm.value = { number: '', supplier: supplierNames.value[0] || '', valid_from: '', valid_to: '', note: '', file_name: '', file_path: '' };
   showAgreementModal.value = true;
 }
@@ -596,8 +601,9 @@ async function saveAgreement() {
       const { data, error } = await db.from('price_agreements').insert(payload);
       if (error) { toast.error('Ошибка', error); return; }
       // Загрузить файл, если выбран, для нового протокола
-      if (pendingPscFile.value && data?.id) {
-        await uploadPscFile(data.id);
+      const newId = Array.isArray(data) ? data[0]?.id : data?.id;
+      if (pendingPscFile.value && newId) {
+        await uploadPscFile(newId);
       }
     }
     toast.success('Сохранено');
