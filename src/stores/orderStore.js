@@ -85,8 +85,8 @@ export const useOrderStore = defineStore('order', () => {
       if (!item.boxesPerPallet || !item.finalOrder) return;
       const qpb = item.qtyPerBox || 1;
       const mult = item.multiplicity || 1;
-      const accountingBoxes = Math.round(unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb);
-      const physBoxes = Math.round(accountingBoxes / mult);
+      const accountingBoxes = unit === 'boxes' ? item.finalOrder : Math.ceil(item.finalOrder / qpb);
+      const physBoxes = Math.ceil(accountingBoxes / mult);
       totalPallets += Math.floor(physBoxes / item.boxesPerPallet);
       totalBoxesLeft += physBoxes % item.boxesPerPallet;
     });
@@ -163,8 +163,9 @@ export const useOrderStore = defineStore('order', () => {
   }
 
   function moveItem(fromIndex, toIndex) {
-    _ensureInitialState();
     const arr = items.value;
+    if (fromIndex < 0 || fromIndex >= arr.length || toIndex < 0 || toIndex >= arr.length) return;
+    _ensureInitialState();
     const [moved] = arr.splice(fromIndex, 1);
     arr.splice(toIndex, 0, moved);
     _snapshot();

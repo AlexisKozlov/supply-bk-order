@@ -17,7 +17,7 @@
           </th>
           <th>Хватит до<br><small>(после поставки)</small></th>
           <th>Паллеты</th>
-          <th v-if="hasPrices" class="price-col">Сумма</th>
+          <th v-if="hasPrices" class="price-col">Сумма<br><small>BYN</small></th>
           <th style="width:32px;"></th>
         </tr>
         <tr v-else>
@@ -91,7 +91,7 @@
         </template>
       </span>
       <span v-if="hasPrices && totalOrderSum > 0" class="total-sum">
-        · Сумма: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} &#8381;</b>
+        · Сумма: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
       </span>
     </div>
   </div>
@@ -136,8 +136,10 @@ const totalOrderSum = computed(() => {
     const pi = props.priceMap[item.sku];
     if (!pi || !item.finalOrder) continue;
     const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
     const fo = item.finalOrder;
-    const physBoxes = isBoxes ? fo : Math.ceil(fo / qpb);
+    const accountingBoxes = isBoxes ? fo : Math.ceil(fo / qpb);
+    const physBoxes = Math.ceil(accountingBoxes / mult);
     const pieces = isBoxes ? fo * qpb : fo;
     if (pi.unit_type === 'box') sum += physBoxes * pi.price;
     else if (pi.unit_type === 'thousand') sum += pieces * pi.price / 1000;

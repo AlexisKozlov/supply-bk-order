@@ -91,7 +91,7 @@ export const useDraftStore = defineStore('draft', () => {
     });
     try { localStorage.setItem(key, json); } catch(e) { /* хранилище переполнено */ }
     // В IndexedDB сохраняем распарсенную копию (структурированный клон — без реактивности)
-    try { idbSet(key, JSON.parse(json)); } catch(e) { /* ignore */ }
+    idbSet(key, JSON.parse(json)).catch(() => { /* ignore */ });
     lastSaved.value = new Date();
   }
 

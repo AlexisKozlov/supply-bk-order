@@ -17,7 +17,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     return {
       sku:                item.sku || null,
       name:               item.name,
-      qty_boxes:          Math.round(Math.max(0, accountingBoxes)),
+      qty_boxes:          Math.ceil(Math.max(0, accountingBoxes)),
       qty_per_box:        Math.round(item.qtyPerBox || 1),
       multiplicity:       mult,
       consumption_period: Math.round(item.consumptionPeriod || 0),

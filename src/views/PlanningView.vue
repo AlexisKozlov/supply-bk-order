@@ -151,7 +151,7 @@
                 <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[0].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[0].orderUnits) }} {{ item.unitOfMeasure }}</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
-              <div v-if="item.plan[0]?.daysRemaining > 0" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[0].daysRemaining)">{{ item.plan[0].daysRemaining }} дн</div>
+              <div v-if="item.plan[0]?.daysRemaining > 1" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[0].daysRemaining)">{{ item.plan[0].daysRemaining }} дн</div>
             </td>
             <!-- Периоды 1+ — dblclick -->
             <td v-for="m in periodHeaders.length - 1" :key="m" class="plan-td-result"
@@ -178,13 +178,13 @@
                 @blur="applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
-              <div v-if="item.plan[m]?.daysRemaining > 0" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
+              <div v-if="item.plan[m]?.daysRemaining > 1" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
             </td>
             <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }" :title="planItemPriceTooltip(item)">
               <template v-if="itemTotalBoxes(item) > 0">
                 <span class="plan-total-boxes">{{ nf.format(itemTotalBoxes(item)) }} кор</span>
-                <span class="plan-total-units">{{ (item.multiplicity || 1) > 1 ? nf.format(Math.ceil(itemTotalBoxes(item) / item.multiplicity)) + ' физ · ' : '' }}{{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }}</span>
-                <span v-if="planItemSum(item) > 0" class="plan-total-price">{{ planItemSum(item).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }} &#8381;</span>
+                <span v-if="!compactPlan" class="plan-total-units">{{ (item.multiplicity || 1) > 1 ? nf.format(Math.ceil(itemTotalBoxes(item) / item.multiplicity)) + ' физ · ' : '' }}{{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }}</span>
+                <span v-if="!compactPlan && planItemSum(item) > 0" class="plan-total-price">{{ planItemSum(item).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
             </td>
@@ -204,7 +204,7 @@
 
     <!-- Итого по ценам -->
     <div v-if="Object.keys(planPriceMap).length && planTotalSum > 0" class="plan-price-summary">
-      Примерная стоимость заказов: <b>{{ planTotalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} &#8381;</b>
+      Примерная стоимость заказов: <b>{{ planTotalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
       <span style="color:var(--text-muted);font-size:11px;margin-left:8px;">({{ planPricedCount }} из {{ planTotalCount }} позиций с ценой)</span>
     </div>
 
@@ -460,6 +460,10 @@ async function loadSupplierProducts() {
   } catch { allSupplierProducts.value = []; }
 }
 
+let _vTimer = null;
+let _validationCache = null;
+let _appliedAnalogs = new Map(); // SKU товара → Set<SKU применённых аналогов>
+
 watch(supplier, () => { _validationCache = null; loadSupplierProducts(); }, { immediate: true });
 
 // ─── Calculator for plan inputs (#3) ──────────────────────────────────────
@@ -603,20 +607,32 @@ const currentWeekHeaders = computed(() => {
 // Будущие периоды: от planningDate (или startDate если planningDate не задана)
 const periodHeaders = computed(() => {
   const headers = [];
-  const start = planningDate.value && planningDate.value > startDate.value ? planningDate.value : startDate.value;
+  const hasPlanningDate = planningDate.value && planningDate.value > startDate.value;
+  const start = hasPlanningDate ? planningDate.value : startDate.value;
   if (periodType.value === 'weeks') {
     const dow = start.getDay(); // 0=вс, 1=пн, ...
     const isMonday = dow === 1;
-    // Первая неделя: от start до ближайшего воскресенья (огрызок если не понедельник)
     let firstFullMonday;
-    if (!isMonday) {
-      const daysToSun = dow === 0 ? 0 : 7 - dow;
-      const fwe = new Date(start); fwe.setDate(fwe.getDate() + daysToSun);
-      const days = Math.max(Math.round((fwe - start) / 86400000) + 1, 1);
-      headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: days / 7 });
-      firstFullMonday = new Date(fwe); firstFullMonday.setDate(firstFullMonday.getDate() + 1);
+    if (!hasPlanningDate) {
+      // Текущая неделя — всегда дополнительная колонка (не входит в periodCount)
+      if (!isMonday) {
+        const daysToSun = dow === 0 ? 0 : 7 - dow;
+        const fwe = new Date(start); fwe.setDate(fwe.getDate() + daysToSun);
+        const days = Math.max(Math.round((fwe - start) / 86400000) + 1, 1);
+        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: days / 7 });
+        firstFullMonday = new Date(fwe); firstFullMonday.setDate(firstFullMonday.getDate() + 1);
+      } else {
+        // Сегодня понедельник — текущая неделя полная
+        const we = new Date(start); we.setDate(we.getDate() + 6);
+        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(we)}`, ratio: 1 });
+        firstFullMonday = new Date(start); firstFullMonday.setDate(firstFullMonday.getDate() + 7);
+      }
     } else {
       firstFullMonday = new Date(start);
+      if (!isMonday) {
+        const shift = dow === 0 ? 1 : 8 - dow;
+        firstFullMonday.setDate(firstFullMonday.getDate() + shift);
+      }
     }
     for (let i = 0; i < periodCount.value; i++) {
       const ws = new Date(firstFullMonday); ws.setDate(ws.getDate() + i * 7);
@@ -624,12 +640,25 @@ const periodHeaders = computed(() => {
       headers.push({ label: `Нед ${i+1}`, sublabel: `${_fmt(ws)}–${_fmt(we)}`, ratio: 1 });
     }
   } else {
-    const dim = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
-    const dl = dim - start.getDate() + 1;
-    headers.push({ label: _mn[start.getMonth()], sublabel: `ост. ${dl} дн.`, ratio: dl / dim });
-    for (let i = 1; i <= periodCount.value; i++) {
-      const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-      headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
+    if (!hasPlanningDate) {
+      // Текущий месяц — всегда дополнительная колонка (не входит в periodCount)
+      const dim = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+      const dl = dim - start.getDate() + 1;
+      const isFirstDay = start.getDate() === 1;
+      headers.push({ label: _mn[start.getMonth()], sublabel: isFirstDay ? String(start.getFullYear()) : `ост. ${dl} дн.`, ratio: dl / dim });
+      // periodCount полных месяцев ПОСЛЕ текущего
+      for (let i = 0; i < periodCount.value; i++) {
+        const d = new Date(start.getFullYear(), start.getMonth() + 1 + i, 1);
+        headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
+      }
+    } else {
+      // С датой планирования — только полные месяцы, без текущего
+      const isFirstDay = start.getDate() === 1;
+      const startMonth = isFirstDay ? start.getMonth() : start.getMonth() + 1;
+      for (let i = 0; i < periodCount.value; i++) {
+        const d = new Date(start.getFullYear(), startMonth + i, 1);
+        headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
+      }
     }
   }
   return headers;
@@ -707,7 +736,7 @@ function recalcItem(idx, fromMonth = 0) {
   const item = items.value[idx];
   const cwHeaders = currentWeekHeaders.value;
   const headers = periodHeaders.value;
-  const qpb = getQpb(item); const pbu = qpb;
+  const qpb = getQpb(item); const mult = getMultiplicity(item); const pbu = qpb;
   const toBase = (v) => inputUnit.value === 'boxes' ? v * qpb : v;
   const periodDays = consumptionPeriodDays.value || 30;
   const daily = toBase(item.monthlyConsumption) / periodDays;
@@ -740,7 +769,7 @@ function recalcItem(idx, fromMonth = 0) {
     const need = (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio;
     const deficit = need - Math.min(co, need);
     if (item.plan[m].locked) { item.plan[m].need = Math.round(need); item.plan[m].deficit = Math.round(deficit); item.plan[m].orderUnits = item.plan[m].orderBoxes * pbu; co = co - need + item.plan[m].orderUnits; }
-    else { let ob = 0, ou = 0; if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); ou = ob * pbu; } item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false }; co = co - need + ou; }
+    else { let ob = 0, ou = 0; if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); if (mult > 1) ob = Math.ceil(ob / mult) * mult; ou = ob * pbu; } item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false }; co = co - need + ou; }
     if (co < 0) co = 0;
     item.plan[m].daysRemaining = daily > 0 ? Math.round(co / daily) : null;
   }
@@ -846,7 +875,7 @@ function periodTotalBoxes(m) { return items.value.reduce((s, i) => s + (i.plan[m
 const itemsWithPlan = computed(() => items.value.filter(i => i.plan.some(p => p.orderBoxes > 0)));
 
 // ─── Цены ─────────────────────────────────────────────────────────────────────
-const planPriceMap = ref({}); // sku -> {price, unit_type}
+const planPriceMap = ref({}); // sku -> {price, unit_type, currency, origPrice}
 
 async function loadPlanPrices() {
   const le = orderStore.settings.legalEntity;
@@ -861,8 +890,10 @@ async function loadPlanPrices() {
       for (const p of prices) {
         let price = parseFloat(p.price);
         if (isNaN(price) || price <= 0) continue;
-        if (p.currency === 'RUB') price = +(price * rate).toFixed(2);
-        map[p.sku] = { price, unit_type: p.unit_type };
+        const origPrice = price;
+        const currency = p.currency || 'BYN';
+        if (currency === 'RUB') price = +(price * rate).toFixed(2);
+        map[p.sku] = { price, unit_type: p.unit_type, currency, origPrice };
       }
     }
     planPriceMap.value = map;
@@ -874,7 +905,9 @@ function planItemSum(item) {
   if (!pi) return 0;
   const totalBoxes = itemTotalBoxes(item);
   if (!totalBoxes) return 0;
-  if (pi.unit_type === 'box') return totalBoxes * pi.price;
+  const mult = item.multiplicity || 1;
+  const physBoxes = Math.ceil(totalBoxes / mult);
+  if (pi.unit_type === 'box') return physBoxes * pi.price;
   if (pi.unit_type === 'thousand') return itemTotalUnits(item) * pi.price / 1000;
   return itemTotalUnits(item) * pi.price;
 }
@@ -885,7 +918,9 @@ function planItemPriceTooltip(item) {
   const sum = planItemSum(item);
   const units = { box: 'кор', piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter: 'л' };
   const unit = units[pi.unit_type] || 'шт';
-  return `Цена: ${parseFloat(pi.price).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} / ${unit}` + (sum > 0 ? ` · Сумма: ${sum.toLocaleString('ru-RU', { minimumFractionDigits: 0 })} \u20BD` : '');
+  let priceStr = `${parseFloat(pi.price).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} BYN / ${unit}`;
+  if (pi.currency === 'RUB') priceStr = `${parseFloat(pi.origPrice).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽ / ${unit} (≈ ${parseFloat(pi.price).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} BYN)`;
+  return `Цена: ${priceStr}` + (sum > 0 ? ` · Сумма: ${sum.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} BYN` : '');
 }
 
 const planTotalSum = computed(() => {
@@ -921,9 +956,7 @@ function onUnitChange(e) {
 }
 
 // ─── Validation (#7 fix — uses inputUnit.value which is already updated) ──
-let _vTimer = null;
-let _validationCache = null;
-let _appliedAnalogs = new Map(); // SKU товара → Set<SKU применённых аналогов>
+// _validationCache объявлена раньше (используется в watch с immediate)
 let _validationGen = 0;
 function triggerValidation() { clearTimeout(_vTimer); _validationGen++; _vTimer = setTimeout(runValidation, 300); }
 async function runValidation() {
@@ -1172,9 +1205,8 @@ async function exportExcel() {
   const XLSX = await import('xlsx-js-style');
   const headers = periodHeaders.value;
   const le = orderStore.settings.legalEntity;
-  const colTotal = 2 + headers.length;       // индекс колонки «Итого»
-  const colPallets = colTotal + 1;             // индекс колонки «Паллеты»
-  const totalCols = colPallets + 1;            // всего колонок
+  const colTotal = 2 + headers.length;          // индекс колонки «Итого»
+  const totalCols = colTotal + 1;               // всего колонок
 
   // Палитра
   const brown = '502314';
@@ -1276,10 +1308,10 @@ async function exportExcel() {
   setCell(ws, r, 1, 'Наименование', sHeaderLeft);
   headers.forEach((h, c) => setCell(ws, r, c + 2, h.label, sHeader));
   setCell(ws, r, colTotal, 'Итого', sHeaderSummary);
-  setCell(ws, r, colPallets, 'Паллеты', sHeaderSummary);
   r++;
 
   // Данные
+  const hasPlanPrices = Object.keys(planPriceMap.value).length > 0;
   itemsWithPlan.value.forEach((item, idx) => {
     const stripe = idx % 2 === 1;
     setCell(ws, r, 0, item.sku || '', sCell(stripe));
@@ -1302,19 +1334,6 @@ async function exportExcel() {
     } else {
       setCell(ws, r, colTotal, '—', sSummaryVal(stripe, false));
     }
-    // Паллеты (через физические = учётные / кратность)
-    const bpp = item.boxesPerPallet || 0;
-    if (bpp > 0 && tBoxes > 0) {
-      const physBoxes = Math.ceil(tBoxes / itemMult);
-      const pallets = Math.floor(physBoxes / bpp);
-      const remainder = physBoxes % bpp;
-      const parts = [];
-      if (pallets > 0) parts.push(`${pallets} пал`);
-      if (remainder > 0) parts.push(`${remainder} кор`);
-      setCell(ws, r, colPallets, parts.join(' + '), sSummaryVal(stripe, true));
-    } else {
-      setCell(ws, r, colPallets, bpp ? '—' : '', sSummaryVal(stripe, false));
-    }
     r++;
   });
 
@@ -1328,35 +1347,40 @@ async function exportExcel() {
   const grandTotalBoxes = itemsWithPlan.value.reduce((s, i) => s + itemTotalBoxes(i), 0);
   const grandTotalUnits = itemsWithPlan.value.reduce((s, i) => s + itemTotalUnits(i), 0);
   setCell(ws, r, colTotal, grandTotalBoxes > 0 ? `${nf.format(grandTotalBoxes)} кор (${nf.format(grandTotalUnits)} шт)` : '—', sTotalSummary);
-  setCell(ws, r, colPallets, '', sTotalSummary);
   r++;
 
-  // Итого паллет
-  setCell(ws, r, 0, '', sTotalEmpty);
-  setCell(ws, r, 1, 'ИТОГО пал:', sTotalLabel);
-  let grandPallets = 0;
-  headers.forEach((_, m) => {
-    let periodPal = 0;
-    itemsWithPlan.value.forEach(item => {
-      const bpp = item.boxesPerPallet || 0;
-      const boxes = item.plan[m]?.orderBoxes || 0;
-      const itemMult = item.multiplicity || 1;
-      // Паллеты через физические = учётные / кратность
-      if (bpp > 0 && boxes > 0) periodPal += Math.floor(Math.ceil(boxes / itemMult) / bpp);
+  // Итого сумма BYN (если есть цены)
+  if (hasPlanPrices) {
+    setCell(ws, r, 0, '', sTotalEmpty);
+    setCell(ws, r, 1, 'Сумма, BYN:', sTotalLabel);
+    let grandSum = 0;
+    headers.forEach((_, m) => {
+      let periodSum = 0;
+      itemsWithPlan.value.forEach(item => {
+        const pi = planPriceMap.value[item.sku];
+        if (!pi) return;
+        const boxes = item.plan[m]?.orderBoxes || 0;
+        if (!boxes) return;
+        const mult = item.multiplicity || 1;
+        const physBoxes = Math.ceil(boxes / mult);
+        const units = item.plan[m]?.orderUnits || 0;
+        if (pi.unit_type === 'box') periodSum += physBoxes * pi.price;
+        else if (pi.unit_type === 'thousand') periodSum += units * pi.price / 1000;
+        else periodSum += units * pi.price;
+      });
+      grandSum += periodSum;
+      setCell(ws, r, m + 2, periodSum > 0 ? periodSum : '—', periodSum > 0 ? { ...sTotalVal, numFmt: '#,##0.00' } : sTotalVal);
     });
-    grandPallets += periodPal;
-    setCell(ws, r, m + 2, periodPal > 0 ? `${periodPal} пал` : '—', sTotalVal);
-  });
-  setCell(ws, r, colTotal, grandPallets > 0 ? `${grandPallets} пал` : '—', sTotalSummary);
-  setCell(ws, r, colPallets, '', sTotalSummary);
-  r++;
+    setCell(ws, r, colTotal, grandSum > 0 ? grandSum : '', grandSum > 0 ? { ...sTotalSummary, numFmt: '#,##0.00' } : sTotalSummary);
+    r++;
+  }
 
   // Настройки листа
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: totalCols - 1 } });
   ws['!cols'] = [
     { wch: 14 }, { wch: 42 },
     ...headers.map(() => ({ wch: 22 })),
-    { wch: 24 }, { wch: 32 },
+    { wch: 24 },
   ];
   ws['!rows'] = [{ hpt: 24 }];
   ws['!merges'] = [
@@ -1587,6 +1611,7 @@ async function loadPlanFromHistory(planId) {
   undoStack.value = []; redoStack.value = [];
   items.value.forEach((_, idx) => recalcItem(idx, 0));
   triggerValidation();
+  loadPlanPrices();
   toast.success('План загружен', `${plan.supplier} — ${items.value.length} позиций`);
 }
 
@@ -1622,7 +1647,7 @@ onMounted(async () => {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
       const ok = await confirmAction('Восстановить черновик?', `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`);
-      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); toast.info('Черновик загружен', ''); } }
+      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); loadPlanPrices(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }
@@ -1696,6 +1721,7 @@ watch(() => route.query.planId, async (newId) => {
 .plan-td-total.plan-has-value { background: rgba(245,166,35,0.08); }
 .plan-total-boxes { display: block; font-weight: 700; font-size: 13px; color: var(--bk-brown); }
 .plan-total-units { display: block; font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+.plan-total-price { display: block; font-size: 10px; color: #1B5E20; margin-top: 1px; }
 .consumption-warning { color: #d32f2f !important; font-weight: 700 !important; border-color: #d32f2f !important; background: #ffebee !important; }
 
 /* Колонка запаса (дней) */

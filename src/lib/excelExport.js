@@ -79,8 +79,7 @@ export async function exportToExcel(items, settings, priceMap) {
   setCell(ws, r, 1, 'Заказ', sHeader);
   setCell(ws, r, 2, 'Паллеты', sHeader);
   if (hasPrices) {
-    setCell(ws, r, 3, 'Цена', sHeader);
-    setCell(ws, r, 4, 'Сумма', sHeader);
+    setCell(ws, r, 3, 'Сумма, BYN', sHeader);
   }
   r++;
 
@@ -95,10 +94,10 @@ export async function exportToExcel(items, settings, priceMap) {
     const mult = getMultiplicity(item);
     // qty_boxes теперь в учётных коробках
     const accountingBoxes = settings.unit === 'boxes'
-      ? Math.ceil(item.finalOrder)
+      ? item.finalOrder
       : Math.ceil(item.finalOrder / qpb);
     const physBoxes = Math.ceil(accountingBoxes / mult);
-    const pieces = accountingBoxes * qpb;
+    const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
     const unit = item.unitOfMeasure || 'шт';
     const nameWithSku = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
     const stripe = count % 2 === 1;
@@ -111,25 +110,21 @@ export async function exportToExcel(items, settings, priceMap) {
     if (bpp > 0 && pallets > 0) {
       setCell(ws, r, 2, `${pallets} пал${boxesLeft ? ' + ' + boxesLeft + ' кор' : ''}`, sOrder(stripe));
     } else if (bpp > 0) {
-      setCell(ws, r, 2, `${physBoxes} кор`, sCell(stripe));
+      setCell(ws, r, 2, `${physBoxes} кор`, sOrder(stripe));
     } else {
-      setCell(ws, r, 2, '—', sCell(stripe));
+      setCell(ws, r, 2, '—', sOrder(stripe));
     }
     if (hasPrices) {
       const pi = priceMap[item.sku];
       if (pi) {
         const price = parseFloat(pi.price);
-        const unitLabels = { box: '/кор', piece: '/шт', thousand: '/тыс', kg: '/кг', liter: '/л' };
-        const unitLabel = unitLabels[pi.unit_type] || '/шт';
         let lineSum = 0;
         if (pi.unit_type === 'box') lineSum = price * physBoxes;
         else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
         else lineSum = price * pieces;
-        setCell(ws, r, 3, `${price.toLocaleString('ru-RU', { minimumFractionDigits: 2 })}${unitLabel}`, sCell(stripe));
-        setCell(ws, r, 4, lineSum, { ...sOrder(stripe), numFmt: '#,##0.00' });
+        setCell(ws, r, 3, lineSum, { ...sOrder(stripe), numFmt: '#,##0.00' });
       } else {
         setCell(ws, r, 3, '—', sCell(stripe));
-        setCell(ws, r, 4, '—', sCell(stripe));
       }
     }
     totalBoxes += physBoxes;
@@ -155,24 +150,23 @@ export async function exportToExcel(items, settings, priceMap) {
         const pi = priceMap[item.sku];
         if (!pi) return;
         const qpb_ = getQpb(item); const mult_ = getMultiplicity(item);
-        const ab = settings.unit === 'boxes' ? Math.ceil(item.finalOrder) : Math.ceil(item.finalOrder / qpb_);
+        const ab = settings.unit === 'boxes' ? item.finalOrder : Math.ceil(item.finalOrder / qpb_);
         const pb = Math.ceil(ab / mult_);
-        const pc = ab * qpb_;
+        const pc = settings.unit === 'pieces' ? item.finalOrder : ab * qpb_;
         const pr = parseFloat(pi.price);
         if (pi.unit_type === 'box') totalSum += pr * pb;
         else if (pi.unit_type === 'thousand') totalSum += pr * pc / 1000;
         else totalSum += pr * pc;
       });
-      setCell(ws, r, 3, '', sTotalLabel);
-      setCell(ws, r, 4, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
+      setCell(ws, r, 3, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
     }
     r++;
   }
 
   // Диапазон, ширины, мержи
-  const lastCol = hasPrices ? 4 : 2;
+  const lastCol = hasPrices ? 3 : 2;
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: lastCol } });
-  ws['!cols'] = hasPrices ? [{ wch: 55 }, { wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 14 }] : [{ wch: 55 }, { wch: 24 }, { wch: 18 }];
+  ws['!cols'] = hasPrices ? [{ wch: 55 }, { wch: 24 }, { wch: 18 }, { wch: 16 }] : [{ wch: 55 }, { wch: 24 }, { wch: 18 }];
   ws['!rows'] = [{ hpt: 24 }];
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },

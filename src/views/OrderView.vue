@@ -196,7 +196,7 @@
             </div>
             <div v-if="orderResultTotalSum > 0" class="or-card or-card-accent">
               <span class="or-card-label">Сумма</span>
-              <span class="or-card-value">{{ orderResultTotalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} &#8381;</span>
+              <span class="or-card-value">{{ orderResultTotalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</span>
             </div>
           </div>
           <!-- Result table -->
@@ -466,7 +466,7 @@ onBeforeRouteLeave(async () => {
   }
   // Снимаем блокировку редактирования при уходе (после подтверждения)
   if (orderStore.editingOrderId) {
-    db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '' }).catch(() => {});
+    db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '', order_id: orderStore.editingOrderId }).catch(() => {});
   }
 });
 
@@ -583,6 +583,7 @@ function onUnitChange(e) {
         item._stockPcs = item.stock;
         item._transitPcs = item.transit;
         item._cpPcs = item.consumptionPeriod;
+        item._finalOrderPcs = item.finalOrder;
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
         item.stock   = item.stock   ? Math.round(item.stock   / qpb * 100) / 100 : 0;
         item.transit = item.transit ? Math.round(item.transit / qpb * 100) / 100 : 0;
@@ -592,8 +593,8 @@ function onUnitChange(e) {
         item.consumptionPeriod = item._cpPcs ?? Math.round(item.consumptionPeriod * qpb);
         item.stock   = item._stockPcs ?? Math.round(item.stock * qpb);
         item.transit = item._transitPcs ?? Math.round(item.transit * qpb);
-        item.finalOrder = Math.round(item.finalOrder * qpb);
-        delete item._stockPcs; delete item._transitPcs; delete item._cpPcs;
+        item.finalOrder = item._finalOrderPcs ?? Math.round(item.finalOrder * qpb);
+        delete item._stockPcs; delete item._transitPcs; delete item._cpPcs; delete item._finalOrderPcs;
       }
     });
   }
@@ -727,12 +728,15 @@ async function onCdaModeChange(e) {
 }
 
 // ─── Загрузка цен ────────────────────────────────────────────────────────────
+let _loadPricesGen = 0;
 async function loadPrices() {
   const le = orderStore.settings.legalEntity;
   const supplier = orderStore.settings.supplier;
   if (!le || !supplier) { priceMap.value = {}; return; }
+  const gen = ++_loadPricesGen;
   try {
     const { data } = await db.rpc('get_current_prices', { legal_entity: le, supplier });
+    if (gen !== _loadPricesGen) return; // устаревший запрос
     const map = {};
     if (data) {
       const prices = data.prices || data;
@@ -740,12 +744,14 @@ async function loadPrices() {
       for (const p of prices) {
         let price = parseFloat(p.price);
         if (isNaN(price) || price <= 0) continue;
-        if (p.currency === 'RUB') price = +(price * rate).toFixed(2);
-        map[p.sku] = { price, unit_type: p.unit_type };
+        const origPrice = price;
+        const currency = p.currency || 'BYN';
+        if (currency === 'RUB') price = +(price * rate).toFixed(2);
+        map[p.sku] = { price, unit_type: p.unit_type, currency, origPrice };
       }
     }
     priceMap.value = map;
-  } catch { priceMap.value = {}; }
+  } catch { if (gen === _loadPricesGen) priceMap.value = {}; }
 }
 
 // ─── Загрузить из 1С ──────────────────────────────────────────────────────────
@@ -908,7 +914,7 @@ function getLineSum(l) {
   if (pi.unit_type === 'box') sum = l.boxes * pi.price;
   else if (pi.unit_type === 'thousand') sum = l.pieces * pi.price / 1000;
   else sum = l.pieces * pi.price;
-  return sum > 0 ? sum.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—';
+  return sum > 0 ? sum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 }
 
 // ─── Share ────────────────────────────────────────────────────────────────────

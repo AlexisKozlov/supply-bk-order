@@ -146,7 +146,7 @@
 
     <!-- Сумма (цена × заказ) -->
     <td v-if="hasPrices" class="price-col" :title="priceTooltip">
-      <span v-if="rowSum > 0" class="row-sum">{{ rowSumDisplay }}</span>
+      <span v-if="rowSum > 0" class="row-sum">{{ rowSumDisplay }}<span v-if="priceInfo?.currency === 'RUB'" class="currency-badge rub">₽</span></span>
       <span v-else-if="priceInfo" class="row-sum row-sum-zero">—</span>
       <span v-else class="row-sum row-sum-none"></span>
     </td>
@@ -572,7 +572,8 @@ const rowSum = computed(() => {
   const ut = props.priceInfo.unit_type;
   const isBoxes = props.settings.unit === 'boxes';
   // Привести к нужным единицам для расчёта
-  const physBoxes = isBoxes ? fo : Math.ceil(fo / qpb.value);
+  const accountingBoxes = isBoxes ? fo : Math.ceil(fo / qpb.value);
+  const physBoxes = Math.ceil(accountingBoxes / mult.value);
   const pieces = isBoxes ? fo * qpb.value : fo;
   if (ut === 'box') return physBoxes * props.priceInfo.price;
   if (ut === 'thousand') return pieces * props.priceInfo.price / 1000;
@@ -580,14 +581,20 @@ const rowSum = computed(() => {
 });
 const rowSumDisplay = computed(() => {
   if (!rowSum.value) return '';
-  return rowSum.value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return rowSum.value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 });
 const priceTooltip = computed(() => {
   if (!props.priceInfo) return 'Цена не задана';
   const p = parseFloat(props.priceInfo.price);
   const units = { box: 'кор', piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter: 'л' };
   const unit = units[props.priceInfo.unit_type] || 'шт';
-  return `Цена: ${p.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} / ${unit}`;
+  const cur = props.priceInfo.currency || 'BYN';
+  const curSign = cur === 'RUB' ? '₽' : 'BYN';
+  if (cur === 'RUB') {
+    const orig = parseFloat(props.priceInfo.origPrice);
+    return `Цена: ${orig.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽ / ${unit} (≈ ${p.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} BYN)`;
+  }
+  return `Цена: ${p.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ${curSign} / ${unit}`;
 });
 
 // ─── Дефицит до поставки (объединённый computed) ─────────────────────────────

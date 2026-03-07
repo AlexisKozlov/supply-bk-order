@@ -1294,6 +1294,8 @@ td.plan-td-result:hover {
 .row-sum { font-family: monospace; font-size: 12px; color: var(--text); }
 .row-sum-zero { color: var(--text-muted); }
 .row-sum-none { }
+.currency-badge { display: inline-block; font-size: 10px; font-family: sans-serif; margin-left: 2px; padding: 0 3px; border-radius: 3px; vertical-align: middle; line-height: 16px; }
+.currency-badge.rub { background: #E3F2FD; color: #1565C0; }
 .total-sum { color: #1B5E20; }
 
 /* ─── Add product row ─── */
