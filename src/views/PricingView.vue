@@ -276,6 +276,8 @@
         </div>
       </div>
     </div>
+    <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
+      @confirm="onConfirm" @cancel="onCancel" />
   </div>
 </template>
 
@@ -289,6 +291,10 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import { useConfirm } from '@/composables/useConfirm.js';
+
+const { confirmModal, confirm, onConfirm, onCancel } = useConfirm();
 
 const orderStore = useOrderStore();
 const userStore = useUserStore();
@@ -539,7 +545,7 @@ async function savePrice() {
 }
 
 async function deletePrice(p) {
-  if (!confirm(`Удалить цену для ${p.sku}?`)) return;
+  if (!await confirm('Удалить цену?', `Удалить цену для ${p.sku}?`)) return;
   const { error } = await db.rpc('delete_price', { id: p.id });
   if (error) { toast.error('Ошибка', error); return; }
   toast.success('Удалено');
@@ -640,7 +646,7 @@ async function uploadPscFile(agreementId, file) {
 }
 
 async function approveAgreement(a) {
-  if (!confirm(`Согласовать протокол ${a.number}? Предыдущий активный протокол для этого поставщика будет заархивирован.`)) return;
+  if (!await confirm('Согласовать протокол?', `Согласовать «${a.number}»? Предыдущий активный протокол для этого поставщика будет заархивирован.`)) return;
   const { error } = await db.rpc('approve_agreement', { id: a.id });
   if (error) { toast.error('Ошибка', error); return; }
   toast.success('Протокол согласован');
@@ -648,7 +654,7 @@ async function approveAgreement(a) {
 }
 
 async function deleteAgreement(a) {
-  if (!confirm(`Удалить протокол ${a.number}?`)) return;
+  if (!await confirm('Удалить протокол?', `Удалить протокол «${a.number}»?`)) return;
   const { error } = await db.from('price_agreements').delete().eq('id', a.id);
   if (error) { toast.error('Ошибка', error); return; }
   toast.success('Удалено');
