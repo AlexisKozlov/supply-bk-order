@@ -180,10 +180,11 @@
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
               <div v-if="item.plan[m]?.daysRemaining > 0" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
             </td>
-            <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }">
+            <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }" :title="planItemPriceTooltip(item)">
               <template v-if="itemTotalBoxes(item) > 0">
                 <span class="plan-total-boxes">{{ nf.format(itemTotalBoxes(item)) }} кор</span>
                 <span class="plan-total-units">{{ (item.multiplicity || 1) > 1 ? nf.format(Math.ceil(itemTotalBoxes(item) / item.multiplicity)) + ' физ · ' : '' }}{{ nf.format(itemTotalUnits(item)) }} {{ item.unitOfMeasure || 'шт' }}</span>
+                <span v-if="planItemSum(item) > 0" class="plan-total-price">{{ planItemSum(item).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) }} &#8381;</span>
               </template>
               <span v-else class="plan-result-zero">—</span>
             </td>
@@ -199,6 +200,12 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Итого по ценам -->
+    <div v-if="Object.keys(planPriceMap).length && planTotalSum > 0" class="plan-price-summary">
+      Примерная стоимость заказов: <b>{{ planTotalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} &#8381;</b>
+      <span style="color:var(--text-muted);font-size:11px;margin-left:8px;">({{ planPricedCount }} из {{ planTotalCount }} позиций с ценой)</span>
     </div>
 
     <!-- Мобильный карточный вид планирования -->
@@ -842,6 +849,51 @@ function itemTotalUnits(item) { return item.plan.reduce((s, p) => s + (p.orderUn
 function periodTotalBoxes(m) { return items.value.reduce((s, i) => s + (i.plan[m]?.orderBoxes || 0), 0); }
 const itemsWithPlan = computed(() => items.value.filter(i => i.plan.some(p => p.orderBoxes > 0)));
 
+// ─── Цены ─────────────────────────────────────────────────────────────────────
+const planPriceMap = ref({}); // sku -> {price, unit_type}
+
+async function loadPlanPrices() {
+  const le = orderStore.settings.legalEntity;
+  const sup = supplier.value;
+  if (!le || !sup) { planPriceMap.value = {}; return; }
+  try {
+    const { data } = await db.rpc('get_current_prices', { legal_entity: le, supplier: sup });
+    const map = {};
+    if (data) for (const p of data) map[p.sku] = { price: parseFloat(p.price), unit_type: p.unit_type };
+    planPriceMap.value = map;
+  } catch { planPriceMap.value = {}; }
+}
+
+function planItemSum(item) {
+  const pi = planPriceMap.value[item.sku];
+  if (!pi) return 0;
+  const totalBoxes = itemTotalBoxes(item);
+  if (!totalBoxes) return 0;
+  if (pi.unit_type === 'box') return totalBoxes * pi.price;
+  return itemTotalUnits(item) * pi.price;
+}
+
+function planItemPriceTooltip(item) {
+  const pi = planPriceMap.value[item.sku];
+  if (!pi) return '';
+  const sum = planItemSum(item);
+  const unit = pi.unit_type === 'box' ? 'кор' : 'шт';
+  return `Цена: ${parseFloat(pi.price).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} / ${unit}` + (sum > 0 ? ` · Сумма: ${sum.toLocaleString('ru-RU', { minimumFractionDigits: 0 })} \u20BD` : '');
+}
+
+const planTotalSum = computed(() => {
+  if (!Object.keys(planPriceMap.value).length) return 0;
+  return items.value.reduce((s, item) => s + planItemSum(item), 0);
+});
+
+const planPricedCount = computed(() => {
+  return items.value.filter(i => planPriceMap.value[i.sku] && itemTotalBoxes(i) > 0).length;
+});
+
+const planTotalCount = computed(() => {
+  return items.value.filter(i => itemTotalBoxes(i) > 0).length;
+});
+
 // ─── Unit change (#7 fix — clear cache before converting) ─────────────────
 function onUnitChange(e) {
   const newUnit = e.target.value;
@@ -1342,6 +1394,7 @@ async function loadProducts() {
     editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null;
     undoStack.value = []; redoStack.value = [];
     recalcAll(); triggerValidation(); _savePlanDraft();
+    loadPlanPrices();
   } finally { suppLoading.value = false; }
 }
 

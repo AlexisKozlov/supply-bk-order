@@ -17,6 +17,7 @@
           </th>
           <th>Хватит до<br><small>(после поставки)</small></th>
           <th>Паллеты</th>
+          <th v-if="hasPrices" class="price-col">Сумма</th>
           <th style="width:32px;"></th>
         </tr>
         <tr v-else>
@@ -31,6 +32,7 @@
           <th>{{ settings.unit === 'boxes' ? 'Уч/Физ' : 'Шт/Физ' }}</th>
           <th>До</th>
           <th>Пал.</th>
+          <th v-if="hasPrices" class="price-col">Сум.</th>
           <th style="width:24px;"></th>
         </tr>
       </thead>
@@ -55,6 +57,8 @@
             :adu-value="props.aduMap.get(orderStore.items[index]?.sku)?.adu || 0"
             :cda-mode="props.cdaMode"
             :cda-params="props.cdaMode ? getCdaParams(orderStore.items[index]) : null"
+            :price-info="props.priceMap[orderStore.items[index]?.sku] || null"
+            :has-prices="hasPrices"
             :ref="el => { if (el) rowRefs[index] = el; }"
             @remove="orderStore.removeItem($event); draftStore.save();"
             @edit-product="$emit('edit-product', $event)"
@@ -86,6 +90,9 @@
           + {{ orderStore.finalSummary.boxesLeft }} кор.
         </template>
       </span>
+      <span v-if="hasPrices && totalOrderSum > 0" class="total-sum">
+        · Сумма: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} &#8381;</b>
+      </span>
     </div>
   </div>
 </template>
@@ -109,6 +116,7 @@ const props = defineProps({
   cdaSupplierDoc: { type: Number, default: 0 },
   cdaSafetyCoef: { type: Number, default: 1.0 },
   filterQuery: { type: String, default: '' },
+  priceMap: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(['edit-product']);
@@ -116,6 +124,26 @@ const emit = defineEmits(['edit-product']);
 const orderStore = useOrderStore();
 const draftStore = useDraftStore();
 const settings = computed(() => orderStore.settings);
+
+// ─── Цены ─────────────────────────────────────────────────────────────────
+const hasPrices = computed(() => Object.keys(props.priceMap).length > 0);
+
+const totalOrderSum = computed(() => {
+  if (!hasPrices.value) return 0;
+  let sum = 0;
+  for (const item of orderStore.items) {
+    const pi = props.priceMap[item.sku];
+    if (!pi || !item.finalOrder) continue;
+    const qpb = getQpb(item);
+    const boxes = item.finalOrder;
+    if (pi.unit_type === 'box') {
+      sum += boxes * pi.price;
+    } else {
+      sum += boxes * qpb * pi.price;
+    }
+  }
+  return sum;
+});
 
 // ─── Фильтрация ───────────────────────────────────────────────────────────
 const filteredIndices = computed(() => {
@@ -167,6 +195,7 @@ const colSpan = computed(() => {
   let c = 9; // базовые колонки (включая запас)
   if (settings.value.hasTransit) c++;
   if (props.cdaMode) c++;
+  if (hasPrices.value) c++;
   return c;
 });
 

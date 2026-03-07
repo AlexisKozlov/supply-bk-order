@@ -125,6 +125,7 @@
         :cda-supplier-doc="currentSupplierDoc || 7"
         :cda-safety-coef="orderStore.settings.safetyCoef"
         :filter-query="filterQuery"
+        :price-map="priceMap"
         @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
@@ -193,12 +194,16 @@
               <span class="or-card-label">Позиций</span>
               <span class="or-card-value">{{ orderResultModal.lines?.length || 0 }}</span>
             </div>
+            <div v-if="orderResultTotalSum > 0" class="or-card or-card-accent">
+              <span class="or-card-label">Сумма</span>
+              <span class="or-card-value">{{ orderResultTotalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} &#8381;</span>
+            </div>
           </div>
           <!-- Result table -->
           <div class="or-table-wrap">
             <table class="or-table">
               <thead>
-                <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
+                <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th><th v-if="orderResultTotalSum > 0">Сумма</th></tr>
               </thead>
               <tbody>
                 <tr v-for="(l, idx) in orderResultModal.lines" :key="l.sku || idx">
@@ -207,6 +212,7 @@
                   <td class="or-name">{{ l.name }}</td>
                   <td class="or-qty">{{ l.boxes }}</td>
                   <td class="or-qty">{{ nf.format(l.pieces) }}</td>
+                  <td v-if="orderResultTotalSum > 0" class="or-qty">{{ getLineSum(l) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -266,6 +272,7 @@ const savingOrder           = ref(false);
 const fillLoading           = ref(false);
 const aduLoading            = ref(false);
 const aduMap                = ref(new Map());
+const priceMap              = ref({}); // sku -> {price, unit_type}
 const load1cLoading         = ref(false);
 const importLoading         = ref(false);
 const filterQuery           = ref('');
@@ -430,6 +437,8 @@ onMounted(async () => {
   }
   document.addEventListener('click', closeShareDropdown);
   draftTickTimer = setInterval(() => { draftTick.value++; }, 30000);
+  // Загрузить цены, если поставщик уже выбран
+  if (orderStore.settings.supplier) loadPrices();
 });
 
 function hasUnsavedData() {
@@ -542,6 +551,7 @@ async function onSupplierChange(e) {
     }
     draftStore.save();
     orderVisible.value = true;
+    loadPrices();
   } catch { toast.error('Ошибка', 'Не удалось загрузить товары'); }
   finally { supplierLoading.value = false; }
 }
@@ -710,6 +720,21 @@ async function onCdaModeChange(e) {
   draftStore.save();
 }
 
+// ─── Загрузка цен ────────────────────────────────────────────────────────────
+async function loadPrices() {
+  const le = orderStore.settings.legalEntity;
+  const supplier = orderStore.settings.supplier;
+  if (!le || !supplier) { priceMap.value = {}; return; }
+  try {
+    const { data } = await db.rpc('get_current_prices', { legal_entity: le, supplier });
+    const map = {};
+    if (data) {
+      for (const p of data) map[p.sku] = { price: parseFloat(p.price), unit_type: p.unit_type };
+    }
+    priceMap.value = map;
+  } catch { priceMap.value = {}; }
+}
+
 // ─── Загрузить из 1С ──────────────────────────────────────────────────────────
 async function loadFrom1c() {
   if (!orderStore.items.length) { toast.error('Нет товаров', 'Сначала добавьте товары'); return; }
@@ -849,6 +874,26 @@ function showOrderResult() {
   orderResultModal.value = { show: true, text, supplier, deliveryDate, lines };
 }
 
+const orderResultTotalSum = computed(() => {
+  const lines = orderResultModal.value.lines;
+  if (!lines?.length || !Object.keys(priceMap.value).length) return 0;
+  let sum = 0;
+  for (const l of lines) {
+    const pi = priceMap.value[l.sku];
+    if (!pi) continue;
+    if (pi.unit_type === 'box') sum += l.boxes * pi.price;
+    else sum += l.pieces * pi.price;
+  }
+  return sum;
+});
+
+function getLineSum(l) {
+  const pi = priceMap.value[l.sku];
+  if (!pi) return '—';
+  const sum = pi.unit_type === 'box' ? l.boxes * pi.price : l.pieces * pi.price;
+  return sum > 0 ? sum.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—';
+}
+
 // ─── Share ────────────────────────────────────────────────────────────────────
 async function share(channel) {
   showShareDropdown.value = false;
@@ -949,7 +994,7 @@ function onAnalogSkip() {
 async function exportExcel() {
   if (!itemsWithOrderCount.value) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
   const { exportToExcel } = await import('@/lib/excelExport.js');
-  exportToExcel(orderStore.items, orderStore.settings);
+  exportToExcel(orderStore.items, orderStore.settings, priceMap.value);
 }
 
 // ─── Очистить ─────────────────────────────────────────────────────────────────

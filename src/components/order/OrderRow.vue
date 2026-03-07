@@ -144,6 +144,13 @@
       <button class="btn small round-to-pallet" @click="roundToPallet">Округлить</button>
     </td>
 
+    <!-- Сумма (цена × заказ) -->
+    <td v-if="hasPrices" class="price-col" :title="priceTooltip">
+      <span v-if="rowSum > 0" class="row-sum">{{ rowSumDisplay }}</span>
+      <span v-else-if="priceInfo" class="row-sum row-sum-zero">—</span>
+      <span v-else class="row-sum row-sum-none"></span>
+    </td>
+
     <!-- Удалить -->
     <td class="delete-cell">
       <button class="delete-item-x" title="Удалить" @click="$emit('remove', item.id)"><BkIcon name="close" size="xs"/></button>
@@ -174,6 +181,8 @@ const props = defineProps({
   aduValue: { type: Number, default: 0 },
   cdaMode: { type: Boolean, default: false },
   cdaParams: { type: Object, default: null },
+  priceInfo: { type: Object, default: null },
+  hasPrices: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['remove', 'edit-product', 'drag-start', 'drag-over', 'drop', 'drag-end', 'nav']);
@@ -554,6 +563,24 @@ const palletDisplay = computed(() => {
   const p = calc.value.palletsInfo;
   if (!p) return '-';
   return `${p.pallets} пал. + ${p.boxesLeft} кор.`;
+});
+
+// ─── Цена и сумма ────────────────────────────────────────────────────────────
+const rowSum = computed(() => {
+  if (!props.priceInfo || !props.item.finalOrder) return 0;
+  const boxes = props.item.finalOrder;
+  if (props.priceInfo.unit_type === 'box') return boxes * props.priceInfo.price;
+  return boxes * qpb.value * props.priceInfo.price;
+});
+const rowSumDisplay = computed(() => {
+  if (!rowSum.value) return '';
+  return rowSum.value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+});
+const priceTooltip = computed(() => {
+  if (!props.priceInfo) return 'Цена не задана';
+  const p = parseFloat(props.priceInfo.price);
+  const unit = props.priceInfo.unit_type === 'box' ? 'кор' : 'шт';
+  return `Цена: ${p.toLocaleString('ru-RU', { minimumFractionDigits: 2 })} / ${unit}`;
 });
 
 // ─── Дефицит до поставки (объединённый computed) ─────────────────────────────

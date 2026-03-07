@@ -46,9 +46,9 @@ try {
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','shelf-life'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','shelf-life'=>'edit'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','shelf-life'=>'view'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','shelf-life'=>'full','pricing'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','shelf-life'=>'edit','pricing'=>'edit'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','shelf-life'=>'view','pricing'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
@@ -62,6 +62,7 @@ $TABLE_TO_MODULE = [
     'settings'=>'database','item_order'=>'order',
     'deficit_sessions'=>'order','deficit_results'=>'order','deficit_tokens'=>'order','deficit_restaurant_stock'=>'order',
     'stock_collections'=>'order','stock_collection_products'=>'order','stock_collection_data'=>'order','stock_collection_tokens'=>'order',
+    'price_agreements'=>'pricing','product_prices'=>'pricing',
 ];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
@@ -88,7 +89,7 @@ function checkLegalEntityAccess($sessionUser, $legalEntity) {
 }
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
-$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','delivery_schedule','deficit_sessions','deficit_tokens','stock_collections','restaurants'];
+$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','delivery_schedule','deficit_sessions','deficit_tokens','stock_collections','restaurants','price_agreements','product_prices'];
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
@@ -330,6 +331,79 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
     if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
     $filename = basename($parts[2]);
     $filepath = __DIR__ . '/uploads/acts/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $filepath);
+    finfo_close($finfo);
+    $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $filename) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
+// ═══ UPLOAD PSC FILE ═══
+if ($endpoint === 'upload' && $subpoint === 'psc') {
+    if ($method !== 'POST') respond(['error' => 'Method not allowed'], 405);
+    if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
+    $su = getSessionUser($pdo);
+    if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+    $p = resolvePermissions($su['role'], $su['permissions'] ?? null, $ROLE_TEMPLATES);
+    if (($ACCESS_LEVELS[$p['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+
+    $agreementId = $_POST['agreement_id'] ?? '';
+    if (!$agreementId) respond(['error' => 'agreement_id required'], 400);
+
+    $chk = $pdo->prepare("SELECT id, legal_entity FROM price_agreements WHERE id=?"); $chk->execute([$agreementId]);
+    $ag = $chk->fetch();
+    if (!$ag) respond(['error' => 'Agreement not found'], 404);
+    if (!checkLegalEntityAccess($su, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        respond(['error' => 'Upload failed'], 400);
+    }
+    $file = $_FILES['file'];
+    $maxSize = 10 * 1024 * 1024;
+    if ($file['size'] > $maxSize) respond(['error' => 'Файл слишком большой (макс 10МБ)'], 400);
+
+    $allowedMime = ['application/pdf','image/jpeg','image/png','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    if (!in_array($mime, $allowedMime)) respond(['error' => 'Допустимые форматы: PDF, JPEG, PNG, Excel'], 400);
+
+    $ext = match($mime) {
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+        'application/vnd.ms-excel' => 'xls',
+        default => 'bin',
+    };
+    $filename = 'psc_' . intval($agreementId) . '_' . time() . '.' . $ext;
+    $uploadDir = __DIR__ . '/uploads/psc/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
+    $dest = $uploadDir . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $dest)) respond(['error' => 'Save failed'], 500);
+
+    // Удалить старый файл, если есть
+    $s = $pdo->prepare("SELECT file_path FROM price_agreements WHERE id=?"); $s->execute([$agreementId]);
+    $old = $s->fetchColumn();
+    if ($old && file_exists(__DIR__ . '/' . $old)) unlink(__DIR__ . '/' . $old);
+
+    $path = 'uploads/psc/' . $filename;
+    $origName = mb_substr($file['name'], 0, 255);
+    $pdo->prepare("UPDATE price_agreements SET file_path=?, file_name=? WHERE id=?")->execute([$path, $origName, $agreementId]);
+    respond(['success' => true, 'path' => $path, 'file_name' => $origName]);
+}
+
+// ═══ DOWNLOAD PSC FILE ═══
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'psc' && isset($parts[2])) {
+    if (!checkAuth($pdo)) respond(['error' => 'Unauthorized'], 401);
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/uploads/psc/' . $filename;
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $filepath);
@@ -1291,6 +1365,86 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    // ═══ PRICING: импорт цен, согласование ПСЦ ═══
+    if ($fn === 'import_prices') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $le = $body['legal_entity'] ?? '';
+        $supplier = $body['supplier'] ?? '';
+        $prices = $body['prices'] ?? []; // [{sku, price, unit_type}]
+        $agreementId = $body['agreement_id'] ?? null;
+        if (!$le || !$supplier || empty($prices)) respond(['error' => 'Не указаны обязательные поля'], 400);
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        $imported = 0;
+        try {
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, unit_type, agreement_id, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type=VALUES(unit_type), agreement_id=VALUES(agreement_id), updated_by=VALUES(updated_by), updated_at=NOW()");
+            foreach ($prices as $p) {
+                $sku = trim($p['sku'] ?? '');
+                $price = floatval($p['price'] ?? 0);
+                $unitType = ($p['unit_type'] ?? 'piece') === 'box' ? 'box' : 'piece';
+                if (!$sku || $price < 0) continue;
+                $stmt->execute([$sku, $supplier, $le, $price, $unitType, $agreementId, $caller['name']]);
+                $imported++;
+            }
+            $pdo->commit();
+            respond(['success' => true, 'imported' => $imported]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("import_prices error: " . $e->getMessage());
+            respond(['error' => 'Ошибка импорта'], 500);
+        }
+    }
+
+    if ($fn === 'approve_agreement') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID протокола'], 400);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) respond(['error' => 'Только полный доступ может согласовывать ПСЦ'], 403);
+        $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
+        if (!$ag) respond(['error' => 'Протокол не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if ($ag['status'] === 'active') respond(['error' => 'Протокол уже согласован'], 400);
+        // Архивируем предыдущие активные протоколы для этого поставщика+юрлица
+        $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity=? AND status='active'")->execute([$ag['supplier'], $ag['legal_entity']]);
+        // Активируем текущий
+        $pdo->prepare("UPDATE price_agreements SET status='active', approved_by=?, approved_at=NOW() WHERE id=?")->execute([$caller['name'], $id]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'get_current_prices') {
+        $caller = getSessionUser($pdo);
+        if (!$caller && !checkApiKey($pdo)) respond(['error' => 'Unauthorized'], 401);
+        $le = $body['legal_entity'] ?? ($_GET['legal_entity'] ?? '');
+        if (strpos($le, 'eq.') === 0) $le = substr($le, 3);
+        if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
+        if ($caller && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        $supplier = $body['supplier'] ?? ($_GET['supplier'] ?? '');
+        $sql = "SELECT pp.sku, pp.price, pp.unit_type, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity=?";
+        $params = [$le];
+        if ($supplier) { $sql .= " AND pp.supplier=?"; $params[] = $supplier; }
+        $s = $pdo->prepare($sql); $s->execute($params);
+        respond($s->fetchAll());
+    }
+
+    if ($fn === 'delete_price') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $s = $pdo->prepare("SELECT * FROM product_prices WHERE id=?"); $s->execute([$id]); $row = $s->fetch();
+        if (!$row) respond(['error' => 'Цена не найдена'], 404);
+        if (!checkLegalEntityAccess($caller, $row['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
     respond(['error'=>'Not found'], 404);
 }
 
@@ -1298,7 +1452,7 @@ if ($endpoint === 'rpc') {
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens','price_agreements','product_prices'];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users', 'error_logs', 'api_keys'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
@@ -1395,6 +1549,8 @@ $filterWhitelist = [
     'stock_collection_products' => ['id','collection_id'],
     'stock_collection_data'   => ['id','collection_id','product_id','restaurant_number'],
     'stock_collection_tokens' => ['id','collection_id'],
+    'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','created_by','approved_by','created_at'],
+    'product_prices'   => ['id','sku','supplier','legal_entity','agreement_id','updated_by','updated_at'],
 ];
 
 if ($method === 'GET') {

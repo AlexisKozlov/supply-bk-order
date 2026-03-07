@@ -782,6 +782,19 @@ tbody tr td[colspan] {
   font-size: 15px;
 }
 
+.plan-total-price { display: block; font-size: 10px; color: #388E3C; font-weight: 600; margin-top: 1px; }
+
+.plan-price-summary {
+  padding: 10px 20px;
+  background: #E8F5E9;
+  border: 1px solid #C8E6C9;
+  border-radius: 0 0 var(--radius) var(--radius);
+  border-top: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2E7D32;
+}
+
 /* Hover rows */
 .plan-table tbody tr {
   transition: background 0.1s;
@@ -1275,6 +1288,13 @@ td.plan-td-result:hover {
   font-weight: 600;
   color: var(--green);
 }
+
+/* ─── Price column ─── */
+.price-col { text-align: right; white-space: nowrap; min-width: 60px; }
+.row-sum { font-family: monospace; font-size: 12px; color: var(--text); }
+.row-sum-zero { color: var(--text-muted); }
+.row-sum-none { }
+.total-sum { color: #1B5E20; }
 
 /* ─── Add product row ─── */
 .add-product-row td { border-top: 1px dashed #e0e0e0 !important; background: #fafafa; text-align: left !important; padding: 2px 8px !important; }

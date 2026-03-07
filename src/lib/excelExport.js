@@ -1,6 +1,6 @@
 import { getQpb, getMultiplicity } from './utils.js';
 
-export async function exportToExcel(items, settings) {
+export async function exportToExcel(items, settings, priceMap) {
   const XLSX = await import('xlsx-js-style');
   const nf = new Intl.NumberFormat('ru-RU');
 
@@ -74,9 +74,14 @@ export async function exportToExcel(items, settings) {
   r += 2;
 
   // Шапка таблицы
+  const hasPrices = priceMap && Object.keys(priceMap).length > 0;
   setCell(ws, r, 0, 'Наименование', sHeaderLeft);
   setCell(ws, r, 1, 'Заказ', sHeader);
   setCell(ws, r, 2, 'Паллеты', sHeader);
+  if (hasPrices) {
+    setCell(ws, r, 3, 'Цена', sHeader);
+    setCell(ws, r, 4, 'Сумма', sHeader);
+  }
   r++;
 
   // Данные
@@ -110,6 +115,19 @@ export async function exportToExcel(items, settings) {
     } else {
       setCell(ws, r, 2, '—', sCell(stripe));
     }
+    if (hasPrices) {
+      const pi = priceMap[item.sku];
+      if (pi) {
+        const price = parseFloat(pi.price);
+        const unitLabel = pi.unit_type === 'box' ? '/кор' : '/шт';
+        const lineSum = pi.unit_type === 'box' ? price * physBoxes : price * pieces;
+        setCell(ws, r, 3, `${price.toLocaleString('ru-RU', { minimumFractionDigits: 2 })}${unitLabel}`, sCell(stripe));
+        setCell(ws, r, 4, lineSum, { ...sOrder(stripe), numFmt: '#,##0.00' });
+      } else {
+        setCell(ws, r, 3, '—', sCell(stripe));
+        setCell(ws, r, 4, '—', sCell(stripe));
+      }
+    }
     totalBoxes += physBoxes;
     totalPallets += pallets;
     totalBoxesLeft += boxesLeft;
@@ -125,17 +143,34 @@ export async function exportToExcel(items, settings) {
       ? `${totalPallets} пал${totalBoxesLeft ? ' + ' + totalBoxesLeft + ' кор' : ''}`
       : `${totalBoxes} кор`;
     setCell(ws, r, 2, palletsSummary, sTotalVal);
+    if (hasPrices) {
+      // Подсчитаем итого сумму
+      let totalSum = 0;
+      items.forEach(item => {
+        if (!item.finalOrder || item.finalOrder <= 0) return;
+        const pi = priceMap[item.sku];
+        if (!pi) return;
+        const qpb_ = getQpb(item); const mult_ = getMultiplicity(item);
+        const ab = settings.unit === 'boxes' ? Math.ceil(item.finalOrder) : Math.ceil(item.finalOrder / qpb_);
+        const pb = Math.ceil(ab / mult_);
+        const pc = ab * qpb_;
+        totalSum += pi.unit_type === 'box' ? parseFloat(pi.price) * pb : parseFloat(pi.price) * pc;
+      });
+      setCell(ws, r, 3, '', sTotalLabel);
+      setCell(ws, r, 4, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
+    }
     r++;
   }
 
   // Диапазон, ширины, мержи
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: 2 } });
-  ws['!cols'] = [{ wch: 55 }, { wch: 24 }, { wch: 18 }];
+  const lastCol = hasPrices ? 4 : 2;
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: lastCol } });
+  ws['!cols'] = hasPrices ? [{ wch: 55 }, { wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 14 }] : [{ wch: 55 }, { wch: 24 }, { wch: 18 }];
   ws['!rows'] = [{ hpt: 24 }];
   ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
-    { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
-    { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } },
+    { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: lastCol } },
   ];
 
   const wb = XLSX.utils.book_new();

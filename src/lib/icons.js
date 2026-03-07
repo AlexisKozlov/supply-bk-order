@@ -25,6 +25,8 @@ export const icons = {
 
   modules: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="2" fill="#D62700"/><rect x="13" y="3" width="8" height="8" rx="2" fill="#FF8733"/><rect x="3" y="13" width="8" height="8" rx="2" fill="#FF8733"/><rect x="13" y="13" width="8" height="8" rx="2" fill="#FDBD10"/></svg>`,
 
+  pricing: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><path d="M12 8v8M9.5 10.5c0-1.1.9-2 2.5-2s2.5.9 2.5 2-.9 1.5-2.5 2-2.5 1-2.5 2 .9 2 2.5 2 2.5-.9 2.5-2" stroke="#D62700" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+
   // ─── Actions ───
   save: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.5"/><path d="M8 12l2.5 3L16 9" stroke="#D62300" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 7h16" stroke="#FF8733" stroke-width="1" opacity="0.3"/></svg>`,
 
@@ -161,6 +163,8 @@ export const iconsLight = {
   deficit: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="rgba(255,255,255,0.1)" stroke="#FFB74D" stroke-width="1.3"/><path d="M12 3a9 9 0 010 18" fill="#FFB74D" opacity="0.5"/><path d="M12 3a9 9 0 000 18" fill="rgba(255,255,255,0.08)"/><line x1="12" y1="3" x2="12" y2="21" stroke="rgba(255,255,255,0.4)" stroke-width="1.2"/><path d="M8 9l-3 3 3 3" stroke="#FFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 9l3 3-3 3" stroke="#FFD54F" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 
   home: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/><path d="M3 12l9-8 9 8" stroke="#FFD54F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+
+  pricing: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/><path d="M12 8v8M9.5 10.5c0-1.1.9-2 2.5-2s2.5.9 2.5 2-.9 1.5-2.5 2-2.5 1-2.5 2 .9 2 2.5 2 2.5-.9 2.5-2" stroke="#81C784" stroke-width="1.8" stroke-linecap="round"/></svg>`,
 
   gear: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 005.18 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 8.92a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/></svg>`,
 };
