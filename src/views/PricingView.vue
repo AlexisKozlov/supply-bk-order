@@ -65,7 +65,7 @@
               <th v-if="hasRubPrices" class="col-byn">В BYN</th>
               <th class="col-psc">ПСЦ</th>
               <th class="col-date" @click="toggleSort('updated_at')">Обновлено {{ sortIcon('updated_at') }}</th>
-              <th v-if="!isViewer" class="col-actions"></th>
+              <th class="col-actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -82,11 +82,11 @@
                 <span v-else class="psc-badge psc-manual">Руч.</span>
               </td>
               <td class="col-date text-muted">{{ formatDate(p.updated_at) }}</td>
-              <td v-if="!isViewer" class="col-actions" style="display:flex;gap:2px;justify-content:center;">
+              <td class="col-actions" style="display:flex;gap:2px;justify-content:center;">
                 <button class="db-card-btn" @click.stop="showHistory(p)" title="История цены">
                   <BkIcon name="history" size="sm"/>
                 </button>
-                <button class="db-card-btn db-card-btn-del" @click.stop="deletePrice(p)" title="Удалить">
+                <button v-if="!isViewer" class="db-card-btn db-card-btn-del" @click.stop="deletePrice(p)" title="Удалить">
                   <BkIcon name="delete" size="sm"/>
                 </button>
               </td>
