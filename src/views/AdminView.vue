@@ -67,6 +67,7 @@
           </div>
 
           <div class="adm-user-actions">
+            <button class="adm-act-btn" @click.stop="openPermissions(u)" title="Права"><BkIcon name="key" size="sm"/></button>
             <button class="adm-act-btn" @click.stop="openUserModal(u)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
@@ -705,6 +706,50 @@
       </div>
     </Teleport>
 
+    <!-- ═══ Модалка прав доступа ═══ -->
+    <Teleport to="body">
+      <div v-if="showPermModal" class="modal" @click.self="showPermModal = false">
+        <div class="modal-box" style="max-width:620px;">
+          <div class="modal-header">
+            <h2>Права доступа</h2>
+            <button class="modal-close" @click="showPermModal = false"><BkIcon name="close" size="sm"/></button>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+            {{ permUser?.name }} · роль: {{ permUser?.role }}
+            <span v-if="permUser?.display_role"> ({{ permUser.display_role }})</span>
+          </div>
+
+          <div class="perm-matrix">
+            <div class="perm-row perm-header">
+              <span class="perm-module">Модуль</span>
+              <span class="perm-level">По роли</span>
+              <span class="perm-level">Текущий</span>
+              <span class="perm-level">Изменить</span>
+            </div>
+            <div v-for="m in permModules" :key="m.key" class="perm-row">
+              <span class="perm-module">{{ m.label }}</span>
+              <span class="perm-level perm-base">{{ permLevelLabel(m.base) }}</span>
+              <span class="perm-level" :class="'perm-lvl-' + m.current">{{ permLevelLabel(m.current) }}</span>
+              <select v-model="m.override" class="perm-select" :disabled="permUser?.role === 'admin'">
+                <option value="">По роли</option>
+                <option value="none">Нет</option>
+                <option value="view">Просмотр</option>
+                <option value="edit">Редактирование</option>
+                <option value="full">Полный</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+            <button class="btn secondary" @click="showPermModal = false">Отмена</button>
+            <button class="btn primary" @click="savePermissions" :disabled="savingPerms">
+              {{ savingPerms ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
       @confirm="onConfirmOk"
       @cancel="onConfirmCancel" />
@@ -781,6 +826,69 @@ function getPermissionsDiff() {
   if (!form.value.permissions || Object.keys(form.value.permissions).length === 0) return null;
   return { ...form.value.permissions };
 }
+
+// ═══ Модалка прав доступа ═══
+const showPermModal = ref(false);
+const permUser = ref(null);
+const permModules = ref([]);
+const savingPerms = ref(false);
+
+function permLevelLabel(level) {
+  return { none: '\u2014', view: 'Просмотр', edit: 'Редактир.', full: 'Полный' }[level] || '\u2014';
+}
+
+function openPermissions(user) {
+  permUser.value = user;
+  const role = user.role || 'user';
+  const base = ROLE_TEMPLATES[role] || ROLE_TEMPLATES.user;
+  let overrides = {};
+  try { overrides = typeof user.permissions === 'string' ? JSON.parse(user.permissions || '{}') : (user.permissions || {}); } catch { overrides = {}; }
+
+  permModules.value = Object.keys(MODULE_LABELS).map(key => ({
+    key,
+    label: MODULE_LABELS[key],
+    base: base[key] || 'none',
+    current: overrides[key] || base[key] || 'none',
+    override: overrides[key] || '',
+  }));
+  showPermModal.value = true;
+}
+
+async function savePermissions() {
+  savingPerms.value = true;
+  try {
+    const overrides = {};
+    const role = permUser.value.role || 'user';
+    const base = ROLE_TEMPLATES[role] || ROLE_TEMPLATES.user;
+    for (const m of permModules.value) {
+      if (m.override && m.override !== base[m.key]) {
+        overrides[m.key] = m.override;
+      }
+    }
+    const permsToSend = Object.keys(overrides).length ? overrides : null;
+
+    const { data, error } = await db.rpc('update_user', {
+      caller_name: userStore.currentUser?.name || '',
+      user_id: permUser.value.id,
+      permissions: permsToSend,
+    });
+    if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
+
+    // Обновить локально
+    const idx = users.value.findIndex(u => u.id === permUser.value.id);
+    if (idx >= 0) {
+      users.value[idx].permissions = permsToSend ? JSON.stringify(permsToSend) : null;
+    }
+
+    toast.success('Сохранено', 'Права обновлены');
+    showPermModal.value = false;
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    savingPerms.value = false;
+  }
+}
+
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
 // ═══ Аудит-лог ═══
@@ -2027,4 +2135,18 @@ watch(() => userStore.currentUser?.role, (role) => {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 6px;
 }
+
+/* ═══ Permissions Matrix ═══ */
+.perm-matrix { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.perm-row { display: grid; grid-template-columns: 1fr 90px 90px 120px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.perm-row:last-child { border-bottom: none; }
+.perm-header { background: var(--card); font-weight: 700; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.perm-module { font-weight: 600; }
+.perm-level { text-align: center; font-size: 11px; }
+.perm-base { color: var(--text-muted); }
+.perm-lvl-full { color: #D32F2F; font-weight: 600; }
+.perm-lvl-edit { color: #F57C00; font-weight: 600; }
+.perm-lvl-view { color: #1976D2; }
+.perm-lvl-none { color: var(--text-muted); opacity: 0.5; }
+.perm-select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; font-family: inherit; background: var(--card); }
 </style>
