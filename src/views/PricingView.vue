@@ -62,8 +62,7 @@
         <table class="pricing-table">
           <thead>
             <tr>
-              <th class="col-sku" @click="toggleSort('sku')">Артикул {{ sortIcon('sku') }}</th>
-              <th class="col-name">Название</th>
+              <th class="col-product" @click="toggleSort('sku')">Товар {{ sortIcon('sku') }}</th>
               <th class="col-supplier" @click="toggleSort('supplier')">Поставщик {{ sortIcon('supplier') }}</th>
               <th class="col-price" @click="toggleSort('price')">Цена {{ sortIcon('price') }}</th>
               <th class="col-unit">За</th>
@@ -76,8 +75,10 @@
           </thead>
           <tbody>
             <tr v-for="p in sortedPrices" :key="p.id" @click="!isViewer && editPrice(p)" :style="!isViewer ? 'cursor:pointer' : ''">
-              <td class="col-sku mono" data-label="Артикул">{{ p.sku }}</td>
-              <td class="col-name ellipsis" data-label="Название">{{ productNames[p.sku] || '—' }}</td>
+              <td class="col-product" data-label="Товар">
+                <span class="mono" style="font-weight:600;">{{ p.sku }}</span>
+                <span class="product-name-sub">{{ productNames[p.sku] || '—' }}</span>
+              </td>
               <td class="col-supplier ellipsis" data-label="Поставщик">{{ p.supplier }}</td>
               <td class="col-price mono" data-label="Цена">{{ formatPrice(p.price) }}</td>
               <td class="col-unit" data-label="За">{{ unitLabel(p.unit_type) }}</td>
@@ -106,11 +107,10 @@
           Товары без цены{{ filterSupplier ? ' (' + filterSupplier + ')' : '' }}: {{ noPriceProducts.length }}
         </div>
         <table class="pricing-table" style="font-size:12px;">
-          <thead><tr><th>Артикул</th><th>Название</th><th v-if="!filterSupplier">Поставщик</th><th v-if="!isViewer"></th></tr></thead>
+          <thead><tr><th>Товар</th><th v-if="!filterSupplier">Поставщик</th><th v-if="!isViewer"></th></tr></thead>
           <tbody>
             <tr v-for="np in noPriceProducts" :key="np.sku">
-              <td class="mono">{{ np.sku }}</td>
-              <td>{{ np.name }}</td>
+              <td><span class="mono" style="font-weight:600;">{{ np.sku }}</span> <span class="product-name-sub">{{ np.name }}</span></td>
               <td v-if="!filterSupplier" class="text-muted">{{ np.supplier }}</td>
               <td v-if="!isViewer" style="width:60px;text-align:center;">
                 <button class="btn secondary" style="font-size:10px;padding:2px 8px;" @click="openNewPriceForSku(np)">+ Цена</button>
@@ -1254,8 +1254,8 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .pricing-table td { border-bottom: 1px solid var(--border); }
 .pricing-table tbody tr:hover { background: rgba(245,166,35,0.04); }
 
-.col-sku { width: 80px; }
-.col-name { min-width: 120px; text-align: center !important; }
+.col-product { min-width: 160px; }
+.product-name-sub { display:block; font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:240px; }
 .col-supplier { width: 140px; }
 .col-price { width: 80px; text-align: right !important; }
 .col-unit { width: 36px; }
