@@ -1706,16 +1706,22 @@ if ($endpoint === 'rpc') {
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $le = $body['legal_entity'] ?? '';
         $supplier = $body['supplier'] ?? '';
-        if (!$le || !$supplier) respond(['error' => 'Не указаны обязательные поля'], 400);
+        if (!$le) respond(['error' => 'Не указаны обязательные поля'], 400);
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
-        // Товары поставщика для группы юрлиц, у которых нет цены
+        // Товары для группы юрлиц, у которых нет цены (опционально по поставщику)
+        $params = [];
         if (strpos($le, 'Пицца Стар') !== false) {
-            $sql = "SELECT p.sku, p.name FROM products p WHERE p.supplier=? AND `legal_entity` LIKE ? AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku=p.sku AND pp.supplier=? AND pp.legal_entity=?) ORDER BY p.name";
-            $s = $pdo->prepare($sql); $s->execute([$supplier, '%Пицца Стар%', $supplier, $le]);
+            $sql = "SELECT p.sku, p.name, p.supplier FROM products p WHERE p.legal_entity LIKE ? AND p.is_active = 1";
+            $params[] = '%Пицца Стар%';
         } else {
-            $sql = "SELECT p.sku, p.name FROM products p WHERE p.supplier=? AND (`legal_entity` LIKE ? OR `legal_entity` LIKE ?) AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku=p.sku AND pp.supplier=? AND pp.legal_entity=?) ORDER BY p.name";
-            $s = $pdo->prepare($sql); $s->execute([$supplier, '%Бургер БК%', '%Воглия Матта%', $supplier, $le]);
+            $sql = "SELECT p.sku, p.name, p.supplier FROM products p WHERE (p.legal_entity LIKE ? OR p.legal_entity LIKE ?) AND p.is_active = 1";
+            $params[] = '%Бургер БК%'; $params[] = '%Воглия Матта%';
         }
+        if ($supplier) { $sql .= " AND p.supplier = ?"; $params[] = $supplier; }
+        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = p.sku AND pp.legal_entity = ?)";
+        $params[] = $le;
+        $sql .= " ORDER BY p.supplier, p.name";
+        $s = $pdo->prepare($sql); $s->execute($params);
         respond($s->fetchAll());
     }
 

@@ -49,7 +49,7 @@
         {{ filterSupplier }}
         <button class="pf-supplier-tag-clear" @click="filterSupplier = ''" title="Сбросить">&times;</button>
       </span>
-      <button v-if="activeTab === 'prices' && filterSupplier" class="db-sort-btn" :class="{ active: showNoPriceFilter }" @click="toggleNoPriceFilter" style="margin-left:auto;">
+      <button v-if="activeTab === 'prices'" class="db-sort-btn" :class="{ active: showNoPriceFilter }" @click="toggleNoPriceFilter" style="margin-left:auto;">
         Без цены <span v-if="noPriceProducts.length" class="pf-no-price-count">({{ noPriceProducts.length }})</span>
       </button>
     </div>
@@ -102,13 +102,16 @@
       </div>
       <!-- Товары без цены -->
       <div v-if="showNoPriceFilter && noPriceProducts.length" class="no-price-list">
-        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">Товары без цены ({{ filterSupplier }}):</div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-muted);">
+          Товары без цены{{ filterSupplier ? ' (' + filterSupplier + ')' : '' }}: {{ noPriceProducts.length }}
+        </div>
         <table class="pricing-table" style="font-size:12px;">
-          <thead><tr><th>Артикул</th><th>Название</th><th v-if="!isViewer"></th></tr></thead>
+          <thead><tr><th>Артикул</th><th>Название</th><th v-if="!filterSupplier">Поставщик</th><th v-if="!isViewer"></th></tr></thead>
           <tbody>
             <tr v-for="np in noPriceProducts" :key="np.sku">
               <td class="mono">{{ np.sku }}</td>
               <td>{{ np.name }}</td>
+              <td v-if="!filterSupplier" class="text-muted">{{ np.supplier }}</td>
               <td v-if="!isViewer" style="width:60px;text-align:center;">
                 <button class="btn secondary" style="font-size:10px;padding:2px 8px;" @click="openNewPriceForSku(np)">+ Цена</button>
               </td>
@@ -1144,13 +1147,14 @@ async function toggleNoPriceFilter() {
     noPriceProducts.value = [];
     return;
   }
-  if (!filterSupplier.value) { toast.error('Сначала выберите поставщика'); return; }
   const le = orderStore.settings.legalEntity;
-  const { data, error } = await db.rpc('get_products_without_prices', { legal_entity: le, supplier: filterSupplier.value });
+  const params = { legal_entity: le };
+  if (filterSupplier.value) params.supplier = filterSupplier.value;
+  const { data, error } = await db.rpc('get_products_without_prices', params);
   if (error) { toast.error('Ошибка', error); return; }
   noPriceProducts.value = data || [];
   showNoPriceFilter.value = true;
-  if (!noPriceProducts.value.length) toast.info('Все товары этого поставщика имеют цены');
+  if (!noPriceProducts.value.length) toast.info('У всех товаров есть цены');
 }
 
 // === Подсветка истечения ПСЦ ===
