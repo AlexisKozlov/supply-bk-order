@@ -166,7 +166,6 @@
         <div class="form-group" style="position:relative;">
           <label>Товар</label>
           <input v-model="priceForm.sku" class="form-input" placeholder="Артикул или название..." @input="onSkuInput" @focus="onSkuInput" @blur="hideSkuHintsDelayed" autocomplete="off" />
-          <div v-if="priceForm.sku && skuFoundName" style="font-size:11px;color:#388E3C;margin-top:2px;">{{ skuFoundName }}</div>
           <div v-if="skuHints.length" class="sku-hints">
             <div v-for="h in skuHints" :key="h.sku" class="sku-hint" @mousedown.prevent="selectSkuHint(h)">
               <span class="mono" style="font-weight:600;">{{ h.sku }}</span> <span style="color:var(--text-muted);">{{ h.name }}</span>
@@ -596,15 +595,18 @@ function getAgreementLabel(id) {
 const showPriceModal = ref(false);
 const editingPrice = ref(null);
 const savingPrice = ref(false);
-const priceForm = ref({ sku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null });
+const priceForm = ref({ sku: '', _realSku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null });
 const skuHints = ref([]);
 const supplierProducts = ref([]);
+function getRealSku() {
+  return priceForm.value._realSku || priceForm.value.sku?.split(' — ')[0]?.trim() || '';
+}
 const skuFoundName = computed(() => {
-  const sku = priceForm.value.sku?.trim();
+  const sku = getRealSku();
   return sku ? (productNames.value[sku] || '') : '';
 });
 const priceUnitOptions = computed(() => {
-  const sku = priceForm.value.sku?.trim();
+  const sku = getRealSku();
   const uom = sku ? (productUnits.value[sku] || 'шт') : 'шт';
   return allowedUnitTypes(uom);
 });
@@ -627,6 +629,7 @@ async function searchProducts(q, supplier) {
 
 function onSkuInput() {
   clearTimeout(skuSearchTimer);
+  priceForm.value._realSku = '';
   const q = (priceForm.value.sku || '').trim();
   if (q.length < 2) { skuHints.value = []; return; }
   skuSearchTimer = setTimeout(async () => {
@@ -648,7 +651,8 @@ async function onPriceSupplierChange(keepSku = false) {
   if (data) for (const p of data) productUnits.value[p.sku] = p.unit_of_measure || 'шт';
 }
 function selectSkuHint(h) {
-  priceForm.value.sku = h.sku;
+  priceForm.value.sku = h.name ? `${h.sku} — ${h.name}` : h.sku;
+  priceForm.value._realSku = h.sku;
   skuHints.value = [];
   if (h.name && !productNames.value[h.sku]) productNames.value[h.sku] = h.name;
   if (h.unit_of_measure) productUnits.value[h.sku] = h.unit_of_measure;
@@ -679,7 +683,8 @@ function openNewPrice() {
 }
 function openNewPriceForSku(np) {
   editingPrice.value = null;
-  priceForm.value = { sku: np.sku, supplier: filterSupplier.value, price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
+  const displaySku = np.name ? `${np.sku} — ${np.name}` : np.sku;
+  priceForm.value = { sku: displaySku, _realSku: np.sku, supplier: np.supplier || filterSupplier.value, price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
   skuHints.value = [];
   supplierProducts.value = [];
   showPriceModal.value = true;
@@ -687,7 +692,8 @@ function openNewPriceForSku(np) {
 }
 function editPrice(p) {
   editingPrice.value = p;
-  priceForm.value = { sku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
+  const displaySku = productNames.value[p.sku] ? `${p.sku} — ${productNames.value[p.sku]}` : p.sku;
+  priceForm.value = { sku: displaySku, _realSku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
   skuHints.value = [];
   supplierProducts.value = [];
   showPriceModal.value = true;
@@ -696,9 +702,10 @@ function editPrice(p) {
 
 async function savePrice() {
   if (savingPrice.value) return;
-  const { sku, supplier, price, unit_type, currency, agreement_id } = priceForm.value;
+  const { supplier, price, unit_type, currency, agreement_id } = priceForm.value;
+  const sku = getRealSku();
   if (!sku || !supplier) { toast.error('Ошибка', 'Укажите артикул и поставщика'); return; }
-  if (supplierProducts.value.length && !supplierProducts.value.some(p => p.sku === sku.trim())) {
+  if (supplierProducts.value.length && !supplierProducts.value.some(p => p.sku === sku)) {
     toast.error('Ошибка', 'Этот товар не относится к выбранному поставщику');
     return;
   }
