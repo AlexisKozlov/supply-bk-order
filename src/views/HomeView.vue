@@ -82,25 +82,22 @@
       <button v-if="userStore.isAuthenticated" class="p-footer-btn" @click="showLogoutConfirm = true">Выйти из аккаунта</button>
     </footer>
 
-    <!-- Activity panel -->
-    <Transition name="p-activity-slide">
-      <div v-if="userStore.isAuthenticated && activityItems.length" class="p-activity" :class="{ 'p-activity-collapsed': activityCollapsed }">
-        <div class="p-activity-header" @click="activityCollapsed = !activityCollapsed">
-          <span class="p-activity-title">Активность</span>
-          <span class="p-activity-toggle">{{ activityCollapsed ? '▲' : '▼' }}</span>
-        </div>
-        <div v-if="!activityCollapsed" class="p-activity-list">
-          <div v-for="a in activityItems" :key="a.id" class="p-activity-item">
-            <span class="p-activity-dot" :style="{ background: actionColor(a.action) }"></span>
-            <span class="p-activity-text">
+    <!-- Activity dashboard — right side -->
+    <div v-if="userStore.isAuthenticated && activityItems.length" class="p-dash">
+      <div class="p-dash-title">Активность команды</div>
+      <div class="p-dash-list">
+        <div v-for="a in activityItems" :key="a.id" class="p-dash-item">
+          <span class="p-dash-dot" :style="{ background: actionColor(a.action) }"></span>
+          <div class="p-dash-content">
+            <span class="p-dash-text">
               <b>{{ a.user_name }}</b> {{ actionText(a) }}
-              <span v-if="actionDetail(a)" class="p-activity-detail">{{ actionDetail(a) }}</span>
+              <span v-if="actionDetail(a)" class="p-dash-detail">{{ actionDetail(a) }}</span>
             </span>
-            <span class="p-activity-time">{{ timeAgo(a.created_at) }}</span>
+            <span class="p-dash-time">{{ timeAgo(a.created_at) }}</span>
           </div>
         </div>
       </div>
-    </Transition>
+    </div>
 
     <!-- ═══ LOGIN MODAL ═══ -->
     <Teleport to="body">
@@ -567,28 +564,18 @@ function confirmLogout() {
 .p-greeting h2 em { font-style: normal; color: #FF8733; }
 .p-greeting p { font-size: 12px; color: rgba(245,230,208,.45); margin-top: 6px; font-weight: 500; }
 
-/* Activity panel — right side */
-.p-activity { position: fixed; right: 20px; bottom: 20px; z-index: 50; width: 320px; background: rgba(30,18,10,.85); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 0; box-shadow: 0 8px 32px rgba(0,0,0,.4); transition: all .3s ease; }
-.p-activity-collapsed { width: 160px; }
-.p-activity-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; cursor: pointer; user-select: none; }
-.p-activity-header:hover { background: rgba(255,255,255,.04); border-radius: 14px; }
-.p-activity-title { font-size: 10px; font-weight: 700; color: rgba(245,230,208,.5); text-transform: uppercase; letter-spacing: 1.5px; }
-.p-activity-toggle { font-size: 8px; color: rgba(245,230,208,.3); }
-.p-activity-list { display: flex; flex-direction: column; gap: 4px; padding: 0 14px 12px; max-height: 280px; overflow-y: auto; }
-.p-activity-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(245,230,208,.6); padding: 3px 0; }
-.p-activity-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.p-activity-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p-activity-text b { color: rgba(245,230,208,.85); font-weight: 600; }
-.p-activity-detail { opacity: 0.5; }
-.p-activity-time { font-size: 9px; color: rgba(245,230,208,.3); flex-shrink: 0; white-space: nowrap; }
-.p-activity-list::-webkit-scrollbar { width: 3px; }
-.p-activity-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 3px; }
-.p-activity-slide-enter-active { animation: actSlideIn .4s ease; }
-.p-activity-slide-leave-active { animation: actSlideOut .3s ease; }
-@keyframes actSlideIn { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
-@keyframes actSlideOut { from { opacity: 1; } to { opacity: 0; transform: translateX(30px); } }
-@media (max-width: 760px) { .p-activity { right: 10px; bottom: 10px; width: 280px; } .p-activity-collapsed { width: 140px; } }
-@media (max-width: 480px) { .p-activity { right: 8px; bottom: 8px; width: calc(100vw - 16px); max-width: 300px; } }
+/* Activity dashboard — right center */
+.p-dash { position: fixed; right: 24px; top: 50%; transform: translateY(-50%); z-index: 50; width: 280px; background: rgba(20,12,6,.75); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,.07); border-radius: 16px; padding: 16px; box-shadow: 0 8px 40px rgba(0,0,0,.35); }
+.p-dash-title { font-size: 9px; font-weight: 700; color: rgba(245,230,208,.35); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.p-dash-list { display: flex; flex-direction: column; gap: 10px; }
+.p-dash-item { display: flex; gap: 10px; align-items: flex-start; }
+.p-dash-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; box-shadow: 0 0 6px currentColor; }
+.p-dash-content { flex: 1; min-width: 0; }
+.p-dash-text { display: block; font-size: 11px; color: rgba(245,230,208,.6); line-height: 1.4; }
+.p-dash-text b { color: rgba(245,230,208,.85); font-weight: 600; }
+.p-dash-detail { color: rgba(245,230,208,.35); }
+.p-dash-time { font-size: 9px; color: rgba(245,230,208,.25); margin-top: 1px; display: block; }
+@media (max-width: 1100px) { .p-dash { display: none; } }
 
 /* Dock — slot/item pattern for stable hover */
 .p-dock { display: flex; gap: 0; padding: 16px 28px; background: rgba(255,255,255,.035); border-radius: 22px; border: 1px solid rgba(255,255,255,.05); align-items: flex-end; flex-shrink: 0; }
