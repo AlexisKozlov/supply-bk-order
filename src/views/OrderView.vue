@@ -144,6 +144,13 @@
           </div>
         </div>
         <button class="btn" @click="exportExcel" v-if="orderStore.items.length" :disabled="!itemsWithOrderCount"><BkIcon name="excel" size="sm"/> Excel</button>
+        <div style="position:relative;display:inline-block;" v-if="orderStore.items.length">
+          <button class="btn" @click.stop="showSupplierOrderDropdown = !showSupplierOrderDropdown" :disabled="!itemsWithOrderCount"><BkIcon name="note" size="sm"/> Заявка</button>
+          <div v-if="showSupplierOrderDropdown" class="share-dropdown" style="bottom:100%;top:auto;">
+            <button @click.stop="exportSupplierExcel"><span class="share-dot" style="background:#217346"></span>Excel</button>
+            <button @click.stop="printSupplierOrderFn"><span class="share-dot" style="background:#D32F2F"></span>Печать / PDF</button>
+          </div>
+        </div>
       </div>
       <div v-if="draftStatusText && orderStore.items.length && !orderStore.viewOnlyMode && !orderStore.editingOrderId" class="draft-status">{{ draftStatusText }}</div>
     </div>
@@ -265,6 +272,7 @@ const orderVisible          = ref(true);
 const settingsExpanded      = ref(false);
 const supplierLoading       = ref(false);
 const showShareDropdown     = ref(false);
+const showSupplierOrderDropdown = ref(false);
 const showManualModal       = ref(false);
 const showSaveModal         = ref(false);
 const saveModalLines        = ref([]);
@@ -508,7 +516,10 @@ watch(() => route.query.orderId, async (newId) => {
 });
 
 function closeShareDropdown(e) {
-  if (!e.target.closest('.share-dropdown')) showShareDropdown.value = false;
+  if (!e.target.closest('.share-dropdown')) {
+    showShareDropdown.value = false;
+    showSupplierOrderDropdown.value = false;
+  }
 }
 
 function toggleCompact() {
@@ -1027,6 +1038,23 @@ async function exportExcel() {
   if (!itemsWithOrderCount.value) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
   const { exportToExcel } = await import('@/lib/excelExport.js');
   exportToExcel(orderStore.items, orderStore.settings, priceMap.value);
+}
+
+// ─── Заявка поставщику ───────────────────────────────────────────────────────
+async function exportSupplierExcel() {
+  showSupplierOrderDropdown.value = false;
+  if (!itemsWithOrderCount.value) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
+  const { exportSupplierOrder } = await import('@/lib/excelExport.js');
+  const s = { ...orderStore.settings, userName: userStore.currentUser?.name || '' };
+  exportSupplierOrder(s, orderStore.items, priceMap.value);
+}
+
+async function printSupplierOrderFn() {
+  showSupplierOrderDropdown.value = false;
+  if (!itemsWithOrderCount.value) { toast.error('Нет позиций', 'Нет позиций с заказом для экспорта'); return; }
+  const { printSupplierOrder } = await import('@/lib/excelExport.js');
+  const s = { ...orderStore.settings, userName: userStore.currentUser?.name || '' };
+  printSupplierOrder(s, orderStore.items, priceMap.value);
 }
 
 // ─── Очистить ─────────────────────────────────────────────────────────────────

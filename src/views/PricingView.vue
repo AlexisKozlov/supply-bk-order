@@ -27,6 +27,9 @@
       <button class="db-tab" :class="{ active: activeTab === 'agreements' }" @click="activeTab = 'agreements'; loadAgreements()">
         <BkIcon name="order" size="sm"/> Протоколы (ПСЦ) <span class="db-tab-count">{{ agreements.length }}</span>
       </button>
+      <button class="db-tab" :class="{ active: activeTab === 'dynamics' }" @click="activeTab = 'dynamics'; loadDynamics()">
+        <BkIcon name="analytics" size="sm"/> Динамика цен <span class="db-tab-count">{{ dynamicsStats.total }}</span>
+      </button>
     </div>
 
     <!-- Поиск -->
@@ -150,6 +153,82 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ДИНАМИКА ЦЕН -->
+    <div v-if="activeTab === 'dynamics'">
+      <div v-if="dynamicsLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!dynamicsData.length" style="text-align:center;padding:40px;color:var(--text-muted);">Нет данных об изменениях цен</div>
+      <template v-else>
+        <!-- Сводка -->
+        <div class="dyn-summary">
+          <div class="dyn-stat">
+            <span class="dyn-stat-num dyn-up">{{ dynamicsStats.up }}</span>
+            <span class="dyn-stat-label">подорожало</span>
+          </div>
+          <div class="dyn-stat">
+            <span class="dyn-stat-num dyn-down">{{ dynamicsStats.down }}</span>
+            <span class="dyn-stat-label">подешевело</span>
+          </div>
+          <div class="dyn-stat">
+            <span class="dyn-stat-num">{{ dynamicsStats.newItems }}</span>
+            <span class="dyn-stat-label">новых</span>
+          </div>
+          <div class="dyn-stat">
+            <span class="dyn-stat-num" :class="dynamicsStats.avgPct > 0 ? 'dyn-up' : dynamicsStats.avgPct < 0 ? 'dyn-down' : ''">
+              {{ dynamicsStats.avgPct > 0 ? '+' : '' }}{{ dynamicsStats.avgPct }}%
+            </span>
+            <span class="dyn-stat-label">средн. изменение</span>
+          </div>
+        </div>
+        <!-- Фильтр периода -->
+        <div class="pricing-filters">
+          <select v-model="dynamicsPeriod" class="pf-supplier-select" style="min-width:140px;" @change="loadDynamics">
+            <option value="7">За неделю</option>
+            <option value="30">За месяц</option>
+            <option value="90">За квартал</option>
+          </select>
+          <div class="pf-supplier-select-wrap">
+            <select v-model="dynamicsFilterSupplier" class="pf-supplier-select" style="min-width:160px;">
+              <option value="">Все поставщики</option>
+              <option v-for="s in dynamicsSuppliers" :key="s" :value="s">{{ s }}</option>
+            </select>
+          </div>
+        </div>
+        <!-- Таблица -->
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Поставщик</th>
+              <th style="text-align:right;">Было</th>
+              <th style="text-align:right;">Стало</th>
+              <th style="text-align:right;">Изменение</th>
+              <th>Дата</th>
+              <th>Кто</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in filteredDynamics" :key="d.id">
+              <td>
+                <span class="mono" style="font-weight:600;">{{ d.sku }}</span>
+                <span class="product-name-sub">{{ productNames[d.sku] || '' }}</span>
+              </td>
+              <td class="ellipsis">{{ d.supplier }}</td>
+              <td class="mono" style="text-align:right;">{{ d.old_price ? formatPrice(d.old_price) : '—' }}</td>
+              <td class="mono" style="text-align:right;font-weight:600;">{{ formatPrice(d.new_price) }}</td>
+              <td style="text-align:right;">
+                <span v-if="d.old_price" :class="d.new_price > d.old_price ? 'diff-up' : d.new_price < d.old_price ? 'diff-down' : 'diff-same'">
+                  {{ d.new_price > d.old_price ? '+' : '' }}{{ ((d.new_price - d.old_price) / d.old_price * 100).toFixed(1) }}%
+                </span>
+                <span v-else class="text-muted">новая</span>
+              </td>
+              <td class="text-muted" style="white-space:nowrap;">{{ formatDate(d.changed_at) }}</td>
+              <td class="text-muted ellipsis" style="max-width:80px;">{{ d.changed_by }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
     </div>
 
     <!-- Модалка: Редактирование/создание цены -->
@@ -1212,10 +1291,70 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
   noPriceProducts.value = [];
   prices.value = [];
   agreements.value = [];
+  dynamicsData.value = [];
   await supplierStore.loadSuppliers(le);
   await loadPrices();
   loadAgreements();
 });
+
+// ═══ Динамика цен ═══
+const dynamicsData = ref([]);
+const dynamicsLoading = ref(false);
+const dynamicsPeriod = ref('7');
+const dynamicsFilterSupplier = ref('');
+
+const dynamicsSuppliers = computed(() => {
+  const set = new Set(dynamicsData.value.map(d => d.supplier));
+  return [...set].sort();
+});
+
+const filteredDynamics = computed(() => {
+  let data = dynamicsData.value;
+  if (dynamicsFilterSupplier.value) {
+    data = data.filter(d => d.supplier === dynamicsFilterSupplier.value);
+  }
+  return data;
+});
+
+const dynamicsStats = computed(() => {
+  const data = filteredDynamics.value;
+  let up = 0, down = 0, newItems = 0, totalPct = 0, pctCount = 0;
+  for (const d of data) {
+    if (!d.old_price) { newItems++; continue; }
+    const old = parseFloat(d.old_price);
+    const cur = parseFloat(d.new_price);
+    if (cur > old) up++;
+    else if (cur < old) down++;
+    if (old > 0) { totalPct += (cur - old) / old * 100; pctCount++; }
+  }
+  return {
+    total: data.length,
+    up, down, newItems,
+    avgPct: pctCount > 0 ? (totalPct / pctCount).toFixed(1) : '0.0',
+  };
+});
+
+async function loadDynamics() {
+  dynamicsLoading.value = true;
+  try {
+    const le = orderStore.settings.legalEntity;
+    const since = new Date();
+    since.setDate(since.getDate() - parseInt(dynamicsPeriod.value));
+    const sinceStr = since.toISOString().slice(0, 10);
+    const { data, error } = await db.from('price_history')
+      .select('*')
+      .eq('legal_entity', le)
+      .gte('changed_at', sinceStr)
+      .order('changed_at', { ascending: false })
+      .limit(200);
+    if (error) { toast.error('Ошибка', error); return; }
+    dynamicsData.value = data || [];
+  } catch (e) {
+    toast.error('Ошибка загрузки', e.message);
+  } finally {
+    dynamicsLoading.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -1479,5 +1618,18 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 
   /* Графики и история */
   .price-chart-bars { height:80px; }
+
+  /* Динамика цен */
+  .dyn-summary { flex-wrap:wrap; gap:8px; }
+  .dyn-stat { min-width:70px; padding:8px 12px; }
+  .dyn-stat-num { font-size:18px; }
 }
+
+/* ═══ Динамика цен ═══ */
+.dyn-summary { display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+.dyn-stat { background:var(--card); border:1.5px solid var(--border); border-radius:10px; padding:12px 18px; text-align:center; min-width:100px; }
+.dyn-stat-num { display:block; font-size:22px; font-weight:800; color:var(--text); }
+.dyn-stat-label { font-size:10px; color:var(--text-muted); font-weight:600; }
+.dyn-up { color:#E53935; }
+.dyn-down { color:#43A047; }
 </style>

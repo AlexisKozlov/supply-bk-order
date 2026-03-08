@@ -732,3 +732,295 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
   XLSX.utils.book_append_sheet(wb, ws, 'График доставки');
   XLSX.writeFile(wb, `График_доставки_${date}.xlsx`);
 }
+
+/**
+ * Заявка поставщику — Excel
+ */
+export async function exportSupplierOrder(settings, items, priceMap) {
+  const XLSX = await import('xlsx-js-style');
+  const nf = new Intl.NumberFormat('ru-RU');
+
+  const supplier = settings.supplier || '';
+  const legalEntity = settings.legalEntity || '';
+  const deliveryDate = settings.deliveryDate
+    ? settings.deliveryDate.toLocaleDateString('ru-RU')
+    : '';
+  const today = new Date().toLocaleDateString('ru-RU');
+  const userName = settings.userName || '';
+
+  // Палитра
+  const darkGray = '333333';
+  const borderClr = 'AAAAAA';
+  const border = { style: 'thin', color: { rgb: borderClr } };
+  const borders = { top: border, bottom: border, left: border, right: border };
+
+  const sTitle = {
+    font: { bold: true, sz: 14, color: { rgb: darkGray }, name: 'Calibri' },
+    alignment: { horizontal: 'center', vertical: 'center' },
+  };
+  const sMeta = {
+    font: { sz: 11, color: { rgb: '444444' }, name: 'Calibri' },
+    alignment: { vertical: 'center' },
+  };
+  const sMetaBold = {
+    font: { bold: true, sz: 11, color: { rgb: darkGray }, name: 'Calibri' },
+    alignment: { vertical: 'center' },
+  };
+  const sHeader = {
+    font: { bold: true, sz: 11, color: { rgb: darkGray }, name: 'Calibri' },
+    fill: { fgColor: { rgb: 'F0F0F0' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+  const sHeaderLeft = { ...sHeader, alignment: { ...sHeader.alignment, horizontal: 'left' } };
+
+  function sCell() {
+    return {
+      font: { sz: 11, name: 'Calibri' },
+      alignment: { vertical: 'center' },
+      border: borders,
+    };
+  }
+  function sCellRight() {
+    return {
+      font: { sz: 11, name: 'Calibri' },
+      alignment: { horizontal: 'right', vertical: 'center' },
+      border: borders,
+    };
+  }
+  const sTotalLabel = {
+    font: { bold: true, sz: 11, color: { rgb: darkGray }, name: 'Calibri' },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+  const sTotalVal = {
+    font: { bold: true, sz: 11, color: { rgb: darkGray }, name: 'Calibri' },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borders,
+  };
+
+  function setCell(ws, r, c, val, style) {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    ws[ref] = { v: val, t: typeof val === 'number' ? 'n' : 's', s: style };
+  }
+
+  const hasPrices = priceMap && Object.keys(priceMap).length > 0;
+  const lastCol = hasPrices ? 5 : 3;
+
+  const ws = {};
+  let r = 0;
+
+  // Заголовок
+  setCell(ws, r, 0, 'Заявка на поставку', sTitle);
+  r++;
+  setCell(ws, r, 0, `От: ${legalEntity}`, sMetaBold);
+  r++;
+  setCell(ws, r, 0, `Поставщик: ${supplier}`, sMetaBold);
+  r++;
+  setCell(ws, r, 0, `Дата поставки: ${deliveryDate}`, sMeta);
+  r++;
+  setCell(ws, r, 0, `Дата заявки: ${today}`, sMeta);
+  r++;
+  r++; // пустая строка
+
+  // Шапка таблицы
+  const headerRow = r;
+  setCell(ws, r, 0, '№п/п', sHeader);
+  setCell(ws, r, 1, 'Артикул', sHeader);
+  setCell(ws, r, 2, 'Наименование', sHeaderLeft);
+  setCell(ws, r, 3, 'Кол-во (кор.)', sHeader);
+  if (hasPrices) {
+    setCell(ws, r, 4, 'Цена', sHeader);
+    setCell(ws, r, 5, 'Сумма', sHeader);
+  }
+  r++;
+
+  // Данные
+  let totalBoxes = 0;
+  let totalSum = 0;
+  let idx = 0;
+
+  items.forEach(item => {
+    if (!item.finalOrder || item.finalOrder <= 0) return;
+    const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
+    const accountingBoxes = settings.unit === 'boxes'
+      ? item.finalOrder
+      : Math.round(item.finalOrder / qpb);
+    const physBoxes = Math.round(accountingBoxes / mult);
+
+    idx++;
+    setCell(ws, r, 0, idx, sCellRight());
+    setCell(ws, r, 1, item.sku || '', sCell());
+    setCell(ws, r, 2, item.name || '', sCell());
+    setCell(ws, r, 3, physBoxes, sCellRight());
+
+    if (hasPrices) {
+      const pi = priceMap[item.sku];
+      if (pi) {
+        const price = parseFloat(pi.price) || 0;
+        const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
+        let lineSum = 0;
+        if (pi.unit_type === 'box') lineSum = price * physBoxes;
+        else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
+        else lineSum = price * pieces;
+        setCell(ws, r, 4, price, { ...sCellRight(), numFmt: '#,##0.00' });
+        setCell(ws, r, 5, lineSum, { ...sCellRight(), numFmt: '#,##0.00' });
+        totalSum += lineSum;
+      } else {
+        setCell(ws, r, 4, '', sCell());
+        setCell(ws, r, 5, '', sCell());
+      }
+    }
+
+    totalBoxes += physBoxes;
+    r++;
+  });
+
+  // ИТОГО
+  if (idx > 0) {
+    setCell(ws, r, 0, '', sTotalLabel);
+    setCell(ws, r, 1, '', sTotalLabel);
+    setCell(ws, r, 2, 'ИТОГО:', sTotalLabel);
+    setCell(ws, r, 3, totalBoxes, sTotalVal);
+    if (hasPrices) {
+      setCell(ws, r, 4, '', sTotalLabel);
+      setCell(ws, r, 5, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
+    }
+    r++;
+  }
+
+  r++; // пустая строка
+  setCell(ws, r, 0, `Контактное лицо: ${userName}`, sMeta);
+  r++;
+
+  // Диапазон, ширины, мержи
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: lastCol } });
+  ws['!cols'] = hasPrices
+    ? [{ wch: 5 }, { wch: 15 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 15 }]
+    : [{ wch: 5 }, { wch: 15 }, { wch: 30 }, { wch: 12 }];
+  ws['!rows'] = [{ hpt: 22 }];
+  // Мержи для заголовочных строк
+  for (let mr = 0; mr <= 4; mr++) {
+    ws['!merges'] = ws['!merges'] || [];
+    ws['!merges'].push({ s: { r: mr, c: 0 }, e: { r: mr, c: lastCol } });
+  }
+  // Мерж для контактного лица
+  ws['!merges'].push({ s: { r: r - 1, c: 0 }, e: { r: r - 1, c: lastCol } });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Заявка');
+
+  const fileDate = today.replace(/\./g, '-');
+  XLSX.writeFile(wb, `Заявка_${supplier}_${fileDate}.xlsx`);
+}
+
+/**
+ * Заявка поставщику — печать (PDF через iframe + print)
+ */
+export function printSupplierOrder(settings, items, priceMap) {
+  const hasPrices = priceMap && Object.keys(priceMap).length > 0;
+
+  const filteredItems = items.filter(i => i.finalOrder > 0);
+  let totalBoxes = 0;
+  let totalSum = 0;
+
+  const rows = filteredItems.map((item, idx) => {
+    const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
+    const accountingBoxes = settings.unit === 'boxes'
+      ? item.finalOrder
+      : Math.round(item.finalOrder / qpb);
+    const physBoxes = Math.round(accountingBoxes / mult);
+    totalBoxes += physBoxes;
+
+    let priceTd = '';
+    let sumTd = '';
+    if (hasPrices) {
+      const pi = priceMap[item.sku];
+      if (pi) {
+        const price = parseFloat(pi.price) || 0;
+        const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
+        let lineSum = 0;
+        if (pi.unit_type === 'box') lineSum = price * physBoxes;
+        else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
+        else lineSum = price * pieces;
+        totalSum += lineSum;
+        priceTd = `<td class="right">${price.toFixed(2)}</td>`;
+        sumTd = `<td class="right">${lineSum.toFixed(2)}</td>`;
+      } else {
+        priceTd = `<td></td>`;
+        sumTd = `<td></td>`;
+      }
+    }
+
+    return `<tr>
+      <td style="text-align:center;">${idx + 1}</td>
+      <td>${item.sku || ''}</td>
+      <td>${item.name || ''}</td>
+      <td class="right">${physBoxes}</td>
+      ${priceTd}${sumTd}
+    </tr>`;
+  }).join('');
+
+  const deliveryDate = settings.deliveryDate
+    ? settings.deliveryDate.toLocaleDateString('ru-RU')
+    : '';
+  const today = new Date().toLocaleDateString('ru-RU');
+
+  const priceHeaders = hasPrices ? '<th style="width:80px;text-align:right;">Цена</th><th style="width:90px;text-align:right;">Сумма</th>' : '';
+  const priceTotals = hasPrices ? `<td></td><td class="right">${totalSum.toFixed(2)}</td>` : '';
+  const colSpan = hasPrices ? 4 : 3;
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Заявка - ${settings.supplier || ''}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; padding: 30px; }
+  h2 { text-align: center; margin-bottom: 20px; }
+  .meta { margin-bottom: 16px; }
+  .meta div { margin-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #999; padding: 6px 8px; }
+  th { background: #f0f0f0; font-weight: bold; }
+  .total { font-weight: bold; }
+  .right { text-align: right; }
+  .footer { margin-top: 24px; font-size: 12px; color: #666; }
+  @media print { body { padding: 15px; } }
+</style>
+</head><body>
+<h2>Заявка на поставку</h2>
+<div class="meta">
+  <div><b>От:</b> ${settings.legalEntity || ''}</div>
+  <div><b>Поставщик:</b> ${settings.supplier || ''}</div>
+  <div><b>Дата поставки:</b> ${deliveryDate}</div>
+  <div><b>Дата заявки:</b> ${today}</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:40px;">No</th>
+    <th style="width:80px;">Артикул</th>
+    <th>Наименование</th>
+    <th style="width:80px;text-align:right;">Кол-во, кор.</th>
+    ${priceHeaders}
+  </tr></thead>
+  <tbody>${rows}</tbody>
+  <tfoot><tr class="total">
+    <td colspan="${colSpan}" style="text-align:right;">ИТОГО:</td>
+    <td class="right">${totalBoxes}</td>
+    ${priceTotals}
+  </tr></tfoot>
+</table>
+<div class="footer">Контактное лицо: ${settings.userName || ''}</div>
+</body></html>`;
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;width:0;height:0;';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.write(html);
+  iframe.contentDocument.close();
+  setTimeout(() => {
+    iframe.contentWindow.print();
+    setTimeout(() => document.body.removeChild(iframe), 2000);
+  }, 300);
+}

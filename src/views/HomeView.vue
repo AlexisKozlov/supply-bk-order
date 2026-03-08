@@ -43,6 +43,21 @@
         <p>Управление поставками · Supply Department</p>
       </div>
 
+      <!-- Activity feed -->
+      <div v-if="userStore.isAuthenticated && activityItems.length" class="p-activity">
+        <div class="p-activity-title">Последние действия</div>
+        <div class="p-activity-list">
+          <div v-for="a in activityItems" :key="a.id" class="p-activity-item">
+            <span class="p-activity-dot" :style="{ background: actionColor(a.action) }"></span>
+            <span class="p-activity-text">
+              <b>{{ a.user_name }}</b> {{ actionText(a) }}
+              <span v-if="actionDetail(a)" class="p-activity-detail">{{ actionDetail(a) }}</span>
+            </span>
+            <span class="p-activity-time">{{ timeAgo(a.created_at) }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Dock -->
       <div class="p-dock">
         <div
@@ -189,6 +204,63 @@ const maintenanceEndTimeRaw = ref(null);
 const maintenanceNow = ref(Date.now());
 let maintenanceTickTimer = null;
 
+const activityItems = ref([]);
+
+async function loadActivity() {
+  if (!userStore.isAuthenticated) return;
+  try {
+    const { data } = await db.from('audit_log').select('*').order('created_at', { ascending: false }).limit(8);
+    activityItems.value = data || [];
+  } catch {}
+}
+
+function actionText(item) {
+  const map = {
+    order_created: 'создал заказ',
+    order_updated: 'изменил заказ',
+    order_deleted: 'удалил заказ',
+    plan_created: 'создал план',
+    plan_updated: 'изменил план',
+    plan_deleted: 'удалил план',
+    received: 'принял поставку',
+    reception_reverted: 'отменил приёмку',
+    delivery_date_changed: 'перенёс доставку',
+    schedule_updated: 'обновил расписание',
+    restaurant_updated: 'обновил ресторан',
+    product_created: 'добавил товар',
+    product_updated: 'изменил товар',
+  };
+  return map[item.action] || item.action;
+}
+
+function timeAgo(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const sec = Math.floor((now - d) / 1000);
+  if (sec < 60) return 'только что';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} мин назад`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}ч назад`;
+  const days = Math.floor(hr / 24);
+  if (days === 1) return 'вчера';
+  return `${days} дн. назад`;
+}
+
+function actionColor(action) {
+  if (action.includes('created') || action === 'product_created') return '#4CAF50';
+  if (action.includes('deleted')) return '#E53935';
+  if (action === 'received') return '#00897B';
+  return '#FF8733';
+}
+
+function actionDetail(item) {
+  try {
+    const d = typeof item.details === 'string' ? JSON.parse(item.details) : item.details;
+    return d?.supplier || '';
+  } catch { return ''; }
+}
+
 const maintenanceCountdown = computed(() => {
   if (!maintenanceEndTimeRaw.value) return '';
   const end = new Date(maintenanceEndTimeRaw.value).getTime();
@@ -261,6 +333,7 @@ onMounted(async () => {
   document.addEventListener('click', handleOutsideClick);
   initEmberGlow();
   checkMaintenanceForHome();
+  loadActivity();
 });
 onBeforeUnmount(() => {
   showLoader.value = false;
@@ -487,6 +560,17 @@ function confirmLogout() {
 .p-greeting h2 { font-size: 30px; font-weight: 900; color: #F5E6D0; line-height: 1.15; font-family: 'Flame', 'Sora', sans-serif; }
 .p-greeting h2 em { font-style: normal; color: #FF8733; }
 .p-greeting p { font-size: 12px; color: rgba(245,230,208,.45); margin-top: 6px; font-weight: 500; }
+
+/* Activity feed */
+.p-activity { width: 100%; max-width: 480px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 14px 18px; flex-shrink: 0; }
+.p-activity-title { font-size: 10px; font-weight: 700; color: rgba(245,230,208,.4); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px; }
+.p-activity-list { display: flex; flex-direction: column; gap: 6px; }
+.p-activity-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(245,230,208,.6); }
+.p-activity-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.p-activity-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-activity-text b { color: rgba(245,230,208,.85); font-weight: 600; }
+.p-activity-detail { opacity: 0.5; }
+.p-activity-time { font-size: 9px; color: rgba(245,230,208,.3); flex-shrink: 0; white-space: nowrap; }
 
 /* Dock — slot/item pattern for stable hover */
 .p-dock { display: flex; gap: 0; padding: 16px 28px; background: rgba(255,255,255,.035); border-radius: 22px; border: 1px solid rgba(255,255,255,.05); align-items: flex-end; flex-shrink: 0; }
