@@ -39,7 +39,7 @@ export const useSupplierStore = defineStore('supplier', () => {
 
         const { data, error } = await query;
 
-        if (!error && data) {
+        if (!error && data && data.length > 0) {
           // Дедупликация по short_name
           const unique = [];
           const seen = new Set();

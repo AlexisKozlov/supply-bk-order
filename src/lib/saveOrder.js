@@ -153,6 +153,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
           unit: oldOrder.unit, notes: oldOrder.notes, supplier: oldOrder.supplier,
           has_transit: oldOrder.has_transit, show_stock_column: oldOrder.show_stock_column,
           cda_mode: oldOrder.cda_mode, safety_coef: oldOrder.safety_coef,
+          legal_entity: oldOrder.legal_entity,
         }).eq('id', editingOrderId);
       }
       return { error: 'Не удалось сохранить состав заказа: ' + (rpcError || rpcResult?.error) };

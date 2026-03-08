@@ -153,7 +153,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
         // Если API не вернул данные, перезагружаем
         const currentGroup = loadedGroup.value;
         invalidate();
-        await _doLoad(currentGroup);
+        await _doLoad(currentGroup, _loadId);
       }
     }
 

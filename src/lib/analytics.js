@@ -156,7 +156,7 @@ function processData(orders, prevOrders, days) {
   // Также: был регулярным (≥2 заказа), текущий объём упал на 80%+
   for (const [key, cur] of Object.entries(prodMap)) {
     const prev = prevProdMap[key];
-    if (prev && prev.orders >= 2 && prev.boxes >= 5) {
+    if (prev && prev.orders >= 2 && prev.boxes > 0) {
       const drop = Math.round((1 - cur.boxes / prev.boxes) * 100);
       if (drop >= 80) {
         changes.push({
@@ -505,9 +505,9 @@ export async function getForecastData(legalEntity) {
     // Расход и остаток — из analysis_data (те же данные что на стр. Анализа)
     // Всё хранится в штуках, переводим в коробки для единообразия
     const dailyConsumptionPieces = analysisData ? analysisData.dailyConsumption : 0;
-    const dailyConsumptionBoxes = dailyConsumptionPieces / qtyPerBox;
+    const dailyConsumptionBoxes = qtyPerBox > 0 ? dailyConsumptionPieces / qtyPerBox : 0;
     const stockPieces = analysisData ? analysisData.stock : null;
-    const stockBoxes = hasStockData ? stockPieces / qtyPerBox : null;
+    const stockBoxes = hasStockData && qtyPerBox > 0 ? stockPieces / qtyPerBox : null;
 
     let daysOfStock = null;
     let stockStatus = 'unknown';
