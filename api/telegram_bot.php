@@ -927,6 +927,26 @@ if (isset($input['callback_query'])) {
     $msgId = $cb['message']['message_id'];
     $data = $cb['data'] ?? '';
 
+    // Кнопки меню
+    if (str_starts_with($data, 'cmd_')) {
+        $cmd = substr($data, 4);
+        $user = getUser($chatId);
+        if (!$user) {
+            answerCallback($cb['id'], 'Сначала привяжите аккаунт');
+            exit;
+        }
+        answerCallback($cb['id']);
+        switch ($cmd) {
+            case 'orders': cmdOrders($chatId, $user); break;
+            case 'stock': cmdStock($chatId, $user); break;
+            case 'consumption': cmdConsumption($chatId, $user); break;
+            case 'prices': cmdPrices($chatId, $user); break;
+            case 'psc': cmdPsc($chatId, $user); break;
+            case 'settings': showSettings($chatId, null, $user['name']); break;
+        }
+        exit;
+    }
+
     if (str_starts_with($data, 'toggle_')) {
         $field = substr($data, 7);
         $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary'];
@@ -954,13 +974,29 @@ $text = trim($msg['text'] ?? '');
 
 // /start
 if ($text === '/start') {
-    sendMessage($chatId, "👋 <b>Supply Department</b>\n\nЭтот бот помогает с закупками: показывает заказы, остатки, цены и отвечает на вопросы.\n\nДля привязки аккаунта отправьте свой <b>email</b>.\n\nКоманды:\n/orders — заказы за 7 дней\n/stock — низкие остатки\n/consumption — топ расхода\n/prices — изменения цен\n/psc — протоколы\n/settings — настройки уведомлений\n\nИли просто задайте вопрос текстом!");
+    $user = getUser($chatId);
+    $greeting = $user ? "Привет, <b>{$user['name']}</b>! 👋" : "👋 <b>Supply Department</b>";
+    $intro = $user
+        ? "Я помогу с закупками: остатки, заказы, цены, сроки годности. Задай вопрос или выбери из меню:"
+        : "Я бот отдела закупок. Для начала отправьте свой <b>email</b>, чтобы привязать аккаунт.";
+
+    $keyboard = ['inline_keyboard' => [
+        [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
+        [['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
+        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
+    ]];
+    sendMessage($chatId, "{$greeting}\n\n{$intro}", $keyboard);
     exit;
 }
 
-// /help
-if ($text === '/help') {
-    sendMessage($chatId, "📖 <b>Команды</b>\n\n/orders — заказы за последние 7 дней\n/stock — товары с низким остатком\n/consumption — топ по расходу в день\n/prices — последние изменения цен\n/psc — активные протоколы\n/settings — настройки уведомлений\n\nМожно задать вопрос текстом, например:\n• <i>Какие заказы были сегодня?</i>\n• <i>У кого заканчивается остаток?</i>\n• <i>Когда истекает протокол с Мираторг?</i>");
+// /help или /menu
+if ($text === '/help' || $text === '/menu') {
+    $keyboard = ['inline_keyboard' => [
+        [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
+        [['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
+        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
+    ]];
+    sendMessage($chatId, "📖 <b>Меню</b>\n\nВыберите раздел или задайте вопрос текстом:\n\n<i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Состав последнего заказа\n• Что скоро просрочится на складе?", $keyboard);
     exit;
 }
 
