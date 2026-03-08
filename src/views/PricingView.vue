@@ -599,7 +599,7 @@ const priceForm = ref({ sku: '', _realSku: '', supplier: '', price: 0, unit_type
 const skuHints = ref([]);
 const supplierProducts = ref([]);
 function getRealSku() {
-  return priceForm.value._realSku || priceForm.value.sku?.split(' — ')[0]?.trim() || '';
+  return priceForm.value._realSku || priceForm.value.sku?.trim() || '';
 }
 const skuFoundName = computed(() => {
   const sku = getRealSku();
@@ -651,7 +651,7 @@ async function onPriceSupplierChange(keepSku = false) {
   if (data) for (const p of data) productUnits.value[p.sku] = p.unit_of_measure || 'шт';
 }
 function selectSkuHint(h) {
-  priceForm.value.sku = h.name ? `${h.sku} — ${h.name}` : h.sku;
+  priceForm.value.sku = h.name ? `${h.sku} ${h.name}` : h.sku;
   priceForm.value._realSku = h.sku;
   skuHints.value = [];
   if (h.name && !productNames.value[h.sku]) productNames.value[h.sku] = h.name;
@@ -683,7 +683,7 @@ function openNewPrice() {
 }
 function openNewPriceForSku(np) {
   editingPrice.value = null;
-  const displaySku = np.name ? `${np.sku} — ${np.name}` : np.sku;
+  const displaySku = np.name ? `${np.sku} ${np.name}` : np.sku;
   priceForm.value = { sku: displaySku, _realSku: np.sku, supplier: np.supplier || filterSupplier.value, price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
   skuHints.value = [];
   supplierProducts.value = [];
@@ -692,7 +692,7 @@ function openNewPriceForSku(np) {
 }
 function editPrice(p) {
   editingPrice.value = p;
-  const displaySku = productNames.value[p.sku] ? `${p.sku} — ${productNames.value[p.sku]}` : p.sku;
+  const displaySku = productNames.value[p.sku] ? `${p.sku} ${productNames.value[p.sku]}` : p.sku;
   priceForm.value = { sku: displaySku, _realSku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
   skuHints.value = [];
   supplierProducts.value = [];
