@@ -1718,7 +1718,7 @@ if ($endpoint === 'rpc') {
             $params[] = '%Бургер БК%'; $params[] = '%Воглия Матта%';
         }
         if ($supplier) { $sql .= " AND p.supplier = ?"; $params[] = $supplier; }
-        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = p.sku AND pp.legal_entity = ?)";
+        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku COLLATE utf8mb4_general_ci = p.sku AND pp.legal_entity COLLATE utf8mb4_general_ci = ?)";
         $params[] = $le;
         $sql .= " ORDER BY p.supplier, p.name";
         $s = $pdo->prepare($sql); $s->execute($params);
