@@ -80,6 +80,11 @@
           <button class="user-dropdown-btn" @click="showChangePassword = true; showUserMenu = false;">
             <BkIcon name="key" size="sm" light/> Сменить пароль
           </button>
+          <a class="user-dropdown-btn telegram-btn" href="https://t.me/supplyportal_bot" target="_blank" @click="showUserMenu = false">
+            <span class="tg-icon">✈</span>
+            {{ userStore.currentUser.telegram_connected ? 'Telegram-бот' : 'Подключить бота' }}
+            <span v-if="userStore.currentUser.telegram_connected" class="tg-connected">✓</span>
+          </a>
           <button class="user-dropdown-btn logout" @click="showLogoutConfirm = true; showUserMenu = false;">
             <BkIcon name="redo" size="sm"/> Выйти
           </button>

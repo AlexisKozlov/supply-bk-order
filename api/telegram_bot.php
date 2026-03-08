@@ -261,12 +261,14 @@ function askAI($question, $context) {
     // Groq (бесплатный, Llama 3)
     $groqKey = $GLOBALS['GROQ_API_KEY'] ?? '';
     if ($groqKey) {
-        return askGroq($question, $context, $groqKey);
+        $result = askGroq($question, $context, $groqKey);
+        if ($result) return $result;
     }
 
     // Gemini (fallback)
     if ($GEMINI_API_KEY) {
-        return askGemini($question, $context, $GEMINI_API_KEY);
+        $result = askGemini($question, $context, $GEMINI_API_KEY);
+        if ($result) return $result;
     }
 
     return null;
@@ -274,66 +276,26 @@ function askAI($question, $context) {
 
 function getSystemPrompt() {
     return <<<'PROMPT'
-Ты — умный ассистент отдела закупок сети ресторанов быстрого питания (бренд Burger King в Беларуси).
+Ты — ассистент отдела закупок сети Burger King в Беларуси. Три юрлица: Бургер БК, Воглия Матта, Пицца Стар.
 
-== О КОМПАНИИ ==
-- Три юридических лица: «ООО Бургер БК», «ООО Воглия Матта», «ООО Пицца Стар»
-- У каждого юрлица свои поставщики, товары, остатки, заказы и цены
-- Отдел закупок управляет заказами продуктов у поставщиков для ресторанов
+Термины: ПСЦ — протокол цен с поставщиком. Запас в днях = остаток ÷ дневной расход. ≤3 дн — критично, 3–7 — мало, >14 — норма.
 
-== ТЕРМИНЫ ==
-- ПСЦ (протокол согласования цен) — договор с поставщиком о ценах на определённый срок. Если ПСЦ истекает — нужно продлить или заключить новый, иначе поставки остановятся
-- Расход (consumption) — сколько товара потребляют рестораны за период (в штуках)
-- Остаток (stock) — сколько товара сейчас на складе (в штуках)
-- Запас в днях = остаток ÷ (расход ÷ период). Если ≤3 дней — критически мало, 3–7 — мало, 7–14 — внимание, >14 — норма
-- Заказ — список товаров для отправки поставщику. Содержит позиции с количеством в коробках
-- Коробка (box) — единица упаковки, в каждой коробке определённое количество штук (qty_per_box)
-- Кратность (multiplicity) — минимальный шаг заказа (например, кратность 3 = заказ только 3, 6, 9... коробок)
-- Дата прихода (delivery_date) — когда поставка приедет в ресторан
-- Страховочные дни (safety_days) — дополнительный запас на случай задержки поставки
-- Сроки годности — данные со склада (Маллинг): дата производства, годен до, статус, склад (Холод/Мороз/Сухой)
-
-== МОДУЛИ ПРИЛОЖЕНИЯ ==
-- Заказ — калькулятор заказа: расчёт потребности с учётом остатков, расхода, транзита, страховочных дней
-- Планирование — план закупок на месяц по поставщикам
-- История заказов — архив всех заказов с составом
-- План-факт — сравнение план vs факт поставок
-- База данных — справочник товаров, поставщиков
-- График поставок — расписание доставок по дням недели
-- Аналитика — ABC/XYZ анализ, тренды, динамика
-- Календарь — календарь поставок
-- Анализ запасов — остатки, расход, запас в днях, критические позиции
-- Сроки годности — данные со склада Маллинг: что годно, что скоро истекает, что заблокировано
-- Цены и ПСЦ — прайс-листы, протоколы согласования цен, динамика цен
-- Тендеры — проведение тендеров по выбору поставщиков
-
-== КАК ОТВЕЧАТЬ ==
-- Кратко, по делу, на русском языке
-- Используй ТОЛЬКО данные из контекста. Не выдумывай цифры и факты
-- Если данных недостаточно — честно скажи об этом и предложи команду бота
-- ВАЖНО: если в контексте найдено НЕСКОЛЬКО товаров — покажи ВСЕ найденные, не выбирай один. Перечисли каждый товар с его данными
-- Названия товаров ВСЕГДА показывай в формате: «артикул Название» (например: «100045 Молоко стерилизованное»)
-- Если спрашивают остаток — покажи остаток, расход в день и на сколько дней хватит для КАЖДОГО найденного товара
-- Если спрашивают совет по закупкам — анализируй остатки и расход: если расход высокий, а остаток низкий — нужно заказывать
-- Форматируй для Telegram HTML: <b>жирный</b>, <i>курсив</i>. НЕ используй Markdown (**, ##, ``` и т.д.)
-- Числа с единицами: «5 кор.», «120 шт.», «14 дн.»
-- Даты в формате ДД.ММ.ГГГГ
-
-== ДОСТУПНЫЕ КОМАНДЫ БОТА (можешь подсказать пользователю) ==
-/orders — заказы за 7 дней
-/stock — товары с низким остатком
-/consumption — топ по расходу
-/prices — последние изменения цен
-/psc — активные протоколы (ПСЦ)
-/settings — настройки уведомлений
+Правила ответа:
+- Кратко, на русском, ТОЛЬКО по данным из контекста
+- Если несколько товаров — покажи ВСЕ
+- Формат товара: «артикул Название»
+- Остаток: показывай остаток, расход/день и запас в днях
+- HTML для Telegram: <b>жирный</b>. НЕ используй Markdown
+- Числа: «5 кор.», «120 шт.», «14 дн.», даты: ДД.ММ.ГГГГ
+- Команды: /orders /stock /consumption /prices /psc /settings
 PROMPT;
 }
 
-function askGroq($question, $context, $apiKey) {
+function askGroq($question, $context, $apiKey, $model = 'llama-3.3-70b-versatile') {
     $systemPrompt = getSystemPrompt();
 
     $payload = json_encode([
-        'model' => 'llama-3.3-70b-versatile',
+        'model' => $model,
         'messages' => [
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => "Контекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"],
@@ -342,16 +304,30 @@ function askGroq($question, $context, $apiKey) {
         'temperature' => 0.3,
     ]);
 
-    $opts = ['http' => [
-        'method' => 'POST',
-        'header' => "Content-Type: application/json\r\nAuthorization: Bearer {$apiKey}",
-        'content' => $payload,
-        'timeout' => 30,
-        'ignore_errors' => true,
-    ]];
+    $ch = curl_init('https://api.groq.com/openai/v1/chat/completions');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+        ],
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
 
-    $response = @file_get_contents('https://api.groq.com/openai/v1/chat/completions', false, stream_context_create($opts));
-    if (!$response) return null;
+    if (!$response || $httpCode !== 200) {
+        error_log("Groq API error ({$model}): HTTP {$httpCode}, err={$err}");
+        // При rate limit — попробовать меньшую модель
+        if ($httpCode === 429 && $model === 'llama-3.3-70b-versatile') {
+            return askGroq($question, $context, $apiKey, 'llama-3.1-8b-instant');
+        }
+        return null;
+    }
 
     $data = json_decode($response, true);
     return $data['choices'][0]['message']['content'] ?? null;
@@ -369,15 +345,16 @@ function askGemini($question, $context, $apiKey) {
     ]);
 
     $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={$apiKey}";
-    $opts = ['http' => [
-        'method' => 'POST',
-        'header' => "Content-Type: application/json",
-        'content' => $payload,
-        'timeout' => 30,
-        'ignore_errors' => true,
-    ]];
-
-    $response = @file_get_contents($url, false, stream_context_create($opts));
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $response = curl_exec($ch);
+    curl_close($ch);
     if (!$response) return null;
 
     $data = json_decode($response, true);
@@ -1016,34 +993,15 @@ function handleFreeText($chatId, $text, $user) {
     $entity = getUserEntity($user);
     $context = gatherContext($user);
 
-    // Поиск конкретных товаров в вопросе
-    $productContext = lookupProduct($text, $entity);
-    if ($productContext) {
-        $context .= $productContext;
-    }
-
-    // Поиск заказов если спрашивают про состав/заказ
-    $orderContext = lookupOrders($text, $entity);
-    if ($orderContext) {
-        $context .= $orderContext;
-    }
-
-    // Анализ запасов по дням если спрашивают
-    $stockDaysContext = lookupStockDays($text, $entity);
-    if ($stockDaysContext) {
-        $context .= $stockDaysContext;
-    }
-
-    // Сроки годности если спрашивают
-    $shelfContext = lookupShelfLife($text, $entity);
-    if ($shelfContext) {
-        $context .= $shelfContext;
-    }
-
-    // Информация по поставщику
-    $supplierContext = lookupSupplier($text, $entity);
-    if ($supplierContext) {
-        $context .= $supplierContext;
+    // Поиск данных по вопросу (каждый блок в try-catch чтобы одна ошибка не сломала весь ответ)
+    $lookups = ['lookupProduct', 'lookupOrders', 'lookupStockDays', 'lookupShelfLife', 'lookupSupplier'];
+    foreach ($lookups as $fn) {
+        try {
+            $result = $fn($text, $entity);
+            if ($result) $context .= $result;
+        } catch (Exception $e) {
+            error_log("Bot {$fn} error: " . $e->getMessage());
+        }
     }
 
     // Обновляем статус — теперь думает ИИ
@@ -1052,7 +1010,12 @@ function handleFreeText($chatId, $text, $user) {
     }
     sendTyping($chatId);
 
-    $answer = askAI($text, $context);
+    $answer = null;
+    try {
+        $answer = askAI($text, $context);
+    } catch (Exception $e) {
+        error_log("Bot askAI error: " . $e->getMessage());
+    }
 
     // Удаляем сообщение-статус
     if ($thinkMsg) {
@@ -1062,6 +1025,7 @@ function handleFreeText($chatId, $text, $user) {
     if ($answer) {
         sendMessage($chatId, $answer);
     } else {
+        error_log("Bot: askAI returned null. GROQ_KEY len=" . strlen($GLOBALS['GROQ_API_KEY'] ?? '') . " context len=" . strlen($context));
         sendMessage($chatId, "Не удалось получить ответ. Попробуйте позже или используйте команды:\n/orders /stock /consumption /prices /psc");
     }
 }
@@ -1163,7 +1127,8 @@ if ($text === '/start') {
     $keyboard = ['inline_keyboard' => [
         [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
         [['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
-        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
+        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc']],
+        [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
     ]];
     sendMessage($chatId, "{$greeting}\n\n{$intro}", $keyboard);
     exit;
@@ -1174,7 +1139,8 @@ if ($text === '/help' || $text === '/menu') {
     $keyboard = ['inline_keyboard' => [
         [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
         [['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
-        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
+        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc']],
+        [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
     ]];
     sendMessage($chatId, "📖 <b>Меню</b>\n\nВыберите раздел или задайте вопрос текстом:\n\n<i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Состав последнего заказа\n• Что скоро просрочится на складе?", $keyboard);
     exit;

@@ -55,7 +55,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     // Загружаем старый заказ для diff параметров
     ({ data: oldOrder } = await db
       .from('orders')
-      .select('delivery_date, today_date, safety_days, period_days, unit, notes, supplier, created_by, updated_at, has_transit, show_stock_column, cda_mode, safety_coef')
+      .select('delivery_date, today_date, safety_days, period_days, unit, notes, supplier, created_by, updated_at, has_transit, show_stock_column, cda_mode, safety_coef, legal_entity')
       .eq('id', editingOrderId)
       .single());
 

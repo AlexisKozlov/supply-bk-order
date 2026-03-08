@@ -62,7 +62,7 @@ $TABLE_TO_MODULE = [
     'settings'=>'database','item_order'=>'order',
     'deficit_sessions'=>'order','deficit_results'=>'order','deficit_tokens'=>'order','deficit_restaurant_stock'=>'order',
     'stock_collections'=>'order','stock_collection_products'=>'order','stock_collection_data'=>'order','stock_collection_tokens'=>'order',
-    'price_agreements'=>'pricing','product_prices'=>'pricing',
+    'price_agreements'=>'pricing','product_prices'=>'pricing','price_history'=>'pricing',
     'tenders'=>'tenders','tender_items'=>'tenders','tender_offers'=>'tenders','tender_offer_prices'=>'tenders','tender_files'=>'tenders',
 ];
 
@@ -90,7 +90,7 @@ function checkLegalEntityAccess($sessionUser, $legalEntity) {
 }
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
-$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices'];
+$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history'];
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
@@ -150,7 +150,7 @@ function getSessionUser($pdo) {
     if (mt_rand(1, 100) === 1) {
         try { $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()"); } catch (PDOException $e) { /* не критично */ }
     }
-    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
+    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at, u.telegram_chat_id FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) { $_sessionUserCache['result'] = null; return null; }
@@ -598,7 +598,7 @@ if ($endpoint === 'rpc') {
         $email = $body['user_email'] ?? ''; $pass = $body['user_password'] ?? '';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success'=>false,'error'=>'invalid_email'], 400);
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
-        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,permissions,created_at FROM users WHERE email=?");
+        $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,permissions,created_at,telegram_chat_id FROM users WHERE email=?");
         $s->execute([$email]); $u = $s->fetch();
         if (!$u) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
         if (!verifyAndMigratePassword($pdo, $u['name'], $pass, $u['password'])) { recordFailedLogin($pdo, $clientIp, $email); respond(['success'=>false,'error'=>'invalid_credentials']); }
@@ -612,7 +612,7 @@ if ($endpoint === 'rpc') {
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';
         foreach ($mmRows as $mr) { if ($mr['key'] === 'maintenance_mode') $maintenanceVal = $mr['value']; if ($mr['key'] === 'maintenance_message') $maintenanceMsg = $mr['value']; }
-        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'permissions'=>$permsDecoded,'created_at'=>$u['created_at'] ?? null],'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
+        respond(['success'=>true,'user'=>['name'=>$u['name'],'role'=>$u['role']??'user','display_role'=>$displayRole,'legal_entities'=>$le,'permissions'=>$permsDecoded,'created_at'=>$u['created_at'] ?? null,'telegram_connected'=>!empty($u['telegram_chat_id'])],'session_token'=>$sessionToken,'maintenance_mode'=>$maintenanceVal==='true','maintenance_message'=>$maintenanceMsg ?: null]);
     }
     if ($fn === 'check_legacy_password') {
         $pwd = $body['pwd'] ?? '';
@@ -835,7 +835,7 @@ if ($endpoint === 'rpc') {
         $le = ($sessionUser['legal_entities'] && is_string($sessionUser['legal_entities'])) ? (json_decode($sessionUser['legal_entities'], true) ?? []) : [];
         $permsRaw2 = $sessionUser['permissions'] ?? null;
         $permsDecoded2 = ($permsRaw2 && is_string($permsRaw2)) ? json_decode($permsRaw2, true) : null;
-        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'permissions' => $permsDecoded2, 'created_at' => $sessionUser['created_at'] ?? null]]);
+        respond(['valid' => true, 'user' => ['name' => $sessionUser['name'], 'role' => $sessionUser['role'] ?? 'user', 'display_role' => $sessionUser['display_role'] ?? null, 'legal_entities' => $le, 'permissions' => $permsDecoded2, 'created_at' => $sessionUser['created_at'] ?? null, 'telegram_connected' => !empty($sessionUser['telegram_chat_id'])]]);
     }
 
     if ($fn === 'logout') {
@@ -1853,7 +1853,7 @@ if ($endpoint === 'rpc') {
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens','price_agreements','product_prices','tenders','tender_items','tender_offers','tender_offer_prices','tender_files'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens','price_agreements','product_prices','price_history','tenders','tender_items','tender_offers','tender_offer_prices','tender_files'];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users', 'error_logs', 'api_keys'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)

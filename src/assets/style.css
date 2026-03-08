@@ -131,6 +131,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 4px;
+  padding: 8px 4px 6px;
 }
 .sidebar.collapsed .sidebar-brand-icon {
   display: flex;
@@ -154,9 +155,6 @@ body {
 .sidebar.collapsed .sidebar-user { justify-content: center; }
 .sidebar.collapsed .sidebar-bottom { padding: 6px 4px 8px; position: relative; }
 .sidebar.collapsed .sidebar-nav-scroll { overflow: hidden; }
-.sidebar.collapsed .sidebar-brand {
-  padding: 8px 4px 6px;
-}
 .sidebar.collapsed .sidebar-tools-row {
   flex-wrap: wrap;
   padding: 2px 4px 4px;
@@ -362,6 +360,10 @@ body {
 .user-dropdown-btn:hover { background: var(--bg); }
 .user-dropdown-btn.logout { color: var(--error); }
 .user-dropdown-btn.logout:hover { background: #FEF2F2; }
+.user-dropdown-btn.telegram-btn { color: #2AABEE; text-decoration: none; display: flex; align-items: center; gap: 6px; }
+.user-dropdown-btn.telegram-btn:hover { background: #EBF7FE; }
+.user-dropdown-btn.telegram-btn .tg-icon { font-size: 14px; transform: rotate(45deg); display: inline-block; }
+.user-dropdown-btn.telegram-btn .tg-connected { color: #22C55E; font-size: 12px; margin-left: auto; }
 
 /* ═══════ MAIN AREA ═══════ */
 .main-wrapper {
@@ -404,8 +406,6 @@ body {
 .topbar-title {
   font-size: 17px; font-weight: 700; color: var(--text);
 }
-
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 .topbar-badge-entity {
   font-size: 11px; font-weight: 700;

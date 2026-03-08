@@ -81,19 +81,32 @@ if ($hour === 9 && $minute < 5) {
     ")->fetchAll();
 
     foreach ($users as $user) {
-        // Заказы на сегодня
         $today = date('Y-m-d');
-        $ordersToday = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date = ? AND received_at IS NULL");
-        $ordersToday->execute([$today]);
-        $orderCount = $ordersToday->fetchColumn();
+        // Юрлица пользователя
+        $le = $user['legal_entities'];
+        $entities = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
+        $leFilter = '';
+        $leParams = [];
+        if (!empty($entities)) {
+            $ph = implode(',', array_fill(0, count($entities), '?'));
+            $leFilter = " AND legal_entity IN ({$ph})";
+            $leParams = $entities;
+        }
 
-        // Просроченные (дата прошла, не приняты)
-        $overdue = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date < ? AND received_at IS NULL");
-        $overdue->execute([$today]);
-        $overdueCount = $overdue->fetchColumn();
+        // Заказы на сегодня (только по юрлицам пользователя)
+        $s = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date = ? AND received_at IS NULL" . $leFilter);
+        $s->execute(array_merge([$today], $leParams));
+        $orderCount = $s->fetchColumn();
 
-        // Истекающие ПСЦ (в ближайшие 7 дней)
-        $expiring = $pdo->query("SELECT COUNT(*) FROM price_agreements WHERE status = 'active' AND valid_to BETWEEN CURDATE() AND CURDATE() + INTERVAL 7 DAY")->fetchColumn();
+        // Просроченные
+        $s = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date < ? AND received_at IS NULL" . $leFilter);
+        $s->execute(array_merge([$today], $leParams));
+        $overdueCount = $s->fetchColumn();
+
+        // Истекающие ПСЦ
+        $s = $pdo->prepare("SELECT COUNT(*) FROM price_agreements WHERE status = 'active' AND valid_to BETWEEN CURDATE() AND CURDATE() + INTERVAL 7 DAY" . $leFilter);
+        $s->execute($leParams);
+        $expiring = $s->fetchColumn();
 
         $text = "📊 <b>Сводка на " . date('d.m.Y') . "</b>\n\n";
         $text .= "📦 Поставки сегодня: <b>{$orderCount}</b>\n";
@@ -117,9 +130,9 @@ $recentPrices = $pdo->query("
 ")->fetchAll();
 
 if (!empty($recentPrices)) {
-    // Отправить всем с price_changed=1
+    // Пользователи с price_changed=1
     $users = $pdo->query("
-        SELECT u.name, u.telegram_chat_id
+        SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
         WHERE u.telegram_chat_id IS NOT NULL AND ts.price_changed = 1
@@ -128,6 +141,10 @@ if (!empty($recentPrices)) {
     foreach ($recentPrices as $rp) {
         $text = "💰 <b>Обновление цен</b>\n\n{$rp['changed_by']} обновил {$rp['cnt']} цен ({$rp['legal_entity']})";
         foreach ($users as $user) {
+            // Отправлять только пользователям с доступом к этому юрлицу
+            $le = $user['legal_entities'];
+            $entities = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
+            if (!empty($entities) && !in_array($rp['legal_entity'], $entities)) continue;
             tgSend($user['telegram_chat_id'], $text);
             $sent++;
         }
