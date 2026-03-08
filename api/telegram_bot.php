@@ -738,6 +738,34 @@ function lookupOrders($question, $entity) {
     return $context;
 }
 
+// Распознавание числительных (цифрами и словами)
+function extractNumber($text) {
+    // Сначала ищем цифры
+    if (preg_match('/(\d+)/u', $text, $m)) {
+        return intval($m[1]);
+    }
+    // Числительные словами
+    $words = [
+        'один'=>1,'одного'=>1,'одной'=>1,
+        'два'=>2,'двух'=>2,'двум'=>2,
+        'три'=>3,'трёх'=>3,'трех'=>3,'трём'=>3,'трем'=>3,
+        'четыре'=>4,'четырёх'=>4,'четырех'=>4,
+        'пять'=>5,'пяти'=>5,
+        'шесть'=>6,'шести'=>6,
+        'семь'=>7,'семи'=>7,
+        'восемь'=>8,'восьми'=>8,
+        'девять'=>9,'девяти'=>9,
+        'десять'=>10,'десяти'=>10,
+        'одиннадцать'=>11,'двенадцать'=>12,'тринадцать'=>13,'четырнадцать'=>14,
+        'пятнадцать'=>15,'двадцать'=>20,'тридцать'=>30,
+    ];
+    $lower = mb_strtolower($text);
+    foreach ($words as $word => $num) {
+        if (mb_strpos($lower, $word) !== false) return $num;
+    }
+    return null;
+}
+
 // Анализ запасов по дням — товары с критическим запасом
 function lookupStockDays($question, $entity) {
     global $pdo;
@@ -752,10 +780,7 @@ function lookupStockDays($question, $entity) {
     if (!$isDaysQuestion) return '';
 
     // Извлечь число дней из вопроса (по умолчанию 7)
-    $maxDays = 7;
-    if (preg_match('/(\d+)\s*(дн|день|дня)/u', $q, $m)) {
-        $maxDays = intval($m[1]);
-    }
+    $maxDays = extractNumber($question) ?? 7;
 
     $sql = "SELECT a.sku, p.name, a.stock, a.consumption, a.period_days, p.supplier,
                    ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left
@@ -836,10 +861,7 @@ function lookupShelfLife($question, $entity) {
 
     // Если не искали конкретный товар или не нашли — показать скоро истекающие
     if (!$found) {
-        $daysAhead = 14;
-        if (preg_match('/(\d+)\s*(дн|день|дня)/u', $q, $m)) {
-            $daysAhead = intval($m[1]);
-        }
+        $daysAhead = extractNumber($question) ?? 14;
 
         $sql = "SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
                        DATEDIFF(expiry_date, CURDATE()) as days_left
