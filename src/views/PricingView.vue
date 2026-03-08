@@ -39,12 +39,18 @@
 
     <!-- Фильтр по поставщику -->
     <div class="pricing-filters">
-      <template v-if="supplierNames.length > 1">
-        <button class="db-sort-btn" :class="{ active: !filterSupplier }" @click="filterSupplier = ''" style="font-size:11px;">Все</button>
-        <button v-for="s in supplierNames" :key="s" class="db-sort-btn" :class="{ active: filterSupplier === s }" @click="filterSupplier = s" style="font-size:11px;">{{ s }}</button>
-      </template>
-      <button v-if="activeTab === 'prices' && filterSupplier" class="db-sort-btn" :class="{ active: showNoPriceFilter }" @click="toggleNoPriceFilter" style="font-size:11px;margin-left:auto;">
-        Без цены <span v-if="noPriceProducts.length" style="font-size:10px;opacity:0.7;">({{ noPriceProducts.length }})</span>
+      <div v-if="supplierNames.length > 1" class="pf-supplier-select-wrap">
+        <select v-model="filterSupplier" class="pf-supplier-select">
+          <option value="">Все поставщики</option>
+          <option v-for="s in supplierNames" :key="s" :value="s">{{ s }}</option>
+        </select>
+      </div>
+      <span v-if="filterSupplier" class="pf-supplier-tag">
+        {{ filterSupplier }}
+        <button class="pf-supplier-tag-clear" @click="filterSupplier = ''" title="Сбросить">&times;</button>
+      </span>
+      <button v-if="activeTab === 'prices' && filterSupplier" class="db-sort-btn" :class="{ active: showNoPriceFilter }" @click="toggleNoPriceFilter" style="margin-left:auto;">
+        Без цены <span v-if="noPriceProducts.length" class="pf-no-price-count">({{ noPriceProducts.length }})</span>
       </button>
     </div>
 
@@ -1348,7 +1354,14 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .pricing-search-input { width:100%; padding:9px 36px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; background:var(--card); box-sizing:border-box; transition:border-color .15s,box-shadow .15s; }
 .pricing-search-input:focus { border-color:var(--bk-orange); outline:none; box-shadow:0 0 0 3px rgba(245,166,35,0.12); }
 .pricing-search-clear { position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:14px; }
-.pricing-filters { margin-bottom:14px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.pricing-filters { margin-bottom:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.pf-supplier-select-wrap { position:relative; }
+.pf-supplier-select { appearance:none; -webkit-appearance:none; padding:6px 32px 6px 10px; border:1.5px solid var(--border); border-radius:8px; background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E") no-repeat right 10px center; font-size:12px; font-weight:600; font-family:inherit; color:var(--text); cursor:pointer; transition:border-color .15s; min-width:180px; }
+.pf-supplier-select:focus { border-color:var(--bk-orange); outline:none; box-shadow:0 0 0 3px rgba(245,166,35,0.12); }
+.pf-supplier-tag { display:inline-flex; align-items:center; gap:4px; padding:4px 8px 4px 10px; border-radius:16px; background:var(--bk-orange); color:#fff; font-size:11px; font-weight:600; }
+.pf-supplier-tag-clear { background:none; border:none; color:rgba(255,255,255,0.8); font-size:16px; line-height:1; cursor:pointer; padding:0 2px; font-weight:400; }
+.pf-supplier-tag-clear:hover { color:#fff; }
+.pf-no-price-count { font-size:10px; opacity:0.7; }
 
 /* ═══ Layout helpers ═══ */
 .pricing-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
