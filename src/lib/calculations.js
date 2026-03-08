@@ -51,7 +51,7 @@ export function calculateItem(item, settings) {
   if (!valid) return { calculatedOrder: 0, coverageDate: null, palletsInfo: null };
 
   const { daily, stockAfterDelivery } = calcStockAfterDelivery(item, settings);
-  const needAfterDelivery = daily * safetyDays;
+  const needAfterDelivery = daily * (safetyDays || 0);
 
   let calculatedOrder = needAfterDelivery - stockAfterDelivery;
   if (calculatedOrder < 0) calculatedOrder = 0;

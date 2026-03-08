@@ -445,7 +445,8 @@ async function loadCards() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     allCards.value = data.map(c => {
-      const analogs = typeof c.analogs === 'string' ? JSON.parse(c.analogs) : (c.analogs || [])
+      let analogs = c.analogs || []
+      if (typeof c.analogs === 'string') { try { analogs = JSON.parse(c.analogs); } catch { analogs = []; } }
       return {
         id: c.id?.toString() || '',
         name: c.name || '',
@@ -649,8 +650,8 @@ function doSearch() {
       continue
     }
 
-    // 4. Совпадение по аналогу (точное)
-    if (analogsNorm.includes(q)) {
+    // 4. Совпадение по аналогу (подстрочное)
+    if (analogsNorm.some(a => a.includes(q))) {
       foundCards.push({ ...c, reason: 'найдено по аналогу' })
       if (!matchType) { matchType = 'analog'; matchedCardId = c.id }
       continue

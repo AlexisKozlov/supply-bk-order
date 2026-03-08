@@ -90,7 +90,7 @@
                 <th class="col-addr">Адрес</th>
                 <th v-for="prod in collectionData.products" :key="prod.id" class="col-prod">
                   <div>{{ prod.product_name }}</div>
-                  <div class="th-unit">{{ prod.unit === 'boxes' ? 'кор.' : 'шт.' }}</div>
+                  <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
                 </th>
                 <th v-if="activeCollection.status === 'active'" class="col-del"></th>
               </tr>
@@ -268,10 +268,17 @@
               <!-- Unit selector -->
               <div class="sc-product-unit-row">
                 <span class="sc-product-unit-label">Единица сбора:</span>
-                <div class="sc-switcher">
-                  <button :class="{ on: p.unit === 'boxes' }" @click="p.unit = 'boxes'">Коробки</button>
-                  <button :class="{ on: p.unit === 'pieces' }" @click="p.unit = 'pieces'">Штуки</button>
-                </div>
+                <template v-if="p.unitLocked">
+                  <span class="sc-unit-locked">{{ unitLabel(p.unit) }}</span>
+                </template>
+                <template v-else>
+                  <div class="sc-switcher">
+                    <button :class="{ on: p.unit === 'boxes' }" @click="p.unit = 'boxes'">Коробки</button>
+                    <button :class="{ on: p.unit === 'pieces' }" @click="p.unit = 'pieces'">Штуки</button>
+                    <button :class="{ on: p.unit === 'kg' }" @click="p.unit = 'kg'">Кг</button>
+                    <button :class="{ on: p.unit === 'liters' }" @click="p.unit = 'liters'">Литры</button>
+                  </div>
+                </template>
               </div>
             </div>
             <button class="sc-btn outline full" @click="addProductRow" style="margin-top: 8px;">+ Добавить товар</button>
@@ -340,7 +347,11 @@ function handleDocClick(e) {
   }
 }
 onMounted(() => { loadCollections(); restaurantStore.load(orderStore.settings.legalEntity); document.addEventListener('click', handleDocClick); });
-onUnmounted(() => { document.removeEventListener('click', handleDocClick); });
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocClick);
+  Object.values(searchTimers).forEach(t => clearTimeout(t));
+  searchTimers = {};
+});
 watch(() => orderStore.settings.legalEntity, () => { collectionData.value = null; loadCollections(); restaurantStore.invalidate(); restaurantStore.load(orderStore.settings.legalEntity); });
 
 const uniqueRestaurants = computed(() => {
@@ -349,14 +360,14 @@ const uniqueRestaurants = computed(() => {
 });
 
 function makeProductRow() {
-  return { name: '', sku: '', unit: 'pieces', fromDb: false, results: [], showDrop: false, searchQuery: '', manual: false, supplier: '', searching: false };
+  return { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], showDrop: false, searchQuery: '', manual: false, supplier: '', searching: false };
 }
 function addProductRow() {
   newProducts.value.push(makeProductRow());
 }
 function clearProductRow(i) {
   const p = newProducts.value[i];
-  Object.assign(p, { name: '', sku: '', fromDb: false, results: [], searchQuery: '', manual: false, supplier: '', searching: false });
+  Object.assign(p, { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], searchQuery: '', manual: false, supplier: '', searching: false });
 }
 function setManual(i) {
   const p = newProducts.value[i];
@@ -398,6 +409,11 @@ function pickProduct(i, product) {
   p.showDrop = false;
   p.results = [];
   p.searchQuery = '';
+  // Единица измерения из карточки товара — блокируем выбор
+  const uom = product.unit_of_measure;
+  if (uom === 'кг') { p.unit = 'kg'; p.unitLocked = true; }
+  else if (uom === 'л') { p.unit = 'liters'; p.unitLocked = true; }
+  else { p.unit = 'pieces'; p.unitLocked = true; }
 }
 
 // Collections CRUD
@@ -497,7 +513,7 @@ function copyToken() {
   navigator.clipboard.writeText(tokenLink.value).then(() => {
     copied.value = true;
     setTimeout(() => copied.value = false, 2000);
-  });
+  }).catch(() => { toastStore.error('Ошибка', 'Не удалось скопировать'); });
 }
 
 // Close collection
@@ -529,10 +545,16 @@ function askDeleteCollection() {
 async function doDeleteCollection() {
   try {
     const id = activeCollection.value.id;
-    await db.from('stock_collection_data').delete().eq('collection_id', id);
-    await db.from('stock_collection_tokens').delete().eq('collection_id', id);
-    await db.from('stock_collection_products').delete().eq('collection_id', id);
-    await db.from('stock_collections').delete().eq('id', id);
+    const steps = [
+      () => db.from('stock_collection_data').delete().eq('collection_id', id),
+      () => db.from('stock_collection_tokens').delete().eq('collection_id', id),
+      () => db.from('stock_collection_products').delete().eq('collection_id', id),
+      () => db.from('stock_collections').delete().eq('id', id),
+    ];
+    for (const step of steps) {
+      const { error } = await step();
+      if (error) { toastStore.error('Ошибка', 'Не удалось удалить сбор'); return; }
+    }
     activeCollection.value = null;
     collectionData.value = null;
     toastStore.success('Удалено', 'Сбор удалён');
@@ -548,11 +570,11 @@ function openRename() {
 async function saveRename() {
   if (!renameName.value.trim()) return;
   try {
-    await db.from('stock_collections').update({ name: renameName.value.trim() }).eq('id', activeCollection.value.id);
+    const { error } = await db.from('stock_collections').update({ name: renameName.value.trim() }).eq('id', activeCollection.value.id);
+    if (error) { toastStore.error('Ошибка', 'Не удалось переименовать'); return; }
     activeCollection.value.name = renameName.value.trim();
     showRename.value = false;
     toastStore.success('Сохранено', '');
-    // Update in list too
     const c = collections.value.find(x => x.id === activeCollection.value.id);
     if (c) c.name = renameName.value.trim();
   } catch { toastStore.error('Ошибка', 'Не удалось переименовать'); }
@@ -607,7 +629,8 @@ async function saveCellEdit(d) {
   const val = parseFloat(String(editStockValue.value).replace(',', '.'));
   if (isNaN(val)) { toastStore.error('Ошибка', 'Неверное значение'); return; }
   try {
-    await db.from('stock_collection_data').update({ stock: val }).eq('id', d.id);
+    const { error } = await db.from('stock_collection_data').update({ stock: val }).eq('id', d.id);
+    if (error) { toastStore.error('Ошибка', 'Не удалось сохранить'); return; }
     d.stock = val;
     editingCell.value = null;
     toastStore.success('Сохранено', '');
@@ -623,7 +646,8 @@ function deleteRestaurantRow(row) {
       try {
         const ids = Object.values(row.cells).map(d => d.id).filter(Boolean);
         for (const id of ids) {
-          await db.from('stock_collection_data').delete().eq('id', id);
+          const { error } = await db.from('stock_collection_data').delete().eq('id', id);
+          if (error) { toastStore.error('Ошибка', 'Не удалось удалить'); return; }
         }
         await refreshData();
         toastStore.success('Удалено', '');
@@ -679,8 +703,8 @@ async function exportExcel() {
   ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: 'Адрес', t: 's', s: sH };
   const prodOffset = 3;
   products.forEach((p, i) => {
-    const unitLabel = p.unit === 'boxes' ? 'кор.' : 'шт.';
-    ws[XLSX.utils.encode_cell({ r, c: i + prodOffset })] = { v: `${p.product_name} (${unitLabel})`, t: 's', s: sH };
+    const ul = unitLabel(p.unit);
+    ws[XLSX.utils.encode_cell({ r, c: i + prodOffset })] = { v: `${p.product_name} (${ul})`, t: 's', s: sH };
     cols.push({ wch: Math.max(16, p.product_name.length + 8) });
   });
   r++;
@@ -728,6 +752,13 @@ function sourceLabel(s) {
   if (s === 'form') return 'Форма';
   if (s === 'file') return 'Файл';
   return 'Вручную';
+}
+
+function unitLabel(u) {
+  if (u === 'boxes') return 'кор.';
+  if (u === 'kg') return 'кг';
+  if (u === 'liters') return 'л';
+  return 'шт.';
 }
 
 function fmtDate(s) {
@@ -911,6 +942,7 @@ function fmtTime(s) {
 /* Unit row */
 .sc-product-unit-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .sc-product-unit-label { font-size: 12px; color: var(--muted); font-weight: 500; }
+.sc-unit-locked { font-size: 12px; font-weight: 700; color: #502314; padding: 5px 12px; background: #F0EBE4; border-radius: 6px; }
 
 /* Dropdown */
 .sc-drop {
@@ -931,11 +963,11 @@ function fmtTime(s) {
 .sc-switcher { display: inline-flex; border: 1.5px solid var(--border); border-radius: 6px; overflow: hidden; flex-shrink: 0; }
 .sc-switcher button {
   padding: 6px 11px; font-size: 11px; font-weight: 600; font-family: inherit;
-  border: none; cursor: pointer; background: none; color: var(--muted); transition: all 0.12s;
+  border: none; cursor: pointer; background: transparent; color: #8C7B6E; transition: all 0.12s;
 }
-.sc-switcher button:not(:last-child) { border-right: 1.5px solid var(--border); }
-.sc-switcher button.on { background: var(--brown); color: #fff; }
-.sc-switcher button:hover:not(.on) { background: var(--bg2); }
+.sc-switcher button:not(:last-child) { border-right: 1.5px solid #EDE7DF; }
+.sc-switcher .on { background: #502314 !important; color: #fff !important; }
+.sc-switcher button:hover:not(.on) { background: #F9F6F2; }
 
 @media (max-width: 640px) {
   .sc-product-card { padding: 10px; }

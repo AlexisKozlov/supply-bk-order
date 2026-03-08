@@ -315,7 +315,8 @@ watch(notifTab, async (v) => {
 
 function formatChangelogDate(str) {
   if (!str) return '';
-  const d = new Date(str);
+  const ds = typeof str === 'string' && str.length === 10 ? str + 'T00:00:00' : str;
+  const d = new Date(ds);
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
@@ -347,6 +348,7 @@ const toolsItems = [
   { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
   { module: 'order', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
   { module: 'order', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
+  { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
 ];
 
 const showToolsMenu = ref(false); // legacy, не используется
@@ -454,6 +456,7 @@ function sendHeartbeat() {
 
 let heartbeatTimer = null;
 let maintenanceTimer = null;
+let welcomeTimers = [];
 let removeAfterEach = null;
 
 removeAfterEach = router.afterEach(() => {
@@ -474,7 +477,7 @@ const availableEntities = computed(() => {
 
 const userInitials = computed(() => {
   const name = userStore.currentUser?.name || '';
-  return name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  return name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 });
 
 function toggleSidebar() {
@@ -496,8 +499,8 @@ onMounted(() => {
       welcomeVisible.value = true;
       nextTick(() => startWelcomeParticles());
     });
-    setTimeout(() => { welcomeFade.value = true; }, 2200);
-    setTimeout(() => { showWelcome.value = false; welcomeVisible.value = false; welcomeFade.value = false; stopWelcomeParticles(); }, 2800);
+    welcomeTimers.push(setTimeout(() => { welcomeFade.value = true; }, 2200));
+    welcomeTimers.push(setTimeout(() => { showWelcome.value = false; welcomeVisible.value = false; welcomeFade.value = false; stopWelcomeParticles(); }, 2800));
   }
 
   document.addEventListener('click', handleOutsideClick);
@@ -523,6 +526,8 @@ onUnmounted(() => {
   window.removeEventListener('offline', handleOffline);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
+  welcomeTimers.forEach(clearTimeout);
+  welcomeTimers = [];
   if (removeAfterEach) removeAfterEach();
   notificationStore.stopPolling();
 });

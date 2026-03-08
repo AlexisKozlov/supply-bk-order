@@ -43,6 +43,7 @@
         :class="{ 'consumption-warning': consumptionWarning }"
         :title="consumptionWarning ? `⚠ Расход отличается от анализа запасов (${nf.format(Math.round(avgConsumption))}), проверьте данные` : ''"
         @focus="calcConsumption.onFocus"
+        @blur="calcConsumption.onBlur"
         @keydown="(e) => handleCalcKeydown(e, 'consumptionPeriod', calcConsumption)"
         @change="(e) => updateField('consumptionPeriod', +e.target.value)"
         ref="inputConsumption"
@@ -57,6 +58,7 @@
         type="number"
         :value="item.stock"
         @focus="calcStock.onFocus"
+        @blur="calcStock.onBlur"
         @keydown="(e) => handleCalcKeydown(e, 'stock', calcStock)"
         @change="(e) => updateField('stock', +e.target.value)"
         ref="inputStock"
@@ -70,6 +72,7 @@
         type="number"
         :value="item.transit"
         @focus="calcTransit.onFocus"
+        @blur="calcTransit.onBlur"
         @keydown="(e) => handleCalcKeydown(e, 'transit', calcTransit)"
         @change="(e) => updateField('transit', +e.target.value)"
         ref="inputTransit"
@@ -114,6 +117,7 @@
         :value="orderPieces"
         style="width:70px;"
         @focus="calcOrderPieces.onFocus"
+        @blur="calcOrderPieces.onBlur"
         @keydown="(e) => handleOrderPiecesKeydown(e)"
         @change="(e) => onOrderPiecesChange(+e.target.value)"
         ref="inputOrderPieces"
@@ -126,6 +130,7 @@
         :value="orderBoxes"
         style="width:70px;"
         @focus="calcOrderBoxes.onFocus"
+        @blur="calcOrderBoxes.onBlur"
         @keydown="(e) => handleOrderBoxesKeydown(e)"
         @change="(e) => onOrderBoxesChange(+e.target.value)"
         ref="inputOrderBoxes"
@@ -442,11 +447,12 @@ function onOrderPiecesChange(value) {
 }
 
 function onOrderBoxesChange(physBoxes) {
-  const pieces = physBoxes * physBoxSize.value;
   let finalOrder;
   if (props.settings.unit === 'pieces') {
-    finalOrder = pieces;
+    if (!physBoxSize.value) return; // нет данных для пересчёта
+    finalOrder = physBoxes * physBoxSize.value;
   } else {
+    if (!mult.value) return; // нет данных для пересчёта
     finalOrder = physBoxes * mult.value;
   }
   orderStore.updateItemField(props.item.id, 'finalOrder', finalOrder);

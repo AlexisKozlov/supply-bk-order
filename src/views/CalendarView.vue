@@ -156,7 +156,7 @@ function isoWeekNum(week) {
 function isCurrentWeek(week) { return week.some(c => c.isToday); }
 
 function onTagClick(o) {
-  const dd = o.deliveryDate ? new Date(o.deliveryDate).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+  const dd = o.deliveryDate ? new Date(o.deliveryDate + (o.deliveryDate.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
   preview.value = {
     show: true, orderId: o.id, supplier: o.supplier,
     itemCount: o.itemCount, items: o.items || [], deliveryDate: dd,

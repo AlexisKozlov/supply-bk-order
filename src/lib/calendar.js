@@ -62,7 +62,7 @@ export function buildCalendarGrid(year, month, orders, supplierColors) {
   // Последний заказ по поставщику
   const lastOrderBySupplier = {};
   orders.forEach(o => {
-    const d = new Date(o.delivery_date);
+    const d = new Date(o.delivery_date + (o.delivery_date?.length === 10 ? 'T00:00:00' : ''));
     const sup = o.supplier;
     if (!sup) return;
     if (!lastOrderBySupplier[sup] || d > lastOrderBySupplier[sup]) {
@@ -110,7 +110,7 @@ export function buildCalendarGrid(year, month, orders, supplierColors) {
     const supplierOrders = orders.filter(o => o.supplier === s);
     let nextDelivery = null, lastDelivery = null;
     supplierOrders.forEach(o => {
-      const d = new Date(o.delivery_date);
+      const d = new Date(o.delivery_date + (o.delivery_date?.length === 10 ? 'T00:00:00' : ''));
       if (d >= today) { if (!nextDelivery || d < nextDelivery) nextDelivery = d; }
       else { if (!lastDelivery || d > lastDelivery) lastDelivery = d; }
     });
@@ -140,7 +140,7 @@ export function buildCalendarGrid(year, month, orders, supplierColors) {
 
   // Просроченные
   const overdue = suppliers.filter(s => {
-    const hasFuture = orders.some(o => o.supplier === s && new Date(o.delivery_date) >= today);
+    const hasFuture = orders.some(o => o.supplier === s && new Date(o.delivery_date + 'T00:00:00') >= today);
     if (hasFuture) return false;
     const lastDate = lastOrderBySupplier[s];
     if (!lastDate) return true;

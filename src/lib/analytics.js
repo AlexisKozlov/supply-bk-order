@@ -81,7 +81,7 @@ function processData(orders, prevOrders, days) {
     supMap[sup].orders++;
     supMap[sup].boxes += boxes;
     // Используем дату доставки (если есть) или дату создания
-    const d = o.delivery_date ? new Date(o.delivery_date) : new Date(o.created_at);
+    const d = o.delivery_date ? new Date(o.delivery_date + 'T00:00:00') : new Date(o.created_at);
     if (!supMap[sup].lastDate || d > supMap[sup].lastDate) supMap[sup].lastDate = d;
   });
   // Прошлый период для поставщиков
@@ -138,108 +138,41 @@ function processData(orders, prevOrders, days) {
     };
   });
 
-  // === Аномалии ===
-  const anomalies = [];
+  // === Изменения за период ===
+  const changes = [];
 
-  // Последний заказ по поставщику (для ссылок)
-  const lastOrderBySupplier = {};
-  orders.forEach(o => {
-    const sup = o.supplier || 'Без поставщика';
-    if (!lastOrderBySupplier[sup] || new Date(o.created_at) > new Date(lastOrderBySupplier[sup].created_at)) {
-      lastOrderBySupplier[sup] = o;
+  // 1. Товар перестали заказывать — был в прошлом периоде (≥3 заказа), нет в текущем
+  for (const [key, prev] of Object.entries(prevProdMap)) {
+    if (prev.orders >= 3 && !prodMap[key]) {
+      changes.push({
+        type: 'disappeared', icon: '🔴', severity: 'danger',
+        title: prev.name || key,
+        text: `Перестали заказывать — за прошлые ${days} дн. было ${prev.orders} заказов (${Math.round(prev.boxes)} кор.)`,
+        detail: `За текущие ${days} дней — ноль заказов`,
+        sku: key,
+      });
     }
-  });
-
-  // 1. Резкий рост/падение расхода — по ВСЕМ товарам (не только топ-10)
-  const allProductsWithDelta = Object.values(prodMap).map(p => {
-    const key = p.sku || p.name || '?';
-    const prev = prevProdMap[key] || { boxes: 0, orders: 0 };
-    const delta = prev.boxes > 0 ? Math.round((p.boxes - prev.boxes) / prev.boxes * 100) : null;
-    return { ...p, prevBoxes: prev.boxes, prevOrders: prev.orders, deltaBoxes: delta };
-  });
-  // Минимум 5 коробок в одном из периодов, чтобы мелкие товары не шумели
-  function ordersWord(n) { return n === 1 ? 'заказ' : n >= 2 && n <= 4 ? 'заказа' : 'заказов'; }
-  allProductsWithDelta.forEach(p => {
-    if (p.deltaBoxes !== null && Math.max(p.boxes, p.prevBoxes) >= 5) {
-      if (p.deltaBoxes >= 50) {
-        anomalies.push({
-          type: 'spike', icon: '📈', severity: p.deltaBoxes >= 100 ? 'danger' : 'warning',
-          title: p.name || p.sku,
-          text: `За ${days} дн. заказали ${Math.round(p.boxes)} кор. (${p.orders} ${ordersWord(p.orders)}) — на ${p.deltaBoxes}% больше`,
-          detail: `Предыдущие ${days} дн.: ${Math.round(p.prevBoxes)} кор. (${p.prevOrders} ${ordersWord(p.prevOrders)})`,
-        });
-      }
-      if (p.deltaBoxes <= -30) {
-        anomalies.push({
-          type: 'drop', icon: '📉', severity: p.deltaBoxes <= -60 ? 'danger' : 'warning',
-          title: p.name || p.sku,
-          text: `За ${days} дн. заказали ${Math.round(p.boxes)} кор. (${p.orders} ${ordersWord(p.orders)}) — на ${Math.abs(p.deltaBoxes)}% меньше`,
-          detail: `Предыдущие ${days} дн.: ${Math.round(p.prevBoxes)} кор. (${p.prevOrders} ${ordersWord(p.prevOrders)})`,
+  }
+  // Также: был регулярным (≥2 заказа), текущий объём упал на 80%+
+  for (const [key, cur] of Object.entries(prodMap)) {
+    const prev = prevProdMap[key];
+    if (prev && prev.orders >= 2 && prev.boxes >= 5) {
+      const drop = Math.round((1 - cur.boxes / prev.boxes) * 100);
+      if (drop >= 80) {
+        changes.push({
+          type: 'disappeared', icon: '🟡', severity: 'warning',
+          title: cur.name || key,
+          text: `Почти перестали заказывать — объём упал на ${drop}%`,
+          detail: `Было ${Math.round(prev.boxes)} кор. (${prev.orders} зак.), стало ${Math.round(cur.boxes)} кор. (${cur.orders} зак.)`,
+          sku: key,
         });
       }
     }
-  });
-
-  // 2. Поставщик давно без заказа (> 2.5x средний интервал, минимум 7 дней)
-  suppliers.forEach(s => {
-    if (s.orders >= 3 && s.daysAgo !== null) {
-      const avgInterval = days / s.orders;
-      if (s.daysAgo > Math.max(avgInterval * 2.5, 7)) {
-        const lastOrder = lastOrderBySupplier[s.supplier];
-        anomalies.push({
-          type: 'supplier', icon: '⚠️', severity: 'danger',
-          title: s.supplier,
-          text: `Последний заказ ${s.daysAgo} дн. назад — обычно заказывают каждые ~${Math.round(avgInterval)} дн.`,
-          detail: `Всего ${s.orders} заказов за ${days} дней`,
-          orderId: lastOrder ? lastOrder.id : null,
-        });
-      }
-    }
-  });
-
-  // 3. Необычно большой/маленький заказ — PER SUPPLIER (у каждого свой масштаб)
-  const ordersBySupplier = {};
-  orders.forEach(o => {
-    const sup = o.supplier || 'Без поставщика';
-    if (!ordersBySupplier[sup]) ordersBySupplier[sup] = [];
-    const d = new Date(o.created_at);
-    ordersBySupplier[sup].push({
-      id: o.id,
-      supplier: sup,
-      boxes: sumBoxes(o.order_items),
-      date: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
-    });
-  });
-  for (const [sup, supOrders] of Object.entries(ordersBySupplier)) {
-    if (supOrders.length < 3) continue;
-    const mean = supOrders.reduce((s, o) => s + o.boxes, 0) / supOrders.length;
-    const std = Math.sqrt(supOrders.reduce((s, o) => s + (o.boxes - mean) ** 2, 0) / supOrders.length);
-    if (std <= 0 || mean < 3) continue;
-    supOrders.forEach(o => {
-      const z = (o.boxes - mean) / std;
-      if (z > 2.5) {
-        anomalies.push({
-          type: 'outlier', icon: '⚡', severity: 'info',
-          title: `${o.supplier} — заказ от ${o.date}`,
-          text: `${Math.round(o.boxes)} кор. — это в ${(o.boxes / mean).toFixed(1)}× больше обычного`,
-          detail: `Обычно заказывают ~${Math.round(mean)} кор.`,
-          orderId: o.id,
-        });
-      } else if (z < -2.5 && o.boxes > 0) {
-        anomalies.push({
-          type: 'outlier', icon: '⚡', severity: 'info',
-          title: `${o.supplier} — заказ от ${o.date}`,
-          text: `${Math.round(o.boxes)} кор. — это в ${(mean / o.boxes).toFixed(1)}× меньше обычного`,
-          detail: `Обычно заказывают ~${Math.round(mean)} кор.`,
-          orderId: o.id,
-        });
-      }
-    });
   }
 
-  // Сортировка аномалий: danger → warning → info
-  const sevOrder = { danger: 0, warning: 1, info: 2 };
-  anomalies.sort((a, b) => (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9));
+  // Сортировка: danger сначала, потом warning
+  const sevOrder = { danger: 0, warning: 1 };
+  changes.sort((a, b) => (sevOrder[a.severity] || 9) - (sevOrder[b.severity] || 9));
 
   // === Общие итоги ===
   const totalBoxes  = orders.reduce((s, o) => s + sumBoxes(o.order_items), 0);
@@ -345,7 +278,7 @@ function processData(orders, prevOrders, days) {
     suppliers,
     supplierColor,
     topProducts,
-    anomalies,
+    changes,
     planFact,
     totals:       { orders: totalOrders, boxes: totalBoxes },
     prev:         { orders: prevCount,   boxes: prevBoxes  },
@@ -449,6 +382,9 @@ export async function getForecastData(legalEntity) {
     ordersQuery, stockQuery, seasonQuery, productsQuery,
   ]);
 
+  if (ordersRes.error || stockRes.error || seasonRes.error || productsRes.error) {
+    console.error('Analytics data load error', ordersRes.error, stockRes.error, seasonRes.error, productsRes.error);
+  }
   const orders = ordersRes.data || [];
   const stockRows = stockRes.data || [];
   const seasonOrders = seasonRes.data || [];
@@ -507,7 +443,13 @@ export async function getForecastData(legalEntity) {
     : 1;
 
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const currentMonthTotal = monthTotals[currentMonth] || overallMonthAvg;
+  // Для текущего неполного месяца экстраполируем на полный
+  const dayOfMonth = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const currentMonthRaw = monthTotals[currentMonth];
+  const currentMonthTotal = currentMonthRaw != null
+    ? (dayOfMonth > 0 ? currentMonthRaw * daysInMonth / dayOfMonth : currentMonthRaw)
+    : overallMonthAvg;
   const seasonCoeff = overallMonthAvg > 0 ? currentMonthTotal / overallMonthAvg : 1;
 
   // === Все даты за 60 дней ===

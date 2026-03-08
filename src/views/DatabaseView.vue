@@ -444,14 +444,15 @@ async function switchToSuppliers() { activeTab.value = 'suppliers'; await loadSu
 
 async function loadSuppliers() {
   const myId = ++_suppLoadId;
-  if (activeTab.value === 'suppliers') loading.value = true;
+  const showLoading = activeTab.value === 'suppliers';
+  if (showLoading) loading.value = true;
   try {
     const { data, error } = await db.from('suppliers').select('*').order('short_name');
     if (myId !== _suppLoadId) return;
     if (error) { toast.error('Ошибка', ''); return; }
     const group = getEntityGroup(orderStore.settings.legalEntity);
     suppliers.value = (data || []).filter(s => group.includes(s.legal_entity));
-  } finally { if (myId === _suppLoadId) loading.value = false; }
+  } finally { if (myId === _suppLoadId && showLoading) loading.value = false; }
 }
 
 function openNew(type) {

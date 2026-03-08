@@ -412,7 +412,8 @@ async function doImport() {
       const toCreate = supplierNames.filter(name => !existingSet.has(`${name}|${props.legalEntity}`));
       if (toCreate.length) {
         const suppBatch = toCreate.map(name => ({ short_name: name, legal_entity: props.legalEntity }));
-        await db.from('suppliers').insert(suppBatch);
+        const { error: suppErr } = await db.from('suppliers').insert(suppBatch);
+        if (suppErr) { emit('close'); toast.error('Ошибка', 'Не удалось создать поставщиков'); return; }
         suppliersCreated = toCreate.length;
       }
     }

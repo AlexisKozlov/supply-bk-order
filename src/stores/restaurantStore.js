@@ -22,6 +22,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   }
 
   let _loadingGroup = '';
+  let _loadId = 0;
   async function load(legalEntity) {
     const group = entityToGroup(legalEntity);
     if (loaded.value && loadedGroup.value === group) return;
@@ -29,21 +30,25 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     if (loading.value && loadPromise && _loadingGroup === group) return loadPromise;
     loading.value = true;
     _loadingGroup = group;
-    loadPromise = _doLoad(group);
+    const myId = ++_loadId;
+    loadPromise = _doLoad(group, myId);
     try {
       await loadPromise;
     } finally {
-      loadPromise = null;
-      _loadingGroup = '';
+      if (_loadId === myId) {
+        loadPromise = null;
+        _loadingGroup = '';
+      }
     }
   }
 
-  async function _doLoad(group) {
+  async function _doLoad(group, myId) {
     try {
       const [rRes, sRes] = await Promise.all([
         db.from('restaurants').select('*').eq('legal_entity_group', group).order('sort_order'),
         db.from('delivery_schedule').select('*'),
       ]);
+      if (myId !== _loadId) return; // Устарел — новая загрузка уже идёт
       if (rRes.error) throw new Error(rRes.error);
       if (sRes.error) throw new Error(sRes.error);
       restaurants.value = rRes.data || [];
@@ -52,11 +57,12 @@ export const useRestaurantStore = defineStore('restaurant', () => {
       loaded.value = true;
       loadedGroup.value = group;
     } catch (e) {
+      if (myId !== _loadId) return;
       console.error('restaurantStore load error:', e);
       const toastStore = useToastStore();
       toastStore.error('Ошибка загрузки', 'Не удалось загрузить данные ресторанов');
     } finally {
-      loading.value = false;
+      if (myId === _loadId) loading.value = false;
     }
   }
 

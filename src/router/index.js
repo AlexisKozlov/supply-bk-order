@@ -30,6 +30,8 @@ const routes = [
       { path: 'suppliers', redirect: { name: 'database', query: { tab: 'suppliers' } } },
       { path: 'deficit', name: 'deficit', component: () => import('@/views/DeficitView.vue'), meta: { title: 'Распределение дефицита', module: 'order' } },
       { path: 'stock-collection', name: 'stock-collection', component: () => import('@/views/StockCollectionView.vue'), meta: { title: 'Сбор остатков', module: 'order' } },
+      { path: 'tenders', name: 'tenders', component: () => import('@/views/TendersView.vue'), meta: { title: 'Тендеры', module: 'tenders' } },
+      { path: 'tenders/:id', name: 'tender-detail', component: () => import('@/views/TenderDetailView.vue'), meta: { title: 'Тендер', module: 'tenders' } },
     ],
   },
   {
@@ -101,12 +103,14 @@ router.beforeEach((to) => {
     return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
   }
   if (to.meta.requiresAdmin && userStore.currentUser?.role !== 'admin') {
-    return { name: 'order' };
+    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders'];
+    const first = modules.find(m => userStore.hasAccess(m, 'view'));
+    return first ? { name: first } : { name: 'home' };
   }
   // Модульная проверка прав
   if (to.meta.module && !userStore.hasAccess(to.meta.module, 'view')) {
     // Редирект на первый доступный модуль
-    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing'];
+    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders'];
     const first = modules.find(m => userStore.hasAccess(m, 'view'));
     return first ? { name: first } : { name: 'home' };
   }

@@ -12,20 +12,26 @@
       </select>
     </div>
 
-    <!-- Anomaly banner (if critical, always visible) -->
-    <div v-if="!loading && data && criticalAnomalies.length && activeTab !== 'anomalies'" class="an-alert-banner" @click="activeTab = 'anomalies'">
-      <BkIcon name="warning" size="sm"/> {{ criticalAnomalies.length }} критич. аномалий
+    <!-- Changes banner (if critical, always visible) -->
+    <div v-if="!loading && data && criticalChanges.length && activeTab !== 'changes'" class="an-alert-banner" @click="activeTab = 'changes'">
+      <BkIcon name="warning" size="sm"/> {{ criticalChanges.length }} важных изменений
       <span class="an-alert-link">Смотреть →</span>
     </div>
 
     <!-- Tabs -->
-    <div v-if="!loading && data" class="an-tabs">
+    <div v-if="!loading || activeTab === 'abc-xyz'" class="an-tabs">
       <button v-for="t in tabs" :key="t.id" class="an-tab" :class="{ active: activeTab === t.id }" @click="activeTab = t.id">
         {{ t.label }}
-        <span v-if="t.id === 'anomalies' && data.anomalies.length" class="an-tab-badge">{{ data.anomalies.length }}</span>
+        <span v-if="t.id === 'changes' && data && data.changes.length" class="an-tab-badge">{{ data.changes.length }}</span>
       </button>
     </div>
 
+    <template v-if="activeTab === 'abc-xyz'">
+      <div class="an-content">
+        <AbcXyzPanel />
+      </div>
+    </template>
+    <template v-else>
     <div v-if="loading" style="text-align:center;padding:60px;">
       <BurgerSpinner text="Загрузка..." />
     </div>
@@ -420,21 +426,20 @@
         </template>
       </template>
 
-      <!-- ===== ANOMALIES ===== -->
-      <template v-if="activeTab === 'anomalies'">
-        <div v-if="!data.anomalies.length" style="text-align:center;padding:40px;color:var(--text-muted);">
-          <BkIcon name="success" size="sm"/> Аномалий не обнаружено за выбранный период
+      <!-- ===== CHANGES ===== -->
+      <template v-if="activeTab === 'changes'">
+        <div v-if="!data.changes.length" style="text-align:center;padding:40px;color:var(--text-muted);">
+          <BkIcon name="success" size="sm"/> Нет значимых изменений за выбранный период
         </div>
-        <div v-for="(a, i) in data.anomalies" :key="i" class="an-anomaly" :class="['sev-' + a.severity, { clickable: a.orderId }]"
-          @click="a.orderId ? loadOrder(a.orderId) : null">
-          <span class="an-anomaly-icon">{{ a.icon }}</span>
-          <div class="an-anomaly-body">
-            <div class="an-anomaly-title">{{ a.title }}</div>
-            <div class="an-anomaly-text">{{ a.text }}</div>
-            <div class="an-anomaly-detail">{{ a.detail }}</div>
+        <div v-for="(c, i) in data.changes" :key="i" class="an-change" :class="'sev-' + c.severity">
+          <span class="an-change-icon">{{ c.icon }}</span>
+          <div class="an-change-body">
+            <div class="an-change-title">{{ c.title }}</div>
+            <div class="an-change-text">{{ c.text }}</div>
+            <div class="an-change-detail">{{ c.detail }}</div>
           </div>
-          <span class="an-anomaly-tag">{{ typeLabel(a.type) }}</span>
-          <span v-if="a.orderId" class="an-anomaly-go" title="Открыть заказ">Открыть →</span>
+          <span class="an-change-tag">{{ changeTypeLabel(c.type) }}</span>
+          <button v-if="c.sku" class="an-change-action" @click="goToProduct(c.sku)">Посмотреть</button>
         </div>
       </template>
 
@@ -543,6 +548,7 @@
       </template>
 
     </div>
+    </template>
   </div>
 </template>
 
@@ -558,6 +564,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import AbcXyzPanel from '@/views/AbcXyzView.vue';
 
 
 const router = useRouter();
@@ -591,7 +598,7 @@ const chartDays = computed(() => {
 });
 const maxTotal = computed(() => chartDays.value.length ? Math.max(...chartDays.value.map(d => d.total), 1) : 1);
 
-const criticalAnomalies = computed(() => data.value ? data.value.anomalies.filter(a => a.severity === 'danger') : []);
+const criticalChanges = computed(() => data.value ? data.value.changes.filter(c => c.severity === 'danger') : []);
 
 const tabs = [
   { id: 'overview', label: 'Обзор' },
@@ -599,8 +606,9 @@ const tabs = [
   { id: 'suppliers', label: 'Поставщики' },
   { id: 'products', label: 'Товары' },
   { id: 'forecast', label: 'Прогноз' },
-  { id: 'anomalies', label: 'Аномалии' },
+  { id: 'changes', label: 'Изменения' },
   { id: 'reports', label: 'Отчёты' },
+  { id: 'abc-xyz', label: 'ABC/XYZ' },
 ];
 
 function barH(boxes) { return Math.max(Math.round((boxes / maxTotal.value) * 110), 4); }
@@ -613,8 +621,12 @@ function sPct(s) { return data.value.totals.boxes > 0 ? (s.boxes / data.value.to
 function pPct(p) { return data.value.topProducts[0]?.boxes ? (p.boxes / data.value.topProducts[0].boxes * 100) : 0; }
 function supDelta(s) { return s.prevBoxes > 0 ? Math.round((s.boxes - s.prevBoxes) / s.prevBoxes * 100) : null; }
 function deltaCls(d) { return d === null ? '' : d >= 0 ? 'val-up' : 'val-down'; }
-function typeLabel(t) {
-  return { spike: 'Рост', drop: 'Падение', supplier: 'Поставщик', outlier: 'Выброс' }[t] || t;
+function changeTypeLabel(t) {
+  return { disappeared: 'Пропал товар', low_stock: 'Заканчивается' }[t] || t;
+}
+
+function goToProduct(sku) {
+  router.push({ name: 'database', query: { search: sku } });
 }
 
 async function loadOrder(orderId) {
@@ -646,13 +658,15 @@ async function load() {
 // Lazy-load сезонности и прогноза при переключении на табы
 watch(activeTab, async (tab) => {
   if (tab === 'reports' && !seasonality.value && !seasonalityLoading.value) {
+    const myId = ++_seasonLoadId;
     seasonalityLoading.value = true;
     try {
-      seasonality.value = await getSeasonalityData(orderStore.settings.legalEntity);
+      const d = await getSeasonalityData(orderStore.settings.legalEntity);
+      if (myId === _seasonLoadId) seasonality.value = d;
     } catch (e) {
-      seasonality.value = null;
+      if (myId === _seasonLoadId) seasonality.value = null;
     } finally {
-      seasonalityLoading.value = false;
+      if (myId === _seasonLoadId) seasonalityLoading.value = false;
     }
   }
   if (tab === 'forecast' && !forecast.value && !forecastLoading.value) {
@@ -661,14 +675,18 @@ watch(activeTab, async (tab) => {
 });
 
 async function loadForecast() {
+  const myId = ++_forecastLoadId;
   forecastLoading.value = true;
   try {
-    forecast.value = await getForecastData(orderStore.settings.legalEntity);
+    const d = await getForecastData(orderStore.settings.legalEntity);
+    if (myId !== _forecastLoadId) return;
+    forecast.value = d;
   } catch (e) {
+    if (myId !== _forecastLoadId) return;
     toast.error('Ошибка', 'Не удалось загрузить прогноз');
     forecast.value = null;
   } finally {
-    forecastLoading.value = false;
+    if (myId === _forecastLoadId) forecastLoading.value = false;
   }
 }
 
@@ -808,11 +826,25 @@ async function exportAnalytics() {
   exportAnalyticsToExcel(data.value, seasonality.value);
 }
 
+let _seasonLoadId = 0;
+let _forecastLoadId = 0;
 watch(() => orderStore.settings.legalEntity, () => {
   seasonality.value = null;
   forecast.value = null;
+  seasonalityLoading.value = false;
+  forecastLoading.value = false;
   forecastSupplier.value = '';
   load();
+  // Перезагрузить данные таба, если пользователь уже на нём
+  if (activeTab.value === 'reports') {
+    const myId = ++_seasonLoadId;
+    seasonalityLoading.value = true;
+    getSeasonalityData(orderStore.settings.legalEntity)
+      .then(d => { if (myId === _seasonLoadId) seasonality.value = d; })
+      .catch(() => { if (myId === _seasonLoadId) seasonality.value = null; })
+      .finally(() => { if (myId === _seasonLoadId) seasonalityLoading.value = false; });
+  }
+  if (activeTab.value === 'forecast') loadForecast();
 });
 onMounted(() => load());
 </script>
@@ -975,33 +1007,30 @@ onMounted(() => load());
   border: 1px solid #90CAF9; font-size: 12px; color: #1565C0;
 }
 
-/* Anomalies */
-.an-anomaly {
-  display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px;
-  margin-bottom: 6px; border-radius: 8px;
+/* Changes */
+.an-change {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+  margin-bottom: 6px; border-radius: 10px;
 }
-.an-anomaly.sev-danger { background: #FFF5F5; border: 1px solid #FFCDD2; }
-.an-anomaly.sev-warning { background: #FFFCF0; border: 1px solid #FFE082; }
-.an-anomaly.sev-info { background: #FAFAFA; border: 1px solid #E0E0E0; }
-.an-anomaly-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
-.an-anomaly-body { flex: 1; }
-.an-anomaly-title { font-size: 13px; font-weight: 700; color: var(--text); }
-.an-anomaly-text { font-size: 12px; color: var(--text); margin-top: 1px; }
-.an-anomaly-detail { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-.an-anomaly-tag {
+.an-change.sev-danger { background: #FFF5F5; border: 1px solid #FFCDD2; }
+.an-change.sev-warning { background: #FFFCF0; border: 1px solid #FFE082; }
+.an-change-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.an-change-body { flex: 1; }
+.an-change-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.an-change-text { font-size: 12px; color: var(--text); margin-top: 2px; }
+.an-change-detail { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.an-change-tag {
   font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
-  flex-shrink: 0; white-space: nowrap;
+  flex-shrink: 0; white-space: nowrap; align-self: center;
 }
-.sev-danger .an-anomaly-tag { background: #FFCDD2; color: #B71C1C; }
-.sev-warning .an-anomaly-tag { background: #FFE082; color: #BF360C; }
-.sev-info .an-anomaly-tag { background: #E0E0E0; color: #424242; }
-
-.an-anomaly.clickable { cursor: pointer; }
-.an-anomaly.clickable:hover { opacity: 0.85; }
-.an-anomaly-go {
+.sev-danger .an-change-tag { background: #FFCDD2; color: #B71C1C; }
+.sev-warning .an-change-tag { background: #FFE082; color: #BF360C; }
+.an-change-action {
   font-size: 11px; font-weight: 700; color: #1565C0; flex-shrink: 0; align-self: center;
-  white-space: nowrap; padding: 3px 8px; background: #E3F2FD; border-radius: 4px;
+  white-space: nowrap; padding: 5px 12px; background: #E3F2FD; border-radius: 6px;
+  border: none; cursor: pointer; font-family: inherit; transition: background .15s;
 }
+.an-change-action:hover { background: #BBDEFB; }
 
 /* ===== REPORTS TAB ===== */
 .rpt-toolbar {

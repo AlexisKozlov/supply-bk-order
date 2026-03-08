@@ -22,7 +22,7 @@ export const useSupplierStore = defineStore('supplier', () => {
     if (_loadPromises[cacheKey]) return _loadPromises[cacheKey];
 
     loading.value = true;
-    _loadPromises[cacheKey] = (async () => {
+    const promise = (async () => {
       try {
         let query = db
           .from('suppliers')
@@ -70,7 +70,8 @@ export const useSupplierStore = defineStore('supplier', () => {
         delete _loadPromises[cacheKey];
       }
     })();
-    return _loadPromises[cacheKey];
+    _loadPromises[cacheKey] = promise;
+    return promise;
   }
 
   function getSuppliersForEntity(legalEntity) {

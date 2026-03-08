@@ -55,8 +55,10 @@ export const useHistoryStore = defineStore('history', () => {
       error.value = e.message || 'Ошибка загрузки';
       return [];
     } finally {
-      loading.value = false;
-      loadingMore.value = false;
+      if (myRequestId === _requestIds[type]) {
+        if (reset) loading.value = false;
+        else loadingMore.value = false;
+      }
     }
   }
 
@@ -119,8 +121,8 @@ export const useHistoryStore = defineStore('history', () => {
   async function deleteOrder(orderId) {
     const { error } = await db.rpc('delete_order', { order_id: orderId });
     if (error) return { error: 'Не удалось удалить заказ: ' + error };
-    await db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} });
     orders.value = orders.value.filter(o => o.id !== orderId);
+    db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} }).catch(() => {});
     return { success: true };
   }
 

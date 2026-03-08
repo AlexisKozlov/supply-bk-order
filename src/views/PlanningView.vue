@@ -175,7 +175,7 @@
               <input v-else type="number" class="plan-edit-input" :value="item.plan[m]?.orderBoxes || 0"
                 @keydown.enter.prevent="applyEdit(idx, m, $event.target.value)"
                 @keydown.escape.prevent="cancelEdit()"
-                @blur="applyEdit(idx, m, $event.target.value)"
+                @blur="planCalc.onBlur(); applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
               <div v-if="item.plan[m]?.daysRemaining > 1" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
@@ -244,7 +244,7 @@
                 <input type="number" class="plan-mob-edit-input" :value="p.orderBoxes || 0"
                   @keydown.enter.prevent="applyEdit(idx, pi, $event.target.value)"
                   @keydown.escape.prevent="cancelEdit()"
-                  @blur="applyEdit(idx, pi, $event.target.value)"
+                  @blur="planCalc.onBlur(); applyEdit(idx, pi, $event.target.value)"
                   @click.stop />
               </template>
               <template v-else>
@@ -562,7 +562,7 @@ const periodLabel = computed(() => {
   return map[periodValue.value] || periodValue.value;
 });
 const startDateDisplay = computed(() => {
-  const d = new Date(startDateStr.value);
+  const d = new Date(startDateStr.value + 'T00:00:00');
   return !isNaN(d) ? d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
 });
 function toggleSettings() {
@@ -577,8 +577,8 @@ const consumptionColumnLabel = computed(() => {
 });
 const periodType = computed(() => periodValue.value.startsWith('w') ? 'weeks' : 'months');
 const periodCount = computed(() => parseInt(periodValue.value.slice(1)));
-const startDate = computed(() => new Date(startDateStr.value));
-const planningDate = computed(() => planningDateStr.value ? new Date(planningDateStr.value) : null);
+const startDate = computed(() => new Date(startDateStr.value + 'T00:00:00'));
+const planningDate = computed(() => planningDateStr.value ? new Date(planningDateStr.value + 'T00:00:00') : null);
 
 const _fmt = (d) => `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
 const _mn = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
@@ -666,7 +666,7 @@ const periodHeaders = computed(() => {
 
 const planningDateDisplay = computed(() => {
   if (!planningDateStr.value) return '—';
-  const d = new Date(planningDateStr.value);
+  const d = new Date(planningDateStr.value + 'T00:00:00');
   return !isNaN(d) ? d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
 });
 
@@ -746,7 +746,7 @@ function recalcItem(idx, fromMonth = 0) {
     const old = item.transit || [];
     item.transit = cwHeaders.map((_, w) => old[w] || { qty: 0 });
   }
-  let co = item.stockOnHand + item.stockAtSupplier;
+  let co = (item.stockOnHand || 0) + (item.stockAtSupplier || 0);
   item._cwData = cwHeaders.map((h, w) => {
     const weekConsumption = daily * h.days;
     const transitUnits = toBase(item.transit[w]?.qty || 0);
@@ -763,7 +763,7 @@ function recalcItem(idx, fromMonth = 0) {
   }
   const mu = daily * 30; const wu = daily * 7;
   // Если нет текущих недель — начальный остаток как раньше
-  if (!cwHeaders.length) co = item.stockOnHand + item.stockAtSupplier;
+  if (!cwHeaders.length) co = (item.stockOnHand || 0) + (item.stockAtSupplier || 0);
   for (let m = 0; m < fromMonth && m < headers.length; m++) { co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m]?.orderUnits || 0); if (co < 0) co = 0; }
   for (let m = fromMonth; m < headers.length; m++) {
     const need = (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio;
@@ -788,6 +788,7 @@ function startEdit(idx, m, event) {
   });
 }
 function applyEdit(idx, m, val) {
+  if (!editingCell.value || editingCell.value.idx !== idx || editingCell.value.m !== m) return;
   const newVal = parseInt(val) || 0;
   const item = items.value[idx]; const p = item.plan[m]; if (!p) { editingCell.value = null; return; }
   p.orderBoxes = newVal; p.orderUnits = newVal * getQpb(item); p.locked = true;
@@ -1615,8 +1616,11 @@ async function loadPlanFromHistory(planId) {
   toast.success('План загружен', `${plan.supplier} — ${items.value.length} позиций`);
 }
 
-watch(() => orderStore.settings.legalEntity, async () => {
-  await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
+let _planLeChangeId = 0;
+watch(() => orderStore.settings.legalEntity, async (le) => {
+  const myId = ++_planLeChangeId;
+  await supplierStore.loadSuppliers(le);
+  if (myId !== _planLeChangeId) return;
   const prev = supplier.value;
   supplier.value = '';
   items.value = []; editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null;
@@ -1662,9 +1666,10 @@ onBeforeUnmount(() => {
 
 onBeforeRouteLeave(async () => {
   if (hasPlanUnsavedData()) {
+    window.removeEventListener('beforeunload', onPlanBeforeUnload);
     draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
     const ok = await confirmAction('Несохранённые данные', 'Вы не сохранили план. Уйти со страницы?');
-    if (!ok) return false;
+    if (!ok) { window.addEventListener('beforeunload', onPlanBeforeUnload); return false; }
   }
 });
 
@@ -1672,7 +1677,7 @@ onBeforeRouteLeave(async () => {
 watch(() => route.query.planId, async (newId) => {
   if (!newId) return;
   await loadPlanFromHistory(newId);
-  if (route.query.mode === 'view') { viewOnly.value = true; }
+  if (route.query.mode === 'view' || isViewer.value) { viewOnly.value = true; }
 });
 </script>
 

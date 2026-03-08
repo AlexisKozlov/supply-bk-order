@@ -27,8 +27,8 @@ async function idbGet(key) {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readonly');
       const req = tx.objectStore(IDB_STORE).get(key);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => { db.close(); resolve(req.result); };
+      req.onerror = () => { db.close(); reject(req.error); };
     });
   } catch { return undefined; }
 }
@@ -39,8 +39,8 @@ async function idbSet(key, value) {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
       tx.objectStore(IDB_STORE).put(value, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
     });
   } catch { /* fallback на localStorage */ }
 }
@@ -51,8 +51,8 @@ async function idbDelete(key) {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
       tx.objectStore(IDB_STORE).delete(key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
     });
   } catch { /* ignore */ }
 }
@@ -100,7 +100,7 @@ export const useDraftStore = defineStore('draft', () => {
     const orderStore = useOrderStore();
     const key = getDraftKey(orderStore);
     localStorage.removeItem(key);
-    idbDelete(key);
+    idbDelete(key).catch(() => {});
   }
 
   /** Восстановить черновик. Возвращает true если черновик был загружен. */
@@ -118,9 +118,9 @@ export const useDraftStore = defineStore('draft', () => {
       isLoading.value = true;
 
       // Настройки
-      if (data.settings.today) { const d = new Date(data.settings.today); if (!isNaN(d)) orderStore.settings.today = d; }
-      if (data.settings.deliveryDate) { const d = new Date(data.settings.deliveryDate); if (!isNaN(d)) orderStore.settings.deliveryDate = d; }
-      if (data.settings.safetyEndDate) { const d = new Date(data.settings.safetyEndDate); if (!isNaN(d)) orderStore.settings.safetyEndDate = d; }
+      if (data.settings.today) { const v = data.settings.today; const d = new Date(typeof v === 'string' && v.length === 10 ? v + 'T00:00:00' : v); if (!isNaN(d)) orderStore.settings.today = d; }
+      if (data.settings.deliveryDate) { const v = data.settings.deliveryDate; const d = new Date(typeof v === 'string' && v.length === 10 ? v + 'T00:00:00' : v); if (!isNaN(d)) orderStore.settings.deliveryDate = d; }
+      if (data.settings.safetyEndDate) { const v = data.settings.safetyEndDate; const d = new Date(typeof v === 'string' && v.length === 10 ? v + 'T00:00:00' : v); if (!isNaN(d)) orderStore.settings.safetyEndDate = d; }
 
       orderStore.settings.legalEntity  = data.settings.legalEntity  || 'ООО "Бургер БК"';
       orderStore.settings.supplier     = data.settings.supplier      || '';

@@ -713,11 +713,14 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+
+const router = useRouter();
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
@@ -1296,6 +1299,7 @@ watch(activeTab, (tab) => {
   if (tab === 'sessions') {
     loadOnlineUsers();
     loadSessions();
+    if (onlineTimer) clearInterval(onlineTimer);
     onlineTimer = setInterval(loadOnlineUsers, 15000);
   } else {
     if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; }
@@ -1460,7 +1464,8 @@ async function toggleMaintenance() {
 }
 
 async function updateSetting(key, value) {
-  await db.from('settings').update({ value }).eq('key', key);
+  const { error } = await db.from('settings').update({ value }).eq('key', key);
+  if (error) toast.error('Ошибка', 'Не удалось сохранить настройку');
 }
 
 function setQuickTimer(minutes) {
@@ -1473,7 +1478,10 @@ async function saveExactTime() {
   if (!maintenanceTimeInput.value) return;
   maintenanceTimerSaving.value = true;
   try {
-    const [hh, mm] = maintenanceTimeInput.value.split(':').map(Number);
+    const parts = maintenanceTimeInput.value.split(':');
+    if (parts.length < 2) { toast.error('Неверный формат', 'Используйте ЧЧ:ММ'); maintenanceTimerSaving.value = false; return; }
+    const [hh, mm] = parts.map(Number);
+    if (isNaN(hh) || isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) { toast.error('Неверное время', ''); maintenanceTimerSaving.value = false; return; }
     const target = new Date();
     target.setHours(hh, mm, 0, 0);
     // Если время уже прошло — считаем, что это завтра
@@ -1501,8 +1509,17 @@ async function clearTimer() {
   finally { maintenanceTimerSaving.value = false; }
 }
 
-onMounted(() => { loadUsers(); loadSettings(); });
+onMounted(() => {
+  // Повторная проверка роли (защита от подмены в localStorage до ответа сервера)
+  if (userStore.currentUser?.role !== 'admin') return;
+  loadUsers(); loadSettings();
+});
 onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
+
+// Если сервер подтвердит другую роль — перенаправить
+watch(() => userStore.currentUser?.role, (role) => {
+  if (role && role !== 'admin') router.replace({ name: 'order' });
+});
 </script>
 
 <style scoped>

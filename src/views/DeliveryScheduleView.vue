@@ -641,12 +641,13 @@ async function openLogModal() {
     const { data, error } = await db.from('audit_log')
       .select('*')
       .eq('entity_type', 'delivery_schedule')
+      .eq('legal_entity', orderStore.settings.legalEntity)
       .order('created_at', { ascending: false })
       .limit(100);
     if (error) throw new Error(error);
     logEntries.value = (data || []).map(row => ({
       ...row,
-      details: typeof row.details === 'string' ? JSON.parse(row.details) : row.details,
+      details: typeof row.details === 'string' ? (() => { try { return JSON.parse(row.details); } catch { return {}; } })() : row.details,
     }));
   } catch (e) {
     console.error('Failed to load audit log:', e);

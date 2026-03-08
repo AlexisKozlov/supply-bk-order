@@ -159,8 +159,8 @@ onMounted(async () => {
       Object.assign(form.value, {
         sku: data.sku || '', name: data.name || '', supplier: data.supplier || '',
         legal_entity: data.legal_entity || form.value.legal_entity,
-        qty_per_box: data.qty_per_box || '', boxes_per_pallet: data.boxes_per_pallet || '',
-        multiplicity: data.multiplicity || '', unit_of_measure: data.unit_of_measure || 'шт',
+        qty_per_box: data.qty_per_box ?? '', boxes_per_pallet: data.boxes_per_pallet ?? '',
+        multiplicity: data.multiplicity ?? '', unit_of_measure: data.unit_of_measure || 'шт',
         analog_group: data.analog_group || '',
         is_active: data.is_active !== undefined ? !!data.is_active : true,
         category: data.category || '',
@@ -170,8 +170,8 @@ onMounted(async () => {
     Object.assign(form.value, {
       sku: props.product.sku || '', name: props.product.name || '',
       supplier: props.product.supplier || '', legal_entity: props.product.legal_entity || form.value.legal_entity,
-      qty_per_box: props.product.qty_per_box || '', boxes_per_pallet: props.product.boxes_per_pallet || '',
-      multiplicity: props.product.multiplicity || '', unit_of_measure: props.product.unit_of_measure || 'шт',
+      qty_per_box: props.product.qty_per_box ?? '', boxes_per_pallet: props.product.boxes_per_pallet ?? '',
+      multiplicity: props.product.multiplicity ?? '', unit_of_measure: props.product.unit_of_measure || 'шт',
       analog_group: props.product.analog_group || '',
       is_active: props.product.is_active !== undefined ? !!props.product.is_active : true,
       category: props.product.category || '',

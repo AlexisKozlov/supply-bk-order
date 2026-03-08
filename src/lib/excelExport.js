@@ -95,8 +95,8 @@ export async function exportToExcel(items, settings, priceMap) {
     // qty_boxes теперь в учётных коробках
     const accountingBoxes = settings.unit === 'boxes'
       ? item.finalOrder
-      : Math.ceil(item.finalOrder / qpb);
-    const physBoxes = Math.ceil(accountingBoxes / mult);
+      : Math.round(item.finalOrder / qpb);
+    const physBoxes = Math.round(accountingBoxes / mult);
     const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
     const unit = item.unitOfMeasure || 'шт';
     const nameWithSku = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
@@ -117,7 +117,7 @@ export async function exportToExcel(items, settings, priceMap) {
     if (hasPrices) {
       const pi = priceMap[item.sku];
       if (pi) {
-        const price = parseFloat(pi.price);
+        const price = parseFloat(pi.price) || 0;
         let lineSum = 0;
         if (pi.unit_type === 'box') lineSum = price * physBoxes;
         else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
@@ -150,10 +150,10 @@ export async function exportToExcel(items, settings, priceMap) {
         const pi = priceMap[item.sku];
         if (!pi) return;
         const qpb_ = getQpb(item); const mult_ = getMultiplicity(item);
-        const ab = settings.unit === 'boxes' ? item.finalOrder : Math.ceil(item.finalOrder / qpb_);
-        const pb = Math.ceil(ab / mult_);
+        const ab = settings.unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb_);
+        const pb = Math.round(ab / mult_);
         const pc = settings.unit === 'pieces' ? item.finalOrder : ab * qpb_;
-        const pr = parseFloat(pi.price);
+        const pr = parseFloat(pi.price) || 0;
         if (pi.unit_type === 'box') totalSum += pr * pb;
         else if (pi.unit_type === 'thousand') totalSum += pr * pc / 1000;
         else totalSum += pr * pc;
@@ -504,12 +504,12 @@ export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {
   }
 
   // ═══════════════════════════
-  // ЛИСТ 5: АНОМАЛИИ
+  // ЛИСТ 5: ИЗМЕНЕНИЯ
   // ═══════════════════════════
-  if (analyticsData.anomalies && analyticsData.anomalies.length) {
+  if (analyticsData.changes && analyticsData.changes.length) {
     const ws5 = {};
     r = 0;
-    setCell(ws5, r, 0, `Аномалии за ${period} дней`, sTitle);
+    setCell(ws5, r, 0, `Изменения за ${period} дней`, sTitle);
     r += 2;
 
     ['Тип', 'Важность', 'Название', 'Описание', 'Подробности'].forEach((h, c) => {
@@ -517,13 +517,13 @@ export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {
     });
     r++;
 
-    const typeLabels = { spike: 'Рост расхода', drop: 'Падение расхода', supplier: 'Поставщик', outlier: 'Необычный заказ' };
-    const sevLabels = { danger: 'Критично', warning: 'Внимание', info: 'Информация' };
-    const sevColors = { danger: { bg: redBg, fg: red }, warning: { bg: 'FFF3E0', fg: 'E65100' }, info: { bg: grayBg, fg: '616161' } };
+    const typeLabels = { disappeared: 'Пропал товар', low_stock: 'Заканчивается' };
+    const sevLabels = { danger: 'Критично', warning: 'Внимание' };
+    const sevColors = { danger: { bg: redBg, fg: red }, warning: { bg: 'FFF3E0', fg: 'E65100' } };
 
-    analyticsData.anomalies.forEach((a, i) => {
+    analyticsData.changes.forEach((a, i) => {
       const stripe = i % 2 === 1;
-      const sc = sevColors[a.severity] || sevColors.info;
+      const sc = sevColors[a.severity] || sevColors.warning;
       setCell(ws5, r, 0, typeLabels[a.type] || a.type, sCell(stripe));
       setCell(ws5, r, 1, sevLabels[a.severity] || '', {
         font: { bold: true, sz: 11, color: { rgb: sc.fg }, name: 'Calibri' },
@@ -541,7 +541,7 @@ export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {
     ws5['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 30 }, { wch: 50 }, { wch: 40 }];
     ws5['!rows'] = [{ hpt: 24 }];
     ws5['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
-    XLSX.utils.book_append_sheet(wb, ws5, 'Аномалии');
+    XLSX.utils.book_append_sheet(wb, ws5, 'Изменения');
   }
 
   XLSX.writeFile(wb, `Аналитика_${date}.xlsx`);

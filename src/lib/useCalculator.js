@@ -61,7 +61,13 @@ export function useCalculator(onCalculate) {
     return pendingOperation !== null;
   }
 
-  return { onFocus, onKeydown, hasPendingOp };
+  function onBlur() {
+    pendingOperation = null;
+    firstValue = null;
+    isEnteringSecondValue = false;
+  }
+
+  return { onFocus, onKeydown, onBlur, hasPendingOp };
 }
 
 function _calc(a, b, op) {

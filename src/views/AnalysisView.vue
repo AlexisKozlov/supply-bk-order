@@ -493,7 +493,8 @@ function commitEdit(item) {
   }
   editingCell.value = null;
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => saveDataToDB(), 1000);
+  const saveLe = orderStore.settings.legalEntity;
+  _saveTimer = setTimeout(() => { if (orderStore.settings.legalEntity === saveLe) saveDataToDB(); }, 1000);
 }
 
 function cancelEdit() {
@@ -725,7 +726,7 @@ async function loadFrom1c() {
     let filled = 0;
 
     let oldestUpdate = null;
-    data.forEach(d => { const t = new Date(d.updated_at); if (!oldestUpdate || t < oldestUpdate) oldestUpdate = t; });
+    data.forEach(d => { if (!d.updated_at) return; const t = new Date(d.updated_at); if (!isNaN(t) && (!oldestUpdate || t < oldestUpdate)) oldestUpdate = t; });
 
     items.value.forEach(item => {
       const d = item.sku ? stockMap.get(item.sku) : null;

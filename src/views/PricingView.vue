@@ -1,8 +1,8 @@
 <template>
   <div class="pricing-view">
-    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="page-header pricing-header">
       <h1 class="page-title">Цены и ПСЦ</h1>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div class="pricing-header-actions">
         <!-- Курс RUB→BYN -->
         <div v-if="!isViewer" class="rate-control">
           <span class="rate-label">1 RUB =</span>
@@ -10,10 +10,12 @@
           <span class="rate-label">BYN</span>
         </div>
         <span v-else-if="rubToBynRate" class="rate-display">1 RUB = {{ rubToBynRate }} BYN</span>
-        <button v-if="activeTab === 'prices'" class="btn secondary" @click="exportPriceList" style="font-size:11px;padding:5px 12px;">Экспорт</button>
-        <button v-if="!isViewer && activeTab === 'prices'" class="btn primary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт цен</button>
-        <button v-if="!isViewer && activeTab === 'prices'" class="btn secondary" @click="openNewPrice" style="font-size:11px;padding:5px 12px;">+ Цена</button>
-        <button v-if="!isViewer && activeTab === 'agreements'" class="btn primary" @click="openNewAgreement" style="font-size:11px;padding:5px 12px;">+ Протокол</button>
+        <div class="pricing-header-btns">
+          <button v-if="activeTab === 'prices'" class="btn secondary" @click="exportPriceList" style="font-size:11px;padding:5px 12px;">Экспорт</button>
+          <button v-if="!isViewer && activeTab === 'prices'" class="btn primary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт цен</button>
+          <button v-if="!isViewer && activeTab === 'prices'" class="btn secondary" @click="openNewPrice" style="font-size:11px;padding:5px 12px;">+ Цена</button>
+          <button v-if="!isViewer && activeTab === 'agreements'" class="btn primary" @click="openNewAgreement" style="font-size:11px;padding:5px 12px;">+ Протокол</button>
+        </div>
       </div>
     </div>
 
@@ -28,17 +30,15 @@
     </div>
 
     <!-- Поиск -->
-    <div style="position:relative;margin-bottom:14px;">
-      <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none;opacity:0.5;"><BkIcon name="search" size="sm"/></span>
-      <input v-model="searchQuery" style="width:100%;padding:9px 36px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--card);box-sizing:border-box;transition:border-color .15s,box-shadow .15s;"
-        :placeholder="activeTab === 'prices' ? 'Поиск по артикулу, поставщику...' : 'Поиск по номеру, поставщику...'"
-        @focus="$event.target.style.borderColor='var(--bk-orange)';$event.target.style.boxShadow='0 0 0 3px rgba(245,166,35,0.12)'"
-        @blur="$event.target.style.borderColor='var(--border)';$event.target.style.boxShadow='none'" />
-      <button v-if="searchQuery" @click="searchQuery=''" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;"><BkIcon name="close" size="xs"/></button>
+    <div class="pricing-search-wrap">
+      <span class="pricing-search-icon"><BkIcon name="search" size="sm"/></span>
+      <input v-model="searchQuery" class="pricing-search-input"
+        :placeholder="activeTab === 'prices' ? 'Поиск по артикулу, поставщику...' : 'Поиск по номеру, поставщику...'" />
+      <button v-if="searchQuery" @click="searchQuery=''" class="pricing-search-clear"><BkIcon name="close" size="xs"/></button>
     </div>
 
     <!-- Фильтр по поставщику -->
-    <div style="margin-bottom:14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <div class="pricing-filters">
       <template v-if="supplierNames.length > 1">
         <button class="db-sort-btn" :class="{ active: !filterSupplier }" @click="filterSupplier = ''" style="font-size:11px;">Все</button>
         <button v-for="s in supplierNames" :key="s" class="db-sort-btn" :class="{ active: filterSupplier === s }" @click="filterSupplier = s" style="font-size:11px;">{{ s }}</button>
@@ -70,19 +70,19 @@
           </thead>
           <tbody>
             <tr v-for="p in sortedPrices" :key="p.id" @click="!isViewer && editPrice(p)" :style="!isViewer ? 'cursor:pointer' : ''">
-              <td class="col-sku mono">{{ p.sku }}</td>
-              <td class="col-name ellipsis">{{ productNames[p.sku] || '—' }}</td>
-              <td class="col-supplier ellipsis">{{ p.supplier }}</td>
-              <td class="col-price mono">{{ formatPrice(p.price) }}</td>
-              <td class="col-unit">{{ unitLabel(p.unit_type) }}</td>
-              <td class="col-cur"><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
-              <td v-if="hasRubPrices" class="col-byn mono">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
-              <td class="col-psc">
+              <td class="col-sku mono" data-label="Артикул">{{ p.sku }}</td>
+              <td class="col-name ellipsis" data-label="Название">{{ productNames[p.sku] || '—' }}</td>
+              <td class="col-supplier ellipsis" data-label="Поставщик">{{ p.supplier }}</td>
+              <td class="col-price mono" data-label="Цена">{{ formatPrice(p.price) }}</td>
+              <td class="col-unit" data-label="За">{{ unitLabel(p.unit_type) }}</td>
+              <td class="col-cur" data-label="Вал."><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
+              <td v-if="hasRubPrices" class="col-byn mono" data-label="В BYN">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
+              <td class="col-psc" data-label="ПСЦ">
                 <span v-if="p.agreement_id" class="psc-badge" :title="getAgreementLabel(p.agreement_id)">ПСЦ</span>
                 <span v-else class="psc-badge psc-manual">Руч.</span>
               </td>
-              <td class="col-date text-muted">{{ formatDate(p.updated_at) }}</td>
-              <td class="col-actions">
+              <td class="col-date text-muted" data-label="Обновлено">{{ formatDate(p.updated_at) }}</td>
+              <td class="col-actions" data-label="">
                 <button class="db-card-btn" @click.stop="showHistory(p)" title="История цены">
                   <BkIcon name="history" size="sm"/>
                 </button>
@@ -118,7 +118,7 @@
       <div v-else-if="!filteredAgreements.length" style="text-align:center;padding:40px;color:var(--text-muted);">Протоколы не найдены</div>
       <div v-else class="db-grid">
         <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="agreementCardClass(a)" @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
-          <div class="db-card-top" style="display:flex;align-items:center;gap:8px;">
+          <div class="db-card-top">
             <span class="agreement-status" :class="'st-' + a.status">{{ statusLabel(a.status) }}</span>
             <span style="font-weight:600;">{{ a.number }}</span>
             <span v-if="agreementExpiry(a)" class="expiry-badge" :class="agreementExpiry(a).cls">{{ agreementExpiry(a).text }}</span>
@@ -172,18 +172,18 @@
             </div>
           </div>
         </div>
-        <div class="form-group" style="display:flex;gap:12px;">
-          <div style="flex:1;">
+        <div class="form-row-price">
+          <div class="form-group" style="flex:1;min-width:0;">
             <label>Цена</label>
             <input v-model.number="priceForm.price" type="number" step="0.01" min="0" class="form-input" />
           </div>
-          <div style="flex:0 0 100px;">
+          <div class="form-group" style="flex:0 0 100px;">
             <label>За</label>
             <select v-model="priceForm.unit_type" class="form-input">
               <option v-for="u in priceUnitOptions" :key="u.value" :value="u.value">{{ u.label }}</option>
             </select>
           </div>
-          <div style="flex:0 0 80px;">
+          <div class="form-group" style="flex:0 0 80px;">
             <label>Валюта</label>
             <select v-model="priceForm.currency" class="form-input">
               <option value="BYN">BYN</option>
@@ -210,14 +210,14 @@
 
     <!-- Модалка: Редактирование/создание протокола -->
     <div v-if="showAgreementModal" class="modal-overlay" @click.self="tryCloseAgreementModal">
-      <div class="modal-card" style="max-width:620px;">
+      <div class="modal-card modal-agreement">
         <h3 style="margin:0 0 16px;">{{ editingAgreement ? 'Редактировать протокол' : 'Новый протокол (ПСЦ)' }}</h3>
-        <div style="display:flex;gap:12px;">
-          <div class="form-group" style="flex:1;">
+        <div class="form-row-2col">
+          <div class="form-group">
             <label>Номер протокола</label>
             <input v-model="agForm.number" class="form-input" placeholder="ПСЦ-001" />
           </div>
-          <div class="form-group" style="flex:1;">
+          <div class="form-group">
             <label>Поставщик</label>
             <select v-model="agForm.supplier" class="form-input" @change="onAgSupplierChange">
               <option value="">— Выберите —</option>
@@ -225,12 +225,12 @@
             </select>
           </div>
         </div>
-        <div class="form-group" style="display:flex;gap:12px;">
-          <div style="flex:1;">
+        <div class="form-row-2col">
+          <div class="form-group">
             <label>Действует с</label>
             <input v-model="agForm.valid_from" type="date" class="form-input" />
           </div>
-          <div style="flex:1;">
+          <div class="form-group">
             <label>Действует до</label>
             <input v-model="agForm.valid_to" type="date" class="form-input" />
           </div>
@@ -499,16 +499,19 @@ async function loadProductNames() {
 
 const loadingAgreements = ref(false);
 
+let _loadAgrGen = 0;
 async function loadAgreements() {
   const le = orderStore.settings.legalEntity;
   if (!le) return;
+  const gen = ++_loadAgrGen;
   loadingAgreements.value = true;
   try {
     const { data, error } = await db.from('price_agreements').select('*').eq('legal_entity', le).order('created_at', { ascending: false });
+    if (gen !== _loadAgrGen) return;
     if (error) { toast.error('Ошибка', error); return; }
     agreements.value = data || [];
   } finally {
-    loadingAgreements.value = false;
+    if (gen === _loadAgrGen) loadingAgreements.value = false;
   }
 }
 
@@ -555,7 +558,8 @@ function formatPrice(v) {
 }
 function formatDate(d) {
   if (!d) return '';
-  const dt = new Date(d);
+  const ds = typeof d === 'string' && d.length === 10 ? d + 'T00:00:00' : d;
+  const dt = new Date(ds);
   if (isNaN(dt)) return d;
   return dt.toLocaleDateString('ru-RU');
 }
@@ -574,6 +578,7 @@ function allowedUnitTypes(productUom) {
 }
 
 function getAgreementLabel(id) {
+  if (!id) return '';
   const a = agreements.value.find(x => x.id === id);
   return a ? `${a.number} (${statusLabel(a.status)})` : `ПСЦ #${id}`;
 }
@@ -840,6 +845,11 @@ async function saveAgreement() {
       newId = Array.isArray(data) ? data[0]?.id : data?.id;
       if (pendingPscFile.value && newId) {
         await uploadPscFile(newId);
+        // Обновить запись протокола с путём к файлу
+        if (agForm.value.file_name) {
+          const { error: fileErr } = await db.from('price_agreements').update({ file_name: agForm.value.file_name, file_path: agForm.value.file_path }).eq('id', newId);
+          if (fileErr) toast.error('Предупреждение', 'Файл загружен, но не привязан к протоколу');
+        }
       }
     }
     // Сохранить цены товаров, привязанных к протоколу
@@ -1150,7 +1160,7 @@ function agreementCardClass(a) {
 function agreementExpiry(a) {
   if (a.status !== 'active' || !a.valid_to) return null;
   const now = new Date();
-  const end = new Date(a.valid_to);
+  const end = new Date(a.valid_to + 'T00:00:00');
   const diff = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
   if (diff < 0) return { text: 'Истёк', cls: 'expiry-danger' };
   if (diff <= 7) return { text: `${diff} дн.`, cls: 'expiry-danger' };
@@ -1331,4 +1341,119 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
 .price-chart-bar.bar-down { background:linear-gradient(to top, #C8E6C9, #43A047); }
 .price-chart-bar.bar-same { background:linear-gradient(to top, #E0E0E0, #9E9E9E); }
 .price-chart-label { font-size:9px; color:var(--text-muted); margin-top:3px; white-space:nowrap; }
+
+/* ═══ Search & Filters ═══ */
+.pricing-search-wrap { position:relative; margin-bottom:14px; }
+.pricing-search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:14px; pointer-events:none; opacity:0.5; }
+.pricing-search-input { width:100%; padding:9px 36px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; background:var(--card); box-sizing:border-box; transition:border-color .15s,box-shadow .15s; }
+.pricing-search-input:focus { border-color:var(--bk-orange); outline:none; box-shadow:0 0 0 3px rgba(245,166,35,0.12); }
+.pricing-search-clear { position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:14px; }
+.pricing-filters { margin-bottom:14px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+
+/* ═══ Layout helpers ═══ */
+.pricing-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.pricing-header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.pricing-header-btns { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.form-row-2col { display:flex; gap:12px; }
+.form-row-2col > .form-group { flex:1; min-width:0; }
+.form-row-price { display:flex; gap:12px; }
+.modal-agreement { max-width:620px; }
+
+/* ═══ MOBILE: 768px ═══ */
+@media (max-width: 768px) {
+  .pricing-header { flex-direction:column; align-items:stretch; }
+  .pricing-header .page-title { font-size:18px; margin-bottom:4px; }
+  .pricing-header-actions { justify-content:space-between; }
+  .pricing-header-btns { flex-wrap:wrap; }
+
+  .db-tab { padding:7px 12px; font-size:12px; }
+
+  /* Протоколы: карточки вертикально */
+  .db-card { flex-direction:column; align-items:stretch; gap:6px; }
+  .db-card-top { flex-wrap:wrap; }
+  .db-card-meta { flex-wrap:wrap; }
+  .db-card-btns { opacity:1; justify-content:flex-end; }
+
+  /* Модалки */
+  .modal-card { width:96vw; max-width:96vw !important; padding:16px; max-height:90vh; overflow-y:auto; }
+  .modal-agreement { max-width:96vw !important; }
+  .form-row-2col { flex-direction:column; gap:0; }
+
+  /* Таблица прайс-листа: горизонтальный скролл */
+  .pricing-table { font-size:12px; }
+  .pricing-table th, .pricing-table td { padding:5px 6px; }
+}
+
+/* ═══ MOBILE: 480px — карточный режим ═══ */
+@media (max-width: 480px) {
+  .pricing-header-actions { flex-direction:column; align-items:stretch; gap:6px; }
+  .pricing-header-btns { justify-content:stretch; }
+  .pricing-header-btns .btn { flex:1; text-align:center; }
+
+  .rate-control { justify-content:center; }
+
+  .db-tab { padding:6px 10px; font-size:11px; gap:4px; }
+  .db-tab-count { font-size:10px; padding:1px 5px; }
+
+  /* Таблица цен → карточки */
+  .pricing-table:not(.pricing-table-keep) thead { display:none; }
+  .pricing-table:not(.pricing-table-keep) tbody,
+  .pricing-table:not(.pricing-table-keep) tr,
+  .pricing-table:not(.pricing-table-keep) td { display:block; width:100%; }
+  .pricing-table:not(.pricing-table-keep) tr {
+    background:var(--card);
+    border:1px solid var(--border-light);
+    border-radius:8px;
+    padding:10px 12px;
+    margin-bottom:8px;
+    position:relative;
+  }
+  .pricing-table:not(.pricing-table-keep) tr:hover { border-color:var(--bk-orange); }
+  .pricing-table:not(.pricing-table-keep) td {
+    border:none;
+    padding:2px 0;
+    text-align:left !important;
+    max-width:none;
+    overflow:visible;
+    white-space:normal;
+  }
+  .pricing-table:not(.pricing-table-keep) td[data-label]:before {
+    content:attr(data-label) ": ";
+    font-size:10px;
+    font-weight:600;
+    color:var(--text-muted);
+    margin-right:4px;
+  }
+  .pricing-table:not(.pricing-table-keep) td[data-label=""]:before { content:none; }
+  .pricing-table:not(.pricing-table-keep) td.col-actions {
+    display:flex;
+    gap:8px;
+    justify-content:flex-end;
+    padding-top:6px;
+    border-top:1px solid var(--border-light);
+    margin-top:4px;
+  }
+  .pricing-table:not(.pricing-table-keep) .ellipsis { white-space:normal; overflow:visible; }
+
+  /* Ряд цены в модалке */
+  .form-row-price { flex-wrap:wrap; gap:8px; }
+  .form-row-price > .form-group { min-width:0; }
+  .form-row-price > .form-group:first-child { flex:1 1 100%; }
+
+  /* Поиск товаров в протоколе */
+  .ag-product-row { flex-wrap:wrap; gap:4px; padding:8px; }
+  .ag-product-row > span:nth-child(3) { flex:1 1 100%; order:3; }
+  .ag-product-row > div { order:4; width:100%; justify-content:flex-end; }
+
+  /* Товары без цены */
+  .no-price-list .pricing-table td { padding:4px 0; }
+  .no-price-list .pricing-table tr { padding:8px 10px; }
+
+  /* Импорт модалка */
+  .modal-card select.form-input { font-size:14px; min-height:36px; }
+  .modal-card input.form-input { font-size:14px; min-height:36px; }
+
+  /* Графики и история */
+  .price-chart-bars { height:80px; }
+}
 </style>

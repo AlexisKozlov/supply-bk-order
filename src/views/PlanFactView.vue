@@ -393,19 +393,22 @@ function sumOrderBoxes(order) {
   }, 0)
 }
 
-onMounted(() => {
-  Promise.all([loadSuppliers(), loadOrders()])
+onMounted(async () => {
+  await Promise.all([loadSuppliers(), loadOrders()])
 })
 
 watch(legalEntity, () => {
-  Promise.all([loadSuppliers(), loadOrders()])
+  loadSuppliers()
+  loadOrders()
 })
 
 async function loadSuppliers() {
-  let query = db.from('suppliers').select('short_name').order('short_name')
-  query = applyEntityFilter(query, legalEntity.value)
-  const { data } = await query
-  if (data) suppliers.value = data.map(s => s.short_name)
+  try {
+    let query = db.from('suppliers').select('short_name').order('short_name')
+    query = applyEntityFilter(query, legalEntity.value)
+    const { data } = await query
+    if (data) suppliers.value = data.map(s => s.short_name)
+  } catch { /* ошибка не блокирует основную загрузку */ }
 }
 
 function todayStr() {

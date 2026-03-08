@@ -20,8 +20,8 @@ defineProps({ title: String, message: String });
 const emit = defineEmits(['confirm', 'cancel']);
 
 function onKey(e) {
-  if (e.key === 'Enter') { e.preventDefault(); emit('confirm'); }
-  else if (e.key === 'Escape') { emit('cancel'); }
+  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); emit('confirm'); }
+  else if (e.key === 'Escape') { e.stopPropagation(); emit('cancel'); }
 }
 onMounted(() => document.addEventListener('keydown', onKey));
 onUnmounted(() => document.removeEventListener('keydown', onKey));

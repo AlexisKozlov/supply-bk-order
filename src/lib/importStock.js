@@ -827,8 +827,10 @@ export function importFromFile(target, items, legalEntity, unit) {
         if (result.matched < items.length) {
           const unmatched = items.filter((item, idx) => {
             const updated = result.items[idx];
-            return updated.stock === item.stock && updated.consumptionPeriod === item.consumptionPeriod
-              && updated.stockOnHand === item.stockOnHand;
+            if (target === 'planning') {
+              return updated.stockOnHand === item.stockOnHand && updated.stockAtSupplier === item.stockAtSupplier && updated.monthlyConsumption === item.monthlyConsumption;
+            }
+            return updated.stock === item.stock && updated.consumptionPeriod === item.consumptionPeriod && updated.transit === item.transit;
           });
           if (unmatched.length > 0) {
             debug(`[importStock] Unmatched items (${unmatched.length}):`);

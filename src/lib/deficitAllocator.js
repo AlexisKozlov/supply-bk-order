@@ -20,7 +20,7 @@ export function findNextDeliveryDate(restaurantSchedule, afterDate) {
   if (!restaurantSchedule || restaurantSchedule.size === 0) return null;
 
   const deliveryDays = [...restaurantSchedule.keys()].sort((a, b) => a - b);
-  const after = new Date(afterDate);
+  const after = typeof afterDate === 'string' ? new Date(afterDate + 'T00:00:00') : new Date(afterDate);
   after.setHours(0, 0, 0, 0);
 
   for (let offset = 1; offset <= 14; offset++) {
@@ -35,8 +35,8 @@ export function findNextDeliveryDate(restaurantSchedule, afterDate) {
 }
 
 function daysBetween(from, to) {
-  const f = new Date(from); f.setHours(0, 0, 0, 0);
-  const t = new Date(to); t.setHours(0, 0, 0, 0);
+  const f = typeof from === 'string' ? new Date(from + 'T00:00:00') : new Date(from); f.setHours(0, 0, 0, 0);
+  const t = typeof to === 'string' ? new Date(to + 'T00:00:00') : new Date(to); t.setHours(0, 0, 0, 0);
   return Math.max(0, Math.round((t - f) / 86400000));
 }
 
@@ -115,12 +115,17 @@ export function allocateDeficit({ warehouseStock, nextDeliveryDate, growthFactor
     remaining = Math.round(remaining * 100) / 100;
     sorted.sort((a, b) => (b.rn - b.r.allocated) - (a.rn - a.r.allocated));
 
-    for (const { r, rn } of sorted) {
-      if (remaining < mult) break;
-      const canAdd = rn - r.allocated;
-      if (canAdd >= mult) {
-        r.allocated += mult;
-        remaining -= mult;
+    let distributed = true;
+    while (remaining >= mult && distributed) {
+      distributed = false;
+      for (const { r, rn } of sorted) {
+        if (remaining < mult) break;
+        const canAdd = rn - r.allocated;
+        if (canAdd >= mult) {
+          r.allocated += mult;
+          remaining -= mult;
+          distributed = true;
+        }
       }
     }
   }

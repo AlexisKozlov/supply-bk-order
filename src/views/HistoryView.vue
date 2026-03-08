@@ -359,23 +359,29 @@ const colorMap = computed(() => {
 function supplierColor(name) { return colorMap.value[name] || '#999'; }
 
 // --- Formatting ---
+function parseDate(str) {
+  if (!str) return null;
+  // Даты без времени (YYYY-MM-DD) парсим как локальные, чтобы не сдвигался день
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return new Date(str + 'T00:00:00');
+  return new Date(str);
+}
 function formatDateShort(str) {
-  if (!str) return '';
-  return new Date(str).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const d = parseDate(str);
+  return d ? d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 }
 function formatDate(str) {
-  if (!str) return '';
-  return new Date(str).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const d = parseDate(str);
+  return d ? d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 }
 function formatDateTime(str) {
-  if (!str) return '';
-  const d = new Date(str);
+  const d = parseDate(str);
+  if (!d) return '';
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
          d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 function dayOfWeek(str) {
-  if (!str) return '';
-  return new Date(str).toLocaleDateString('ru-RU', { weekday: 'short' });
+  const d = parseDate(str);
+  return d ? d.toLocaleDateString('ru-RU', { weekday: 'short' }) : '';
 }
 function orderItemsFiltered(order) {
   return (order.order_items || []).filter(i => i.qty_boxes && Math.round(i.qty_boxes) > 0);
@@ -407,10 +413,13 @@ onMounted(async () => {
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   await load();
 });
+let _leChangeId = 0;
 watch(() => orderStore.settings.legalEntity, async () => {
   compareMode.value = false;
   compareSelection.value = [];
+  const myId = ++_leChangeId;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
+  if (myId !== _leChangeId) return;
   await load();
 });
 async function load() {
@@ -472,7 +481,7 @@ async function copyPlanLink(plan) {
 }
 async function copyOrder(order) {
   const deliveryDate = order.delivery_date
-    ? new Date(order.delivery_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    ? new Date(order.delivery_date + 'T00:00:00').toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
     : '—';
   const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
   let productMap = {};

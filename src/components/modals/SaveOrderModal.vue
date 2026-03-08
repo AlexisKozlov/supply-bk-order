@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ConfirmModal from './ConfirmModal.vue';
 
@@ -96,7 +96,7 @@ function tryClose() {
   emit('cancel');
 }
 function onKey(e) {
-  if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
+  if (e.key === 'Escape' && !showConfirmClose.value && !props.saving) tryClose();
 }
 onMounted(() => {
   document.addEventListener('keydown', onKey);
@@ -109,6 +109,8 @@ function doConfirm() {
   _confirmed = true;
   emit('confirm', note.value.trim());
 }
+// Сбросить флаг если сохранение завершилось (ошибка — saving стал false)
+watch(() => props.saving, (v) => { if (!v) _confirmed = false; });
 </script>
 
 <style scoped>

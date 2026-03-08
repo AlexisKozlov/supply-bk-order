@@ -17,7 +17,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     return {
       sku:                item.sku || null,
       name:               item.name,
-      qty_boxes:          Math.ceil(Math.max(0, accountingBoxes)),
+      qty_boxes:          Math.round(Math.max(0, accountingBoxes)),
       qty_per_box:        Math.round(item.qtyPerBox || 1),
       multiplicity:       mult,
       consumption_period: Math.round(item.consumptionPeriod || 0),
@@ -39,7 +39,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     period_days:       settings.periodDays  || 30,
     unit:              settings.unit        || 'pieces',
     legal_entity:      settings.legalEntity,
-    note:              note || null,
+    notes:             note || null,
     has_transit:       settings.hasTransit ? 1 : 0,
     show_stock_column: settings.showStockColumn ? 1 : 0,
     cda_mode:          settings.cdaMode ? 1 : 0,
@@ -55,7 +55,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     // Загружаем старый заказ для diff параметров
     ({ data: oldOrder } = await db
       .from('orders')
-      .select('delivery_date, today_date, safety_days, period_days, unit, note, supplier, created_by, updated_at')
+      .select('delivery_date, today_date, safety_days, period_days, unit, notes, supplier, created_by, updated_at, has_transit, show_stock_column, cda_mode, safety_coef')
       .eq('id', editingOrderId)
       .single());
 
@@ -69,7 +69,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     // Загружаем старые позиции для diff
     const { data: oldItems } = await db
       .from('order_items')
-      .select('sku, name, qty_boxes, consumption_period, stock')
+      .select('sku, name, qty_boxes, consumption_period, stock, transit')
       .eq('order_id', editingOrderId);
 
     const { error } = await db.from('orders').update(orderData).eq('id', editingOrderId);
@@ -89,7 +89,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       if ((oldOrder.safety_days || 0) !== (orderData.safety_days || 0)) paramChanges.push({ label: 'Запас', from: oldOrder.safety_days + ' дн.', to: orderData.safety_days + ' дн.' });
       if ((oldOrder.period_days || 30) !== (orderData.period_days || 30)) paramChanges.push({ label: 'Период', from: oldOrder.period_days + ' дн.', to: orderData.period_days + ' дн.' });
       if ((oldOrder.unit || 'pieces') !== (orderData.unit || 'pieces')) paramChanges.push({ label: 'Единица', from: oldOrder.unit, to: orderData.unit });
-      if ((oldOrder.note || '') !== (note || '')) paramChanges.push({ label: 'Примечание', from: oldOrder.note || '—', to: note || '—' });
+      if ((oldOrder.notes || '') !== (note || '')) paramChanges.push({ label: 'Примечание', from: oldOrder.notes || '—', to: note || '—' });
     }
 
     // Diff для аудит-лога
@@ -111,6 +111,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
             if (old.qty_boxes !== newItem.qty_boxes) diffs.push(`заказ: ${old.qty_boxes}→${newItem.qty_boxes}`);
             if (old.consumption_period !== newItem.consumption_period) diffs.push(`расход: ${old.consumption_period}→${newItem.consumption_period}`);
             if (old.stock !== newItem.stock) diffs.push(`остаток: ${old.stock}→${newItem.stock}`);
+            if (old.transit !== newItem.transit) diffs.push(`транзит: ${old.transit}→${newItem.transit}`);
             if (diffs.length) changes.push({ item: key, type: 'changed', diffs });
           }
           oldMap.delete(key);
@@ -149,7 +150,9 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
         await db.from('orders').update({
           delivery_date: oldOrder.delivery_date, today_date: oldOrder.today_date,
           safety_days: oldOrder.safety_days, period_days: oldOrder.period_days,
-          unit: oldOrder.unit, note: oldOrder.note, supplier: oldOrder.supplier,
+          unit: oldOrder.unit, notes: oldOrder.notes, supplier: oldOrder.supplier,
+          has_transit: oldOrder.has_transit, show_stock_column: oldOrder.show_stock_column,
+          cda_mode: oldOrder.cda_mode, safety_coef: oldOrder.safety_coef,
         }).eq('id', editingOrderId);
       }
       return { error: 'Не удалось сохранить состав заказа: ' + (rpcError || rpcResult?.error) };

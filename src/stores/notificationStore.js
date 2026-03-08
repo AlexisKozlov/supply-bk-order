@@ -153,7 +153,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
   function startPolling() {
     stopPolling();
-    sessionStartTime.value = Date.now();
+    if (!sessionStartTime.value) sessionStartTime.value = Date.now();
     load();
     checkBroadcasts();
     pollTimer = setInterval(() => load(), POLL_INTERVAL);

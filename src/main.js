@@ -70,7 +70,14 @@ window.onunhandledrejection = (event) => {
     msg.includes('Importing a module script failed') ||
     msg.includes('error loading dynamically imported module')
   ) {
-    window.location.reload();
+    const key = 'bk_reload_count';
+    const count = parseInt(sessionStorage.getItem(key) || '0');
+    if (count < 2) {
+      sessionStorage.setItem(key, String(count + 1));
+      window.location.reload();
+    } else {
+      sessionStorage.removeItem(key);
+    }
     return;
   }
   if (shouldIgnoreError(msg, stack)) return;

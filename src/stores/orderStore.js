@@ -85,8 +85,8 @@ export const useOrderStore = defineStore('order', () => {
       if (!item.boxesPerPallet || !item.finalOrder) return;
       const qpb = item.qtyPerBox || 1;
       const mult = item.multiplicity || 1;
-      const accountingBoxes = unit === 'boxes' ? item.finalOrder : Math.ceil(item.finalOrder / qpb);
-      const physBoxes = Math.ceil(accountingBoxes / mult);
+      const accountingBoxes = unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb);
+      const physBoxes = Math.round(accountingBoxes / mult);
       totalPallets += Math.floor(physBoxes / item.boxesPerPallet);
       totalBoxesLeft += physBoxes % item.boxesPerPallet;
     });
@@ -255,7 +255,7 @@ export const useOrderStore = defineStore('order', () => {
     settings.unit = order.unit || 'pieces';
     settings.hasTransit = order.has_transit === true || order.has_transit === 'true' || order.has_transit === '1' || order.has_transit === 1;
     settings.showStockColumn = true; // всегда показываем запас при просмотре
-    settings.note = order.note || '';
+    settings.note = order.notes || order.note || '';
     settings.cdaMode = order.cda_mode === true || order.cda_mode === 1 || order.cda_mode === '1';
     settings.safetyCoef = parseFloat(order.safety_coef) ?? 1.0;
     if (isNaN(settings.safetyCoef)) settings.safetyCoef = 1.0;
@@ -274,9 +274,9 @@ export const useOrderStore = defineStore('order', () => {
       const productData = histItem.sku ? productMap[histItem.sku] : null;
       const added = addItem(productData || {
         sku: histItem.sku, name: histItem.name,
-        qty_per_box: (productData?.qty_per_box) || histItem.qty_per_box || 1,
+        qty_per_box: histItem.qty_per_box || 1,
         boxes_per_pallet: null,
-        multiplicity: (productData?.multiplicity) || 1,
+        multiplicity: histItem.multiplicity || 1,
       }, true);
 
       // Если товар-дубликат (addItem вернул null), пропускаем

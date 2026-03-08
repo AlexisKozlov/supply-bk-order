@@ -207,8 +207,7 @@ const enrichedData = computed(() =>
   allData.value.map(row => {
     let daysLeft = null;
     if (row.expiry_date) {
-      const exp = new Date(row.expiry_date);
-      exp.setHours(0, 0, 0, 0);
+      const exp = new Date(row.expiry_date + 'T00:00:00');
       daysLeft = Math.floor((exp - getToday()) / 86400000);
     }
     return { ...row, customer: normalizeCustomer(row.customer), warehouse: normalizeWarehouse(row.warehouse), days_left: daysLeft };
@@ -344,7 +343,8 @@ function fmtDateTime(d) {
 
 function fmtDate(d) {
   if (!d) return '\u2014';
-  return new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const ds = typeof d === 'string' && d.length === 10 ? d + 'T00:00:00' : d;
+  return new Date(ds).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 function fmtQty(v) {

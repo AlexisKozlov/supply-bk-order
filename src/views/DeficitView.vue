@@ -559,7 +559,8 @@ async function loadCollectionProductData(prodId, prod) {
 
 function fmtDateShort(s) {
   if (!s) return '';
-  return new Date(s).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const ds = typeof s === 'string' && s.length === 10 ? s + 'T00:00:00' : s;
+  return new Date(ds).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
 
 // --- File upload ---
@@ -567,8 +568,8 @@ function openFilePicker() {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = '.xlsx,.xls,.csv,.tsv';
-    input.addEventListener('change', (e) => resolve(e.target.files[0] || null));
-    const onFocus = () => { setTimeout(() => resolve(null), 300); window.removeEventListener('focus', onFocus); };
+    const onFocus = () => { setTimeout(() => { window.removeEventListener('focus', onFocus); resolve(null); }, 300); };
+    input.addEventListener('change', (e) => { window.removeEventListener('focus', onFocus); resolve(e.target.files[0] || null); });
     window.addEventListener('focus', onFocus);
     input.click();
   });
@@ -637,8 +638,7 @@ async function processFile(file, sheet, colIdx, target) {
     const data = await parseRestaurantFile(file, sheet, colIdx);
     if (!data.length) { toastStore.error('Ошибка', 'Не удалось распознать данные'); return; }
     if (target === 'stock') {
-      const merged = mergeStockSources(data, formResponses.value);
-      stockData.value = merged.length ? merged : data;
+      stockData.value = data;
       toastStore.success('Загружено', `${stockData.value.length} ресторанов`);
     } else {
       consumptionData.value = data;
@@ -667,7 +667,7 @@ function calculate() {
     return { id: r.id, number: num, dailyConsumption: consumptionDays.value > 0 ? tc / consumptionDays.value : 0, currentStock: cs, schedule: schedMap.get(String(r.id)) || new Map() };
   });
 
-  const result = allocateDeficit({ warehouseStock: warehouseStock.value, nextDeliveryDate: new Date(nextDeliveryDate.value), growthFactor: growthFactor.value, multiplicity: multiplicity.value || 1, restaurants: rd });
+  const result = allocateDeficit({ warehouseStock: warehouseStock.value, nextDeliveryDate: new Date(nextDeliveryDate.value + 'T00:00:00'), growthFactor: growthFactor.value, multiplicity: multiplicity.value || 1, restaurants: rd });
   result.results = result.results.filter(r => r.need > 0 || r.dailyConsumption > 0 || r.currentStock > 0);
   result.results.sort((a, b) => b.allocated - a.allocated);
   allocationResult.value = result;
@@ -722,7 +722,8 @@ async function saveSession() {
     const sid = Array.isArray(session) ? session[0]?.id : session?.id;
     if (sid) {
       for (const r of allocationResult.value.results) {
-        await db.from('deficit_results').insert({ session_id: sid, restaurant_number: r.restaurantNumber, current_stock: r.currentStock, daily_consumption: r.dailyConsumption, days_to_cover: r.daysToCover, need: r.need, allocated: r.allocated, delivery_day: r.deliveryDay });
+        const { error: insErr } = await db.from('deficit_results').insert({ session_id: sid, restaurant_number: r.restaurantNumber, current_stock: r.currentStock, daily_consumption: r.dailyConsumption, days_to_cover: r.daysToCover, need: r.need, allocated: r.allocated, delivery_day: r.deliveryDay });
+        if (insErr) throw new Error(insErr);
       }
     }
     toastStore.success('Сохранено', ''); loadHistory();

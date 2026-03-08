@@ -78,7 +78,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
 
 function formatDate(str) {
   if (!str) return '—';
-  return new Date(str).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const ds = typeof str === 'string' && str.length === 10 ? str + 'T00:00:00' : str;
+  return new Date(ds).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function getItems(order) {

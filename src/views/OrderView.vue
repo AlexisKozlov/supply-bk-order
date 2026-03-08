@@ -331,7 +331,7 @@ function onSafetyDaysChange(e) {
 function onSafetyDateChange(e) {
   const delivery = orderStore.settings.deliveryDate;
   if (!delivery || !(delivery instanceof Date) || isNaN(delivery)) { toast.error('Сначала укажите дату прихода', ''); return; }
-  const target = new Date(e.target.value); if (isNaN(target)) return;
+  const target = new Date(e.target.value + 'T00:00:00'); if (isNaN(target)) return;
   if (target < delivery) { toast.error('Дата запаса не может быть раньше даты прихода', ''); return; }
   orderStore.settings.safetyDays = Math.max(0, Math.round((target - delivery) / 86400000));
   draftStore.save();
@@ -357,6 +357,7 @@ watch(paramsReady, (ready) => {
 // Перезагружать поставщиков при смене юр. лица в сайдбаре
 watch(() => orderStore.settings.legalEntity, async (le) => {
   filterQuery.value = '';
+  priceMap.value = {};
   await supplierStore.loadSuppliers(le);
 });
 
@@ -460,9 +461,10 @@ onUnmounted(() => {
 
 onBeforeRouteLeave(async () => {
   if (hasUnsavedData()) {
+    window.removeEventListener('beforeunload', onBeforeUnload);
     draftStore.saveNow();
     const ok = await confirmAction('Несохранённые данные', 'Вы не сохранили заказ. Уйти со страницы?');
-    if (!ok) return false;
+    if (!ok) { window.addEventListener('beforeunload', onBeforeUnload); return false; }
   }
   // Снимаем блокировку редактирования при уходе (после подтверждения)
   if (orderStore.editingOrderId) {
@@ -522,7 +524,7 @@ async function onSupplierChange(e) {
   const hasData = orderStore.items.some(i => i.consumptionPeriod > 0 || i.stock > 0 || i.transit > 0 || i.finalOrder > 0);
   if (hasData) {
     const ok = await confirmAction('Сменить поставщика?', 'Текущий заказ с заполненными данными будет сброшен.');
-    if (!ok) return;
+    if (!ok) { e.target.value = orderStore.settings.supplier; return; }
   }
   orderStore.settings.supplier = newSupplier;
   orderStore.settings.note = '';
@@ -557,7 +559,7 @@ async function onSupplierChange(e) {
 }
 
 function onTodayChange(e) {
-  const d = new Date(e.target.value);
+  const d = new Date(e.target.value + 'T00:00:00');
   if (!isNaN(d)) { orderStore.settings.today = d; draftStore.save(); }
 }
 
@@ -567,7 +569,7 @@ function onDeliveryChange(e) {
     toast.error('Некорректная дата', 'Дата прихода не может быть раньше сегодняшней');
     e.target.value = deliveryStr.value; return;
   }
-  orderStore.settings.deliveryDate = new Date(e.target.value);
+  orderStore.settings.deliveryDate = new Date(e.target.value + 'T00:00:00');
   draftStore.save();
 }
 
@@ -603,6 +605,8 @@ function onUnitChange(e) {
 
 // ─── Сохранение в БД ──────────────────────────────────────────────────────────
 async function openSaveModal() {
+  if (!orderStore.settings.supplier) { toast.error('Не выбран поставщик', 'Укажите поставщика в настройках заказа'); return; }
+  if (!orderStore.settings.deliveryDate) { toast.error('Не указана дата поставки', 'Укажите дату в настройках заказа'); return; }
   const { lines } = buildOrderText();
   if (!lines.length) { toast.error('Нет позиций с заказом', ''); return; }
 
@@ -649,7 +653,12 @@ async function onSaveConfirm(note) {
     toast.success(label, `Сохранено: ${result.itemsCount} позиций`);
 
     showSaveModal.value = false;
+    // Снимаем блокировку заказа перед обнулением ID
+    if (orderStore.editingOrderId) {
+      db.rpc('unlock_order', { order_id: orderStore.editingOrderId }).catch(() => {});
+    }
     orderStore.editingOrderId = null;
+    orderStore.editingOrderUpdatedAt = null;
     draftStore.clear();
 
     // Полный сброс: параметры + товары
@@ -1044,6 +1053,9 @@ async function exitViewMode() {
 async function exitEditMode() {
   const ok = await confirmAction('Сбросить редактирование?', 'Заказ будет очищен.');
   if (!ok) return;
+  if (orderStore.editingOrderId) {
+    db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '', order_id: orderStore.editingOrderId }).catch(() => {});
+  }
   orderStore.resetOrder();
   orderStore.settings.today = new Date();
   orderStore.settings.deliveryDate = null;

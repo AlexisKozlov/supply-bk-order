@@ -104,7 +104,7 @@ class QueryBuilder {
     for (const [k, v] of Object.entries(this._f)) p.set(k, v);
     if (this._sel !== '*') p.set('select', this._sel);
     if (this._ord) p.set('order', this._ord);
-    if (this._lim) p.set('limit', String(this._lim));
+    if (this._lim != null) p.set('limit', String(this._lim));
     if (this._off) p.set('offset', String(this._off));
     if (this._upsert) p.set('upsert', 'true');
     if (this._rawParams) { for (const [k, v] of Object.entries(this._rawParams)) p.set(k, v); }

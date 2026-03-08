@@ -246,7 +246,8 @@ const userInitials = computed(() => {
 });
 const firstName = computed(() => {
   const name = userStore.currentUser?.name || '';
-  return name.split(' ').pop() || name.split(' ')[0] || '';
+  const parts = name.split(' ').filter(Boolean);
+  return parts.length > 1 ? parts[1] : parts[0] || '';
 });
 
 onMounted(async () => {

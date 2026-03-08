@@ -84,7 +84,7 @@ defineProps({
 });
 const emit = defineEmits(['close']);
 
-function onKey(e) { if (e.key === 'Escape') emit('close'); }
+function onKey(e) { if (e.key === 'Escape' && props.show) emit('close'); }
 onMounted(() => document.addEventListener('keydown', onKey));
 onUnmounted(() => document.removeEventListener('keydown', onKey));
 

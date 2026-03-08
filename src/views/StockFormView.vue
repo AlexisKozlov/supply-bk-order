@@ -52,7 +52,7 @@
         <div v-for="(prod, idx) in info.products" :key="prod.id" class="sf-product">
           <div class="sf-product-top">
             <div class="sf-product-name">{{ prod.product_name }}</div>
-            <div class="sf-product-unit">{{ prod.unit === 'boxes' ? 'коробки' : 'штуки' }}</div>
+            <div class="sf-product-unit">{{ unitFull(prod.unit) }}</div>
           </div>
           <div class="sf-product-input-wrap">
             <input
@@ -64,7 +64,7 @@
               :class="{ filled: stockValues[prod.id] }"
               @focus="$event.target.select()"
             />
-            <span class="sf-input-unit">{{ prod.unit === 'boxes' ? 'кор.' : 'шт.' }}</span>
+            <span class="sf-input-unit">{{ unitShort(prod.unit) }}</span>
           </div>
         </div>
 
@@ -105,7 +105,7 @@
         <div class="sf-success-details">
           <div v-for="prod in info.products" :key="prod.id" class="sf-success-item">
             <span>{{ prod.product_name }}</span>
-            <strong>{{ stockValues[prod.id] || 0 }} {{ prod.unit === 'boxes' ? 'кор.' : 'шт.' }}</strong>
+            <strong>{{ stockValues[prod.id] || 0 }} {{ unitShort(prod.unit) }}</strong>
           </div>
         </div>
         <button v-if="editTimeLeft > 0" class="sf-edit-btn" @click="editing = true">
@@ -125,7 +125,7 @@
         <div v-for="prod in info.products" :key="prod.id" class="sf-product">
           <div class="sf-product-top">
             <div class="sf-product-name">{{ prod.product_name }}</div>
-            <div class="sf-product-unit">{{ prod.unit === 'boxes' ? 'коробки' : 'штуки' }}</div>
+            <div class="sf-product-unit">{{ unitFull(prod.unit) }}</div>
           </div>
           <div class="sf-product-input-wrap">
             <input
@@ -134,7 +134,7 @@
               class="sf-input"
               @focus="$event.target.select()"
             />
-            <span class="sf-input-unit">{{ prod.unit === 'boxes' ? 'кор.' : 'шт.' }}</span>
+            <span class="sf-input-unit">{{ unitShort(prod.unit) }}</span>
           </div>
         </div>
         <button
@@ -178,6 +178,9 @@ import { db } from '@/lib/apiClient.js';
 
 const route = useRoute();
 const token = route.params.token;
+
+function unitShort(u) { return { boxes: 'кор.', kg: 'кг', liters: 'л' }[u] || 'шт.'; }
+function unitFull(u) { return { boxes: 'коробки', kg: 'килограммы', liters: 'литры' }[u] || 'штуки'; }
 
 const loading = ref(true);
 const expired = ref(false);
