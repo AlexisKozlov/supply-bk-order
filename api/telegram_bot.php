@@ -25,6 +25,18 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input) exit;
 
+// Определяем chatId для ошибок
+$_CHAT_ID = $input['message']['chat']['id'] ?? $input['callback_query']['message']['chat']['id'] ?? null;
+
+// Глобальный обработчик ошибок — бот никогда не падает молча
+set_exception_handler(function(Throwable $e) {
+    global $_CHAT_ID;
+    if ($_CHAT_ID) {
+        sendMessage($_CHAT_ID, "⚠️ Произошла ошибка. Попробуйте ещё раз или используйте /menu");
+    }
+    error_log('[TelegramBot] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+});
+
 // ═══ Telegram helpers ═══
 
 function sendMessage($chatId, $text, $replyMarkup = null) {
@@ -782,47 +794,187 @@ function lookupShelfLife($question, $entity) {
     }
     if (!$isShelfQuestion) return '';
 
-    // Скоро истекающие (в пределах 14 дней)
-    $daysAhead = 14;
-    if (preg_match('/(\d+)\s*(дн|день|дня)/u', $q, $m)) {
-        $daysAhead = intval($m[1]);
+    // Извлечь ключевые слова для поиска конкретного товара
+    $stopShelf = ['срок','годн','годности','годност','истек','просроч','хранен','склад','какой','какая','какие','покажи','сколько','осталось'];
+    $words = preg_split('/[\s,.\-!?:;]+/u', mb_strtolower($question));
+    $productTerms = [];
+    foreach ($words as $w) {
+        $w = trim($w);
+        if (mb_strlen($w) >= 3 && !in_array($w, $stopShelf) && !is_numeric($w)) {
+            $stem = $w;
+            if (mb_strlen($w) >= 4) {
+                $stem = preg_replace('/(ов|ев|ей|ий|ой|ый|ая|ое|ые|ие|ам|ям|ах|ях|ом|ем|ём|ую|юю|ых|их|ми|ки|ка|ку|ко|ке)$/u', '', $w);
+                if (mb_strlen($stem) < 3) $stem = $w;
+            }
+            $productTerms[] = $stem;
+        }
     }
-
-    $sql = "SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
-                   DATEDIFF(expiry_date, CURDATE()) as days_left
-            FROM stock_malling
-            WHERE expiry_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY) AND expiry_date >= CURDATE()
-            ORDER BY expiry_date ASC LIMIT 20";
-    $s = $pdo->prepare($sql); $s->execute([$daysAhead]);
-    $items = $s->fetchAll();
-
-    // Также заблокированные / просроченные
-    $s2 = $pdo->prepare("SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
-                   DATEDIFF(expiry_date, CURDATE()) as days_left
-            FROM stock_malling
-            WHERE (expiry_status != 'Годен' OR expiry_date < CURDATE() OR block_reason IS NOT NULL)
-            ORDER BY expiry_date ASC LIMIT 15");
-    $s2->execute();
-    $blocked = $s2->fetchAll();
-
-    if (!$items && !$blocked) return "\n== СРОКИ ГОДНОСТИ ==\nПросроченных или истекающих товаров не найдено.\n";
 
     $context = "\n== СРОКИ ГОДНОСТИ ==\n";
-    if ($items) {
-        $context .= "Истекают в ближайшие {$daysAhead} дней:\n";
-        foreach ($items as $i) {
-            $date = date('d.m.Y', strtotime($i['expiry_date']));
-            $context .= "- {$i['product_name']}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}\n";
+    $found = false;
+
+    // Поиск по конкретному товару
+    if (!empty($productTerms)) {
+        foreach ($productTerms as $term) {
+            $sql = "SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
+                           DATEDIFF(expiry_date, CURDATE()) as days_left
+                    FROM stock_malling
+                    WHERE product_name LIKE ? AND expiry_date >= CURDATE()
+                    ORDER BY expiry_date ASC LIMIT 15";
+            $s = $pdo->prepare($sql); $s->execute(["%{$term}%"]);
+            $items = $s->fetchAll();
+            if ($items) {
+                $found = true;
+                foreach ($items as $i) {
+                    $date = date('d.m.Y', strtotime($i['expiry_date']));
+                    $status = $i['block_reason'] ?: $i['expiry_status'];
+                    $context .= "- {$i['product_name']}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}, статус: {$status}\n";
+                }
+            }
         }
     }
-    if ($blocked) {
-        $context .= "\nЗаблокированные / просроченные:\n";
-        foreach ($blocked as $b) {
-            $date = date('d.m.Y', strtotime($b['expiry_date']));
-            $reason = $b['block_reason'] ?: $b['expiry_status'];
-            $context .= "- {$b['product_name']}: {$date}, {$b['quantity']} шт., статус: {$reason}\n";
+
+    // Если не искали конкретный товар или не нашли — показать скоро истекающие
+    if (!$found) {
+        $daysAhead = 14;
+        if (preg_match('/(\d+)\s*(дн|день|дня)/u', $q, $m)) {
+            $daysAhead = intval($m[1]);
+        }
+
+        $sql = "SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
+                       DATEDIFF(expiry_date, CURDATE()) as days_left
+                FROM stock_malling
+                WHERE expiry_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY) AND expiry_date >= CURDATE()
+                ORDER BY expiry_date ASC LIMIT 20";
+        $s = $pdo->prepare($sql); $s->execute([$daysAhead]);
+        $items = $s->fetchAll();
+        if ($items) {
+            $found = true;
+            $context .= "Истекают в ближайшие {$daysAhead} дней:\n";
+            foreach ($items as $i) {
+                $date = date('d.m.Y', strtotime($i['expiry_date']));
+                $context .= "- {$i['product_name']}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}\n";
+            }
+        }
+
+        // Заблокированные / просроченные
+        $s2 = $pdo->prepare("SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
+                       DATEDIFF(expiry_date, CURDATE()) as days_left
+                FROM stock_malling
+                WHERE (expiry_status != 'Годен' OR expiry_date < CURDATE() OR block_reason IS NOT NULL)
+                ORDER BY expiry_date ASC LIMIT 15");
+        $s2->execute();
+        $blocked = $s2->fetchAll();
+        if ($blocked) {
+            $found = true;
+            $context .= "\nЗаблокированные / просроченные:\n";
+            foreach ($blocked as $b) {
+                $date = date('d.m.Y', strtotime($b['expiry_date']));
+                $reason = $b['block_reason'] ?: $b['expiry_status'];
+                $context .= "- {$b['product_name']}: {$date}, {$b['quantity']} шт., статус: {$reason}\n";
+            }
         }
     }
+
+    if (!$found) return "\n== СРОКИ ГОДНОСТИ ==\nДанных по срокам годности не найдено.\n";
+    return $context;
+}
+
+// Поиск информации по поставщику
+function lookupSupplier($question, $entity) {
+    global $pdo;
+    $q = mb_strtolower($question);
+
+    $supplierKeywords = ['поставщик','поставщ','контакт','телефон','email','dlt','срок документ'];
+    $isSupplierQ = false;
+    foreach ($supplierKeywords as $kw) {
+        if (mb_strpos($q, $kw) !== false) { $isSupplierQ = true; break; }
+    }
+
+    // Также проверяем, упоминается ли конкретный поставщик
+    $params = [];
+    $eFilter = '';
+    if ($entity) { $eFilter = " AND legal_entity = ?"; $params[] = $entity; }
+
+    $s = $pdo->prepare("SELECT short_name, full_name, telegram, whatsapp, email, dlt, doc FROM suppliers WHERE 1=1" . $eFilter);
+    $s->execute($params);
+    $allSuppliers = $s->fetchAll();
+
+    $matched = [];
+    foreach ($allSuppliers as $sup) {
+        $name = mb_strtolower($sup['short_name'] ?? '');
+        if ($name && mb_strpos($q, $name) !== false) {
+            $matched[] = $sup;
+            continue;
+        }
+        // Поиск по частям имени
+        $words = preg_split('/[\s\-()]+/u', $name);
+        foreach ($words as $w) {
+            if (mb_strlen($w) >= 4 && mb_strpos($q, $w) !== false) {
+                $matched[] = $sup;
+                break;
+            }
+        }
+    }
+
+    if (empty($matched) && !$isSupplierQ) return '';
+
+    $context = "\n== ПОСТАВЩИКИ ==\n";
+
+    if (!empty($matched)) {
+        foreach ($matched as $sup) {
+            $context .= "\n<b>{$sup['short_name']}</b>";
+            if ($sup['full_name']) $context .= " ({$sup['full_name']})";
+            $context .= "\n";
+            if ($sup['email']) $context .= "  Email: {$sup['email']}\n";
+            if ($sup['telegram']) $context .= "  Telegram: {$sup['telegram']}\n";
+            if ($sup['whatsapp']) $context .= "  WhatsApp: {$sup['whatsapp']}\n";
+            if ($sup['dlt']) $context .= "  DLT (срок доставки): {$sup['dlt']} дн.\n";
+            if ($sup['doc']) $context .= "  Срок документов: {$sup['doc']} дн.\n";
+
+            // Кол-во товаров этого поставщика
+            $s2 = $pdo->prepare("SELECT COUNT(*) as cnt FROM products WHERE supplier = ? AND is_active = 1" . $eFilter);
+            $s2->execute(array_merge([$sup['short_name']], $params));
+            $cnt = $s2->fetch()['cnt'];
+            $context .= "  Товаров: {$cnt}\n";
+
+            // Планы
+            $planParams = [$sup['short_name']];
+            $planFilter = "";
+            if ($entity) { $planFilter = " AND legal_entity = ?"; $planParams[] = $entity; }
+            $s3 = $pdo->prepare("SELECT note, start_date, period_type, period_count FROM plans WHERE supplier = ?" . $planFilter . " ORDER BY created_at DESC LIMIT 1");
+            $s3->execute($planParams);
+            $plan = $s3->fetch();
+            if ($plan) {
+                $context .= "  Последний план: {$plan['note']}, период: {$plan['period_count']} {$plan['period_type']}\n";
+            }
+
+            // Последний заказ
+            $s4 = $pdo->prepare("SELECT created_at, delivery_date, (SELECT SUM(qty_boxes) FROM order_items WHERE order_id = o.id) as boxes FROM orders o WHERE o.supplier = ?" . str_replace('legal_entity', 'o.legal_entity', $planFilter) . " ORDER BY o.created_at DESC LIMIT 1");
+            $s4->execute($planParams);
+            $lastOrder = $s4->fetch();
+            if ($lastOrder) {
+                $context .= "  Последний заказ: " . date('d.m.Y', strtotime($lastOrder['created_at'])) . ", {$lastOrder['boxes']} кор.\n";
+            }
+
+            // ПСЦ
+            $s5 = $pdo->prepare("SELECT number, valid_to, DATEDIFF(valid_to, CURDATE()) as days_left FROM price_agreements WHERE supplier = ? AND status = 'active'" . $planFilter . " LIMIT 1");
+            $s5->execute($planParams);
+            $psc = $s5->fetch();
+            if ($psc) {
+                $context .= "  ПСЦ: {$psc['number']}, до " . date('d.m.Y', strtotime($psc['valid_to'])) . " ({$psc['days_left']} дн.)\n";
+            }
+        }
+    } elseif ($isSupplierQ) {
+        // Список всех поставщиков
+        $context .= "Всего поставщиков: " . count($allSuppliers) . "\n";
+        foreach (array_slice($allSuppliers, 0, 20) as $sup) {
+            $context .= "- {$sup['short_name']}";
+            if ($sup['dlt']) $context .= " (DLT: {$sup['dlt']} дн.)";
+            $context .= "\n";
+        }
+    }
+
     return $context;
 }
 
@@ -864,6 +1016,12 @@ function handleFreeText($chatId, $text, $user) {
     $shelfContext = lookupShelfLife($text, $entity);
     if ($shelfContext) {
         $context .= $shelfContext;
+    }
+
+    // Информация по поставщику
+    $supplierContext = lookupSupplier($text, $entity);
+    if ($supplierContext) {
+        $context .= $supplierContext;
     }
 
     // Обновляем статус — теперь думает ИИ
