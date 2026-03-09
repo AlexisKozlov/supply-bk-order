@@ -91,7 +91,9 @@
         </template>
       </span>
       <span v-if="hasPrices && totalOrderSum > 0" class="total-sum">
-        · Сумма: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
+        · Без НДС: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
+        · НДС: <b>{{ totalVat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
+        · С НДС: <b>{{ totalWithVat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
       </span>
     </div>
   </div>
@@ -147,6 +149,30 @@ const totalOrderSum = computed(() => {
   }
   return sum;
 });
+
+const totalVat = computed(() => {
+  if (!hasPrices.value) return 0;
+  let vat = 0;
+  const isBoxes = settings.value.unit === 'boxes';
+  for (const item of orderStore.items) {
+    const pi = props.priceMap[item.sku];
+    if (!pi || !item.finalOrder) continue;
+    const qpb = getQpb(item);
+    const mult = getMultiplicity(item);
+    const fo = item.finalOrder;
+    const accountingBoxes = isBoxes ? fo : Math.ceil(fo / qpb);
+    const physBoxes = Math.ceil(accountingBoxes / mult);
+    const pieces = isBoxes ? fo * qpb : fo;
+    let lineSum = 0;
+    if (pi.unit_type === 'box') lineSum = physBoxes * pi.price;
+    else if (pi.unit_type === 'thousand') lineSum = pieces * pi.price / 1000;
+    else lineSum = pieces * pi.price;
+    vat += lineSum * ((pi.vat_rate ?? 20) / 100);
+  }
+  return vat;
+});
+
+const totalWithVat = computed(() => totalOrderSum.value + totalVat.value);
 
 // ─── Фильтрация ───────────────────────────────────────────────────────────
 const filteredIndices = computed(() => {

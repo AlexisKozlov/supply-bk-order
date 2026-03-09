@@ -15,6 +15,8 @@ if (!$BOT_TOKEN) exit;
 
 $GEMINI_API_KEY = $_ENV['GEMINI_API_KEY'] ?? '';
 $GROQ_API_KEY = $_ENV['GROQ_API_KEY'] ?? '';
+$DEEPSEEK_API_KEY = $_ENV['DEEPSEEK_API_KEY'] ?? '';
+$OPENROUTER_API_KEY = $_ENV['OPENROUTER_API_KEY'] ?? '';
 
 $dsn = 'mysql:host=' . ($_ENV['DB_HOST'] ?? 'localhost') . ';dbname=' . ($_ENV['DB_NAME'] ?? 'supply_bk') . ';charset=utf8mb4';
 $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
@@ -116,6 +118,19 @@ function setUserEntity($userName, $entity) {
     $pdo->prepare("UPDATE telegram_settings SET selected_entity = ? WHERE user_name = ?")->execute([$entity, $userName]);
 }
 
+function getUserMode($userName) {
+    global $pdo;
+    $s = $pdo->prepare("SELECT mode FROM telegram_settings WHERE user_name = ?");
+    $s->execute([$userName]);
+    $row = $s->fetch();
+    return $row['mode'] ?? null;
+}
+
+function setUserMode($userName, $mode) {
+    global $pdo;
+    $pdo->prepare("UPDATE telegram_settings SET mode = ? WHERE user_name = ?")->execute([$mode, $userName]);
+}
+
 function getEntityShort($entity) {
     if (strpos($entity, 'Бургер') !== false) return 'БК';
     if (strpos($entity, 'Воглия') !== false) return 'ВМ';
@@ -125,7 +140,16 @@ function getEntityShort($entity) {
 
 // ═══ Команды с данными ═══
 
-function cmdOrders($chatId, $user) {
+// Универсальная отправка: editMessage если есть $editMsgId, иначе sendMessage
+function botSend($chatId, $text, $replyMarkup = null, $editMsgId = null) {
+    if ($editMsgId) {
+        editMessage($chatId, $editMsgId, $text, $replyMarkup);
+    } else {
+        sendMessage($chatId, $text, $replyMarkup);
+    }
+}
+
+function cmdOrders($chatId, $user, $editMsgId = null) {
     global $pdo;
     $entity = getUserEntity($user);
 
@@ -140,8 +164,10 @@ function cmdOrders($chatId, $user) {
     $s = $pdo->prepare($sql); $s->execute($params);
     $orders = $s->fetchAll();
 
+    $menuBtn = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+
     if (!$orders) {
-        sendMessage($chatId, "📦 За последние 7 дней заказов нет.");
+        botSend($chatId, "📦 За последние 7 дней заказов нет.", ['inline_keyboard' => [$menuBtn]], $editMsgId);
         return;
     }
 
@@ -153,16 +179,16 @@ function cmdOrders($chatId, $user) {
         $text .= "  создан {$date}, приход {$delivery}, автор: {$o['created_by']}\n";
     }
     $text .= "\nВсего: " . count($orders) . " заказов";
-    sendMessage($chatId, $text);
+    botSend($chatId, $text, ['inline_keyboard' => [$menuBtn]], $editMsgId);
 }
 
-function cmdStock($chatId, $user) {
+function cmdStock($chatId, $user, $editMsgId = null) {
     global $pdo;
     $entity = getUserEntity($user);
     $entityShort = $entity ? ' (' . getEntityShort($entity) . ')' : '';
 
-    // Товары с запасом ≤ 5 дней (по дневному расходу)
     $sql = "SELECT a.sku, p.name, p.supplier, a.stock, a.consumption, a.period_days,
+                   COALESCE(p.unit_of_measure, 'шт') as uom,
                    CASE WHEN a.consumption > 0 THEN ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) ELSE 999 END as days_left
             FROM analysis_data a
             LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
@@ -173,8 +199,13 @@ function cmdStock($chatId, $user) {
     $s = $pdo->prepare($sql); $s->execute($params);
     $items = $s->fetchAll();
 
+    $btns = [
+        [['text' => '📊 Анализ запасов', 'callback_data' => 'cmd_analysis']],
+        [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']],
+    ];
+
     if (!$items) {
-        sendMessage($chatId, "✅ Нет товаров с запасом ≤ 5 дней.{$entityShort}");
+        botSend($chatId, "✅ Нет товаров с запасом ≤ 5 дней.{$entityShort}", ['inline_keyboard' => $btns], $editMsgId);
         return;
     }
 
@@ -184,18 +215,17 @@ function cmdStock($chatId, $user) {
         $daily = round($i['consumption'] / max($i['period_days'], 1), 1);
         $icon = $i['days_left'] <= 0 ? '🔴' : '🟠';
         $text .= "{$icon} <b>{$name}</b>\n";
-        $text .= "   ост. {$i['stock']} шт., расход {$daily}/день, запас ~{$i['days_left']} дн.\n";
+        $uLabel = getUomLabel($i['uom'] ?? 'шт');
+        $text .= "   ост. {$i['stock']} {$uLabel}, расход {$daily}/день, запас ~{$i['days_left']} дн.\n";
     }
-    $text .= "\n📊 Полный анализ: /analysis";
-    sendMessage($chatId, $text);
+    botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
 }
 
-function cmdConsumption($chatId, $user) {
+function cmdConsumption($chatId, $user, $editMsgId = null) {
     global $pdo;
     $entity = getUserEntity($user);
 
-    // Топ-15 товаров по расходу
-    $sql = "SELECT a.sku, p.name, a.consumption, a.period_days
+    $sql = "SELECT a.sku, p.name, a.consumption, a.period_days, COALESCE(p.unit_of_measure, 'шт') as uom
             FROM analysis_data a
             LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
             WHERE a.consumption > 0";
@@ -205,26 +235,29 @@ function cmdConsumption($chatId, $user) {
     $s = $pdo->prepare($sql); $s->execute($params);
     $items = $s->fetchAll();
 
+    $menuBtn = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+
     if (!$items) {
-        sendMessage($chatId, "📊 Данных о расходе пока нет.");
+        botSend($chatId, "📊 Данных о расходе пока нет.", ['inline_keyboard' => [$menuBtn]], $editMsgId);
         return;
     }
 
-    $text = "📊 <b>Топ расхода</b> (шт./день)" . ($entity ? " ($entity)" : "") . "\n\n";
+    $text = "📊 <b>Топ расхода</b>" . ($entity ? " ($entity)" : "") . "\n\n";
     foreach ($items as $i) {
         $days = max($i['period_days'], 1);
         $daily = round($i['consumption'] / $days, 1);
         $name = $i['name'] ? $i['sku'] . ' ' . $i['name'] : $i['sku'];
-        $text .= "• {$name} — <b>{$daily}</b> шт./день ({$i['consumption']} за {$days} дн.)\n";
+        $u = $i['uom'] ?? 'шт';
+        $uLabel = getUomLabel($u);
+        $text .= "• {$name} — <b>{$daily}</b> {$uLabel}/день ({$i['consumption']} за {$days} дн.)\n";
     }
-    sendMessage($chatId, $text);
+    botSend($chatId, $text, ['inline_keyboard' => [$menuBtn]], $editMsgId);
 }
 
-function cmdPrices($chatId, $user) {
+function cmdPrices($chatId, $user, $editMsgId = null) {
     global $pdo;
     $entity = getUserEntity($user);
 
-    // Последние изменения цен (только для товаров, у которых есть действующая цена)
     $sql = "SELECT ph.sku, p.name as product_name, ph.old_price, ph.new_price, ph.changed_by, ph.changed_at, ph.supplier
             FROM price_history ph
             LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = ph.legal_entity COLLATE utf8mb4_general_ci
@@ -235,8 +268,10 @@ function cmdPrices($chatId, $user) {
     $s = $pdo->prepare($sql); $s->execute($params);
     $changes = $s->fetchAll();
 
+    $menuBtn = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+
     if (!$changes) {
-        sendMessage($chatId, "💰 Изменений цен пока нет.");
+        botSend($chatId, "💰 Изменений цен пока нет.", ['inline_keyboard' => [$menuBtn]], $editMsgId);
         return;
     }
 
@@ -248,10 +283,10 @@ function cmdPrices($chatId, $user) {
         $text .= "• {$name} ({$c['supplier']})\n";
         $text .= "  {$arrow} {$c['old_price']} → <b>{$c['new_price']}</b> ₽ ({$date})\n";
     }
-    sendMessage($chatId, $text);
+    botSend($chatId, $text, ['inline_keyboard' => [$menuBtn]], $editMsgId);
 }
 
-function cmdPsc($chatId, $user) {
+function cmdPsc($chatId, $user, $editMsgId = null) {
     global $pdo;
     $entity = getUserEntity($user);
 
@@ -264,8 +299,10 @@ function cmdPsc($chatId, $user) {
     $s = $pdo->prepare($sql); $s->execute($params);
     $agreements = $s->fetchAll();
 
+    $menuBtn = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+
     if (!$agreements) {
-        sendMessage($chatId, "📋 Активных протоколов нет.");
+        botSend($chatId, "📋 Активных протоколов нет.", ['inline_keyboard' => [$menuBtn]], $editMsgId);
         return;
     }
 
@@ -278,18 +315,355 @@ function cmdPsc($chatId, $user) {
         $text .= "{$icon} <b>{$a['number']}</b> — {$a['supplier']}\n";
         $text .= "  до {$to} ({$label})\n";
     }
-    sendMessage($chatId, $text);
+    botSend($chatId, $text, ['inline_keyboard' => [$menuBtn]], $editMsgId);
+}
+
+// ═══ Планы по поставщикам ═══
+
+function cmdPlans($chatId, $user, $editMsgId = null) {
+    global $pdo;
+    $entity = getUserEntity($user);
+
+    $sql = "SELECT p.supplier, p.period_type, p.period_count, p.start_date, p.note, p.created_by, p.updated_at,
+                   p.consumption_period_days, p.input_unit
+            FROM plans p WHERE 1=1";
+    $params = [];
+    if ($entity) { $sql .= " AND p.legal_entity = ?"; $params[] = $entity; }
+    $sql .= " ORDER BY p.updated_at DESC LIMIT 10";
+    $s = $pdo->prepare($sql); $s->execute($params);
+    $plans = $s->fetchAll();
+
+    $menuBtn = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+
+    if (!$plans) {
+        botSend($chatId, "📅 Планов пока нет.", ['inline_keyboard' => [$menuBtn]], $editMsgId);
+        return;
+    }
+
+    $periodLabels = ['weeks' => 'нед.', 'months' => 'мес.'];
+    $text = "📅 <b>Планы поставок</b>" . ($entity ? " (" . getEntityShort($entity) . ")" : "") . "\n\n";
+    foreach ($plans as $p) {
+        $period = ($p['period_count'] ?? 3) . ' ' . ($periodLabels[$p['period_type']] ?? $p['period_type']);
+        $updated = $p['updated_at'] ? date('d.m', strtotime($p['updated_at'])) : '—';
+        $text .= "• <b>{$p['supplier']}</b> — {$period}\n";
+        if ($p['note']) $text .= "  📝 {$p['note']}\n";
+        $text .= "  обновлён {$updated}, автор: {$p['created_by']}\n";
+    }
+    botSend($chatId, $text, ['inline_keyboard' => [$menuBtn]], $editMsgId);
+}
+
+// ═══ Ожидающие поставки ═══
+
+function cmdDeliveries($chatId, $user, $editMsgId = null) {
+    global $pdo;
+    $entity = getUserEntity($user);
+
+    // Заказы без приёмки (received_at IS NULL) и с датой доставки
+    $sql = "SELECT o.id, o.supplier, o.delivery_date, o.created_by, o.created_at,
+                   DATEDIFF(CURDATE(), o.delivery_date) as days_overdue,
+                   (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) as items_count,
+                   (SELECT SUM(oi.qty_boxes) FROM order_items oi WHERE oi.order_id = o.id) as total_boxes
+            FROM orders o
+            WHERE o.received_at IS NULL AND o.delivery_date IS NOT NULL";
+    $params = [];
+    if ($entity) { $sql .= " AND o.legal_entity = ?"; $params[] = $entity; }
+    $sql .= " ORDER BY o.delivery_date ASC LIMIT 15";
+    $s = $pdo->prepare($sql); $s->execute($params);
+    $orders = $s->fetchAll();
+
+    $menuBtn = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+
+    if (!$orders) {
+        botSend($chatId, "✅ Нет ожидающих поставок.", ['inline_keyboard' => [$menuBtn]], $editMsgId);
+        return;
+    }
+
+    $text = "🚚 <b>Ожидающие поставки</b>" . ($entity ? " (" . getEntityShort($entity) . ")" : "") . "\n\n";
+    foreach ($orders as $o) {
+        $delivery = date('d.m', strtotime($o['delivery_date']));
+        $overdue = $o['days_overdue'];
+        $icon = $overdue > 0 ? '🔴' : ($overdue == 0 ? '🟡' : '🟢');
+        $label = $overdue > 0 ? "просрочена на {$overdue} дн." : ($overdue == 0 ? 'сегодня' : 'через ' . abs($overdue) . ' дн.');
+        $text .= "{$icon} <b>{$o['supplier']}</b> — приход {$delivery} ({$label})\n";
+        $text .= "   {$o['items_count']} поз., {$o['total_boxes']} кор.\n";
+    }
+    botSend($chatId, $text, ['inline_keyboard' => [$menuBtn]], $editMsgId);
+}
+
+// ═══ График доставок ═══
+
+function cmdCards($chatId, $user, $editMsgId = null) {
+    global $pdo;
+
+    // Включаем режим поиска карточек
+    setUserMode($user['name'], 'cards');
+
+    $s = $pdo->prepare("SELECT COUNT(*) as cnt FROM cards");
+    $s->execute();
+    $total = $s->fetch()['cnt'];
+
+    $s = $pdo->prepare("SELECT value FROM settings WHERE `key` = 'last_update' LIMIT 1");
+    $s->execute();
+    $lastUpdate = $s->fetch()['value'] ?? '—';
+
+    $text = "🔍 <b>Режим поиска карточек</b>\n\n";
+    $text .= "Карточек в базе: <b>{$total}</b>\n";
+    $text .= "Обновлено: {$lastUpdate}\n\n";
+    $text .= "Отправьте <b>артикул</b> или <b>название</b> товара.\n";
+    $text .= "Бот найдёт актуальную карточку и покажет аналоги.\n\n";
+    $text .= "<i>Для выхода нажмите «Выход» или отправьте /menu</i>";
+
+    $btns = [[['text' => '❌ Выход из поиска карточек', 'callback_data' => 'cmd_cards_exit']]];
+    botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
+}
+
+// Поиск карточки — прямой ответ без ИИ
+function searchCardDirect($chatId, $query) {
+    global $pdo;
+
+    $normalize = function($s) {
+        $s = mb_strtolower($s);
+        $s = str_replace('ё', 'е', $s);
+        return preg_replace('/[^а-яa-z0-9]/u', '', $s);
+    };
+
+    $queryRaw = trim($query);
+    if (mb_strlen($queryRaw) < 2) {
+        sendMessage($chatId, "Введите минимум 2 символа.", ['inline_keyboard' => [[['text' => '❌ Выход', 'callback_data' => 'cmd_cards_exit']]]]);
+        return;
+    }
+
+    $s = $pdo->prepare("SELECT id, name, analogs FROM cards ORDER BY name");
+    $s->execute();
+    $allCards = $s->fetchAll();
+
+    $q = $normalize($queryRaw);
+    $results = [];
+
+    // 1. Поиск по артикулу (точный и частичный)
+    $articleMatch = null;
+    if (preg_match('/\d{4,}(?:-\d+)?/', $queryRaw, $am)) {
+        $articleMatch = $am[0];
+    }
+
+    if ($articleMatch) {
+        foreach ($allCards as $c) {
+            if ($c['id'] === $articleMatch) {
+                $results[] = ['card' => $c, 'reason' => 'найдено по артикулу'];
+                break;
+            }
+        }
+        // Если не найден как основной — ищем в аналогах
+        if (empty($results)) {
+            foreach ($allCards as $c) {
+                $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+                if (!is_array($analogs)) $analogs = [];
+                if (in_array($articleMatch, $analogs)) {
+                    $results[] = ['card' => $c, 'reason' => "артикул {$articleMatch} — аналог этого товара"];
+                }
+            }
+        }
+        // Частичное совпадение артикула
+        if (empty($results)) {
+            foreach ($allCards as $c) {
+                if ($c['id'] && strpos($c['id'], $articleMatch) !== false) {
+                    $results[] = ['card' => $c, 'reason' => 'часть артикула'];
+                    if (count($results) >= 10) break;
+                }
+            }
+        }
+    }
+
+    // 2. Текстовый поиск (если артикул не нашёлся или запрос текстовый)
+    if (empty($results)) {
+        foreach ($allCards as $c) {
+            $normId = $normalize($c['id'] ?? '');
+            $normName = $normalize($c['name']);
+            $normFull = $normId . $normName;
+            $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+            if (!is_array($analogs)) $analogs = [];
+
+            if ($normId === $q) {
+                $results[] = ['card' => $c, 'reason' => 'точное совпадение артикула'];
+                continue;
+            }
+            if ($normFull && mb_strpos($normFull, $q) !== false) {
+                $results[] = ['card' => $c, 'reason' => 'найдено по названию'];
+                continue;
+            }
+            if ($normId && mb_strpos($normId, $q) !== false) {
+                $results[] = ['card' => $c, 'reason' => 'часть артикула'];
+                continue;
+            }
+            foreach ($analogs as $a) {
+                if (mb_strpos($normalize($a), $q) !== false) {
+                    $results[] = ['card' => $c, 'reason' => "найдено по аналогу ({$a})"];
+                    break;
+                }
+            }
+            if (mb_strpos($normName, $q) !== false) {
+                if (!in_array($c['id'], array_column(array_column($results, 'card'), 'id'))) {
+                    $results[] = ['card' => $c, 'reason' => 'найдено по названию'];
+                }
+            }
+
+            if (count($results) >= 10) break;
+        }
+    }
+
+    $exitBtn = [['text' => '❌ Выход', 'callback_data' => 'cmd_cards_exit']];
+
+    if (empty($results)) {
+        // Попробуем найти похожие по отдельным словам
+        $suggestions = [];
+        $words = preg_split('/[\s,.\-!?:;]+/u', mb_strtolower($queryRaw));
+        foreach ($words as $w) {
+            $w = trim($w);
+            if (mb_strlen($w) < 3) continue;
+            $nw = $normalize($w);
+            foreach ($allCards as $c) {
+                if (mb_strpos($normalize($c['name']), $nw) !== false) {
+                    $suggestions[$c['id']] = $c;
+                    if (count($suggestions) >= 5) break 2;
+                }
+            }
+        }
+
+        $msg = "❌ По запросу «<b>{$queryRaw}</b>» карточек не найдено.\n\n";
+        if (!empty($suggestions)) {
+            $msg .= "Возможно, вы имели в виду:\n";
+            foreach ($suggestions as $c) {
+                $msg .= "• <b>{$c['id']}</b> {$c['name']}\n";
+            }
+            $msg .= "\nОтправьте артикул для точного поиска.";
+        } else {
+            $msg .= "Попробуйте:\n• Другой артикул или название\n• Часть названия (например, «стакан» вместо «стаканчик»)\n• Числовой артикул";
+        }
+        sendMessage($chatId, $msg, ['inline_keyboard' => [$exitBtn]]);
+        return;
+    }
+
+    $text = "🔍 Результаты по «<b>{$queryRaw}</b>»:\n\n";
+    foreach ($results as $i => $r) {
+        $c = $r['card'];
+        $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+        if (!is_array($analogs)) $analogs = [];
+
+        $num = $i + 1;
+        $text .= "<b>{$num}. {$c['id']}</b> {$c['name']}\n";
+        $text .= "   <i>{$r['reason']}</i>\n";
+        if (!empty($analogs)) {
+            $text .= "   Аналоги: " . implode(', ', $analogs) . "\n";
+        }
+        $text .= "\n";
+    }
+
+    $text .= "<i>Отправьте ещё артикул или название для поиска</i>";
+
+    // Обрезка по лимиту Telegram
+    if (mb_strlen($text) > 4000) {
+        $text = mb_substr($text, 0, 3990) . "\n\n…";
+    }
+
+    sendMessage($chatId, $text, ['inline_keyboard' => [$exitBtn]]);
+}
+
+function cmdSchedule($chatId, $user, $editMsgId = null, $dayNum = null) {
+    global $pdo;
+
+    $dayNames = ['', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+    $dayShort = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    $today = (int) date('N'); // 1=Пн, 7=Вс
+
+    $entity = getUserEntity($user);
+    // Определяем группу юрлица для фильтра
+    $group = 'BK_VM';
+    if ($entity && strpos($entity, 'Пицца') !== false) $group = 'PS';
+
+    $sql = "SELECT r.number, r.address, r.city, ds.day_of_week, ds.delivery_time
+            FROM delivery_schedule ds
+            JOIN restaurants r ON r.id = ds.restaurant_id AND r.active = 1
+            WHERE ds.delivery_time IS NOT NULL AND ds.delivery_time != ''
+              AND r.legal_entity_group = ?
+            ORDER BY ds.day_of_week, ds.delivery_time, r.number";
+    $s = $pdo->prepare($sql); $s->execute([$group]);
+    $all = $s->fetchAll();
+
+    $menuBtn = ['text' => '📖 Меню', 'callback_data' => 'cmd_menu'];
+
+    if (!$all) {
+        botSend($chatId, "🗓 График доставок пуст.", ['inline_keyboard' => [[$menuBtn]]], $editMsgId);
+        return;
+    }
+
+    // Группируем по дням
+    $byDay = [];
+    foreach ($all as $row) {
+        $byDay[$row['day_of_week']][] = $row;
+    }
+
+    if ($dayNum === null) {
+        // Сводка по всем дням + кнопки
+        $text = "🗓 <b>График доставок</b>\n\n";
+
+        for ($d = 1; $d <= 6; $d++) {
+            $cnt = count($byDay[$d] ?? []);
+            $isToday = ($d === $today);
+            $mark = $isToday ? '📍 ' : '';
+            $todayLabel = $isToday ? ' (сегодня)' : '';
+            $text .= "{$mark}<b>{$dayNames[$d]}</b>{$todayLabel} — {$cnt} доставок\n";
+        }
+
+        // Кнопки по дням
+        $row1 = []; $row2 = [];
+        for ($d = 1; $d <= 6; $d++) {
+            $cnt = count($byDay[$d] ?? []);
+            $mark = ($d === $today) ? '📍' : '';
+            $btn = ['text' => "{$mark}{$dayShort[$d]} ({$cnt})", 'callback_data' => "sched_{$d}"];
+            if ($d <= 3) $row1[] = $btn; else $row2[] = $btn;
+        }
+        $buttons = [$row1, $row2, [$menuBtn]];
+        botSend($chatId, $text, ['inline_keyboard' => $buttons], $editMsgId);
+    } else {
+        // Детальный список на конкретный день
+        $isToday = ($dayNum === $today);
+        $todayLabel = $isToday ? ' (сегодня)' : '';
+        $items = $byDay[$dayNum] ?? [];
+        $cnt = count($items);
+        $text = "🗓 <b>{$dayNames[$dayNum]}{$todayLabel}</b> — {$cnt} доставок\n\n";
+
+        if ($items) {
+            foreach ($items as $d) {
+                $city = ($d['city'] && $d['city'] !== 'Минск') ? " ({$d['city']})" : '';
+                $text .= "#{$d['number']} {$d['delivery_time']} — {$d['address']}{$city}\n";
+            }
+        } else {
+            $text .= "Нет доставок в этот день.\n";
+        }
+
+        // Кнопки навигации между днями
+        $prevDay = $dayNum > 1 ? $dayNum - 1 : 6;
+        $nextDay = $dayNum < 6 ? $dayNum + 1 : 1;
+        $navRow = [
+            ['text' => "← {$dayShort[$prevDay]}", 'callback_data' => "sched_{$prevDay}"],
+            ['text' => '📋 Все дни', 'callback_data' => 'cmd_schedule'],
+            ['text' => "{$dayShort[$nextDay]} →", 'callback_data' => "sched_{$nextDay}"],
+        ];
+        $buttons = [$navRow, [$menuBtn]];
+        botSend($chatId, $text, ['inline_keyboard' => $buttons], $editMsgId);
+    }
 }
 
 // ═══ Полный анализ запасов (как на сайте) ═══
 
-function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
+function cmdAnalysis($chatId, $user, $zone = null, $page = 0, $editMsgId = null) {
     global $pdo;
     $entity = getUserEntity($user);
     $entityShort = $entity ? getEntityShort($entity) : '';
 
     // Загружаем все товары с данными анализа, группируя по аналоговой группе
     $sql = "SELECT p.sku, p.name, p.analog_group, p.supplier, p.qty_per_box, p.category,
+                   COALESCE(p.unit_of_measure, 'шт') as uom,
                    a.stock, a.consumption, a.period_days
             FROM products p
             INNER JOIN analysis_data a ON a.sku COLLATE utf8mb4_general_ci = p.sku COLLATE utf8mb4_general_ci
@@ -311,6 +685,7 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
     foreach ($items as $item) {
         $groupName = $item['analog_group'] ?: $item['sku'] . ' ' . $item['name'];
         if (!isset($groups[$groupName])) {
+            $u = $item['uom'] ?? 'шт';
             $groups[$groupName] = [
                 'name' => $groupName,
                 'items' => [],
@@ -319,6 +694,7 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
                 'periodDays' => 30,
                 'supplier' => $item['supplier'],
                 'category' => $item['category'] ?: '',
+                'uomLabel' => getUomLabel($u),
             ];
         }
         $groups[$groupName]['items'][] = $item;
@@ -383,26 +759,25 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
 
         // Показываем критичные, если есть
         if ($zoneCounts['red'] > 0) {
-            $text .= "\n<b>⚠️ Критичные группы:</b>\n";
+            $text .= "\n<b>⚠️ Критичные:</b>\n";
             foreach (array_slice($zoneGroups['red'], 0, 10) as $g) {
                 $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
-                $text .= "🔴 <b>{$g['name']}</b> — {$g['days']} дн.\n";
-                $text .= "   остаток: {$g['totalStock']}, расход: {$daily}/день, {$g['supplier']}\n";
+                $text .= "🔴 {$g['name']} — <b>{$g['days']}д.</b> ост.{$g['totalStock']}, {$daily}/д\n";
             }
             if ($zoneCounts['red'] > 10) {
-                $text .= "... и ещё " . ($zoneCounts['red'] - 10) . " групп\n";
+                $text .= "… +" . ($zoneCounts['red'] - 10) . " ещё\n";
             }
         }
 
         // Показываем оранжевые
         if ($zoneCounts['orange'] > 0) {
-            $text .= "\n<b>🟠 Требуют внимания:</b>\n";
+            $text .= "\n<b>🟠 Внимание:</b>\n";
             foreach (array_slice($zoneGroups['orange'], 0, 8) as $g) {
                 $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
-                $text .= "🟠 <b>{$g['name']}</b> — {$g['days']} дн. (ост. {$g['totalStock']}, расход {$daily}/день)\n";
+                $text .= "🟠 {$g['name']} — <b>{$g['days']}д.</b> ост.{$g['totalStock']}, {$daily}/д\n";
             }
             if ($zoneCounts['orange'] > 8) {
-                $text .= "... и ещё " . ($zoneCounts['orange'] - 8) . "\n";
+                $text .= "… +" . ($zoneCounts['orange'] - 8) . " ещё\n";
             }
         }
 
@@ -413,8 +788,14 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
         if ($zoneCounts['green'] > 0) $buttons[] = ['text' => "🟢 Норма ({$zoneCounts['green']})", 'callback_data' => 'analysis_green_0'];
         if ($zoneCounts['purple'] > 0) $buttons[] = ['text' => "🟣 Излишки ({$zoneCounts['purple']})", 'callback_data' => 'analysis_purple_0'];
 
-        $keyboard = ['inline_keyboard' => array_chunk($buttons, 2)];
-        sendMessage($chatId, $text, $keyboard);
+        $rows = array_chunk($buttons, 2);
+        $rows[] = [['text' => '🏠 Меню', 'callback_data' => 'cmd_menu']];
+        $keyboard = ['inline_keyboard' => $rows];
+        if ($editMsgId) {
+            editMessage($chatId, $editMsgId, $text, $keyboard);
+        } else {
+            sendMessage($chatId, $text, $keyboard);
+        }
         return;
     }
 
@@ -439,18 +820,17 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
     foreach ($pageItems as $g) {
         $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
         $daysStr = $g['days'] >= 999 ? '∞' : $g['days'];
-        $text .= "<b>{$g['name']}</b>\n";
-        $text .= "  📦 {$g['totalStock']} шт. · 📉 {$daily}/день · ⏳ {$daysStr} дн.\n";
-        $text .= "  🏷 {$g['supplier']}" . ($g['category'] ? " · {$g['category']}" : "") . "\n";
+        $uL = $g['uomLabel'] ?? 'шт.';
+        $text .= "<b>{$g['name']}</b> — <b>{$daysStr}д.</b>\n";
+        $text .= "  {$g['totalStock']} {$uL} · {$daily}/д · {$g['supplier']}\n";
 
         // Показываем состав группы, если > 1 товара
         if (count($g['items']) > 1) {
             foreach ($g['items'] as $item) {
                 $iDaily = $item['period_days'] > 0 ? round($item['consumption'] / $item['period_days'], 1) : 0;
-                $text .= "    · {$item['sku']} {$item['name']}: ост. {$item['stock']}, расх. {$iDaily}/д\n";
+                $text .= "  · {$item['sku']}: {$item['stock']}, {$iDaily}/д\n";
             }
         }
-        $text .= "\n";
     }
 
     // Навигация
@@ -459,8 +839,12 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
     if ($page + 1 < $totalPages) $navButtons[] = ['text' => 'Далее ➡️', 'callback_data' => "analysis_{$zone}_" . ($page + 1)];
     $navButtons[] = ['text' => '📊 Сводка', 'callback_data' => 'analysis_summary'];
 
-    $keyboard = ['inline_keyboard' => [$navButtons]];
-    sendMessage($chatId, $text, $keyboard);
+    $keyboard = ['inline_keyboard' => [$navButtons, [['text' => '🏠 Меню', 'callback_data' => 'cmd_menu']]]];
+    if ($editMsgId) {
+        editMessage($chatId, $editMsgId, $text, $keyboard);
+    } else {
+        sendMessage($chatId, $text, $keyboard);
+    }
 }
 
 // ═══ AI ответы через Claude ═══
@@ -468,16 +852,40 @@ function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
 function askAI($question, $context) {
     global $GEMINI_API_KEY;
 
-    // Groq (бесплатный, Llama 3)
+    // Groq (основной — самый быстрый, 1-3 сек)
     $groqKey = $GLOBALS['GROQ_API_KEY'] ?? '';
     if ($groqKey) {
         $result = askGroq($question, $context, $groqKey);
         if ($result) return $result;
+        error_log("Bot: Groq failed, trying OpenRouter");
     }
 
-    // Gemini (fallback)
+    // OpenRouter (запасной — бесплатные модели, но медленнее)
+    $openrouterKey = $GLOBALS['OPENROUTER_API_KEY'] ?? '';
+    if ($openrouterKey) {
+        $result = askOpenRouter($question, $context, $openrouterKey);
+        if ($result) return $result;
+    }
+
+    // Gemini (fallback — проверяем кэш квоты)
     if ($GEMINI_API_KEY) {
-        $result = askGemini($question, $context, $GEMINI_API_KEY);
+        $geminiBlock = sys_get_temp_dir() . '/gemini_blocked.txt';
+        $geminiOk = true;
+        if (file_exists($geminiBlock) && time() - filemtime($geminiBlock) < 3600) {
+            $geminiOk = false; // Квота исчерпана, не пробуем час
+        }
+        if ($geminiOk) {
+            error_log("Bot: trying Gemini fallback");
+            $result = askGemini($question, $context, $GEMINI_API_KEY);
+            if ($result) return $result;
+        }
+    }
+
+    // DeepSeek (если есть баланс)
+    $deepseekKey = $GLOBALS['DEEPSEEK_API_KEY'] ?? '';
+    if ($deepseekKey) {
+        error_log("Bot: trying DeepSeek fallback");
+        $result = askDeepSeek($question, $context, $deepseekKey);
         if ($result) return $result;
     }
 
@@ -486,22 +894,273 @@ function askAI($question, $context) {
 
 function getSystemPrompt() {
     return <<<'PROMPT'
-Ты — ассистент отдела закупок сети Burger King в Беларуси. Три юрлица: Бургер БК, Воглия Матта, Пицца Стар.
+Ты — ассистент отдела закупок сети Burger King в Беларуси.
 
-Термины: ПСЦ — протокол цен с поставщиком. Запас в днях = остаток ÷ дневной расход. ≤3 дн — критично, 3–7 — мало, >14 — норма.
+== ЮРЛИЦА ==
+Три юридических лица:
+- ООО «Бургер БК» (сокращённо БК) — основное юрлицо Burger King
+- ООО «Воглия Матта» (сокращённо ВМ) — второе юрлицо Burger King
+- ООО «Пицца Стар» (сокращённо ПС) — юрлицо Pizza Star
 
-Правила ответа:
+ВАЖНО: У каждого юрлица СВОИ данные — свои товары, остатки, расход, заказы, цены и сроки годности.
+Бургер БК и Воглия Матта — это два разных юрлица одного бизнеса, но данные у них РАЗНЫЕ.
+Пицца Стар — отдельный бизнес со своими данными.
+Данные в контексте уже отфильтрованы по текущему юрлицу пользователя.
+Если пользователь спрашивает про другое юрлицо — предложи переключиться: /entity
+
+== СРОКИ ГОДНОСТИ ==
+В таблице stock_malling хранятся данные по срокам годности со складов.
+Поле «customer» — это юрлицо (Бургер БК, Воглия Матта, Пицца Стар).
+Если в контексте есть метка [Бургер БК], [Воглия Матта] или [Пицца Стар] — указывай, к какому юрлицу относится товар.
+Статусы: Годен — всё ок, Маллинг — снижена цена (скоро истечёт), Блокирован — нельзя использовать.
+
+== ТЕРМИНЫ ==
+ПСЦ — протокол согласования цен с поставщиком.
+Запас в днях = остаток ÷ дневной расход. ≤3 дн — критично, 3–7 — мало, >14 — норма.
+DLT — срок доставки (delivery lead time). DOC — срок документооборота.
+НДС — налог на добавленную стоимость (обычно 20%, бывает 10% и 0%). Цены в системе — без НДС.
+Кратность — заказ должен быть кратен этому числу коробок.
+Кейсовка (вложение, фасовка) — это qty_per_box: сколько штук/кг/литров в одной коробке. Если спрашивают «какая кейсовка» — ответь именно qty_per_box (шт./кор., кг/кор. или л/кор.).
+
+== ДОПОЛНИТЕЛЬНЫЕ ЗНАНИЯ ==
+- Поставки: заказы с датой доставки, но без приёмки — это ожидающие поставки. Просроченные — если дата прошла.
+- Планы: у поставщиков есть периодичность заказов (каждые N недель/месяцев).
+- Рестораны: около 57 ресторанов, каждый имеет свой номер и адрес. У ресторанов есть график доставки по дням недели с временем.
+- Группы аналогов: товары с одинаковой analog_group взаимозаменяемы, их запас считается суммарно.
+- Единицы: товары считаются в штуках или коробках. qty_per_box — штук в коробке. multiplicity — кратность заказа.
+- Сбор остатков: рестораны заполняют формы с остатками определённых товаров.
+- Карточки: справочник всех товаров с артикулами и аналогами. У каждого товара может быть список аналогов (замен). Если в контексте есть раздел «КАРТОЧКИ ТОВАРОВ» — покажи найденные карточки с аналогами.
+
+== КОНТЕКСТ РАЗГОВОРА ==
+Если вопрос пользователя выглядит как уточнение (например «а по Воглии?», «а для БК?», «ещё по молоку»), система автоматически добавляет контекст предыдущего вопроса. Отвечай на полный вопрос, не упоминая что это уточнение.
+
+== ТИПИЧНЫЕ ВОПРОСЫ И КАК ОТВЕЧАТЬ ==
+Вопрос «когда приедет [товар]?» → Покажи ожидающие поставки с этим товаром: дату прихода, количество в коробках и штуках, поставщика.
+Вопрос «сколько [товара] заказано?» → Покажи позиции заказов с этим товаром и их количество.
+Вопрос «какой остаток [товара]?» → Покажи остаток, дневной расход и запас в днях.
+Вопрос «что скоро просрочится?» → Покажи товары с близким сроком годности.
+Вопрос «когда доставка в ресторан N?» → Покажи график доставок для конкретного ресторана.
+Вопрос «какие товары заканчиваются?» → Покажи товары с запасом менее 5 дней.
+Вопрос «расскажи про поставщика X» → Покажи контакты, DLT, последний заказ, ПСЦ.
+Вопрос «найди карточку [артикул/название]» → Покажи карточку с артикулом, названием и списком аналогов.
+Вопрос «какие аналоги у [товара]?» → Покажи карточку и её аналоги.
+Вопрос «какая кейсовка [товара]?» → Покажи qty_per_box (вложение в коробку): «В коробке: X шт./кг/л». Также покажи кратность заказа.
+
+== ПРАВИЛА ОТВЕТА ==
 - Кратко, на русском, ТОЛЬКО по данным из контекста
-- Если несколько товаров — покажи ВСЕ
+- КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать данные. Если в контексте нет информации — так и скажи.
+- Если данных не найдено или вопрос неоднозначный — задай уточняющий вопрос. Примеры:
+  • «Какой именно товар вы имеете в виду? Уточните артикул или полное название.»
+  • «По запросу найдено несколько вариантов: [список]. Какой именно?»
+  • «Данных по этому товару нет. Возможно, вы имели в виду [похожий товар]?»
+  • «Для какого юрлица показать данные? Сейчас выбрано: [юрлицо].»
+- Если вопрос слишком общий (например, просто «молоко» без контекста), спроси что именно нужно: остаток, цену, поставку или карточку
+- НИКОГДА не связывай товар с поставщиком, если это явно не указано в данных. Раздел «Ожидаемые поставки» показывает только общее кол-во по поставщику — из него НЕЛЬЗЯ определить, какие товары в заказе
+- Для вопроса «когда приедет [товар]» — используй ТОЛЬКО раздел «ОЖИДАЮЩИЕ ПОСТАВКИ (найденные товары)», где указаны конкретные позиции
+- Если несколько товаров — покажи ВСЕ, не обрезай
 - Формат товара: «артикул Название»
 - Остаток: показывай остаток, расход/день и запас в днях
-- HTML для Telegram: <b>жирный</b>. НЕ используй Markdown
+- Цены: всегда показывай и «без НДС» и «с НДС», указывай ставку НДС
+- При вопросе о поставке конкретного товара — показывай КОЛИЧЕСТВО ИМЕННО ЭТОГО ТОВАРА, а не общее количество заказа
+- Единицы: у каждого товара своя единица (шт., л, кг) — используй ту, что указана в данных. Не заменяй «л» на «шт.» и наоборот
+- HTML для Telegram: <b>жирный</b>, <a href="url">текст</a> для ссылок. НЕ используй Markdown (**, ##, - , ```). Списки — с «•» или «—»
+- Если в данных есть ссылки (<a href="...">) — сохраняй их как есть в ответе. НЕ дублируй ссылки, НЕ добавляй новые
 - Числа: «5 кор.», «120 шт.», «14 дн.», даты: ДД.ММ.ГГГГ
-- Команды: /orders /stock /consumption /prices /psc /analysis /entity /settings
+- Не повторяй вопрос пользователя в ответе
+- Ответ должен быть сразу по существу
+
+== ПОДСКАЗКИ КОМАНД ==
+Если пользователь спрашивает о чём-то, что лучше посмотреть через команду — предложи её в конце ответа:
+- Полный список заказов → /orders
+- Все низкие остатки → /stock
+- Анализ запасов по зонам → /analysis
+- Расход товаров → /consumption
+- Изменения цен → /prices
+- Протоколы ПСЦ → /psc
+- Ожидаемые поставки → /deliveries
+- Планы поставок → /plans
+- График доставок → /schedule
+- Поиск карточек → /cards
+- Переключить юрлицо → /entity
+Не навязывай команды — предлагай только если это действительно поможет ответить на вопрос полнее.
+
+== ЧАСТЫЕ ОШИБКИ — НЕ ДОПУСКАЙ ==
+- НЕ пиши «по данным системы, [товар] от поставщика X» если это не указано явно
+- НЕ считай общий запас по аналогам — каждый товар отдельно
+- НЕ округляй числа — показывай как есть в данных
+- НЕ добавляй «по данным на сегодня» — пользователь знает что данные актуальны
+- НЕ используй слова «приблизительно», «ориентировочно» для точных данных из системы
 PROMPT;
 }
 
+function askOpenRouter($question, $context, $apiKey) {
+    $systemPrompt = getSystemPrompt();
+
+    // Модели по приоритету: разнообразие провайдеров для обхода лимитов
+    $models = [
+        'meta-llama/llama-4-maverick:free',
+        'meta-llama/llama-4-scout:free',
+        'qwen/qwen3-235b-a22b:free',
+        'deepseek/deepseek-chat-v3-0324:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'google/gemma-3-27b-it:free',
+    ];
+
+    foreach ($models as $model) {
+        $result = callOpenRouter($question, $context, $apiKey, $systemPrompt, $model);
+        if ($result) return $result;
+    }
+
+    return null;
+}
+
+function callOpenRouter($question, $context, $apiKey, $systemPrompt, $model) {
+    // Кэш недоступных моделей (файл, чтобы работал между запросами)
+    $cacheFile = sys_get_temp_dir() . '/openrouter_blocked.json';
+    $blocked = [];
+    if (file_exists($cacheFile)) {
+        $blocked = json_decode(file_get_contents($cacheFile), true) ?: [];
+        // Очистка устаревших (>30 минут)
+        $blocked = array_filter($blocked, fn($ts) => time() - $ts < 1800);
+    }
+    if (isset($blocked[$model])) {
+        return null; // Пропускаем — модель недавно дала 429
+    }
+
+    // Gemma не поддерживает system role — объединяем с user
+    $isGemma = strpos($model, 'gemma') !== false;
+
+    if ($isGemma) {
+        $messages = [
+            ['role' => 'user', 'content' => "{$systemPrompt}\n\nКонтекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"],
+        ];
+    } else {
+        $messages = [
+            ['role' => 'system', 'content' => $systemPrompt],
+            ['role' => 'user', 'content' => "Контекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"],
+        ];
+    }
+
+    $payload = json_encode([
+        'model' => $model,
+        'messages' => $messages,
+        'max_tokens' => 1024,
+        'temperature' => 0.1,
+    ]);
+
+    $ch = curl_init('https://openrouter.ai/api/v1/chat/completions');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+            'HTTP-Referer: https://supply-department.online',
+            'X-Title: Supply Bot',
+        ],
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 3,
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if (!$response || $httpCode !== 200) {
+        $respPreview = $response ? mb_substr($response, 0, 200) : '(empty)';
+        error_log("OpenRouter [{$model}]: HTTP {$httpCode}, err={$err}, resp={$respPreview}");
+        // Запоминаем 429 чтобы не пробовать эту модель 30 минут
+        if ($httpCode === 429) {
+            $blocked[$model] = time();
+            @file_put_contents($cacheFile, json_encode($blocked));
+        }
+        return null;
+    }
+
+    $data = json_decode($response, true);
+    $content = $data['choices'][0]['message']['content'] ?? null;
+
+    // Некоторые модели (step, qwen) кладут ответ в reasoning — проверяем
+    if (!$content) {
+        $reasoning = $data['choices'][0]['message']['reasoning'] ?? null;
+        if ($reasoning) $content = $reasoning;
+    }
+
+    // Убираем <think> теги если есть
+    if ($content) {
+        $content = preg_replace('/<think>[\s\S]*?<\/think>/u', '', $content);
+        $content = trim($content);
+    }
+
+    if ($content) {
+        error_log("OpenRouter: OK with model={$model}");
+    }
+
+    return $content ?: null;
+}
+
+function askDeepSeek($question, $context, $apiKey) {
+    $systemPrompt = getSystemPrompt();
+
+    $payload = json_encode([
+        'model' => 'deepseek-chat',
+        'messages' => [
+            ['role' => 'system', 'content' => $systemPrompt],
+            ['role' => 'user', 'content' => "Контекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"],
+        ],
+        'max_tokens' => 1024,
+        'temperature' => 0.1,
+    ]);
+
+    $ch = curl_init('https://api.deepseek.com/chat/completions');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+        ],
+        CURLOPT_TIMEOUT => 20,
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if (!$response || $httpCode !== 200) {
+        $respPreview = $response ? mb_substr($response, 0, 500) : '(empty)';
+        error_log("DeepSeek API error: HTTP {$httpCode}, err={$err}, resp={$respPreview}");
+        return null;
+    }
+
+    $data = json_decode($response, true);
+    $content = $data['choices'][0]['message']['content'] ?? null;
+    // DeepSeek иногда включает <think>...</think> в ответ — убираем
+    if ($content) {
+        $content = preg_replace('/<think>[\s\S]*?<\/think>/u', '', $content);
+        $content = trim($content);
+    }
+    return $content ?: null;
+}
+
 function askGroq($question, $context, $apiKey, $model = 'llama-3.3-70b-versatile') {
+    // Кэш rate limit (чтобы не дёргать API зря)
+    $cacheFile = sys_get_temp_dir() . '/groq_blocked.json';
+    $blocked = [];
+    if (file_exists($cacheFile)) {
+        $blocked = json_decode(file_get_contents($cacheFile), true) ?: [];
+    }
+    if (isset($blocked[$model]) && time() < $blocked[$model]) {
+        error_log("Groq: {$model} rate-limited until " . date('H:i:s', $blocked[$model]));
+        // Попробовать меньшую модель
+        if ($model === 'llama-3.3-70b-versatile') {
+            return askGroq($question, $context, $apiKey, 'llama-3.1-8b-instant');
+        }
+        return null;
+    }
+
     $systemPrompt = getSystemPrompt();
 
     $payload = json_encode([
@@ -511,7 +1170,7 @@ function askGroq($question, $context, $apiKey, $model = 'llama-3.3-70b-versatile
             ['role' => 'user', 'content' => "Контекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"],
         ],
         'max_tokens' => 1024,
-        'temperature' => 0.3,
+        'temperature' => 0.1,
     ]);
 
     $ch = curl_init('https://api.groq.com/openai/v1/chat/completions');
@@ -523,7 +1182,8 @@ function askGroq($question, $context, $apiKey, $model = 'llama-3.3-70b-versatile
             'Content-Type: application/json',
             'Authorization: Bearer ' . $apiKey,
         ],
-        CURLOPT_TIMEOUT => 30,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_CONNECTTIMEOUT => 3,
     ]);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -531,10 +1191,23 @@ function askGroq($question, $context, $apiKey, $model = 'llama-3.3-70b-versatile
     curl_close($ch);
 
     if (!$response || $httpCode !== 200) {
-        error_log("Groq API error ({$model}): HTTP {$httpCode}, err={$err}");
-        // При rate limit — попробовать меньшую модель
-        if ($httpCode === 429 && $model === 'llama-3.3-70b-versatile') {
-            return askGroq($question, $context, $apiKey, 'llama-3.1-8b-instant');
+        error_log("Groq API error ({$model}): HTTP {$httpCode}, err={$err}, ctx_len=" . strlen($context));
+        if ($httpCode === 429) {
+            // Извлекаем время ожидания из ответа
+            $waitSec = 600; // По умолчанию 10 мин
+            if (preg_match('/try again in (\d+)h/i', $response, $hm)) {
+                $waitSec = intval($hm[1]) * 3600;
+            } elseif (preg_match('/try again in (\d+)m/i', $response, $mm)) {
+                $waitSec = intval($mm[1]) * 60;
+            } elseif (preg_match('/try again in ([\d.]+)s/i', $response, $sm)) {
+                $waitSec = intval(ceil(floatval($sm[1])));
+            }
+            $blocked[$model] = time() + $waitSec;
+            @file_put_contents($cacheFile, json_encode($blocked));
+            // Попробовать меньшую модель
+            if ($model === 'llama-3.3-70b-versatile') {
+                return askGroq($question, $context, $apiKey, 'llama-3.1-8b-instant');
+            }
         }
         return null;
     }
@@ -551,7 +1224,7 @@ function askGemini($question, $context, $apiKey) {
         'contents' => [
             ['role' => 'user', 'parts' => [['text' => "Контекст (данные из системы):\n{$context}\n\nВопрос пользователя: {$question}"]]]
         ],
-        'generationConfig' => ['maxOutputTokens' => 1024],
+        'generationConfig' => ['maxOutputTokens' => 1024, 'temperature' => 0.1],
     ]);
 
     $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={$apiKey}";
@@ -564,18 +1237,34 @@ function askGemini($question, $context, $apiKey) {
         CURLOPT_TIMEOUT => 30,
     ]);
     $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
     curl_close($ch);
-    if (!$response) return null;
+    if (!$response || $httpCode !== 200) {
+        $respPreview = $response ? mb_substr($response, 0, 500) : '(empty)';
+        error_log("Gemini API error: HTTP {$httpCode}, err={$err}, resp={$respPreview}");
+        // Если квота исчерпана — запоминаем на час
+        if ($httpCode === 429 || strpos($response ?: '', 'quota') !== false) {
+            @file_put_contents(sys_get_temp_dir() . '/gemini_blocked.txt', 'blocked');
+        }
+        return null;
+    }
 
     $data = json_decode($response, true);
-    return $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+    $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+    if (!$text) {
+        error_log("Bot: Gemini returned null");
+    }
+    return $text;
 }
 
 function gatherContext($user) {
     global $pdo;
     $entity = getUserEntity($user);
     $context = "Пользователь: {$user['name']}, роль: {$user['role']}";
-    if ($entity) $context .= ", юрлицо: {$entity}";
+    if ($entity) $context .= "\nТекущее юрлицо: {$entity} (все данные ниже — для этого юрлица)";
+    $allEntities = implode(', ', $user['legal_entities']);
+    $context .= "\nДоступные юрлица: {$allEntities}";
     $context .= "\nСегодня: " . date('d.m.Y, l') . "\n\n";
 
     $params = [];
@@ -661,7 +1350,7 @@ function gatherContext($user) {
     }
 
     // Топ расхода
-    $sql = "SELECT a.sku, p.name, a.consumption, a.period_days FROM analysis_data a
+    $sql = "SELECT a.sku, p.name, a.consumption, a.period_days, COALESCE(p.unit_of_measure, 'шт') as uom FROM analysis_data a
             LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
             WHERE a.consumption > 0";
     if ($entity) { $sql .= " AND a.legal_entity = ?"; }
@@ -673,7 +1362,93 @@ function gatherContext($user) {
         foreach ($consumption as $c) {
             $daily = round($c['consumption'] / max($c['period_days'], 1), 1);
             $name = $c['name'] ? $c['sku'] . ' ' . $c['name'] : $c['sku'];
-            $context .= "- {$name}: {$daily} шт./день\n";
+            $cu = $c['uom'] ?? 'шт';
+            $cuLabel = getUomLabel($cu);
+            $context .= "- {$name}: {$daily} {$cuLabel}/день\n";
+        }
+    }
+
+    // Сроки годности — скоро истекающие (ближайшие 14 дней)
+    $customerName = null;
+    if ($entity) {
+        if (strpos($entity, 'Бургер') !== false) $customerName = 'Бургер БК';
+        elseif (strpos($entity, 'Воглия') !== false) $customerName = 'Воглия Матта';
+        elseif (strpos($entity, 'Пицца') !== false) $customerName = 'Пицца Стар';
+    }
+    $shelfSql = "SELECT product_name, customer, warehouse, expiry_date, quantity, expiry_status,
+                        DATEDIFF(expiry_date, CURDATE()) as days_left
+                 FROM stock_malling
+                 WHERE expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 14 DAY)";
+    $shelfParams = [];
+    if ($customerName) { $shelfSql .= " AND customer = ?"; $shelfParams[] = $customerName; }
+    $shelfSql .= " ORDER BY expiry_date ASC LIMIT 10";
+    $s = $pdo->prepare($shelfSql); $s->execute($shelfParams);
+    $expiring = $s->fetchAll();
+    if ($expiring) {
+        $context .= "\nСроки годности (истекают в ближайшие 14 дней):\n";
+        foreach ($expiring as $ex) {
+            $date = date('d.m.Y', strtotime($ex['expiry_date']));
+            $custLabel = $ex['customer'] ? " [{$ex['customer']}]" : '';
+            $context .= "- {$ex['product_name']}{$custLabel}: до {$date} ({$ex['days_left']} дн.), {$ex['quantity']} шт., склад: {$ex['warehouse']}\n";
+        }
+    }
+
+    // Заблокированные / просроченные
+    $blockedSql = "SELECT product_name, customer, expiry_status, block_reason, quantity
+                   FROM stock_malling
+                   WHERE (expiry_status != 'Годен' OR expiry_date < CURDATE() OR block_reason IS NOT NULL)";
+    $blockedParams = [];
+    if ($customerName) { $blockedSql .= " AND customer = ?"; $blockedParams[] = $customerName; }
+    $blockedSql .= " LIMIT 10";
+    $s = $pdo->prepare($blockedSql); $s->execute($blockedParams);
+    $blocked = $s->fetchAll();
+    if ($blocked) {
+        $context .= "\nЗаблокированные/просроченные на складе:\n";
+        foreach ($blocked as $b) {
+            $reason = $b['block_reason'] ?: $b['expiry_status'];
+            $custLabel = $b['customer'] ? " [{$b['customer']}]" : '';
+            $context .= "- {$b['product_name']}{$custLabel}: {$b['quantity']} шт., статус: {$reason}\n";
+        }
+    }
+
+    // Ожидаемые поставки (заказы без факт. прихода)
+    $delivSql = "SELECT o.supplier, o.delivery_date, o.created_at,
+                        (SELECT SUM(oi.qty_boxes) FROM order_items oi WHERE oi.order_id = o.id) as boxes,
+                        DATEDIFF(CURDATE(), o.delivery_date) as overdue_days
+                 FROM orders o
+                 WHERE o.received_at IS NULL";
+    $delivParams = [];
+    if ($entity) { $delivSql .= " AND o.legal_entity = ?"; $delivParams[] = $entity; }
+    $delivSql .= " ORDER BY o.delivery_date ASC LIMIT 10";
+    $s = $pdo->prepare($delivSql); $s->execute($delivParams);
+    $deliveries = $s->fetchAll();
+    if ($deliveries) {
+        $context .= "\nОжидаемые поставки:\n";
+        foreach ($deliveries as $d) {
+            $dd = $d['delivery_date'] ? date('d.m', strtotime($d['delivery_date'])) : '—';
+            $status = '';
+            if ($d['delivery_date'] && $d['overdue_days'] > 0) {
+                $status = " ⚠️ просрочена на {$d['overdue_days']} дн.";
+            }
+            $context .= "- {$d['supplier']}: {$d['boxes']} кор., ожид. {$dd}{$status}\n";
+        }
+    }
+
+    // Планы поставок
+    $planSql = "SELECT pl.supplier, pl.period_type, pl.period_count, pl.note, pl.updated_at
+                FROM plans pl";
+    $planParams = [];
+    if ($entity) { $planSql .= " WHERE pl.legal_entity = ?"; $planParams[] = $entity; }
+    $planSql .= " ORDER BY pl.supplier ASC LIMIT 15";
+    $s = $pdo->prepare($planSql); $s->execute($planParams);
+    $plans = $s->fetchAll();
+    if ($plans) {
+        $periodLabels = ['weeks' => 'нед.', 'months' => 'мес.'];
+        $context .= "\nПланы поставок:\n";
+        foreach ($plans as $pl) {
+            $period = ($pl['period_count'] ?? 3) . ' ' . ($periodLabels[$pl['period_type']] ?? $pl['period_type']);
+            $note = $pl['note'] ? " ({$pl['note']})" : '';
+            $context .= "- {$pl['supplier']}: каждые {$period}{$note}\n";
         }
     }
 
@@ -683,6 +1458,9 @@ function gatherContext($user) {
 // Поиск товара по артикулу или названию и сбор всех данных по нему
 function lookupProduct($question, $entity) {
     global $pdo;
+    // Определяем, вопрос ли это о поставке — тогда не нужна история заказов
+    $q = mb_strtolower($question);
+    $skipHistory = (bool) preg_match('/поставк|приед|привез|когда.*прие|ожидае|приход|привоз/u', $q);
 
     // Извлечь артикулы (числа 4+ цифр) из вопроса
     $skus = [];
@@ -701,21 +1479,19 @@ function lookupProduct($question, $entity) {
     if (empty($skus) && empty($searchTerms)) {
         $stopWords = ['какой','какая','какие','каков','сколько','покажи','найди','расскажи','подскажи',
             'остаток','остатки','расход','заказ','заказы','цена','цены','товар','товары','продукт',
-            'есть','нет','где','что','как','для','это','еще','уже','очень','можно','нужно','надо',
+            'есть','нет','где','что','как','для','это','еще','ещё','уже','очень','можно','нужно','надо',
             'мне','наш','наши','весь','все','только','сейчас','когда','был','была','будет','день',
             'дней','штук','коробок','последний','сегодня','вчера','завтра','про','информация','инфо',
             'данные','скажи','ответь','дай','группа','аналог','аналоги','поставщик',
-            'состав','заказа','заказов','последний','последнего','покажи','покаж'];
+            'состав','заказа','заказов','последнего','покаж',
+            'приедет','приедут','привезут','поставка','поставки','ожидает','доставка','приход',
+            'литров','литр','кило','килограмм','штуки','коробки','упаковок','палет',
+            'кейсовка','кейсовки','упаковка','фасовка','вложение','вложенность'];
         $words = preg_split('/[\s,.\-!?:;]+/u', mb_strtolower($question));
         foreach ($words as $w) {
             $w = trim($w);
             if (mb_strlen($w) >= 3 && !in_array($w, $stopWords) && !is_numeric($w)) {
-                // Обрезаем русские окончания для поиска (молока→молок, булки→булк, кетчупа→кетчуп)
-                $stem = $w;
-                if (mb_strlen($w) >= 4) {
-                    $stem = preg_replace('/(ов|ев|ей|ий|ой|ый|ая|ое|ые|ие|ам|ям|ах|ях|ом|ем|ём|ую|юю|ых|их|ми|ки|ка|ку|ко|ке)$/u', '', $w);
-                    if (mb_strlen($stem) < 3) $stem = $w; // Если обрезали слишком коротко
-                }
+                $stem = stemRu($w);
                 $searchTerms[] = $stem;
             }
         }
@@ -739,7 +1515,7 @@ function lookupProduct($question, $entity) {
 
         foreach ($products as $prod) {
             $found = true;
-            $context .= productFullInfo($prod, $entity);
+            $context .= productFullInfo($prod, $entity, $skipHistory);
         }
 
         if (empty($products)) {
@@ -751,32 +1527,43 @@ function lookupProduct($question, $entity) {
             $products = $s->fetchAll();
             foreach ($products as $prod) {
                 $found = true;
-                $context .= productFullInfo($prod, $entity);
+                $context .= productFullInfo($prod, $entity, $skipHistory);
             }
         }
     }
 
     // Поиск по названию (и по группе аналогов) — приоритет товарам с остатками
     $foundSkus = [];
-    foreach ($searchTerms as $term) {
-        // Сначала товары с данными в analysis_data (есть остаток или расход)
+
+    // Если несколько слов — сначала ищем товары, содержащие ВСЕ слова (точный поиск)
+    if (count($searchTerms) > 1) {
+        // Строим SQL с AND для всех терминов
+        $nameConditions = [];
+        $nameParams = [];
+        foreach ($searchTerms as $term) {
+            $nameConditions[] = "(p.name LIKE ? OR p.analog_group LIKE ?)";
+            $nameParams[] = "%{$term}%";
+            $nameParams[] = "%{$term}%";
+        }
+        $allCondition = implode(' AND ', $nameConditions);
+
+        // С данными анализа
         $sql = "SELECT p.sku, p.name, p.supplier, p.qty_per_box, p.multiplicity, p.unit_of_measure, p.legal_entity, p.analog_group
                 FROM products p
                 INNER JOIN analysis_data a ON a.sku COLLATE utf8mb4_general_ci = p.sku COLLATE utf8mb4_general_ci
                     AND a.legal_entity COLLATE utf8mb4_general_ci = p.legal_entity COLLATE utf8mb4_general_ci
-                WHERE (p.name LIKE ? OR p.analog_group LIKE ?) AND p.is_active = 1" . $eFilter . "
-                ORDER BY a.stock DESC
-                LIMIT 10";
+                WHERE {$allCondition} AND p.is_active = 1" . $eFilter . "
+                ORDER BY a.stock DESC LIMIT 10";
         $s = $pdo->prepare($sql);
-        $s->execute(array_merge(["%{$term}%", "%{$term}%"], $eParams));
+        $s->execute(array_merge($nameParams, $eParams));
         $products = $s->fetchAll();
 
-        // Если ничего не нашли с данными — ищем просто по products
+        // Без данных анализа
         if (empty($products)) {
             $sql = "SELECT p.sku, p.name, p.supplier, p.qty_per_box, p.multiplicity, p.unit_of_measure, p.legal_entity, p.analog_group
-                    FROM products p WHERE (p.name LIKE ? OR p.analog_group LIKE ?) AND p.is_active = 1" . $eFilter . " LIMIT 10";
+                    FROM products p WHERE {$allCondition} AND p.is_active = 1" . $eFilter . " LIMIT 10";
             $s = $pdo->prepare($sql);
-            $s->execute(array_merge(["%{$term}%", "%{$term}%"], $eParams));
+            $s->execute(array_merge($nameParams, $eParams));
             $products = $s->fetchAll();
         }
 
@@ -785,19 +1572,54 @@ function lookupProduct($question, $entity) {
             if (isset($foundSkus[$key])) continue;
             $foundSkus[$key] = true;
             $found = true;
-            $context .= productFullInfo($prod, $entity);
+            $context .= productFullInfo($prod, $entity, $skipHistory);
+        }
+    }
+
+    // Если точный поиск не дал результатов — ищем по отдельным словам
+    if (!$found) {
+        foreach ($searchTerms as $term) {
+            $sql = "SELECT p.sku, p.name, p.supplier, p.qty_per_box, p.multiplicity, p.unit_of_measure, p.legal_entity, p.analog_group
+                    FROM products p
+                    INNER JOIN analysis_data a ON a.sku COLLATE utf8mb4_general_ci = p.sku COLLATE utf8mb4_general_ci
+                        AND a.legal_entity COLLATE utf8mb4_general_ci = p.legal_entity COLLATE utf8mb4_general_ci
+                    WHERE (p.name LIKE ? OR p.analog_group LIKE ?) AND p.is_active = 1" . $eFilter . "
+                    ORDER BY a.stock DESC
+                    LIMIT 10";
+            $s = $pdo->prepare($sql);
+            $s->execute(array_merge(["%{$term}%", "%{$term}%"], $eParams));
+            $products = $s->fetchAll();
+
+            if (empty($products)) {
+                $sql = "SELECT p.sku, p.name, p.supplier, p.qty_per_box, p.multiplicity, p.unit_of_measure, p.legal_entity, p.analog_group
+                        FROM products p WHERE (p.name LIKE ? OR p.analog_group LIKE ?) AND p.is_active = 1" . $eFilter . " LIMIT 10";
+                $s = $pdo->prepare($sql);
+                $s->execute(array_merge(["%{$term}%", "%{$term}%"], $eParams));
+                $products = $s->fetchAll();
+            }
+
+            foreach ($products as $prod) {
+                $key = $prod['sku'] . '|' . $prod['legal_entity'];
+                if (isset($foundSkus[$key])) continue;
+                $foundSkus[$key] = true;
+                $found = true;
+                $context .= productFullInfo($prod, $entity, $skipHistory);
+            }
         }
     }
 
     return $found ? $context : '';
 }
 
-function productFullInfo($prod, $entity) {
+function productFullInfo($prod, $entity, $skipHistory = false) {
     global $pdo;
     $sku = $prod['sku'];
     $le = $prod['legal_entity'];
+    $uom = $prod['unit_of_measure'] ?? 'шт';
+    $uomLabel = getUomLabel($uom);
+    $uomPerBox = $uom === 'л' ? 'л/кор.' : ($uom === 'кг' ? 'кг/кор.' : 'шт./кор.');
     $info = "\n<b>{$sku} {$prod['name']}</b>\n";
-    $info .= "  Поставщик: {$prod['supplier']}, шт./кор.: {$prod['qty_per_box']}, кратность: {$prod['multiplicity']}\n";
+    $info .= "  Поставщик: {$prod['supplier']}, {$uomPerBox}: {$prod['qty_per_box']}, кратность: {$prod['multiplicity']}\n";
     if (!empty($prod['analog_group'])) {
         $info .= "  Группа аналогов: {$prod['analog_group']}\n";
     }
@@ -809,37 +1631,62 @@ function productFullInfo($prod, $entity) {
     if ($ad) {
         $daily = $ad['period_days'] > 0 ? round($ad['consumption'] / $ad['period_days'], 1) : 0;
         $daysLeft = $daily > 0 ? round($ad['stock'] / $daily) : '∞';
-        $info .= "  Остаток: {$ad['stock']} шт., расход: {$ad['consumption']} за {$ad['period_days']} дн. ({$daily} шт./день)\n";
+        $info .= "  Остаток: {$ad['stock']} {$uomLabel}, расход: {$ad['consumption']} за {$ad['period_days']} дн. ({$daily} {$uomLabel}/день)\n";
         $info .= "  Запас на: ~{$daysLeft} дней\n";
     } else {
         $info .= "  Остаток/расход: нет данных\n";
     }
 
     // Текущая цена
-    $s = $pdo->prepare("SELECT price, currency FROM product_prices WHERE sku COLLATE utf8mb4_general_ci = ? AND legal_entity COLLATE utf8mb4_general_ci = ? LIMIT 1");
+    $s = $pdo->prepare("SELECT price, currency, vat_rate, unit_type FROM product_prices WHERE sku COLLATE utf8mb4_general_ci = ? AND legal_entity COLLATE utf8mb4_general_ci = ? LIMIT 1");
     $s->execute([$sku, $le]);
     $price = $s->fetch();
     if ($price) {
-        $info .= "  Цена: {$price['price']} {$price['currency']}\n";
+        $vat = $price['vat_rate'] ?? 20;
+        $priceWithVat = round($price['price'] * (1 + $vat / 100), 2);
+        $unitLabels = ['piece'=>'шт','box'=>'кор','thousand'=>'тыс/шт','kg'=>'кг','liter'=>'л'];
+        $unit = $unitLabels[$price['unit_type']] ?? $price['unit_type'];
+        $info .= "  Цена: {$price['price']} {$price['currency']}/{$unit} (без НДС), НДС {$vat}%, с НДС: {$priceWithVat} {$price['currency']}\n";
     }
 
-    // Последние заказы с этим товаром
-    $s = $pdo->prepare("SELECT o.supplier, o.created_at, o.delivery_date, oi.qty_boxes
-            FROM order_items oi
-            JOIN orders o ON o.id = oi.order_id
-            WHERE oi.sku = ? AND o.legal_entity = ?
-            ORDER BY o.created_at DESC LIMIT 5");
+    // Ожидающие поставки с этим товаром
+    $s = $pdo->prepare("SELECT o.id as order_id, o.supplier, o.delivery_date, oi.qty_boxes,
+                               DATEDIFF(o.delivery_date, CURDATE()) as days_until
+                        FROM order_items oi
+                        JOIN orders o ON o.id = oi.order_id
+                        WHERE oi.sku = ? AND o.legal_entity = ? AND o.received_at IS NULL AND o.delivery_date IS NOT NULL
+                        ORDER BY o.delivery_date ASC LIMIT 5");
     $s->execute([$sku, $le]);
-    $orders = $s->fetchAll();
-    if ($orders) {
-        $info .= "  Последние заказы:\n";
-        foreach ($orders as $ord) {
-            $date = date('d.m', strtotime($ord['created_at']));
-            $delivery = $ord['delivery_date'] ? date('d.m', strtotime($ord['delivery_date'])) : '—';
-            $info .= "    {$date}: {$ord['qty_boxes']} кор. ({$ord['supplier']}), приход {$delivery}\n";
+    $pending = $s->fetchAll();
+    if ($pending) {
+        $info .= "  Ожидается поставка:\n";
+        foreach ($pending as $p) {
+            $dd = date('d.m', strtotime($p['delivery_date']));
+            $pcs = $p['qty_boxes'] * max($prod['qty_per_box'], 1);
+            $when = $p['days_until'] > 0 ? "через {$p['days_until']} дн." : ($p['days_until'] == 0 ? 'сегодня' : 'просрочена');
+            $orderUrl = "https://supply-department.online/order?orderId={$p['order_id']}&mode=view";
+            $info .= "    {$dd}: {$p['qty_boxes']} кор. ({$pcs} {$uomLabel}) — {$p['supplier']}, {$when} (<a href=\"{$orderUrl}\">заказ</a>)\n";
         }
-    } else {
-        $info .= "  Заказов не найдено\n";
+    }
+
+    // Последние заказы с этим товаром (пропускаем если не нужна история)
+    if (!$skipHistory) {
+        $s = $pdo->prepare("SELECT o.id as order_id, o.supplier, o.created_at, o.delivery_date, oi.qty_boxes
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE oi.sku = ? AND o.legal_entity = ?
+                ORDER BY o.created_at DESC LIMIT 3");
+        $s->execute([$sku, $le]);
+        $orders = $s->fetchAll();
+        if ($orders) {
+            $info .= "  Последние заказы:\n";
+            foreach ($orders as $ord) {
+                $date = date('d.m', strtotime($ord['created_at']));
+                $delivery = $ord['delivery_date'] ? date('d.m', strtotime($ord['delivery_date'])) : '—';
+                $orderUrl = "https://supply-department.online/order?orderId={$ord['order_id']}&mode=view";
+                $info .= "    {$date}: {$ord['qty_boxes']} кор. ({$ord['supplier']}), приход {$delivery} (<a href=\"{$orderUrl}\">заказ</a>)\n";
+            }
+        }
     }
 
     return $info;
@@ -885,7 +1732,8 @@ function lookupOrders($question, $entity) {
 
     // Определяем кол-во заказов для показа
     $limit = 3;
-    if (preg_match('/последн/u', $q)) $limit = 1;
+    if (preg_match('/последни[еймх]/u', $q)) $limit = 5; // "последние заказы" — несколько
+    elseif (preg_match('/последн[иеяй]/u', $q)) $limit = 1; // "последний заказ" — один
 
     // Загружаем заказы
     $sql = "SELECT o.id, o.supplier, o.created_by, o.created_at, o.delivery_date
@@ -908,13 +1756,17 @@ function lookupOrders($question, $entity) {
         $context .= "\nЗаказ #{$o['id']} — {$o['supplier']}, создан {$date}, приход {$delivery}, автор: {$o['created_by']}\n";
         $context .= "Состав:\n";
 
-        $s2 = $pdo->prepare("SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, oi.consumption_period, oi.stock, oi.transit
-                FROM order_items oi WHERE oi.order_id = ? ORDER BY oi.name");
+        $s2 = $pdo->prepare("SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, oi.consumption_period, oi.stock, oi.transit,
+                COALESCE(p.unit_of_measure, 'шт') as uom
+                FROM order_items oi LEFT JOIN products p ON p.sku = oi.sku
+                WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
         foreach ($items as $it) {
             $pcs = $it['qty_boxes'] * max($it['qty_per_box'], 1);
-            $context .= "  - {$it['sku']} {$it['name']}: {$it['qty_boxes']} кор. ({$pcs} шт.)";
+            $u = $it['uom'] ?? 'шт';
+            $uLabel = getUomLabel($u);
+            $context .= "  - {$it['sku']} {$it['name']}: {$it['qty_boxes']} кор. ({$pcs} {$uLabel})";
             if ($it['stock'] > 0) $context .= ", остаток: {$it['stock']}";
             if ($it['transit'] > 0) $context .= ", транзит: {$it['transit']}";
             $context .= "\n";
@@ -923,6 +1775,35 @@ function lookupOrders($question, $entity) {
     }
 
     return $context;
+}
+
+// ═══ Вспомогательные функции ═══
+
+// Единица измерения → подпись для вывода
+function getUomLabel($uom) {
+    return $uom === 'л' ? 'л' : ($uom === 'кг' ? 'кг' : 'шт.');
+}
+
+// Стемирование русского слова (обрезка окончаний для поиска)
+function stemRu($word) {
+    if (mb_strlen($word) < 3) return $word;
+    // 3-буквенные окончания (прилагательные, существительные)
+    $stem = preg_replace('/(ого|его|ому|ему|ной|ным|ном|ную|ных|ами|ями|ями|ого|ому|ыми|ими|нем|нём|тся|ний|ние|ний|ния|нию|ией|ием|иям|ями|ать|ять|ить|еть|уть|ыть|ять|ось|ась)$/u', '', $word);
+    if ($stem !== $word && mb_strlen($stem) >= 3) return $stem;
+    // 2-буквенные окончания
+    $stem = preg_replace('/(ов|ев|ей|ий|ой|ый|ая|яя|ое|ые|ие|ам|ям|ах|ях|ом|ем|ём|ую|юю|ых|их|ми|ки|ка|ку|ко|ке|ок|ек|ёк|ик|ть|ся|ны|на|но|ну|не|ни)$/u', '', $word);
+    if ($stem !== $word && mb_strlen($stem) >= 3) return $stem;
+    // 1-буквенные окончания
+    $stem = preg_replace('/[аеёиоуыэюя]$/u', '', $word);
+    return mb_strlen($stem) >= 3 ? $stem : $word;
+}
+
+// Проверка: содержит ли текст хотя бы одно из ключевых слов
+function matchesKeywords($text, $keywords) {
+    foreach ($keywords as $kw) {
+        if (mb_strpos($text, $kw) !== false) return true;
+    }
+    return false;
 }
 
 // Распознавание числительных (цифрами и словами)
@@ -970,6 +1851,7 @@ function lookupStockDays($question, $entity) {
     $maxDays = extractNumber($question) ?? 7;
 
     $sql = "SELECT a.sku, p.name, a.stock, a.consumption, a.period_days, p.supplier,
+                   COALESCE(p.unit_of_measure, 'шт') as uom,
                    ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left
             FROM analysis_data a
             LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci
@@ -987,7 +1869,9 @@ function lookupStockDays($question, $entity) {
     foreach ($items as $i) {
         $daily = round($i['consumption'] / max($i['period_days'], 1), 1);
         $name = $i['name'] ? $i['sku'] . ' ' . $i['name'] : $i['sku'];
-        $context .= "- {$name}: остаток {$i['stock']} шт., расход {$daily} шт./день, запас на ~{$i['days_left']} дн.";
+        $u = $i['uom'] ?? 'шт';
+        $uLabel = getUomLabel($u);
+        $context .= "- {$name}: остаток {$i['stock']} {$uLabel}, расход {$daily} {$uLabel}/день, запас на ~{$i['days_left']} дн.";
         if ($i['supplier']) $context .= " ({$i['supplier']})";
         $context .= "\n";
     }
@@ -1006,41 +1890,54 @@ function lookupShelfLife($question, $entity) {
     }
     if (!$isShelfQuestion) return '';
 
+    // Маппинг юрлица → customer в stock_malling
+    $customerFilter = '';
+    $customerParams = [];
+    if ($entity) {
+        // Определяем короткое имя для фильтра customer
+        $customerName = null;
+        if (strpos($entity, 'Бургер') !== false) $customerName = 'Бургер БК';
+        elseif (strpos($entity, 'Воглия') !== false) $customerName = 'Воглия Матта';
+        elseif (strpos($entity, 'Пицца') !== false) $customerName = 'Пицца Стар';
+        if ($customerName) {
+            $customerFilter = ' AND customer = ?';
+            $customerParams = [$customerName];
+        }
+    }
+
     // Извлечь ключевые слова для поиска конкретного товара
-    $stopShelf = ['срок','годн','годности','годност','истек','просроч','хранен','склад','какой','какая','какие','покажи','сколько','осталось'];
+    $stopShelf = ['срок','годн','годности','годност','истек','просроч','хранен','склад','какой','какая','какие','покажи','сколько','осталось',
+                  'бургер','воглия','матта','пицца','стар','юрлиц','юрлица','лицо','лица'];
     $words = preg_split('/[\s,.\-!?:;]+/u', mb_strtolower($question));
     $productTerms = [];
     foreach ($words as $w) {
         $w = trim($w);
         if (mb_strlen($w) >= 3 && !in_array($w, $stopShelf) && !is_numeric($w)) {
-            $stem = $w;
-            if (mb_strlen($w) >= 4) {
-                $stem = preg_replace('/(ов|ев|ей|ий|ой|ый|ая|ое|ые|ие|ам|ям|ах|ях|ом|ем|ём|ую|юю|ых|их|ми|ки|ка|ку|ко|ке)$/u', '', $w);
-                if (mb_strlen($stem) < 3) $stem = $w;
-            }
-            $productTerms[] = $stem;
+            $productTerms[] = stemRu($w);
         }
     }
 
     $context = "\n== СРОКИ ГОДНОСТИ ==\n";
+    if ($entity) $context .= "(юрлицо: {$entity})\n";
     $found = false;
 
     // Поиск по конкретному товару
     if (!empty($productTerms)) {
         foreach ($productTerms as $term) {
-            $sql = "SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
+            $sql = "SELECT product_name, customer, warehouse, expiry_date, quantity, expiry_status, block_reason,
                            DATEDIFF(expiry_date, CURDATE()) as days_left
                     FROM stock_malling
-                    WHERE product_name LIKE ? AND expiry_date >= CURDATE()
+                    WHERE product_name LIKE ? AND expiry_date >= CURDATE()" . $customerFilter . "
                     ORDER BY expiry_date ASC LIMIT 15";
-            $s = $pdo->prepare($sql); $s->execute(["%{$term}%"]);
+            $s = $pdo->prepare($sql); $s->execute(array_merge(["%{$term}%"], $customerParams));
             $items = $s->fetchAll();
             if ($items) {
                 $found = true;
                 foreach ($items as $i) {
                     $date = date('d.m.Y', strtotime($i['expiry_date']));
                     $status = $i['block_reason'] ?: $i['expiry_status'];
-                    $context .= "- {$i['product_name']}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}, статус: {$status}\n";
+                    $custLabel = $i['customer'] ? " [{$i['customer']}]" : '';
+                    $context .= "- {$i['product_name']}{$custLabel}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}, статус: {$status}\n";
                 }
             }
         }
@@ -1050,29 +1947,31 @@ function lookupShelfLife($question, $entity) {
     if (!$found) {
         $daysAhead = extractNumber($question) ?? 14;
 
-        $sql = "SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
+        $sql = "SELECT product_name, customer, warehouse, expiry_date, quantity, expiry_status, block_reason,
                        DATEDIFF(expiry_date, CURDATE()) as days_left
                 FROM stock_malling
-                WHERE expiry_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY) AND expiry_date >= CURDATE()
+                WHERE expiry_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY) AND expiry_date >= CURDATE()" . $customerFilter . "
                 ORDER BY expiry_date ASC LIMIT 20";
-        $s = $pdo->prepare($sql); $s->execute([$daysAhead]);
+        $s = $pdo->prepare($sql); $s->execute(array_merge([$daysAhead], $customerParams));
         $items = $s->fetchAll();
         if ($items) {
             $found = true;
             $context .= "Истекают в ближайшие {$daysAhead} дней:\n";
             foreach ($items as $i) {
                 $date = date('d.m.Y', strtotime($i['expiry_date']));
-                $context .= "- {$i['product_name']}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}\n";
+                $custLabel = $i['customer'] ? " [{$i['customer']}]" : '';
+                $context .= "- {$i['product_name']}{$custLabel}: годен до {$date} ({$i['days_left']} дн.), {$i['quantity']} шт., склад: {$i['warehouse']}\n";
             }
         }
 
         // Заблокированные / просроченные
-        $s2 = $pdo->prepare("SELECT product_name, warehouse, expiry_date, quantity, expiry_status, block_reason,
+        $sql2 = "SELECT product_name, customer, warehouse, expiry_date, quantity, expiry_status, block_reason,
                        DATEDIFF(expiry_date, CURDATE()) as days_left
                 FROM stock_malling
-                WHERE (expiry_status != 'Годен' OR expiry_date < CURDATE() OR block_reason IS NOT NULL)
-                ORDER BY expiry_date ASC LIMIT 15");
-        $s2->execute();
+                WHERE (expiry_status != 'Годен' OR expiry_date < CURDATE() OR block_reason IS NOT NULL)" . $customerFilter . "
+                ORDER BY expiry_date ASC LIMIT 15";
+        $s2 = $pdo->prepare($sql2);
+        $s2->execute($customerParams);
         $blocked = $s2->fetchAll();
         if ($blocked) {
             $found = true;
@@ -1080,7 +1979,8 @@ function lookupShelfLife($question, $entity) {
             foreach ($blocked as $b) {
                 $date = date('d.m.Y', strtotime($b['expiry_date']));
                 $reason = $b['block_reason'] ?: $b['expiry_status'];
-                $context .= "- {$b['product_name']}: {$date}, {$b['quantity']} шт., статус: {$reason}\n";
+                $custLabel = $b['customer'] ? " [{$b['customer']}]" : '';
+                $context .= "- {$b['product_name']}{$custLabel}: {$date}, {$b['quantity']} шт., статус: {$reason}\n";
             }
         }
     }
@@ -1187,13 +2087,600 @@ function lookupSupplier($question, $entity) {
     return $context;
 }
 
+// Поиск по графику доставок / ресторанам
+function lookupSchedule($question, $entity) {
+    global $pdo;
+    $q = mb_strtolower($question);
+
+    $schedKeywords = ['график','доставк','ресторан','рестор','адрес','когда доставк','какой день','расписан'];
+    $isSchedQ = false;
+    foreach ($schedKeywords as $kw) {
+        if (mb_strpos($q, $kw) !== false) { $isSchedQ = true; break; }
+    }
+    if (!$isSchedQ) return '';
+
+    $dayNames = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота'];
+    $context = "\n== ГРАФИК ДОСТАВОК ==\n";
+
+    // Ищем номер ресторана
+    $restNum = null;
+    if (preg_match('/(?:ресторан|рест|#)\s*(\d+)/iu', $question, $m)) {
+        $restNum = intval($m[1]);
+    } elseif (preg_match('/\b(\d{1,3})\b/', $question, $m)) {
+        // Одно-трёхзначное число может быть номером ресторана
+        $num = intval($m[1]);
+        if ($num >= 1 && $num <= 200) $restNum = $num;
+    }
+
+    if ($restNum) {
+        $s = $pdo->prepare("SELECT r.id, r.number, r.address, r.region FROM restaurants r WHERE r.number = ? AND r.active = 1 LIMIT 1");
+        $s->execute([$restNum]);
+        $rest = $s->fetch();
+        if ($rest) {
+            $context .= "Ресторан #{$rest['number']} — {$rest['address']} ({$rest['region']})\n";
+            $s2 = $pdo->prepare("SELECT day_of_week, delivery_time FROM delivery_schedule WHERE restaurant_id = ? AND delivery_time IS NOT NULL ORDER BY day_of_week");
+            $s2->execute([$rest['id']]);
+            $sched = $s2->fetchAll();
+            if ($sched) {
+                $context .= "Доставки:\n";
+                foreach ($sched as $sc) {
+                    $context .= "  {$dayNames[$sc['day_of_week']]}: {$sc['delivery_time']}\n";
+                }
+            } else {
+                $context .= "Доставки не назначены\n";
+            }
+            return $context;
+        }
+    }
+
+    // Ищем по адресу
+    $words = preg_split('/[\s,.\-!?:;]+/u', $q);
+    $addrTerms = [];
+    $stopSched = ['график','доставк','доставки','ресторан','какой','день','когда','расписан','покажи','адрес'];
+    foreach ($words as $w) {
+        if (mb_strlen($w) >= 3 && !in_array($w, $stopSched) && !is_numeric($w)) $addrTerms[] = $w;
+    }
+
+    if (!empty($addrTerms)) {
+        foreach ($addrTerms as $term) {
+            $s = $pdo->prepare("SELECT r.id, r.number, r.address, r.region FROM restaurants r WHERE (r.address LIKE ? OR r.city LIKE ?) AND r.active = 1 LIMIT 5");
+            $s->execute(["%{$term}%", "%{$term}%"]);
+            $rests = $s->fetchAll();
+            foreach ($rests as $rest) {
+                $context .= "\nРесторан #{$rest['number']} — {$rest['address']} ({$rest['region']})\n";
+                $s2 = $pdo->prepare("SELECT day_of_week, delivery_time FROM delivery_schedule WHERE restaurant_id = ? AND delivery_time IS NOT NULL ORDER BY day_of_week");
+                $s2->execute([$rest['id']]);
+                $sched = $s2->fetchAll();
+                if ($sched) {
+                    foreach ($sched as $sc) {
+                        $context .= "  {$dayNames[$sc['day_of_week']]}: {$sc['delivery_time']}\n";
+                    }
+                }
+            }
+            if (!empty($rests)) return $context;
+        }
+    }
+
+    // Общая сводка
+    $s = $pdo->prepare("SELECT ds.day_of_week, COUNT(*) as cnt FROM delivery_schedule ds JOIN restaurants r ON r.id = ds.restaurant_id AND r.active = 1 WHERE ds.delivery_time IS NOT NULL GROUP BY ds.day_of_week ORDER BY ds.day_of_week");
+    $s->execute();
+    $summary = $s->fetchAll();
+    if ($summary) {
+        $context .= "Доставки по дням недели:\n";
+        foreach ($summary as $row) {
+            $context .= "  {$dayNames[$row['day_of_week']]}: {$row['cnt']} ресторанов\n";
+        }
+    }
+    return $context;
+}
+
+// Поиск по ожидающим поставкам
+function lookupDeliveries($question, $entity) {
+    global $pdo;
+    $q = mb_strtolower($question);
+
+    $delivKeywords = ['поставк','ожида','приход','приёмк','приемк','привез','в пути','просроч','задерж',
+        'когда приед','когда будет','когда приве','заказан','доставк','ожидаем','едет','везут'];
+    $isDelivQ = false;
+    foreach ($delivKeywords as $kw) {
+        if (mb_strpos($q, $kw) !== false) { $isDelivQ = true; break; }
+    }
+    if (!$isDelivQ) return '';
+
+    // Извлекаем поисковые слова для товара (убираем стоп-слова)
+    $stopWords = ['когда','приедет','приедут','привезут','будет','будут','поставка','поставки','ожидает',
+        'ожидается','приход','сколько','какой','какая','какие','заказ','заказано','нужно','есть',
+        'пришло','привезли','уже','ещё','еще','скоро','ожидаем','завтра','послезавтра','сегодня',
+        'понедельник','вторник','среда','четверг','пятница','суббота','воскресенье'];
+    $words = preg_split('/[\s,.\-!?:;]+/u', $q);
+    $searchTerms = [];
+    foreach ($words as $w) {
+        $w = trim($w);
+        if (mb_strlen($w) >= 3 && !in_array($w, $stopWords) && !is_numeric($w)) {
+            $searchTerms[] = stemRu($w);
+        }
+    }
+
+    // Парсим дату из вопроса (завтра, послезавтра, день недели)
+    $filterDate = null;
+    if (mb_strpos($q, 'сегодня') !== false) {
+        $filterDate = date('Y-m-d');
+    } elseif (mb_strpos($q, 'послезавтра') !== false) {
+        $filterDate = date('Y-m-d', strtotime('+2 days'));
+    } elseif (mb_strpos($q, 'завтра') !== false) {
+        $filterDate = date('Y-m-d', strtotime('+1 day'));
+    } else {
+        $dayMap = ['понедельник'=>1,'вторник'=>2,'среду'=>3,'среда'=>3,'четверг'=>4,'пятницу'=>5,'пятница'=>5,'субботу'=>6,'суббота'=>6,'воскресенье'=>7];
+        foreach ($dayMap as $dayName => $dayNum) {
+            if (mb_strpos($q, $dayName) !== false) {
+                $today = date('N'); // 1=пн, 7=вс
+                $diff = $dayNum - $today;
+                if ($diff <= 0) $diff += 7;
+                $filterDate = date('Y-m-d', strtotime("+{$diff} days"));
+                break;
+            }
+        }
+    }
+
+    // Загружаем ожидающие заказы
+    $sql = "SELECT o.id, o.supplier, o.delivery_date, o.created_at, o.created_by,
+                   DATEDIFF(CURDATE(), o.delivery_date) as days_overdue
+            FROM orders o WHERE o.received_at IS NULL AND o.delivery_date IS NOT NULL";
+    $params = [];
+    if ($entity) { $sql .= " AND o.legal_entity = ?"; $params[] = $entity; }
+    if ($filterDate) { $sql .= " AND o.delivery_date = ?"; $params[] = $filterDate; }
+    $sql .= " ORDER BY o.delivery_date ASC LIMIT 20";
+    $s = $pdo->prepare($sql); $s->execute($params);
+    $orders = $s->fetchAll();
+
+    if (!$orders) return "\n== ПОСТАВКИ ==\nОжидающих поставок нет.\n";
+
+    // Если есть поисковые слова — ищем конкретный товар в позициях заказов
+    $hasProductSearch = !empty($searchTerms);
+    $orderIds = array_column($orders, 'id');
+
+    if ($hasProductSearch && $orderIds) {
+        // Загружаем позиции всех ожидающих заказов
+        $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+        $s2 = $pdo->prepare("SELECT oi.order_id, oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box,
+                                    COALESCE(p.unit_of_measure, 'шт') as uom
+                             FROM order_items oi LEFT JOIN products p ON p.sku = oi.sku
+                             WHERE oi.order_id IN ({$placeholders})");
+        $s2->execute($orderIds);
+        $allItems = $s2->fetchAll();
+
+        // Ищем совпадения по товару — товар должен содержать ВСЕ поисковые слова
+        $matchedItems = [];
+        foreach ($allItems as $item) {
+            $haystack = mb_strtolower(($item['sku'] ?? '') . ' ' . ($item['name'] ?? ''));
+            $matchedAll = true;
+            foreach ($searchTerms as $term) {
+                if (mb_strpos($haystack, $term) === false) { $matchedAll = false; break; }
+            }
+            if ($matchedAll) {
+                $matchedItems[] = $item;
+            }
+        }
+        // Если по всем словам ничего — ищем хотя бы по одному
+        if (empty($matchedItems)) {
+            foreach ($allItems as $item) {
+                $haystack = mb_strtolower(($item['sku'] ?? '') . ' ' . ($item['name'] ?? ''));
+                foreach ($searchTerms as $term) {
+                    if (mb_strpos($haystack, $term) !== false) { $matchedItems[] = $item; break; }
+                }
+            }
+        }
+
+        if ($matchedItems) {
+            // Группируем по заказу
+            $byOrder = [];
+            foreach ($matchedItems as $mi) {
+                $byOrder[$mi['order_id']][] = $mi;
+            }
+
+            $context = "\n== ОЖИДАЮЩИЕ ПОСТАВКИ (найденные товары) ==\n";
+            foreach ($orders as $o) {
+                if (!isset($byOrder[$o['id']])) continue;
+                $delivery = date('d.m.Y', strtotime($o['delivery_date']));
+                $overdue = $o['days_overdue'];
+                $status = $overdue > 0 ? "просрочена на {$overdue} дн." : ($overdue == 0 ? 'сегодня' : 'через ' . abs($overdue) . ' дн.');
+                $orderUrl = "https://supply-department.online/order?orderId={$o['id']}&mode=view";
+                $context .= "\n{$o['supplier']} — приход {$delivery} ({$status}) (<a href=\"{$orderUrl}\">открыть</a>)\n";
+                foreach ($byOrder[$o['id']] as $item) {
+                    $u = $item['uom'] ?? 'шт';
+                    $itemUom = getUomLabel($u);
+                    $pcs = $item['qty_per_box'] ? $item['qty_boxes'] * $item['qty_per_box'] : '';
+                    $pcsInfo = $pcs ? " ({$pcs} {$itemUom})" : '';
+                    $context .= "  • {$item['sku']} {$item['name']}: {$item['qty_boxes']} кор.{$pcsInfo}\n";
+                }
+            }
+            return $context;
+        } else {
+            // Искали конкретный товар, но не нашли ни в одном заказе
+            $searchStr = implode(' ', $searchTerms);
+            return "\n== ОЖИДАЮЩИЕ ПОСТАВКИ ==\nТовар «{$searchStr}» НЕ НАЙДЕН ни в одном ожидающем заказе. Всего ожидается " . count($orders) . " поставок.\n";
+        }
+    }
+
+    // Общий список поставок (без фильтра по товару) — одним запросом
+    $orderIds = array_column($orders, 'id');
+    $boxesByOrder = [];
+    if ($orderIds) {
+        $ph = implode(',', array_fill(0, count($orderIds), '?'));
+        $s3 = $pdo->prepare("SELECT order_id, SUM(qty_boxes) as boxes, COUNT(*) as items FROM order_items WHERE order_id IN ({$ph}) GROUP BY order_id");
+        $s3->execute($orderIds);
+        foreach ($s3->fetchAll() as $r) $boxesByOrder[$r['order_id']] = $r;
+    }
+
+    $context = "\n== ОЖИДАЮЩИЕ ПОСТАВКИ ==\n";
+    foreach ($orders as $o) {
+        $delivery = date('d.m.Y', strtotime($o['delivery_date']));
+        $overdue = $o['days_overdue'];
+        $status = $overdue > 0 ? "просрочена на {$overdue} дн." : ($overdue == 0 ? 'сегодня' : 'через ' . abs($overdue) . ' дн.');
+        $info = $boxesByOrder[$o['id']] ?? ['boxes' => 0, 'items' => 0];
+        $orderUrl = "https://supply-department.online/order?orderId={$o['id']}&mode=view";
+        $context .= "- {$o['supplier']}: приход {$delivery} ({$status}), {$info['boxes']} кор., {$info['items']} поз. (<a href=\"{$orderUrl}\">открыть</a>)\n";
+    }
+    return $context;
+}
+
+// Поиск по планам
+function lookupPlans($question, $entity) {
+    global $pdo;
+    $q = mb_strtolower($question);
+
+    $planKeywords = ['план','планир','период','частот','как часто','интервал','когда заказ'];
+    $isPlanQ = false;
+    foreach ($planKeywords as $kw) {
+        if (mb_strpos($q, $kw) !== false) { $isPlanQ = true; break; }
+    }
+    if (!$isPlanQ) return '';
+
+    $sql = "SELECT supplier, period_type, period_count, note, created_by, updated_at
+            FROM plans WHERE 1=1";
+    $params = [];
+    if ($entity) { $sql .= " AND legal_entity = ?"; $params[] = $entity; }
+    $sql .= " ORDER BY updated_at DESC LIMIT 10";
+    $s = $pdo->prepare($sql); $s->execute($params);
+    $plans = $s->fetchAll();
+
+    if (!$plans) return "\n== ПЛАНЫ ==\nПланов поставок нет.\n";
+
+    $periodLabels = ['weeks' => 'нед.', 'months' => 'мес.'];
+    $context = "\n== ПЛАНЫ ПОСТАВОК ==\n";
+    foreach ($plans as $p) {
+        $period = ($p['period_count'] ?? 3) . ' ' . ($periodLabels[$p['period_type']] ?? $p['period_type']);
+        $context .= "- {$p['supplier']}: каждые {$period}";
+        if ($p['note']) $context .= " ({$p['note']})";
+        $context .= "\n";
+    }
+    return $context;
+}
+
+// Поиск цен с НДС
+function lookupPrices($question, $entity) {
+    global $pdo;
+    $q = mb_strtolower($question);
+
+    $priceKeywords = ['цен','стоимост','прайс','сколько стоит','ндс','налог','vat'];
+    $isPriceQ = false;
+    foreach ($priceKeywords as $kw) {
+        if (mb_strpos($q, $kw) !== false) { $isPriceQ = true; break; }
+    }
+    if (!$isPriceQ) return '';
+
+    // Ищем товар в вопросе
+    $skus = [];
+    if (preg_match_all('/\b(\d{4,})\b/', $question, $m)) $skus = $m[1];
+
+    $searchTerms = [];
+    if (preg_match_all('/[«""]([^»""]+)[»""]/', $question, $m)) $searchTerms = $m[1];
+
+    if (empty($skus) && empty($searchTerms)) {
+        $stopPrice = ['цен','цена','цены','стоимост','прайс','сколько','стоит','ндс','налог','покажи','какая','какой','какие'];
+        $words = preg_split('/[\s,.\-!?:;]+/u', mb_strtolower($question));
+        foreach ($words as $w) {
+            $w = trim($w);
+            if (mb_strlen($w) >= 3 && !in_array($w, $stopPrice) && !is_numeric($w)) {
+                $searchTerms[] = stemRu($w);
+            }
+        }
+    }
+
+    if (empty($skus) && empty($searchTerms)) return '';
+
+    $context = "\n== ЦЕНЫ ==\n";
+    $found = false;
+    $eFilter = $entity ? " AND pp.legal_entity = ?" : "";
+    $eParams = $entity ? [$entity] : [];
+
+    foreach ($skus as $sku) {
+        $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
+                FROM product_prices pp
+                LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = pp.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = pp.legal_entity COLLATE utf8mb4_general_ci
+                WHERE pp.sku = ?" . $eFilter . " LIMIT 5";
+        $s = $pdo->prepare($sql); $s->execute(array_merge([$sku], $eParams));
+        foreach ($s->fetchAll() as $row) {
+            $found = true;
+            $vat = $row['vat_rate'] ?? 20;
+            $priceWithVat = round($row['price'] * (1 + $vat / 100), 2);
+            $unitLabels = ['piece'=>'шт','box'=>'кор','thousand'=>'тыс/шт','kg'=>'кг','liter'=>'л'];
+            $unit = $unitLabels[$row['unit_type']] ?? $row['unit_type'];
+            $context .= "- {$row['sku']} {$row['name']}: {$row['price']} {$row['currency']}/{$unit} (без НДС), НДС {$vat}%, с НДС: {$priceWithVat} {$row['currency']} — {$row['supplier']}\n";
+        }
+    }
+
+    foreach ($searchTerms as $term) {
+        $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
+                FROM product_prices pp
+                LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = pp.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = pp.legal_entity COLLATE utf8mb4_general_ci
+                WHERE p.name LIKE ?" . $eFilter . " LIMIT 10";
+        $s = $pdo->prepare($sql); $s->execute(array_merge(["%{$term}%"], $eParams));
+        foreach ($s->fetchAll() as $row) {
+            $found = true;
+            $vat = $row['vat_rate'] ?? 20;
+            $priceWithVat = round($row['price'] * (1 + $vat / 100), 2);
+            $unitLabels = ['piece'=>'шт','box'=>'кор','thousand'=>'тыс/шт','kg'=>'кг','liter'=>'л'];
+            $unit = $unitLabels[$row['unit_type']] ?? $row['unit_type'];
+            $context .= "- {$row['sku']} {$row['name']}: {$row['price']} {$row['currency']}/{$unit} (без НДС), НДС {$vat}%, с НДС: {$priceWithVat} {$row['currency']} — {$row['supplier']}\n";
+        }
+    }
+
+    return $found ? $context : '';
+}
+
+// Поиск по карточкам товаров (как страница «Поиск карточек»)
+function lookupCards($question, $entity) {
+    global $pdo;
+    $q = mb_strtolower($question);
+
+    // Определяем — спрашивают ли про карточку
+    $cardKeywords = ['карточ','артикул','найди товар','найди карточ','поиск товар','что за товар',
+        'какой товар','что это за','номер товар','код товар','аналог','замен','чем замени'];
+    $isCardQ = matchesKeywords($q, $cardKeywords);
+
+    // Также ищем если в вопросе есть артикул (5+ цифр)
+    $hasArticle = preg_match('/\b\d{5,}(?:-\d+)?\b/', $question);
+
+    if (!$isCardQ && !$hasArticle) return '';
+
+    // Нормализация (как на фронтенде)
+    $normalize = function($s) {
+        $s = mb_strtolower($s);
+        $s = str_replace('ё', 'е', $s);
+        return preg_replace('/[^а-яa-z0-9]/u', '', $s);
+    };
+
+    // Извлекаем поисковые слова
+    $stopWords = ['карточка','карточки','карточку','артикул','артикула','найди','покажи','какой','какая',
+        'товар','товара','товары','что','это','номер','код','поиск','где','как',
+        'аналог','аналоги','аналога','аналогов','замена','замены','замену','заменить','чем','заменили'];
+    $searchTerms = [];
+    // Сначала артикулы
+    if (preg_match_all('/\b(\d{5,}(?:-\d+)?)\b/', $question, $m)) {
+        $searchTerms = $m[1];
+    }
+    // Потом текстовые слова
+    $words = preg_split('/[\s,.\-!?:;]+/u', $q);
+    $textTerms = [];
+    foreach ($words as $w) {
+        $w = trim($w);
+        if (mb_strlen($w) >= 3 && !in_array($w, $stopWords) && !is_numeric($w)) {
+            $textTerms[] = stemRu($w);
+        }
+    }
+
+    if (empty($searchTerms) && empty($textTerms)) return '';
+
+    // Загружаем карточки
+    $s = $pdo->prepare("SELECT id, name, analogs FROM cards ORDER BY name");
+    $s->execute();
+    $allCards = $s->fetchAll();
+    if (!$allCards) return '';
+
+    $results = [];
+
+    // Поиск по артикулу
+    foreach ($searchTerms as $article) {
+        foreach ($allCards as $c) {
+            if ($c['id'] === $article) {
+                $results[$c['id']] = ['card' => $c, 'reason' => 'найдено по артикулу'];
+                break;
+            }
+            // Проверяем аналоги
+            $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+            if (!is_array($analogs)) $analogs = array_filter(array_map('trim', explode(',', $c['analogs'])));
+            if (in_array($article, $analogs)) {
+                $results[$c['id']] = ['card' => $c, 'reason' => "найдено по аналогу (арт. {$article})"];
+            }
+        }
+    }
+
+    // Текстовый поиск по названию
+    if (empty($results) && !empty($textTerms)) {
+        $searchQuery = implode(' ', $textTerms);
+        $normQuery = $normalize($searchQuery);
+
+        foreach ($allCards as $c) {
+            $normId = $normalize($c['id']);
+            $normName = $normalize($c['name']);
+            $normFull = $normId . $normName;
+
+            $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+            if (!is_array($analogs)) $analogs = array_filter(array_map('trim', explode(',', $c['analogs'])));
+
+            // Точное совпадение артикула
+            if ($normId === $normQuery) {
+                $results[$c['id']] = ['card' => $c, 'reason' => 'точное совпадение'];
+                continue;
+            }
+            // Совпадение по артикулу + названию
+            if (mb_strpos($normFull, $normQuery) !== false) {
+                $results[$c['id']] = ['card' => $c, 'reason' => 'найдено по названию'];
+                continue;
+            }
+            // Частичное совпадение артикула
+            if (mb_strpos($normId, $normQuery) !== false) {
+                $results[$c['id']] = ['card' => $c, 'reason' => 'часть артикула'];
+                continue;
+            }
+            // Совпадение по аналогу
+            foreach ($analogs as $a) {
+                if (mb_strpos($normalize($a), $normQuery) !== false) {
+                    $results[$c['id']] = ['card' => $c, 'reason' => 'найдено по аналогу'];
+                    break;
+                }
+            }
+            // Частичное совпадение названия
+            if (mb_strpos($normName, $normQuery) !== false) {
+                $results[$c['id']] = ['card' => $c, 'reason' => 'найдено по названию'];
+            }
+
+            if (count($results) >= 10) break; // Ограничиваем результаты
+        }
+    }
+
+    if (empty($results)) return '';
+
+    $context = "\n== КАРТОЧКИ ТОВАРОВ ==\n";
+    foreach ($results as $r) {
+        $c = $r['card'];
+        $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+        if (!is_array($analogs)) $analogs = array_filter(array_map('trim', explode(',', $c['analogs'])));
+        $analogStr = !empty($analogs) ? ' | аналоги: ' . implode(', ', array_slice($analogs, 0, 5)) : '';
+        $context .= "- {$c['id']} {$c['name']}{$analogStr} ({$r['reason']})\n";
+    }
+
+    return $context;
+}
+
+// ═══ Быстрые ответы на простые фразы ═══
+
+function getQuickReply($text, $user) {
+    $t = mb_strtolower(trim($text));
+    $name = explode(' ', $user['name'])[1] ?? $user['name']; // Имя (без фамилии)
+
+    // Приветствия
+    if (preg_match('/^(привет|здравствуй|добр(ый|ое|ая)|хай|хей|hello|hi|йо|салам|хелло)\b/u', $t)) {
+        $hour = (int)(new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H');
+        $greeting = $hour < 12 ? 'Доброе утро' : ($hour < 18 ? 'Добрый день' : 'Добрый вечер');
+        return "{$greeting}, <b>{$name}</b>! Чем могу помочь?\n\nЗадайте вопрос или выберите раздел в меню.";
+    }
+
+    // Благодарности
+    if (preg_match('/^(спасибо|благодар|спс|thx|thanks|мерси)\b/u', $t)) {
+        return "Пожалуйста! Если ещё что-то нужно — спрашивайте.";
+    }
+
+    // Прощания
+    if (preg_match('/^(пока|до свидания|до встречи|бай|bye|удачи|всего доброго)\b/u', $t)) {
+        return "До связи, <b>{$name}</b>! Хорошего дня.";
+    }
+
+    // Как дела
+    if (preg_match('/^как (дела|жизнь|поживаешь|сам)/u', $t)) {
+        return "Всё работает! Готов помочь с данными. Задайте вопрос или откройте меню.";
+    }
+
+    return null;
+}
+
+// ═══ Память разговора (последний контекст) ═══
+
+function saveLastContext($userName, $question, $entity) {
+    global $pdo;
+    try {
+        $pdo->prepare("UPDATE telegram_settings SET last_question = ?, last_entity = ?, last_question_at = NOW() WHERE user_name = ?")
+            ->execute([mb_substr($question, 0, 500), $entity, $userName]);
+    } catch (Exception $e) { /* колонка может не существовать */ }
+}
+
+function getLastContext($userName) {
+    global $pdo;
+    try {
+        $s = $pdo->prepare("SELECT last_question, last_entity, last_question_at FROM telegram_settings WHERE user_name = ?");
+        $s->execute([$userName]);
+        $row = $s->fetch();
+        if (!$row || !$row['last_question']) return null;
+        // Контекст актуален 10 минут
+        $age = time() - strtotime($row['last_question_at']);
+        if ($age > 600) return null;
+        return $row;
+    } catch (Exception $e) { return null; }
+}
+
+function isFollowUp($text) {
+    $t = mb_strtolower(trim($text));
+    // Короткие уточняющие фразы
+    return preg_match('/^(а (по|для|у|в|на|что|как)|а если|ещё|еще|и (по|для|ещё|еще)|то же|тоже самое|аналогично|по (бк|вм|пс|бургер|воглия|пицца)|для (бк|вм|пс|бургер|воглия|пицца))/u', $t)
+        && mb_strlen($t) < 100;
+}
+
+function selectRelevantLookups($q) {
+    // Всегда запускаем поиск товара и карточек — они релевантны почти для любого вопроса
+    $lookups = ['lookupProduct', 'lookupCards'];
+
+    // Заказы
+    if (preg_match('/заказ|состав|позиц|что заказ|заказыв|отправ/u', $q)) {
+        $lookups[] = 'lookupOrders';
+    }
+    // Остатки по дням
+    if (preg_match('/остат|запас|дней|заканч|кончает|мало|критич|нулев|ноль/u', $q)) {
+        $lookups[] = 'lookupStockDays';
+    }
+    // Сроки годности
+    if (preg_match('/срок|годн|истек|просроч|маллинг|блокир|хранен|expir/u', $q)) {
+        $lookups[] = 'lookupShelfLife';
+    }
+    // Поставщики
+    if (preg_match('/поставщик|контакт|телефон|email|whatsapp|telegram|менедж|dlt|срок доставк/u', $q)) {
+        $lookups[] = 'lookupSupplier';
+    }
+    // График доставок
+    if (preg_match('/график|расписан|ресторан|доставк.*рестор|рестор.*доставк|какой день/u', $q)) {
+        $lookups[] = 'lookupSchedule';
+    }
+    // Поставки (ожидаемые)
+    if (preg_match('/поставк|приед|привез|когда.*прие|ожидае|приход|доставк|привоз/u', $q)) {
+        $lookups[] = 'lookupDeliveries';
+    }
+    // Планы
+    if (preg_match('/план|периодич|частот|как часто|график заказ/u', $q)) {
+        $lookups[] = 'lookupPlans';
+    }
+    // Цены
+    if (preg_match('/цен|стоим|прайс|ндс|сколько стоит|почём|по чём/u', $q)) {
+        $lookups[] = 'lookupPrices';
+    }
+
+    // Если не нашли специфических тем — запускаем все (общий вопрос)
+    if (count($lookups) <= 2) {
+        $lookups = ['lookupProduct', 'lookupCards', 'lookupOrders', 'lookupStockDays',
+                     'lookupShelfLife', 'lookupSupplier', 'lookupSchedule',
+                     'lookupDeliveries', 'lookupPlans', 'lookupPrices'];
+    }
+
+    return array_unique($lookups);
+}
+
 function handleFreeText($chatId, $text, $user) {
-    global $GEMINI_API_KEY, $GROQ_API_KEY;
+    global $GEMINI_API_KEY, $GROQ_API_KEY, $DEEPSEEK_API_KEY, $OPENROUTER_API_KEY;
 
     // Без ключа — подсказка по командам
-    if (!$GEMINI_API_KEY && !$GROQ_API_KEY) {
+    if (!$GEMINI_API_KEY && !$GROQ_API_KEY && !$DEEPSEEK_API_KEY && !$OPENROUTER_API_KEY) {
         sendMessage($chatId, "Доступные команды:\n/orders — заказы за 7 дней\n/stock — низкие остатки\n/consumption — топ расхода\n/prices — изменения цен\n/psc — протоколы\n/settings — настройки уведомлений");
         return;
+    }
+
+    // Проверяем, не follow-up ли это (уточняющий вопрос к предыдущему)
+    $effectiveText = $text;
+    if (isFollowUp($text)) {
+        $lastCtx = getLastContext($user['name']);
+        if ($lastCtx && $lastCtx['last_question']) {
+            // Объединяем: берём предмет из прошлого вопроса + уточнение из текущего
+            $effectiveText = $lastCtx['last_question'] . ' ' . $text;
+            error_log("Bot: follow-up detected. Combined: {$effectiveText}");
+        }
     }
 
     // Отправляем «думает...» сообщение
@@ -1204,15 +2691,34 @@ function handleFreeText($chatId, $text, $user) {
     $context = gatherContext($user);
 
     // Поиск данных по вопросу (каждый блок в try-catch чтобы одна ошибка не сломала весь ответ)
-    $lookups = ['lookupProduct', 'lookupOrders', 'lookupStockDays', 'lookupShelfLife', 'lookupSupplier'];
+    $lookupContext = '';
+    // Определяем какие lookup-ы нужны по ключевым словам в вопросе
+    $q = mb_strtolower($effectiveText);
+    $lookups = selectRelevantLookups($q);
     foreach ($lookups as $fn) {
         try {
-            $result = $fn($text, $entity);
-            if ($result) $context .= $result;
+            $result = $fn($effectiveText, $entity);
+            if ($result) $lookupContext .= $result;
         } catch (Exception $e) {
             error_log("Bot {$fn} error: " . $e->getMessage());
         }
     }
+
+    // Сохраняем контекст для возможных follow-up вопросов
+    saveLastContext($user['name'], $effectiveText, $entity);
+
+    // Ограничиваем размер контекста чтобы ИИ не путался
+    // Если lookup данных много — урезаем общий контекст (gatherContext), оставляя точечные данные
+    $totalLen = mb_strlen($context) + mb_strlen($lookupContext);
+    if ($totalLen > 12000) {
+        // Lookup-данные приоритетнее — обрезаем общий контекст
+        $maxGeneral = max(2000, 12000 - mb_strlen($lookupContext));
+        $context = mb_substr($context, 0, $maxGeneral) . "\n…(сокращено)\n";
+    }
+    if (mb_strlen($lookupContext) > 10000) {
+        $lookupContext = mb_substr($lookupContext, 0, 9500) . "\n…(данных больше, показаны основные)\n";
+    }
+    $context .= $lookupContext;
 
     // Обновляем статус — теперь думает ИИ
     if ($thinkMsg) {
@@ -1221,26 +2727,122 @@ function handleFreeText($chatId, $text, $user) {
     sendTyping($chatId);
 
     $answer = null;
+    $aiStart = microtime(true);
     try {
-        $answer = askAI($text, $context);
+        $answer = askAI($effectiveText, $context);
     } catch (Exception $e) {
         error_log("Bot askAI error: " . $e->getMessage());
     }
+    $aiTime = round(microtime(true) - $aiStart, 1);
+    error_log("Bot: AI response in {$aiTime}s, context=" . strlen($context) . " bytes, answer=" . ($answer ? strlen($answer) . ' bytes' : 'null'));
 
     // Удаляем сообщение-статус
     if ($thinkMsg) {
         deleteMessage($chatId, $thinkMsg);
     }
 
+    $menuMarkup = ['inline_keyboard' => [[['text' => '📖 Меню', 'callback_data' => 'cmd_menu']]]];
     if ($answer) {
-        sendMessage($chatId, $answer);
+        // Telegram ограничивает 4096 символов
+        if (mb_strlen($answer) > 4000) {
+            $answer = mb_substr($answer, 0, 3990) . "\n\n…";
+        }
+        sendMessage($chatId, $answer, $menuMarkup);
     } else {
-        error_log("Bot: askAI returned null. GROQ_KEY len=" . strlen($GLOBALS['GROQ_API_KEY'] ?? '') . " context len=" . strlen($context));
-        sendMessage($chatId, "Не удалось получить ответ. Попробуйте позже или используйте команды:\n/orders /stock /consumption /prices /psc");
+        // Если ИИ недоступен — попробуем дать прямой ответ из собранных данных
+        $directAnswer = buildDirectAnswer($lookupContext);
+        if ($directAnswer) {
+            sendMessage($chatId, $directAnswer, $menuMarkup);
+        } else {
+            error_log("Bot: askAI returned null. GROQ_KEY len=" . strlen($GLOBALS['GROQ_API_KEY'] ?? '') . " context len=" . strlen($context));
+            // Формируем подсказку
+            $hint = "Не удалось обработать запрос.\n\nПопробуйте уточнить вопрос:\n";
+            $hint .= "• Укажите <b>артикул</b> или <b>полное название</b> товара\n";
+            $hint .= "• Добавьте контекст: «остаток», «цена», «когда приедет», «аналоги»\n";
+            $hint .= "• Или используйте кнопки меню ниже";
+            sendMessage($chatId, $hint, ['inline_keyboard' => [
+                [['text' => '🔍 Поиск карточек', 'callback_data' => 'cmd_cards']],
+                [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']],
+            ]]);
+        }
     }
 }
 
+// Прямой ответ из данных, когда ИИ недоступен
+function buildDirectAnswer($context) {
+    // Извлекаем секции с полезными данными (== НАЗВАНИЕ ==)
+    $sections = [];
+    if (preg_match_all('/\n== (.+?) ==\n([\s\S]*?)(?=\n== |\z)/', $context, $matches, PREG_SET_ORDER)) {
+        foreach ($matches as $m) {
+            $title = trim($m[1]);
+            $body = trim($m[2]);
+            if ($body) {
+                $sections[] = ['title' => $title, 'body' => $body];
+            }
+        }
+    }
+
+    if (empty($sections)) return null;
+
+    // Форматируем для Telegram
+    $text = "📋 <i>Данные из системы:</i>\n\n";
+    foreach ($sections as $s) {
+        $text .= "<b>{$s['title']}</b>\n";
+        $body = $s['body'];
+        // Убираем лишние отступы
+        $body = preg_replace('/^    /m', '  ', $body);
+        $body = preg_replace('/^  • /m', '• ', $body);
+        $body = preg_replace('/^  - /m', '• ', $body);
+        $body = preg_replace('/^- /m', '• ', $body);
+        $text .= $body . "\n\n";
+    }
+
+    $text = trim($text);
+
+    // Telegram ограничивает 4096 символов
+    if (mb_strlen($text) > 4000) {
+        $text = mb_substr($text, 0, 3990) . "\n\n…<i>обрезано</i>";
+    }
+
+    return $text;
+}
+
 // ═══ Settings UI ═══
+
+function getMenuButtons($user) {
+    $entity = $user ? getUserEntity($user) : null;
+    $buttons = [
+        [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
+        [['text' => '📊 Анализ', 'callback_data' => 'cmd_analysis'], ['text' => '📊 Расход', 'callback_data' => 'cmd_consumption']],
+        [['text' => '💰 Цены', 'callback_data' => 'cmd_prices'], ['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc']],
+        [['text' => '🚚 Поставки', 'callback_data' => 'cmd_deliveries'], ['text' => '📅 Планы', 'callback_data' => 'cmd_plans']],
+        [['text' => '🗓 График доставок', 'callback_data' => 'cmd_schedule'], ['text' => '🔍 Карточки', 'callback_data' => 'cmd_cards']],
+    ];
+    if ($user && count($user['legal_entities']) > 1) {
+        $short = $entity ? getEntityShort($entity) : '?';
+        $buttons[] = [['text' => "🏢 Юрлицо ({$short})", 'callback_data' => 'cmd_entity'], ['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
+    } else {
+        $buttons[] = [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
+    }
+    return $buttons;
+}
+
+function getMenuText($user) {
+    $entity = $user ? getUserEntity($user) : null;
+    $short = $entity ? getEntityShort($entity) : '';
+    $today = date('d.m.Y');
+    $dayNames = [1=>'понедельник',2=>'вторник',3=>'среда',4=>'четверг',5=>'пятница',6=>'суббота',7=>'воскресенье'];
+    $dayName = $dayNames[(int)date('N')] ?? '';
+
+    $lines = ["📖 <b>Supply Department</b>"];
+    $lines[] = "━━━━━━━━━━━━━━━━━";
+    if ($entity) $lines[] = "🏢 {$short}  ·  📅 {$today}, {$dayName}";
+    else $lines[] = "📅 {$today}, {$dayName}";
+    $lines[] = "";
+    $lines[] = "Выберите раздел или задайте вопрос:";
+
+    return implode("\n", $lines);
+}
 
 function showSettings($chatId, $msgId, $userName) {
     global $pdo;
@@ -1263,6 +2865,7 @@ function showSettings($chatId, $msgId, $userName) {
         $on = $settings[$key] ? '✅' : '❌';
         $buttons[] = [['text' => "$on $label", 'callback_data' => "toggle_$key"]];
     }
+    $buttons[] = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
 
     $markup = ['inline_keyboard' => $buttons];
 
@@ -1281,27 +2884,35 @@ if (isset($input['callback_query'])) {
     $msgId = $cb['message']['message_id'];
     $data = $cb['data'] ?? '';
 
-    // Кнопки меню
+    // Кнопки меню — всё редактируем в том же сообщении
     if (str_starts_with($data, 'cmd_')) {
         $cmd = substr($data, 4);
         $user = getUser($chatId);
         if (!$user) {
-            answerCallback($cb['id'], 'Сначала привяжите аккаунт');
+            answerCallback($cb['id'], 'Нажмите /start для привязки аккаунта');
             exit;
         }
         answerCallback($cb['id']);
         switch ($cmd) {
-            case 'orders': cmdOrders($chatId, $user); break;
-            case 'stock': cmdStock($chatId, $user); break;
-            case 'consumption': cmdConsumption($chatId, $user); break;
-            case 'prices': cmdPrices($chatId, $user); break;
-            case 'psc': cmdPsc($chatId, $user); break;
-            case 'analysis': cmdAnalysis($chatId, $user); break;
+            case 'menu':
+                setUserMode($user['name'], null);
+                editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
+                break;
+            case 'orders': cmdOrders($chatId, $user, $msgId); break;
+            case 'stock': cmdStock($chatId, $user, $msgId); break;
+            case 'consumption': cmdConsumption($chatId, $user, $msgId); break;
+            case 'prices': cmdPrices($chatId, $user, $msgId); break;
+            case 'psc': cmdPsc($chatId, $user, $msgId); break;
+            case 'analysis': cmdAnalysis($chatId, $user, null, 0, $msgId); break;
+            case 'plans': cmdPlans($chatId, $user, $msgId); break;
+            case 'deliveries': cmdDeliveries($chatId, $user, $msgId); break;
+            case 'schedule': cmdSchedule($chatId, $user, $msgId); break;
             case 'entity':
                 $entities = $user['legal_entities'];
                 if (count($entities) <= 1) {
                     $current = getUserEntity($user);
-                    sendMessage($chatId, "🏢 Вам доступно одно юрлицо: <b>{$current}</b>");
+                    $btns = [[['text' => '📖 Меню', 'callback_data' => 'cmd_menu']]];
+                    editMessage($chatId, $msgId, "🏢 Вам доступно одно юрлицо: <b>{$current}</b>", ['inline_keyboard' => $btns]);
                 } else {
                     $current = getUserEntity($user);
                     $btns = [];
@@ -1310,15 +2921,33 @@ if (isset($input['callback_query'])) {
                         $short = getEntityShort($le);
                         $btns[] = [['text' => "{$mark}{$short} — {$le}", 'callback_data' => "entity_{$idx}"]];
                     }
-                    sendMessage($chatId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>{$current}</b>\n\nНажмите для переключения:", ['inline_keyboard' => $btns]);
+                    $btns[] = [['text' => '📖 Меню', 'callback_data' => 'cmd_menu']];
+                    editMessage($chatId, $msgId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>{$current}</b>\n\nНажмите для переключения:", ['inline_keyboard' => $btns]);
                 }
                 break;
-            case 'settings': showSettings($chatId, null, $user['name']); break;
+            case 'cards': cmdCards($chatId, $user, $msgId); break;
+            case 'cards_exit':
+                setUserMode($user['name'], null);
+                editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
+                break;
+            case 'settings': showSettings($chatId, $msgId, $user['name']); break;
         }
         exit;
     }
 
-    // Анализ запасов — навигация по зонам
+    // График доставок — навигация по дням
+    if (str_starts_with($data, 'sched_')) {
+        $user = getUser($chatId);
+        if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        answerCallback($cb['id']);
+        $dayNum = intval(substr($data, 6));
+        if ($dayNum >= 1 && $dayNum <= 6) {
+            cmdSchedule($chatId, $user, $msgId, $dayNum);
+        }
+        exit;
+    }
+
+    // Анализ запасов — навигация по зонам (редактируем то же сообщение)
     if (str_starts_with($data, 'analysis_')) {
         $user = getUser($chatId);
         if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
@@ -1326,11 +2955,11 @@ if (isset($input['callback_query'])) {
         $parts = explode('_', $data);
         // analysis_summary, analysis_red_0, analysis_orange_1 ...
         if ($parts[1] === 'summary') {
-            cmdAnalysis($chatId, $user);
+            cmdAnalysis($chatId, $user, null, 0, $msgId);
         } else {
             $zone = $parts[1];
             $page = intval($parts[2] ?? 0);
-            cmdAnalysis($chatId, $user, $zone, $page);
+            cmdAnalysis($chatId, $user, $zone, $page, $msgId);
         }
         exit;
     }
@@ -1345,7 +2974,8 @@ if (isset($input['callback_query'])) {
             setUserEntity($user['name'], $entities[$idx]);
             $short = getEntityShort($entities[$idx]);
             answerCallback($cb['id'], "Выбрано: {$short}");
-            editMessage($chatId, $msgId, "✅ Юрлицо переключено на <b>{$entities[$idx]}</b>\n\nТеперь все данные показываются для этого юрлица.");
+            $menuBtns = ['inline_keyboard' => [[['text' => '📖 Меню', 'callback_data' => 'cmd_menu']]]];
+            editMessage($chatId, $msgId, "✅ Юрлицо переключено на <b>{$entities[$idx]}</b>\n\nТеперь все данные показываются для этого юрлица.", $menuBtns);
         } else {
             answerCallback($cb['id'], 'Ошибка выбора');
         }
@@ -1371,63 +3001,58 @@ if (isset($input['callback_query'])) {
 
 // ═══ Обработка сообщений ═══
 
-$msg = $input['message'] ?? null;
+$msg = $input['message'] ?? $input['edited_message'] ?? null;
 if (!$msg) exit;
 
 $chatId = $msg['chat']['id'];
+
+// Фото, документы, голос — вежливый ответ
+if (!isset($msg['text']) && (isset($msg['photo']) || isset($msg['document']) || isset($msg['voice']) || isset($msg['video']) || isset($msg['sticker']))) {
+    $user = getUser($chatId);
+    if ($user) {
+        sendMessage($chatId, "Я пока умею работать только с текстовыми сообщениями.\n\nПопробуйте задать вопрос текстом, например:\n• <i>Какой остаток молока?</i>\n• <i>Когда приедет Мираторг?</i>");
+    }
+    exit;
+}
+
 $text = trim($msg['text'] ?? '');
 
 // /start
 if ($text === '/start') {
     $user = getUser($chatId);
-    $greeting = $user ? "Привет, <b>{$user['name']}</b>! 👋" : "👋 <b>Supply Department</b>";
-    $entity = $user ? getUserEntity($user) : null;
-    $entityInfo = $entity ? "\n🏢 Юрлицо: <b>{$entity}</b>" : '';
-    $intro = $user
-        ? "Я помогу с закупками: остатки, заказы, цены, анализ запасов.{$entityInfo}\n\nЗадай вопрос или выбери из меню:"
-        : "Я бот отдела закупок. Для начала отправьте свой <b>email</b>, чтобы привязать аккаунт.";
-
-    $buttons = [
-        [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
-        [['text' => '📊 Анализ запасов', 'callback_data' => 'cmd_analysis'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
-        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '📊 Расход', 'callback_data' => 'cmd_consumption']],
-    ];
-    if ($user && count($user['legal_entities']) > 1) {
-        $short = $entity ? getEntityShort($entity) : '?';
-        $buttons[] = [['text' => "🏢 Юрлицо ({$short})", 'callback_data' => 'cmd_entity']];
+    if ($user) {
+        $greeting = "Привет, <b>{$user['name']}</b>! 👋\n\n";
+        sendMessage($chatId, $greeting . getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
+    } else {
+        // Генерируем токен и даём кнопку для авторизации через сайт
+        $token = bin2hex(random_bytes(16));
+        $tgUsername = $msg['from']['username'] ?? null;
+        $pdo->prepare("DELETE FROM telegram_link_tokens WHERE telegram_chat_id = ?")->execute([$chatId]);
+        $pdo->prepare("INSERT INTO telegram_link_tokens (token, telegram_chat_id, telegram_username, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))")
+            ->execute([$token, $chatId, $tgUsername]);
+        $linkUrl = "https://supply-department.online/telegram-link?token={$token}";
+        $keyboard = ['inline_keyboard' => [
+            [['text' => '🔐 Войти через сайт', 'url' => $linkUrl]],
+        ]];
+        sendMessage($chatId, "👋 <b>Supply Department</b>\n\nЯ бот отдела закупок.\nДля доступа нужно привязать Telegram к вашему аккаунту на сайте.\n\nНажмите кнопку ниже — откроется сайт, где нужно войти под своим логином.\n\n<i>Ссылка действительна 15 минут.</i>", $keyboard);
     }
-    $buttons[] = [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
-
-    $keyboard = ['inline_keyboard' => $buttons];
-    sendMessage($chatId, "{$greeting}\n\n{$intro}", $keyboard);
     exit;
 }
 
 // /help или /menu
 if ($text === '/help' || $text === '/menu') {
     $user = getUser($chatId);
-    $entity = $user ? getUserEntity($user) : null;
-    $entityInfo = $entity ? "\n🏢 Юрлицо: <b>{$entity}</b>" : '';
-
-    $buttons = [
-        [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
-        [['text' => '📊 Анализ запасов', 'callback_data' => 'cmd_analysis'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
-        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '📊 Расход', 'callback_data' => 'cmd_consumption']],
-    ];
-    if ($user && count($user['legal_entities']) > 1) {
-        $short = $entity ? getEntityShort($entity) : '?';
-        $buttons[] = [['text' => "🏢 Юрлицо ({$short})", 'callback_data' => 'cmd_entity']];
-    }
-    $buttons[] = [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
-
-    sendMessage($chatId, "📖 <b>Меню</b>{$entityInfo}\n\nВыберите раздел или задайте вопрос текстом:\n\n<i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Анализ запасов\n• Состав последнего заказа\n• Что скоро просрочится на складе?", ['inline_keyboard' => $buttons]);
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    setUserMode($user['name'], null); // сброс режима
+    $tips = "\n\n💡 <i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Что скоро просрочится?\n• Когда доставка в ресторан 45?";
+    sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
     exit;
 }
 
 // /analysis — полный анализ запасов
 if ($text === '/analysis') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdAnalysis($chatId, $user);
     exit;
 }
@@ -1435,7 +3060,7 @@ if ($text === '/analysis') {
 // /entity — переключение юрлица
 if ($text === '/entity') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     $entities = $user['legal_entities'];
     if (count($entities) <= 1) {
         $current = getUserEntity($user);
@@ -1464,10 +3089,18 @@ if ($text === '/settings') {
     exit;
 }
 
+// /cards
+if ($text === '/cards') {
+    $user = getUser($chatId);
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    cmdCards($chatId, $user);
+    exit;
+}
+
 // /orders
 if ($text === '/orders') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdOrders($chatId, $user);
     exit;
 }
@@ -1475,7 +3108,7 @@ if ($text === '/orders') {
 // /stock
 if ($text === '/stock') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdStock($chatId, $user);
     exit;
 }
@@ -1483,7 +3116,7 @@ if ($text === '/stock') {
 // /consumption
 if ($text === '/consumption') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdConsumption($chatId, $user);
     exit;
 }
@@ -1491,7 +3124,7 @@ if ($text === '/consumption') {
 // /prices
 if ($text === '/prices') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdPrices($chatId, $user);
     exit;
 }
@@ -1499,31 +3132,37 @@ if ($text === '/prices') {
 // /psc
 if ($text === '/psc') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdPsc($chatId, $user);
-    exit;
-}
-
-// Привязка по email
-if (filter_var($text, FILTER_VALIDATE_EMAIL)) {
-    $u = $pdo->prepare("SELECT name FROM users WHERE email = ?");
-    $u->execute([$text]);
-    $user = $u->fetch();
-    if (!$user) {
-        sendMessage($chatId, "❌ Пользователь с email <b>{$text}</b> не найден в системе.");
-        exit;
-    }
-    $pdo->prepare("UPDATE users SET telegram_chat_id = ? WHERE email = ?")->execute([$chatId, $text]);
-    $pdo->prepare("INSERT IGNORE INTO telegram_settings (user_name) VALUES (?)")->execute([$user['name']]);
-    sendMessage($chatId, "✅ Аккаунт <b>{$user['name']}</b> привязан!\n\nТеперь вы будете получать уведомления.\n\nКоманды: /orders /stock /prices /psc /help\nНастройки: /settings\n\nИли просто задайте вопрос!");
     exit;
 }
 
 // Свободный текст — ответ на вопрос
 $user = getUser($chatId);
 if (!$user) {
-    sendMessage($chatId, "Отправьте email для привязки аккаунта или /start для начала.");
+    sendMessage($chatId, "🔒 Для доступа к боту нужно привязать Telegram к аккаунту.\n\nНажмите /start чтобы получить ссылку для входа.");
     exit;
+}
+
+// Быстрые ответы на приветствия и благодарности — без вызова ИИ
+$quickReply = getQuickReply($text, $user);
+if ($quickReply) {
+    sendMessage($chatId, $quickReply, ['inline_keyboard' => [[['text' => '📖 Меню', 'callback_data' => 'cmd_menu']]]]);
+    exit;
+}
+
+// Режим поиска карточек — все сообщения идут в поиск карточек
+$userMode = getUserMode($user['name']);
+if ($userMode === 'cards') {
+    // Любая /-команда выходит из режима (обработается выше — этот код не должен сюда попасть)
+    // На случай необработанных команд:
+    if (str_starts_with($text, '/')) {
+        setUserMode($user['name'], null);
+        // Пусть проваливается в handleFreeText
+    } else {
+        searchCardDirect($chatId, $text);
+        exit;
+    }
 }
 
 handleFreeText($chatId, $text, $user);

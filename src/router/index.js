@@ -53,6 +53,12 @@ const routes = [
     meta: { title: 'Поиск карточек' },
   },
   {
+    path: '/telegram-link',
+    name: 'telegram-link',
+    component: () => import('@/views/TelegramLinkView.vue'),
+    meta: { title: 'Привязка Telegram' },
+  },
+  {
     path: '/login',
     name: 'login',
     redirect: (to) => ({ name: 'home', query: { showLogin: 'true', redirect: to.query.redirect || '' } }),

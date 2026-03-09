@@ -71,6 +71,7 @@
               <th class="col-unit">За</th>
               <th class="col-cur">Вал.</th>
               <th v-if="hasRubPrices" class="col-byn">В BYN</th>
+              <th class="col-vat">НДС</th>
               <th class="col-psc">ПСЦ</th>
               <th class="col-date" @click="toggleSort('updated_at')">Обновлено {{ sortIcon('updated_at') }}</th>
               <th class="col-actions"></th>
@@ -87,6 +88,7 @@
               <td class="col-unit" data-label="За">{{ unitLabel(p.unit_type) }}</td>
               <td class="col-cur" data-label="Вал."><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
               <td v-if="hasRubPrices" class="col-byn mono" data-label="В BYN">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
+              <td class="col-vat" data-label="НДС">{{ (p.vat_rate ?? 20) }}%</td>
               <td class="col-psc" data-label="ПСЦ">
                 <span v-if="p.agreement_id" class="psc-badge" :title="getAgreementLabel(p.agreement_id)">ПСЦ</span>
                 <span v-else class="psc-badge psc-manual">Руч.</span>
@@ -277,6 +279,14 @@
               <option value="RUB">RUB</option>
             </select>
           </div>
+          <div class="form-group" style="flex:0 0 80px;">
+            <label>НДС, %</label>
+            <select v-model.number="priceForm.vat_rate" class="form-input">
+              <option :value="20">20%</option>
+              <option :value="10">10%</option>
+              <option :value="0">0%</option>
+            </select>
+          </div>
         </div>
         <div v-if="priceForm.currency === 'RUB' && priceForm.price > 0" style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:8px;">
           = {{ formatPrice(priceForm.price * rubToBynRate) }} BYN (курс {{ rubToBynRate }})
@@ -368,6 +378,11 @@
                 <input type="number" v-model.number="item.price" step="0.01" min="0" class="form-input" style="width:80px;padding:3px 5px;font-size:11px;text-align:right;" placeholder="Цена" />
                 <select v-model="item.unit_type" class="form-input" style="width:65px;padding:3px;font-size:10px;">
                   <option v-for="u in allowedUnitTypes(item.uom)" :key="u.value" :value="u.value">{{ UNIT_LABELS[u.value] || u.value }}</option>
+                </select>
+                <select v-model.number="item.vat_rate" class="form-input" style="width:55px;padding:3px;font-size:10px;" title="Ставка НДС">
+                  <option :value="20">20%</option>
+                  <option :value="10">10%</option>
+                  <option :value="0">0%</option>
                 </select>
               </div>
             </div>
@@ -674,7 +689,7 @@ function getAgreementLabel(id) {
 const showPriceModal = ref(false);
 const editingPrice = ref(null);
 const savingPrice = ref(false);
-const priceForm = ref({ sku: '', _realSku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null });
+const priceForm = ref({ sku: '', _realSku: '', supplier: '', price: 0, unit_type: 'piece', currency: 'BYN', vat_rate: 20, agreement_id: null });
 const skuHints = ref([]);
 const supplierProducts = ref([]);
 function getRealSku() {
@@ -754,7 +769,7 @@ onUnmounted(() => {
 
 function openNewPrice() {
   editingPrice.value = null;
-  priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
+  priceForm.value = { sku: '', supplier: supplierNames.value[0] || '', price: 0, unit_type: 'piece', currency: 'BYN', vat_rate: 20, agreement_id: null };
   skuHints.value = [];
   supplierProducts.value = [];
   showPriceModal.value = true;
@@ -763,7 +778,7 @@ function openNewPrice() {
 function openNewPriceForSku(np) {
   editingPrice.value = null;
   const displaySku = np.name ? `${np.sku} ${np.name}` : np.sku;
-  priceForm.value = { sku: displaySku, _realSku: np.sku, supplier: np.supplier || filterSupplier.value, price: 0, unit_type: 'piece', currency: 'BYN', agreement_id: null };
+  priceForm.value = { sku: displaySku, _realSku: np.sku, supplier: np.supplier || filterSupplier.value, price: 0, unit_type: 'piece', currency: 'BYN', vat_rate: 20, agreement_id: null };
   skuHints.value = [];
   supplierProducts.value = [];
   showPriceModal.value = true;
@@ -772,7 +787,7 @@ function openNewPriceForSku(np) {
 function editPrice(p) {
   editingPrice.value = p;
   const displaySku = productNames.value[p.sku] ? `${p.sku} ${productNames.value[p.sku]}` : p.sku;
-  priceForm.value = { sku: displaySku, _realSku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', agreement_id: p.agreement_id || null };
+  priceForm.value = { sku: displaySku, _realSku: p.sku, supplier: p.supplier, price: p.price, unit_type: p.unit_type, currency: p.currency || 'BYN', vat_rate: p.vat_rate ?? 20, agreement_id: p.agreement_id || null };
   skuHints.value = [];
   supplierProducts.value = [];
   showPriceModal.value = true;
@@ -781,7 +796,7 @@ function editPrice(p) {
 
 async function savePrice() {
   if (savingPrice.value) return;
-  const { supplier, price, unit_type, currency, agreement_id } = priceForm.value;
+  const { supplier, price, unit_type, currency, vat_rate, agreement_id } = priceForm.value;
   const sku = getRealSku();
   if (!sku || !supplier) { toast.error('Ошибка', 'Укажите артикул и поставщика'); return; }
   if (supplierProducts.value.length && !supplierProducts.value.some(p => p.sku === sku)) {
@@ -795,7 +810,7 @@ async function savePrice() {
       supplier,
       currency,
       agreement_id: agreement_id || null,
-      prices: [{ sku: sku.trim(), price: parseFloat(price) || 0, unit_type }],
+      prices: [{ sku: sku.trim(), price: parseFloat(price) || 0, unit_type, vat_rate: vat_rate ?? 20 }],
     });
     if (error) { toast.error('Ошибка', error); return; }
     toast.success('Сохранено');
@@ -860,11 +875,13 @@ async function loadAgProducts(supplier, agreementId) {
       const ex = existingPrices[p.sku];
       const uom = p.unit_of_measure || 'шт';
       const defaultUnit = uom === 'кг' ? 'kg' : uom === 'л' ? 'liter' : 'piece';
+      const existingFull = supplierPrices.find(pp => pp.sku === p.sku);
       return {
         sku: p.sku, name: p.name, uom,
         selected: !!ex,
         price: ex ? ex.price : 0,
         unit_type: ex ? ex.unit_type : defaultUnit,
+        vat_rate: existingFull?.vat_rate ?? 20,
         oldPrice: currentPriceMap[p.sku] || null,
       };
     });
@@ -956,7 +973,7 @@ async function saveAgreement() {
         supplier: agForm.value.supplier,
         currency: agCurrency.value,
         agreement_id: agId,
-        prices: selectedItems.map(x => ({ sku: x.sku, price: x.price, unit_type: x.unit_type })),
+        prices: selectedItems.map(x => ({ sku: x.sku, price: x.price, unit_type: x.unit_type, vat_rate: x.vat_rate ?? 20 })),
       });
     }
     toast.success('Сохранено');
@@ -1407,6 +1424,7 @@ async function loadDynamics() {
 .col-unit { width: 36px; }
 .col-cur { width: 42px; }
 .col-byn { width: 80px; text-align: right !important; }
+.col-vat { width: 44px; text-align: center !important; font-size: 11px; color: var(--text-muted); }
 .col-psc { width: 44px; text-align: center !important; }
 .col-date { width: 85px; font-size: 11px; }
 .col-actions { width: 60px; text-align: center !important; white-space: nowrap; }

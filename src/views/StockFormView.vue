@@ -283,7 +283,7 @@ async function submitEdit() {
 /* Brand header */
 .sf-brand {
   display: flex; align-items: center; gap: 10px;
-  padding: 20px 0 16px;
+  padding: 12px 0 10px;
 }
 .sf-logo { flex-shrink: 0; }
 .sf-brand-text {
@@ -293,10 +293,10 @@ async function submitEdit() {
 
 /* Card */
 .sf-card {
-  background: #fff; border-radius: 20px;
+  background: #fff; border-radius: 16px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.25);
-  padding: 28px 24px;
-  width: 100%; max-width: 440px;
+  padding: 20px 18px;
+  width: 100%; max-width: 400px;
   animation: sf-slideUp 0.3s ease-out;
 }
 @keyframes sf-slideUp {
@@ -305,20 +305,20 @@ async function submitEdit() {
 }
 
 /* Header */
-.sf-header { text-align: center; margin-bottom: 24px; }
+.sf-header { text-align: center; margin-bottom: 14px; }
 .sf-badge {
   display: inline-block;
   background: linear-gradient(135deg, #D62700, #FF8733);
-  color: #fff; font-size: 11px; font-weight: 700;
-  padding: 4px 14px; border-radius: 20px;
+  color: #fff; font-size: 10px; font-weight: 700;
+  padding: 3px 10px; border-radius: 20px;
   text-transform: uppercase; letter-spacing: 0.5px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .sf-header h1 {
-  font-size: 22px; font-weight: 800; color: #502314;
-  margin: 0 0 4px; line-height: 1.2;
+  font-size: 18px; font-weight: 800; color: #502314;
+  margin: 0 0 2px; line-height: 1.2;
 }
-.sf-entity { font-size: 13px; color: #8C7B6E; margin: 0; }
+.sf-entity { font-size: 12px; color: #8C7B6E; margin: 0; }
 
 /* Loading */
 .sf-loading {
@@ -333,69 +333,69 @@ async function submitEdit() {
 @keyframes sf-spin { to { transform: rotate(360deg); } }
 
 /* Fields */
-.sf-field { margin-bottom: 16px; }
+.sf-field { margin-bottom: 10px; }
 .sf-field label {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 14px; font-weight: 700; color: #502314;
-  margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 700; color: #502314;
+  margin-bottom: 6px;
 }
 .sf-field-icon {
-  width: 22px; height: 22px; border-radius: 50%;
+  width: 18px; height: 18px; border-radius: 50%;
   background: #502314; color: #fff;
-  font-size: 11px; font-weight: 700;
+  font-size: 10px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
 
 .sf-select {
-  width: 100%; padding: 12px 14px; border: 2px solid #EDE7DF;
-  border-radius: 12px; font-size: 15px; font-family: inherit;
+  width: 100%; padding: 9px 12px; border: 1.5px solid #EDE7DF;
+  border-radius: 10px; font-size: 14px; font-family: inherit;
   background: #fff; transition: all 0.15s; box-sizing: border-box;
   color: #8C7B6E; appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238C7B6E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 14px center;
-  padding-right: 36px;
+  background-repeat: no-repeat; background-position: right 12px center;
+  padding-right: 32px;
 }
-.sf-select:focus { outline: none; border-color: #FF8733; box-shadow: 0 0 0 3px rgba(255,135,51,0.15); }
+.sf-select:focus { outline: none; border-color: #FF8733; box-shadow: 0 0 0 2px rgba(255,135,51,0.12); }
 .sf-select.filled { color: #502314; border-color: #A5D6A7; }
 
 /* Products */
 .sf-product {
-  background: #F9F6F2; border-radius: 12px;
-  padding: 14px 16px; margin-bottom: 10px;
+  background: #F9F6F2; border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 6px;
   transition: background 0.15s;
 }
 .sf-product-top {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
-.sf-product-name { font-size: 14px; font-weight: 700; color: #502314; }
+.sf-product-name { font-size: 13px; font-weight: 700; color: #502314; }
 .sf-product-unit {
-  font-size: 11px; font-weight: 600; color: #FF8733;
-  background: #FFF3E0; padding: 2px 8px; border-radius: 6px;
+  font-size: 10px; font-weight: 600; color: #FF8733;
+  background: #FFF3E0; padding: 1px 6px; border-radius: 5px;
 }
 .sf-product-input-wrap { position: relative; }
 .sf-input {
-  width: 100%; padding: 12px 50px 12px 14px; border: 2px solid #EDE7DF;
-  border-radius: 10px; font-size: 18px; font-weight: 700; font-family: inherit;
+  width: 100%; padding: 8px 44px 8px 12px; border: 1.5px solid #EDE7DF;
+  border-radius: 8px; font-size: 16px; font-weight: 700; font-family: inherit;
   background: #fff; transition: all 0.15s; box-sizing: border-box;
   color: #502314;
 }
-.sf-input:focus { outline: none; border-color: #FF8733; box-shadow: 0 0 0 3px rgba(255,135,51,0.15); }
+.sf-input:focus { outline: none; border-color: #FF8733; box-shadow: 0 0 0 2px rgba(255,135,51,0.12); }
 .sf-input.filled { border-color: #A5D6A7; }
 .sf-input::placeholder { color: #ccc; font-weight: 400; }
 .sf-input-unit {
-  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-  font-size: 13px; font-weight: 600; color: #8C7B6E; pointer-events: none;
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; font-weight: 600; color: #8C7B6E; pointer-events: none;
 }
 
 /* Submit */
 .sf-submit {
-  width: 100%; padding: 15px; border: none; border-radius: 14px;
+  width: 100%; padding: 12px; border: none; border-radius: 10px;
   background: #ccc; color: #fff;
-  font-size: 16px; font-weight: 800; font-family: inherit;
+  font-size: 15px; font-weight: 800; font-family: inherit;
   cursor: pointer; transition: all 0.2s;
-  margin-top: 12px;
+  margin-top: 10px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
 }
 .sf-submit.ready {
@@ -411,8 +411,8 @@ async function submitEdit() {
   animation: sf-spin 0.7s linear infinite;
 }
 .sf-already {
-  text-align: center; font-size: 14px; font-weight: 600; color: #FF8733;
-  padding: 14px; background: #FFF3E0; border-radius: 12px; margin-top: 12px;
+  text-align: center; font-size: 13px; font-weight: 600; color: #FF8733;
+  padding: 10px; background: #FFF3E0; border-radius: 10px; margin-top: 10px;
   line-height: 1.4;
 }
 .sf-error {
@@ -471,8 +471,8 @@ async function submitEdit() {
 }
 
 @media (max-width: 480px) {
-  .sf-page { padding: 0 12px 24px; }
-  .sf-card { padding: 24px 18px; border-radius: 16px; }
-  .sf-header h1 { font-size: 19px; }
+  .sf-page { padding: 0 10px 20px; }
+  .sf-card { padding: 16px 14px; border-radius: 14px; }
+  .sf-header h1 { font-size: 16px; }
 }
 </style>

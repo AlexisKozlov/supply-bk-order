@@ -15,13 +15,14 @@
     <!-- Changes banner (if critical, always visible) -->
     <div v-if="!loading && data && criticalChanges.length && activeTab !== 'changes'" class="an-alert-banner" @click="activeTab = 'changes'">
       <BkIcon name="warning" size="sm"/> {{ criticalChanges.length }} важных изменений
-      <span class="an-alert-link">Смотреть →</span>
+      <span class="an-alert-link">Смотреть</span>
     </div>
 
     <!-- Tabs -->
     <div v-if="!loading || activeTab === 'abc-xyz'" class="an-tabs">
       <button v-for="t in tabs" :key="t.id" class="an-tab" :class="{ active: activeTab === t.id }" @click="activeTab = t.id">
-        {{ t.label }}
+        <BkIcon :name="t.icon" size="xs"/>
+        <span class="an-tab-text">{{ t.label }}</span>
         <span v-if="t.id === 'changes' && data && data.changes.length" class="an-tab-badge">{{ data.changes.length }}</span>
       </button>
     </div>
@@ -40,88 +41,212 @@
     <!-- Tab content -->
     <div v-else class="an-content">
 
-      <!-- ===== OVERVIEW ===== -->
+      <!-- ===== DASHBOARD (OVERVIEW) ===== -->
       <template v-if="activeTab === 'overview'">
-        <!-- KPI cards -->
-        <div class="an-kpi-grid">
-          <div class="an-kpi">
-            <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="history" size="sm"/></span> Заказов</div>
-            <div class="an-kpi-row">
-              <span class="an-kpi-val">{{ nf(data.totals.orders) }}</span>
-              <span v-if="data.deltaOrders !== null" class="an-badge" :class="data.deltaOrders >= 0 ? 'up' : 'down'">
-                {{ data.deltaOrders >= 0 ? '▲' : '▼' }} {{ Math.abs(data.deltaOrders) }}%
-              </span>
+        <!-- Main KPI cards -->
+        <div class="dash-kpi-grid">
+          <div class="dash-kpi dash-kpi--brown">
+            <div class="dash-kpi__left-border"></div>
+            <div class="dash-kpi__body">
+              <div class="dash-kpi__header">
+                <span class="dash-kpi__icon"><BkIcon name="history" size="sm"/></span>
+                <span class="dash-kpi__label">Заказов</span>
+              </div>
+              <div class="dash-kpi__value-row">
+                <span class="dash-kpi__value">{{ nf(data.totals.orders) }}</span>
+                <span v-if="data.deltaOrders !== null" class="dash-badge" :class="data.deltaOrders >= 0 ? 'dash-badge--up' : 'dash-badge--down'">
+                  {{ data.deltaOrders >= 0 ? '+' : '' }}{{ data.deltaOrders }}%
+                </span>
+              </div>
+              <div class="dash-kpi__sub">прошлый период: {{ nf(data.prev.orders) }}</div>
             </div>
-            <div class="an-kpi-sub">прошлый: {{ nf(data.prev.orders) }}</div>
           </div>
-          <div class="an-kpi">
-            <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> Коробок</div>
-            <div class="an-kpi-row">
-              <span class="an-kpi-val">{{ nf(data.totals.boxes) }}</span>
-              <span v-if="data.deltaBoxes !== null" class="an-badge" :class="data.deltaBoxes >= 0 ? 'up' : 'down'">
-                {{ data.deltaBoxes >= 0 ? '▲' : '▼' }} {{ Math.abs(data.deltaBoxes) }}%
-              </span>
+          <div class="dash-kpi dash-kpi--orange">
+            <div class="dash-kpi__left-border"></div>
+            <div class="dash-kpi__body">
+              <div class="dash-kpi__header">
+                <span class="dash-kpi__icon"><BkIcon name="order" size="sm"/></span>
+                <span class="dash-kpi__label">Коробок</span>
+              </div>
+              <div class="dash-kpi__value-row">
+                <span class="dash-kpi__value">{{ nf(data.totals.boxes) }}</span>
+                <span v-if="data.deltaBoxes !== null" class="dash-badge" :class="data.deltaBoxes >= 0 ? 'dash-badge--up' : 'dash-badge--down'">
+                  {{ data.deltaBoxes >= 0 ? '+' : '' }}{{ data.deltaBoxes }}%
+                </span>
+              </div>
+              <div class="dash-kpi__sub">прошлый период: {{ nf(data.prev.boxes) }}</div>
             </div>
-            <div class="an-kpi-sub">прошлый: {{ nf(data.prev.boxes) }}</div>
           </div>
-          <div class="an-kpi">
-            <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="ruler" size="sm"/></span> Ср. кор/заказ</div>
-            <div class="an-kpi-row">
-              <span class="an-kpi-val">{{ data.totals.orders ? Math.round(data.totals.boxes / data.totals.orders) : 0 }}</span>
+          <div class="dash-kpi dash-kpi--blue">
+            <div class="dash-kpi__left-border"></div>
+            <div class="dash-kpi__body">
+              <div class="dash-kpi__header">
+                <span class="dash-kpi__icon"><BkIcon name="pricing" size="sm"/></span>
+                <span class="dash-kpi__label">Закупки, BYN</span>
+              </div>
+              <div class="dash-kpi__value-row">
+                <span class="dash-kpi__value">{{ moneyStats.totalSpend > 0 ? nfMoney(moneyStats.totalSpend) : '---' }}</span>
+              </div>
+              <div class="dash-kpi__sub">{{ moneyStats.totalSpend > 0 ? 'ср. заказ: ~' + nfMoney(moneyStats.avgOrderCost) + ' BYN' : 'нет данных о ценах' }}</div>
             </div>
-            <div class="an-kpi-sub">за период</div>
           </div>
-          <div class="an-kpi" v-if="data.planFact.receivedOrders > 0">
-            <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="success" size="sm"/></span> Выполнение</div>
-            <div class="an-kpi-row">
-              <span class="an-kpi-val" :style="{ color: data.planFact.fulfillmentPct >= 95 ? '#2E7D32' : data.planFact.fulfillmentPct >= 80 ? '#E65100' : '#D32F2F' }">{{ data.planFact.fulfillmentPct }}%</span>
+          <div class="dash-kpi dash-kpi--green" v-if="data.planFact.receivedOrders > 0">
+            <div class="dash-kpi__left-border"></div>
+            <div class="dash-kpi__body">
+              <div class="dash-kpi__header">
+                <span class="dash-kpi__icon"><BkIcon name="success" size="sm"/></span>
+                <span class="dash-kpi__label">Выполнение</span>
+              </div>
+              <div class="dash-kpi__value-row">
+                <span class="dash-kpi__value" :class="fulfillmentCls(data.planFact.fulfillmentPct)">{{ data.planFact.fulfillmentPct }}%</span>
+              </div>
+              <div class="dash-kpi__sub">{{ data.planFact.discrepancyItems }} расхожд. из {{ data.planFact.totalReceivedItems }}</div>
             </div>
-            <div class="an-kpi-sub">{{ data.planFact.discrepancyItems }} расхожд. из {{ data.planFact.totalReceivedItems }}</div>
+          </div>
+          <!-- Fallback KPI when no fulfillment data -->
+          <div class="dash-kpi dash-kpi--green" v-if="!data.planFact.receivedOrders">
+            <div class="dash-kpi__left-border"></div>
+            <div class="dash-kpi__body">
+              <div class="dash-kpi__header">
+                <span class="dash-kpi__icon"><BkIcon name="ruler" size="sm"/></span>
+                <span class="dash-kpi__label">Ср. кор/заказ</span>
+              </div>
+              <div class="dash-kpi__value-row">
+                <span class="dash-kpi__value">{{ data.totals.orders ? Math.round(data.totals.boxes / data.totals.orders) : 0 }}</span>
+              </div>
+              <div class="dash-kpi__sub">за период {{ days }} дней</div>
+            </div>
           </div>
         </div>
 
-        <!-- Chart -->
-        <div class="an-card">
-          <div class="an-card-header">
-            <span class="an-card-title"><BkIcon name="calendar" size="sm"/> Коробок по дням</span>
-            <div class="an-legend">
-              <span v-for="s in data.suppliers" :key="s.supplier" class="an-legend-item">
-                <span class="an-legend-dot" :style="{ background: s.color }"></span>{{ s.supplier }}
-              </span>
-            </div>
+        <!-- Secondary KPI row -->
+        <div class="dash-secondary-row">
+          <div class="dash-mini-stat">
+            <span class="dash-mini-stat__val">{{ uniqueProductsCount }}</span>
+            <span class="dash-mini-stat__label">Товаров</span>
           </div>
-          <div class="an-chart">
-            <div v-for="(day, i) in chartDays" :key="day.dayKey" class="an-bar-col"
-              :title="day.dayLabel + ': ' + nf(day.total) + ' кор.'">
-              <div class="an-bar-num">{{ nf(day.total) }}</div>
-              <div class="an-bar-stack">
-                <template v-for="s in data.suppliers" :key="s.supplier">
-                  <div v-if="day.bySupplier[s.supplier]" class="an-bar-seg"
-                    :style="{ height: barH(day.bySupplier[s.supplier]) + 'px', background: s.color,
-                      borderRadius: isTop(day, s.supplier) ? '3px 3px 0 0' : '0' }">
-                  </div>
-                </template>
-              </div>
-              <div class="an-bar-label">{{ day.dayLabel }}</div>
+          <div class="dash-mini-stat">
+            <span class="dash-mini-stat__val">{{ data.suppliers.length }}</span>
+            <span class="dash-mini-stat__label">Поставщиков</span>
+          </div>
+          <div class="dash-mini-stat">
+            <span class="dash-mini-stat__val">{{ avgBoxesPerSupplier }}</span>
+            <span class="dash-mini-stat__label">Ср. кор/пост.</span>
+          </div>
+          <div class="dash-mini-stat">
+            <span class="dash-mini-stat__val">{{ topSupplierConcentration }}%</span>
+            <span class="dash-mini-stat__label">Концентрация</span>
+          </div>
+        </div>
+
+        <!-- Insights panel -->
+        <div v-if="insights.length" class="dash-insights">
+          <div class="dash-insights__title"><BkIcon name="bulb" size="sm"/> Выводы</div>
+          <div class="dash-insights__list">
+            <div v-for="(ins, i) in insights" :key="i" class="dash-insight" :class="'dash-insight--' + ins.type">
+              <span class="dash-insight__dot"></span>
+              <span class="dash-insight__text">{{ ins.text }}</span>
             </div>
           </div>
         </div>
 
-        <!-- Suppliers quick -->
-        <div class="an-card">
-          <div class="an-card-title"><BkIcon name="building" size="sm"/> По поставщикам</div>
-          <div class="an-sup-table">
-            <div v-for="s in data.suppliers" :key="s.supplier" class="an-sup-row">
-              <div class="an-sup-left">
-                <span class="an-sup-dot" :style="{ background: s.color }"></span>
-                <span class="an-sup-name">{{ s.supplier }}</span>
-              </div>
-              <div class="an-sup-right">
-                <div class="an-sup-bar-wrap">
-                  <div class="an-sup-bar" :style="{ width: sPct(s) + '%', background: s.color }"></div>
+        <!-- Area chart -->
+        <div class="dash-card">
+          <div class="dash-card__header">
+            <span class="dash-card__title"><BkIcon name="calendar" size="sm"/> Коробок по дням</span>
+            <div class="dash-legend">
+              <span v-for="s in data.suppliers" :key="s.supplier" class="dash-legend__item">
+                <span class="dash-legend__dot" :style="{ background: s.color }"></span>{{ s.supplier }}
+              </span>
+            </div>
+          </div>
+          <div class="dash-area-chart" v-if="chartDays.length">
+            <svg :viewBox="'0 0 ' + areaChartW + ' ' + areaChartH" class="dash-area-svg" preserveAspectRatio="none">
+              <!-- Grid lines -->
+              <line v-for="g in 4" :key="'grid-'+g" :x1="0" :y1="areaChartH * g / 4" :x2="areaChartW" :y2="areaChartH * g / 4" stroke="var(--border-light)" stroke-width="0.5" stroke-dasharray="4,4"/>
+              <!-- Area fill -->
+              <path :d="areaPath" fill="url(#areaGrad)" opacity="0.3"/>
+              <!-- Line -->
+              <path :d="linePath" fill="none" stroke="#FF8732" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <!-- Dots -->
+              <circle v-for="(pt, i) in areaPoints" :key="'dot-'+i" :cx="pt.x" :cy="pt.y" r="3" fill="#FF8732" stroke="#fff" stroke-width="1.5"/>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#FF8732" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="#FF8732" stop-opacity="0.02"/>
+                </linearGradient>
+              </defs>
+            </svg>
+            <div class="dash-area-labels">
+              <span v-for="(day, i) in areaLabelDays" :key="'lbl-'+i" class="dash-area-label">{{ day.dayLabel }}</span>
+            </div>
+          </div>
+          <div v-else style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px;">Нет дней с заказами</div>
+        </div>
+
+        <!-- Two-column: Donut + Mini tables -->
+        <div class="dash-two-col">
+          <!-- Donut chart -->
+          <div class="dash-card dash-card--half">
+            <div class="dash-card__title"><BkIcon name="building" size="sm"/> Распределение по поставщикам</div>
+            <div class="dash-donut-wrap">
+              <svg viewBox="0 0 120 120" class="dash-donut-svg">
+                <circle v-for="(seg, i) in donutSegments" :key="'donut-'+i"
+                  cx="60" cy="60" r="46" fill="none"
+                  :stroke="seg.color" stroke-width="18"
+                  :stroke-dasharray="seg.dash" :stroke-dashoffset="seg.offset"
+                  :transform="'rotate(-90 60 60)'"
+                />
+                <text x="60" y="56" text-anchor="middle" class="dash-donut-center-val">{{ nf(data.totals.boxes) }}</text>
+                <text x="60" y="70" text-anchor="middle" class="dash-donut-center-label">коробок</text>
+              </svg>
+              <div class="dash-donut-legend">
+                <div v-for="s in data.suppliers.slice(0, 5)" :key="'dl-'+s.supplier" class="dash-donut-legend__item">
+                  <span class="dash-donut-legend__dot" :style="{ background: s.color }"></span>
+                  <span class="dash-donut-legend__name">{{ s.supplier }}</span>
+                  <span class="dash-donut-legend__pct">{{ Math.round(sPct(s)) }}%</span>
                 </div>
-                <span class="an-sup-val">{{ nf(s.boxes) }}</span>
-                <span class="an-sup-meta">{{ s.orders }} зак.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mini tables -->
+          <div class="dash-card dash-card--half">
+            <div class="dash-card__title"><BkIcon name="fire" size="sm"/> Топ-3 товара</div>
+            <div v-for="(p, i) in data.topProducts.slice(0, 3)" :key="'tp-'+i" class="dash-mini-row">
+              <span class="dash-mini-row__rank" :class="{ top: i === 0 }">{{ i + 1 }}</span>
+              <span class="dash-mini-row__name">{{ p.name || p.sku || '---' }}</span>
+              <span class="dash-mini-row__val">{{ nf(p.boxes) }}</span>
+              <span v-if="p.deltaBoxes !== null" class="dash-mini-row__delta" :class="p.deltaBoxes >= 0 ? 'up' : 'down'">
+                {{ p.deltaBoxes >= 0 ? '+' : '' }}{{ p.deltaBoxes }}%
+              </span>
+            </div>
+
+            <div class="dash-card__title" style="margin-top:16px;"><BkIcon name="building" size="sm"/> Топ-3 поставщика</div>
+            <div v-for="(s, i) in data.suppliers.slice(0, 3)" :key="'ts-'+i" class="dash-mini-row">
+              <span class="dash-mini-row__rank" :class="{ top: i === 0 }">{{ i + 1 }}</span>
+              <span class="dash-mini-row__name">{{ s.supplier }}</span>
+              <span class="dash-mini-row__val">{{ nf(s.boxes) }}</span>
+              <span class="dash-mini-row__meta">{{ s.orders }} зак.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Suppliers bar chart -->
+        <div class="dash-card">
+          <div class="dash-card__title"><BkIcon name="building" size="sm"/> По поставщикам</div>
+          <div class="dash-sup-table">
+            <div v-for="s in data.suppliers" :key="s.supplier" class="dash-sup-row">
+              <div class="dash-sup-row__left">
+                <span class="dash-sup-row__dot" :style="{ background: s.color }"></span>
+                <span class="dash-sup-row__name">{{ s.supplier }}</span>
+              </div>
+              <div class="dash-sup-row__right">
+                <div class="dash-sup-row__bar-wrap">
+                  <div class="dash-sup-row__bar" :style="{ width: sPct(s) + '%', background: s.color }"></div>
+                </div>
+                <span class="dash-sup-row__val">{{ nf(s.boxes) }}</span>
+                <span class="dash-sup-row__meta">{{ s.orders }} зак.</span>
               </div>
             </div>
           </div>
@@ -135,34 +260,46 @@
         </div>
         <template v-else>
           <!-- KPI -->
-          <div class="an-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="success" size="sm"/></span> Принято</div>
-              <div class="an-kpi-row"><span class="an-kpi-val">{{ data.planFact.receivedOrders }}</span></div>
-              <div class="an-kpi-sub">заказов (ожидают: {{ data.planFact.pendingOrders }})</div>
-            </div>
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> План</div>
-              <div class="an-kpi-row"><span class="an-kpi-val">{{ nf(data.planFact.planBoxes) }}</span></div>
-              <div class="an-kpi-sub">коробок заказано</div>
-            </div>
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> Факт</div>
-              <div class="an-kpi-row"><span class="an-kpi-val">{{ nf(data.planFact.factBoxes) }}</span></div>
-              <div class="an-kpi-sub">коробок получено</div>
-            </div>
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="ruler" size="sm"/></span> Выполнение</div>
-              <div class="an-kpi-row">
-                <span class="an-kpi-val" :style="{ color: data.planFact.fulfillmentPct >= 95 ? '#2E7D32' : data.planFact.fulfillmentPct >= 80 ? '#E65100' : '#D32F2F' }">{{ data.planFact.fulfillmentPct }}%</span>
+          <div class="dash-kpi-grid">
+            <div class="dash-kpi dash-kpi--blue">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="success" size="sm"/></span><span class="dash-kpi__label">Принято</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ data.planFact.receivedOrders }}</span></div>
+                <div class="dash-kpi__sub">заказов (ожидают: {{ data.planFact.pendingOrders }})</div>
               </div>
-              <div class="an-kpi-sub">факт / план</div>
+            </div>
+            <div class="dash-kpi dash-kpi--orange">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="order" size="sm"/></span><span class="dash-kpi__label">План</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ nf(data.planFact.planBoxes) }}</span></div>
+                <div class="dash-kpi__sub">коробок заказано</div>
+              </div>
+            </div>
+            <div class="dash-kpi dash-kpi--brown">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="order" size="sm"/></span><span class="dash-kpi__label">Факт</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ nf(data.planFact.factBoxes) }}</span></div>
+                <div class="dash-kpi__sub">коробок получено</div>
+              </div>
+            </div>
+            <div class="dash-kpi dash-kpi--green">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="ruler" size="sm"/></span><span class="dash-kpi__label">Выполнение</span></div>
+                <div class="dash-kpi__value-row">
+                  <span class="dash-kpi__value" :class="fulfillmentCls(data.planFact.fulfillmentPct)">{{ data.planFact.fulfillmentPct }}%</span>
+                </div>
+                <div class="dash-kpi__sub">факт / план</div>
+              </div>
             </div>
           </div>
 
-          <!-- Расхождения: прогресс-бар -->
-          <div class="an-card">
-            <div class="an-card-title"><BkIcon name="warning" size="sm"/> Расхождения</div>
+          <!-- Расхождения -->
+          <div class="dash-card">
+            <div class="dash-card__title"><BkIcon name="warning" size="sm"/> Расхождения</div>
             <div class="an-pf-bar-wrap">
               <div class="an-pf-bar-ok" :style="{ width: (100 - data.planFact.discrepancyPct) + '%' }">
                 <span v-if="100 - data.planFact.discrepancyPct > 15">{{ 100 - data.planFact.discrepancyPct }}% ОК</span>
@@ -184,8 +321,8 @@
           </div>
 
           <!-- Тренд выполнения по дням -->
-          <div v-if="data.planFact.dayTrend.length > 1" class="an-card">
-            <div class="an-card-title"><BkIcon name="calendar" size="sm"/> Тренд выполнения по дням</div>
+          <div v-if="data.planFact.dayTrend.length > 1" class="dash-card">
+            <div class="dash-card__title"><BkIcon name="calendar" size="sm"/> Тренд выполнения по дням</div>
             <div class="an-pf-trend">
               <div v-for="d in data.planFact.dayTrend" :key="d.date" class="an-pf-trend-col" :title="`${d.label}: план ${d.plan}, факт ${d.fact} (${d.pct}%)`">
                 <div class="an-pf-trend-pct" :style="{ color: d.pct >= 95 ? '#2E7D32' : d.pct >= 80 ? '#E65100' : '#D32F2F' }">{{ d.pct }}%</div>
@@ -203,11 +340,11 @@
           </div>
 
           <!-- По поставщикам -->
-          <div v-if="data.planFact.suppliers.length" class="an-card">
-            <div class="an-card-title"><BkIcon name="building" size="sm"/> Выполнение по поставщикам</div>
+          <div v-if="data.planFact.suppliers.length" class="dash-card">
+            <div class="dash-card__title"><BkIcon name="building" size="sm"/> Выполнение по поставщикам</div>
             <div v-for="s in data.planFact.suppliers" :key="s.supplier" class="an-pf-sup-row">
               <div class="an-pf-sup-left">
-                <span class="an-sup-dot" :style="{ background: s.color }"></span>
+                <span class="dash-sup-row__dot" :style="{ background: s.color }"></span>
                 <span class="an-pf-sup-name">{{ s.supplier }}</span>
               </div>
               <div class="an-pf-sup-mid">
@@ -223,9 +360,9 @@
             </div>
           </div>
 
-          <!-- Топ товаров с расхождениями -->
-          <div v-if="data.planFact.discrepancyProducts.length" class="an-card">
-            <div class="an-card-title"><BkIcon name="fire" size="sm"/> Товары с расхождениями</div>
+          <!-- Товары с расхождениями -->
+          <div v-if="data.planFact.discrepancyProducts.length" class="dash-card">
+            <div class="dash-card__title"><BkIcon name="fire" size="sm"/> Товары с расхождениями</div>
             <div v-for="(p, i) in data.planFact.discrepancyProducts" :key="p.sku || p.name" class="an-pf-prod-row">
               <div class="an-pf-prod-rank">{{ i + 1 }}</div>
               <div class="an-pf-prod-info">
@@ -246,48 +383,56 @@
 
       <!-- ===== SUPPLIERS ===== -->
       <template v-if="activeTab === 'suppliers'">
-        <div v-for="s in data.suppliers" :key="s.supplier" class="an-card an-sup-card">
-          <div class="an-sup-card-head">
-            <span class="an-sup-dot-lg" :style="{ background: s.color }"></span>
-            <span class="an-sup-card-name">{{ s.supplier }}</span>
-            <span v-if="s.daysAgo !== null" class="an-sup-card-ago">{{ s.daysAgo }} дн. назад</span>
+        <div v-for="s in data.suppliers" :key="s.supplier" class="dash-card dash-sup-card">
+          <div class="dash-sup-card__head">
+            <span class="dash-sup-card__dot" :style="{ background: s.color }"></span>
+            <span class="dash-sup-card__name">{{ s.supplier }}</span>
+            <span v-if="s.daysAgo !== null" class="dash-sup-card__ago">{{ s.daysAgo }} дн. назад</span>
           </div>
-          <div class="an-sup-metrics">
-            <div class="an-sup-metric">
-              <div class="an-sup-metric-val">{{ s.orders }}</div>
-              <div class="an-sup-metric-label">Заказов</div>
+          <div class="dash-sup-card__metrics">
+            <div class="dash-sup-card__metric">
+              <div class="dash-sup-card__metric-val">{{ s.orders }}</div>
+              <div class="dash-sup-card__metric-label">Заказов</div>
             </div>
-            <div class="an-sup-metric">
-              <div class="an-sup-metric-val">{{ nf(s.boxes) }}</div>
-              <div class="an-sup-metric-label">Коробок</div>
+            <div class="dash-sup-card__metric">
+              <div class="dash-sup-card__metric-val">{{ nf(s.boxes) }}</div>
+              <div class="dash-sup-card__metric-label">Коробок</div>
             </div>
-            <div class="an-sup-metric">
-              <div class="an-sup-metric-val">{{ s.orders ? Math.round(s.boxes / s.orders) : 0 }}</div>
-              <div class="an-sup-metric-label">Ср./заказ</div>
+            <div class="dash-sup-card__metric">
+              <div class="dash-sup-card__metric-val">{{ s.orders ? Math.round(s.boxes / s.orders) : 0 }}</div>
+              <div class="dash-sup-card__metric-label">Ср./заказ</div>
             </div>
-            <div class="an-sup-metric">
-              <div class="an-sup-metric-val" :class="deltaCls(supDelta(s))">
-                <template v-if="supDelta(s) !== null">{{ supDelta(s) >= 0 ? '▲' : '▼' }}{{ Math.abs(supDelta(s)) }}%</template>
-                <template v-else>—</template>
+            <div class="dash-sup-card__metric">
+              <div class="dash-sup-card__metric-val" :class="deltaCls(supDelta(s))">
+                <template v-if="supDelta(s) !== null">{{ supDelta(s) >= 0 ? '+' : '' }}{{ supDelta(s) }}%</template>
+                <template v-else>---</template>
               </div>
-              <div class="an-sup-metric-label">vs прошл.</div>
+              <div class="dash-sup-card__metric-label">vs прошл.</div>
             </div>
           </div>
         </div>
       </template>
 
-      <!-- ===== PRODUCTS + FORECAST ===== -->
+      <!-- ===== PRODUCTS + REPORTS (MERGED) ===== -->
       <template v-if="activeTab === 'products'">
-        <div class="an-card" style="padding:0;">
+        <div class="rpt-toolbar">
+          <button class="btn primary" @click="exportAnalytics" :disabled="!data"><BkIcon name="excel" size="sm"/> Экспорт в Excel</button>
+        </div>
+
+        <!-- Топ товаров с прогрессом, спарклайнами и дельтами -->
+        <div class="dash-card" style="padding:0;">
           <div class="an-prod-header">
-            <span><BkIcon name="fire" size="sm"/> Топ товаров + прогноз</span>
+            <span><BkIcon name="fire" size="sm"/> Топ товаров за {{ days }} дней</span>
+            <span v-if="moneyStats.totalSpend > 0" class="an-prod-header-money">
+              <BkIcon name="pricing" size="xs"/> ~{{ nfMoney(moneyStats.totalSpend) }} BYN
+            </span>
           </div>
           <div v-for="(p, i) in data.topProducts" :key="p.sku || p.name" class="an-prod-row">
             <div class="an-prod-rank" :class="{ top: i < 3 }">{{ i + 1 }}</div>
             <div class="an-prod-info">
               <div class="an-prod-line1">
                 <span class="an-prod-sku">{{ p.sku || '' }}</span>
-                <span class="an-prod-name">{{ p.name || '—' }}</span>
+                <span class="an-prod-name">{{ p.name || '---' }}</span>
               </div>
               <div class="an-prod-progress">
                 <div class="an-prod-progress-bar" :style="{ width: pPct(p) + '%' }"></div>
@@ -296,8 +441,9 @@
             <div class="an-prod-stats">
               <div class="an-prod-boxes">{{ nf(p.boxes) }} кор</div>
               <div v-if="p.deltaBoxes !== null" class="an-prod-delta" :class="p.deltaBoxes >= 0 ? 'up' : 'down'">
-                {{ p.deltaBoxes >= 0 ? '▲' : '▼' }} {{ Math.abs(p.deltaBoxes) }}%
+                {{ p.deltaBoxes >= 0 ? '+' : '' }}{{ p.deltaBoxes }}%
               </div>
+              <div v-if="prices && prices[p.sku]" class="an-prod-cost">~{{ nfMoney(p.boxes * (prices[p.sku].price || 0) * (1 + (prices[p.sku].vat_rate || 0) / 100)) }} BYN</div>
             </div>
             <div class="an-prod-forecast">
               <div class="an-prod-forecast-label">прогноз</div>
@@ -305,8 +451,47 @@
             </div>
           </div>
         </div>
+
+        <!-- Сезонность -->
+        <div class="dash-card">
+          <div class="dash-card__title"><BkIcon name="calendar" size="sm"/> Сезонность (12 мес.)</div>
+          <div v-if="seasonalityLoading" style="text-align:center;padding:30px;color:var(--text-muted);">
+            <BurgerSpinner text="Загрузка..." />
+          </div>
+          <div v-else-if="!seasonality" style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Нет данных</div>
+          <template v-else>
+            <div class="rpt-season-chart">
+              <div v-for="m in seasonality.monthData" :key="m.key" class="rpt-season-col">
+                <div class="rpt-season-val">{{ nf(m.boxes) }}</div>
+                <div class="rpt-season-bar-area">
+                  <div class="rpt-season-bar" :style="{ height: seasonBarH(m.boxes, seasonality.maxBoxes) + 'px' }"></div>
+                  <div v-if="m.movingAvg !== null" class="rpt-season-avg-dot" :style="{ bottom: seasonBarH(m.movingAvg, seasonality.maxBoxes) + 'px' }"></div>
+                </div>
+                <div class="rpt-season-label">{{ m.label }}</div>
+              </div>
+            </div>
+            <div class="rpt-season-legend">
+              <span class="rpt-season-legend-item"><span class="rpt-season-legend-bar"></span> Коробок</span>
+              <span class="rpt-season-legend-item"><span class="rpt-season-legend-dot"></span> Скольз. среднее (3 мес.)</span>
+            </div>
+            <!-- YoY table -->
+            <div v-if="seasonality.monthData.some(m => m.yoyDelta !== null)" class="rpt-yoy-table">
+              <div class="rpt-yoy-title">Год к году</div>
+              <div class="rpt-yoy-grid">
+                <div v-for="m in seasonality.monthData" :key="m.key + '-yoy'" class="rpt-yoy-cell">
+                  <div class="rpt-yoy-label">{{ m.label }}</div>
+                  <div v-if="m.yoyDelta !== null" class="rpt-yoy-val" :class="m.yoyDelta >= 0 ? 'up' : 'down'">
+                    {{ m.yoyDelta >= 0 ? '+' : '' }}{{ m.yoyDelta }}%
+                  </div>
+                  <div v-else class="rpt-yoy-val">---</div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
         <div class="an-forecast-note">
-          <BkIcon name="bulb" size="sm"/> Прогноз = средний расход в день × {{ days }} дней
+          <BkIcon name="bulb" size="sm"/> Прогноз = средний расход в день x {{ days }} дней. Для детального прогноза запасов перейдите на вкладку Прогноз.
         </div>
       </template>
 
@@ -334,39 +519,51 @@
           </div>
 
           <!-- KPI -->
-          <div class="an-kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="order" size="sm"/></span> Товаров в расчёте</div>
-              <div class="an-kpi-row"><span class="an-kpi-val">{{ forecastKpi.totalProducts }}</span></div>
-              <div class="an-kpi-sub">которые заказывали за 60 дней</div>
+          <div class="dash-kpi-grid">
+            <div class="dash-kpi dash-kpi--blue">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="order" size="sm"/></span><span class="dash-kpi__label">Товаров в расчёте</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ forecastKpi.totalProducts }}</span></div>
+                <div class="dash-kpi__sub">которые заказывали за 60 дней</div>
+              </div>
             </div>
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="chartUp" size="sm"/></span> Понадобится коробок</div>
-              <div class="an-kpi-row"><span class="an-kpi-val">{{ nf(forecastKpi.totalForecast) }}</span><span class="an-kpi-unit">кор.</span></div>
-              <div class="an-kpi-sub">ожидаемый расход за {{ forecastPeriod }} дней</div>
+            <div class="dash-kpi dash-kpi--orange">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="chartUp" size="sm"/></span><span class="dash-kpi__label">Понадобится коробок</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ nf(forecastKpi.totalForecast) }}</span><span class="dash-kpi__unit">кор.</span></div>
+                <div class="dash-kpi__sub">ожидаемый расход за {{ forecastPeriod }} дней</div>
+              </div>
             </div>
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="warning" size="sm"/></span> Товаров с дефицитом</div>
-              <div class="an-kpi-row"><span class="an-kpi-val" style="color:#D32F2F;">{{ forecastKpi.deficitCount }}</span><span class="an-kpi-unit">из {{ forecastKpi.withStockCount }} с остатками</span></div>
-              <div class="an-kpi-sub">{{ forecastKpi.criticalCount ? 'критично (на 3 дня и менее): ' + forecastKpi.criticalCount : 'критичных нет' }}{{ forecastKpi.noStockCount ? ' · без данных: ' + forecastKpi.noStockCount : '' }}</div>
+            <div class="dash-kpi dash-kpi--red">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="warning" size="sm"/></span><span class="dash-kpi__label">Товаров с дефицитом</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value" style="color:#D32F2F;">{{ forecastKpi.deficitCount }}</span><span class="dash-kpi__unit">из {{ forecastKpi.withStockCount }} с остатками</span></div>
+                <div class="dash-kpi__sub">{{ forecastKpi.criticalCount ? 'критично (на 3 дня и менее): ' + forecastKpi.criticalCount : 'критичных нет' }}{{ forecastKpi.noStockCount ? ' / без данных: ' + forecastKpi.noStockCount : '' }}</div>
+              </div>
             </div>
-            <div class="an-kpi">
-              <div class="an-kpi-head"><span class="an-kpi-icon"><BkIcon name="chartUp" size="sm"/></span> Тренд заказов</div>
-              <div class="an-kpi-row"><span class="an-kpi-val">{{ forecastKpi.trendUp }}</span><span class="an-kpi-unit">растут</span></div>
-              <div class="an-kpi-sub">падают: {{ forecastKpi.trendDown }} · стабильно: {{ forecastKpi.trendStable }}</div>
+            <div class="dash-kpi dash-kpi--green">
+              <div class="dash-kpi__left-border"></div>
+              <div class="dash-kpi__body">
+                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="chartUp" size="sm"/></span><span class="dash-kpi__label">Тренд заказов</span></div>
+                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ forecastKpi.trendUp }}</span><span class="dash-kpi__unit">растут</span></div>
+                <div class="dash-kpi__sub">падают: {{ forecastKpi.trendDown }} / стабильно: {{ forecastKpi.trendStable }}</div>
+              </div>
             </div>
           </div>
 
-          <!-- Легенда-пояснение -->
+          <!-- Легенда -->
           <div class="fc-legend">
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#E8F5E9;border-color:#4CAF50;"></span> <b>Ок</b> — запаса больше чем на 7 дней</div>
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFF3E0;border-color:#FF9800;"></span> <b>Мало</b> — запаса на 4–7 дней</div>
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFEBEE;border-color:#F44336;"></span> <b>Критично</b> — запаса на 3 дня и менее</div>
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#F5F5F5;border-color:#BDBDBD;"></span> <b>Нет данных</b> — остатки не внесены (на стр. Анализ)</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#E8F5E9;border-color:#4CAF50;"></span> <b>Ок</b> --- запаса больше чем на 7 дней</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFF3E0;border-color:#FF9800;"></span> <b>Мало</b> --- запаса на 4-7 дней</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFEBEE;border-color:#F44336;"></span> <b>Критично</b> --- запаса на 3 дня и менее</div>
+            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#F5F5F5;border-color:#BDBDBD;"></span> <b>Нет данных</b> --- остатки не внесены (на стр. Анализ)</div>
           </div>
 
           <!-- Таблица -->
-          <div class="an-card fc-table-card">
+          <div class="dash-card fc-table-card">
             <div class="fc-table-wrap">
               <table class="fc-table">
                 <thead>
@@ -396,16 +593,16 @@
                       <span class="fc-trend-label" :class="'fc-trend-' + item.trend">{{ trendLabel(item.trend) }}</span>
                     </td>
                     <td class="fc-td fc-td-num" :class="{ 'fc-no-data': !item.hasConsumptionData }">
-                      {{ item.hasConsumptionData ? item.avgPerDay.toFixed(1) : '—' }}
+                      {{ item.hasConsumptionData ? item.avgPerDay.toFixed(1) : '---' }}
                     </td>
                     <td class="fc-td fc-td-num fc-td-forecast" :class="{ 'fc-no-data': !item.hasConsumptionData }">
-                      {{ item.hasConsumptionData ? Math.round(forecastVal(item)) : '—' }}
+                      {{ item.hasConsumptionData ? Math.round(forecastVal(item)) : '---' }}
                     </td>
                     <td class="fc-td fc-td-num" :class="{ 'fc-no-data': item.stock === null }">
-                      {{ item.stock !== null ? Math.round(item.stock) : '—' }}
+                      {{ item.stock !== null ? Math.round(item.stock) : '---' }}
                     </td>
                     <td class="fc-td fc-td-num" :class="item.daysOfStock !== null && item.daysOfStock <= 3 ? 'fc-days-critical' : item.daysOfStock !== null && item.daysOfStock <= 7 ? 'fc-days-warning' : item.daysOfStock === null ? 'fc-no-data' : ''">
-                      {{ item.daysOfStock === null ? '—' : item.daysOfStock >= 999 ? '—' : item.daysOfStock }}
+                      {{ item.daysOfStock === null ? '---' : item.daysOfStock >= 999 ? '---' : item.daysOfStock }}
                     </td>
                     <td class="fc-td fc-td-status">
                       <span class="fc-status-badge" :class="'fc-badge-' + item.stockStatus">{{ stockStatusLabel(item.stockStatus) }}</span>
@@ -420,8 +617,8 @@
           </div>
 
           <div class="fc-note">
-            <BkIcon name="bulb" size="sm"/> <b>Откуда данные:</b> расход и остатки — со страницы Анализ.
-            Прогноз = дневной расход × количество дней. Динамика и тренд — из истории заказов за 60 дней.
+            <BkIcon name="bulb" size="sm"/> <b>Откуда данные:</b> расход и остатки --- со страницы Анализ.
+            Прогноз = дневной расход x количество дней. Динамика и тренд --- из истории заказов за 60 дней.
           </div>
         </template>
       </template>
@@ -432,7 +629,7 @@
           <BkIcon name="success" size="sm"/> Нет значимых изменений за выбранный период
         </div>
         <div v-for="(c, i) in data.changes" :key="i" class="an-change" :class="'sev-' + c.severity">
-          <span class="an-change-icon">{{ c.icon }}</span>
+          <div class="an-change-sev-badge" :class="'an-sev-' + c.severity">{{ c.severity === 'danger' ? 'КРИТИЧНО' : 'ВНИМАНИЕ' }}</div>
           <div class="an-change-body">
             <div class="an-change-title">{{ c.title }}</div>
             <div class="an-change-text">{{ c.text }}</div>
@@ -440,110 +637,6 @@
           </div>
           <span class="an-change-tag">{{ changeTypeLabel(c.type) }}</span>
           <button v-if="c.sku" class="an-change-action" @click="goToProduct(c.sku)">Посмотреть</button>
-        </div>
-      </template>
-
-      <!-- ===== REPORTS ===== -->
-      <template v-if="activeTab === 'reports'">
-        <div class="rpt-toolbar">
-          <button class="btn primary" @click="exportAnalytics" :disabled="!data"><BkIcon name="excel" size="sm"/> Экспорт в Excel</button>
-        </div>
-
-        <!-- Топ-10 товаров -->
-        <div v-if="data" class="an-card">
-          <div class="an-card-title"><BkIcon name="fire" size="sm"/> Топ-10 товаров</div>
-          <div v-for="(p, i) in data.topProducts" :key="p.sku || p.name" class="rpt-prod-row">
-            <div class="rpt-prod-medal">{{ i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) }}</div>
-            <div class="rpt-prod-info">
-              <div class="rpt-prod-name">{{ p.name || p.sku }}</div>
-              <div class="rpt-prod-bar-wrap">
-                <div class="rpt-prod-bar" :style="{ width: pPct(p) + '%' }"></div>
-              </div>
-            </div>
-            <div class="rpt-prod-stats">
-              <span class="rpt-prod-boxes">{{ nf(p.boxes) }} кор</span>
-              <span v-if="p.deltaBoxes !== null" class="rpt-prod-delta" :class="p.deltaBoxes >= 0 ? 'up' : 'down'">
-                {{ p.deltaBoxes >= 0 ? '▲' : '▼' }} {{ Math.abs(p.deltaBoxes) }}%
-              </span>
-            </div>
-            <div class="rpt-prod-forecast">~{{ nf(p.forecast) }}</div>
-          </div>
-        </div>
-
-        <!-- Топ-5 поставщиков -->
-        <div v-if="data" class="an-card">
-          <div class="an-card-title"><BkIcon name="building" size="sm"/> Топ-5 поставщиков</div>
-          <div v-for="(s, i) in data.suppliers.slice(0, 5)" :key="s.supplier" class="rpt-sup-row">
-            <div class="rpt-sup-medal">{{ i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) }}</div>
-            <div class="rpt-sup-info">
-              <span class="rpt-sup-name">{{ s.supplier }}</span>
-              <div class="rpt-sup-bar-wrap">
-                <div class="rpt-sup-bar" :style="{ width: sPct(s) + '%', background: s.color }"></div>
-              </div>
-            </div>
-            <div class="rpt-sup-stats">
-              <span>{{ nf(s.boxes) }} кор</span>
-              <span class="rpt-sup-orders">{{ s.orders }} зак.</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Сезонность -->
-        <div class="an-card">
-          <div class="an-card-title"><BkIcon name="calendar" size="sm"/> Сезонность (12 мес.)</div>
-          <div v-if="seasonalityLoading" style="text-align:center;padding:30px;color:var(--text-muted);">
-            <BurgerSpinner text="Загрузка..." />
-          </div>
-          <div v-else-if="!seasonality" style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Нет данных</div>
-          <template v-else>
-            <div class="rpt-season-chart">
-              <div v-for="m in seasonality.monthData" :key="m.key" class="rpt-season-col">
-                <div class="rpt-season-val">{{ nf(m.boxes) }}</div>
-                <div class="rpt-season-bar-area">
-                  <div class="rpt-season-bar" :style="{ height: seasonBarH(m.boxes, seasonality.maxBoxes) + 'px' }"></div>
-                  <div v-if="m.movingAvg !== null" class="rpt-season-avg-dot" :style="{ bottom: seasonBarH(m.movingAvg, seasonality.maxBoxes) + 'px' }"></div>
-                </div>
-                <div class="rpt-season-label">{{ m.label }}</div>
-              </div>
-            </div>
-            <div class="rpt-season-legend">
-              <span class="rpt-season-legend-item"><span class="rpt-season-legend-bar"></span> Коробок</span>
-              <span class="rpt-season-legend-item"><span class="rpt-season-legend-dot"></span> Скольз. среднее (3 мес.)</span>
-            </div>
-            <!-- YoY table -->
-            <div v-if="seasonality.monthData.some(m => m.yoyDelta !== null)" class="rpt-yoy-table">
-              <div class="rpt-yoy-title">Год к году</div>
-              <div class="rpt-yoy-grid">
-                <div v-for="m in seasonality.monthData" :key="m.key + '-yoy'" class="rpt-yoy-cell">
-                  <div class="rpt-yoy-label">{{ m.label }}</div>
-                  <div v-if="m.yoyDelta !== null" class="rpt-yoy-val" :class="m.yoyDelta >= 0 ? 'up' : 'down'">
-                    {{ m.yoyDelta >= 0 ? '+' : '' }}{{ m.yoyDelta }}%
-                  </div>
-                  <div v-else class="rpt-yoy-val">—</div>
-                </div>
-              </div>
-            </div>
-          </template>
-        </div>
-
-        <!-- Прогноз расхода -->
-        <div v-if="data" class="an-card">
-          <div class="an-card-title"><BkIcon name="chartUp" size="sm"/> Прогноз расхода</div>
-          <div v-for="p in data.topProducts.slice(0, 5)" :key="'fc-' + (p.sku || p.name)" class="rpt-fc-row">
-            <div class="rpt-fc-name">{{ p.name || p.sku }}</div>
-            <div class="rpt-fc-bars">
-              <div class="rpt-fc-bar-wrap">
-                <div class="rpt-fc-bar rpt-fc-fact" :style="{ width: (p.boxes / Math.max(p.boxes, p.forecast, 1)) * 100 + '%' }"></div>
-              </div>
-              <div class="rpt-fc-bar-wrap">
-                <div class="rpt-fc-bar rpt-fc-forecast" :style="{ width: (p.forecast / Math.max(p.boxes, p.forecast, 1)) * 100 + '%' }"></div>
-              </div>
-            </div>
-            <div class="rpt-fc-nums">
-              <div>Факт: {{ nf(p.boxes) }}</div>
-              <div>Прогноз: {{ nf(p.forecast) }}</div>
-            </div>
-          </div>
         </div>
       </template>
 
@@ -586,10 +679,16 @@ const forecastPeriod = ref(7);
 const forecastSupplier = ref('');
 const forecastSort = ref({ col: 'default', asc: true });
 
+// Prices for monetary metrics
+const prices = ref(null);
+
 let _analyticsLoadId = 0;
 
 const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 function nf(v) { return formatter.format(v || 0); }
+
+const moneyFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+function nfMoney(v) { return moneyFormatter.format(Math.round(v || 0)); }
 
 // Chart: only days with orders (skip zero days)
 const chartDays = computed(() => {
@@ -601,15 +700,181 @@ const maxTotal = computed(() => chartDays.value.length ? Math.max(...chartDays.v
 const criticalChanges = computed(() => data.value ? data.value.changes.filter(c => c.severity === 'danger') : []);
 
 const tabs = [
-  { id: 'overview', label: 'Обзор' },
-  { id: 'planfact', label: 'Поставки' },
-  { id: 'suppliers', label: 'Поставщики' },
-  { id: 'products', label: 'Товары' },
-  { id: 'forecast', label: 'Прогноз' },
-  { id: 'changes', label: 'Изменения' },
-  { id: 'reports', label: 'Отчёты' },
-  { id: 'abc-xyz', label: 'ABC/XYZ' },
+  { id: 'overview', label: 'Дашборд', icon: 'analytics' },
+  { id: 'planfact', label: 'План/Факт', icon: 'success' },
+  { id: 'suppliers', label: 'Поставщики', icon: 'building' },
+  { id: 'products', label: 'Товары и отчёты', icon: 'fire' },
+  { id: 'forecast', label: 'Прогноз', icon: 'chartUp' },
+  { id: 'changes', label: 'Изменения', icon: 'warning' },
+  { id: 'abc-xyz', label: 'ABC/XYZ', icon: 'planning' },
 ];
+
+// ---- Prices loading ----
+async function loadPrices() {
+  const entity = orderStore.settings.legalEntity;
+  let q = db.from('product_prices').select('sku,price,vat_rate,unit_type,legal_entity');
+  if (entity) q = q.eq('legal_entity', entity);
+  const { data: d } = await q;
+  if (d) {
+    prices.value = {};
+    for (const p of d) prices.value[p.sku] = p;
+  }
+}
+
+// ---- Money stats ----
+const moneyStats = computed(() => {
+  const result = { totalSpend: 0, avgOrderCost: 0, costPerBox: 0 };
+  if (!data.value || !prices.value) return result;
+  let total = 0;
+  for (const p of data.value.topProducts) {
+    const priceInfo = prices.value[p.sku];
+    if (priceInfo && priceInfo.price) {
+      const unitPrice = priceInfo.price * (1 + (priceInfo.vat_rate || 0) / 100);
+      total += p.boxes * unitPrice;
+    }
+  }
+  result.totalSpend = total;
+  result.avgOrderCost = data.value.totals.orders > 0 ? total / data.value.totals.orders : 0;
+  result.costPerBox = data.value.totals.boxes > 0 ? total / data.value.totals.boxes : 0;
+  return result;
+});
+
+// ---- Overview computed ----
+const uniqueProductsCount = computed(() => {
+  if (!data.value || !data.value.topProducts) return 0;
+  return data.value.topProducts.length;
+});
+
+const avgBoxesPerSupplier = computed(() => {
+  if (!data.value || !data.value.suppliers.length) return 0;
+  return Math.round(data.value.totals.boxes / data.value.suppliers.length);
+});
+
+const topSupplierConcentration = computed(() => {
+  if (!data.value || !data.value.suppliers.length || !data.value.totals.boxes) return 0;
+  return Math.round(data.value.suppliers[0].boxes / data.value.totals.boxes * 100);
+});
+
+const busiestSupplierName = computed(() => {
+  if (!data.value || !data.value.suppliers.length) return '---';
+  return data.value.suppliers[0].supplier;
+});
+
+// Insights
+const insights = computed(() => {
+  if (!data.value) return [];
+  const list = [];
+  // Volume change
+  if (data.value.deltaBoxes !== null) {
+    if (data.value.deltaBoxes > 10) {
+      list.push({ type: 'good', text: 'Объём вырос на ' + data.value.deltaBoxes + '% по сравнению с прошлым периодом' });
+    } else if (data.value.deltaBoxes < -10) {
+      list.push({ type: 'bad', text: 'Объём снизился на ' + Math.abs(data.value.deltaBoxes) + '% по сравнению с прошлым периодом' });
+    } else {
+      list.push({ type: 'neutral', text: 'Объём стабилен: изменение ' + (data.value.deltaBoxes >= 0 ? '+' : '') + data.value.deltaBoxes + '%' });
+    }
+  }
+  // Busiest supplier
+  if (data.value.suppliers.length > 1) {
+    list.push({ type: 'neutral', text: 'Самый загруженный поставщик: ' + busiestSupplierName.value + ' (' + topSupplierConcentration.value + '% объёма)' });
+  }
+  // Critical changes
+  if (criticalChanges.value.length) {
+    list.push({ type: 'bad', text: criticalChanges.value.length + ' товаров с критичными изменениями' });
+  }
+  // Fulfillment
+  if (data.value.planFact.receivedOrders > 0) {
+    if (data.value.planFact.fulfillmentPct >= 95) {
+      list.push({ type: 'good', text: 'Выполнение поставок: ' + data.value.planFact.fulfillmentPct + '%' });
+    } else if (data.value.planFact.fulfillmentPct < 80) {
+      list.push({ type: 'bad', text: 'Низкое выполнение поставок: ' + data.value.planFact.fulfillmentPct + '%' });
+    } else {
+      list.push({ type: 'neutral', text: 'Выполнение поставок: ' + data.value.planFact.fulfillmentPct + '%' });
+    }
+  }
+  // Deficit from forecast
+  if (forecast.value && forecast.value.kpi.deficitCount > 0) {
+    list.push({ type: 'bad', text: forecast.value.kpi.deficitCount + ' товаров с дефицитом запасов' });
+  }
+  // Money
+  if (moneyStats.value.totalSpend > 0) {
+    list.push({ type: 'neutral', text: 'Объём закупок за период: ~' + nfMoney(moneyStats.value.totalSpend) + ' BYN' });
+  }
+  return list;
+});
+
+// Area chart
+const areaChartW = 600;
+const areaChartH = 160;
+
+const areaPoints = computed(() => {
+  if (!chartDays.value.length) return [];
+  const pts = [];
+  const len = chartDays.value.length;
+  const padX = 20;
+  const padY = 10;
+  const usableW = areaChartW - padX * 2;
+  const usableH = areaChartH - padY * 2;
+  for (let i = 0; i < len; i++) {
+    const x = len === 1 ? areaChartW / 2 : padX + (i / (len - 1)) * usableW;
+    const y = padY + usableH - (chartDays.value[i].total / maxTotal.value) * usableH;
+    pts.push({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+  }
+  return pts;
+});
+
+const linePath = computed(() => {
+  if (!areaPoints.value.length) return '';
+  return areaPoints.value.map((p, i) => (i === 0 ? 'M' : 'L') + p.x + ',' + p.y).join(' ');
+});
+
+const areaPath = computed(() => {
+  if (!areaPoints.value.length) return '';
+  const pts = areaPoints.value;
+  let d = 'M' + pts[0].x + ',' + pts[0].y;
+  for (let i = 1; i < pts.length; i++) {
+    d += ' L' + pts[i].x + ',' + pts[i].y;
+  }
+  d += ' L' + pts[pts.length - 1].x + ',' + areaChartH;
+  d += ' L' + pts[0].x + ',' + areaChartH + ' Z';
+  return d;
+});
+
+const areaLabelDays = computed(() => {
+  if (!chartDays.value.length) return [];
+  const d = chartDays.value;
+  if (d.length <= 10) return d;
+  // Show every nth label
+  const step = Math.ceil(d.length / 8);
+  return d.filter((_, i) => i % step === 0 || i === d.length - 1);
+});
+
+// Donut chart
+const donutSegments = computed(() => {
+  if (!data.value || !data.value.suppliers.length) return [];
+  const total = data.value.totals.boxes || 1;
+  const circumference = 2 * Math.PI * 46; // r=46
+  const segments = [];
+  let offset = 0;
+  for (const s of data.value.suppliers) {
+    const pct = s.boxes / total;
+    const len = pct * circumference;
+    const gap = 2;
+    segments.push({
+      color: s.color,
+      dash: (len - gap) + ' ' + (circumference - len + gap),
+      offset: -offset,
+    });
+    offset += len;
+  }
+  return segments;
+});
+
+function fulfillmentCls(pct) {
+  if (pct >= 95) return 'val-good';
+  if (pct >= 80) return 'val-warn';
+  return 'val-bad';
+}
 
 function barH(boxes) { return Math.max(Math.round((boxes / maxTotal.value) * 110), 4); }
 function isTop(day, sup) {
@@ -657,7 +922,7 @@ async function load() {
 
 // Lazy-load сезонности и прогноза при переключении на табы
 watch(activeTab, async (tab) => {
-  if (tab === 'reports' && !seasonality.value && !seasonalityLoading.value) {
+  if (tab === 'products' && !seasonality.value && !seasonalityLoading.value) {
     const myId = ++_seasonLoadId;
     seasonalityLoading.value = true;
     try {
@@ -748,7 +1013,7 @@ function toggleForecastSort(col) {
 
 function sortIcon(col) {
   if (forecastSort.value.col !== col) return '';
-  return forecastSort.value.asc ? ' ▲' : ' ▼';
+  return forecastSort.value.asc ? ' \u25B2' : ' \u25BC';
 }
 
 function sparklinePath(data, w, h) {
@@ -776,9 +1041,9 @@ function stockStatusLabel(status) {
 }
 
 function trendLabel(trend) {
-  if (trend === 'up') return '▲ Растёт';
-  if (trend === 'down') return '▼ Падает';
-  return '— Стабильно';
+  if (trend === 'up') return '\u25B2 Растёт';
+  if (trend === 'down') return '\u25BC Падает';
+  return '--- Стабильно';
 }
 
 async function createOrderFromForecast() {
@@ -834,9 +1099,11 @@ watch(() => orderStore.settings.legalEntity, () => {
   seasonalityLoading.value = false;
   forecastLoading.value = false;
   forecastSupplier.value = '';
+  prices.value = null;
   load();
+  loadPrices();
   // Перезагрузить данные таба, если пользователь уже на нём
-  if (activeTab.value === 'reports') {
+  if (activeTab.value === 'products') {
     const myId = ++_seasonLoadId;
     seasonalityLoading.value = true;
     getSeasonalityData(orderStore.settings.legalEntity)
@@ -846,150 +1113,239 @@ watch(() => orderStore.settings.legalEntity, () => {
   }
   if (activeTab.value === 'forecast') loadForecast();
 });
-onMounted(() => load());
+onMounted(() => {
+  load();
+  loadPrices();
+});
 </script>
 
 <style scoped>
 .analytics-view { padding: 0; display: flex; flex-direction: column; }
 
-/* Header */
+/* ===== Header ===== */
 .an-header {
   display: flex; align-items: center; justify-content: space-between;
   flex-shrink: 0; margin-bottom: 8px;
 }
 .an-period {
-  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
   font-size: 12px; font-weight: 600; background: var(--card); color: var(--text);
+  cursor: pointer;
 }
 
-/* Alert banner */
+/* ===== Alert banner ===== */
 .an-alert-banner {
-  padding: 7px 14px; background: #FFF3E0; border: 1px solid #FFCC80;
-  border-radius: 8px; font-size: 12px; color: #E65100; cursor: pointer;
+  padding: 8px 14px; background: linear-gradient(135deg, #FFF3E0, #FFE0B2); border: 1px solid #FFCC80;
+  border-radius: 10px; font-size: 12px; color: #E65100; cursor: pointer;
   display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-bottom: 8px;
+  transition: box-shadow 0.2s;
 }
-.an-alert-link { margin-left: auto; font-weight: 600; }
+.an-alert-banner:hover { box-shadow: 0 2px 8px rgba(230, 81, 0, 0.15); }
+.an-alert-link { margin-left: auto; font-weight: 700; }
 
-/* Tabs */
+/* ===== Tabs (pill style) ===== */
 .an-tabs {
-  display: flex; gap: 0; border-bottom: 2px solid var(--border-light);
-  margin-bottom: 12px; flex-shrink: 0;
+  display: flex; gap: 4px; margin-bottom: 14px; flex-shrink: 0;
+  padding: 4px; background: var(--bg); border-radius: 12px;
+  overflow-x: auto;
 }
 .an-tab {
   padding: 7px 14px; font-size: 12px; font-weight: 600; border: none; cursor: pointer;
-  border-bottom: 2px solid transparent; margin-bottom: -2px; background: none;
-  color: var(--text-muted); transition: all 0.1s; display: flex; align-items: center; gap: 4px;
+  border-radius: 8px; background: none;
+  color: var(--text-muted); transition: all 0.15s; display: flex; align-items: center; gap: 5px;
+  white-space: nowrap;
 }
-.an-tab.active { color: var(--text); border-bottom-color: var(--text); }
-.an-tab:hover { color: var(--text); }
+.an-tab.active {
+  color: #fff; background: #502314;
+  box-shadow: 0 2px 6px rgba(80, 35, 20, 0.25);
+}
+.an-tab:not(.active):hover { color: var(--text); background: rgba(80, 35, 20, 0.06); }
+.an-tab-text { }
 .an-tab-badge {
   font-size: 10px; font-weight: 700; background: #F44336; color: #fff;
   padding: 0 5px; border-radius: 8px; line-height: 16px;
 }
 
-/* Content scroll area */
+/* ===== Content ===== */
 .an-content { flex: 1; overflow-y: auto; min-height: 0; }
 
-/* KPI grid */
-.an-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
-.an-kpi {
-  background: var(--card); border: 1px solid var(--border-light); border-radius: 10px; padding: 12px 14px;
-}
-.an-kpi-head { font-size: 11px; color: var(--text-muted); font-weight: 600; }
-.an-kpi-icon { margin-right: 2px; }
-.an-kpi-row { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
-.an-kpi-val { font-size: 24px; font-weight: 800; color: var(--text); }
-.an-kpi-sub { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+/* ===== Dashboard KPI Cards ===== */
+.dash-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
 
-.an-badge {
-  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px;
+.dash-kpi {
+  background: var(--card); border-radius: 14px; overflow: hidden;
+  display: flex; position: relative;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  transition: box-shadow 0.2s, transform 0.15s;
 }
-.an-badge.up { background: #E8F5E9; color: #2E7D32; }
-.an-badge.down { background: #FFEBEE; color: #C62828; }
+.dash-kpi:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
+.dash-kpi__left-border { width: 4px; flex-shrink: 0; }
+.dash-kpi--brown .dash-kpi__left-border { background: linear-gradient(to bottom, #502314, #7a4a3a); }
+.dash-kpi--orange .dash-kpi__left-border { background: linear-gradient(to bottom, #FF8732, #FFB366); }
+.dash-kpi--blue .dash-kpi__left-border { background: linear-gradient(to bottom, #1976D2, #64B5F6); }
+.dash-kpi--green .dash-kpi__left-border { background: linear-gradient(to bottom, #2E7D32, #81C784); }
+.dash-kpi--red .dash-kpi__left-border { background: linear-gradient(to bottom, #D32F2F, #EF9A9A); }
 
-/* Cards */
-.an-card {
-  background: var(--card); border: 1px solid var(--border-light); border-radius: 10px;
-  padding: 14px; margin-bottom: 12px;
+.dash-kpi__body { padding: 12px 14px; flex: 1; min-width: 0; }
+.dash-kpi__header { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.dash-kpi__icon { flex-shrink: 0; }
+.dash-kpi__label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+.dash-kpi__value-row { display: flex; align-items: baseline; gap: 8px; }
+.dash-kpi__value { font-size: 26px; font-weight: 800; color: var(--text); line-height: 1.1; }
+.dash-kpi__value.val-good { color: #2E7D32; }
+.dash-kpi__value.val-warn { color: #E65100; }
+.dash-kpi__value.val-bad { color: #D32F2F; }
+.dash-kpi__sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.dash-kpi__unit { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+
+/* Delta badges */
+.dash-badge {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+  display: inline-flex; align-items: center;
 }
-.an-card-header {
+.dash-badge--up { background: #E8F5E9; color: #2E7D32; }
+.dash-badge--down { background: #FFEBEE; color: #C62828; }
+
+/* Secondary stats row */
+.dash-secondary-row {
+  display: flex; gap: 10px; margin-bottom: 14px;
+}
+.dash-mini-stat {
+  flex: 1; background: var(--card); border-radius: 10px; padding: 10px 12px;
+  text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  border: 1px solid var(--border-light);
+}
+.dash-mini-stat__val { font-size: 18px; font-weight: 800; color: var(--text); display: block; }
+.dash-mini-stat__label { font-size: 10px; color: var(--text-muted); font-weight: 600; display: block; margin-top: 2px; }
+
+/* Insights panel */
+.dash-insights {
+  background: var(--card); border-radius: 14px; padding: 12px 16px; margin-bottom: 14px;
+  border: 1px solid var(--border-light); box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+.dash-insights__title { font-size: 13px; font-weight: 800; color: var(--text); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.dash-insights__list { display: flex; flex-direction: column; gap: 6px; }
+.dash-insight { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); padding: 4px 0; }
+.dash-insight__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dash-insight--good .dash-insight__dot { background: #4CAF50; }
+.dash-insight--bad .dash-insight__dot { background: #F44336; }
+.dash-insight--neutral .dash-insight__dot { background: #FF9800; }
+.dash-insight__text { flex: 1; }
+
+/* ===== Dashboard Cards ===== */
+.dash-card {
+  background: var(--card); border-radius: 14px; padding: 16px;
+  margin-bottom: 14px; border: 1px solid var(--border-light);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  transition: box-shadow 0.2s;
+}
+.dash-card:hover { box-shadow: 0 3px 14px rgba(0,0,0,0.09); }
+.dash-card__header {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 10px; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 12px; flex-wrap: wrap; gap: 6px;
 }
-.an-card-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.dash-card__title { font-size: 14px; font-weight: 800; color: var(--text); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 
 /* Legend */
-.an-legend { display: flex; flex-wrap: wrap; gap: 8px; }
-.an-legend-item { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text); }
-.an-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.dash-legend { display: flex; flex-wrap: wrap; gap: 10px; }
+.dash-legend__item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text); }
+.dash-legend__dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
-/* Chart */
-.an-chart {
-  display: flex; align-items: flex-end; gap: 4px; height: 160px;
-  overflow-x: auto; overflow-y: visible; padding-bottom: 24px;
+/* ===== Area chart ===== */
+.dash-area-chart { margin-top: 4px; }
+.dash-area-svg { width: 100%; height: 160px; display: block; }
+.dash-area-labels {
+  display: flex; justify-content: space-between; padding: 4px 20px 0;
 }
-.an-bar-col {
-  flex: 1; min-width: 28px; max-width: 70px;
-  display: flex; flex-direction: column; align-items: center;
-}
-.an-bar-num { font-size: 9px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; }
-.an-bar-stack {
-  width: 85%; display: flex; flex-direction: column; justify-content: flex-end; height: 120px;
-}
-.an-bar-seg { width: 100%; flex-shrink: 0; }
-.an-bar-label {
-  font-size: 9px; color: var(--text-muted); margin-top: 3px; border-top: 1px solid var(--border-light); padding-top: 2px;
-  white-space: nowrap; text-align: center;
-}
+.dash-area-label { font-size: 9px; color: var(--text-muted); }
 
-/* Supplier rows (overview) — bar aligned from right */
-.an-sup-table { display: flex; flex-direction: column; }
-.an-sup-row {
-  display: flex; align-items: center; gap: 10px; padding: 5px 0;
+/* ===== Two-column layout ===== */
+.dash-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 0; }
+.dash-card--half { margin-bottom: 14px; }
+
+/* Donut */
+.dash-donut-wrap { display: flex; align-items: center; gap: 16px; }
+.dash-donut-svg { width: 120px; height: 120px; flex-shrink: 0; }
+.dash-donut-center-val { font-size: 16px; font-weight: 800; fill: var(--text); }
+.dash-donut-center-label { font-size: 9px; fill: var(--text-muted); font-weight: 600; }
+.dash-donut-legend { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.dash-donut-legend__item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.dash-donut-legend__dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.dash-donut-legend__name { flex: 1; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-donut-legend__pct { font-weight: 700; color: var(--text); min-width: 32px; text-align: right; }
+
+/* Mini rows in overview */
+.dash-mini-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid var(--border-light); font-size: 12px;
+}
+.dash-mini-row:last-child { border-bottom: none; }
+.dash-mini-row__rank {
+  width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; flex-shrink: 0; background: var(--border-light); color: var(--text);
+}
+.dash-mini-row__rank.top { background: #FF8732; color: #fff; }
+.dash-mini-row__name { flex: 1; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-mini-row__val { font-weight: 700; color: var(--text); min-width: 40px; text-align: right; }
+.dash-mini-row__delta { font-size: 10px; font-weight: 700; min-width: 40px; text-align: right; }
+.dash-mini-row__delta.up { color: #2E7D32; }
+.dash-mini-row__delta.down { color: #C62828; }
+.dash-mini-row__meta { font-size: 10px; color: var(--text-muted); min-width: 40px; text-align: right; }
+
+/* Supplier bars on overview */
+.dash-sup-table { display: flex; flex-direction: column; }
+.dash-sup-row {
+  display: flex; align-items: center; gap: 10px; padding: 6px 0;
   border-bottom: 1px solid var(--border-light);
 }
-.an-sup-row:last-child { border-bottom: none; }
-.an-sup-left { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.an-sup-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-.an-sup-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.an-sup-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; width: 70%; }
-.an-sup-bar-wrap { flex: 1; height: 12px; background: var(--border-light); border-radius: 6px; overflow: hidden; }
-.an-sup-bar { height: 100%; border-radius: 6px; transition: width 0.4s; }
-.an-sup-val { font-size: 11px; font-weight: 700; color: var(--text); min-width: 50px; text-align: right; }
-.an-sup-meta { font-size: 10px; color: var(--text-muted); min-width: 45px; text-align: right; }
+.dash-sup-row:last-child { border-bottom: none; }
+.dash-sup-row__left { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.dash-sup-row__dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.dash-sup-row__name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-sup-row__right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; width: 65%; }
+.dash-sup-row__bar-wrap { flex: 1; height: 10px; background: var(--border-light); border-radius: 5px; overflow: hidden; }
+.dash-sup-row__bar { height: 100%; border-radius: 5px; transition: width 0.4s; }
+.dash-sup-row__val { font-size: 11px; font-weight: 700; color: var(--text); min-width: 50px; text-align: right; }
+.dash-sup-row__meta { font-size: 10px; color: var(--text-muted); min-width: 45px; text-align: right; }
 
-/* Supplier cards (tab) */
-.an-sup-card { padding: 14px 16px; }
-.an-sup-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.an-sup-dot-lg { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
-.an-sup-card-name { font-size: 15px; font-weight: 700; color: var(--text); flex: 1; }
-.an-sup-card-ago { font-size: 11px; color: var(--text-muted); }
+/* ===== Supplier cards (tab) ===== */
+.dash-sup-card { padding: 14px 16px; }
+.dash-sup-card__head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.dash-sup-card__dot { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
+.dash-sup-card__name { font-size: 15px; font-weight: 800; color: var(--text); flex: 1; }
+.dash-sup-card__ago { font-size: 11px; color: var(--text-muted); }
+.dash-sup-card__metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.dash-sup-card__metric { background: var(--bg); padding: 10px 6px; border-radius: 8px; text-align: center; }
+.dash-sup-card__metric-val { font-size: 18px; font-weight: 800; color: var(--text); }
+.dash-sup-card__metric-val.val-up { color: #2E7D32; font-size: 14px; }
+.dash-sup-card__metric-val.val-down { color: #C62828; font-size: 14px; }
+.dash-sup-card__metric-label { font-size: 9px; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
 
-.an-sup-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.an-sup-metric { background: var(--bg); padding: 8px 6px; border-radius: 6px; text-align: center; }
-.an-sup-metric-val { font-size: 18px; font-weight: 800; color: var(--text); }
-.an-sup-metric-val.val-up { color: #2E7D32; font-size: 14px; }
-.an-sup-metric-val.val-down { color: #C62828; font-size: 14px; }
-.an-sup-metric-label { font-size: 9px; color: var(--text-muted); font-weight: 600; }
-
-/* Products */
+/* ===== Products + Reports (merged) ===== */
 .an-prod-header {
   padding: 10px 14px; border-bottom: 1px solid var(--border-light);
-  font-size: 14px; font-weight: 700; color: var(--text);
+  font-size: 14px; font-weight: 800; color: var(--text);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.an-prod-header-money {
+  font-size: 12px; font-weight: 700; color: #1976D2;
+  display: flex; align-items: center; gap: 4px;
 }
 .an-prod-row {
   display: flex; align-items: center; gap: 10px; padding: 9px 14px;
   border-bottom: 1px solid var(--border-light);
+  transition: background 0.1s;
 }
+.an-prod-row:hover { background: rgba(0,0,0,0.015); }
 .an-prod-row:last-child { border-bottom: none; }
 .an-prod-rank {
   width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; flex-shrink: 0; background: var(--border); color: var(--text);
 }
-.an-prod-rank.top { background: #F5A623; color: #fff; font-size: 12px; }
+.an-prod-rank.top { background: #FF8732; color: #fff; font-size: 12px; }
 .an-prod-info { flex: 1; min-width: 0; }
 .an-prod-line1 { display: flex; align-items: baseline; gap: 5px; }
-.an-prod-sku { font-size: 10px; font-weight: 700; color: #F5A623; }
+.an-prod-sku { font-size: 10px; font-weight: 700; color: #FF8732; }
 .an-prod-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-prod-progress { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-top: 3px; }
 .an-prod-progress-bar { height: 100%; background: linear-gradient(90deg, #4CAF50, #81C784); border-radius: 2px; transition: width 0.4s; }
@@ -998,23 +1354,77 @@ onMounted(() => load());
 .an-prod-delta { font-size: 10px; font-weight: 700; }
 .an-prod-delta.up { color: #2E7D32; }
 .an-prod-delta.down { color: #C62828; }
+.an-prod-cost { font-size: 9px; color: #1976D2; font-weight: 600; margin-top: 1px; }
 .an-prod-forecast { border-left: 1px solid var(--border-light); padding-left: 10px; min-width: 60px; text-align: right; flex-shrink: 0; }
 .an-prod-forecast-label { font-size: 9px; color: var(--text-muted); }
-.an-prod-forecast-val { font-size: 14px; font-weight: 700; color: #2196F3; }
+.an-prod-forecast-val { font-size: 14px; font-weight: 700; color: #1976D2; }
 
 .an-forecast-note {
   margin-top: 4px; padding: 8px 12px; background: #E3F2FD; border-radius: 8px;
   border: 1px solid #90CAF9; font-size: 12px; color: #1565C0;
 }
 
-/* Changes */
+/* ===== Reports toolbar ===== */
+.rpt-toolbar {
+  display: flex; justify-content: flex-end; margin-bottom: 12px;
+}
+
+/* Seasonality */
+.rpt-season-chart {
+  display: flex; align-items: flex-end; gap: 6px; height: 180px;
+  overflow-x: auto; padding-bottom: 28px; margin-top: 12px;
+}
+.rpt-season-col {
+  flex: 1; min-width: 40px; max-width: 80px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.rpt-season-val { font-size: 9px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; }
+.rpt-season-bar-area { width: 70%; height: 130px; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+.rpt-season-bar { width: 100%; background: linear-gradient(to top, #FF8732, #ffb366); border-radius: 3px 3px 0 0; transition: height 0.4s; }
+.rpt-season-avg-dot {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #D62300; border: 2px solid var(--card);
+  z-index: 2;
+}
+.rpt-season-label {
+  font-size: 9px; color: var(--text-muted); margin-top: 3px;
+  border-top: 1px solid var(--border-light); padding-top: 2px;
+  white-space: nowrap; text-align: center;
+}
+.rpt-season-legend {
+  display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-muted);
+}
+.rpt-season-legend-item { display: flex; align-items: center; gap: 4px; }
+.rpt-season-legend-bar { width: 16px; height: 6px; border-radius: 2px; background: linear-gradient(90deg, #FF8732, #ffb366); }
+.rpt-season-legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #D62300; }
+
+.rpt-yoy-table { margin-top: 14px; }
+.rpt-yoy-title { font-size: 12px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
+.rpt-yoy-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px;
+}
+.rpt-yoy-cell {
+  padding: 6px; background: var(--bg); border-radius: 6px; text-align: center;
+}
+.rpt-yoy-label { font-size: 9px; color: var(--text-muted); font-weight: 600; }
+.rpt-yoy-val { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-top: 2px; }
+.rpt-yoy-val.up { color: #2E7D32; }
+.rpt-yoy-val.down { color: #C62828; }
+
+/* ===== Changes ===== */
 .an-change {
   display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
   margin-bottom: 6px; border-radius: 10px;
 }
 .an-change.sev-danger { background: #FFF5F5; border: 1px solid #FFCDD2; }
 .an-change.sev-warning { background: #FFFCF0; border: 1px solid #FFE082; }
-.an-change-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.an-change-sev-badge {
+  font-size: 9px; font-weight: 800; padding: 3px 8px; border-radius: 4px;
+  flex-shrink: 0; white-space: nowrap; letter-spacing: 0.5px;
+}
+.an-sev-danger { background: #FFCDD2; color: #B71C1C; }
+.an-sev-warning { background: #FFE082; color: #BF360C; }
 .an-change-body { flex: 1; }
 .an-change-title { font-size: 13px; font-weight: 700; color: var(--text); }
 .an-change-text { font-size: 12px; color: var(--text); margin-top: 2px; }
@@ -1032,115 +1442,7 @@ onMounted(() => load());
 }
 .an-change-action:hover { background: #BBDEFB; }
 
-/* ===== REPORTS TAB ===== */
-.rpt-toolbar {
-  display: flex; justify-content: flex-end; margin-bottom: 12px;
-}
-
-/* Top products in reports */
-.rpt-prod-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px 0;
-  border-bottom: 1px solid var(--border-light);
-}
-.rpt-prod-row:last-child { border-bottom: none; }
-.rpt-prod-medal { width: 28px; text-align: center; font-size: 16px; flex-shrink: 0; }
-.rpt-prod-info { flex: 1; min-width: 0; }
-.rpt-prod-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rpt-prod-bar-wrap { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-top: 4px; }
-.rpt-prod-bar { height: 100%; background: linear-gradient(90deg, #4CAF50, #81C784); border-radius: 2px; transition: width 0.4s; }
-.rpt-prod-stats { text-align: right; min-width: 80px; flex-shrink: 0; }
-.rpt-prod-boxes { font-size: 13px; font-weight: 700; color: var(--text); }
-.rpt-prod-delta { font-size: 10px; font-weight: 700; margin-left: 4px; }
-.rpt-prod-delta.up { color: #2E7D32; }
-.rpt-prod-delta.down { color: #C62828; }
-.rpt-prod-forecast { font-size: 12px; font-weight: 700; color: #2196F3; min-width: 50px; text-align: right; flex-shrink: 0; }
-
-/* Top suppliers in reports */
-.rpt-sup-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px 0;
-  border-bottom: 1px solid var(--border-light);
-}
-.rpt-sup-row:last-child { border-bottom: none; }
-.rpt-sup-medal { width: 28px; text-align: center; font-size: 16px; flex-shrink: 0; }
-.rpt-sup-info { flex: 1; min-width: 0; }
-.rpt-sup-name { font-size: 13px; font-weight: 600; color: var(--text); }
-.rpt-sup-bar-wrap { height: 10px; background: var(--border-light); border-radius: 5px; overflow: hidden; margin-top: 4px; }
-.rpt-sup-bar { height: 100%; border-radius: 5px; transition: width 0.4s; }
-.rpt-sup-stats { text-align: right; min-width: 90px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--text); }
-.rpt-sup-orders { color: var(--text-muted); margin-left: 6px; }
-
-/* Seasonality chart */
-.rpt-season-chart {
-  display: flex; align-items: flex-end; gap: 6px; height: 180px;
-  overflow-x: auto; padding-bottom: 28px; margin-top: 12px;
-}
-.rpt-season-col {
-  flex: 1; min-width: 40px; max-width: 80px;
-  display: flex; flex-direction: column; align-items: center;
-}
-.rpt-season-val { font-size: 9px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; }
-.rpt-season-bar-area { width: 70%; height: 130px; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
-.rpt-season-bar { width: 100%; background: linear-gradient(to top, #F5A623, #ffb366); border-radius: 3px 3px 0 0; transition: height 0.4s; }
-.rpt-season-avg-dot {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #D62300; border: 2px solid var(--card);
-  z-index: 2;
-}
-.rpt-season-label {
-  font-size: 9px; color: var(--text-muted); margin-top: 3px;
-  border-top: 1px solid var(--border-light); padding-top: 2px;
-  white-space: nowrap; text-align: center;
-}
-.rpt-season-legend {
-  display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-muted);
-}
-.rpt-season-legend-item { display: flex; align-items: center; gap: 4px; }
-.rpt-season-legend-bar { width: 16px; height: 6px; border-radius: 2px; background: linear-gradient(90deg, #F5A623, #ffb366); }
-.rpt-season-legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #D62300; }
-
-/* YoY table */
-.rpt-yoy-table { margin-top: 14px; }
-.rpt-yoy-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-.rpt-yoy-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px;
-}
-.rpt-yoy-cell {
-  padding: 6px; background: var(--bg); border-radius: 6px; text-align: center;
-}
-.rpt-yoy-label { font-size: 9px; color: var(--text-muted); font-weight: 600; }
-.rpt-yoy-val { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-top: 2px; }
-.rpt-yoy-val.up { color: #2E7D32; }
-.rpt-yoy-val.down { color: #C62828; }
-
-/* Forecast */
-.rpt-fc-row {
-  display: flex; align-items: center; gap: 12px; padding: 8px 0;
-  border-bottom: 1px solid var(--border-light);
-}
-.rpt-fc-row:last-child { border-bottom: none; }
-.rpt-fc-name { font-size: 12px; font-weight: 600; color: var(--text); min-width: 120px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rpt-fc-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.rpt-fc-bar-wrap { height: 8px; background: var(--border-light); border-radius: 4px; overflow: hidden; }
-.rpt-fc-bar { height: 100%; border-radius: 4px; transition: width 0.4s; }
-.rpt-fc-fact { background: #4CAF50; }
-.rpt-fc-forecast { background: #2196F3; opacity: 0.6; }
-.rpt-fc-nums { font-size: 10px; color: var(--text-muted); min-width: 80px; text-align: right; flex-shrink: 0; line-height: 1.6; }
-
-@media (max-width: 768px) {
-  .an-kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .an-tabs { overflow-x: auto; }
-  .an-tab { padding: 7px 10px; font-size: 11px; white-space: nowrap; }
-}
-@media (max-width: 480px) {
-  .an-tab { padding: 6px 8px; font-size: 10px; }
-  .an-kpi-grid { grid-template-columns: 1fr; }
-  .an-sup-metrics { grid-template-columns: repeat(2, 1fr); }
-  .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }
-  .rpt-fc-name { min-width: 80px; }
-}
-
-/* ═══ Plan-Fact analytics ═══ */
+/* ===== Plan-Fact ===== */
 .an-pf-bar-wrap {
   display: flex; height: 28px; border-radius: 6px; overflow: hidden;
   border: 1px solid var(--border-light, #eee); margin-bottom: 10px;
@@ -1165,7 +1467,6 @@ onMounted(() => load());
   font-size: 13px; color: #1565C0;
 }
 
-/* ═══ Plan-Fact: Trend by day ═══ */
 .an-pf-trend {
   display: flex; align-items: flex-end; gap: 6px; height: 140px;
   overflow-x: auto; padding-bottom: 24px; margin-top: 8px;
@@ -1197,7 +1498,6 @@ onMounted(() => load());
 .an-pf-legend-plan { width: 12px; height: 6px; border-radius: 2px; background: #E0E0E0; }
 .an-pf-legend-fact { width: 12px; height: 6px; border-radius: 2px; background: #4CAF50; }
 
-/* ═══ Plan-Fact: Suppliers ═══ */
 .an-pf-sup-row {
   display: flex; align-items: center; gap: 10px; padding: 7px 0;
   border-bottom: 1px solid var(--border-light);
@@ -1213,7 +1513,6 @@ onMounted(() => load());
 .an-pf-sup-detail { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 .an-pf-sup-disc { font-size: 10px; font-weight: 700; color: #E65100; background: #FFF3E0; padding: 1px 5px; border-radius: 4px; }
 
-/* ═══ Plan-Fact: Products with discrepancies ═══ */
 .an-pf-prod-row {
   display: flex; align-items: center; gap: 10px; padding: 8px 0;
   border-bottom: 1px solid var(--border-light);
@@ -1231,7 +1530,7 @@ onMounted(() => load());
 .an-pf-prod-delta.neg { color: #D32F2F; }
 .an-pf-prod-delta.pos { color: #E65100; }
 
-/* ═══ FORECAST TAB ═══ */
+/* ===== Forecast tab ===== */
 .fc-controls {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
@@ -1245,7 +1544,7 @@ onMounted(() => load());
 .fc-period-btn:first-child { border-radius: 6px 0 0 6px; }
 .fc-period-btn:last-child { border-radius: 0 6px 6px 0; }
 .fc-period-btn:not(:first-child) { border-left: none; }
-.fc-period-btn.active { background: var(--text); color: var(--card); border-color: var(--text); }
+.fc-period-btn.active { background: #502314; color: #fff; border-color: #502314; }
 .fc-supplier-select {
   padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
   font-size: 12px; font-weight: 600; background: var(--card); color: var(--text);
@@ -1263,7 +1562,6 @@ onMounted(() => load());
   width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0;
   border: 1.5px solid;
 }
-.an-kpi-unit { font-size: 12px; color: var(--text-muted); font-weight: 600; }
 
 .fc-table-card { padding: 0; overflow: hidden; }
 .fc-table-wrap { overflow-x: auto; }
@@ -1288,18 +1586,16 @@ onMounted(() => load());
 .fc-status-warning:hover { background: #FFF8E1; }
 
 .fc-td { padding: 8px 10px; vertical-align: middle; }
-.fc-td-name { }
 .fc-item-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
-.fc-item-sku { font-size: 10px; color: #F5A623; font-weight: 700; }
+.fc-item-sku { font-size: 10px; color: #FF8732; font-weight: 700; }
 .fc-item-supplier { font-size: 10px; color: var(--text-muted); }
-.fc-td-spark { }
 .fc-sparkline { width: 60px; height: 20px; display: block; }
 .fc-trend-label { font-size: 10px; font-weight: 600; white-space: nowrap; }
 .fc-trend-up { color: #4CAF50; }
 .fc-trend-down { color: #F44336; }
 .fc-trend-stable { color: #9E9E9E; }
 .fc-td-num { text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.fc-td-forecast { color: #2196F3; font-weight: 700; }
+.fc-td-forecast { color: #1976D2; font-weight: 700; }
 .fc-days-critical { color: #D32F2F; font-weight: 800; }
 .fc-days-warning { color: #E65100; font-weight: 700; }
 .fc-td-status { text-align: center; }
@@ -1318,11 +1614,34 @@ onMounted(() => load());
   border: 1px solid #90CAF9; font-size: 12px; color: #1565C0;
 }
 
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .dash-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .dash-two-col { grid-template-columns: 1fr; }
+  .dash-secondary-row { flex-wrap: wrap; }
+  .dash-mini-stat { min-width: calc(50% - 6px); }
+}
+
 @media (max-width: 768px) {
+  .an-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .an-tab { padding: 6px 10px; font-size: 11px; }
+  .dash-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .dash-donut-wrap { flex-direction: column; align-items: center; }
   .fc-controls { flex-direction: column; align-items: stretch; }
   .fc-controls-left { flex-direction: column; }
   .fc-supplier-select { max-width: none; }
   .fc-hide-mobile { display: none; }
   .fc-item-name { max-width: 120px; }
+  .an-prod-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
+
+@media (max-width: 480px) {
+  .an-tab { padding: 5px 8px; font-size: 10px; gap: 3px; }
+  .an-tab-text { display: none; }
+  .dash-kpi-grid { grid-template-columns: 1fr; }
+  .dash-secondary-row { flex-direction: column; }
+  .dash-sup-card__metrics { grid-template-columns: repeat(2, 1fr); }
+  .rpt-yoy-grid { grid-template-columns: repeat(4, 1fr); }
+  .dash-sup-row__right { width: 55%; }
 }
 </style>

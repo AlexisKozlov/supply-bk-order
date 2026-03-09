@@ -143,8 +143,9 @@ export async function exportToExcel(items, settings, priceMap) {
       : `${totalBoxes} кор`;
     setCell(ws, r, 2, palletsSummary, sTotalVal);
     if (hasPrices) {
-      // Подсчитаем итого сумму
+      // Подсчитаем итого сумму и НДС
       let totalSum = 0;
+      let totalVat = 0;
       items.forEach(item => {
         if (!item.finalOrder || item.finalOrder <= 0) return;
         const pi = priceMap[item.sku];
@@ -154,11 +155,26 @@ export async function exportToExcel(items, settings, priceMap) {
         const pb = Math.round(ab / mult_);
         const pc = settings.unit === 'pieces' ? item.finalOrder : ab * qpb_;
         const pr = parseFloat(pi.price) || 0;
-        if (pi.unit_type === 'box') totalSum += pr * pb;
-        else if (pi.unit_type === 'thousand') totalSum += pr * pc / 1000;
-        else totalSum += pr * pc;
+        let lineSum = 0;
+        if (pi.unit_type === 'box') lineSum = pr * pb;
+        else if (pi.unit_type === 'thousand') lineSum = pr * pc / 1000;
+        else lineSum = pr * pc;
+        totalSum += lineSum;
+        totalVat += lineSum * ((pi.vat_rate ?? 20) / 100);
       });
       setCell(ws, r, 3, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
+      r++;
+      // НДС
+      setCell(ws, r, 0, 'НДС:', sTotalLabel);
+      setCell(ws, r, 1, '', sTotalVal);
+      setCell(ws, r, 2, '', sTotalVal);
+      setCell(ws, r, 3, totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
+      r++;
+      // Итого с НДС
+      setCell(ws, r, 0, 'ИТОГО С НДС:', sTotalLabel);
+      setCell(ws, r, 1, '', sTotalVal);
+      setCell(ws, r, 2, '', sTotalVal);
+      setCell(ws, r, 3, totalSum + totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
     }
     r++;
   }
@@ -886,6 +902,37 @@ export async function exportSupplierOrder(settings, items, priceMap) {
     if (hasPrices) {
       setCell(ws, r, 4, '', sTotalLabel);
       setCell(ws, r, 5, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
+      r++;
+      // НДС
+      let totalVat = 0;
+      items.forEach(item => {
+        if (!item.finalOrder || item.finalOrder <= 0) return;
+        const pi = priceMap[item.sku];
+        if (!pi) return;
+        const qpb_ = getQpb(item); const mult_ = getMultiplicity(item);
+        const ab_ = settings.unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb_);
+        const pb_ = Math.round(ab_ / mult_);
+        const pc_ = settings.unit === 'pieces' ? item.finalOrder : ab_ * qpb_;
+        const pr_ = parseFloat(pi.price) || 0;
+        let ls = 0;
+        if (pi.unit_type === 'box') ls = pr_ * pb_;
+        else if (pi.unit_type === 'thousand') ls = pr_ * pc_ / 1000;
+        else ls = pr_ * pc_;
+        totalVat += ls * ((pi.vat_rate ?? 20) / 100);
+      });
+      setCell(ws, r, 0, '', sTotalLabel);
+      setCell(ws, r, 1, '', sTotalLabel);
+      setCell(ws, r, 2, 'НДС:', sTotalLabel);
+      setCell(ws, r, 3, '', sTotalLabel);
+      setCell(ws, r, 4, '', sTotalLabel);
+      setCell(ws, r, 5, totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
+      r++;
+      setCell(ws, r, 0, '', sTotalLabel);
+      setCell(ws, r, 1, '', sTotalLabel);
+      setCell(ws, r, 2, 'ИТОГО С НДС:', sTotalLabel);
+      setCell(ws, r, 3, '', sTotalLabel);
+      setCell(ws, r, 4, '', sTotalLabel);
+      setCell(ws, r, 5, totalSum + totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
     }
     r++;
   }
@@ -969,7 +1016,27 @@ export function printSupplierOrder(settings, items, priceMap) {
   const today = new Date().toLocaleDateString('ru-RU');
 
   const priceHeaders = hasPrices ? '<th style="width:80px;text-align:right;">Цена</th><th style="width:90px;text-align:right;">Сумма</th>' : '';
+  let totalVatPrint = 0;
+  if (hasPrices) {
+    filteredItems.forEach(item => {
+      const qpb = getQpb(item);
+      const mult = getMultiplicity(item);
+      const accountingBoxes = settings.unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb);
+      const physBoxes = Math.round(accountingBoxes / mult);
+      const pi = priceMap[item.sku];
+      if (!pi) return;
+      const price = parseFloat(pi.price) || 0;
+      const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
+      let lineSum = 0;
+      if (pi.unit_type === 'box') lineSum = price * physBoxes;
+      else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
+      else lineSum = price * pieces;
+      totalVatPrint += lineSum * ((pi.vat_rate ?? 20) / 100);
+    });
+  }
   const priceTotals = hasPrices ? `<td></td><td class="right">${totalSum.toFixed(2)}</td>` : '';
+  const vatRow = hasPrices ? `<tr class="total"><td colspan="${hasPrices ? 4 : 3}" style="text-align:right;">НДС:</td><td class="right"></td><td></td><td class="right">${totalVatPrint.toFixed(2)}</td></tr>` : '';
+  const totalWithVatRow = hasPrices ? `<tr class="total"><td colspan="${hasPrices ? 4 : 3}" style="text-align:right;">ИТОГО С НДС:</td><td class="right"></td><td></td><td class="right">${(totalSum + totalVatPrint).toFixed(2)}</td></tr>` : '';
   const colSpan = hasPrices ? 4 : 3;
 
   const html = `<!DOCTYPE html>
@@ -1009,7 +1076,7 @@ export function printSupplierOrder(settings, items, priceMap) {
     <td colspan="${colSpan}" style="text-align:right;">ИТОГО:</td>
     <td class="right">${totalBoxes}</td>
     ${priceTotals}
-  </tr></tfoot>
+  </tr>${vatRow}${totalWithVatRow}</tfoot>
 </table>
 <div class="footer">Контактное лицо: ${settings.userName || ''}</div>
 </body></html>`;

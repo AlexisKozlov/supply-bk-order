@@ -30,7 +30,7 @@
     <!-- Active collection detail -->
     <div v-if="activeCollection" class="sc-detail">
       <div class="sc-detail-bar">
-        <button class="sc-btn outline" @click="activeCollection = null; collectionData = null;">← Назад</button>
+        <button class="sc-btn outline" @click="activeCollection = null; collectionData = null; responseFilter = ''; sortKey = 'restaurant'; sortDir = 'asc';">← Назад</button>
         <div class="sc-detail-info">
           <div class="sc-detail-name">{{ activeCollection.name }}</div>
           <span class="sc-tag" :class="activeCollection.status === 'active' ? 'green' : 'gray'">
@@ -80,26 +80,41 @@
           </div>
         </div>
 
+        <!-- Filter -->
+        <div v-if="mergedRows.length" class="sc-filter-bar">
+          <input
+            v-model="responseFilter"
+            type="text"
+            class="sc-input sc-filter-input"
+            placeholder="Поиск по номеру, городу или адресу..."
+          />
+          <span v-if="responseFilter" class="sc-filter-count">
+            {{ filteredRows.length }} из {{ mergedRows.length }}
+          </span>
+        </div>
+
         <!-- Unified table: Restaurant | Product1 | Product2 | ... -->
         <div v-if="mergedRows.length" class="sc-tbl-wrap">
           <table class="sc-tbl">
             <thead>
               <tr>
-                <th class="col-num">Ресторан</th>
-                <th class="col-city">Город</th>
-                <th class="col-addr">Адрес</th>
-                <th v-for="prod in collectionData.products" :key="prod.id" class="col-prod">
-                  <div>{{ prod.product_name }}</div>
+                <th class="col-num sortable" @click="toggleSort('restaurant')">Ресторан <span class="sort-arrow">{{ sortKey === 'restaurant' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th class="col-city sortable" @click="toggleSort('city')">Город <span class="sort-arrow">{{ sortKey === 'city' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th class="col-addr sortable" @click="toggleSort('address')">Адрес <span class="sort-arrow">{{ sortKey === 'address' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th class="col-time sortable" @click="toggleSort('time')">Заполнено <span class="sort-arrow">{{ sortKey === 'time' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th v-for="prod in collectionData.products" :key="prod.id" class="col-prod sortable" @click="toggleSort('prod_' + prod.id)">
+                  <div>{{ prod.product_name }} <span class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></div>
                   <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
                 </th>
                 <th v-if="activeCollection.status === 'active'" class="col-del"></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in mergedRows" :key="row.restaurant">
+              <tr v-for="row in filteredRows" :key="row.restaurant">
                 <td class="col-num fw">Ресторан {{ row.restaurant }}</td>
                 <td class="col-city muted">{{ row.city }}</td>
                 <td class="col-addr muted">{{ row.address }}</td>
+                <td class="col-time muted">{{ fmtShort(row.submittedAt) }}</td>
                 <td v-for="prod in collectionData.products" :key="prod.id" class="col-prod">
                   <template v-if="editingCell === row.restaurant + '_' + prod.id">
                     <input
@@ -127,7 +142,7 @@
             </tbody>
             <tfoot>
               <tr>
-                <td colspan="3" class="foot-label">Итого</td>
+                <td colspan="4" class="foot-label">Итого</td>
                 <td v-for="prod in collectionData.products" :key="prod.id" class="col-prod foot-val">
                   {{ getProductTotal(prod.id) }}
                 </td>
@@ -137,13 +152,26 @@
           </table>
         </div>
         <div v-else class="sc-empty">Нет данных</div>
+
+        <!-- Missing restaurants (bottom) -->
+        <div v-if="missingRestaurants.length" class="sc-missing">
+          <div class="sc-missing-head" @click="showMissing = !showMissing">
+            <span class="sc-missing-icon">{{ showMissing ? '▾' : '▸' }}</span>
+            <span>Не заполнили: <b>{{ missingRestaurants.length }}</b> из {{ restaurantStore.restaurants.length }}</span>
+          </div>
+          <div v-if="showMissing" class="sc-missing-list">
+            <span v-for="r in missingRestaurants" :key="r.number" class="sc-missing-tag">
+              {{ r.number }}<template v-if="r.city"> · {{ r.city }}</template>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Modals -->
     <Teleport to="body">
       <!-- Confirm modal -->
-      <div v-if="confirmModal.show" class="modal" @click.self="confirmModal.show = false">
+      <div v-if="confirmModal.show" class="modal modal-confirm" @click.self="confirmModal.show = false">
         <div class="modal-box" style="max-width: 420px;">
           <div class="sc-modal-head">
             <h3>{{ confirmModal.title }}</h3>
@@ -201,11 +229,11 @@
       </div>
 
       <!-- Create modal -->
-      <div v-if="showCreate" class="modal" @click.self="showCreate = false">
+      <div v-if="showCreate" class="modal" @click.self="tryCloseCreate">
         <div class="modal-box" style="max-width: 600px;">
           <div class="sc-modal-head">
             <h3>Новый сбор остатков</h3>
-            <button class="sc-x" @click="showCreate = false">✕</button>
+            <button class="sc-x" @click="tryCloseCreate">✕</button>
           </div>
 
           <div class="sc-field">
@@ -252,6 +280,10 @@
                       <template v-if="r.qty_per_box"> · {{ r.qty_per_box }} шт/кор</template>
                     </div>
                   </div>
+                  <div class="sc-drop-item sc-drop-manual" @click="setManual(i)">
+                    <div class="sc-drop-name">Ввести вручную</div>
+                    <div class="sc-drop-meta">Товара нет в базе — ввести название и артикул</div>
+                  </div>
                 </div>
 
                 <!-- Manual input (when nothing selected from DB) -->
@@ -285,7 +317,7 @@
           </div>
 
           <div class="sc-modal-foot">
-            <button class="sc-btn outline" @click="showCreate = false">Отмена</button>
+            <button class="sc-btn outline" @click="tryCloseCreate">Отмена</button>
             <button class="sc-btn fill" @click="createCollection" :disabled="!canCreate || creating">
               {{ creating ? '...' : 'Создать' }}
             </button>
@@ -334,9 +366,17 @@ const confirmModal = ref({ show: false, title: '', text: '', btnText: '', danger
 const showRename = ref(false);
 const renameName = ref('');
 
+// Filter & Sort
+const responseFilter = ref('');
+const sortKey = ref('restaurant');
+const sortDir = ref('asc');
+
 // Cell edit
 const editingCell = ref(null);
 const editStockValue = ref('');
+
+// Missing restaurants
+const showMissing = ref(true);
 
 const todayStr = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 
@@ -357,6 +397,14 @@ watch(() => orderStore.settings.legalEntity, () => { collectionData.value = null
 const uniqueRestaurants = computed(() => {
   if (!collectionData.value?.data) return 0;
   return new Set(collectionData.value.data.map(d => d.restaurant_number)).size;
+});
+
+const missingRestaurants = computed(() => {
+  if (!collectionData.value?.data || !restaurantStore.restaurants.length) return [];
+  const answered = new Set(collectionData.value.data.map(d => String(d.restaurant_number)));
+  return restaurantStore.restaurants
+    .filter(r => !answered.has(String(r.number)))
+    .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
 });
 
 function makeProductRow() {
@@ -433,6 +481,21 @@ function openCreateModal() {
   newName.value = '';
   newProducts.value = [makeProductRow()];
   showCreate.value = true;
+}
+
+function isCreateDirty() {
+  if (newName.value.trim()) return true;
+  return newProducts.value.some(p => p.name.trim() || p.fromDb || p.searchQuery.trim());
+}
+
+function tryCloseCreate() {
+  if (!isCreateDirty()) { showCreate.value = false; return; }
+  confirmModal.value = {
+    show: true, title: 'Закрыть форму?', danger: false,
+    text: 'Вы уже начали заполнять сбор. Все введённые данные будут потеряны.',
+    btnText: 'Закрыть',
+    action: () => { showCreate.value = false; },
+  };
 }
 
 async function createCollection() {
@@ -586,7 +649,8 @@ function getProductData(productId) {
 }
 
 function getProductTotal(productId) {
-  return getProductData(productId).reduce((s, d) => s + (parseFloat(d.stock) || 0), 0);
+  const total = getProductData(productId).reduce((s, d) => s + (parseFloat(d.stock) || 0), 0);
+  return parseFloat(total.toFixed(2));
 }
 
 // Merged table: one row per restaurant, columns = products
@@ -603,13 +667,58 @@ const mergedRows = computed(() => {
     const key = String(d.restaurant_number);
     if (!restMap.has(key)) {
       const info = getRestaurantInfo(key);
-      restMap.set(key, { restaurant: key, city: info.city, address: info.address, cells: {} });
+      restMap.set(key, { restaurant: key, city: info.city, address: info.address, cells: {}, submittedAt: null });
     }
-    restMap.get(key).cells[d.product_id] = d;
+    const row = restMap.get(key);
+    row.cells[d.product_id] = d;
+    if (d.submitted_at && (!row.submittedAt || d.submitted_at > row.submittedAt)) {
+      row.submittedAt = d.submitted_at;
+    }
   }
   return [...restMap.values()].sort((a, b) =>
     a.restaurant.localeCompare(b.restaurant, undefined, { numeric: true })
   );
+});
+
+function toggleSort(key) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey.value = key;
+    sortDir.value = 'asc';
+  }
+}
+
+const filteredRows = computed(() => {
+  const q = responseFilter.value.trim().toLowerCase();
+  let rows = mergedRows.value;
+  if (q) {
+    rows = rows.filter(row =>
+      row.restaurant.toLowerCase().includes(q) ||
+      row.city.toLowerCase().includes(q) ||
+      row.address.toLowerCase().includes(q)
+    );
+  }
+  const key = sortKey.value;
+  const dir = sortDir.value === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    if (key === 'restaurant') {
+      return dir * a.restaurant.localeCompare(b.restaurant, undefined, { numeric: true });
+    }
+    if (key === 'city') return dir * a.city.localeCompare(b.city, 'ru');
+    if (key === 'address') return dir * a.address.localeCompare(b.address, 'ru');
+    if (key === 'time') {
+      return dir * ((a.submittedAt || '') < (b.submittedAt || '') ? -1 : (a.submittedAt || '') > (b.submittedAt || '') ? 1 : 0);
+    }
+    // Sort by product column
+    if (key.startsWith('prod_')) {
+      const prodId = parseInt(key.slice(5));
+      const va = parseFloat(a.cells[prodId]?.stock) || 0;
+      const vb = parseFloat(b.cells[prodId]?.stock) || 0;
+      return dir * (va - vb);
+    }
+    return 0;
+  });
 });
 
 // Cell edit
@@ -719,7 +828,7 @@ async function exportExcel() {
   restNums.forEach((num, ri) => {
     const stripe = ri % 2 === 1;
     const info = getRestaurantInfo(num);
-    ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: num, t: 's', s: sB(stripe) };
+    ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: `Ресторан ${num}`, t: 's', s: sB(stripe) };
     ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: info.city, t: 's', s: sC(stripe) };
     ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: info.address, t: 's', s: sC(stripe) };
     products.forEach((p, pi) => {
@@ -736,7 +845,7 @@ async function exportExcel() {
   ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: '', t: 's', s: sBold };
   products.forEach((p, pi) => {
     const total = allData.filter(d => d.product_id === p.id).reduce((s, d) => s + (parseFloat(d.stock) || 0), 0);
-    ws[XLSX.utils.encode_cell({ r, c: pi + prodOffset })] = { v: total, t: 'n', s: sBold };
+    ws[XLSX.utils.encode_cell({ r, c: pi + prodOffset })] = { v: parseFloat(total.toFixed(2)), t: 'n', s: sBold };
   });
 
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: products.length + prodOffset - 1 } });
@@ -761,6 +870,12 @@ function unitLabel(u) {
   return 'шт.';
 }
 
+function fmtShort(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 function fmtDate(s) {
   if (!s) return '';
   const d = new Date(s);
@@ -774,6 +889,7 @@ function fmtTime(s) {
 
 <style scoped>
 .sc { --brown: #502314; --orange: #FF8732; --red: #D62700; --green: #2E7D32; --border: #EDE7DF; --muted: #8C7B6E; --bg2: #F9F6F2; }
+.modal-confirm { z-index: 10001; }
 
 /* Top */
 .sc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
@@ -794,6 +910,23 @@ function fmtTime(s) {
 .sc-tag.green { background: #E8F5E9; color: #2E7D32; }
 .sc-tag.gray { background: #f0ece6; color: #999; }
 .sc-empty { text-align: center; color: var(--muted); padding: 40px; font-size: 14px; }
+
+/* Missing restaurants */
+.sc-missing {
+  background: #FFF8E1; border: 1px solid #FFE082; border-radius: 10px;
+  padding: 10px 14px; margin-top: 12px;
+}
+.sc-missing-head {
+  font-size: 13px; color: #F57F17; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 6px;
+}
+.sc-missing-head b { color: #E65100; }
+.sc-missing-icon { font-size: 10px; width: 12px; }
+.sc-missing-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sc-missing-tag {
+  font-size: 11px; padding: 3px 8px; background: #fff; border: 1px solid #FFE082;
+  border-radius: 6px; color: #795548; white-space: nowrap;
+}
 
 /* Detail */
 .sc-detail-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -817,6 +950,17 @@ function fmtTime(s) {
 .sc-summary-num { font-size: 18px; font-weight: 700; color: var(--brown); font-family: 'Flame', sans-serif; }
 .sc-summary-lbl { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
 
+/* Filter */
+.sc-filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.sc-filter-input { max-width: 320px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--brown); background: #fff; }
+.sc-filter-input:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 2px rgba(255,135,50,0.15); }
+.sc-filter-input::placeholder { color: #bbb; }
+.sc-filter-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { background: rgba(80,35,20,0.08); }
+.sort-arrow { font-size: 10px; opacity: 0.4; margin-left: 2px; }
+th.sortable:hover .sort-arrow { opacity: 0.7; }
+
 /* Table */
 .sc-tbl-wrap {
   background: #fff; border: 1px solid var(--border); border-radius: 10px;
@@ -826,11 +970,12 @@ function fmtTime(s) {
 .sc-tbl thead tr { background: #502314; }
 .sc-tbl thead th {
   color: #fff; font-size: 11px; font-weight: 600;
-  padding: 10px 12px; text-align: center; white-space: nowrap;
+  padding: 6px 5px; text-align: center;
 }
-.sc-tbl thead th .th-unit { font-weight: 400; font-size: 10px; opacity: 0.7; margin-top: 1px; }
+.sc-tbl thead th.col-prod { white-space: normal; word-break: break-word; max-width: 80px; font-size: 10px; line-height: 1.3; }
+.sc-tbl thead th .th-unit { font-weight: 400; font-size: 9px; opacity: 0.7; margin-top: 1px; }
 .sc-tbl tbody td {
-  padding: 7px 12px; border-bottom: 1px solid #f0ece6; text-align: center;
+  padding: 5px 5px; border-bottom: 1px solid #f0ece6; text-align: center;
 }
 .sc-tbl tbody tr:nth-child(even) { background: #FEFBF7; }
 .sc-tbl tbody tr:hover { background: #FFF3E0; }
@@ -839,7 +984,8 @@ function fmtTime(s) {
 .col-num { text-align: left !important; white-space: nowrap; min-width: 80px; }
 .col-city { text-align: left !important; white-space: nowrap; font-size: 12px; }
 .col-addr { text-align: left !important; font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.col-prod { min-width: 90px; }
+.col-prod { min-width: 50px; max-width: 90px; font-size: 12px; }
+.col-time { white-space: nowrap; font-size: 11px; width: 80px; }
 .col-del { width: 36px; text-align: center !important; }
 .sc-row-del {
   width: 24px; height: 24px; border: none; background: none;
@@ -956,6 +1102,8 @@ function fmtTime(s) {
 }
 .sc-drop-item:last-child { border-bottom: none; }
 .sc-drop-item:hover { background: #FFF8F0; }
+.sc-drop-manual { border-top: 2px solid var(--border); background: #FEFBF7; }
+.sc-drop-manual .sc-drop-name { color: var(--orange); }
 .sc-drop-name { font-size: 13px; font-weight: 600; color: var(--brown); }
 .sc-drop-meta { font-size: 10px; color: var(--muted); }
 

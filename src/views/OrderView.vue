@@ -759,7 +759,7 @@ async function loadPrices() {
         const origPrice = price;
         const currency = p.currency || 'BYN';
         if (currency === 'RUB') price = +(price * rate).toFixed(2);
-        map[p.sku] = { price, unit_type: p.unit_type, currency, origPrice };
+        map[p.sku] = { price, unit_type: p.unit_type, currency, origPrice, vat_rate: p.vat_rate ?? 20 };
       }
     }
     priceMap.value = map;
