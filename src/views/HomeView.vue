@@ -45,12 +45,13 @@
 
       <!-- Dock -->
       <div class="p-dock">
-        <div
+        <a
           v-for="(m, i) in dockModules" :key="m.key"
           class="p-dock-slot"
+          :href="dockHref(m)"
           @mouseenter="hoveredIdx = i"
           @mouseleave="hoveredIdx = null"
-          @click="m.dim ? stubModule(m.name) : m.public ? goPublic(m.key) : goTo(m.key, m.query)"
+          @click.prevent="m.isFolder ? (showToolsFolder = !showToolsFolder) : m.dim ? stubModule(m.name) : m.public ? goPublic(m.key) : goTo(m.key, m.query)"
         >
           <div
             class="p-dock-item"
@@ -58,21 +59,41 @@
               'p-dock-dim': m.dim,
               'p-dock-hovered': hoveredIdx === i,
               'p-dock-neighbor': hoveredIdx !== null && hoveredIdx !== i && Math.abs(hoveredIdx - i) === 1,
+              'p-dock-folder-active': m.isFolder && showToolsFolder,
             }"
           >
-            <div class="p-dock-icon" v-html="m.svg"></div>
+            <div class="p-dock-icon" :class="{ 'p-dock-icon-folder': m.isFolder }" v-html="m.svg"></div>
             <span class="p-dock-label">{{ m.name }}</span>
             <span v-if="m.dim" class="p-dock-tag">скоро</span>
           </div>
-        </div>
+        </a>
       </div>
+
+      <!-- Tools folder popup -->
+      <Transition name="tools-folder">
+        <div v-if="showToolsFolder" class="p-tools-folder">
+          <div class="p-tools-folder-title">Инструменты</div>
+          <div class="p-tools-folder-grid">
+            <a
+              v-for="t in toolsFolderItems" :key="t.key"
+              class="p-tools-folder-item"
+              :href="t.public ? toolsPublicHref(t.key) : '/' + t.key"
+              @click.prevent="t.public ? goPublic(t.key) : goTo(t.key); showToolsFolder = false;"
+            >
+              <div class="p-tools-folder-icon" v-html="t.svg"></div>
+              <span class="p-tools-folder-label">{{ t.name }}</span>
+            </a>
+          </div>
+        </div>
+      </Transition>
+      <div v-if="showToolsFolder" class="p-tools-folder-overlay" @click="showToolsFolder = false"></div>
 
       <!-- Quick actions -->
       <div class="p-actions">
-        <button class="p-btn p-btn-primary" @click="goTo('order')">
+        <a href="/order" class="p-btn p-btn-primary" @click.prevent="goTo('order')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
           Новый заказ
-        </button>
+        </a>
       </div>
     </div>
 
@@ -294,26 +315,45 @@ async function checkMaintenanceForHome() {
 const svgIcons = {
   order: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="6" width="24" height="22" rx="3" stroke="#502314" stroke-width="2"/><path d="M4 12h24" stroke="#502314" stroke-width="2"/><path d="M12 2v6M20 2v6" stroke="#502314" stroke-width="2" stroke-linecap="round"/><rect x="9" y="16" width="6" height="4" rx="1" fill="#D62700" opacity=".8"/><rect x="17" y="16" width="6" height="4" rx="1" fill="#FF8733" opacity=".6"/><rect x="9" y="22" width="6" height="3" rx="1" fill="#FF8733" opacity=".4"/></svg>`,
   planning: `<svg viewBox="0 0 32 32" fill="none"><line x1="4" y1="6" x2="4" y2="26" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".3"/><rect x="6" y="7" width="14" height="4" rx="2" fill="#D62700"/><rect x="6" y="13" width="20" height="4" rx="2" fill="#FF8733"/><rect x="6" y="19" width="11" height="4" rx="2" fill="#D62700" opacity=".6"/><rect x="6" y="25" width="17" height="4" rx="2" fill="#D4C4B0"/><circle cx="20" cy="9" r="1.2" fill="#fff" opacity=".5"/><circle cx="26" cy="15" r="1.2" fill="#fff" opacity=".5"/></svg>`,
+  planFact: `<svg viewBox="0 0 32 32" fill="none"><rect x="2" y="10" width="18" height="12" rx="2" stroke="#502314" stroke-width="2"/><path d="M20 14h5l4 5v3h-9v-8z" stroke="#502314" stroke-width="2" stroke-linejoin="round"/><circle cx="9" cy="24" r="2.5" fill="#D62700" stroke="#502314" stroke-width="1.5"/><circle cx="24" cy="24" r="2.5" fill="#FF8733" stroke="#502314" stroke-width="1.5"/><rect x="5" y="13" width="6" height="3" rx="1" fill="#D62700" opacity=".2"/><rect x="5" y="17" width="4" height="2" rx=".5" fill="#FF8733" opacity=".2"/></svg>`,
   calendar: `<svg viewBox="0 0 32 32" fill="none"><rect x="3" y="6" width="26" height="22" rx="3" stroke="#502314" stroke-width="2"/><path d="M3 13h26" stroke="#502314" stroke-width="1.5"/><path d="M10 3v5M22 3v5" stroke="#502314" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="19" r="2" fill="#D62700"/><circle cx="16" cy="19" r="2" fill="#FF8733" opacity=".6"/><circle cx="22" cy="19" r="2" fill="#D4C4B0"/><circle cx="10" cy="24" r="1.5" fill="#D4C4B0"/><circle cx="16" cy="24" r="1.5" fill="#D62700" opacity=".5"/></svg>`,
   analytics: `<svg viewBox="0 0 32 32" fill="none"><path d="M4 26L10 18L16 21L22 11L28 6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 26L10 18L16 21L22 11L28 6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round" opacity=".15" transform="translate(0,2)"/><circle cx="10" cy="18" r="2.5" fill="#fff" stroke="#D62700" stroke-width="1.5"/><circle cx="22" cy="11" r="2.5" fill="#fff" stroke="#FF8733" stroke-width="1.5"/><circle cx="28" cy="6" r="2.5" fill="#fff" stroke="#D62700" stroke-width="1.5"/></svg>`,
   history: `<svg viewBox="0 0 32 32" fill="none"><rect x="5" y="3" width="22" height="26" rx="3" stroke="#502314" stroke-width="2"/><line x1="10" y1="10" x2="22" y2="10" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".4"/><line x1="10" y1="15" x2="22" y2="15" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".3"/><line x1="10" y1="20" x2="18" y2="20" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".2"/><rect x="8" y="8" width="3" height="3" rx=".5" fill="#D62700" opacity=".7"/><rect x="8" y="13" width="3" height="3" rx=".5" fill="#FF8733" opacity=".5"/><rect x="8" y="18" width="3" height="3" rx=".5" fill="#D4C4B0" opacity=".5"/></svg>`,
   database: `<svg viewBox="0 0 32 32" fill="none"><ellipse cx="16" cy="8" rx="11" ry="4" stroke="#502314" stroke-width="2"/><path d="M5 8v7c0 2.2 4.9 4 11 4s11-1.8 11-4V8" stroke="#502314" stroke-width="2"/><path d="M5 15v7c0 2.2 4.9 4 11 4s11-1.8 11-4v-7" stroke="#502314" stroke-width="2"/><ellipse cx="16" cy="15" rx="11" ry="4" fill="#D62700" opacity=".1"/><ellipse cx="16" cy="22" rx="11" ry="4" fill="#FF8733" opacity=".1"/></svg>`,
+  pricing: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="5" width="24" height="22" rx="3" stroke="#502314" stroke-width="2"/><path d="M16 10v12" stroke="#502314" stroke-width="2" stroke-linecap="round"/><path d="M12 13h8a2 2 0 010 4h-8" stroke="#502314" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 17h8a2 2 0 010 4h-8" stroke="#502314" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="1" fill="#D62700"/><circle cx="20" cy="21" r="1" fill="#FF8733"/></svg>`,
   search: `<svg viewBox="0 0 32 32" fill="none"><circle cx="14" cy="14" r="9" stroke="#502314" stroke-width="2.5"/><line x1="21" y1="21" x2="28" y2="28" stroke="#502314" stroke-width="2.5" stroke-linecap="round"/><circle cx="14" cy="14" r="4" fill="#D62700" opacity=".12"/></svg>`,
-  delivery: `<svg viewBox="0 0 32 32" fill="none"><rect x="2" y="10" width="18" height="12" rx="2" stroke="#502314" stroke-width="2"/><path d="M20 14h5l4 5v3h-9v-8z" stroke="#502314" stroke-width="2" stroke-linejoin="round"/><circle cx="9" cy="24" r="2.5" fill="#D62700" stroke="#502314" stroke-width="1.5"/><circle cx="24" cy="24" r="2.5" fill="#FF8733" stroke="#502314" stroke-width="1.5"/><rect x="5" y="13" width="6" height="3" rx="1" fill="#D62700" opacity=".2"/><rect x="5" y="17" width="4" height="2" rx=".5" fill="#FF8733" opacity=".2"/></svg>`,
+  delivery: `<svg viewBox="0 0 32 32" fill="none"><rect x="3" y="6" width="26" height="20" rx="3" stroke="#502314" stroke-width="2"/><path d="M3 12h26" stroke="#502314" stroke-width="1.5"/><circle cx="10" cy="18" r="2" fill="#D62700" opacity=".6"/><circle cx="16" cy="18" r="2" fill="#FF8733" opacity=".6"/><circle cx="22" cy="18" r="2" fill="#D4C4B0"/><path d="M10 9h4M18 9h4" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".4"/></svg>`,
   analysis: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="24" height="24" rx="3" stroke="#502314" stroke-width="2"/><path d="M9 20l4-5 4 3 6-8" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="20" r="1.5" fill="#D62700"/><circle cx="13" cy="15" r="1.5" fill="#FF8733"/><circle cx="17" cy="18" r="1.5" fill="#FF8733"/><circle cx="23" cy="10" r="1.5" fill="#D62700"/><rect x="8" y="23" width="3" height="3" rx=".5" fill="#502314" opacity=".2"/><rect x="13" y="22" width="3" height="4" rx=".5" fill="#502314" opacity=".25"/><rect x="18" y="21" width="3" height="5" rx=".5" fill="#502314" opacity=".3"/><rect x="23" y="23" width="3" height="3" rx=".5" fill="#502314" opacity=".15"/></svg>`,
+  shelfLife: `<svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="11" stroke="#502314" stroke-width="2"/><path d="M16 9v7l5 3" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="16" r="2" fill="#FF8733"/></svg>`,
+  stockCollection: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="12" width="10" height="14" rx="2" stroke="#502314" stroke-width="2"/><rect x="18" y="8" width="10" height="18" rx="2" stroke="#502314" stroke-width="2"/><rect x="7" y="15" width="4" height="3" rx="1" fill="#D62700" opacity=".5"/><rect x="21" y="11" width="4" height="3" rx="1" fill="#FF8733" opacity=".5"/><path d="M9 5v4M23 3v2" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".4"/></svg>`,
+  deficit: `<svg viewBox="0 0 32 32" fill="none"><path d="M16 4L28 28H4L16 4z" stroke="#502314" stroke-width="2" stroke-linejoin="round"/><path d="M16 14v6" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><circle cx="16" cy="23" r="1.5" fill="#D62700"/></svg>`,
+  tenders: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="24" height="24" rx="3" stroke="#502314" stroke-width="2"/><path d="M10 12h12M10 16h12M10 20h8" stroke="#502314" stroke-width="1.5" stroke-linecap="round" opacity=".4"/><rect x="7" y="11" width="2" height="2" rx=".5" fill="#D62700"/><rect x="7" y="15" width="2" height="2" rx=".5" fill="#FF8733"/><rect x="7" y="19" width="2" height="2" rx=".5" fill="#D4C4B0"/></svg>`,
+  tools: `<svg viewBox="0 0 32 32" fill="none"><rect x="4" y="4" width="11" height="11" rx="3" fill="#D62700" opacity=".7"/><rect x="17" y="4" width="11" height="11" rx="3" fill="#FF8733" opacity=".7"/><rect x="4" y="17" width="11" height="11" rx="3" fill="#FF8733" opacity=".5"/><rect x="17" y="17" width="11" height="11" rx="3" fill="#D4C4B0" opacity=".5"/></svg>`,
 };
 
 const dockModules = [
-  { key: 'order',     name: 'Новый заказ',     svg: svgIcons.order },
-  { key: 'planning',  name: 'Планирование',    svg: svgIcons.planning },
-  { key: 'calendar',  name: 'Календарь',       svg: svgIcons.calendar },
-  { key: 'analytics', name: 'Аналитика',       svg: svgIcons.analytics },
-  { key: 'history',   name: 'История',         svg: svgIcons.history },
-  { key: 'database',  name: 'База данных',     svg: svgIcons.database },
-  { key: 'delivery-schedule', name: 'Доставки в рестораны', svg: svgIcons.delivery },
-  { key: 'search',    name: 'Поиск карточек',  svg: svgIcons.search, public: true },
-  { key: 'analysis',  name: 'Анализ',          svg: svgIcons.analysis },
+  { key: 'order',      name: 'Новый заказ',    svg: svgIcons.order },
+  { key: 'planning',   name: 'Планирование',   svg: svgIcons.planning },
+  { key: 'plan-fact',  name: 'Поставки',       svg: svgIcons.planFact },
+  { key: 'history',    name: 'История',        svg: svgIcons.history },
+  { key: 'database',   name: 'База данных',    svg: svgIcons.database },
+  { key: 'pricing',    name: 'Цены и ПСЦ',     svg: svgIcons.pricing },
+  { key: 'calendar',   name: 'Календарь',      svg: svgIcons.calendar },
+  { key: 'tools',      name: 'Инструменты',    svg: svgIcons.tools, isFolder: true },
 ];
+
+const toolsFolderItems = [
+  { key: 'analytics',          name: 'Аналитика',              svg: svgIcons.analytics },
+  { key: 'analysis',           name: 'Анализ запасов',         svg: svgIcons.analysis },
+  { key: 'shelf-life',         name: 'Сроки годности',         svg: svgIcons.shelfLife },
+  { key: 'delivery-schedule',  name: 'График доставки',        svg: svgIcons.delivery },
+  { key: 'stock-collection',   name: 'Сбор остатков',          svg: svgIcons.stockCollection },
+  { key: 'deficit',            name: 'Дефицит',                svg: svgIcons.deficit },
+  { key: 'tenders',            name: 'Тендеры',                svg: svgIcons.tenders },
+  { key: 'search',             name: 'Поиск карточек',         svg: svgIcons.search, public: true },
+];
+
+const showToolsFolder = ref(false);
 
 const userInitials = computed(() => {
   const name = userStore.currentUser?.name || '';
@@ -449,6 +489,7 @@ function initEmberGlow() {
 
 function handleOutsideClick(e) {
   if (showUserMenu.value && !e.target.closest('.p-header-right')) showUserMenu.value = false;
+  if (showToolsFolder.value && !e.target.closest('.p-tools-folder') && !e.target.closest('.p-dock-slot')) showToolsFolder.value = false;
 }
 
 function openLogin() {
@@ -466,6 +507,17 @@ function _safeTimeout(fn, delay) {
   const id = setTimeout(fn, delay);
   _loaderTimers.push(id);
   return id;
+}
+
+function dockHref(m) {
+  if (m.isFolder || m.dim) return '#';
+  if (m.public) return toolsPublicHref(m.key);
+  return '/' + m.key;
+}
+
+function toolsPublicHref(key) {
+  const routes = { search: '/search-cards' };
+  return routes[key] || '/' + key;
 }
 
 function goTo(name, query) {
@@ -579,7 +631,7 @@ function confirmLogout() {
 
 /* Dock — slot/item pattern for stable hover */
 .p-dock { display: flex; gap: 0; padding: 16px 28px; background: rgba(255,255,255,.035); border-radius: 22px; border: 1px solid rgba(255,255,255,.05); align-items: flex-end; flex-shrink: 0; }
-.p-dock-slot { width: 72px; display: flex; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; }
+.p-dock-slot { width: 72px; display: flex; justify-content: center; flex-shrink: 0; position: relative; z-index: 1; text-decoration: none; color: inherit; }
 .p-dock-slot:hover { z-index: 10; }
 .p-dock-item { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; transition: transform .25s cubic-bezier(.2,1,.3,1); position: relative; transform-origin: bottom center; will-change: transform; }
 .p-dock-item.p-dock-hovered { transform: scale(1.28) translateY(-10px); }
@@ -673,6 +725,85 @@ function confirmLogout() {
   .p-dock-icon { width: 44px; height: 44px; padding: 8px; }
   .p-dock { padding: 10px 18px; gap: 0; }
   .p-dock-slot { width: 60px; }
+}
+
+/* ═══ TOOLS FOLDER ═══ */
+.p-dock-icon-folder {
+  background: linear-gradient(135deg, #FAF6EF, #F0E8DA) !important;
+  border-color: rgba(214,39,0,.12) !important;
+}
+.p-dock-folder-active .p-dock-icon-folder {
+  box-shadow: 0 0 0 2px rgba(214,39,0,.3), 0 4px 16px rgba(0,0,0,.15) !important;
+}
+.p-tools-folder-overlay {
+  position: fixed; inset: 0; z-index: 90;
+}
+.p-tools-folder {
+  position: relative; z-index: 95;
+  background: rgba(20,12,6,.85);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 18px;
+  padding: 20px 24px;
+  max-width: 520px;
+  width: 100%;
+  box-shadow: 0 12px 48px rgba(0,0,0,.4);
+}
+.p-tools-folder-title {
+  font-size: 10px; font-weight: 700;
+  color: rgba(245,230,208,.4);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.p-tools-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.p-tools-folder-item {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 6px; border-radius: 14px; cursor: pointer;
+  transition: background .15s, transform .15s;
+  text-decoration: none; color: inherit;
+}
+.p-tools-folder-item:hover {
+  background: rgba(255,255,255,.07);
+  transform: translateY(-2px);
+}
+.p-tools-folder-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: #FAF6EF;
+  border: 1.5px solid rgba(80,35,20,.06);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.1);
+  padding: 8px;
+}
+.p-tools-folder-icon :deep(svg) { width: 100%; height: 100%; }
+.p-tools-folder-label {
+  font-size: 10px; font-weight: 600;
+  color: rgba(245,230,208,.6);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.tools-folder-enter-active { animation: toolsFolderIn .25s ease; }
+.tools-folder-leave-active { animation: toolsFolderOut .2s ease; }
+@keyframes toolsFolderIn { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes toolsFolderOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px) scale(.97); } }
+
+@media (max-width: 760px) {
+  .p-tools-folder { max-width: calc(100% - 32px); padding: 16px; }
+  .p-tools-folder-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .p-tools-folder-icon { width: 38px; height: 38px; padding: 7px; }
+  .p-tools-folder-label { font-size: 9px; }
+}
+@media (max-width: 480px) {
+  .p-tools-folder { max-width: calc(100% - 20px); padding: 14px 12px; }
+  .p-tools-folder-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .p-tools-folder-item { padding: 10px 6px; }
 }
 
 /* ═══ SUPPLY LOADER ═══ */

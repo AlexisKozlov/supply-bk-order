@@ -98,7 +98,29 @@ function getUser($chatId) {
 }
 
 function getUserEntity($user) {
+    global $pdo;
+    // Проверяем, есть ли сохранённый выбор юрлица в telegram_settings
+    $s = $pdo->prepare("SELECT selected_entity FROM telegram_settings WHERE user_name = ?");
+    $s->execute([$user['name']]);
+    $row = $s->fetch();
+    $selected = $row['selected_entity'] ?? null;
+    // Если выбрано и есть в списке доступных — используем
+    if ($selected && in_array($selected, $user['legal_entities'])) {
+        return $selected;
+    }
     return $user['legal_entities'][0] ?? null;
+}
+
+function setUserEntity($userName, $entity) {
+    global $pdo;
+    $pdo->prepare("UPDATE telegram_settings SET selected_entity = ? WHERE user_name = ?")->execute([$entity, $userName]);
+}
+
+function getEntityShort($entity) {
+    if (strpos($entity, 'Бургер') !== false) return 'БК';
+    if (strpos($entity, 'Воглия') !== false) return 'ВМ';
+    if (strpos($entity, 'Пицца') !== false) return 'ПС';
+    return mb_substr($entity, 0, 4);
 }
 
 // ═══ Команды с данными ═══
@@ -137,28 +159,34 @@ function cmdOrders($chatId, $user) {
 function cmdStock($chatId, $user) {
     global $pdo;
     $entity = getUserEntity($user);
+    $entityShort = $entity ? ' (' . getEntityShort($entity) . ')' : '';
 
-    // Товары с низким остатком (из analysis_data)
-    $sql = "SELECT a.sku, p.name, a.stock
+    // Товары с запасом ≤ 5 дней (по дневному расходу)
+    $sql = "SELECT a.sku, p.name, p.supplier, a.stock, a.consumption, a.period_days,
+                   CASE WHEN a.consumption > 0 THEN ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) ELSE 999 END as days_left
             FROM analysis_data a
             LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
-            WHERE a.stock <= 5 AND a.stock >= 0";
+            WHERE a.consumption > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
-    $sql .= " ORDER BY a.stock ASC LIMIT 20";
+    $sql .= " HAVING days_left <= 5 ORDER BY days_left ASC LIMIT 25";
     $s = $pdo->prepare($sql); $s->execute($params);
     $items = $s->fetchAll();
 
     if (!$items) {
-        sendMessage($chatId, "✅ Все остатки в норме.");
+        sendMessage($chatId, "✅ Нет товаров с запасом ≤ 5 дней.{$entityShort}");
         return;
     }
 
-    $text = "📉 <b>Низкие остатки</b> (≤ 5)" . ($entity ? " ($entity)" : "") . "\n\n";
+    $text = "📉 <b>Критичные остатки</b> (≤ 5 дней){$entityShort}\n\n";
     foreach ($items as $i) {
         $name = $i['name'] ? $i['sku'] . ' ' . $i['name'] : $i['sku'];
-        $text .= "• {$name} — <b>{$i['stock']}</b>\n";
+        $daily = round($i['consumption'] / max($i['period_days'], 1), 1);
+        $icon = $i['days_left'] <= 0 ? '🔴' : '🟠';
+        $text .= "{$icon} <b>{$name}</b>\n";
+        $text .= "   ост. {$i['stock']} шт., расход {$daily}/день, запас ~{$i['days_left']} дн.\n";
     }
+    $text .= "\n📊 Полный анализ: /analysis";
     sendMessage($chatId, $text);
 }
 
@@ -253,6 +281,188 @@ function cmdPsc($chatId, $user) {
     sendMessage($chatId, $text);
 }
 
+// ═══ Полный анализ запасов (как на сайте) ═══
+
+function cmdAnalysis($chatId, $user, $zone = null, $page = 0) {
+    global $pdo;
+    $entity = getUserEntity($user);
+    $entityShort = $entity ? getEntityShort($entity) : '';
+
+    // Загружаем все товары с данными анализа, группируя по аналоговой группе
+    $sql = "SELECT p.sku, p.name, p.analog_group, p.supplier, p.qty_per_box, p.category,
+                   a.stock, a.consumption, a.period_days
+            FROM products p
+            INNER JOIN analysis_data a ON a.sku COLLATE utf8mb4_general_ci = p.sku COLLATE utf8mb4_general_ci
+                AND a.legal_entity COLLATE utf8mb4_general_ci = p.legal_entity COLLATE utf8mb4_general_ci
+            WHERE p.is_active = 1";
+    $params = [];
+    if ($entity) { $sql .= " AND p.legal_entity = ?"; $params[] = $entity; }
+    $sql .= " ORDER BY p.analog_group, p.name";
+    $s = $pdo->prepare($sql); $s->execute($params);
+    $items = $s->fetchAll();
+
+    if (!$items) {
+        sendMessage($chatId, "📊 Данных анализа нет" . ($entity ? " для {$entityShort}" : "") . ".");
+        return;
+    }
+
+    // Группируем по аналоговой группе
+    $groups = [];
+    foreach ($items as $item) {
+        $groupName = $item['analog_group'] ?: $item['sku'] . ' ' . $item['name'];
+        if (!isset($groups[$groupName])) {
+            $groups[$groupName] = [
+                'name' => $groupName,
+                'items' => [],
+                'totalStock' => 0,
+                'totalConsumption' => 0,
+                'periodDays' => 30,
+                'supplier' => $item['supplier'],
+                'category' => $item['category'] ?: '',
+            ];
+        }
+        $groups[$groupName]['items'][] = $item;
+        $groups[$groupName]['totalStock'] += $item['stock'];
+        $groups[$groupName]['totalConsumption'] += $item['consumption'];
+        if ($item['period_days'] > 0) {
+            $groups[$groupName]['periodDays'] = $item['period_days'];
+        }
+    }
+
+    // Рассчитываем дни для каждой группы и определяем зону
+    $zoneGroups = ['red' => [], 'orange' => [], 'green' => [], 'purple' => []];
+    foreach ($groups as &$g) {
+        $stock = $g['totalStock'];
+        $consumption = $g['totalConsumption'];
+        $periodDays = max($g['periodDays'], 1);
+
+        if ($consumption <= 0) {
+            $g['days'] = $stock > 0 ? 999 : 0;
+        } else {
+            $dailyRate = $consumption / $periodDays;
+            $g['days'] = round($stock / $dailyRate);
+        }
+
+        if ($g['days'] <= 5) {
+            $g['zone'] = 'red';
+        } elseif ($g['days'] <= 10) {
+            $g['zone'] = 'orange';
+        } elseif ($g['days'] <= 30) {
+            $g['zone'] = 'green';
+        } else {
+            $g['zone'] = 'purple';
+        }
+
+        $zoneGroups[$g['zone']][] = $g;
+    }
+    unset($g);
+
+    // Сортируем каждую зону по дням
+    foreach ($zoneGroups as &$zg) {
+        usort($zg, fn($a, $b) => $a['days'] - $b['days']);
+    }
+    unset($zg);
+
+    $zoneCounts = [
+        'red' => count($zoneGroups['red']),
+        'orange' => count($zoneGroups['orange']),
+        'green' => count($zoneGroups['green']),
+        'purple' => count($zoneGroups['purple']),
+    ];
+    $total = array_sum($zoneCounts);
+
+    // Если зона не указана — показываем сводку
+    if (!$zone) {
+        $text = "📊 <b>Анализ запасов</b>" . ($entity ? " ({$entityShort})" : "") . "\n";
+        $text .= "Групп товаров: <b>{$total}</b>\n\n";
+
+        $text .= "🔴 Критично (0–5 дн.): <b>{$zoneCounts['red']}</b>\n";
+        $text .= "🟠 Внимание (6–10 дн.): <b>{$zoneCounts['orange']}</b>\n";
+        $text .= "🟢 Норма (11–30 дн.): <b>{$zoneCounts['green']}</b>\n";
+        $text .= "🟣 Излишки (30+ дн.): <b>{$zoneCounts['purple']}</b>\n";
+
+        // Показываем критичные, если есть
+        if ($zoneCounts['red'] > 0) {
+            $text .= "\n<b>⚠️ Критичные группы:</b>\n";
+            foreach (array_slice($zoneGroups['red'], 0, 10) as $g) {
+                $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
+                $text .= "🔴 <b>{$g['name']}</b> — {$g['days']} дн.\n";
+                $text .= "   остаток: {$g['totalStock']}, расход: {$daily}/день, {$g['supplier']}\n";
+            }
+            if ($zoneCounts['red'] > 10) {
+                $text .= "... и ещё " . ($zoneCounts['red'] - 10) . " групп\n";
+            }
+        }
+
+        // Показываем оранжевые
+        if ($zoneCounts['orange'] > 0) {
+            $text .= "\n<b>🟠 Требуют внимания:</b>\n";
+            foreach (array_slice($zoneGroups['orange'], 0, 8) as $g) {
+                $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
+                $text .= "🟠 <b>{$g['name']}</b> — {$g['days']} дн. (ост. {$g['totalStock']}, расход {$daily}/день)\n";
+            }
+            if ($zoneCounts['orange'] > 8) {
+                $text .= "... и ещё " . ($zoneCounts['orange'] - 8) . "\n";
+            }
+        }
+
+        // Кнопки для просмотра каждой зоны
+        $buttons = [];
+        if ($zoneCounts['red'] > 0) $buttons[] = ['text' => "🔴 Критичные ({$zoneCounts['red']})", 'callback_data' => 'analysis_red_0'];
+        if ($zoneCounts['orange'] > 0) $buttons[] = ['text' => "🟠 Внимание ({$zoneCounts['orange']})", 'callback_data' => 'analysis_orange_0'];
+        if ($zoneCounts['green'] > 0) $buttons[] = ['text' => "🟢 Норма ({$zoneCounts['green']})", 'callback_data' => 'analysis_green_0'];
+        if ($zoneCounts['purple'] > 0) $buttons[] = ['text' => "🟣 Излишки ({$zoneCounts['purple']})", 'callback_data' => 'analysis_purple_0'];
+
+        $keyboard = ['inline_keyboard' => array_chunk($buttons, 2)];
+        sendMessage($chatId, $text, $keyboard);
+        return;
+    }
+
+    // Показ конкретной зоны
+    $zoneNames = ['red' => '🔴 Критично (0–5 дн.)', 'orange' => '🟠 Внимание (6–10 дн.)', 'green' => '🟢 Норма (11–30 дн.)', 'purple' => '🟣 Излишки (30+ дн.)'];
+    $items = $zoneGroups[$zone] ?? [];
+    $perPage = 15;
+    $offset = $page * $perPage;
+    $pageItems = array_slice($items, $offset, $perPage);
+    $totalPages = ceil(count($items) / $perPage);
+
+    if (!$pageItems) {
+        sendMessage($chatId, "В этой зоне нет товаров.");
+        return;
+    }
+
+    $text = "📊 <b>{$zoneNames[$zone]}</b>" . ($entity ? " ({$entityShort})" : "") . "\n";
+    $text .= "Всего: <b>" . count($items) . "</b> групп";
+    if ($totalPages > 1) $text .= " (стр. " . ($page + 1) . "/" . $totalPages . ")";
+    $text .= "\n\n";
+
+    foreach ($pageItems as $g) {
+        $daily = $g['totalConsumption'] > 0 ? round($g['totalConsumption'] / max($g['periodDays'], 1), 1) : 0;
+        $daysStr = $g['days'] >= 999 ? '∞' : $g['days'];
+        $text .= "<b>{$g['name']}</b>\n";
+        $text .= "  📦 {$g['totalStock']} шт. · 📉 {$daily}/день · ⏳ {$daysStr} дн.\n";
+        $text .= "  🏷 {$g['supplier']}" . ($g['category'] ? " · {$g['category']}" : "") . "\n";
+
+        // Показываем состав группы, если > 1 товара
+        if (count($g['items']) > 1) {
+            foreach ($g['items'] as $item) {
+                $iDaily = $item['period_days'] > 0 ? round($item['consumption'] / $item['period_days'], 1) : 0;
+                $text .= "    · {$item['sku']} {$item['name']}: ост. {$item['stock']}, расх. {$iDaily}/д\n";
+            }
+        }
+        $text .= "\n";
+    }
+
+    // Навигация
+    $navButtons = [];
+    if ($page > 0) $navButtons[] = ['text' => '⬅️ Назад', 'callback_data' => "analysis_{$zone}_" . ($page - 1)];
+    if ($page + 1 < $totalPages) $navButtons[] = ['text' => 'Далее ➡️', 'callback_data' => "analysis_{$zone}_" . ($page + 1)];
+    $navButtons[] = ['text' => '📊 Сводка', 'callback_data' => 'analysis_summary'];
+
+    $keyboard = ['inline_keyboard' => [$navButtons]];
+    sendMessage($chatId, $text, $keyboard);
+}
+
 // ═══ AI ответы через Claude ═══
 
 function askAI($question, $context) {
@@ -287,7 +497,7 @@ function getSystemPrompt() {
 - Остаток: показывай остаток, расход/день и запас в днях
 - HTML для Telegram: <b>жирный</b>. НЕ используй Markdown
 - Числа: «5 кор.», «120 шт.», «14 дн.», даты: ДД.ММ.ГГГГ
-- Команды: /orders /stock /consumption /prices /psc /settings
+- Команды: /orders /stock /consumption /prices /psc /analysis /entity /settings
 PROMPT;
 }
 
@@ -1086,7 +1296,58 @@ if (isset($input['callback_query'])) {
             case 'consumption': cmdConsumption($chatId, $user); break;
             case 'prices': cmdPrices($chatId, $user); break;
             case 'psc': cmdPsc($chatId, $user); break;
+            case 'analysis': cmdAnalysis($chatId, $user); break;
+            case 'entity':
+                $entities = $user['legal_entities'];
+                if (count($entities) <= 1) {
+                    $current = getUserEntity($user);
+                    sendMessage($chatId, "🏢 Вам доступно одно юрлицо: <b>{$current}</b>");
+                } else {
+                    $current = getUserEntity($user);
+                    $btns = [];
+                    foreach ($entities as $idx => $le) {
+                        $mark = ($le === $current) ? '✅ ' : '';
+                        $short = getEntityShort($le);
+                        $btns[] = [['text' => "{$mark}{$short} — {$le}", 'callback_data' => "entity_{$idx}"]];
+                    }
+                    sendMessage($chatId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>{$current}</b>\n\nНажмите для переключения:", ['inline_keyboard' => $btns]);
+                }
+                break;
             case 'settings': showSettings($chatId, null, $user['name']); break;
+        }
+        exit;
+    }
+
+    // Анализ запасов — навигация по зонам
+    if (str_starts_with($data, 'analysis_')) {
+        $user = getUser($chatId);
+        if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        answerCallback($cb['id']);
+        $parts = explode('_', $data);
+        // analysis_summary, analysis_red_0, analysis_orange_1 ...
+        if ($parts[1] === 'summary') {
+            cmdAnalysis($chatId, $user);
+        } else {
+            $zone = $parts[1];
+            $page = intval($parts[2] ?? 0);
+            cmdAnalysis($chatId, $user, $zone, $page);
+        }
+        exit;
+    }
+
+    // Выбор юрлица
+    if (str_starts_with($data, 'entity_')) {
+        $user = getUser($chatId);
+        if (!$user) { answerCallback($cb['id'], 'Сначала привяжите аккаунт'); exit; }
+        $idx = intval(substr($data, 7));
+        $entities = $user['legal_entities'];
+        if (isset($entities[$idx])) {
+            setUserEntity($user['name'], $entities[$idx]);
+            $short = getEntityShort($entities[$idx]);
+            answerCallback($cb['id'], "Выбрано: {$short}");
+            editMessage($chatId, $msgId, "✅ Юрлицо переключено на <b>{$entities[$idx]}</b>\n\nТеперь все данные показываются для этого юрлица.");
+        } else {
+            answerCallback($cb['id'], 'Ошибка выбора');
         }
         exit;
     }
@@ -1120,29 +1381,75 @@ $text = trim($msg['text'] ?? '');
 if ($text === '/start') {
     $user = getUser($chatId);
     $greeting = $user ? "Привет, <b>{$user['name']}</b>! 👋" : "👋 <b>Supply Department</b>";
+    $entity = $user ? getUserEntity($user) : null;
+    $entityInfo = $entity ? "\n🏢 Юрлицо: <b>{$entity}</b>" : '';
     $intro = $user
-        ? "Я помогу с закупками: остатки, заказы, цены, сроки годности. Задай вопрос или выбери из меню:"
+        ? "Я помогу с закупками: остатки, заказы, цены, анализ запасов.{$entityInfo}\n\nЗадай вопрос или выбери из меню:"
         : "Я бот отдела закупок. Для начала отправьте свой <b>email</b>, чтобы привязать аккаунт.";
 
-    $keyboard = ['inline_keyboard' => [
+    $buttons = [
         [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
-        [['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
-        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc']],
-        [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
-    ]];
+        [['text' => '📊 Анализ запасов', 'callback_data' => 'cmd_analysis'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
+        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '📊 Расход', 'callback_data' => 'cmd_consumption']],
+    ];
+    if ($user && count($user['legal_entities']) > 1) {
+        $short = $entity ? getEntityShort($entity) : '?';
+        $buttons[] = [['text' => "🏢 Юрлицо ({$short})", 'callback_data' => 'cmd_entity']];
+    }
+    $buttons[] = [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
+
+    $keyboard = ['inline_keyboard' => $buttons];
     sendMessage($chatId, "{$greeting}\n\n{$intro}", $keyboard);
     exit;
 }
 
 // /help или /menu
 if ($text === '/help' || $text === '/menu') {
-    $keyboard = ['inline_keyboard' => [
+    $user = getUser($chatId);
+    $entity = $user ? getUserEntity($user) : null;
+    $entityInfo = $entity ? "\n🏢 Юрлицо: <b>{$entity}</b>" : '';
+
+    $buttons = [
         [['text' => '📦 Заказы', 'callback_data' => 'cmd_orders'], ['text' => '📉 Остатки', 'callback_data' => 'cmd_stock']],
-        [['text' => '📊 Расход', 'callback_data' => 'cmd_consumption'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
-        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc']],
-        [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']],
-    ]];
-    sendMessage($chatId, "📖 <b>Меню</b>\n\nВыберите раздел или задайте вопрос текстом:\n\n<i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Состав последнего заказа\n• Что скоро просрочится на складе?", $keyboard);
+        [['text' => '📊 Анализ запасов', 'callback_data' => 'cmd_analysis'], ['text' => '💰 Цены', 'callback_data' => 'cmd_prices']],
+        [['text' => '📋 Протоколы', 'callback_data' => 'cmd_psc'], ['text' => '📊 Расход', 'callback_data' => 'cmd_consumption']],
+    ];
+    if ($user && count($user['legal_entities']) > 1) {
+        $short = $entity ? getEntityShort($entity) : '?';
+        $buttons[] = [['text' => "🏢 Юрлицо ({$short})", 'callback_data' => 'cmd_entity']];
+    }
+    $buttons[] = [['text' => '⚙️ Настройки', 'callback_data' => 'cmd_settings']];
+
+    sendMessage($chatId, "📖 <b>Меню</b>{$entityInfo}\n\nВыберите раздел или задайте вопрос текстом:\n\n<i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Анализ запасов\n• Состав последнего заказа\n• Что скоро просрочится на складе?", ['inline_keyboard' => $buttons]);
+    exit;
+}
+
+// /analysis — полный анализ запасов
+if ($text === '/analysis') {
+    $user = getUser($chatId);
+    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    cmdAnalysis($chatId, $user);
+    exit;
+}
+
+// /entity — переключение юрлица
+if ($text === '/entity') {
+    $user = getUser($chatId);
+    if (!$user) { sendMessage($chatId, "❌ Сначала привяжите аккаунт — отправьте email."); exit; }
+    $entities = $user['legal_entities'];
+    if (count($entities) <= 1) {
+        $current = getUserEntity($user);
+        sendMessage($chatId, "🏢 Вам доступно одно юрлицо: <b>{$current}</b>");
+        exit;
+    }
+    $current = getUserEntity($user);
+    $buttons = [];
+    foreach ($entities as $idx => $le) {
+        $mark = ($le === $current) ? '✅ ' : '';
+        $short = getEntityShort($le);
+        $buttons[] = [['text' => "{$mark}{$short} — {$le}", 'callback_data' => "entity_{$idx}"]];
+    }
+    sendMessage($chatId, "🏢 <b>Выбор юрлица</b>\n\nТекущее: <b>{$current}</b>\n\nНажмите для переключения:", ['inline_keyboard' => $buttons]);
     exit;
 }
 

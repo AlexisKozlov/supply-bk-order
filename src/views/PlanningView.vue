@@ -80,7 +80,7 @@
       <div class="search-bar" v-if="!viewOnly" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
           <input type="text" v-model="filterQuery" placeholder="Фильтр по названию / артикулу..."
-            style="width:280px;max-width:360px;padding-right:28px;"/>
+            style="width:280px;max-width:100%;padding-right:28px;"/>
           <button v-if="filterQuery" @click="filterQuery = ''"
             style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#999;"><BkIcon name="close" size="xs"/></button>
         </div>
