@@ -1545,6 +1545,11 @@ watch(activeTab, (tab) => {
   if (tab === 'stats') {
     if (!Object.keys(statsData.value).length) loadStats();
   }
+  if (tab === 'feedback') {
+    startBugPoll();
+  } else {
+    stopBugPoll();
+  }
 });
 
 const usersWord = computed(() => {
@@ -1927,15 +1932,24 @@ async function bugPoll() {
   } catch {}
 }
 
+function startBugPoll() {
+  if (bugPollTimer) clearInterval(bugPollTimer);
+  bugPollTimer = setInterval(bugPoll, 10000);
+}
+
+function stopBugPoll() {
+  if (bugPollTimer) { clearInterval(bugPollTimer); bugPollTimer = null; }
+}
+
 onMounted(() => {
   db.rpc('get_bug_reports_count', {}).then(({ data }) => {
     if (data) bugNewCount.value = data.new_count || 0;
   }).catch(() => {});
-  bugPollTimer = setInterval(bugPoll, 10000);
+  if (activeTab.value === 'feedback') startBugPoll();
 });
 
 onUnmounted(() => {
-  if (bugPollTimer) clearInterval(bugPollTimer);
+  stopBugPoll();
 });
 </script>
 

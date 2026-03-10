@@ -502,123 +502,139 @@
         </div>
         <div v-else-if="!forecast" style="text-align:center;padding:60px;color:var(--text-muted);">Нет данных для прогноза</div>
         <template v-else>
-          <!-- Контролы -->
-          <div class="fc-controls">
-            <div class="fc-controls-left">
-              <div class="fc-period-btns">
-                <button v-for="p in [7, 14, 30]" :key="p" class="fc-period-btn" :class="{ active: forecastPeriod === p }" @click="forecastPeriod = p">{{ p }} дн.</button>
+          <!-- Панель управления -->
+          <div class="fc2-toolbar">
+            <div class="fc2-toolbar-left">
+              <div class="fc2-period-group">
+                <button v-for="p in [7, 14, 30]" :key="p" class="fc2-period-btn" :class="{ active: forecastPeriod === p }" @click="forecastPeriod = p">{{ p }} дн.</button>
               </div>
-              <select v-model="forecastSupplier" class="fc-supplier-select">
+              <div class="fc2-search-wrap">
+                <svg class="fc2-search-icon" viewBox="0 0 16 16" width="13" height="13"><circle cx="6.5" cy="6.5" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 10l4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <input v-model="forecastSearch" class="fc2-search" placeholder="Поиск..." />
+              </div>
+              <select v-model="forecastSupplier" class="fc2-select">
                 <option value="">Все поставщики</option>
                 <option v-for="s in forecast.suppliers" :key="s" :value="s">{{ s }}</option>
               </select>
             </div>
-            <button v-if="forecastSupplier && canCreateOrder" class="btn primary fc-order-btn" @click="createOrderFromForecast" :disabled="!filteredForecast.length">
-              <BkIcon name="order" size="sm"/> Заказ для {{ forecastSupplier }}
+            <button v-if="forecastSupplier && canCreateOrder" class="btn primary small" @click="createOrderFromForecast" :disabled="!filteredForecast.length">
+              <BkIcon name="order" size="sm"/> Заказ
             </button>
           </div>
 
-          <!-- KPI -->
-          <div class="dash-kpi-grid">
-            <div class="dash-kpi dash-kpi--blue">
-              <div class="dash-kpi__left-border"></div>
-              <div class="dash-kpi__body">
-                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="order" size="sm"/></span><span class="dash-kpi__label">Товаров в расчёте</span></div>
-                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ forecastKpi.totalProducts }}</span></div>
-                <div class="dash-kpi__sub">которые заказывали за 60 дней</div>
-              </div>
+          <!-- Сводка -->
+          <div class="fc2-summary">
+            <div class="fc2-stat">
+              <span class="fc2-stat-val">{{ forecastKpi.totalGroups }}</span>
+              <span class="fc2-stat-label">групп</span>
             </div>
-            <div class="dash-kpi dash-kpi--orange">
-              <div class="dash-kpi__left-border"></div>
-              <div class="dash-kpi__body">
-                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="chartUp" size="sm"/></span><span class="dash-kpi__label">Понадобится коробок</span></div>
-                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ nf(forecastKpi.totalForecast) }}</span><span class="dash-kpi__unit">кор.</span></div>
-                <div class="dash-kpi__sub">ожидаемый расход за {{ forecastPeriod }} дней</div>
-              </div>
+            <div class="fc2-stat-sep"></div>
+            <div class="fc2-stat">
+              <span class="fc2-stat-val fc2-stat-accent">{{ nf(forecastKpi.totalForecast) }}</span>
+              <span class="fc2-stat-label">ед. на {{ forecastPeriod }} дн.</span>
             </div>
-            <div class="dash-kpi dash-kpi--red">
-              <div class="dash-kpi__left-border"></div>
-              <div class="dash-kpi__body">
-                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="warning" size="sm"/></span><span class="dash-kpi__label">Товаров с дефицитом</span></div>
-                <div class="dash-kpi__value-row"><span class="dash-kpi__value" style="color:#D32F2F;">{{ forecastKpi.deficitCount }}</span><span class="dash-kpi__unit">из {{ forecastKpi.withStockCount }} с остатками</span></div>
-                <div class="dash-kpi__sub">{{ forecastKpi.criticalCount ? 'критично (на 3 дня и менее): ' + forecastKpi.criticalCount : 'критичных нет' }}{{ forecastKpi.noStockCount ? ' / без данных: ' + forecastKpi.noStockCount : '' }}</div>
-              </div>
+            <div class="fc2-stat-sep"></div>
+            <div class="fc2-stat" v-if="forecastKpi.deficitCount > 0">
+              <span class="fc2-stat-val fc2-stat-danger">{{ forecastKpi.deficitCount }}</span>
+              <span class="fc2-stat-label">дефицит</span>
             </div>
-            <div class="dash-kpi dash-kpi--green">
-              <div class="dash-kpi__left-border"></div>
-              <div class="dash-kpi__body">
-                <div class="dash-kpi__header"><span class="dash-kpi__icon"><BkIcon name="chartUp" size="sm"/></span><span class="dash-kpi__label">Тренд заказов</span></div>
-                <div class="dash-kpi__value-row"><span class="dash-kpi__value">{{ forecastKpi.trendUp }}</span><span class="dash-kpi__unit">растут</span></div>
-                <div class="dash-kpi__sub">падают: {{ forecastKpi.trendDown }} / стабильно: {{ forecastKpi.trendStable }}</div>
-              </div>
+            <div class="fc2-stat" v-else>
+              <span class="fc2-stat-val fc2-stat-ok">0</span>
+              <span class="fc2-stat-label">дефицит</span>
             </div>
-          </div>
-
-          <!-- Легенда -->
-          <div class="fc-legend">
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#E8F5E9;border-color:#4CAF50;"></span> <b>Ок</b> --- запаса больше чем на 7 дней</div>
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFF3E0;border-color:#FF9800;"></span> <b>Мало</b> --- запаса на 4-7 дней</div>
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#FFEBEE;border-color:#F44336;"></span> <b>Критично</b> --- запаса на 3 дня и менее</div>
-            <div class="fc-legend-item"><span class="fc-legend-dot" style="background:#F5F5F5;border-color:#BDBDBD;"></span> <b>Нет данных</b> --- остатки не внесены (на стр. Анализ)</div>
+            <div class="fc2-stat-sep"></div>
+            <div class="fc2-stat">
+              <span class="fc2-stat-val">{{ forecastKpi.trendUp }}</span>
+              <span class="fc2-stat-label">растут</span>
+            </div>
+            <div class="fc2-stat">
+              <span class="fc2-stat-val">{{ forecastKpi.trendDown }}</span>
+              <span class="fc2-stat-label">падают</span>
+            </div>
           </div>
 
           <!-- Таблица -->
-          <div class="dash-card fc-table-card">
-            <div class="fc-table-wrap">
-              <table class="fc-table">
-                <thead>
-                  <tr>
-                    <th class="fc-th fc-th-name" @click="toggleForecastSort('name')">Товар{{ sortIcon('name') }}</th>
-                    <th class="fc-th fc-th-spark fc-hide-mobile">Динамика за 14 дн.</th>
-                    <th class="fc-th fc-th-num" @click="toggleForecastSort('avgPerDay')" title="Среднее потребление коробок в день">Расход/день, кор.{{ sortIcon('avgPerDay') }}</th>
-                    <th class="fc-th fc-th-num" @click="toggleForecastSort('forecast')" title="Сколько коробок потребуется за выбранный период">Нужно на {{ forecastPeriod }} дн., кор.{{ sortIcon('forecast') }}</th>
-                    <th class="fc-th fc-th-num" @click="toggleForecastSort('stock')" title="Текущий остаток на складе в коробках">На складе, кор.{{ sortIcon('stock') }}</th>
-                    <th class="fc-th fc-th-num" @click="toggleForecastSort('daysOfStock')" title="На сколько дней хватит текущего остатка">Хватит на, дн.{{ sortIcon('daysOfStock') }}</th>
-                    <th class="fc-th fc-th-status">Запас</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in filteredForecast" :key="item.sku || item.name" class="fc-row" :class="'fc-status-' + item.stockStatus">
-                    <td class="fc-td fc-td-name">
-                      <div class="fc-item-name">{{ item.name || item.sku }}</div>
-                      <div v-if="item.sku" class="fc-item-sku">{{ item.sku }}</div>
-                      <div v-if="item.supplier && !forecastSupplier" class="fc-item-supplier">{{ item.supplier }}</div>
+          <div class="fc2-table-wrap">
+            <table class="fc2-table">
+              <thead>
+                <tr>
+                  <th class="fc2-th fc2-th-name" @click="toggleForecastSort('name')">Группа{{ sortIcon('name') }}</th>
+                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('avgPerDay')">В день{{ sortIcon('avgPerDay') }}</th>
+                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('forecast')">На {{ forecastPeriod }} дн.{{ sortIcon('forecast') }}</th>
+                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('stock')">Остаток{{ sortIcon('stock') }}</th>
+                  <th class="fc2-th fc2-th-num" @click="toggleForecastSort('daysOfStock')">Дней{{ sortIcon('daysOfStock') }}</th>
+                  <th v-if="hasYoyData" class="fc2-th fc2-th-num fc2-hide-sm" @click="toggleForecastSort('yoy')">vs год{{ sortIcon('yoy') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="g in filteredForecastGroups" :key="g.name">
+                  <tr class="fc2-row" :class="['fc2-s-' + g.stockStatus, { 'fc2-row-open': fcExpanded.has(g.name) }]" @click="toggleFcExpand(g.name)">
+                    <!-- Название -->
+                    <td class="fc2-td fc2-td-name">
+                      <div class="fc2-name-wrap">
+                        <svg v-if="g.isGroup" class="fc2-chev" :class="{ open: fcExpanded.has(g.name) }" viewBox="0 0 16 16" width="10" height="10"><path d="M5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <div class="fc2-name-col">
+                          <span class="fc2-name">{{ g.name }}</span>
+                          <span v-if="g.isGroup" class="fc2-cnt">{{ g.items.length }}</span>
+                          <span v-if="g.dataSource === 'restaurant_sales'" class="fc2-src" title="Данные реализации ресторанов">Р</span>
+                          <span class="fc2-unit">{{ g.unit || 'шт' }}</span>
+                          <span class="fc2-trend-icon" :class="'fc2-t-' + g.trend" :title="g.trend === 'up' ? 'Растёт' : g.trend === 'down' ? 'Падает' : 'Стабильно'">{{ g.trend === 'up' ? '\u25B2' : g.trend === 'down' ? '\u25BC' : '' }}</span>
+                        </div>
+                        <div v-if="g.supplier && !forecastSupplier" class="fc2-supplier">{{ g.supplier }}</div>
+                      </div>
                     </td>
-                    <td class="fc-td fc-td-spark fc-hide-mobile">
-                      <template v-if="item.sparkline.some(v => v > 0)">
-                        <svg class="fc-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none">
-                          <path :d="sparklinePath(item.sparkline, 60, 20)" fill="none" :stroke="sparklineColor(item.trend)" stroke-width="1.5"/>
-                        </svg>
+                    <!-- Расход/день -->
+                    <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': !g.hasConsumptionData }">
+                      {{ g.hasConsumptionData ? g.avgPerDay.toFixed(1) : '---' }}
+                    </td>
+                    <!-- Прогноз -->
+                    <td class="fc2-td fc2-td-num fc2-td-forecast" :class="{ 'fc2-muted': !g.hasConsumptionData }">
+                      <span>{{ g.hasConsumptionData ? Math.round(forecastVal(g)) : '---' }}</span>
+                      <span v-if="g.seasonCoeff && Math.abs(g.seasonCoeff - 1) > 0.08" class="fc2-season" :class="g.seasonCoeff > 1 ? 'fc2-season-up' : 'fc2-season-dn'" :title="'Сезонность: ' + (g.seasonCoeff > 1 ? '+' : '') + Math.round((g.seasonCoeff - 1) * 100) + '%'">
+                        {{ g.seasonCoeff > 1 ? '\u25B2' : '\u25BC' }}
+                      </span>
+                    </td>
+                    <!-- Остаток -->
+                    <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': g.stock === null }">
+                      {{ g.stock !== null ? Math.round(g.stock) : '---' }}
+                    </td>
+                    <!-- Дней запаса -->
+                    <td class="fc2-td fc2-td-num fc2-td-days" :class="g.daysOfStock !== null && g.daysOfStock <= 3 ? 'fc2-days-crit' : g.daysOfStock !== null && g.daysOfStock <= 7 ? 'fc2-days-warn' : g.daysOfStock === null ? 'fc2-muted' : 'fc2-days-ok'">
+                      <template v-if="g.daysOfStock === null || g.daysOfStock >= 999">---</template>
+                      <template v-else>{{ g.daysOfStock }}</template>
+                    </td>
+                    <!-- YoY -->
+                    <td v-if="hasYoyData" class="fc2-td fc2-td-num fc2-hide-sm" :class="{ 'fc2-muted': g.yoyChange === null }">
+                      <template v-if="g.yoyChange !== null">
+                        <span :class="g.yoyChange > 5 ? 'fc2-yoy-up' : g.yoyChange < -5 ? 'fc2-yoy-dn' : ''">{{ g.yoyChange > 0 ? '+' : '' }}{{ g.yoyChange }}%</span>
                       </template>
-                      <span class="fc-trend-label" :class="'fc-trend-' + item.trend">{{ trendLabel(item.trend) }}</span>
-                    </td>
-                    <td class="fc-td fc-td-num" :class="{ 'fc-no-data': !item.hasConsumptionData }">
-                      {{ item.hasConsumptionData ? item.avgPerDay.toFixed(1) : '---' }}
-                    </td>
-                    <td class="fc-td fc-td-num fc-td-forecast" :class="{ 'fc-no-data': !item.hasConsumptionData }">
-                      {{ item.hasConsumptionData ? Math.round(forecastVal(item)) : '---' }}
-                    </td>
-                    <td class="fc-td fc-td-num" :class="{ 'fc-no-data': item.stock === null }">
-                      {{ item.stock !== null ? Math.round(item.stock) : '---' }}
-                    </td>
-                    <td class="fc-td fc-td-num" :class="item.daysOfStock !== null && item.daysOfStock <= 3 ? 'fc-days-critical' : item.daysOfStock !== null && item.daysOfStock <= 7 ? 'fc-days-warning' : item.daysOfStock === null ? 'fc-no-data' : ''">
-                      {{ item.daysOfStock === null ? '---' : item.daysOfStock >= 999 ? '---' : item.daysOfStock }}
-                    </td>
-                    <td class="fc-td fc-td-status">
-                      <span class="fc-status-badge" :class="'fc-badge-' + item.stockStatus">{{ stockStatusLabel(item.stockStatus) }}</span>
+                      <template v-else>---</template>
                     </td>
                   </tr>
-                </tbody>
-              </table>
-            </div>
-            <div v-if="!filteredForecast.length" style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px;">
-              Нет товаров по выбранному фильтру
-            </div>
-          </div>
-
-          <div class="fc-note">
-            <BkIcon name="bulb" size="sm"/> <b>Откуда данные:</b> расход и остатки --- со страницы Анализ.
-            Прогноз = дневной расход x количество дней. Динамика и тренд --- из истории заказов за 60 дней.
+                  <!-- Развёрнутые товары -->
+                  <template v-if="g.isGroup && fcExpanded.has(g.name)">
+                    <tr v-for="item in g.items" :key="item.sku" class="fc2-row fc2-sub" :class="'fc2-s-' + item.stockStatus">
+                      <td class="fc2-td fc2-td-name fc2-sub-name">
+                        <span class="fc2-sub-sku">{{ item.sku }}</span>
+                        <span class="fc2-sub-label">{{ item.name }}</span>
+                      </td>
+                      <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': !item.hasConsumptionData }">{{ item.hasConsumptionData ? item.avgPerDay.toFixed(1) : '---' }}</td>
+                      <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': !item.hasConsumptionData }">{{ item.hasConsumptionData ? Math.round(forecastVal(item)) : '---' }}</td>
+                      <td class="fc2-td fc2-td-num" :class="{ 'fc2-muted': item.stock === null }">{{ item.stock !== null ? Math.round(item.stock) : '---' }}</td>
+                      <td class="fc2-td fc2-td-num fc2-td-days" :class="item.daysOfStock !== null && item.daysOfStock <= 3 ? 'fc2-days-crit' : item.daysOfStock !== null && item.daysOfStock <= 7 ? 'fc2-days-warn' : item.daysOfStock === null ? 'fc2-muted' : 'fc2-days-ok'">
+                        <template v-if="item.daysOfStock === null || item.daysOfStock >= 999">---</template>
+                        <template v-else>{{ item.daysOfStock }}</template>
+                      </td>
+                      <td v-if="hasYoyData" class="fc2-td fc2-td-num fc2-hide-sm" :class="{ 'fc2-muted': item.yoyChange === null }">
+                        <template v-if="item.yoyChange !== null"><span :class="item.yoyChange > 5 ? 'fc2-yoy-up' : item.yoyChange < -5 ? 'fc2-yoy-dn' : ''">{{ item.yoyChange > 0 ? '+' : '' }}{{ item.yoyChange }}%</span></template>
+                        <template v-else>---</template>
+                      </td>
+                    </tr>
+                  </template>
+                </template>
+              </tbody>
+            </table>
+            <div v-if="!filteredForecastGroups.length" class="fc2-empty">Нет данных по выбранному фильтру</div>
           </div>
         </template>
       </template>
@@ -646,7 +662,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { getOrdersAnalytics, getSeasonalityData, getForecastData } from '@/lib/analytics.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -678,6 +694,8 @@ const forecastLoading = ref(false);
 const forecastPeriod = ref(7);
 const forecastSupplier = ref('');
 const forecastSort = ref({ col: 'default', asc: true });
+const forecastSearch = ref('');
+const fcExpanded = reactive(new Set());
 
 // Prices for monetary metrics
 const prices = ref(null);
@@ -946,37 +964,70 @@ async function loadForecast() {
     const d = await getForecastData(orderStore.settings.legalEntity);
     if (myId !== _forecastLoadId) return;
     forecast.value = d;
+    fcExpanded.clear();
   } catch (e) {
     if (myId !== _forecastLoadId) return;
-    toast.error('Ошибка', 'Не удалось загрузить прогноз');
+    console.error('Forecast load error:', e);
+    toast.error('Ошибка', 'Не удалось загрузить прогноз: ' + (e.message || e));
     forecast.value = null;
   } finally {
     if (myId === _forecastLoadId) forecastLoading.value = false;
   }
 }
 
-// Фильтрованный и отсортированный список прогноза
+// Фильтрованный и отсортированный список прогноза (по товарам — для кнопки «создать заказ»)
 const filteredForecast = computed(() => {
   if (!forecast.value) return [];
   let items = forecast.value.items;
   if (forecastSupplier.value) {
     items = items.filter(i => i.supplier === forecastSupplier.value);
   }
+  return items;
+});
+
+// Фильтрованный и отсортированный список групп
+const filteredForecastGroups = computed(() => {
+  if (!forecast.value) return [];
+  let groups = forecast.value.groups || [];
+  // Фильтр по поставщику
+  if (forecastSupplier.value) {
+    groups = groups.filter(g => g.suppliers.includes(forecastSupplier.value));
+  }
+  // Поиск
+  if (forecastSearch.value) {
+    const q = forecastSearch.value.toLowerCase();
+    groups = groups.filter(g =>
+      g.name.toLowerCase().includes(q) ||
+      g.items.some(i => (i.name || '').toLowerCase().includes(q) || (i.sku || '').toLowerCase().includes(q))
+    );
+  }
+  // Сортировка
   const sort = forecastSort.value;
   if (sort.col !== 'default') {
-    items = [...items].sort((a, b) => {
+    groups = [...groups].sort((a, b) => {
       let va, vb;
-      if (sort.col === 'name') { va = (a.name || a.sku || '').toLowerCase(); vb = (b.name || b.sku || '').toLowerCase(); return sort.asc ? va.localeCompare(vb) : vb.localeCompare(va); }
+      if (sort.col === 'name') { va = a.name.toLowerCase(); vb = b.name.toLowerCase(); return sort.asc ? va.localeCompare(vb) : vb.localeCompare(va); }
       if (sort.col === 'forecast') { va = forecastVal(a); vb = forecastVal(b); }
       else if (sort.col === 'avgPerDay') { va = a.avgPerDay; vb = b.avgPerDay; }
+      else if (sort.col === 'yoy') { va = a.yoyChange ?? -9999; vb = b.yoyChange ?? -9999; }
       else if (sort.col === 'stock') { va = a.stock ?? -1; vb = b.stock ?? -1; }
       else if (sort.col === 'daysOfStock') { va = a.daysOfStock ?? 9999; vb = b.daysOfStock ?? 9999; }
       else { va = 0; vb = 0; }
       return sort.asc ? va - vb : vb - va;
     });
   }
-  return items;
+  return groups;
 });
+
+const hasYoyData = computed(() => {
+  if (!forecast.value?.groups) return false;
+  return forecast.value.groups.some(g => g.yoyChange !== null);
+});
+
+function toggleFcExpand(name) {
+  if (fcExpanded.has(name)) fcExpanded.delete(name);
+  else fcExpanded.add(name);
+}
 
 function forecastVal(item) {
   if (forecastPeriod.value === 14) return item.forecast14;
@@ -984,13 +1035,16 @@ function forecastVal(item) {
   return item.forecast7;
 }
 
-// KPI пересчитываются по отфильтрованному списку (с учётом выбранного поставщика)
+// KPI пересчитываются по отфильтрованным группам
 const forecastKpi = computed(() => {
-  const items = filteredForecast.value;
+  const groups = filteredForecastGroups.value;
+  // Раскрываем до отдельных товаров для точных подсчётов
+  const items = groups.flatMap(g => g.items);
   const withStock = items.filter(i => i.stockStatus !== 'unknown');
   const deficit = withStock.filter(i => i.stockStatus === 'critical' || i.stockStatus === 'warning');
   const totalForecast = items.reduce((s, i) => s + forecastVal(i), 0);
   return {
+    totalGroups: groups.length,
     totalProducts: items.length,
     withStockCount: withStock.length,
     noStockCount: items.length - withStock.length,
@@ -1530,88 +1584,140 @@ onMounted(() => {
 .an-pf-prod-delta.neg { color: #D32F2F; }
 .an-pf-prod-delta.pos { color: #E65100; }
 
-/* ===== Forecast tab ===== */
-.fc-controls {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+/* ===== Forecast tab v2 ===== */
+.fc2-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 10px; flex-wrap: wrap;
 }
-.fc-controls-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.fc-period-btns { display: flex; gap: 0; }
-.fc-period-btn {
-  padding: 5px 12px; font-size: 12px; font-weight: 600; border: 1px solid var(--border);
-  background: var(--card); color: var(--text-muted); cursor: pointer; transition: all 0.15s;
+.fc2-toolbar-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fc2-period-group { display: flex; }
+.fc2-period-btn {
+  padding: 6px 14px; font-size: 12px; font-weight: 700; border: 1.5px solid var(--border);
+  background: var(--card); color: var(--text-muted); cursor: pointer; transition: all 0.12s;
 }
-.fc-period-btn:first-child { border-radius: 6px 0 0 6px; }
-.fc-period-btn:last-child { border-radius: 0 6px 6px 0; }
-.fc-period-btn:not(:first-child) { border-left: none; }
-.fc-period-btn.active { background: #502314; color: #fff; border-color: #502314; }
-.fc-supplier-select {
-  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
-  font-size: 12px; font-weight: 600; background: var(--card); color: var(--text);
-  max-width: 200px;
+.fc2-period-btn:first-child { border-radius: 8px 0 0 8px; }
+.fc2-period-btn:last-child { border-radius: 0 8px 8px 0; }
+.fc2-period-btn:not(:first-child) { border-left: none; }
+.fc2-period-btn.active { background: #502314; color: #fff; border-color: #502314; }
+.fc2-search-wrap {
+  position: relative; display: flex; align-items: center;
 }
-.fc-order-btn { white-space: nowrap; font-size: 12px; }
-
-.fc-legend {
-  display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap;
-  padding: 8px 12px; background: var(--card); border: 1px solid var(--border-light);
-  border-radius: 8px; font-size: 12px; color: var(--text);
+.fc2-search-icon { position: absolute; left: 8px; color: var(--text-muted); pointer-events: none; }
+.fc2-search {
+  padding: 6px 10px 6px 26px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--text); font-size: 12px; width: 170px;
 }
-.fc-legend-item { display: flex; align-items: center; gap: 6px; }
-.fc-legend-dot {
-  width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0;
-  border: 1.5px solid;
+.fc2-select {
+  padding: 6px 10px; border-radius: 8px; border: 1.5px solid var(--border);
+  font-size: 12px; background: var(--card); color: var(--text); max-width: 200px;
 }
 
-.fc-table-card { padding: 0; overflow: hidden; }
-.fc-table-wrap { overflow-x: auto; }
-.fc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.fc-th {
-  padding: 8px 10px; font-weight: 700; font-size: 11px; color: var(--text-muted);
-  border-bottom: 2px solid var(--border-light); text-align: left; cursor: pointer;
-  white-space: nowrap; user-select: none;
+/* Summary bar */
+.fc2-summary {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 10px;
+  background: var(--card); border: 1px solid var(--border-light); border-radius: 10px;
 }
-.fc-th:hover { color: var(--text); }
-.fc-th-name { min-width: 140px; }
-.fc-th-spark { min-width: 100px; }
-.fc-th-num { text-align: right; min-width: 70px; }
-.fc-th-status { text-align: center; min-width: 70px; cursor: default; }
+.fc2-stat { display: flex; align-items: baseline; gap: 4px; }
+.fc2-stat-val { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1; }
+.fc2-stat-accent { color: #502314; }
+.fc2-stat-danger { color: #D32F2F; }
+.fc2-stat-ok { color: #2E7D32; }
+.fc2-stat-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.fc2-stat-sep { width: 1px; height: 24px; background: var(--border-light); flex-shrink: 0; }
 
-.fc-row { border-bottom: 1px solid var(--border-light); transition: background 0.1s; }
-.fc-row:hover { background: rgba(0,0,0,0.02); }
-.fc-row:last-child { border-bottom: none; }
-.fc-status-critical { background: #FFF5F5; }
-.fc-status-critical:hover { background: #FFEBEE; }
-.fc-status-warning { background: #FFFCF0; }
-.fc-status-warning:hover { background: #FFF8E1; }
-
-.fc-td { padding: 8px 10px; vertical-align: middle; }
-.fc-item-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
-.fc-item-sku { font-size: 10px; color: #FF8732; font-weight: 700; }
-.fc-item-supplier { font-size: 10px; color: var(--text-muted); }
-.fc-sparkline { width: 60px; height: 20px; display: block; }
-.fc-trend-label { font-size: 10px; font-weight: 600; white-space: nowrap; }
-.fc-trend-up { color: #4CAF50; }
-.fc-trend-down { color: #F44336; }
-.fc-trend-stable { color: #9E9E9E; }
-.fc-td-num { text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.fc-td-forecast { color: #1976D2; font-weight: 700; }
-.fc-days-critical { color: #D32F2F; font-weight: 800; }
-.fc-days-warning { color: #E65100; font-weight: 700; }
-.fc-td-status { text-align: center; }
-.fc-status-badge {
-  display: inline-block; padding: 2px 8px; border-radius: 4px;
-  font-size: 10px; font-weight: 700;
+/* Table */
+.fc2-table-wrap {
+  border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden;
+  background: var(--card);
 }
-.fc-badge-ok { background: #E8F5E9; color: #2E7D32; }
-.fc-badge-warning { background: #FFF3E0; color: #E65100; }
-.fc-badge-critical { background: #FFEBEE; color: #D32F2F; }
-.fc-badge-unknown { background: #F5F5F5; color: #9E9E9E; }
-.fc-no-data { color: var(--text-muted); font-weight: 400; }
+.fc2-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fc2-th {
+  padding: 9px 12px; font-weight: 700; font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.4px;
+  border-bottom: 2px solid var(--border); text-align: left; cursor: pointer;
+  white-space: nowrap; user-select: none; background: var(--bg);
+}
+.fc2-th:hover { color: var(--text); }
+.fc2-th-name { min-width: 180px; }
+.fc2-th-num { text-align: right; min-width: 60px; }
 
-.fc-note {
-  margin-top: 8px; padding: 8px 12px; background: #E3F2FD; border-radius: 8px;
-  border: 1px solid #90CAF9; font-size: 12px; color: #1565C0;
+/* Rows */
+.fc2-row {
+  border-bottom: 1px solid var(--border-light); cursor: pointer;
+  transition: background 0.1s; border-left: 3px solid transparent;
+}
+.fc2-row:last-child { border-bottom: none; }
+.fc2-row:hover { background: rgba(0,0,0,0.015); }
+.fc2-row-open { background: rgba(0,0,0,0.02); }
+
+/* Status left border */
+.fc2-s-critical { border-left-color: #F44336; background: #FFF8F8; }
+.fc2-s-critical:hover { background: #FFF0F0; }
+.fc2-s-warning { border-left-color: #FF9800; background: #FFFDF5; }
+.fc2-s-warning:hover { background: #FFF8E1; }
+.fc2-s-ok { border-left-color: #4CAF50; }
+.fc2-s-unknown { border-left-color: #E0E0E0; }
+
+/* Cells */
+.fc2-td { padding: 8px 12px; vertical-align: middle; }
+.fc2-td-num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fc2-td-forecast { font-weight: 700; color: #502314; }
+.fc2-muted { color: var(--text-muted); font-weight: 400; }
+
+/* Name cell */
+.fc2-name-wrap { display: flex; flex-direction: column; gap: 1px; }
+.fc2-name-col { display: flex; align-items: center; gap: 5px; }
+.fc2-name { font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.fc2-cnt { font-size: 9px; font-weight: 700; background: var(--bg); color: var(--text-muted); border-radius: 4px; padding: 0 4px; line-height: 1.5; }
+.fc2-src { font-size: 8px; font-weight: 800; background: #E8F5E9; color: #2E7D32; border-radius: 3px; padding: 0 3px; line-height: 1.5; }
+.fc2-unit { font-size: 9px; color: var(--text-muted); font-weight: 600; }
+.fc2-supplier { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.fc2-chev { transition: transform 0.15s; color: var(--text-muted); flex-shrink: 0; margin-right: 2px; }
+.fc2-chev.open { transform: rotate(90deg); }
+
+/* Trend icon inline */
+.fc2-trend-icon { font-size: 8px; line-height: 1; }
+.fc2-t-up { color: #4CAF50; }
+.fc2-t-down { color: #F44336; }
+.fc2-t-stable { color: transparent; }
+
+/* Season arrow */
+.fc2-season { font-size: 8px; margin-left: 3px; }
+.fc2-season-up { color: #E65100; }
+.fc2-season-dn { color: #1565C0; }
+
+/* Days column */
+.fc2-td-days { font-weight: 700; }
+.fc2-days-crit { color: #D32F2F; font-weight: 800; }
+.fc2-days-warn { color: #E65100; }
+.fc2-days-ok { color: #2E7D32; }
+
+/* YoY */
+.fc2-yoy-up { color: #2E7D32; font-weight: 700; }
+.fc2-yoy-dn { color: #C62828; font-weight: 700; }
+
+/* Sub rows */
+.fc2-sub { cursor: default; background: var(--bg); border-left-width: 3px; }
+.fc2-sub:hover { background: #f0ece6; }
+.fc2-sub-name { padding-left: 30px !important; display: flex; align-items: center; gap: 8px; }
+.fc2-sub-sku { font-size: 10px; font-weight: 700; color: #FF8732; min-width: 50px; }
+.fc2-sub-label { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.fc2-empty { text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px; }
+
+.fc2-hide-sm { }
+
+/* Mobile */
+@media (max-width: 768px) {
+  .fc2-hide-sm { display: none; }
+  .fc2-name { max-width: 140px; }
+  .fc2-toolbar { gap: 6px; }
+  .fc2-search { width: 120px; }
+  .fc2-summary { gap: 8px; padding: 8px 10px; }
+  .fc2-stat-val { font-size: 16px; }
+  .fc2-th { padding: 7px 8px; }
+  .fc2-td { padding: 7px 8px; font-size: 12px; }
 }
 
 /* ===== Responsive ===== */

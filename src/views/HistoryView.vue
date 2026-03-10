@@ -390,12 +390,17 @@ function orderItemsFiltered(order) {
 // --- Log modal ---
 async function openLogModal(entityId, entityType) {
   logModal.value = { show: true, loading: true, entries: [], type: entityType };
-  const { data } = await db.from('audit_log').select('*')
-    .eq('entity_id', entityId).eq('entity_type', entityType)
-    .order('created_at', { ascending: false }).limit(50);
-  if (!logModal.value.show) return;
-  logModal.value.entries = data || [];
-  logModal.value.loading = false;
+  try {
+    const { data } = await db.from('audit_log').select('*')
+      .eq('entity_id', entityId).eq('entity_type', entityType)
+      .order('created_at', { ascending: false }).limit(50);
+    if (!logModal.value.show) return;
+    logModal.value.entries = data || [];
+    logModal.value.loading = false;
+  } catch (e) {
+    logModal.value.loading = false;
+    toast.error('Ошибка', 'Не удалось загрузить историю изменений');
+  }
 }
 
 // --- Drawer Escape ---
@@ -443,10 +448,14 @@ async function openOrderDrawer(order) {
   if (!needFetch) return;
   const skus = order.order_items.map(i => i.sku).filter(Boolean);
   if (!skus.length) return;
-  const { data } = await db.from('products').select('sku, multiplicity').in('sku', skus);
-  if (!data || drawerOrder.value?.id !== order.id) return;
-  const multMap = Object.fromEntries(data.map(p => [p.sku, p.multiplicity || 1]));
-  order.order_items.forEach(i => { if (i.multiplicity == null && i.sku) i.multiplicity = multMap[i.sku] || 1; });
+  try {
+    const { data } = await db.from('products').select('sku, multiplicity').in('sku', skus);
+    if (!data || drawerOrder.value?.id !== order.id) return;
+    const multMap = Object.fromEntries(data.map(p => [p.sku, p.multiplicity || 1]));
+    order.order_items.forEach(i => { if (i.multiplicity == null && i.sku) i.multiplicity = multMap[i.sku] || 1; });
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось загрузить данные заказа');
+  }
 }
 function openPlanDrawer(plan) {
   if (drawerPlan.value?.id === plan.id) { drawerPlan.value = null; return; }
@@ -459,15 +468,19 @@ async function viewOrder(order) {
   router.push({ name: 'order', query: { orderId: order.id, mode: 'view' } });
 }
 async function editOrder(order) {
-  // Проверяем блокировку
-  const { data: lock } = await db.rpc('check_order_lock', { order_id: order.id, user_name: userStore.currentUser?.name || '' });
-  if (lock?.locked) {
-    toast.warning('Заказ заблокирован', `Сейчас редактирует: ${lock.locked_by}`);
-    return;
+  try {
+    // Проверяем блокировку
+    const { data: lock } = await db.rpc('check_order_lock', { order_id: order.id, user_name: userStore.currentUser?.name || '' });
+    if (lock?.locked) {
+      toast.warning('Заказ заблокирован', `Сейчас редактирует: ${lock.locked_by}`);
+      return;
+    }
+    const ok = await confirmAction('Редактировать заказ?', 'При сохранении — обновится поверх старого.');
+    if (!ok) return;
+    router.push({ name: 'order', query: { orderId: order.id, mode: 'edit' } });
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось открыть заказ для редактирования');
   }
-  const ok = await confirmAction('Редактировать заказ?', 'При сохранении — обновится поверх старого.');
-  if (!ok) return;
-  router.push({ name: 'order', query: { orderId: order.id, mode: 'edit' } });
 }
 async function copyOrderLink(order) {
   const url = `${window.location.origin}/order?orderId=${order.id}&mode=view`;
@@ -517,11 +530,15 @@ function viewPlan(plan) { router.push({ path: '/planning', query: { planId: plan
 async function deletePlan(plan) {
   const ok = await confirmAction('Удалить план?', plan.supplier);
   if (!ok) return;
-  const { error } = await db.from('plans').delete().eq('id', plan.id);
-  if (error) { toast.error('Ошибка', ''); return; }
-  // Запись об удалении в аудит
-  try { await db.from('audit_log').insert({ action: 'plan_deleted', entity_type: 'plan', entity_id: plan.id, user_name: userStore.currentUser?.name || null, details: { supplier: plan.supplier } }); } catch (e) { console.warn('[history] audit log:', e); }
-  toast.success('Удалён', ''); await load();
+  try {
+    const { error } = await db.from('plans').delete().eq('id', plan.id);
+    if (error) { toast.error('Ошибка', 'Не удалось удалить план'); return; }
+    // Запись об удалении в аудит
+    try { await db.from('audit_log').insert({ action: 'plan_deleted', entity_type: 'plan', entity_id: plan.id, user_name: userStore.currentUser?.name || null, details: { supplier: plan.supplier } }); } catch (e) { console.warn('[history] audit log:', e); }
+    toast.success('Удалён', ''); await load();
+  } catch (e) {
+    toast.error('Ошибка', 'Не удалось удалить план');
+  }
 }
 function planItemsFiltered(plan) {
   let items;

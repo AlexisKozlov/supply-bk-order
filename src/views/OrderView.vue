@@ -1,7 +1,7 @@
 <template>
   <div class="order-view" :class="{ 'fullscreen-table': isFullscreen }">
 
-    <div class="page-header">
+    <div v-if="!orderStore.viewOnlyMode || showFullOrder || !viewSummaryOrder" class="page-header">
       <h1 class="page-title">{{ orderStore.pageTitle }}</h1>
       <span v-if="orderStore.viewOnlyMode" class="editing-badge" style="cursor:pointer" @click="exitViewMode"><BkIcon name="eye" size="sm"/> Просмотр</span>
       <button v-if="orderStore.viewOnlyMode && orderStore.editingOrderId" class="btn small" style="margin-left:4px;" @click="openLogModal" title="История изменений"><BkIcon name="note" size="sm"/> История</button>
@@ -19,7 +19,7 @@
     </div>
 
     <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
-    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="params-block" :class="{ open: settingsExpanded }">
+    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId) && (!orderStore.viewOnlyMode || showFullOrder || !viewSummaryOrder)" class="params-block" :class="{ open: settingsExpanded }">
       <div class="params-summary" @click="toggleSettings">
         <BkIcon name="gear" size="sm" class="params-icon"/>
         <span class="ps-chip"><b>{{ orderStore.settings.supplier || 'Не выбран' }}</b></span>
@@ -80,7 +80,7 @@
     </div>
 
     <!-- Тулбар: фильтр + действия -->
-    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="order-toolbar">
+    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId) && (!orderStore.viewOnlyMode || showFullOrder || !viewSummaryOrder)" class="order-toolbar">
       <div class="search-bar" v-if="!orderStore.viewOnlyMode" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
           <input type="text" v-model="filterQuery" placeholder="Фильтр по названию / артикулу..."
@@ -108,8 +108,57 @@
       </div>
     </div>
 
+    <!-- Сводка заказа (режим просмотра) -->
+    <div v-if="orderStore.viewOnlyMode && viewSummaryOrder && !showFullOrder" class="order-summary-wrap">
+    <div class="order-summary-card">
+      <div class="osc-header">
+        <div class="osc-supplier">{{ viewSummaryOrder.supplier }}</div>
+        <div class="osc-meta">
+          <span>{{ viewSummaryOrder.created_by }}</span>
+          <span>{{ fmtDateFull(viewSummaryOrder.created_at) }}</span>
+        </div>
+      </div>
+      <div class="osc-dates">
+        <div class="osc-date-item">
+          <span class="osc-date-label">Приход</span>
+          <span class="osc-date-val">{{ fmtDateShort(viewSummaryOrder.delivery_date) }}</span>
+        </div>
+        <div v-if="viewSummaryOrder.delivery_date_2" class="osc-date-item">
+          <span class="osc-date-label">Приход 2</span>
+          <span class="osc-date-val">{{ fmtDateShort(viewSummaryOrder.delivery_date_2) }}</span>
+        </div>
+        <div class="osc-date-item">
+          <span class="osc-date-label">Запас</span>
+          <span class="osc-date-val">{{ viewSummaryOrder.safety_days || '—' }} дн.</span>
+        </div>
+        <div class="osc-date-item">
+          <span class="osc-date-label">Позиций</span>
+          <span class="osc-date-val">{{ summaryItems.length }}</span>
+        </div>
+        <div class="osc-date-item">
+          <span class="osc-date-label">Коробок</span>
+          <span class="osc-date-val">{{ summaryTotalBoxes }}</span>
+        </div>
+      </div>
+      <div v-if="viewSummaryOrder.note" class="osc-note">{{ viewSummaryOrder.note }}</div>
+      <div class="osc-items">
+        <div v-for="item in summaryItems" :key="item.sku" class="osc-item">
+          <div class="osc-item-name">{{ item.name }}</div>
+          <div class="osc-item-qty">{{ item.boxes }} кор.<span v-if="item.pcs"> · {{ item.pcs }} шт.</span></div>
+          <div class="osc-item-cover" v-if="item.coverDays !== null">
+            <span class="osc-cover-badge" :class="coverClass(item.coverDays)">{{ item.coverDays === Infinity ? '∞' : item.coverDays }} дн.</span>
+          </div>
+        </div>
+      </div>
+      <div class="osc-actions">
+        <button class="btn primary" @click="showFullOrder = true">Показать весь заказ</button>
+        <button class="btn" @click="exitViewMode">Закрыть</button>
+      </div>
+    </div>
+    </div>
+
     <!-- Секция заказа -->
-    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId)" class="order-section" :class="{ 'view-only-mode': orderStore.viewOnlyMode, 'order-locked': !paramsReady && !orderStore.viewOnlyMode }">
+    <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId) && (!orderStore.viewOnlyMode || showFullOrder || !viewSummaryOrder)" class="order-section" :class="{ 'view-only-mode': orderStore.viewOnlyMode, 'order-locked': !paramsReady && !orderStore.viewOnlyMode }">
 
       <!-- Overlay when params not filled -->
       <div v-if="!paramsReady && !orderStore.viewOnlyMode" class="order-lock-overlay" @click.stop>
@@ -228,7 +277,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
@@ -267,6 +316,54 @@ const supplierLoading       = ref(false);
 const showShareDropdown     = ref(false);
 
 const showManualModal       = ref(false);
+
+// Сводка заказа (режим просмотра)
+const viewSummaryOrder = ref(null); // raw order object
+const showFullOrder = ref(false);
+// Computed данные сводки
+const summaryItems = computed(() => {
+  if (!viewSummaryOrder.value) return [];
+  const items = viewSummaryOrder.value.order_items || [];
+  const periodDays = parseInt(viewSummaryOrder.value.period_days) || 30;
+  const unit = viewSummaryOrder.value.unit || 'pieces';
+  return items
+    .filter(i => (parseFloat(i.qty_boxes) || 0) > 0)
+    .map(i => {
+      const boxes = Math.round(parseFloat(i.qty_boxes) || 0);
+      const qpb = parseFloat(i.qty_per_box) || 1;
+      const pcs = Math.round(boxes * qpb);
+      // stock и consumption хранятся в единицах заказа (pieces или boxes)
+      const stock = parseFloat(i.stock) || 0;
+      const consumption = parseFloat(i.consumption_period) || 0;
+      // Заказанное количество в единицах заказа
+      const ordered = unit === 'boxes' ? boxes : pcs;
+      const dailyRate = periodDays > 0 ? consumption / periodDays : 0;
+      const totalAfter = stock + ordered;
+      const coverDays = dailyRate > 0 ? Math.round(totalAfter / dailyRate) : (totalAfter > 0 ? Infinity : null);
+      return { sku: i.sku, name: i.name, boxes, pcs: pcs !== boxes ? pcs : 0, coverDays };
+    })
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+});
+const summaryTotalBoxes = computed(() => summaryItems.value.reduce((s, i) => s + i.boxes, 0));
+
+function fmtDateFull(str) {
+  if (!str) return '—';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+function fmtDateShort(str) {
+  if (!str) return '—';
+  const p = str.split('T')[0].split('-');
+  return `${p[2]}.${p[1]}`;
+}
+function coverClass(days) {
+  if (days === Infinity) return 'osc-cover-inf';
+  if (days <= 5) return 'osc-cover-danger';
+  if (days <= 10) return 'osc-cover-warn';
+  return 'osc-cover-ok';
+}
+
 const showSaveModal         = ref(false);
 const saveModalLines        = ref([]);
 const savingOrder           = ref(false);
@@ -279,7 +376,7 @@ const importLoading         = ref(false);
 const filterQuery           = ref('');
 const editCardModal         = ref({ show: false, product: null });
 const analogMergeModal      = ref({ show: false, merges: [] });
-const appliedAnalogs        = ref(new Map()); // SKU товара → Set<SKU применённых аналогов>
+const appliedAnalogs        = reactive(new Map()); // SKU товара → Set<SKU применённых аналогов>
 const logModal              = ref({ show: false, loading: false, entries: [] });
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 
@@ -387,14 +484,16 @@ onMounted(async () => {
         if (order.received_at && isEditFinal) {
           toast.warning('Доставка выполнена', 'Редактирование принятого заказа невозможно. Открыт в режиме просмотра.');
           await orderStore.loadOrderIntoForm(order, order.legal_entity, false, true);
-          draftStore.saveNow();
           orderVisible.value = true;
           return;
         }
         await orderStore.loadOrderIntoForm(order, order.legal_entity, isEditFinal, isView);
-        draftStore.saveNow();
+        if (!isView) draftStore.saveNow();
+        if (isView) {
+          viewSummaryOrder.value = order;
+          showFullOrder.value = false;
+        }
         orderVisible.value = true;
-        toast.success('Заказ загружен', isView ? 'Режим просмотра' : (isEditFinal ? 'Режим редактирования' : ''));
       } else {
         toast.error('Заказ не найден', '');
       }
@@ -471,6 +570,12 @@ onBeforeRouteLeave(async () => {
   if (orderStore.editingOrderId) {
     db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '', order_id: orderStore.editingOrderId }).catch(() => {});
   }
+  // При выходе из режима просмотра — очищаем данные, чтобы не создался ложный черновик
+  if (orderStore.viewOnlyMode) {
+    orderStore.items = [];
+    orderStore.viewOnlyMode = false;
+    orderStore.editingOrderId = null;
+  }
 });
 
 // Реактивная навигация: если query изменился когда компонент уже смонтирован
@@ -499,6 +604,8 @@ watch(() => route.query.orderId, async (newId) => {
         return;
       }
       await orderStore.loadOrderIntoForm(order, order.legal_entity, isEdit, isView);
+      if (isView) { viewSummaryOrder.value = order; showFullOrder.value = false; }
+      else { viewSummaryOrder.value = null; }
       orderVisible.value = true;
     } else {
       toast.error('Заказ не найден', '');
@@ -1075,13 +1182,13 @@ function onAnalogApply() {
   const applied = applyAnalogMerges(orderStore.items, merges, 'order');
   // Запоминаем какие аналоги были применены для проверки данных
   for (const merge of merges) {
-    const set = appliedAnalogs.value.get(merge.itemSku) || new Set();
+    const set = appliedAnalogs.get(merge.itemSku) || new Set();
     for (const a of merge.analogs) {
       if (a.checked) set.add(a.sku);
       else set.delete(a.sku);
     }
-    if (set.size > 0) appliedAnalogs.value.set(merge.itemSku, set);
-    else appliedAnalogs.value.delete(merge.itemSku);
+    if (set.size > 0) appliedAnalogs.set(merge.itemSku, set);
+    else appliedAnalogs.delete(merge.itemSku);
   }
   analogMergeModal.value.show = false;
   if (applied > 0) {
@@ -1094,7 +1201,7 @@ function onAnalogSkip() {
   // При пропуске — убираем аналоги из отслеживания
   const { merges } = analogMergeModal.value;
   for (const merge of merges) {
-    appliedAnalogs.value.delete(merge.itemSku);
+    appliedAnalogs.delete(merge.itemSku);
   }
   analogMergeModal.value.show = false;
 }
@@ -1116,8 +1223,22 @@ async function clearOrder() {
 }
 
 async function exitViewMode() {
+  // Из сводки — без подтверждения
+  if (viewSummaryOrder.value && !showFullOrder.value) {
+    viewSummaryOrder.value = null;
+    orderStore.resetOrder();
+    orderStore.settings.today = new Date();
+    orderStore.settings.deliveryDate = null;
+    orderStore.settings.safetyDays = 0;
+    orderStore.settings.note = '';
+    draftStore.clear();
+    if (route.query.orderId) router.replace({ name: 'order' });
+    return;
+  }
   const ok = await confirmAction('Закрыть просмотр?', 'Заказ будет очищен.');
   if (!ok) return;
+  viewSummaryOrder.value = null;
+  showFullOrder.value = false;
   orderStore.resetOrder();
   orderStore.settings.today = new Date();
   orderStore.settings.deliveryDate = null;
@@ -1151,4 +1272,132 @@ async function exitEditMode() {
   padding: 4px 8px 0; font-weight: 500;
 }
 
+/* ═══ Order Summary Card ═══ */
+.order-summary-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  padding: 24px 16px;
+}
+.order-summary-card {
+  background: var(--card);
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  padding: 0;
+  max-width: 760px;
+  width: 100%;
+  overflow: hidden;
+}
+.osc-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+.osc-supplier {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.osc-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.osc-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.osc-date-item {
+  flex: 1;
+  min-width: 80px;
+  padding: 10px 16px;
+  text-align: center;
+  border-right: 1px solid var(--border-light);
+}
+.osc-date-item:last-child { border-right: none; }
+.osc-date-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+.osc-date-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.osc-note {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-light);
+}
+.osc-items {
+  max-height: 400px;
+  overflow-y: auto;
+}
+.osc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+.osc-item:last-child { border-bottom: none; }
+.osc-item:nth-child(even) { background: #FDFCFB; }
+.osc-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text);
+}
+.osc-item-qty {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-size: 12px;
+}
+.osc-item-cover {
+  flex-shrink: 0;
+}
+.osc-cover-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.osc-cover-danger { background: #FFEBEE; color: #C62828; }
+.osc-cover-warn { background: #FFF3E0; color: #E65100; }
+.osc-cover-ok { background: #E8F5E9; color: #2E7D32; }
+.osc-cover-inf { background: #E3F2FD; color: #1565C0; }
+.osc-actions {
+  display: flex;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-light);
+  justify-content: center;
+}
+@media (max-width: 480px) {
+  .order-summary-wrap { padding: 12px 0; }
+  .order-summary-card { border-radius: 0; border-left: none; border-right: none; }
+  .osc-header { padding: 12px 14px 10px; }
+  .osc-date-item { padding: 8px 10px; }
+  .osc-item { padding: 6px 14px; }
+  .osc-actions { padding: 12px 14px; }
+}
 </style>

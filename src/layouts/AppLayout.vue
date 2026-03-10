@@ -452,6 +452,11 @@ const pageNames = {
   'delivery-schedule': 'График доставки',
   'shelf-life': 'Сроки годности',
   'deficit': 'Распределение дефицита',
+  'pricing': 'Цены и ПСЦ',
+  'restaurant-sales': 'Реализация ресторанов',
+  'tenders': 'Тендеры',
+  'tender-detail': 'Тендер',
+  'stock-collection': 'Сбор остатков',
 };
 
 function sendHeartbeat() {
@@ -527,12 +532,35 @@ onMounted(() => {
     userStore.checkMaintenance();
     maintenanceTimer = setInterval(() => userStore.checkMaintenance(), 60000);
   }
+
+  // Пауза таймеров когда вкладка браузера скрыта
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 });
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    // Вкладка скрыта — останавливаем таймеры
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (maintenanceTimer) { clearInterval(maintenanceTimer); maintenanceTimer = null; }
+  } else {
+    // Вкладка снова видна — запускаем сразу и ставим интервалы
+    sendHeartbeat();
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(sendHeartbeat, 30000);
+
+    if (!userStore.isAdmin) {
+      userStore.checkMaintenance();
+      if (maintenanceTimer) clearInterval(maintenanceTimer);
+      maintenanceTimer = setInterval(() => userStore.checkMaintenance(), 60000);
+    }
+  }
+}
 
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
   window.removeEventListener('online', handleOnline);
   window.removeEventListener('offline', handleOffline);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
   welcomeTimers.forEach(clearTimeout);

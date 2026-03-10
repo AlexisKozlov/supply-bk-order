@@ -1,6 +1,6 @@
 <template>
   <div class="planning-view" :class="{ 'fullscreen-table': isFullscreen }">
-    <div class="page-header">
+    <div v-if="!viewOnly || showFullPlan || !editingPlanId" class="page-header">
       <h1 class="page-title">Планирование</h1>
       <span v-if="viewOnly" class="editing-badge" style="cursor:pointer;background:#E3F2FD;color:#1565C0;border-color:#90CAF9;" @click="resetPlan"><BkIcon name="eye" size="sm"/> Просмотр</span>
       <button v-if="viewOnly && editingPlanId" class="btn small" style="margin-left:4px;" @click="openLogModal" title="История изменений"><BkIcon name="note" size="sm"/> История</button>
@@ -18,7 +18,7 @@
     </div>
 
     <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
-    <div v-if="!(isViewer && !viewOnly && !editingPlanId)" class="params-block" :class="{ open: settingsExpanded }">
+    <div v-if="!(isViewer && !viewOnly && !editingPlanId) && (!viewOnly || showFullPlan || !editingPlanId)" class="params-block" :class="{ open: settingsExpanded }">
       <div class="params-summary" @click="toggleSettings">
         <BkIcon name="gear" size="sm" class="params-icon"/>
         <span class="ps-chip"><b>{{ supplier || 'Не выбран' }}</b></span>
@@ -76,7 +76,7 @@
     </div>
 
     <!-- Тулбар: действия -->
-    <div class="order-toolbar" v-if="items.length && !(isViewer && !viewOnly && !editingPlanId)">
+    <div class="order-toolbar" v-if="items.length && !(isViewer && !viewOnly && !editingPlanId) && (!viewOnly || showFullPlan || !editingPlanId)">
       <div class="search-bar" v-if="!viewOnly" style="position:relative;display:flex;align-items:center;gap:8px;">
         <div style="position:relative;display:inline-block;">
           <input type="text" v-model="filterQuery" placeholder="Фильтр по названию / артикулу..."
@@ -97,8 +97,59 @@
       </div>
     </div>
 
+    <!-- Сводка плана (режим просмотра) -->
+    <div v-if="viewOnly && editingPlanId && !showFullPlan && items.length" class="order-summary-wrap">
+    <div class="order-summary-card plan-summary-card">
+      <div class="osc-header">
+        <div class="osc-supplier">{{ supplier }}</div>
+        <div class="osc-meta">
+          <span v-if="_loadedCreatedBy">{{ _loadedCreatedBy }}</span>
+          <span>{{ periodLabel }}, с {{ startDateDisplay }}</span>
+        </div>
+      </div>
+      <div class="osc-dates">
+        <div class="osc-date-item">
+          <span class="osc-date-label">Единицы</span>
+          <span class="osc-date-val">{{ inputUnit === 'boxes' ? 'коробки' : 'штуки' }}</span>
+        </div>
+        <div class="osc-date-item">
+          <span class="osc-date-label">Позиций</span>
+          <span class="osc-date-val">{{ itemsWithPlan.length }}</span>
+        </div>
+        <div class="osc-date-item">
+          <span class="osc-date-label">Всего коробок</span>
+          <span class="osc-date-val">{{ nf.format(planSummaryTotalBoxes) }}</span>
+        </div>
+      </div>
+      <div v-if="_loadedNote" class="osc-note">{{ _loadedNote }}</div>
+      <!-- Разбивка по периодам -->
+      <div class="psc-periods">
+        <div v-for="(ph, pi) in periodHeaders" :key="pi" v-show="periodTotalBoxes(pi) > 0" class="psc-period-block">
+          <div class="psc-period-header" @click="toggleSummaryPeriod(pi)">
+            <span class="psc-period-title">{{ ph.label }} <small v-if="ph.sublabel" class="psc-period-sub">{{ ph.sublabel }}</small></span>
+            <span class="psc-period-total">{{ nf.format(periodTotalBoxes(pi)) }} кор.</span>
+            <BkIcon :name="expandedSummaryPeriods[pi] ? 'chevronUp' : 'chevronDown'" size="xs" class="psc-period-chevron"/>
+          </div>
+          <div v-if="expandedSummaryPeriods[pi]" class="psc-period-items">
+            <template v-for="item in itemsWithPlan" :key="item.sku + '-' + pi">
+              <div v-if="item.plan[pi]?.orderBoxes > 0" class="osc-item">
+                <div class="osc-item-name">{{ item.name }}</div>
+                <div class="osc-item-qty">{{ nf.format(item.plan[pi].orderBoxes) }} кор.<span v-if="item.plan[pi].orderUnits"> · {{ nf.format(item.plan[pi].orderUnits) }} {{ item.unitOfMeasure || 'шт' }}</span></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="osc-actions">
+        <button class="btn primary" @click="showFullPlan = true">Показать весь план</button>
+        <button class="btn" @click="resetPlan">Закрыть</button>
+      </div>
+    </div>
+    </div>
+
     <!-- Таблица -->
-    <div v-if="isViewer && !viewOnly && !editingPlanId"></div>
+    <div v-if="viewOnly && editingPlanId && !showFullPlan && items.length"></div>
+    <div v-else-if="isViewer && !viewOnly && !editingPlanId"></div>
     <div v-else-if="!supplier" style="text-align:center;padding:40px;color:var(--text-muted);">Выберите поставщика</div>
     <div v-else-if="suppLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
     <div v-else-if="!items.length" style="text-align:center;padding:40px;color:var(--text-muted);">Нет товаров у «{{ supplier }}»</div>
@@ -262,7 +313,7 @@
     </div>
 
     <!-- Кнопки завершения -->
-    <div v-if="items.length" class="toolbar-row toolbar-finish" style="margin-top:12px;" v-show="!isFullscreen">
+    <div v-if="items.length && (!viewOnly || showFullPlan || !editingPlanId)" class="toolbar-row toolbar-finish" style="margin-top:12px;" v-show="!isFullscreen">
       <div class="toolbar-spacer"></div>
       <button v-if="!isViewer" class="btn primary" @click="savePlan" :disabled="!itemsWithPlan.length || viewOnly"><BkIcon name="save" size="sm"/> {{ editingPlanId ? 'Обновить план' : 'Сохранить план' }}</button>
       <button class="btn" @click="copyPlanToClipboard" :disabled="!itemsWithPlan.length"><BkIcon name="history" size="sm"/> Копировать</button>
@@ -383,6 +434,11 @@ const load1cLoading = ref(false);
 const fillLoading = ref(false);
 const editingPlanId = ref(null);
 const viewOnly = ref(false);
+const showFullPlan = ref(false);
+const expandedSummaryPeriods = ref({});
+function toggleSummaryPeriod(pi) {
+  expandedSummaryPeriods.value[pi] = !expandedSummaryPeriods.value[pi];
+}
 const logModal = ref({ show: false, loading: false, entries: [] });
 const { confirmModal, confirm: confirmAction, onConfirm: onConfirmOk, onCancel: onConfirmCancel } = useConfirm();
 const editCardModal = ref({ show: false, product: null });
@@ -422,8 +478,8 @@ const saving = ref(false); // { idx, m } for inline edit (#6)
 const isFullscreen = ref(false);
 const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 let _prevPlanItems = null;
-let _loadedCreatedBy = null;
-let _loadedNote = '';
+const _loadedCreatedBy = ref(null);
+const _loadedNote = ref('');
 
 // ─── Фильтр и добавление ──────────────────────────────────────────────────
 const filterQuery           = ref('');
@@ -874,6 +930,7 @@ function itemTotalBoxes(item) { return item.plan.reduce((s, p) => s + (p.orderBo
 function itemTotalUnits(item) { return item.plan.reduce((s, p) => s + (p.orderUnits || 0), 0); }
 function periodTotalBoxes(m) { return items.value.reduce((s, i) => s + (i.plan[m]?.orderBoxes || 0), 0); }
 const itemsWithPlan = computed(() => items.value.filter(i => i.plan.some(p => p.orderBoxes > 0)));
+const planSummaryTotalBoxes = computed(() => itemsWithPlan.value.reduce((s, i) => s + itemTotalBoxes(i), 0));
 
 // ─── Цены ─────────────────────────────────────────────────────────────────────
 const planPriceMap = ref({}); // sku -> {price, unit_type, currency, origPrice}
@@ -1451,7 +1508,7 @@ function onConsumptionPeriodChange() {
 // ─── Сохранение ────────────────────────────────────────────────────────────
 async function savePlan() {
   if (!itemsWithPlan.value.length) { toast.error('Нет данных', ''); return; }
-  saveNote.value = editingPlanId.value ? _loadedNote : '';
+  saveNote.value = editingPlanId.value ? _loadedNote.value : '';
   _saveNoteInitial = saveNote.value;
   showSaveModal.value = true;
   nextTick(() => setTimeout(() => saveNoteInput.value?.focus(), 50));
@@ -1506,7 +1563,7 @@ async function confirmSave() {
     await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || newPlanId || null, user_name: userStore.currentUser?.name || null, details: ld });
   } catch (e) { console.warn('[planning] audit log:', e); }
   // Уведомление только при редактировании чужого плана
-  if (editingPlanId.value && _loadedCreatedBy && _loadedCreatedBy !== userStore.currentUser?.name) {
+  if (editingPlanId.value && _loadedCreatedBy.value && _loadedCreatedBy.value !== userStore.currentUser?.name) {
     try {
       const changes = ld.changes || [];
       const lines = [];
@@ -1523,7 +1580,7 @@ async function confirmSave() {
         entity_id: editingPlanId.value,
         legal_entity: orderStore.settings.legalEntity,
         created_by: userStore.currentUser?.name || null,
-        target_user: _loadedCreatedBy,
+        target_user: _loadedCreatedBy.value,
         read_by: JSON.stringify([userStore.currentUser?.name || '']),
       });
     } catch(e) { console.warn('[planning] notification:', e); }
@@ -1571,7 +1628,7 @@ function formatLogDate(str) {
 }
 
 function resetPlan() {
-  editingPlanId.value = null; viewOnly.value = false; _prevPlanItems = null; _loadedCreatedBy = null; _loadedNote = '';
+  editingPlanId.value = null; viewOnly.value = false; showFullPlan.value = false; expandedSummaryPeriods.value = {}; _prevPlanItems = null; _loadedCreatedBy.value = null; _loadedNote.value = '';
   items.value.forEach(i => { i.plan = []; i.monthlyConsumption = 0; i.stockOnHand = 0; i.stockAtSupplier = 0; });
   undoStack.value = []; redoStack.value = [];
   recalcAll(); draftStore.clearPlanDraft();
@@ -1595,10 +1652,12 @@ async function loadPlanFromHistory(planId) {
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());
   planningDateStr.value = plan.planning_date || '';
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
+  showFullPlan.value = false;
+  expandedSummaryPeriods.value = {};
   inputUnit.value = plan.input_unit || 'boxes';
   editingPlanId.value = plan.id;
-  _loadedCreatedBy = plan.created_by || null;
-  _loadedNote = plan.note || '';
+  _loadedCreatedBy.value = plan.created_by || null;
+  _loadedNote.value = plan.note || '';
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   _prevPlanItems = JSON.parse(JSON.stringify(plan.items || []));
   items.value = (plan.items || []).map(i => ({
@@ -1768,4 +1827,168 @@ watch(() => route.query.planId, async (newId) => {
 /* Hidden items */
 .item-hidden { opacity: 0.7; }
 .hidden-badge { background:#FFEBEE; color:#E57373; font-size:10px; font-weight:600; border:1px solid #E57373; border-radius:3px; padding:1px 4px; margin-left:6px; vertical-align:middle; }
+
+/* ═══ Plan Summary Card — period blocks ═══ */
+.psc-periods {
+  max-height: 450px;
+  overflow-y: auto;
+}
+.psc-period-block {
+  border-bottom: 1px solid var(--border-light);
+}
+.psc-period-block:last-child { border-bottom: none; }
+.psc-period-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.psc-period-header:hover { background: #fdf9f3; }
+.psc-period-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+.psc-period-sub {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.psc-period-total {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--bk-brown);
+  white-space: nowrap;
+}
+.psc-period-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.psc-period-items {
+  border-top: 1px solid var(--border-light);
+  background: var(--bg);
+}
+.psc-period-items .osc-item {
+  padding: 5px 20px 5px 32px;
+}
+
+/* ═══ Plan Summary Card ═══ */
+.order-summary-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  padding: 24px 16px;
+}
+.order-summary-card {
+  background: var(--card);
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  padding: 0;
+  max-width: 760px;
+  width: 100%;
+  overflow: hidden;
+}
+.osc-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+.osc-supplier {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.osc-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.osc-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.osc-date-item {
+  flex: 1;
+  min-width: 80px;
+  padding: 10px 16px;
+  text-align: center;
+  border-right: 1px solid var(--border-light);
+}
+.osc-date-item:last-child { border-right: none; }
+.osc-date-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+.osc-date-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.osc-note {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-light);
+}
+.osc-items {
+  max-height: 400px;
+  overflow-y: auto;
+}
+.osc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+}
+.osc-item:last-child { border-bottom: none; }
+.osc-item:nth-child(even) { background: #FDFCFB; }
+.osc-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text);
+}
+.osc-item-qty {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-size: 12px;
+}
+.osc-actions {
+  display: flex;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-light);
+  justify-content: center;
+}
+@media (max-width: 480px) {
+  .order-summary-wrap { padding: 12px 0; }
+  .order-summary-card { border-radius: 0; border-left: none; border-right: none; }
+  .osc-header { padding: 12px 14px 10px; }
+  .osc-date-item { padding: 8px 10px; }
+  .osc-item { padding: 6px 14px; }
+  .osc-actions { padding: 12px 14px; }
+}
 </style>

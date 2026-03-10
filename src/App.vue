@@ -31,7 +31,6 @@ function logout() {
 }
 
 onMounted(async () => {
-  userStore.restoreSession();
   if (userStore.isAuthenticated) {
     await userStore.checkMaintenance();
   }

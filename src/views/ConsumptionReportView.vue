@@ -633,10 +633,35 @@ onMounted(async () => { await loadExcluded(); loadData() })
 .crv-bar-wh { background: var(--bk-brown, #502314); }
 .crv-bar-rest { background: #42A5F5; }
 
-@media (max-width: 700px) {
+@media (max-width: 768px) {
   .crv-col-bar, .crv-cell-bar { display: none; }
+  .crv-col-act, .crv-cell-act { display: none; }
   .crv-cell-name { max-width: 160px; }
-  .crv-input:first-child { width: 130px; }
-  .crv-toolbar-right { display: none; }
+  .crv-toolbar { flex-direction: column; align-items: stretch; }
+  .crv-toolbar-left { flex-direction: column; align-items: stretch; }
+  .crv-toolbar-right { justify-content: space-between; }
+  .crv-input { width: 100% !important; min-height: 36px; font-size: 14px; }
+  .crv-sort { width: 100% !important; }
+  .crv-tbl { font-size: 12px; }
+  .crv-tbl th { padding: 6px 8px; font-size: 9px; }
+  .crv-tr td { padding: 8px 8px; }
+  .crv-col-num { width: 65px; }
+  .crv-col-diff { width: 65px; }
+  .crv-strip { flex-wrap: wrap; gap: 6px; }
+}
+@media (max-width: 480px) {
+  .crv-tbl thead { display: none; }
+  .crv-tbl, .crv-tbl tbody { display: block; }
+  .crv-tr { display: block !important; padding: 10px 12px; border-bottom: 1px solid var(--border-light); }
+  .crv-tr td { display: inline; padding: 0 !important; border: none !important; background: none !important; }
+  .crv-tr-alt { background: #FDFCFB; }
+  .crv-tr:hover { background: #F5F2EE; }
+  .crv-cell-name { display: block !important; max-width: none; margin-bottom: 6px; }
+  .crv-name-text { white-space: normal; }
+  .crv-cell-num { display: inline-block !important; margin-right: 16px; }
+  .crv-cell-num::before { font-size: 10px; color: var(--text-muted); font-weight: 400; }
+  .crv-tr td:nth-child(2)::before { content: 'Склад: '; }
+  .crv-tr td:nth-child(3)::before { content: 'Рест: '; }
+  .crv-cell-diff { display: inline-block !important; float: right; }
 }
 </style>

@@ -103,6 +103,19 @@ function parseCSV(file, delimiter) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target.result;
+      // Если кириллица не распозналась (кракозябры из Windows-1251), перечитываем в windows-1251
+      if (/[\ufffd]/.test(text) || (!/[а-яА-ЯёЁ]/.test(text) && text.length > 50)) {
+        const reader2 = new FileReader();
+        reader2.onload = (e2) => {
+          const text2 = e2.target.result;
+          const delim = delimiter || detectDelimiter(text2);
+          const lines = text2.split('\n').filter(l => l.trim());
+          resolve(lines.map(l => l.split(delim).map(c => c.trim().replace(/^["']|["']$/g, ''))));
+        };
+        reader2.onerror = () => resolve([]);
+        reader2.readAsText(file, 'windows-1251');
+        return;
+      }
       const delim = delimiter || detectDelimiter(text);
       const lines = text.split('\n').filter(l => l.trim());
       resolve(lines.map(l => l.split(delim).map(c => c.trim().replace(/^["']|["']$/g, ''))));

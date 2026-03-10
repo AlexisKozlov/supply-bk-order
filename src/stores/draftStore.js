@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, toRaw } from 'vue';
 import { useOrderStore } from './orderStore.js';
+import { useToastStore } from './toastStore.js';
 
 const DRAFT_KEY_PREFIX = 'bk_draft';
 const IDB_NAME = 'bk_drafts';
@@ -62,6 +63,7 @@ export const useDraftStore = defineStore('draft', () => {
   const lastSaved = ref(null);
   const lastPlanSaved = ref(null);
   let _timer = null;
+  let _quotaWarningShown = false;
 
   function save() {
     const orderStore = useOrderStore();
@@ -89,10 +91,20 @@ export const useDraftStore = defineStore('draft', () => {
       items: toRaw(orderStore.items),
       timestamp: new Date().toISOString(),
     });
-    try { localStorage.setItem(key, json); } catch(e) { /* хранилище переполнено */ }
+    let lsSaved = true;
+    try { localStorage.setItem(key, json); } catch(e) {
+      lsSaved = false;
+      if (!_quotaWarningShown) {
+        _quotaWarningShown = true;
+        try {
+          const toast = useToastStore();
+          toast.warning('Внимание', 'Не удалось сохранить черновик — хранилище заполнено');
+        } catch (_) { /* toast store не доступен */ }
+      }
+    }
     // В IndexedDB сохраняем распарсенную копию (структурированный клон — без реактивности)
     idbSet(key, JSON.parse(json)).catch(() => { /* ignore */ });
-    lastSaved.value = new Date();
+    if (lsSaved) lastSaved.value = new Date();
   }
 
   function clear() {

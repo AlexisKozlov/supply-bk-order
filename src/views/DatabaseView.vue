@@ -235,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -278,7 +278,7 @@ function confirmAction(title, message) {
 const showImportModal = ref(false);
 const showOnlyActive = ref(true);
 const showNoAnalog = ref(false);
-const expandedGroups = ref(new Set());
+const expandedGroups = reactive(new Set());
 const renameModal = ref({ show: false, oldName: '', newName: '' });
 let _renameInitial = '';
 const restModal = ref({ show: false, data: {}, saving: false });
@@ -480,8 +480,8 @@ async function deleteSupplier(s) {
 }
 
 function toggleGroup(name) {
-  if (expandedGroups.value.has(name)) expandedGroups.value.delete(name);
-  else expandedGroups.value.add(name);
+  if (expandedGroups.has(name)) expandedGroups.delete(name);
+  else expandedGroups.add(name);
 }
 
 function editAnalogGroup(group) {
@@ -501,9 +501,9 @@ async function saveRenameGroup() {
   if (hasError) { toast.error('Ошибка при переименовании', ''); }
   else {
     toast.success('Группа переименована', `${oldName} → ${newName.trim()}`);
-    if (expandedGroups.value.has(oldName)) {
-      expandedGroups.value.delete(oldName);
-      expandedGroups.value.add(newName.trim());
+    if (expandedGroups.has(oldName)) {
+      expandedGroups.delete(oldName);
+      expandedGroups.add(newName.trim());
     }
   }
   renameModal.value.show = false;

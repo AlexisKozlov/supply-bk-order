@@ -11,6 +11,10 @@
           <option value="90">3 месяца</option>
         </select>
         <input v-model="searchQuery" class="rsv-search" placeholder="Поиск группы…" />
+        <select v-model="supplierFilter" class="rsv-select">
+          <option value="">Все поставщики</option>
+          <option v-for="s in supplierList" :key="s" :value="s">{{ s }}</option>
+        </select>
         <select v-model="sortKey" class="rsv-select">
           <option value="total-desc">По объёму ↓</option>
           <option value="total-asc">По объёму ↑</option>
@@ -53,7 +57,7 @@
               <th class="rsv-th-name">Группа аналогов</th>
               <th class="rsv-th-num" title="Суммарная реализация за выбранный период">За период</th>
               <th class="rsv-th-num" title="Средняя реализация в день">Ср. / день</th>
-              <th class="rsv-th-num" title="Среднее количество ресторанов, продававших товар">Рест.</th>
+              <th class="rsv-th-num" title="Максимальное количество ресторанов, продававших товар">Рест.</th>
               <th class="rsv-th-num" title="Изменение по сравнению с предыдущим аналогичным периодом">Тренд</th>
               <th class="rsv-th-chart" title="Динамика за последние 7 дней">7 дней</th>
               <th class="rsv-th-num" title="Количество дней с данными в выбранном периоде">Дни</th>
@@ -69,7 +73,7 @@
                 </td>
                 <td class="rsv-td-num"><b>{{ fmtNum(g.total) }}</b></td>
                 <td class="rsv-td-num">{{ fmtNum(g.avgDay) }}</td>
-                <td class="rsv-td-num">{{ g.avgRestaurants }}</td>
+                <td class="rsv-td-num">{{ g.maxRc }}</td>
                 <td class="rsv-td-num">
                   <span v-if="g.hasPrev" :class="trendClass(g.trend)">{{ g.trend > 0 ? '+' : '' }}{{ g.trend }}%</span>
                   <span v-else class="rsv-muted">—</span>
@@ -105,6 +109,24 @@
                               <div class="rsv-bar" :class="{ 'rsv-bar-we': d.isWe }" :style="{ height: barH(d.qty, g.maxDay) }"></div>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Weekly trends -->
+                    <div v-if="g.weeklyData.length > 1" class="rsv-detail-section">
+                      <div class="rsv-detail-title">Динамика по неделям</div>
+                      <div class="rsv-weekly">
+                        <div v-for="(w, wi) in g.weeklyData" :key="wi" class="rsv-wk-col">
+                          <div class="rsv-wk-change" v-if="w.change !== null" :class="trendClass(w.change)">
+                            {{ w.change > 0 ? '+' : '' }}{{ w.change }}%
+                          </div>
+                          <div class="rsv-wk-change" v-else>&nbsp;</div>
+                          <div class="rsv-wk-val">{{ fmtNum(w.total) }}</div>
+                          <div class="rsv-wk-bar-area">
+                            <div class="rsv-wk-bar" :style="{ height: barH(w.total, g.weeklyMax) }"></div>
+                          </div>
+                          <div class="rsv-wk-label">{{ w.label }}</div>
                         </div>
                       </div>
                     </div>
@@ -196,6 +218,7 @@ const period = ref('30');
 const searchQuery = ref('');
 const sortKey = ref('total-desc');
 const hideZero = ref(true);
+const supplierFilter = ref('');
 const expanded = ref(null);
 const page = ref(1);
 const pageSize = 50;
@@ -352,6 +375,35 @@ const allGroups = computed(() => {
     // Дата последней продажи
     const lastSaleDate = rows[rows.length - 1]?.sale_date || '';
 
+    // Недельные тренды — из rawData, только полные недели (7 дней)
+    const weekMap = {};
+    for (const r of rawData.value) {
+      if (r.analog_group !== name) continue;
+      const dt = new Date(r.sale_date + 'T12:00:00');
+      const day = dt.getDay() || 7; // Вс=7
+      const mon = new Date(dt);
+      mon.setDate(mon.getDate() - day + 1);
+      const weekKey = fmtISO(mon);
+      if (!weekMap[weekKey]) weekMap[weekKey] = { start: weekKey, total: 0, days: 0 };
+      weekMap[weekKey].total += parseFloat(r.quantity) || 0;
+      weekMap[weekKey].days++;
+    }
+    // Оставляем только полные недели (7 дней данных)
+    const weeklyData = Object.values(weekMap)
+      .filter(w => w.days === 7)
+      .sort((a, b) => a.start.localeCompare(b.start));
+    for (let wi = 0; wi < weeklyData.length; wi++) {
+      const wk = weeklyData[wi];
+      wk.total = Math.round(wk.total);
+      wk.label = fmtDateRu(wk.start);
+      if (wi > 0 && weeklyData[wi - 1].total > 0) {
+        wk.change = Math.round((wk.total - weeklyData[wi - 1].total) / weeklyData[wi - 1].total * 100);
+      } else {
+        wk.change = null;
+      }
+    }
+    const weeklyMax = Math.max(...weeklyData.map(w => w.total), 1);
+
     return {
       name, total: Math.round(total), avgDay, avgRestaurants, trend, hasPrev,
       prevTotal: Math.round(prevTotal), last7, dayCount, lastSaleDate,
@@ -359,14 +411,37 @@ const allGroups = computed(() => {
       peakDay: weekdays[peakIdx].label,
       inDb: dbGroups.value.has(name),
       products: productsByGroup.value[name] || [],
+      weeklyData, weeklyMax,
     };
   });
 });
 
 // ═══ Filtering & sorting ═══
 
+// Список поставщиков из справочника
+const supplierList = computed(() => {
+  const set = new Set();
+  for (const prods of Object.values(productsByGroup.value)) {
+    for (const p of prods) { if (p.supplier) set.add(p.supplier); }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+});
+
+// Группы аналогов, связанные с выбранным поставщиком
+const supplierGroups = computed(() => {
+  if (!supplierFilter.value) return null;
+  const groups = new Set();
+  for (const [group, prods] of Object.entries(productsByGroup.value)) {
+    if (prods.some(p => p.supplier === supplierFilter.value)) groups.add(group);
+  }
+  return groups;
+});
+
 const filteredGroups = computed(() => {
   let list = allGroups.value;
+  if (supplierGroups.value) {
+    list = list.filter(g => supplierGroups.value.has(g.name));
+  }
   if (hideZero.value && lastDate.value) {
     // Скрываем группы без реальных продаж или где последняя продажа была более 3 дней назад
     const ld = new Date(lastDate.value + 'T12:00:00');
@@ -399,6 +474,7 @@ function toggleExpand(name) { expanded.value = expanded.value === name ? null : 
 watch(period, () => { page.value = 1; expanded.value = null; loadData(); });
 watch(searchQuery, () => { page.value = 1; });
 watch(sortKey, () => { page.value = 1; });
+watch(supplierFilter, () => { page.value = 1; });
 
 // ═══ Helpers ═══
 
@@ -553,6 +629,15 @@ function parseSalesFile(rows) {
 .rsv-wd-label { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
 .rsv-wd-we { color: #FF8732 !important; }
 
+/* Weekly trends */
+.rsv-weekly { display: flex; gap: 2px; height: 130px; }
+.rsv-wk-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.rsv-wk-change { font-size: 10px; font-weight: 700; white-space: nowrap; margin-bottom: 1px; }
+.rsv-wk-val { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rsv-wk-bar-area { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.rsv-wk-bar { width: 100%; max-width: 40px; background: #FF8732; border-radius: 3px 3px 0 0; transition: height 0.15s; min-height: 2px; }
+.rsv-wk-label { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
+
 /* Metrics */
 .rsv-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .rsv-metric { display: flex; justify-content: space-between; padding: 4px 8px; background: var(--card); border-radius: 5px; font-size: 12px; }
@@ -573,11 +658,31 @@ function parseSalesFile(rows) {
 /* Mobile */
 @media (max-width: 900px) {
   .rsv-detail-cols { grid-template-columns: 1fr; }
+  .rsv-weekly { height: 110px; }
 }
 @media (max-width: 768px) {
   .rsv-th-chart, .rsv-td-chart { display: none; }
+  .rsv-th-num:nth-child(4), .rsv-td-num:nth-child(4) { display: none; } /* Рест. */
+  .rsv-th-num:last-child, .rsv-td-days-cnt { display: none; } /* Дни */
   .rsv-controls { width: 100%; }
-  .rsv-search { flex: 1; }
+  .rsv-search { flex: 1; min-height: 36px; font-size: 14px; }
+  .rsv-select { font-size: 14px; min-height: 36px; }
   .rsv-metrics { grid-template-columns: 1fr; }
+  .rsv-table { font-size: 12px; }
+  .rsv-row td { padding: 8px 6px; }
+  .rsv-th-num { width: 60px; }
+  .rsv-td-name { gap: 4px; }
+  .rsv-daily-chart { height: 80px; }
+  .rsv-wd-chart { height: 80px; }
+  .rsv-prods { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .rsv-header { flex-direction: column; align-items: flex-start; }
+  .rsv-controls { flex-direction: column; align-items: stretch; }
+  .rsv-select { width: 100%; }
+  .rsv-search { width: 100%; }
+  .rsv-check { justify-content: flex-start; }
+  .rsv-th-name { font-size: 10px; }
+  .rsv-td-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; display: inline-block; vertical-align: middle; }
 }
 </style>

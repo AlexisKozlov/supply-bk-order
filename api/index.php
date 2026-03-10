@@ -134,7 +134,7 @@ function checkLegalEntityAccess($sessionUser, $legalEntity) {
 }
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
-$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history'];
+$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports'];
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $uri = preg_replace('#^/api/#', '', $uri);
@@ -1356,7 +1356,7 @@ if ($endpoint === 'rpc') {
         $items = $body['items'] ?? [];
         if (!is_array($items)) respond(['error' => 'Позиции должны быть массивом'], 400);
         if (empty($items)) respond(['error' => 'Список позиций пуст'], 400);
-        if (count($items) > 100000) respond(['error' => 'Слишком много записей (макс. 100 000)'], 400);
+        if (count($items) > 500000) respond(['error' => 'Слишком много записей (макс. 500 000)'], 400);
         try {
             $pdo->beginTransaction();
             // Upsert: обновляем если уже есть запись за эту дату и группу
@@ -2150,7 +2150,7 @@ if ($endpoint === 'rpc') {
         if ($row && $row['screenshots']) {
             $paths = json_decode($row['screenshots'], true) ?: [];
             foreach ($paths as $p) {
-                $fp = __DIR__ . '/' . $p;
+                $fp = __DIR__ . '/uploads/bugs/' . basename($p);
                 if (file_exists($fp)) @unlink($fp);
             }
         }
@@ -2186,7 +2186,7 @@ if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 // ═══ REST ═══
 $allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens','price_agreements','product_prices','price_history','tenders','tender_items','tender_offers','tender_offer_prices','tender_files','bug_reports','bug_report_replies','restaurant_sales','report_exclusions'];
 // Защита: только чтение через REST, запись — через RPC
-$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys'];
+$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -2222,6 +2222,10 @@ if (in_array($table, $readOnly) && $method !== 'GET') {
 if (in_array($table, $noInsertDelete) && ($method === 'POST' || $method === 'DELETE')) {
     respond(['error' => 'Добавление и удаление для этой таблицы запрещено'], 403);
 }
+// Settings: PATCH только для админов
+if ($table === 'settings' && $method === 'PATCH' && (!$sessionUser || $sessionUser['role'] !== 'admin')) {
+    respond(['error' => 'Изменение настроек доступно только администраторам'], 403);
+}
 // Enforce append-only (allow GET + POST, block PATCH/PUT/DELETE)
 if (in_array($table, $appendOnly) && !in_array($method, ['GET', 'POST'])) {
     respond(['error' => 'Для этой таблицы доступно только чтение и добавление'], 403);
@@ -2239,8 +2243,13 @@ if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
     } elseif ($method === 'GET' && $userRole !== 'admin') {
-        // Без фильтра по юрлицу неадмины не могут читать таблицы с юрлицами
-        respond(['error' => 'Требуется фильтр legal_entity'], 400);
+        // notifications и orders по ID: доступ проверяется позже для каждой записи
+        $skipEntityFilter = in_array($table, ['notifications']);
+        // Запрос по конкретному ID — проверка доступа будет на строке с checkLegalEntityAccess
+        if (isset($_GET['id']) || (isset($parts[1]) && $parts[1])) $skipEntityFilter = true;
+        if (!$skipEntityFilter) {
+            respond(['error' => 'Требуется фильтр legal_entity'], 400);
+        }
     }
     // Для операций записи проверяем legal_entity в теле запроса
     if ($method !== 'GET' && !empty($body)) {
@@ -2309,6 +2318,13 @@ $writeWhitelist = [
     'tender_offer_prices' => ['id','offer_id','item_id','price'],
     'restaurant_sales' => ['id','sale_date','analog_group','quantity','restaurant_count'],
     'report_exclusions' => ['id','analog_group','created_by'],
+    'changelog'        => ['id','version','title','description','created_by'],
+    'deficit_sessions' => ['id','legal_entity','product_name','warehouse_stock','next_delivery_date','growth_factor','total_need','total_allocated','restaurant_count','created_by'],
+    'deficit_results'  => ['id','session_id','restaurant_number','current_stock','daily_consumption','days_to_cover','need','allocated','delivery_day'],
+    'stock_collections'=> ['id','name'],
+    'stock_collection_data' => ['id','stock'],
+    'stock_collection_products' => ['id'],
+    'stock_collection_tokens' => ['id'],
 ];
 
 if ($method === 'GET') {
@@ -2373,7 +2389,7 @@ if ($method === 'GET') {
             $sql .= " ORDER BY `{$op[0]}` " . (($op[1]??'asc')==='desc'?'DESC':'ASC');
         }
     }
-    $maxLimit = ($table === 'restaurant_sales') ? 50000 : 5000;
+    $maxLimit = ($table === 'restaurant_sales') ? 500000 : 5000;
     $limit = isset($_GET['limit']) ? max(1, min(intval($_GET['limit']), $maxLimit)) : 1000;
     $sql .= " LIMIT " . $limit;
     if (isset($_GET['offset'])) {
@@ -2385,6 +2401,15 @@ if ($method === 'GET') {
     } catch (PDOException $e) {
         error_log("SELECT error [{$table}]: " . $e->getMessage());
         respond(['error' => 'Ошибка запроса к базе данных'], 500);
+    }
+
+    // Пост-проверка доступа к юрлицу для entity tables, запрошенных по ID без фильтра legal_entity
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && $table !== 'notifications') {
+        $data = array_filter($data, function($row) use ($sessionUser) {
+            if (!isset($row['legal_entity'])) return true;
+            return checkLegalEntityAccess($sessionUser, $row['legal_entity']);
+        });
+        $data = array_values($data);
     }
 
     if ($hasSubSelect && $subTable && in_array($subTable, $allowed) && !empty($data)) {
