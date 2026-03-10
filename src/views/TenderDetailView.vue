@@ -158,7 +158,7 @@
               <div class="td-offer-prices-title">Файлы КП</div>
               <div v-if="getOfferFiles(offer.supplier).length" class="td-files-list">
                 <div v-for="f in getOfferFiles(offer.supplier)" :key="f.id" class="td-file-item">
-                  <a :href="'/api/uploads/tenders/' + f.file_path + '?download=1'" class="td-file-link" target="_blank">
+                  <a :href="'/api/uploads/tenders/' + f.file_path + '?download=1&token=' + sessionToken" class="td-file-link" target="_blank">
                     <span class="td-file-icon">{{ fileIcon(f.file_name) }}</span>
                     {{ f.file_name }}
                   </a>
@@ -375,6 +375,7 @@ const router = useRouter();
 const orderStore = useOrderStore();
 const userStore = useUserStore();
 const toast = useToastStore();
+const sessionToken = localStorage.getItem('bk_session_token') || '';
 
 const isViewer = computed(() => !userStore.hasAccess('tenders', 'edit'));
 const hasFullAccess = computed(() => userStore.hasAccess('tenders', 'full'));

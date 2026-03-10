@@ -282,6 +282,9 @@
     <!-- Broadcast Popup -->
     <BroadcastPopup />
 
+    <!-- Кнопка «Нашли ошибку?» -->
+    <BugReportButton />
+
   </div>
 </template>
 
@@ -295,6 +298,7 @@ import { db } from '@/lib/apiClient.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import BroadcastPopup from '@/components/BroadcastPopup.vue';
+import BugReportButton from '@/components/BugReportButton.vue';
 
 
 const router = useRouter();

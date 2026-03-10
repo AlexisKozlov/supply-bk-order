@@ -10,3 +10,5 @@ api/api/
 nohup.out
 *.xlsx
 .claude/
+api/uploads/
+public/mockups/

@@ -30,6 +30,11 @@
         <BkIcon name="key" size="sm"/> Сессии
         <span class="adm-tab-count" :class="{ active: activeTab === 'sessions' }">{{ onlineUsers.length }}</span>
       </button>
+      <button class="adm-tab" :class="{ active: activeTab === 'feedback' }" @click="activeTab = 'feedback'; loadBugReports()">
+        <BkIcon name="feedback" size="sm"/> Обращения
+        <span v-if="bugNewCount" class="adm-tab-dot"></span>
+        <span class="adm-tab-count" :class="{ active: activeTab === 'feedback' }">{{ bugReports.length || '' }}</span>
+      </button>
     </div>
 
     <!-- ═══ Пользователи ═══ -->
@@ -585,6 +590,123 @@
       </div>
     </div>
 
+    <!-- ═══ Обращения — мессенджер ═══ -->
+    <div v-if="activeTab === 'feedback'" class="adm-section fb-messenger">
+      <!-- Левая панель: список -->
+      <div class="fb-sidebar">
+        <div class="fb-sidebar-top">
+          <select v-model="bugFilterStatus" class="bug-filter-select" style="flex:1;">
+            <option value="">Все ({{ bugReports.length }})</option>
+            <option value="new">Новые</option>
+            <option value="in_progress">В работе</option>
+            <option value="resolved">Решённые</option>
+            <option value="closed">Закрытые</option>
+          </select>
+          <button class="btn" @click="loadBugReports" style="font-size:11px;padding:4px 8px;"><BkIcon name="redo" size="sm"/></button>
+        </div>
+        <div class="fb-list">
+          <div v-if="bugLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
+          <div v-else-if="!filteredBugReports.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;">Нет обращений</div>
+          <div
+            v-for="r in filteredBugReports" :key="r.id"
+            class="fb-item" :class="{ active: bugDetail?.id === r.id, 'is-new': r.status === 'new' }"
+            @click="openBugDetail(r)"
+          >
+            <div class="fb-item-top">
+              <span class="fb-item-status" :class="'st-' + r.status"></span>
+              <span class="fb-item-author">{{ r.created_by }}</span>
+              <span class="fb-item-date">{{ formatBugDate(r.created_at) }}</span>
+            </div>
+            <div class="fb-item-title">{{ r.title }}</div>
+            <div class="fb-item-bottom">
+              <span class="fb-item-entity">{{ r.legal_entity || '' }}</span>
+              <span v-if="r.reply_count" class="fb-item-replies">💬 {{ r.reply_count }}</span>
+              <span v-if="r.screenshots?.length" class="fb-item-attach">📎 {{ r.screenshots.length }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Правая панель: чат -->
+      <div class="fb-chat">
+        <template v-if="bugDetail">
+          <!-- Шапка чата -->
+          <div class="fb-chat-header">
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+              <select v-model="bugDetail.status" @change="updateBugStatus(bugDetail)" class="bug-filter-select" style="font-weight:600;font-size:11px;padding:3px 6px;">
+                <option value="new">🟠 Новое</option>
+                <option value="in_progress">🔵 В работе</option>
+                <option value="resolved">🟢 Решено</option>
+                <option value="closed">⚫ Закрыто</option>
+              </select>
+              <span class="fb-chat-title">{{ bugDetail.title }}</span>
+            </div>
+            <button class="fb-del-btn" @click="deleteBugReport(bugDetail)" title="Удалить"><BkIcon name="delete" size="sm"/></button>
+          </div>
+
+          <!-- Описание (сворачиваемое) -->
+          <details class="fb-chat-info">
+            <summary>
+              {{ bugDetail.created_by }} · {{ formatBugDate(bugDetail.created_at) }}
+              <span v-if="bugDetail.screenshots?.length"> · 📎 {{ bugDetail.screenshots.length }}</span>
+            </summary>
+            <div class="fb-chat-info-body">
+              <p v-if="bugDetail.description" style="font-size:13px;color:var(--text-secondary);white-space:pre-wrap;margin:0 0 8px;line-height:1.5;">{{ bugDetail.description }}</p>
+              <div v-if="bugDetail.screenshots?.length" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                <a v-for="(s, i) in bugDetail.screenshots" :key="i" :href="apiBase + '/' + s + '?token=' + sessionToken" target="_blank">
+                  <img :src="apiBase + '/' + s + '?token=' + sessionToken" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border);" />
+                </a>
+              </div>
+              <div v-if="bugDetail.page_url" style="font-size:11px;color:var(--text-muted);word-break:break-all;"><b>Страница:</b> {{ bugDetail.page_url }}</div>
+              <details v-if="bugDetail.action_log" style="margin-top:4px;">
+                <summary style="font-size:11px;color:var(--text-muted);cursor:pointer;">Лог действий</summary>
+                <pre style="font-size:10px;background:var(--bg);padding:6px 8px;border-radius:6px;margin-top:4px;white-space:pre-wrap;max-height:150px;overflow-y:auto;">{{ bugDetail.action_log }}</pre>
+              </details>
+            </div>
+          </details>
+
+          <!-- Сообщения -->
+          <div class="fb-chat-messages" ref="bugChatScroll">
+            <div v-if="!bugReplies.length" style="text-align:center;padding:40px;color:var(--text-muted);font-size:12px;">Нет сообщений — напишите ответ</div>
+            <div v-for="r in bugReplies" :key="r.id" class="fb-msg" :class="{ admin: r.is_admin }">
+              <div class="fb-msg-meta">
+                <span :style="r.is_admin ? 'color:#2E7D32' : ''">{{ r.created_by }}{{ r.is_admin ? ' (вы)' : '' }}</span>
+                <span>{{ formatBugDate(r.created_at) }}</span>
+              </div>
+              <div class="fb-msg-text" v-html="renderMsgContent(r.message)"></div>
+            </div>
+          </div>
+
+          <!-- Превью вложений -->
+          <div v-if="bugReplyImages.length" class="fb-attach-preview">
+            <div v-for="(img, i) in bugReplyImages" :key="i" class="fb-attach-thumb">
+              <img :src="img.preview" />
+              <button @click="bugReplyImages.splice(i, 1)" class="fb-attach-remove">&times;</button>
+              <div v-if="img.uploading" class="fb-attach-loading"></div>
+            </div>
+          </div>
+
+          <!-- Ввод -->
+          <div class="fb-chat-input">
+            <label class="fb-attach-btn" title="Прикрепить фото">
+              <input type="file" accept="image/*" multiple @change="onBugReplyFiles" style="display:none" />
+              📎
+            </label>
+            <textarea v-model="bugReplyText" class="bug-reply-input" placeholder="Enter — отправить" rows="1" @keydown.enter.exact.prevent="sendBugReply" @input="autoResizeReply" @paste="onBugReplyPaste"></textarea>
+            <button class="btn primary" :disabled="(!bugReplyText.trim() && !bugReplyImages.length) || bugReplySending" @click="sendBugReply" style="font-size:13px;padding:8px 16px;align-self:flex-end;">
+              {{ bugReplySending ? '...' : '→' }}
+            </button>
+          </div>
+        </template>
+
+        <!-- Пустое состояние -->
+        <div v-else class="fb-chat-empty">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="var(--border)" stroke-width="1"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
+          <p>Выберите обращение из списка</p>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ Модалка обновления (changelog) ═══ -->
     <Teleport to="body">
       <div v-if="changelogModal.show" class="modal" @click.self="tryCloseChangelog">
@@ -757,7 +879,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
@@ -1628,6 +1750,193 @@ onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });
 watch(() => userStore.currentUser?.role, (role) => {
   if (role && role !== 'admin') router.replace({ name: 'order' });
 });
+
+// ═══ Обращения (баг-репорты) ═══
+const apiBase = import.meta.env.VITE_API_URL || '/api';
+const sessionToken = localStorage.getItem('bk_session_token') || '';
+const bugReports = ref([]);
+const bugLoading = ref(false);
+const bugFilterStatus = ref('');
+const bugNewCount = ref(0);
+const bugDetail = ref(null);
+const bugReplies = ref([]);
+const bugReplyText = ref('');
+const bugReplySending = ref(false);
+
+const filteredBugReports = computed(() => {
+  if (!bugFilterStatus.value) return bugReports.value;
+  return bugReports.value.filter(r => r.status === bugFilterStatus.value);
+});
+
+async function loadBugReports() {
+  bugLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_bug_reports', {});
+    bugReports.value = data?.reports || [];
+    bugNewCount.value = bugReports.value.filter(r => r.status === 'new').length;
+  } finally {
+    bugLoading.value = false;
+  }
+}
+
+async function openBugDetail(r) {
+  const { data } = await db.rpc('get_bug_report', { id: r.id });
+  if (data?.report) {
+    bugDetail.value = data.report;
+    bugReplies.value = data.replies || [];
+    bugReplyText.value = '';
+    scrollChatToBottom();
+  }
+}
+
+async function updateBugStatus(r) {
+  await db.rpc('update_bug_report_status', { id: r.id, status: r.status });
+  toast.success('Статус обновлён');
+  loadBugReports();
+}
+
+const bugChatScroll = ref(null);
+const bugReplyImages = ref([]);
+
+function renderMsgContent(msg) {
+  if (!msg) return '';
+  const escaped = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return escaped.replace(/\[img:(.*?)\]/g, (_, path) => {
+    const src = apiBase + '/' + path + '?token=' + sessionToken;
+    return '<img src="' + src + '" class="fb-msg-img" onclick="window.open(this.src)" />';
+  });
+}
+
+async function uploadBugImage(file) {
+  if (!file.type.startsWith('image/')) return;
+  const preview = URL.createObjectURL(file);
+  const item = { preview, path: null, uploading: true };
+  bugReplyImages.value.push(item);
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(apiBase + '/upload/bug-screenshot', {
+      method: 'POST', body: fd,
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    const data = await res.json();
+    item.path = data.path || null;
+    if (!item.path) bugReplyImages.value = bugReplyImages.value.filter(x => x !== item);
+  } catch { bugReplyImages.value = bugReplyImages.value.filter(x => x !== item); }
+  finally { item.uploading = false; }
+}
+
+function onBugReplyFiles(e) {
+  for (const f of Array.from(e.target.files || [])) uploadBugImage(f);
+  e.target.value = '';
+}
+
+function onBugReplyPaste(e) {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (file) uploadBugImage(file);
+    }
+  }
+}
+
+function scrollChatToBottom() {
+  nextTick(() => {
+    const el = bugChatScroll.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
+function autoResizeReply(e) {
+  const el = e.target;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+}
+
+async function sendBugReply() {
+  const text = bugReplyText.value.trim();
+  const images = bugReplyImages.value.filter(x => x.path).map(x => x.path);
+  if (!text && !images.length) return;
+  if (bugReplySending.value) return;
+  bugReplySending.value = true;
+  try {
+    // Соединяем текст + изображения в одно сообщение
+    let msg = text;
+    if (images.length) {
+      const imgTags = images.map(p => '[img:' + p + ']').join(' ');
+      msg = msg ? msg + '\n' + imgTags : imgTags;
+    }
+    await db.rpc('reply_bug_report', { report_id: bugDetail.value.id, message: msg });
+    bugReplyText.value = '';
+    bugReplyImages.value = [];
+    const { data } = await db.rpc('get_bug_report', { id: bugDetail.value.id });
+    if (data) {
+      bugDetail.value = data.report;
+      bugReplies.value = data.replies || [];
+    }
+    scrollChatToBottom();
+    loadBugReports();
+  } finally {
+    bugReplySending.value = false;
+  }
+}
+
+async function deleteBugReport(r) {
+  if (!confirm('Удалить обращение #' + r.id + '?')) return;
+  await db.rpc('delete_bug_report', { id: r.id });
+  bugDetail.value = null;
+  toast.success('Обращение удалено');
+  loadBugReports();
+}
+
+function bugStatusLabel(s) {
+  return { new: '🟠 Новое', in_progress: '🔵 В работе', resolved: '🟢 Решено', closed: '⚫ Закрыто' }[s] || s;
+}
+
+function formatBugDate(str) {
+  if (!str) return '';
+  const d = new Date(str);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
+    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Автообновление обращений (каждые 10 сек, если таб активен)
+let bugPollTimer = null;
+
+async function bugPoll() {
+  if (activeTab.value !== 'feedback') return;
+  try {
+    const { data } = await db.rpc('get_bug_reports', {});
+    if (data?.reports) {
+      bugReports.value = data.reports;
+      bugNewCount.value = data.reports.filter(r => r.status === 'new').length;
+    }
+    // Если открыта детальная карточка — обновить ответы
+    if (bugDetail.value) {
+      const oldCount = bugReplies.value.length;
+      const { data: d2 } = await db.rpc('get_bug_report', { id: bugDetail.value.id });
+      if (d2) {
+        bugDetail.value = d2.report;
+        bugReplies.value = d2.replies || [];
+        if (d2.replies?.length > oldCount) scrollChatToBottom();
+      }
+    }
+  } catch {}
+}
+
+onMounted(() => {
+  db.rpc('get_bug_reports_count', {}).then(({ data }) => {
+    if (data) bugNewCount.value = data.new_count || 0;
+  }).catch(() => {});
+  bugPollTimer = setInterval(bugPoll, 10000);
+});
+
+onUnmounted(() => {
+  if (bugPollTimer) clearInterval(bugPollTimer);
+});
 </script>
 
 <style scoped>
@@ -2149,4 +2458,211 @@ watch(() => userStore.currentUser?.role, (role) => {
 .perm-lvl-view { color: #1976D2; }
 .perm-lvl-none { color: var(--text-muted); opacity: 0.5; }
 .perm-select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; font-family: inherit; background: var(--card); }
+
+/* ═══ Bug Reports ═══ */
+.bug-filter-select {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--card);
+}
+.adm-bug-row { cursor: pointer; }
+.adm-bug-row:hover { background: rgba(214,35,0,0.02); }
+.adm-bug-status-col { flex-shrink: 0; width: 90px; }
+.adm-bug-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 8px;
+  display: inline-block;
+  white-space: nowrap;
+}
+.adm-bug-status.st-new { background: #FFF3E0; color: #E65100; }
+.adm-bug-status.st-in_progress { background: #E3F2FD; color: #1565C0; }
+.adm-bug-status.st-resolved { background: #E8F5E9; color: #2E7D32; }
+.adm-bug-status.st-closed { background: #F5F5F5; color: #757575; }
+.adm-bug-thumbs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.adm-bug-thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.adm-bug-more {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.bug-reply-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 40px;
+}
+.bug-reply-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(214,35,0,0.08);
+}
+
+/* ═══ Feedback messenger ═══ */
+.fb-messenger {
+  display: flex;
+  gap: 0;
+  height: calc(100vh - 160px);
+  min-height: 400px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card);
+}
+.fb-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-light);
+  background: var(--bg);
+}
+.fb-sidebar-top {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.fb-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.fb-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-light);
+  transition: background 0.1s;
+}
+.fb-item:hover { background: rgba(0,0,0,0.03); }
+.fb-item.active { background: var(--card); border-left: 3px solid var(--accent); }
+.fb-item.is-new { border-left: 3px solid #E65100; }
+.fb-item.active.is-new { border-left-color: var(--accent); }
+.fb-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.fb-item-status {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.fb-item-status.st-new { background: #E65100; }
+.fb-item-status.st-in_progress { background: #1565C0; }
+.fb-item-status.st-resolved { background: #2E7D32; }
+.fb-item-status.st-closed { background: #9E9E9E; }
+.fb-item-author { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+.fb-item-date { font-size: 10px; color: var(--text-muted); margin-left: auto; }
+.fb-item-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fb-item-bottom {
+  display: flex; gap: 8px; margin-top: 2px;
+  font-size: 10px; color: var(--text-muted);
+}
+
+/* Chat panel */
+.fb-chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fb-chat-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.fb-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.fb-chat-title {
+  font-size: 14px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fb-del-btn {
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  padding: 4px; border-radius: 6px; transition: 0.15s;
+}
+.fb-del-btn:hover { color: var(--error); background: rgba(211,47,47,0.08); }
+.fb-chat-info {
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.fb-chat-info summary { padding: 8px 0; cursor: pointer; font-weight: 600; }
+.fb-chat-info-body { padding: 0 0 10px; }
+.fb-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fb-msg {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--bg);
+  max-width: 80%;
+  align-self: flex-start;
+}
+.fb-msg.admin {
+  background: #e8f5e9;
+  align-self: flex-end;
+}
+.fb-msg-meta {
+  display: flex; justify-content: space-between; gap: 8px;
+  margin-bottom: 2px; font-size: 10px; font-weight: 600;
+  color: var(--text-secondary);
+}
+.fb-msg-meta span:last-child { color: var(--text-muted); font-weight: 400; }
+.fb-msg-text { font-size: 13px; white-space: pre-wrap; line-height: 1.45; }
+.fb-msg-img { max-width: 200px; border-radius: 8px; margin-top: 4px; cursor: pointer; }
+.fb-chat-input {
+  display: flex; gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
+  align-items: flex-end;
+}
+.fb-chat-input textarea { flex: 1; resize: none; min-height: 36px; max-height: 100px; }
+
+@media (max-width: 768px) {
+  .fb-messenger { flex-direction: column; height: auto; min-height: unset; }
+  .fb-sidebar { width: 100%; max-height: 300px; border-right: none; border-bottom: 1px solid var(--border-light); }
+  .fb-chat { min-height: 400px; }
+}
 </style>

@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS report_exclusions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  analog_group VARCHAR(255) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255) DEFAULT NULL,
+  UNIQUE KEY uk_analog_group (analog_group)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

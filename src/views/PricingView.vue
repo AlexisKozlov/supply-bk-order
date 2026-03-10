@@ -134,22 +134,25 @@
         <div v-for="a in filteredAgreements" :key="a.id" class="db-card agreement-card" :class="agreementCardClass(a)" @click="!isViewer && editAgreement(a)" :style="!isViewer ? '' : 'cursor:default'">
           <div class="db-card-top">
             <span class="agreement-status" :class="'st-' + a.status">{{ statusLabel(a.status) }}</span>
+            <span class="doc-type-badge" :class="'dt-' + (a.doc_type || 'psc')">{{ docTypeLabel(a.doc_type) }}</span>
             <span style="font-weight:600;">{{ a.number }}</span>
             <span v-if="agreementExpiry(a)" class="expiry-badge" :class="agreementExpiry(a).cls">{{ agreementExpiry(a).text }}</span>
           </div>
           <div class="db-card-meta">
             <span>{{ a.supplier }}</span>
-            <span v-if="a.valid_from">{{ formatDate(a.valid_from) }} — {{ a.valid_to ? formatDate(a.valid_to) : '...' }}</span>
+            <span v-if="a.valid_from">{{ formatDate(a.valid_from) }} — {{ a.valid_to ? formatDate(a.valid_to) : 'бессрочно' }}</span>
           </div>
           <div class="db-card-meta" style="font-size:10px;">
             <span>Создал: {{ a.created_by }}</span>
             <span v-if="a.approved_by">Согласовал: {{ a.approved_by }}</span>
           </div>
           <div v-if="a.file_name" class="db-card-meta">
-            <a :href="apiBase + '/' + a.file_path + '?download=1'" @click.stop class="psc-file-link" target="_blank">{{ a.file_name }}</a>
+            <a :href="apiBase + '/' + a.file_path + '?download=1&token=' + sessionToken" @click.stop class="psc-file-link psc-download-btn" target="_blank"><BkIcon name="import" size="sm"/> Скачать</a>
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button v-if="a.status === 'draft' && hasFullAccess" class="approve-btn" @click.stop="approveAgreement(a)"><BkIcon name="check" size="sm"/> Согласовать</button>
+            <button v-if="a.status === 'active'" class="db-card-btn" @click.stop="archiveAgreement(a)" title="В архив"><BkIcon name="archive" size="sm"/></button>
+            <button v-if="a.status === 'archived'" class="db-card-btn" @click.stop="restoreAgreement(a)" title="Вернуть из архива"><BkIcon name="restore" size="sm"/></button>
             <button class="db-card-btn" @click.stop="editAgreement(a)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button v-if="hasFullAccess" class="db-card-btn db-card-btn-del" @click.stop="deleteAgreement(a)" title="Удалить"><BkIcon name="delete" size="sm"/></button>
           </div>
@@ -308,11 +311,14 @@
     <!-- Модалка: Редактирование/создание протокола -->
     <div v-if="showAgreementModal" class="modal-overlay" @click.self="tryCloseAgreementModal">
       <div class="modal-card modal-agreement">
-        <h3 style="margin:0 0 16px;">{{ editingAgreement ? 'Редактировать протокол' : 'Новый протокол (ПСЦ)' }}</h3>
+        <h3 style="margin:0 0 16px;">{{ editingAgreement ? 'Редактировать протокол' : 'Новый протокол' }}</h3>
         <div class="form-row-2col">
           <div class="form-group">
-            <label>Номер протокола</label>
-            <input v-model="agForm.number" class="form-input" placeholder="ПСЦ-001" />
+            <label>Тип документа</label>
+            <select v-model="agForm.doc_type" class="form-input">
+              <option value="psc">ПСЦ (протокол согласования цен)</option>
+              <option value="spec">Спецификация</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Поставщик</label>
@@ -324,12 +330,18 @@
         </div>
         <div class="form-row-2col">
           <div class="form-group">
-            <label>Действует с</label>
-            <input v-model="agForm.valid_from" type="date" class="form-input" />
+            <label>Номер</label>
+            <input v-model="agForm.number" class="form-input" :placeholder="agForm.doc_type === 'spec' ? 'Спец-001' : 'ПСЦ-001'" />
           </div>
-          <div class="form-group">
-            <label>Действует до</label>
-            <input v-model="agForm.valid_to" type="date" class="form-input" />
+          <div class="form-group" style="display:flex;gap:8px;">
+            <div style="flex:1;">
+              <label>Действует с</label>
+              <input v-model="agForm.valid_from" type="date" class="form-input" />
+            </div>
+            <div style="flex:1;">
+              <label>Действует до</label>
+              <input v-model="agForm.valid_to" type="date" class="form-input" />
+            </div>
           </div>
         </div>
         <div class="form-group">
@@ -338,9 +350,9 @@
         </div>
         <!-- Загрузка файла -->
         <div class="form-group">
-          <label>Файл ПСЦ</label>
+          <label>Файл</label>
           <div v-if="agForm.file_name" style="margin-bottom:6px;font-size:12px;">
-            Текущий: <a :href="apiBase + '/' + agForm.file_path + '?download=1'" target="_blank">{{ agForm.file_name }}</a>
+            Текущий: <a :href="apiBase + '/' + agForm.file_path + '?download=1&token=' + sessionToken" target="_blank">{{ agForm.file_name }}</a>
           </div>
           <input ref="pscFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" @change="onPscFileSelected" style="display:none;" />
           <button class="file-upload-btn" @click="pscFileInput?.click()" :disabled="uploadingFile">
@@ -414,6 +426,14 @@
           </select>
         </div>
         <div class="form-group">
+          <label>НДС по умолчанию</label>
+          <select v-model.number="importVatRate" class="form-input" style="width:120px;">
+            <option :value="20">20%</option>
+            <option :value="10">10%</option>
+            <option :value="0">0%</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Привязать к протоколу (необязательно)</label>
           <select v-model="importAgreementId" class="form-input">
             <option :value="null">— Без привязки —</option>
@@ -427,12 +447,13 @@
         <div v-if="importPreview.length" style="margin-top:12px;">
           <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Предпросмотр (первые {{ Math.min(importPreview.length, 10) }} из {{ importPreview.length }}):</div>
           <table class="pricing-table" style="font-size:11px;">
-            <thead><tr><th>Артикул</th><th class="text-right">Цена</th><th>За</th></tr></thead>
+            <thead><tr><th>Артикул</th><th class="text-right">Цена</th><th>За</th><th>НДС</th></tr></thead>
             <tbody>
               <tr v-for="(p, i) in importPreview.slice(0, 10)" :key="i">
                 <td class="mono">{{ p.sku }}</td>
                 <td class="text-right mono">{{ formatPrice(p.price) }}</td>
                 <td>{{ unitLabel(p.unit_type) }}</td>
+                <td>{{ (p.vat_rate ?? importVatRate) }}%</td>
               </tr>
             </tbody>
           </table>
@@ -514,6 +535,7 @@ const toast = useToastStore();
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const apiBase = API_BASE;
+const sessionToken = localStorage.getItem('bk_session_token') || '';
 
 const isViewer = computed(() => !userStore.hasAccess('pricing', 'edit'));
 const hasFullAccess = computed(() => userStore.hasAccess('pricing', 'full'));
@@ -571,7 +593,7 @@ async function loadPrices() {
     const { data, error } = await db.rpc('get_current_prices', { legal_entity: le });
     if (gen !== _loadPricesGen) return; // устаревший запрос
     if (error) { toast.error('Ошибка', error); return; }
-    prices.value = data?.prices || [];
+    prices.value = (data?.prices || []).map(p => ({ ...p, vat_rate: parseFloat(p.vat_rate) || 20 }));
     if (data?.rub_to_byn_rate) rubToBynRate.value = parseFloat(data.rub_to_byn_rate);
     await loadProductNames();
   } finally {
@@ -667,6 +689,9 @@ function formatDate(d) {
 }
 function statusLabel(s) {
   return { draft: 'Черновик', active: 'Действует', archived: 'Архив' }[s] || s;
+}
+function docTypeLabel(t) {
+  return { psc: 'ПСЦ', spec: 'Спецификация' }[t] || 'ПСЦ';
 }
 const UNIT_LABELS = { piece: 'шт', thousand: 'тыс/шт', kg: 'кг', liter: 'л', box: 'кор' };
 const UNIT_LABELS_FULL = { piece: 'штуку', thousand: 'тыс/шт', kg: 'кг', liter: 'литр', box: 'коробку' };
@@ -840,7 +865,7 @@ const editingAgreement = ref(null);
 const savingAgreement = ref(false);
 const uploadingFile = ref(false);
 const pscFileInput = ref(null);
-const agForm = ref({ number: '', supplier: '', valid_from: '', valid_to: '', note: '', file_name: '', file_path: '' });
+const agForm = ref({ number: '', supplier: '', valid_from: '', valid_to: '', note: '', doc_type: 'psc', file_name: '', file_path: '' });
 const agPriceItems = ref([]); // [{sku, name, selected, price, unit_type}]
 const agProductSearch = ref('');
 const agCurrency = ref('RUB');
@@ -915,7 +940,7 @@ function openNewAgreement() {
   agPriceItems.value = [];
   agProductSearch.value = '';
   agCurrency.value = 'RUB';
-  agForm.value = { number: '', supplier: supplierNames.value[0] || '', valid_from: '', valid_to: '', note: '', file_name: '', file_path: '' };
+  agForm.value = { number: '', supplier: supplierNames.value[0] || '', valid_from: '', valid_to: '', note: '', doc_type: 'psc', file_name: '', file_path: '' };
   showAgreementModal.value = true;
   if (supplierNames.value[0]) loadAgProducts(supplierNames.value[0], null);
 }
@@ -927,7 +952,7 @@ function editAgreement(a) {
   agForm.value = {
     number: a.number, supplier: a.supplier,
     valid_from: a.valid_from || '', valid_to: a.valid_to || '',
-    note: a.note || '', file_name: a.file_name || '', file_path: a.file_path || '',
+    note: a.note || '', doc_type: a.doc_type || 'psc', file_name: a.file_name || '', file_path: a.file_path || '',
   };
   showAgreementModal.value = true;
   if (a.supplier) loadAgProducts(a.supplier, a.id);
@@ -935,7 +960,7 @@ function editAgreement(a) {
 
 async function saveAgreement() {
   if (savingAgreement.value) return;
-  const { number, supplier, valid_from, valid_to, note } = agForm.value;
+  const { number, supplier, valid_from, valid_to, note, doc_type } = agForm.value;
   if (!number || !supplier) { toast.error('Ошибка', 'Укажите номер и поставщика'); return; }
   savingAgreement.value = true;
   try {
@@ -943,7 +968,7 @@ async function saveAgreement() {
     const payload = {
       number, supplier, legal_entity: le,
       valid_from: valid_from || null, valid_to: valid_to || null,
-      note: note || null,
+      note: note || null, doc_type: doc_type || 'psc',
     };
     let newId = null;
     if (editingAgreement.value) {
@@ -1024,10 +1049,27 @@ async function uploadPscFile(agreementId, file) {
 }
 
 async function approveAgreement(a) {
-  if (!await confirm('Согласовать протокол?', `Согласовать «${a.number}»? Предыдущий активный протокол для этого поставщика будет заархивирован.`)) return;
+  const archiveNote = (a.doc_type || 'psc') === 'psc' ? '\nПредыдущий активный ПСЦ этого поставщика будет заархивирован.' : '';
+  if (!await confirm('Согласовать?', `Согласовать «${a.number}»?${archiveNote}`)) return;
   const { error } = await db.rpc('approve_agreement', { id: a.id });
   if (error) { toast.error('Ошибка', error); return; }
   toast.success('Протокол согласован');
+  await loadAgreements();
+}
+
+async function archiveAgreement(a) {
+  if (!await confirm('В архив?', `Перевести «${a.number}» в архив?`)) return;
+  const { error } = await db.rpc('archive_agreement', { id: a.id });
+  if (error) { toast.error('Ошибка', error); return; }
+  toast.success('Протокол перемещён в архив');
+  await loadAgreements();
+}
+
+async function restoreAgreement(a) {
+  if (!await confirm('Вернуть из архива?', `Вернуть «${a.number}» в статус «Действует»?`)) return;
+  const { error } = await db.rpc('restore_agreement', { id: a.id });
+  if (error) { toast.error('Ошибка', error); return; }
+  toast.success('Протокол восстановлен');
   await loadAgreements();
 }
 
@@ -1048,6 +1090,7 @@ async function deleteAgreement(a) {
 const showImportModal = ref(false);
 const importSupplier = ref('');
 const importCurrency = ref('RUB');
+const importVatRate = ref(20);
 const importAgreementId = ref(null);
 const importPreview = ref([]);
 const importing = ref(false);
@@ -1070,6 +1113,7 @@ async function onImportFileSelected(e) {
     const skuCol = keys.find(k => /артикул|sku|код|article/i.test(k)) || keys[0];
     const priceCol = keys.find(k => /цена|price|стоимость|cost/i.test(k)) || keys[1];
     const unitCol = keys.find(k => /единица|unit|за что|тип/i.test(k));
+    const vatCol = keys.find(k => /ндс|нд с|vat|tax/i.test(k));
 
     const parsed = [];
     for (const row of rows) {
@@ -1084,7 +1128,12 @@ async function onImportFileSelected(e) {
         else if (/\bкг\b|kilogram/i.test(uv)) unit_type = 'kg';
         else if (/\bл\b|литр|liter/i.test(uv)) unit_type = 'liter';
       }
-      parsed.push({ sku, price, unit_type });
+      let vat_rate = null;
+      if (vatCol) {
+        const vv = parseFloat(String(row[vatCol] || '').replace(/[^\d.,]/g, '').replace(',', '.'));
+        if (!isNaN(vv) && [0, 10, 20].includes(vv)) vat_rate = vv;
+      }
+      parsed.push({ sku, price, unit_type, vat_rate });
     }
     importPreview.value = parsed;
     if (!parsed.length) toast.error('Не найдены данные', 'Проверьте, что в файле есть колонки с артикулом и ценой');
@@ -1101,7 +1150,7 @@ async function doImport() {
       legal_entity: orderStore.settings.legalEntity,
       supplier: importSupplier.value,
       currency: importCurrency.value,
-      prices: importPreview.value,
+      prices: importPreview.value.map(p => ({ ...p, vat_rate: p.vat_rate ?? importVatRate.value })),
       agreement_id: importAgreementId.value,
     });
     if (error) { toast.error('Ошибка импорта', error); return; }
@@ -1271,7 +1320,8 @@ function agreementCardClass(a) {
 }
 
 function agreementExpiry(a) {
-  if (a.status !== 'active' || !a.valid_to) return null;
+  if (a.status !== 'active') return null;
+  if (!a.valid_to) return { text: 'Бессрочный', cls: 'expiry-permanent' };
   const now = new Date();
   const end = new Date(a.valid_to + 'T00:00:00');
   const diff = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
@@ -1465,8 +1515,14 @@ async function loadDynamics() {
 .agreement-status.st-active { background: rgba(76,175,80,0.15); color: #2E7D32; }
 .agreement-status.st-archived { background: rgba(158,158,158,0.15); color: #757575; }
 
+.doc-type-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+.doc-type-badge.dt-psc { background: rgba(33,150,243,0.12); color: #1565C0; }
+.doc-type-badge.dt-spec { background: rgba(156,39,176,0.12); color: #7B1FA2; }
+
 .psc-file-link { color: var(--bk-orange); text-decoration: none; font-size: 11px; }
 .psc-file-link:hover { text-decoration: underline; }
+.psc-download-btn { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,140,0,0.1); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+.psc-download-btn:hover { background: rgba(255,140,0,0.2); text-decoration: none; }
 
 .form-group { margin-bottom: 12px; }
 .form-group label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
@@ -1491,6 +1547,7 @@ async function loadDynamics() {
 .expiry-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600; margin-left:auto; }
 .expiry-badge.expiry-danger { background:rgba(229,57,53,0.12); color:#C62828; animation: pulse-danger 2s infinite; }
 .expiry-badge.expiry-warning { background:rgba(255,183,77,0.2); color:#EF6C00; }
+.expiry-badge.expiry-permanent { background:rgba(76,175,80,0.12); color:#2E7D32; }
 .agreement-card.agreement-expiring { border-color:#E53935; border-left:3px solid #E53935; }
 @keyframes pulse-danger { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
 

@@ -5,6 +5,9 @@
 
 export const icons = {
   // ─── Navigation / Modules ───
+  archive: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="5" rx="1.5" fill="#FF8733" stroke="#D62700" stroke-width="1.5"/><path d="M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><rect x="9" y="12" width="6" height="2" rx="1" fill="#D62700"/></svg>`,
+  restore: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 0115.36-6.36" stroke="#D62700" stroke-width="2" stroke-linecap="round"/><path d="M21 12a9 9 0 01-15.36 6.36" stroke="#FF8733" stroke-width="2" stroke-linecap="round"/><polyline points="18 2 18 6 14 6" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="6 22 6 18 10 18" stroke="#FF8733" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+
   burger: `<svg viewBox="0 0 24 24" fill="none"><circle cx="8" cy="8" r="5" fill="#D62300"/><circle cx="16" cy="8" r="5" fill="#F5A623"/><circle cx="8" cy="16" r="5" fill="#FF8733"/><circle cx="16" cy="16" r="5" fill="#FFD54F"/><circle cx="12" cy="12" r="4.2" fill="#502314"/><text x="12" y="14.8" text-anchor="middle" fill="white" font-size="7" font-weight="900" font-family="Arial,sans-serif">S</text></svg>`,
 
   home: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" fill="#FFE0B2" stroke="#D62700" stroke-width="1.8"/><path d="M3 12l9-8 9 8" stroke="#D62700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="15" width="6" height="5" rx=".5" fill="#FF8733"/></svg>`,
@@ -64,6 +67,10 @@ export const icons = {
   building: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><circle cx="9" cy="7" r="1.2" fill="#D62700"/><circle cx="15" cy="7" r="1.2" fill="#D62700"/><circle cx="9" cy="12" r="1.2" fill="#FF8733"/><circle cx="15" cy="12" r="1.2" fill="#FF8733"/><rect x="10" y="18" width="4" height="4" fill="#D62700"/></svg>`,
 
   loading: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4"/><path d="M12 18v4" opacity=".3"/><path d="M4.93 4.93l2.83 2.83" opacity=".8"/><path d="M16.24 16.24l2.83 2.83" opacity=".2"/><path d="M2 12h4" opacity=".6"/><path d="M18 12h4" opacity=".4"/><path d="M4.93 19.07l2.83-2.83" opacity=".4"/><path d="M16.24 7.76l2.83-2.83" opacity=".7"/></svg>`,
+
+  bug: `<svg viewBox="0 0 24 24" fill="none"><path d="M8 2l1.5 2.5M16 2l-1.5 2.5" stroke="#D62700" stroke-width="1.8" stroke-linecap="round"/><ellipse cx="12" cy="13" rx="5.5" ry="7" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><path d="M9 10h6M9 13h6M9 16h6" stroke="#FF8733" stroke-width="1.2" stroke-linecap="round"/><circle cx="10" cy="7.5" r="2" fill="#FF8733"/><circle cx="14" cy="7.5" r="2" fill="#FF8733"/><path d="M3 10l2.5 1M21 10l-2.5 1M3 16l2.5-0.5M21 16l-2.5-0.5" stroke="#D62700" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+
+  feedback: `<svg viewBox="0 0 24 24" fill="none"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="1" fill="#D62700"/><circle cx="8" cy="12" r="1" fill="#FF8733"/><circle cx="16" cy="12" r="1" fill="#FF8733"/></svg>`,
 
   warning: `<svg viewBox="0 0 24 24" fill="none"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" fill="#FFF3E0" stroke="#FF8733" stroke-width="1.8"/><line x1="12" y1="9" x2="12" y2="14" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"/><circle cx="12" cy="17.5" r="1.5" fill="#D62700"/></svg>`,
 

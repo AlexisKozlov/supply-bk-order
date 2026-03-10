@@ -100,7 +100,7 @@ $TABLE_TO_MODULE = [
     'plans'=>'planning',
     'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'database',
     'delivery_schedule'=>'delivery-schedule',
-    'analysis_data'=>'analysis','stock_1c'=>'analysis',
+    'analysis_data'=>'analysis','stock_1c'=>'analysis','restaurant_sales'=>'analysis',
     'stock_malling'=>'shelf-life',
     'audit_log'=>'history','notifications'=>'history',
     'settings'=>'database','item_order'=>'order',
@@ -188,7 +188,7 @@ function getSessionUser($pdo) {
     if ($_sessionUserCache['done']) return $_sessionUserCache['result'];
     $_sessionUserCache['done'] = true;
 
-    $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? '';
+    $token = $_SERVER['HTTP_X_SESSION_TOKEN'] ?? $_GET['token'] ?? '';
     if (!$token) { $_sessionUserCache['result'] = null; return null; }
     // Очистка протухших сессий — в ~1% запросов (вместо каждого)
     if (mt_rand(1, 100) === 1) {
@@ -581,6 +581,53 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'tenders' && isset($parts[2
     }
     header('Content-Type: ' . $mime);
     header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $origName) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
+// ═══ UPLOAD BUG REPORT SCREENSHOT ═══
+if ($endpoint === 'upload' && $subpoint === 'bug-screenshot') {
+    if ($method !== 'POST') respond(['error' => 'Метод не поддерживается'], 405);
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        respond(['error' => 'Ошибка загрузки файла'], 400);
+    }
+    $file = $_FILES['file'];
+    $maxSize = 10 * 1024 * 1024;
+    if ($file['size'] > $maxSize) respond(['error' => 'Файл слишком большой (макс. 10 МБ)'], 400);
+
+    $allowed = ['image/jpeg','image/png','image/webp','image/gif'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    if (!in_array($mime, $allowed)) respond(['error' => 'Разрешены только изображения (JPEG, PNG, WebP, GIF)'], 400);
+
+    $ext = match($mime) {
+        'image/jpeg' => 'jpg', 'image/png' => 'png',
+        'image/webp' => 'webp', 'image/gif' => 'gif', default => 'bin',
+    };
+    $filename = 'bug_' . time() . '_' . mt_rand(1000,9999) . '.' . $ext;
+    $uploadDir = __DIR__ . '/uploads/bugs/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
+    $dest = $uploadDir . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $dest)) respond(['error' => 'Ошибка сохранения файла'], 500);
+    respond(['success' => true, 'path' => 'uploads/bugs/' . $filename]);
+}
+
+// ═══ DOWNLOAD BUG SCREENSHOT ═══
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'bugs' && isset($parts[2])) {
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/uploads/bugs/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mime = finfo_file($finfo, $filepath);
+    finfo_close($finfo);
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: inline; filename="' . str_replace('"', '', $filename) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -1299,6 +1346,41 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    if ($fn === 'replace_restaurant_sales') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['analysis'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+        $items = $body['items'] ?? [];
+        if (!is_array($items)) respond(['error' => 'Позиции должны быть массивом'], 400);
+        if (empty($items)) respond(['error' => 'Список позиций пуст'], 400);
+        if (count($items) > 100000) respond(['error' => 'Слишком много записей (макс. 100 000)'], 400);
+        try {
+            $pdo->beginTransaction();
+            // Upsert: обновляем если уже есть запись за эту дату и группу
+            $stmt = $pdo->prepare("INSERT INTO `restaurant_sales` (`sale_date`, `analog_group`, `quantity`, `restaurant_count`)
+                VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE `quantity`=VALUES(`quantity`), `restaurant_count`=VALUES(`restaurant_count`)");
+            $inserted = 0;
+            foreach ($items as $item) {
+                $date = $item['sale_date'] ?? null;
+                $group = $item['analog_group'] ?? null;
+                $qty = $item['quantity'] ?? 0;
+                $rc = $item['restaurant_count'] ?? 0;
+                if (!$date || !$group) continue;
+                $stmt->execute([$date, $group, $qty, $rc]);
+                $inserted++;
+            }
+            $pdo->commit();
+            respond(['success' => true, 'count' => $inserted]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("replace_restaurant_sales error: " . $e->getMessage());
+            respond(['error' => 'Ошибка сохранения данных'], 500);
+        }
+    }
+
     if ($fn === 'replace_stock_malling') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
@@ -1688,7 +1770,11 @@ if ($endpoint === 'rpc') {
             if (!$ag) { $pdo->rollBack(); respond(['error' => 'Протокол не найден'], 404); }
             if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) { $pdo->rollBack(); respond(['error' => 'Нет доступа к юр. лицу'], 403); }
             if ($ag['status'] === 'active') { $pdo->rollBack(); respond(['error' => 'Протокол уже согласован'], 400); }
-            $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity=? AND status='active'")->execute([$ag['supplier'], $ag['legal_entity']]);
+            $docType = $ag['doc_type'] ?? 'psc';
+            // ПСЦ архивирует предыдущие ПСЦ этого поставщика; спецификации — не архивируют ничего
+            if ($docType === 'psc') {
+                $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity=? AND status='active' AND doc_type='psc'")->execute([$ag['supplier'], $ag['legal_entity']]);
+            }
             $pdo->prepare("UPDATE price_agreements SET status='active', approved_by=?, approved_at=NOW() WHERE id=?")->execute([$caller['name'], $id]);
             $pdo->commit();
         } catch (Exception $e) {
@@ -1696,6 +1782,36 @@ if ($endpoint === 'rpc') {
             error_log('approve_agreement error: ' . $e->getMessage());
             respond(['error' => 'Ошибка согласования'], 500);
         }
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'archive_agreement') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID протокола'], 400);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
+        if (!$ag) respond(['error' => 'Протокол не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if ($ag['status'] === 'archived') respond(['error' => 'Протокол уже в архиве'], 400);
+        $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE id=?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'restore_agreement') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID протокола'], 400);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+        $s = $pdo->prepare("SELECT * FROM price_agreements WHERE id=?"); $s->execute([$id]); $ag = $s->fetch();
+        if (!$ag) respond(['error' => 'Протокол не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        if ($ag['status'] !== 'archived') respond(['error' => 'Протокол не в архиве'], 400);
+        $pdo->prepare("UPDATE price_agreements SET status='active' WHERE id=?")->execute([$id]);
         respond(['success' => true]);
     }
 
@@ -1936,6 +2052,131 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    // ═══ Баг-репорты: создать ═══
+    if ($fn === 'create_bug_report') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $title = trim($body['title'] ?? '');
+        $description = trim($body['description'] ?? '');
+        $screenshots = $body['screenshots'] ?? [];
+        $actionLog = trim($body['action_log'] ?? '');
+        $pageUrl = trim($body['page_url'] ?? '');
+        $le = $body['legal_entity'] ?? '';
+        $browserInfo = trim($body['browser_info'] ?? '');
+        if (!$title) respond(['error' => 'Укажите тему сообщения'], 400);
+        $stmt = $pdo->prepare("INSERT INTO bug_reports (title, description, screenshots, action_log, page_url, created_by, legal_entity, browser_info) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$title, $description, json_encode($screenshots), $actionLog, $pageUrl, $caller['name'], $le, $browserInfo]);
+        $id = $pdo->lastInsertId();
+        respond(['success' => true, 'id' => intval($id)]);
+    }
+
+    // ═══ Баг-репорты: список (для админа — все, для юзера — свои) ═══
+    if ($fn === 'get_bug_reports') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $isAdmin = ($caller['role'] ?? '') === 'admin';
+        if ($isAdmin) {
+            $s = $pdo->prepare("SELECT br.*, (SELECT COUNT(*) FROM bug_report_replies WHERE report_id=br.id) as reply_count FROM bug_reports br ORDER BY FIELD(br.status,'new','in_progress','resolved','closed'), br.created_at DESC");
+            $s->execute();
+        } else {
+            $s = $pdo->prepare("SELECT br.*, (SELECT COUNT(*) FROM bug_report_replies WHERE report_id=br.id) as reply_count FROM bug_reports br WHERE br.created_by=? ORDER BY br.created_at DESC");
+            $s->execute([$caller['name']]);
+        }
+        $rows = $s->fetchAll();
+        foreach ($rows as &$r) {
+            $r['screenshots'] = json_decode($r['screenshots'] ?: '[]', true);
+        }
+        respond(['reports' => $rows]);
+    }
+
+    // ═══ Баг-репорты: получить один с ответами ═══
+    if ($fn === 'get_bug_report') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $isAdmin = ($caller['role'] ?? '') === 'admin';
+        $s = $pdo->prepare("SELECT * FROM bug_reports WHERE id=?"); $s->execute([$id]);
+        $report = $s->fetch();
+        if (!$report) respond(['error' => 'Не найдено'], 404);
+        if (!$isAdmin && $report['created_by'] !== $caller['name']) respond(['error' => 'Нет доступа'], 403);
+        $report['screenshots'] = json_decode($report['screenshots'] ?: '[]', true);
+        $rs = $pdo->prepare("SELECT * FROM bug_report_replies WHERE report_id=? ORDER BY created_at ASC"); $rs->execute([$id]);
+        $replies = $rs->fetchAll();
+        respond(['report' => $report, 'replies' => $replies]);
+    }
+
+    // ═══ Баг-репорты: ответить ═══
+    if ($fn === 'reply_bug_report') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $reportId = intval($body['report_id'] ?? 0);
+        $message = trim($body['message'] ?? '');
+        if (!$reportId || !$message) respond(['error' => 'Укажите ID и сообщение'], 400);
+        $s = $pdo->prepare("SELECT * FROM bug_reports WHERE id=?"); $s->execute([$reportId]);
+        $report = $s->fetch();
+        if (!$report) respond(['error' => 'Не найдено'], 404);
+        $isAdmin = ($caller['role'] ?? '') === 'admin';
+        if (!$isAdmin && $report['created_by'] !== $caller['name']) respond(['error' => 'Нет доступа'], 403);
+        $pdo->prepare("INSERT INTO bug_report_replies (report_id, message, created_by, is_admin) VALUES (?, ?, ?, ?)")
+            ->execute([$reportId, $message, $caller['name'], $isAdmin ? 1 : 0]);
+        // Если админ ответил — статус «в работе»
+        if ($isAdmin && $report['status'] === 'new') {
+            $pdo->prepare("UPDATE bug_reports SET status='in_progress' WHERE id=?")->execute([$reportId]);
+        }
+        respond(['success' => true]);
+    }
+
+    // ═══ Баг-репорты: сменить статус (только админ) ═══
+    if ($fn === 'update_bug_report_status') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || ($caller['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
+        $id = intval($body['id'] ?? 0);
+        $status = $body['status'] ?? '';
+        if (!$id || !in_array($status, ['new','in_progress','resolved','closed'])) respond(['error' => 'Неверные параметры'], 400);
+        $pdo->prepare("UPDATE bug_reports SET status=? WHERE id=?")->execute([$status, $id]);
+        respond(['success' => true]);
+    }
+
+    // ═══ Баг-репорты: удалить (только админ) ═══
+    if ($fn === 'delete_bug_report') {
+        $caller = getSessionUser($pdo);
+        if (!$caller || ($caller['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        // Удалить скриншоты с диска
+        $s = $pdo->prepare("SELECT screenshots FROM bug_reports WHERE id=?"); $s->execute([$id]);
+        $row = $s->fetch();
+        if ($row && $row['screenshots']) {
+            $paths = json_decode($row['screenshots'], true) ?: [];
+            foreach ($paths as $p) {
+                $fp = __DIR__ . '/' . $p;
+                if (file_exists($fp)) @unlink($fp);
+            }
+        }
+        $pdo->prepare("DELETE FROM bug_reports WHERE id=?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    // ═══ Баг-репорты: количество новых (для бейджа админа) ═══
+    if ($fn === 'get_bug_reports_count') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $isAdmin = ($caller['role'] ?? '') === 'admin';
+        if ($isAdmin) {
+            $s = $pdo->prepare("SELECT COUNT(*) FROM bug_reports WHERE status IN ('new','in_progress')"); $s->execute();
+            $count = intval($s->fetchColumn());
+            $newCount = intval($pdo->query("SELECT COUNT(*) FROM bug_reports WHERE status='new'")->fetchColumn());
+        } else {
+            // Для обычного пользователя: количество непрочитанных ответов админа
+            $s = $pdo->prepare("SELECT COUNT(DISTINCT br.id) FROM bug_reports br JOIN bug_report_replies brr ON brr.report_id=br.id WHERE br.created_by=? AND brr.is_admin=1 AND brr.created_at > br.updated_at");
+            $s->execute([$caller['name']]);
+            $count = intval($s->fetchColumn());
+            $newCount = $count;
+        }
+        respond(['count' => $count, 'new_count' => $newCount]);
+    }
+
     respond(['error'=>'Not found'], 404);
 }
 
@@ -1943,7 +2184,7 @@ if ($endpoint === 'rpc') {
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }
 
 // ═══ REST ═══
-$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens','price_agreements','product_prices','price_history','tenders','tender_items','tender_offers','tender_offer_prices','tender_files'];
+$allowed = ['products','suppliers','orders','order_items','plans','item_order','settings','audit_log','stock_1c','search_logs','cards','users','analysis_data','notifications','restaurants','delivery_schedule','error_logs','changelog','product_adu','stock_malling','deficit_sessions','deficit_results','deficit_tokens','deficit_restaurant_stock','stock_collections','stock_collection_products','stock_collection_data','stock_collection_tokens','price_agreements','product_prices','price_history','tenders','tender_items','tender_offers','tender_offer_prices','tender_files','bug_reports','bug_report_replies','restaurant_sales','report_exclusions'];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users', 'error_logs', 'api_keys'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
@@ -2042,17 +2283,19 @@ $filterWhitelist = [
     'stock_collection_tokens' => ['id','collection_id'],
     'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','created_by','approved_by','created_at'],
     'product_prices'   => ['id','sku','supplier','legal_entity','agreement_id','vat_rate','updated_by','updated_at'],
+    'restaurant_sales' => ['id','analog_group','sale_date'],
+    'report_exclusions' => ['id','analog_group'],
 ];
 
 // Белый список колонок для записи (POST/PATCH)
 $writeWhitelist = [
-    'orders'       => ['id','supplier','legal_entity','delivery_date','delivery_date_2','unit','note','items','details','created_by','updated_at','cda_mode','safety_coef','act_file','received_at','received_by','today_date','safety_days','period_days','has_transit','show_stock_column'],
+    'orders'       => ['id','supplier','legal_entity','delivery_date','delivery_date_2','unit','note','items','details','created_by','created_at','updated_at','cda_mode','safety_coef','act_file','received_at','received_by','today_date','safety_days','period_days','has_transit','show_stock_column'],
     'order_items'  => ['id','order_id','sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category'],
     'plans'        => ['id','supplier','legal_entity','data','created_by','updated_by','created_at','updated_at','notes','period_type','period_count','items','start_date','planning_date','consumption_period_days','input_unit','note'],
     'products'     => ['id','sku','name','supplier','qty_per_box','boxes_per_pallet','unit_of_measure','legal_entity','multiplicity','analog_group','is_active','category'],
     'suppliers'    => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','palletization','notes','schedule'],
     'notifications'=> ['id','type','title','message','target_user','entity_type','entity_id','legal_entity','created_by','created_at','read_by','deleted_by'],
-    'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','note','file_name','file_path','created_by','approved_by','created_at'],
+    'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','note','doc_type','file_name','file_path','created_by','approved_by','created_at'],
     'product_prices'   => ['id','sku','supplier','legal_entity','price','vat_rate','unit_type','currency','agreement_id','updated_by','updated_at'],
     'audit_log'    => ['action','entity_type','entity_id','user_name','details','changes','created_at'],
     'analysis_data'=> ['id','sku','legal_entity','data','updated_at'],
@@ -2064,6 +2307,8 @@ $writeWhitelist = [
     'tender_items' => ['id','tender_id','name','quantity','unit','sort_order','note'],
     'tender_offers'=> ['id','tender_id','supplier','delivery_days','payment_terms','conditions','note','created_at'],
     'tender_offer_prices' => ['id','offer_id','item_id','price'],
+    'restaurant_sales' => ['id','sale_date','analog_group','quantity','restaurant_count'],
+    'report_exclusions' => ['id','analog_group','created_by'],
 ];
 
 if ($method === 'GET') {
@@ -2128,7 +2373,8 @@ if ($method === 'GET') {
             $sql .= " ORDER BY `{$op[0]}` " . (($op[1]??'asc')==='desc'?'DESC':'ASC');
         }
     }
-    $limit = isset($_GET['limit']) ? max(1, min(intval($_GET['limit']), 5000)) : 1000;
+    $maxLimit = ($table === 'restaurant_sales') ? 50000 : 5000;
+    $limit = isset($_GET['limit']) ? max(1, min(intval($_GET['limit']), $maxLimit)) : 1000;
     $sql .= " LIMIT " . $limit;
     if (isset($_GET['offset'])) {
         $sql .= " OFFSET " . max(0, intval($_GET['offset']));
@@ -2189,7 +2435,7 @@ if ($method === 'POST') {
     }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Недопустимое имя колонки: '.$col], 400); }

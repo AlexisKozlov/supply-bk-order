@@ -2,8 +2,15 @@
   <div class="analysis-view" :class="{ 'anv-compact': compactMode }">
     <!-- Header -->
     <div class="anv-header">
-      <h1 class="page-title" style="margin-bottom:0">Анализ запасов</h1>
-      <div class="anv-header-controls">
+      <div class="anv-header-left">
+        <h1 class="page-title" style="margin-bottom:0">Анализ</h1>
+        <div class="anv-mode-toggle">
+          <button class="anv-mode-btn" :class="{ active: viewMode === 'stock' }" @click="viewMode = 'stock'">Запасы</button>
+          <button class="anv-mode-btn" :class="{ active: viewMode === 'sales' }" @click="viewMode = 'sales'">Реализация</button>
+          <button class="anv-mode-btn" :class="{ active: viewMode === 'report' }" @click="viewMode = 'report'">Отчёт</button>
+        </div>
+      </div>
+      <div v-if="viewMode === 'stock'" class="anv-header-controls">
         <div class="anv-unit-toggle">
           <button
             class="anv-unit-btn"
@@ -18,6 +25,15 @@
         </div>
       </div>
     </div>
+
+    <!-- Реализация ресторанов -->
+    <RestaurantSalesPanel v-if="viewMode === 'sales'" embedded />
+
+    <!-- Отчёт: сравнение расхода склада и реализации -->
+    <ConsumptionReportPanel v-if="viewMode === 'report'" />
+
+    <!-- ═══ Запасы ═══ -->
+    <template v-if="viewMode === 'stock'">
 
     <!-- Alert banner for critical groups -->
     <div
@@ -168,7 +184,7 @@
           <tbody>
             <template v-for="section in sectionedGroups" :key="section.key">
               <tr class="anv-section-row" @click="toggleSection(section.key)">
-                <td colspan="6">
+                <td colspan="7">
                   <svg class="anv-chevron" :class="{ open: expandedSections.has(section.key) }" viewBox="0 0 16 16" width="12" height="12"><path d="M5 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                   <span class="anv-section-label">{{ section.label }}</span>
                   <span class="anv-section-count">{{ section.groups.length }}</span>
@@ -237,6 +253,8 @@
       </div>
     </div>
 
+    </template><!-- /stock -->
+
     <!-- Unmatched items modal -->
     <Teleport to="body">
       <div v-if="showUnmatched" class="anv-modal-overlay" @click.self="showUnmatched = false">
@@ -286,6 +304,9 @@ import { applyEntityFilter } from '@/lib/utils.js';
 import { importFromFile } from '@/lib/importStock.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import { defineAsyncComponent } from 'vue';
+const RestaurantSalesPanel = defineAsyncComponent(() => import('@/views/RestaurantSalesView.vue'));
+const ConsumptionReportPanel = defineAsyncComponent(() => import('@/views/ConsumptionReportView.vue'));
 
 const router = useRouter();
 const orderStore = useOrderStore();
@@ -293,6 +314,7 @@ const userStore = useUserStore();
 const toast = useToastStore();
 const isViewer = computed(() => !userStore.hasAccess('analysis', 'edit'));
 
+const viewMode = ref('stock');
 const periodDays = ref(30);
 const unit = ref('pieces');
 const loading = ref(false);
@@ -307,6 +329,7 @@ const lastUpdate = reactive({ by: '', at: null, label: '' });
 const searchQuery = ref('');
 const filterSupplier = ref('');
 const filterCategory = ref('');
+
 const activeTab = ref('all');
 const expandedSections = reactive(new Set(['Сухой', 'Холод', 'Мороз', '']));
 const compactMode = ref(localStorage.getItem('bk_analysis_compact') === '1');
@@ -414,6 +437,7 @@ async function loadSavedData(requestId) {
     }
   } catch { /* тихо — данных может не быть */ }
 }
+
 
 async function saveDataToDB() {
   const le = orderStore.settings.legalEntity;
@@ -577,6 +601,7 @@ const groupsWithData = computed(() => {
     g.mainSupplier = Object.keys(sc).sort((a, b) => sc[b] - sc[a])[0] || '';
     const cc = g.categoryCounts;
     g.category = Object.keys(cc).sort((a, b) => cc[b] - cc[a])[0] || '';
+
   }
   arr.sort((a, b) => a.groupDays - b.groupDays);
   return arr;
@@ -682,6 +707,17 @@ function nf(n) {
   return n.toLocaleString('ru-RU');
 }
 
+function sparklinePath(data) {
+  if (!data || data.length < 2) return '';
+  const max = Math.max(...data, 1);
+  const step = 40 / (data.length - 1);
+  return data.map((v, i) => {
+    const x = i * step;
+    const y = 14 - (v / max) * 12;
+    return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
+  }).join(' ');
+}
+
 // Unmatched items
 const unmatchedItems = ref([]);
 const showUnmatched = ref(false);
@@ -775,6 +811,34 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   margin-bottom: 8px;
   flex-wrap: wrap;
   gap: 8px;
+}
+.anv-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.anv-mode-toggle {
+  display: flex;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.anv-mode-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.anv-mode-btn.active {
+  background: var(--bk-brown, #D62700);
+  color: #fff;
+}
+.anv-mode-btn:not(.active):hover {
+  background: var(--bg);
 }
 .anv-header-controls {
   display: flex;
@@ -1091,6 +1155,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 .anv-th-name { }
 .anv-th-num { width: 80px; text-align: right !important; }
 .anv-th-days { width: 70px; text-align: center !important; }
+.anv-th-sales { width: 100px; }
 .anv-th-action { width: 36px; }
 
 /* ═══ Section Row (Сухой/Холод/Мороз) ═══ */

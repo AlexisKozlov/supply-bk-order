@@ -91,8 +91,8 @@
         </template>
       </span>
       <span v-if="hasPrices && totalOrderSum > 0" class="total-sum">
-        · Без НДС: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
-        · НДС: <b>{{ totalVat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
+        Без НДС: <b>{{ totalOrderSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</b>
+        · НДС: <b>{{ totalVat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</b>
         · С НДС: <b>{{ totalWithVat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} BYN</b>
       </span>
     </div>

@@ -703,10 +703,85 @@ async function fillFromLastOrder() {
     if (result.analogMerges?.length) {
       analogMergeModal.value = { show: true, merges: result.analogMerges, target: 'order' };
     }
+
+    // Сравниваем расход склада с реализацией ресторанов (фоновая проверка)
+    checkSalesVsConsumption();
   } catch (err) {
     console.error('[fillFromLastOrder]', err);
     toast.error('Ошибка', 'Не удалось загрузить данные анализа');
   } finally { fillLoading.value = false; }
+}
+
+async function checkSalesVsConsumption() {
+  try {
+    // Собираем группы аналогов из текущих товаров
+    const skus = orderStore.items.filter(i => i.sku).map(i => i.sku);
+    if (!skus.length) return;
+    const { data: prods } = await db.from('products').select('sku, analog_group').in('sku', skus);
+    if (!prods?.length) return;
+
+    const groupsMap = {};
+    for (const p of prods) {
+      if (p.analog_group) groupsMap[p.sku] = p.analog_group;
+    }
+    const uniqueGroups = [...new Set(Object.values(groupsMap))];
+    if (!uniqueGroups.length) return;
+
+    // Загружаем реализацию за 30 дней
+    const lastDateR = await db.from('restaurant_sales').select('sale_date').order('sale_date', { ascending: false }).limit(1);
+    const lastDate = lastDateR.data?.[0]?.sale_date;
+    if (!lastDate) return;
+
+    const cutoff = new Date(lastDate + 'T12:00:00');
+    cutoff.setDate(cutoff.getDate() - 29);
+    const cutStr = cutoff.getFullYear() + '-' + String(cutoff.getMonth() + 1).padStart(2, '0') + '-' + String(cutoff.getDate()).padStart(2, '0');
+
+    const { data: sales } = await db.from('restaurant_sales')
+      .select('analog_group, quantity')
+      .gte('sale_date', cutStr)
+      .in('analog_group', uniqueGroups)
+      .limit(15000);
+    if (!sales?.length) return;
+
+    // Суммируем реализацию по группам
+    const salesByGroup = {};
+    for (const r of sales) {
+      salesByGroup[r.analog_group] = (salesByGroup[r.analog_group] || 0) + (parseFloat(r.quantity) || 0);
+    }
+
+    // Сравниваем с расходом со склада
+    const periodDays = orderStore.settings.periodDays || 30;
+    const warnings = [];
+    const checkedGroups = new Set();
+
+    for (const item of orderStore.items) {
+      const group = groupsMap[item.sku];
+      if (!group || checkedGroups.has(group)) continue;
+      checkedGroups.add(group);
+
+      const salesTotal = salesByGroup[group];
+      if (!salesTotal || salesTotal <= 0) continue;
+
+      // Расход со склада за 30 дней (пересчёт из текущих единиц)
+      const cp = item.consumptionPeriod || 0;
+      if (cp <= 0) continue;
+      const qpb = item.qtyPerBox || 1;
+      const cpPcs = orderStore.settings.unit === 'boxes' ? cp * qpb : cp;
+      const warehouseMonthly = cpPcs / periodDays * 30;
+
+      const diff = Math.round((warehouseMonthly - salesTotal) / salesTotal * 100);
+      if (diff > 30) {
+        warnings.push(`${group}: склад +${diff}% vs рестораны`);
+      } else if (diff < -30) {
+        warnings.push(`${group}: рестораны +${Math.abs(diff)}% vs склад`);
+      }
+    }
+
+    if (warnings.length > 0) {
+      const max3 = warnings.slice(0, 3);
+      toast.warning('Расхождения с реализацией', max3.join('; ') + (warnings.length > 3 ? ` и ещё ${warnings.length - 3}` : ''));
+    }
+  } catch { /* тихо — это фоновая проверка */ }
 }
 
 // ─── Загрузка ADU/CV для буферного расчёта ───────────────────────────────────
