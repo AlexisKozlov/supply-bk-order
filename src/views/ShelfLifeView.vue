@@ -130,6 +130,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { CUSTOMER_MAP } from '@/lib/legalEntities.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -159,14 +160,7 @@ function getToday() {
   return d;
 }
 
-// ═══ Маппинг заказчиков ═══
-const CUSTOMER_MAP = {
-  'додо': 'Пицца Стар',
-  'сбарро': 'Пицца Стар',
-  'dodo': 'Пицца Стар',
-  'sbarro': 'Пицца Стар',
-  'бургер бк': 'Бургер БК',
-};
+// Маппинг заказчиков — из единого файла юрлиц
 
 function normalizeCustomer(raw) {
   if (!raw) return '';

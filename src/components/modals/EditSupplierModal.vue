@@ -70,6 +70,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
+import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useFormDirty } from '@/composables/useFormDirty.js';
@@ -88,7 +89,7 @@ const showConfirmClose = ref(false);
 const oldShortName = ref('');
 
 const form = ref({
-  short_name: '', full_name: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
+  short_name: '', full_name: '', legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
   whatsapp: '', telegram: '', viber: '', email: '',
   dlt: null, doc: null,
 });

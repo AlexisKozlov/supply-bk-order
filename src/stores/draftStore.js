@@ -2,10 +2,12 @@ import { defineStore } from 'pinia';
 import { ref, toRaw } from 'vue';
 import { useOrderStore } from './orderStore.js';
 import { useToastStore } from './toastStore.js';
+import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 
 const DRAFT_KEY_PREFIX = 'bk_draft';
 const IDB_NAME = 'bk_drafts';
 const IDB_STORE = 'drafts';
+const IDB_SYNC_STORE = 'sync_queue';
 
 function getDraftKey(orderStore) {
   const le = orderStore?.settings?.legalEntity || '';
@@ -15,8 +17,16 @@ function getDraftKey(orderStore) {
 // ─── IndexedDB хелперы ───
 function openIDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+    const req = indexedDB.open(IDB_NAME, 2);
+    req.onupgradeneeded = (e) => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE);
+      }
+      if (!db.objectStoreNames.contains(IDB_SYNC_STORE)) {
+        db.createObjectStore(IDB_SYNC_STORE, { keyPath: 'id' });
+      }
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -134,7 +144,7 @@ export const useDraftStore = defineStore('draft', () => {
       if (data.settings.deliveryDate) { const v = data.settings.deliveryDate; const d = new Date(typeof v === 'string' && v.length === 10 ? v + 'T00:00:00' : v); if (!isNaN(d)) orderStore.settings.deliveryDate = d; }
       if (data.settings.safetyEndDate) { const v = data.settings.safetyEndDate; const d = new Date(typeof v === 'string' && v.length === 10 ? v + 'T00:00:00' : v); if (!isNaN(d)) orderStore.settings.safetyEndDate = d; }
 
-      orderStore.settings.legalEntity  = data.settings.legalEntity  || 'ООО "Бургер БК"';
+      orderStore.settings.legalEntity  = data.settings.legalEntity  || DEFAULT_ENTITY;
       orderStore.settings.supplier     = data.settings.supplier      || '';
       orderStore.settings.periodDays   = Math.max(1, data.settings.periodDays || 30);
       orderStore.settings.safetyDays   = Math.max(0, data.settings.safetyDays || 0);
@@ -241,5 +251,85 @@ export const useDraftStore = defineStore('draft', () => {
     try { return JSON.parse(raw); } catch { return null; }
   }
 
-  return { isLoading, lastSaved, lastPlanSaved, save, saveNow, clear, load, hasDraft, savePlan, clearPlanDraft, hasPlanDraft, loadPlanDraft };
+  // ═══ ОЧЕРЕДЬ СИНХРОНИЗАЦИИ (offline) ═══
+
+  async function addToSyncQueue(operation) {
+    try {
+      const db = await openIDB();
+      const entry = {
+        id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        timestamp: new Date().toISOString(),
+        method: operation.method,
+        url: operation.url,
+        body: operation.body || null,
+      };
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_SYNC_STORE, 'readwrite');
+        tx.objectStore(IDB_SYNC_STORE).add(entry);
+        tx.oncomplete = () => { db.close(); resolve(entry.id); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      });
+    } catch (e) {
+      console.error('Ошибка добавления в очередь синхронизации:', e);
+    }
+  }
+
+  async function getSyncQueueCount() {
+    try {
+      const db = await openIDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_SYNC_STORE, 'readonly');
+        const req = tx.objectStore(IDB_SYNC_STORE).count();
+        req.onsuccess = () => { db.close(); resolve(req.result); };
+        req.onerror = () => { db.close(); resolve(0); };
+      });
+    } catch { return 0; }
+  }
+
+  async function processSyncQueue() {
+    if (!navigator.onLine) return;
+    try {
+      const db = await openIDB();
+      const entries = await new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_SYNC_STORE, 'readonly');
+        const req = tx.objectStore(IDB_SYNC_STORE).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      });
+
+      // Обрабатываем по порядку
+      for (const entry of entries.sort((a, b) => a.id.localeCompare(b.id))) {
+        try {
+          const fetchOpts = { method: entry.method, headers: { 'Content-Type': 'application/json' } };
+          if (entry.body) fetchOpts.body = JSON.stringify(entry.body);
+          const resp = await fetch(entry.url, fetchOpts);
+          if (resp.ok) {
+            // Удаляем успешно обработанную запись
+            const delDb = await openIDB();
+            await new Promise((resolve, reject) => {
+              const tx = delDb.transaction(IDB_SYNC_STORE, 'readwrite');
+              tx.objectStore(IDB_SYNC_STORE).delete(entry.id);
+              tx.oncomplete = () => { delDb.close(); resolve(); };
+              tx.onerror = () => { delDb.close(); resolve(); };
+            });
+          }
+        } catch {
+          // Если запрос не удался — прекращаем обработку очереди
+          break;
+        }
+      }
+      db.close();
+    } catch (e) {
+      console.error('Ошибка обработки очереди синхронизации:', e);
+    }
+  }
+
+  // Автоматическая обработка очереди при восстановлении соединения
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      processSyncQueue();
+    });
+  }
+
+  return { isLoading, lastSaved, lastPlanSaved, save, saveNow, clear, load, hasDraft, savePlan, clearPlanDraft, hasPlanDraft, loadPlanDraft, addToSyncQueue, getSyncQueueCount, processSyncQueue };
 });

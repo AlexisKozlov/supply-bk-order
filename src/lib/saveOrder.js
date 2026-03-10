@@ -72,11 +72,6 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       .select('sku, name, qty_boxes, consumption_period, stock, transit')
       .eq('order_id', editingOrderId);
 
-    const { error } = await db.from('orders').update(orderData).eq('id', editingOrderId);
-    if (error) return { error: 'Не удалось обновить заказ: ' + error };
-
-    orderId = editingOrderId;
-
     // Param diff
     const paramChanges = [];
     if (oldOrder) {
@@ -126,45 +121,33 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       auditAction = 'order_updated';
       auditDetails = { supplier: settings.supplier, note: 'Не удалось загрузить старые позиции для diff' };
     }
-  } else {
-    // Новый заказ
-    orderData.created_by = userName || null;
-    orderData.created_at = new Date().toISOString();
-    const { data: order, error } = await db.from('orders').insert(orderData).select().single();
-    if (error) return { error: 'Не удалось сохранить заказ: ' + error };
-    orderId = order.id;
-    auditAction  = 'order_created';
-    auditDetails = { supplier: settings.supplier, legal_entity: settings.legalEntity, items_count: itemsWithOrder.length, total_items: allItems.length };
-  }
 
-  // Вставляем позиции (при обновлении — атомарно через транзакцию)
-  const orderItems = itemsWithOrder.map(i => ({ order_id: orderId, ...i }));
-  if (editingOrderId) {
-    const { data: rpcResult, error: rpcError } = await db.rpc('replace_order_items', {
-      order_id: orderId,
+    // Атомарное обновление заказа + позиций через RPC
+    const orderItems = itemsWithOrder.map(i => ({ ...i }));
+    const { data: updateResult, error: updateError } = await db.rpc('update_order', {
+      order_id: editingOrderId,
+      order: orderData,
+      items: orderItems,
+      expected_updated_at: expectedUpdatedAt || null,
+    });
+    if (updateError || (updateResult && updateResult.error)) {
+      return { error: updateResult?.error || updateError || 'Не удалось обновить заказ' };
+    }
+    orderId = editingOrderId;
+  } else {
+    // Новый заказ — атомарно через RPC (транзакция)
+    orderData.created_by = userName || null;
+    const orderItems = itemsWithOrder.map(i => ({ ...i }));
+    const { data: rpcResult, error: rpcError } = await db.rpc('create_order', {
+      order: orderData,
       items: orderItems,
     });
     if (rpcError || (rpcResult && rpcResult.error)) {
-      // Откатываем параметры заказа к предыдущим значениям
-      if (oldOrder) {
-        await db.from('orders').update({
-          delivery_date: oldOrder.delivery_date, today_date: oldOrder.today_date,
-          safety_days: oldOrder.safety_days, period_days: oldOrder.period_days,
-          unit: oldOrder.unit, note: oldOrder.note, supplier: oldOrder.supplier,
-          has_transit: oldOrder.has_transit, show_stock_column: oldOrder.show_stock_column,
-          cda_mode: oldOrder.cda_mode, safety_coef: oldOrder.safety_coef,
-          legal_entity: oldOrder.legal_entity,
-        }).eq('id', editingOrderId);
-      }
-      return { error: 'Не удалось сохранить состав заказа: ' + (rpcError || rpcResult?.error) };
+      return { error: 'Не удалось сохранить заказ: ' + (rpcError || rpcResult?.error) };
     }
-  } else {
-    const { error: itemsError } = await db.from('order_items').insert(orderItems);
-    if (itemsError) {
-      // Откатываем: удаляем заказ без позиций
-      await db.from('orders').delete().eq('id', orderId);
-      return { error: 'Не удалось сохранить состав заказа: ' + itemsError };
-    }
+    orderId = rpcResult.id;
+    auditAction  = 'order_created';
+    auditDetails = { supplier: settings.supplier, legal_entity: settings.legalEntity, items_count: itemsWithOrder.length, total_items: allItems.length };
   }
 
   // Аудит-лог (не блокируем)

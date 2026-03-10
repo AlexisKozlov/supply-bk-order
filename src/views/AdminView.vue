@@ -188,7 +188,11 @@
             <input v-model="bcTitle" class="adm-maint-textarea" style="resize:none;height:auto;padding:10px 14px;" placeholder="Заголовок (необязательно)" />
             <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения для всех сотрудников..."></textarea>
           </div>
-          <button class="btn primary" style="margin-top:12px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim()">
+          <label class="adm-checkbox" style="margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" v-model="bcSendTelegram" style="width:16px;height:16px;cursor:pointer;" />
+            Отправить также в Telegram
+          </label>
+          <button class="btn primary" style="margin-top:10px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim()">
             {{ bcSending ? 'Отправка...' : 'Отправить всем' }}
           </button>
         </div>
@@ -883,8 +887,9 @@ import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
-import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS } from '@/stores/userStore.js';
+import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const router = useRouter();
@@ -900,7 +905,7 @@ const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);
 
-const allEntities = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
+const allEntities = LEGAL_ENTITIES;
 
 const userModal = ref({ show: false, user: null });
 const form = ref({ name: '', email: '', password: '', role: 'user', display_role: '', legal_entities: [], permissions: {} });
@@ -1139,6 +1144,7 @@ const broadcastMode = ref('broadcast');
 const bcTitle = ref('');
 const bcMessage = ref('');
 const bcSending = ref(false);
+const bcSendTelegram = ref(true);
 const bcHistory = ref([]);
 const bcHistoryLoading = ref(false);
 
@@ -1173,9 +1179,11 @@ async function sendBroadcast() {
       user_name: userStore.currentUser.name,
       title: bcTitle.value.trim() || 'Важное сообщение',
       message: bcMessage.value.trim(),
+      send_telegram: bcSendTelegram.value,
     });
     if (data?.success) {
-      toast.success('Отправлено', 'Сообщение отправлено всем пользователям');
+      const tgInfo = data.telegram_sent > 0 ? ` + Telegram (${data.telegram_sent})` : '';
+      toast.success('Отправлено', 'Сообщение отправлено всем пользователям' + tgInfo);
       bcTitle.value = '';
       bcMessage.value = '';
       loadBcHistory();
@@ -1566,7 +1574,7 @@ function parseLe(val) {
 }
 
 function shortEntity(le) {
-  const map = { 'ООО "Бургер БК"': 'БК', 'ООО "Воглия Матта"': 'ВМ', 'ООО "Пицца Стар"': 'ПС' };
+  const map = ENTITY_SHORT_NAMES;
   return map[le] || le;
 }
 
@@ -1747,6 +1755,7 @@ async function clearTimer() {
 onMounted(() => {
   // Повторная проверка роли (защита от подмены в localStorage до ответа сервера)
   if (userStore.currentUser?.role !== 'admin') return;
+  loadRbacConfig(); // загрузить актуальные роли с сервера
   loadUsers(); loadSettings();
 });
 onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer); });

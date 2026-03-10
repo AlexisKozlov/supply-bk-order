@@ -470,7 +470,7 @@ async function viewOrder(order) {
 async function editOrder(order) {
   try {
     // Проверяем блокировку
-    const { data: lock } = await db.rpc('check_order_lock', { order_id: order.id, user_name: userStore.currentUser?.name || '' });
+    const { data: lock } = await db.rpc('check_order_lock', { order_id: order.id });
     if (lock?.locked) {
       toast.warning('Заказ заблокирован', `Сейчас редактирует: ${lock.locked_by}`);
       return;

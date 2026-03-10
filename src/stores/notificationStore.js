@@ -4,7 +4,7 @@ import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
 const POLL_INTERVAL = 60000;
-const BROADCAST_POLL_INTERVAL = 15000;
+const BROADCAST_POLL_INTERVAL = 45000;
 
 export const useNotificationStore = defineStore('notification', () => {
   const notifications = ref([]);
@@ -71,7 +71,7 @@ export const useNotificationStore = defineStore('notification', () => {
     const name = userStore.currentUser?.name;
     if (!name || !ids.length) return;
     try {
-      await db.rpc('mark_notifications_read', { ids, user_name: name });
+      await db.rpc('mark_notifications_read', { ids });
       // Обновляем локально
       notifications.value.forEach(n => {
         if (ids.includes(n.id)) {
@@ -97,7 +97,7 @@ export const useNotificationStore = defineStore('notification', () => {
     const name = userStore.currentUser?.name;
     if (!name) return;
     try {
-      await db.rpc('delete_notification_for_user', { id, user_name: name });
+      await db.rpc('delete_notification_for_user', { id });
       // Обновляем локально — добавляем юзера в deleted_by
       const n = notifications.value.find(n => n.id === id);
       if (n) {
@@ -112,7 +112,7 @@ export const useNotificationStore = defineStore('notification', () => {
     const name = userStore.currentUser?.name;
     if (!name) return;
     try {
-      await db.rpc('delete_all_notifications_for_user', { user_name: name });
+      await db.rpc('delete_all_notifications_for_user', {});
       // Обновляем локально — помечаем все видимые как удалённые
       notifications.value.forEach(n => {
         if (!isDeletedForUser(n)) {
@@ -138,7 +138,7 @@ export const useNotificationStore = defineStore('notification', () => {
     const name = userStore.currentUser?.name;
     if (!name) return;
     try {
-      const { data } = await db.rpc('get_active_broadcasts', { user_name: name });
+      const { data } = await db.rpc('get_active_broadcasts', {});
       activeBroadcasts.value = data || [];
     } catch (e) {
       console.error('Ошибка проверки broadcast:', e);

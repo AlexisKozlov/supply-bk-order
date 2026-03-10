@@ -74,6 +74,19 @@
           <div class="anv-kpi-head">Требуют внимания</div>
           <div class="anv-kpi-val" style="color:var(--green)">0</div>
         </div>
+        <div class="anv-kpi-card" v-if="avgDaysOfStock > 0">
+          <div class="anv-kpi-head">Средний запас</div>
+          <div class="anv-kpi-val">{{ avgDaysOfStock }} <span class="anv-kpi-unit">дн.</span></div>
+        </div>
+        <div class="anv-kpi-card" v-if="frozenCapital > 0">
+          <div class="anv-kpi-head">Замороженный капитал</div>
+          <div class="anv-kpi-val anv-kpi-val-sm">{{ formatCurrency(frozenCapital) }}</div>
+          <div class="anv-kpi-sub">у {{ frozenCapitalItemCount }} из {{ totalItemsWithData }} есть цена</div>
+        </div>
+        <div class="anv-kpi-card anv-kpi-dead" v-if="deadStockCapital > 0">
+          <div class="anv-kpi-head">В мёртвом запасе</div>
+          <div class="anv-kpi-val anv-kpi-val-sm">{{ formatCurrency(deadStockCapital) }}</div>
+        </div>
       </div>
 
       <!-- Distribution bar -->
@@ -82,6 +95,7 @@
         <div v-if="statusCounts.orange" class="anv-dist-seg anv-dist-orange" :style="{ flex: statusCounts.orange }" :title="'6–10 дн: ' + statusCounts.orange"></div>
         <div v-if="statusCounts.green" class="anv-dist-seg anv-dist-green" :style="{ flex: statusCounts.green }" :title="'10–30 дн: ' + statusCounts.green"></div>
         <div v-if="statusCounts.purple" class="anv-dist-seg anv-dist-purple" :style="{ flex: statusCounts.purple }" :title="'30+ дн: ' + statusCounts.purple"></div>
+        <div v-if="statusCounts.dead" class="anv-dist-seg anv-dist-dead" :style="{ flex: statusCounts.dead }" :title="'Мёртвый: ' + statusCounts.dead"></div>
       </div>
     </template>
 
@@ -101,6 +115,9 @@
       </button>
       <button class="anv-tab" :class="{ active: activeTab === 'purple' }" @click="activeTab = 'purple'">
         <span class="anv-tab-dot" style="background:#AB47BC"></span> 30+ <span v-if="statusCounts.purple" class="anv-tab-cnt anv-tab-cnt-purple">{{ statusCounts.purple }}</span>
+      </button>
+      <button class="anv-tab" :class="{ active: activeTab === 'dead' }" @click="activeTab = 'dead'">
+        <span class="anv-tab-dot" style="background:#757575"></span> Мёртвый <span v-if="statusCounts.dead" class="anv-tab-cnt anv-tab-cnt-dead">{{ statusCounts.dead }}</span>
       </button>
     </div>
 
@@ -337,6 +354,23 @@ const dashboardHidden = ref(localStorage.getItem('bk_analysis_dash_hidden') === 
 
 const isBoxes = computed(() => unit.value === 'boxes');
 
+const priceMap = ref(new Map());
+
+async function loadPrices() {
+  const le = orderStore.settings.legalEntity;
+  if (!le) return;
+  try {
+    const { data } = await db.from('product_prices').select('sku,price,unit_type').eq('legal_entity', le);
+    if (data && data.length) {
+      const m = new Map();
+      for (const row of data) {
+        if (row.sku && row.price > 0) m.set(row.sku, { price: row.price, unitType: row.unit_type || 'шт' });
+      }
+      priceMap.value = m;
+    }
+  } catch { /* тихо — цен может не быть */ }
+}
+
 function toggleCompact() {
   compactMode.value = !compactMode.value;
   localStorage.setItem('bk_analysis_compact', compactMode.value ? '1' : '0');
@@ -393,7 +427,7 @@ async function loadProducts() {
       stock: 0,
       consumption: 0,
     }));
-    await loadSavedData(myRequestId);
+    await Promise.all([loadSavedData(myRequestId), loadPrices()]);
   } catch {
     if (myRequestId !== _loadRequestId) return;
     toast.error('Ошибка', 'Не удалось загрузить товары');
@@ -618,7 +652,9 @@ const filteredGroups = computed(() => {
   } else if (activeTab.value === 'normal') {
     result = result.filter(g => getStatusKey(g.groupDays) === 'green');
   } else if (activeTab.value === 'purple') {
-    result = result.filter(g => getStatusKey(g.groupDays) === 'purple');
+    result = result.filter(g => getStatusKey(g.groupDays) === 'purple' && g.groupDays !== Infinity);
+  } else if (activeTab.value === 'dead') {
+    result = result.filter(g => g.groupDays === Infinity);
   }
 
   // Category filter
@@ -662,8 +698,9 @@ const criticalGroups = computed(() => groupsWithData.value.filter(g => getStatus
 const warningGroups = computed(() => groupsWithData.value.filter(g => getStatusKey(g.groupDays) === 'orange'));
 
 const statusCounts = computed(() => {
-  let red = 0, orange = 0, yellow = 0, green = 0, purple = 0;
+  let red = 0, orange = 0, yellow = 0, green = 0, purple = 0, dead = 0;
   for (const g of groupsWithData.value) {
+    if (g.groupDays === Infinity) { dead++; continue; }
     const s = getStatusKey(g.groupDays);
     if (s === 'red') red++;
     else if (s === 'orange') orange++;
@@ -671,8 +708,66 @@ const statusCounts = computed(() => {
     else if (s === 'green') green++;
     else purple++;
   }
-  return { red, orange, yellow, green, purple };
+  return { red, orange, yellow, green, purple, dead };
 });
+
+function stockCost(item) {
+  const p = priceMap.value.get(item.sku);
+  if (!p) return 0;
+  // stock хранится в штуках; пересчитываем в единицу цены
+  let qty = item.stock;
+  const ut = p.unitType;
+  if (ut === 'box' && item.qtyPerBox > 1) qty = item.stock / item.qtyPerBox;
+  else if (ut === 'thousand') qty = item.stock / 1000;
+  else if (ut === 'kg' || ut === 'liter') qty = item.stock; // уже в тех же единицах
+  return qty * p.price;
+}
+
+const frozenCapital = computed(() => {
+  if (!priceMap.value.size) return 0;
+  let total = 0;
+  for (const item of items.value) {
+    if (item.stock > 0 && item.sku) total += stockCost(item);
+  }
+  return Math.round(total);
+});
+
+const frozenCapitalItemCount = computed(() => {
+  if (!priceMap.value.size) return 0;
+  let count = 0;
+  for (const item of items.value) {
+    if (item.stock > 0 && item.sku && priceMap.value.has(item.sku)) count++;
+  }
+  return count;
+});
+
+const deadStockCapital = computed(() => {
+  if (!priceMap.value.size) return 0;
+  let total = 0;
+  for (const item of items.value) {
+    if (item.stock > 0 && item.consumption === 0 && item.sku) total += stockCost(item);
+  }
+  return Math.round(total);
+});
+
+const avgDaysOfStock = computed(() => {
+  const groups = groupsWithData.value;
+  if (!groups.length) return 0;
+  // Среднее по группам с расходом, исключая мёртвый запас и выбросы >200 дн
+  let sum = 0, count = 0;
+  for (const g of groups) {
+    if (g.rawTotalConsumption > 0 && g.groupDays > 0 && g.groupDays !== Infinity && g.groupDays <= 200) {
+      sum += g.groupDays;
+      count++;
+    }
+  }
+  if (!count) return 0;
+  return Math.round(sum / count);
+});
+
+function formatCurrency(val) {
+  return val.toLocaleString('ru-RU') + ' BYN';
+}
 
 function toggleSection(key) {
   if (expandedSections.has(key)) expandedSections.delete(key);
@@ -908,7 +1003,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 /* ═══ KPI Cards ═══ */
 .anv-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
   margin-bottom: 8px;
 }
@@ -934,6 +1029,14 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 }
 .anv-kpi-danger .anv-kpi-val { color: #C62828; }
 .anv-kpi-warn .anv-kpi-val { color: #E65100; }
+.anv-kpi-dead { border-left: 3px solid #757575; }
+.anv-kpi-dead .anv-kpi-val { color: #424242; }
+.anv-kpi-val-sm { font-size: 18px; }
+.anv-kpi-unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
 .anv-kpi-sub {
   font-size: 10px;
   color: var(--text-muted);
@@ -956,6 +1059,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 .anv-dist-yellow { background: #AED581; }
 .anv-dist-green { background: #66BB6A; }
 .anv-dist-purple { background: #AB47BC; }
+.anv-dist-dead { background: #757575; }
 
 /* ═══ Tabs ═══ */
 .anv-tabs {
@@ -1012,6 +1116,8 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 .anv-tab.active .anv-tab-cnt-orange { background: #FF9800; color: white; }
 .anv-tab-cnt-purple { background: #F3E5F5; color: #7B1FA2; }
 .anv-tab.active .anv-tab-cnt-purple { background: #AB47BC; color: white; }
+.anv-tab-cnt-dead { background: #EEEEEE; color: #424242; }
+.anv-tab.active .anv-tab-cnt-dead { background: #757575; color: white; }
 
 /* ═══ Toolbar ═══ */
 .anv-toolbar {

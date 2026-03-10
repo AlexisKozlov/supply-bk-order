@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { reactive, ref, computed, watch, toRaw } from 'vue';
 import { calculateItem, calculateBufferItem } from '@/lib/calculations.js';
 import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
+import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
@@ -38,7 +39,7 @@ export const useOrderStore = defineStore('order', () => {
   const userStore = useUserStore();
 
   const settings = reactive({
-    legalEntity: localStorage.getItem('bk_legal_entity') || 'ООО "Бургер БК"',
+    legalEntity: localStorage.getItem('bk_legal_entity') || DEFAULT_ENTITY,
     supplier: '',
     today: null,
     deliveryDate: null,
@@ -257,8 +258,7 @@ export const useOrderStore = defineStore('order', () => {
     settings.showStockColumn = true; // всегда показываем запас при просмотре
     settings.note = order.notes || order.note || '';
     settings.cdaMode = order.cda_mode === true || order.cda_mode === 1 || order.cda_mode === '1';
-    settings.safetyCoef = parseFloat(order.safety_coef) ?? 1.0;
-    if (isNaN(settings.safetyCoef)) settings.safetyCoef = 1.0;
+    settings.safetyCoef = parseFloat(order.safety_coef) || 1.0;
 
     const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
     let productMap = {};

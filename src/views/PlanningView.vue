@@ -8,14 +8,7 @@
     </div>
 
     <!-- Viewer заглушка -->
-    <div v-if="isViewer && !viewOnly && !editingPlanId" class="viewer-placeholder">
-      <div class="viewer-placeholder-inner">
-        <BkIcon name="eye" size="lg"/>
-        <h2>Режим просмотра</h2>
-        <p>Вы можете просматривать сохранённые планы через раздел <b>История</b>.</p>
-        <button class="btn primary" @click="$router.push({ name: 'history' })"><BkIcon name="history" size="sm"/> Перейти в историю</button>
-      </div>
-    </div>
+    <ViewerBanner v-if="isViewer && !viewOnly && !editingPlanId" itemsLabel="планы" />
 
     <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
     <div v-if="!(isViewer && !viewOnly && !editingPlanId) && (!viewOnly || showFullPlan || !editingPlanId)" class="params-block" :class="{ open: settingsExpanded }">
@@ -402,6 +395,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
+import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
@@ -409,6 +403,7 @@ import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import AnalogMergeModal from '@/components/modals/AnalogMergeModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ViewerBanner from '@/components/ViewerBanner.vue';
 
 
 const route = useRoute();
@@ -1640,7 +1635,7 @@ async function loadPlanFromHistory(planId) {
   const { data: plan, error } = await db.from('plans').select('*').eq('id', planId).single();
   if (gen !== _loadPlanGen) return; // устаревший запрос
   if (error || !plan) { toast.error('Ошибка', ''); return; }
-  const planEntity = plan.legal_entity || 'ООО "Бургер БК"';
+  const planEntity = plan.legal_entity || DEFAULT_ENTITY;
   const allowed = userStore.getAllowedEntities();
   if (allowed && !allowed.includes(planEntity)) {
     toast.error('Нет доступа', 'У вас нет доступа к юрлицу этого плана');

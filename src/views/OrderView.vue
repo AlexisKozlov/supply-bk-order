@@ -9,14 +9,7 @@
     </div>
 
     <!-- Viewer заглушка: viewer не может создавать/редактировать заказы -->
-    <div v-if="isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId" class="viewer-placeholder">
-      <div class="viewer-placeholder-inner">
-        <BkIcon name="eye" size="lg"/>
-        <h2>Режим просмотра</h2>
-        <p>Вы можете просматривать сохранённые заказы через раздел <b>История</b>.</p>
-        <button class="btn primary" @click="$router.push({ name: 'history' })"><BkIcon name="history" size="sm"/> Перейти в историю</button>
-      </div>
-    </div>
+    <ViewerBanner v-if="isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId" itemsLabel="заказы" />
 
     <!-- Параметры: кликабельная строка-сводка + раскрывающаяся панель -->
     <div v-if="orderVisible && !(isViewer && !orderStore.viewOnlyMode && !orderStore.editingOrderId) && (!orderStore.viewOnlyMode || showFullOrder || !viewSummaryOrder)" class="params-block" :class="{ open: settingsExpanded }">
@@ -298,6 +291,7 @@ import AnalogMergeModal from '@/components/modals/AnalogMergeModal.vue';
 import AuditLogModal from '@/components/modals/AuditLogModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import ViewerBanner from '@/components/ViewerBanner.vue';
 
 
 const route         = useRoute();
@@ -471,7 +465,7 @@ onMounted(async () => {
       let mode = route.query.mode || 'view';
       // Проверка блокировки при редактировании
       if (mode === 'edit') {
-        const { data: lock } = await db.rpc('check_order_lock', { order_id: route.query.orderId, user_name: userStore.currentUser?.name || '' });
+        const { data: lock } = await db.rpc('check_order_lock', { order_id: route.query.orderId });
         if (lock?.locked) {
           toast.warning('Заказ заблокирован', `Редактирует: ${lock.locked_by}. Открыт в режиме просмотра.`);
           mode = 'view';
@@ -568,7 +562,7 @@ onBeforeRouteLeave(async () => {
   }
   // Снимаем блокировку редактирования при уходе (после подтверждения)
   if (orderStore.editingOrderId) {
-    db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '', order_id: orderStore.editingOrderId }).catch(() => {});
+    db.rpc('unlock_order', { order_id: orderStore.editingOrderId }).catch(() => {});
   }
   // При выходе из режима просмотра — очищаем данные, чтобы не создался ложный черновик
   if (orderStore.viewOnlyMode) {
@@ -585,7 +579,7 @@ watch(() => route.query.orderId, async (newId) => {
   try {
     let mode = route.query.mode;
     if (mode === 'edit') {
-      const { data: lock } = await db.rpc('check_order_lock', { order_id: newId, user_name: userStore.currentUser?.name || '' });
+      const { data: lock } = await db.rpc('check_order_lock', { order_id: newId });
       if (myLoadId !== _orderLoadId) return;
       if (lock?.locked) {
         toast.warning('Заказ заблокирован', `Редактирует: ${lock.locked_by}. Открыт в режиме просмотра.`);
@@ -1253,7 +1247,7 @@ async function exitEditMode() {
   const ok = await confirmAction('Сбросить редактирование?', 'Заказ будет очищен.');
   if (!ok) return;
   if (orderStore.editingOrderId) {
-    db.rpc('unlock_order', { user_name: userStore.currentUser?.name || '', order_id: orderStore.editingOrderId }).catch(() => {});
+    db.rpc('unlock_order', { order_id: orderStore.editingOrderId }).catch(() => {});
   }
   orderStore.resetOrder();
   orderStore.settings.today = new Date();

@@ -9,6 +9,26 @@ function getEntityGroup(legalEntity) {
   return { cacheKey, entities };
 }
 
+// Кеш активных поставщиков (по данным товаров) — обновляется не чаще раза в 5 минут
+const _activeSuppliersCache = {};
+const ACTIVE_CACHE_TTL = 5 * 60 * 1000;
+
+async function loadActiveSuppliers(entities, cacheKey) {
+  const cached = _activeSuppliersCache[cacheKey];
+  if (cached && (Date.now() - cached.ts < ACTIVE_CACHE_TTL)) return cached.data;
+
+  let prodQuery = db.from('products').select('supplier').eq('is_active', 1);
+  if (entities.length === 1) {
+    prodQuery = prodQuery.eq('legal_entity', entities[0]);
+  } else {
+    prodQuery = prodQuery.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
+  }
+  const { data: activeProducts } = await prodQuery;
+  const set = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
+  _activeSuppliersCache[cacheKey] = { data: set, ts: Date.now() };
+  return set;
+}
+
 export const useSupplierStore = defineStore('supplier', () => {
   const suppliersByEntity = ref({});
   const loading = ref(false);
@@ -29,11 +49,9 @@ export const useSupplierStore = defineStore('supplier', () => {
           .select('short_name, full_name, whatsapp, telegram, viber, email, dlt, doc')
           .order('short_name');
 
-        // Если одна сущность — простой eq, если несколько — or()
         if (entities.length === 1) {
           query = query.eq('legal_entity', entities[0]);
         } else {
-          // or формат: legal_entity.eq.ООО "Бургер БК",legal_entity.eq.ООО "Воглия Матта"
           query = query.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
         }
 
@@ -50,15 +68,8 @@ export const useSupplierStore = defineStore('supplier', () => {
             }
           }
 
-          // Убрать поставщиков, у которых все товары неактивны
-          let prodQuery = db.from('products').select('supplier').eq('is_active', 1);
-          if (entities.length === 1) {
-            prodQuery = prodQuery.eq('legal_entity', entities[0]);
-          } else {
-            prodQuery = prodQuery.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
-          }
-          const { data: activeProducts } = await prodQuery;
-          const activeSuppliers = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
+          // Фильтрация по активным товарам (с кешем)
+          const activeSuppliers = await loadActiveSuppliers(entities, cacheKey);
           const filtered = unique.filter(s => activeSuppliers.has(s.short_name));
 
           suppliersByEntity.value[cacheKey] = filtered;

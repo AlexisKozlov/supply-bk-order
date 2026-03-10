@@ -67,6 +67,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -90,7 +91,7 @@ const form = ref({
   sku: '',
   name: '',
   supplier: props.currentSupplier || '',
-  legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
+  legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
   qty_per_box: '',
   boxes_per_pallet: '',
   multiplicity: '',

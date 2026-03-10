@@ -32,6 +32,14 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
+            urlPattern: /\/api\/(products|suppliers)\?/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-reference-data',
+              expiration: { maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 },
+            },
+          },
+          {
             urlPattern: /\/api\//,
             handler: 'NetworkFirst',
             options: {

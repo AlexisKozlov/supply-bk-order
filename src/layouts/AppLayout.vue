@@ -285,6 +285,9 @@
     <!-- Кнопка «Нашли ошибку?» -->
     <BugReportButton />
 
+    <!-- Индикатор отсутствия соединения -->
+    <OfflineIndicator />
+
   </div>
 </template>
 
@@ -295,10 +298,12 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useNotificationStore } from '@/stores/notificationStore.js';
 import { db } from '@/lib/apiClient.js';
+import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import BroadcastPopup from '@/components/BroadcastPopup.vue';
 import BugReportButton from '@/components/BugReportButton.vue';
+import OfflineIndicator from '@/components/ui/OfflineIndicator.vue';
 
 
 const router = useRouter();
@@ -465,7 +470,7 @@ function sendHeartbeat() {
   if (!name) return;
   const page = pageNames[route.name] || route.name || '';
   const editingOrderId = (route.name === 'order' && route.query.orderId && route.query.mode === 'edit') ? route.query.orderId : null;
-  db.rpc('heartbeat', { user_name: name, page, editing_order_id: editingOrderId }).catch(() => {});
+  db.rpc('heartbeat', { page, editing_order_id: editingOrderId }).catch(() => {});
 }
 
 let heartbeatTimer = null;
@@ -484,7 +489,7 @@ const currentRoute = computed(() => route.name);
 
 const availableEntities = computed(() => {
   const allowed = userStore.getAllowedEntities();
-  const all = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
+  const all = LEGAL_ENTITIES;
   if (!allowed || allowed.length === 0) return all;
   return all.filter(e => allowed.includes(e));
 });

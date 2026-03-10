@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { getEntityGroup } from '@/lib/utils.js';
+import { getEntityGroup } from '@/lib/legalEntities.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 
@@ -117,6 +117,25 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     };
   }
 
+  async function _auditLog(entityId, action, restaurantNumber, paramChanges, extra = {}) {
+    try {
+      const meta = _meta();
+      await db.from('audit_log').insert({
+        entity_type: 'delivery_schedule',
+        entity_id: Number(entityId),
+        action,
+        user_name: meta.updated_by,
+        details: JSON.stringify({
+          restaurant_number: restaurantNumber,
+          param_changes: paramChanges,
+          ...extra,
+        }),
+      });
+    } catch (e) {
+      console.warn('Audit log error:', e);
+    }
+  }
+
   async function saveScheduleCell(restaurantId, dayOfWeek, deliveryTime) {
     if (dayOfWeek < 1 || dayOfWeek > 6) throw new Error('Invalid day_of_week');
     const rid = String(restaurantId);
@@ -159,33 +178,15 @@ export const useRestaurantStore = defineStore('restaurant', () => {
 
     // Аудит-лог (не блокирует основное действие)
     if (oldTime !== newTime) {
-      try {
-        const rest = restaurants.value.find(r => String(r.id) === rid);
-        // Снимок полного графика ресторана (после изменения)
-        const rSched = scheduleByRestaurant.value.get(rid);
-        const fullSchedule = {};
-        for (let d = 1; d <= 6; d++) {
-          const short = DAY_SHORT[d];
-          fullSchedule[short] = rSched?.get(d)?.delivery_time || '';
-        }
-        await db.from('audit_log').insert({
-          entity_type: 'delivery_schedule',
-          entity_id: Number(restaurantId),
-          action: 'schedule_updated',
-          user_name: meta.updated_by,
-          details: JSON.stringify({
-            restaurant_number: rest?.number || restaurantId,
-            param_changes: [{
-              label: DAY_NAMES[dayOfWeek] || `День ${dayOfWeek}`,
-              from: oldTime || '—',
-              to: newTime || '—',
-            }],
-            full_schedule: fullSchedule,
-          }),
-        });
-      } catch (e) {
-        console.warn('Audit log error (schedule):', e);
+      const rest = restaurants.value.find(r => String(r.id) === rid);
+      const rSched = scheduleByRestaurant.value.get(rid);
+      const fullSchedule = {};
+      for (let d = 1; d <= 6; d++) {
+        fullSchedule[DAY_SHORT[d]] = rSched?.get(d)?.delivery_time || '';
       }
+      await _auditLog(restaurantId, 'schedule_updated', rest?.number || restaurantId,
+        [{ label: DAY_NAMES[dayOfWeek] || `День ${dayOfWeek}`, from: oldTime || '—', to: newTime || '—' }],
+        { full_schedule: fullSchedule });
     }
   }
 
@@ -209,31 +210,17 @@ export const useRestaurantStore = defineStore('restaurant', () => {
 
       // Аудит-лог (не блокирует основное действие)
       if (oldRest) {
-        try {
-          const fieldLabels = { number: 'Номер', address: 'Адрес', city: 'Город', region: 'Регион', notes: 'Комментарий' };
-          const paramChanges = [];
-          for (const [key, label] of Object.entries(fieldLabels)) {
-            const oldVal = oldRest[key] || '';
-            const newVal = fields[key] || '';
-            if (String(oldVal) !== String(newVal)) {
-              paramChanges.push({ label, from: oldVal || '—', to: newVal || '—' });
-            }
+        const fieldLabels = { number: 'Номер', address: 'Адрес', city: 'Город', region: 'Регион', notes: 'Комментарий' };
+        const paramChanges = [];
+        for (const [key, label] of Object.entries(fieldLabels)) {
+          const oldVal = oldRest[key] || '';
+          const newVal = fields[key] || '';
+          if (String(oldVal) !== String(newVal)) {
+            paramChanges.push({ label, from: oldVal || '—', to: newVal || '—' });
           }
-          if (paramChanges.length) {
-            const meta = _meta();
-            await db.from('audit_log').insert({
-              entity_type: 'delivery_schedule',
-              entity_id: id,
-              action: 'restaurant_updated',
-              user_name: meta.updated_by,
-              details: JSON.stringify({
-                restaurant_number: oldRest.number || fields.number || id,
-                param_changes: paramChanges,
-              }),
-            });
-          }
-        } catch (e) {
-          console.warn('Audit log error (restaurant):', e);
+        }
+        if (paramChanges.length) {
+          await _auditLog(id, 'restaurant_updated', oldRest.number || fields.number || id, paramChanges);
         }
       }
 
@@ -261,21 +248,8 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     rest.notes = newNotes;
 
     // Аудит-лог
-    try {
-      const meta = _meta();
-      await db.from('audit_log').insert({
-        entity_type: 'delivery_schedule',
-        entity_id: rid,
-        action: 'restaurant_updated',
-        user_name: meta.updated_by,
-        details: JSON.stringify({
-          restaurant_number: rest.number || rid,
-          param_changes: [{ label: 'Комментарий', from: oldNotes || '—', to: newNotes || '—' }],
-        }),
-      });
-    } catch (e) {
-      console.warn('Audit log error (note):', e);
-    }
+    await _auditLog(rid, 'restaurant_updated', rest.number || rid,
+      [{ label: 'Комментарий', from: oldNotes || '—', to: newNotes || '—' }]);
   }
 
   async function deleteRestaurant(id) {

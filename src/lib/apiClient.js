@@ -165,10 +165,13 @@ class QueryBuilder {
 
 function parseJsonFields(row) {
   if (!row || typeof row !== 'object') return row;
-  const jsonCols = ['items', 'legal_entities', 'details', 'sku_order', 'analogs', 'data', 'order_items'];
-  for (const col of jsonCols) {
-    if (col in row && typeof row[col] === 'string') {
-      try { row[col] = JSON.parse(row[col]); } catch (e) { /* keep string */ }
+  for (const col in row) {
+    const v = row[col];
+    if (typeof v === 'string' && v.length >= 2) {
+      const c = v[0];
+      if (c === '[' || c === '{') {
+        try { row[col] = JSON.parse(v); } catch (e) { /* keep string */ }
+      }
     }
   }
   return row;

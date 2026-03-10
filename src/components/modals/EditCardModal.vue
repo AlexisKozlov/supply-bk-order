@@ -114,6 +114,7 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
+import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -142,7 +143,7 @@ const auditEntries = ref([]);
 const originalValues = ref(null);
 
 const form = ref({
-  sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || 'ООО "Бургер БК"',
+  sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
   analog_group: '', is_active: true, category: '',
 });

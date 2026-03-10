@@ -6,20 +6,60 @@
 
 import { db } from '@/lib/apiClient.js';
 import { debug, getQpb, applyEntityFilter } from '@/lib/utils.js';
+import { ENTITY_IMPORT_MAP } from '@/lib/legalEntities.js';
 
-const LEGAL_ENTITY_MAP = {
-  'сбарро':              'ООО "Пицца Стар"',
-  'додо':                'ООО "Пицца Стар"',
-  'пицца стар':          'ООО "Пицца Стар"',
-  'ооо "пицца стар"':    'ООО "Пицца Стар"',
-  'ооо пицца стар':      'ООО "Пицца Стар"',
-  'бургер бк':           'ООО "Бургер БК"',
-  'ооо "бургер бк"':     'ООО "Бургер БК"',
-  'ооо бургер бк':       'ООО "Бургер БК"',
-  'воглия матта':        'ООО "Воглия Матта"',
-  'ооо "воглия матта"':  'ООО "Воглия Матта"',
-  'ооо воглия матта':    'ООО "Воглия Матта"',
-};
+const LEGAL_ENTITY_MAP = ENTITY_IMPORT_MAP;
+
+/**
+ * Загрузить карту аналогов для списка SKU.
+ * @param {Set<string>} itemSkus — SKU позиций заказа/плана
+ * @param {string} legalEntity — юр. лицо для фильтрации
+ * @returns {Promise<{skuToGroup, skuToName, groupToSkus, analogSkuToName, analogSkuToQpb}|null>}
+ */
+async function loadAnalogMap(itemSkus, legalEntity) {
+  if (!itemSkus.size) return null;
+  const skuList = [...itemSkus];
+
+  let prodQuery = db.from('products')
+    .select('sku,name,analog_group')
+    .in('sku', skuList);
+  if (legalEntity) prodQuery = applyEntityFilter(prodQuery, legalEntity);
+  const { data: products } = await prodQuery;
+
+  if (!products?.length) return null;
+
+  const skuToGroup = new Map();
+  const skuToName = new Map();
+  const groups = new Set();
+  for (const p of products) {
+    if (p.analog_group) {
+      skuToGroup.set(p.sku, p.analog_group);
+      skuToName.set(p.sku, p.name);
+      groups.add(p.analog_group);
+    }
+  }
+
+  if (!groups.size) return null;
+
+  let analogQuery = db.from('products')
+    .select('sku,name,analog_group,qty_per_box')
+    .neq('analog_group', '');
+  if (legalEntity) analogQuery = applyEntityFilter(analogQuery, legalEntity);
+  const { data: allAnalogProducts } = await analogQuery;
+  const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
+
+  const groupToSkus = new Map();
+  const analogSkuToName = new Map();
+  const analogSkuToQpb = new Map();
+  for (const p of groupProducts) {
+    if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);
+    groupToSkus.get(p.analog_group).push(p.sku);
+    analogSkuToName.set(p.sku, p.name);
+    analogSkuToQpb.set(p.sku, p.qty_per_box || 1);
+  }
+
+  return { skuToGroup, skuToName, groupToSkus, analogSkuToName, analogSkuToQpb };
+}
 
 const HEADER_KEYWORDS = [
   'артикул', 'наименование', 'остат', 'расход', 'sku', 'stock',
@@ -398,101 +438,57 @@ async function matchData(items, fileData, target, unit, legalEntity) {
   const analogMerges = [];
   if (target !== 'analysis') {
     try {
-      // 1. Собрать SKU всех позиций заказа/плана
       const itemSkus = new Set(items.map(i => i.sku).filter(Boolean));
+      const aMap = await loadAnalogMap(itemSkus, legalEntity);
 
-      // 2. Запросить analog_group для всех SKU позиций (с фильтром по юрлицу)
-      if (itemSkus.size > 0) {
-        const skuList = [...itemSkus];
-        let prodQuery = db.from('products')
-          .select('sku,name,analog_group')
-          .in('sku', skuList);
-        if (legalEntity) prodQuery = applyEntityFilter(prodQuery, legalEntity);
-        const { data: products } = await prodQuery;
+      if (aMap) {
+        const { skuToGroup, skuToName, groupToSkus, analogSkuToName, analogSkuToQpb } = aMap;
 
-        if (products?.length) {
-          // Карта SKU → analog_group
-          const skuToGroup = new Map();
-          const skuToName = new Map();
-          const groups = new Set();
-          for (const p of products) {
-            if (p.analog_group) {
-              skuToGroup.set(p.sku, p.analog_group);
-              skuToName.set(p.sku, p.name);
-              groups.add(p.analog_group);
-            }
+        for (let idx = 0; idx < updatedItems.length; idx++) {
+          const item = updatedItems[idx];
+          if (!item.sku) continue;
+          const group = skuToGroup.get(item.sku);
+          if (!group) continue;
+          const analogs = groupToSkus.get(group);
+          if (!analogs) continue;
+
+          const foundAnalogs = [];
+          for (const analogSku of analogs) {
+            if (analogSku === item.sku) continue;
+            if (itemSkus.has(analogSku)) continue;
+
+            const normKey = normSku(analogSku);
+            const fileEntry = skuLookup.get(normKey)
+              || skuLookup.get(normKey.replace(/^0+(\d+)/, '$1'));
+            if (!fileEntry) continue;
+
+            const analogQpb = analogSkuToQpb.get(analogSku) || 1;
+            const itemQpb = item.qtyPerBox || 1;
+            const needConvert = unit === 'boxes' && analogQpb !== itemQpb && itemQpb > 0;
+            const ratio = needConvert ? analogQpb / itemQpb : 1;
+            const convertVal = (v) => Math.round(v * ratio * 10) / 10;
+
+            foundAnalogs.push({
+              sku: analogSku,
+              name: analogSkuToName.get(analogSku) || '',
+              stock: convertVal(fileEntry.stock ?? 0),
+              transit: convertVal(fileEntry.transit ?? 0),
+              consumption: convertVal(fileEntry.consumption ?? 0),
+              _fileEntry: fileEntry,
+              checked: true,
+            });
           }
-          // 3. Запросить все продукты с analog_group и отфильтровать на клиенте
-          // (in() не работает с запятыми в значениях, напр. «Стакан Пепси 0,5л»)
-          if (groups.size > 0) {
-            let analogQuery = db.from('products')
-              .select('sku,name,analog_group,qty_per_box')
-              .neq('analog_group', '');
-            if (legalEntity) analogQuery = applyEntityFilter(analogQuery, legalEntity);
-            const { data: allAnalogProducts } = await analogQuery;
-            const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
 
-            // Карта group → [sku, ...], SKU → qtyPerBox
-            const groupToSkus = new Map();
-            const analogSkuToName = new Map();
-            const analogSkuToQpb = new Map();
-            if (groupProducts.length) {
-              for (const p of groupProducts) {
-                if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);
-                groupToSkus.get(p.analog_group).push(p.sku);
-                analogSkuToName.set(p.sku, p.name);
-                analogSkuToQpb.set(p.sku, p.qty_per_box || 1);
-              }
-            }
-
-            // 4. Для каждого item — собрать доступные аналоги (без применения)
-            for (let idx = 0; idx < updatedItems.length; idx++) {
-              const item = updatedItems[idx];
-              if (!item.sku) continue;
-              const group = skuToGroup.get(item.sku);
-              if (!group) continue;
-              const analogs = groupToSkus.get(group);
-              if (!analogs) continue;
-
-              const foundAnalogs = [];
-              for (const analogSku of analogs) {
-                if (analogSku === item.sku) continue;
-                if (itemSkus.has(analogSku)) continue;
-
-                const normKey = normSku(analogSku);
-                const fileEntry = skuLookup.get(normKey)
-                  || skuLookup.get(normKey.replace(/^0+(\d+)/, '$1'));
-                if (!fileEntry) continue;
-
-                const analogQpb = analogSkuToQpb.get(analogSku) || 1;
-                const itemQpb = item.qtyPerBox || 1;
-                const needConvert = unit === 'boxes' && analogQpb !== itemQpb && itemQpb > 0;
-                const ratio = needConvert ? analogQpb / itemQpb : 1;
-                const convertVal = (v) => Math.round(v * ratio * 10) / 10;
-
-                foundAnalogs.push({
-                  sku: analogSku,
-                  name: analogSkuToName.get(analogSku) || '',
-                  stock: convertVal(fileEntry.stock ?? 0),
-                  transit: convertVal(fileEntry.transit ?? 0),
-                  consumption: convertVal(fileEntry.consumption ?? 0),
-                  _fileEntry: fileEntry,
-                  checked: true,
-                });
-              }
-
-              if (foundAnalogs.length > 0) {
-                analogMerges.push({
-                  itemSku: item.sku,
-                  itemName: item.name || skuToName.get(item.sku) || item.sku,
-                  itemIdx: idx,
-                  analogs: foundAnalogs,
-                  _base: target === 'order'
-                    ? { stock: item.stock, consumption: item.consumptionPeriod, transit: item.transit }
-                    : { stockOnHand: item.stockOnHand, consumption: item.monthlyConsumption },
-                });
-              }
-            }
+          if (foundAnalogs.length > 0) {
+            analogMerges.push({
+              itemSku: item.sku,
+              itemName: item.name || skuToName.get(item.sku) || item.sku,
+              itemIdx: idx,
+              analogs: foundAnalogs,
+              _base: target === 'order'
+                ? { stock: item.stock, consumption: item.consumptionPeriod, transit: item.transit }
+                : { stockOnHand: item.stockOnHand, consumption: item.monthlyConsumption },
+            });
           }
         }
       }
@@ -650,119 +646,74 @@ export async function loadFromAnalysis(target, items, legalEntity, unit, targetP
   const analogMerges = [];
   try {
     const itemSkus = new Set(items.map(i => i.sku).filter(Boolean));
-    if (itemSkus.size > 0) {
-      const skuList = [...itemSkus];
-      let prodQ = db.from('products')
-        .select('sku,name,analog_group')
-        .in('sku', skuList);
-      if (legalEntity) prodQ = applyEntityFilter(prodQ, legalEntity);
-      const { data: products } = await prodQ;
+    const aMap = await loadAnalogMap(itemSkus, legalEntity);
 
-      if (products?.length) {
-        const skuToGroup = new Map();
-        const skuToName = new Map();
-        const groups = new Set();
-        for (const p of products) {
-          if (p.analog_group) {
-            skuToGroup.set(p.sku, p.analog_group);
-            skuToName.set(p.sku, p.name);
-            groups.add(p.analog_group);
-          }
+    if (aMap) {
+      const { skuToGroup, skuToName, groupToSkus, analogSkuToName } = aMap;
+
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        if (!item.sku) continue;
+        const group = skuToGroup.get(item.sku);
+        if (!group) continue;
+        const analogs = groupToSkus.get(group);
+        if (!analogs) continue;
+
+        const foundAnalogs = [];
+        for (const analogSku of analogs) {
+          if (analogSku === item.sku) continue;
+          if (itemSkus.has(analogSku)) continue;
+
+          // Ищем аналог в данных analysis_data
+          const analogData = adMap.get(analogSku) || adMap.get(normSku(analogSku));
+          if (!analogData) continue;
+
+          // analysis_data хранит всё в штуках — пересчитываем в единицы товара
+          const itemQpb = item.qtyPerBox || 1;
+          const analogPeriodDays = analogData.period_days || 30;
+          const analogDaily = analogPeriodDays > 0 ? (analogData.consumption || 0) / analogPeriodDays : 0;
+          const analogConsumptionPcs = Math.round(analogDaily * targetPeriodDays * 10) / 10;
+          const analogStockPcs = Math.round((analogData.stock ?? 0) * 10) / 10;
+
+          foundAnalogs.push({
+            sku: analogSku,
+            name: analogSkuToName.get(analogSku) || '',
+            stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb * 10) / 10 : analogStockPcs,
+            consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb * 10) / 10 : analogConsumptionPcs,
+            checked: true,
+          });
         }
 
-        if (groups.size > 0) {
-          let analogQ = db.from('products')
-            .select('sku,name,analog_group,qty_per_box')
-            .neq('analog_group', '');
-          if (legalEntity) analogQ = applyEntityFilter(analogQ, legalEntity);
-          const { data: allAnalogProducts } = await analogQ;
-          const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
-
-          const groupToSkus = new Map();
-          const analogSkuToName = new Map();
-          const analogSkuToQpb = new Map();
-          for (const p of groupProducts) {
-            if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);
-            groupToSkus.get(p.analog_group).push(p.sku);
-            analogSkuToName.set(p.sku, p.name);
-            analogSkuToQpb.set(p.sku, p.qty_per_box || 1);
-          }
-
-          for (let idx = 0; idx < items.length; idx++) {
-            const item = items[idx];
-            if (!item.sku) continue;
-            const group = skuToGroup.get(item.sku);
-            if (!group) continue;
-            const analogs = groupToSkus.get(group);
-            if (!analogs) continue;
-
-            const foundAnalogs = [];
-            for (const analogSku of analogs) {
-              if (analogSku === item.sku) continue;
-              if (itemSkus.has(analogSku)) continue;
-
-              // Ищем аналог в данных analysis_data
-              const analogData = adMap.get(analogSku) || adMap.get(normSku(analogSku));
-              if (!analogData) continue;
-
-              // analysis_data хранит всё в штуках — пересчитываем в единицы товара
-              const itemQpb = item.qtyPerBox || 1;
-              const analogPeriodDays = analogData.period_days || 30;
-              const analogDaily = analogPeriodDays > 0 ? (analogData.consumption || 0) / analogPeriodDays : 0;
-              const analogConsumptionPcs = Math.round(analogDaily * targetPeriodDays * 10) / 10;
-              const analogStockPcs = Math.round((analogData.stock ?? 0) * 10) / 10;
-
-              if (target === 'order') {
-                foundAnalogs.push({
-                  sku: analogSku,
-                  name: analogSkuToName.get(analogSku) || '',
-                  stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb * 10) / 10 : analogStockPcs,
-                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb * 10) / 10 : analogConsumptionPcs,
-                  checked: true,
-                });
-              } else {
-                foundAnalogs.push({
-                  sku: analogSku,
-                  name: analogSkuToName.get(analogSku) || '',
-                  stock: unit === 'boxes' ? Math.round(analogStockPcs / itemQpb * 10) / 10 : analogStockPcs,
-                  consumption: unit === 'boxes' ? Math.round(analogConsumptionPcs / itemQpb * 10) / 10 : analogConsumptionPcs,
-                  checked: true,
-                });
-              }
+        if (foundAnalogs.length > 0) {
+          // Базу берём из analysis_data (не из текущего item, который мог содержать предыдущие аналоги)
+          const mainData = adMap.get(item.sku) || adMap.get(normSku(item.sku));
+          const itemQpb = item.qtyPerBox || 1;
+          let baseStock, baseConsumption;
+          if (mainData) {
+            const srcPeriod = mainData.period_days || 30;
+            const cPcs = srcPeriod === targetPeriodDays
+              ? Math.round((mainData.consumption || 0) * 10) / 10
+              : Math.round(((mainData.consumption || 0) / srcPeriod) * targetPeriodDays * 10) / 10;
+            const sPcs = Math.round((mainData.stock || 0) * 10) / 10;
+            if (target === 'order') {
+              baseStock = unit === 'boxes' ? Math.round(sPcs / itemQpb * 10) / 10 : sPcs;
+              baseConsumption = unit === 'boxes' ? Math.round(cPcs / itemQpb * 10) / 10 : cPcs;
+            } else {
+              baseStock = sPcs;
+              baseConsumption = unit === 'boxes' ? Math.round(cPcs / itemQpb * 100) / 100 : cPcs;
             }
-
-            if (foundAnalogs.length > 0) {
-              // Базу берём из analysis_data (не из текущего item, который мог содержать предыдущие аналоги)
-              const mainData = adMap.get(item.sku) || adMap.get(normSku(item.sku));
-              const itemQpb = item.qtyPerBox || 1;
-              let baseStock, baseConsumption;
-              if (mainData) {
-                const srcPeriod = mainData.period_days || 30;
-                const cPcs = srcPeriod === targetPeriodDays
-                  ? Math.round((mainData.consumption || 0) * 10) / 10
-                  : Math.round(((mainData.consumption || 0) / srcPeriod) * targetPeriodDays * 10) / 10;
-                const sPcs = Math.round((mainData.stock || 0) * 10) / 10;
-                if (target === 'order') {
-                  baseStock = unit === 'boxes' ? Math.round(sPcs / itemQpb * 10) / 10 : sPcs;
-                  baseConsumption = unit === 'boxes' ? Math.round(cPcs / itemQpb * 10) / 10 : cPcs;
-                } else {
-                  baseStock = sPcs;
-                  baseConsumption = unit === 'boxes' ? Math.round(cPcs / itemQpb * 100) / 100 : cPcs;
-                }
-              } else {
-                baseStock = 0; baseConsumption = 0;
-              }
-              analogMerges.push({
-                itemSku: item.sku,
-                itemName: item.name || skuToName.get(item.sku) || item.sku,
-                itemIdx: idx,
-                analogs: foundAnalogs,
-                _base: target === 'order'
-                  ? { stock: baseStock, consumption: baseConsumption, transit: 0 }
-                  : { stockOnHand: baseStock, consumption: baseConsumption },
-              });
-            }
+          } else {
+            baseStock = 0; baseConsumption = 0;
           }
+          analogMerges.push({
+            itemSku: item.sku,
+            itemName: item.name || skuToName.get(item.sku) || item.sku,
+            itemIdx: idx,
+            analogs: foundAnalogs,
+            _base: target === 'order'
+              ? { stock: baseStock, consumption: baseConsumption, transit: 0 }
+              : { stockOnHand: baseStock, consumption: baseConsumption },
+          });
         }
       }
     }

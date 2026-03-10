@@ -3,22 +3,36 @@ import { ref, computed } from 'vue';
 import { db, setSessionToken } from '@/lib/apiClient.js';
 
 // ═══ Система модульных прав ═══
-export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis', 'shelf-life', 'pricing', 'tenders'];
+// Fallback-значения (используются до загрузки конфига с сервера)
+export let MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis', 'shelf-life', 'pricing', 'tenders'];
 
-export const ROLE_TEMPLATES = {
+export let ROLE_TEMPLATES = {
   admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'shelf-life': 'full', pricing: 'full', tenders: 'full' },
   user:   { order: 'edit', planning: 'edit', history: 'edit', 'plan-fact': 'edit', database: 'edit', 'delivery-schedule': 'edit', analytics: 'view', calendar: 'view', analysis: 'edit', 'shelf-life': 'edit', pricing: 'edit', tenders: 'edit' },
   viewer: { order: 'view', planning: 'view', history: 'view', 'plan-fact': 'view', database: 'view', 'delivery-schedule': 'view', analytics: 'view', calendar: 'view', analysis: 'view', 'shelf-life': 'view', pricing: 'view', tenders: 'view' },
 };
 
-export const ACCESS_LEVELS = { full: 3, edit: 2, view: 1, none: 0 };
+export let ACCESS_LEVELS = { full: 3, edit: 2, view: 1, none: 0 };
 
 export const MODULE_LABELS = {
   order: 'Новый заказ', planning: 'Планирование', history: 'История',
   'plan-fact': 'Поставки', database: 'База товаров', 'delivery-schedule': 'График доставки',
   analytics: 'Аналитика', calendar: 'Календарь', analysis: 'Анализ',
-  'shelf-life': 'Сроки годности', pricing: 'Цены и ПСЦ',
+  'shelf-life': 'Сроки годности', pricing: 'Цены и ПСЦ', tenders: 'Тендеры',
 };
+
+// Загрузка RBAC-конфига с сервера (единый источник правды — PHP)
+let _rbacLoaded = false;
+export async function loadRbacConfig() {
+  if (_rbacLoaded) return;
+  try {
+    const { data } = await db.rpc('get_rbac_config');
+    if (data?.modules) MODULES = data.modules;
+    if (data?.role_templates) ROLE_TEMPLATES = data.role_templates;
+    if (data?.access_levels) ACCESS_LEVELS = data.access_levels;
+    _rbacLoaded = true;
+  } catch (e) { /* используем fallback */ }
+}
 
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref(null);
@@ -60,7 +74,7 @@ export const useUserStore = defineStore('user', () => {
 
   async function validateSession(user) {
     try {
-      const { data } = await db.rpc('validate_session', { user_name: user?.name || '' });
+      const { data } = await db.rpc('validate_session', {});
       if (!data?.valid) {
         logout();
         return;
