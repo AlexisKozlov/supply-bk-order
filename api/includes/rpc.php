@@ -725,7 +725,10 @@ if ($endpoint === 'rpc') {
                 $inserted++;
             }
             $pdo->commit();
-            notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
+            // TODO: уведомление в Telegram временно отключено
+            // if (!empty($body['notify'])) {
+            //     notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
+            // }
             respond(['success' => true, 'count' => $inserted]);
         } catch (PDOException $e) {
             $pdo->rollBack();

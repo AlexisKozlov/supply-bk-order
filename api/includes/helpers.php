@@ -366,7 +366,7 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     elseif (strpos($val,'lte.')===0) { $where[]="`$key`<=?"; $params[]=substr($val,4); }
     elseif (strpos($val,'lt.')===0) { $where[]="`$key`<?"; $params[]=substr($val,3); }
     elseif (strpos($val,'in.')===0) {
-        $inv = str_replace(['in.(',')',' '], '', $val);
+        $inv = substr($val, 4, -1); // убираем "in.(" и ")"
         $arr = preg_split('/(?<!\\\\),/', $inv);
         $arr = array_map(fn($x) => str_replace('\\,', ',', $x), $arr);
         $ph = implode(',', array_fill(0, count($arr), '?'));

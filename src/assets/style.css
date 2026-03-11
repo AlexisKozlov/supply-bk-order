@@ -874,6 +874,12 @@ td.order-highlight {
 
 .calc-to-order:hover { background: #C8E6C9; }
 
+.trend-btn { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px; border: none; cursor: pointer; vertical-align: middle; margin-left: 3px; line-height: 1.2; font-family: inherit; }
+.trend-btn.trend-up { background: #FFF3E0; color: #E65100; }
+.trend-btn.trend-up:hover { background: #FFE0B2; }
+.trend-btn.trend-down { background: #E3F2FD; color: #1565C0; }
+.trend-btn.trend-down:hover { background: #BBDEFB; }
+
 .delete-item-x {
   width: 30px; height: 30px;
   border: none;

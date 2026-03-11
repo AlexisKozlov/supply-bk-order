@@ -59,6 +59,7 @@
             :cda-params="props.cdaMode ? getCdaParams(orderStore.items[index]) : null"
             :price-info="props.priceMap[orderStore.items[index]?.sku] || null"
             :has-prices="hasPrices"
+            :trend="props.trendMap[orderStore.items[index]?.sku] || null"
             :ref="el => { if (el) rowRefs[index] = el; }"
             @remove="orderStore.removeItem($event); draftStore.save();"
             @edit-product="$emit('edit-product', $event)"
@@ -119,6 +120,7 @@ const props = defineProps({
   cdaSafetyCoef: { type: Number, default: 1.0 },
   filterQuery: { type: String, default: '' },
   priceMap: { type: Object, default: () => ({}) },
+  trendMap: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(['edit-product']);

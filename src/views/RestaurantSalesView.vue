@@ -31,6 +31,12 @@
       </div>
     </div>
 
+    <!-- Import overlay -->
+    <div v-if="importing" class="rsv-overlay">
+      <BurgerSpinner />
+      <p class="rsv-overlay-text">Загрузка файла…</p>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="rsv-center"><BurgerSpinner /></div>
 
@@ -324,10 +330,11 @@ const allGroups = computed(() => {
 
   return Object.entries(curMap).map(([name, rows]) => {
     const total = rows.reduce((s, r) => s + (parseFloat(r.quantity) || 0), 0);
-    const totalRc = rows.reduce((s, r) => s + (parseInt(r.restaurant_count) || 0), 0);
+    const rcRows = rows.filter(r => parseInt(r.restaurant_count) > 0);
+    const totalRc = rcRows.reduce((s, r) => s + (parseInt(r.restaurant_count) || 0), 0);
     const dayCount = rows.length;
     const avgDay = dayCount ? Math.round(total / dayCount) : 0;
-    const avgRestaurants = dayCount ? Math.round(totalRc / dayCount) : 0;
+    const avgRestaurants = rcRows.length ? Math.round(totalRc / rcRows.length) : 0;
 
     // Trend vs previous period
     const prevTotal = prevMap[name] || 0;
@@ -508,16 +515,20 @@ async function onFileSelected(e) {
   e.target.value = '';
   importing.value = true;
   try {
-    const XLSX = await import('xlsx-js-style');
+    const mod = await import('xlsx-js-style');
+    const XLSX = mod.default || mod;
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+    console.log('Sales import: rows:', rows.length, 'header:', JSON.stringify(rows[0]));
     const items = parseSalesFile(rows);
+    console.log('Sales import: parsed items:', items.length);
     if (!items.length) { toast.error('Ошибка', 'Не удалось распознать данные'); return; }
     toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…`);
     for (let i = 0; i < items.length; i += 10000) {
-      const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000) });
+      const isLast = i + 10000 >= items.length;
+      const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast });
       if (error) { toast.error('Ошибка', error); return; }
     }
     toast.success('Готово', `Загружено ${items.length.toLocaleString('ru')} записей`);
@@ -527,6 +538,54 @@ async function onFileSelected(e) {
 }
 
 function parseSalesFile(rows) {
+  // Пробуем Qlik-формат, если не подходит — 1С УТ
+  return parseQlik(rows) || parse1cUT(rows) || [];
+}
+
+// ═══ Qlik: колонки ГруппаАналогов, Дата, Расход/Продажи, Количество мест хранения ═══
+function parseQlik(rows) {
+  let colGroup = -1, colDate = -1, colRc = -1, headerIdx = -1;
+  const qtyCols = []; // может быть и Расход, и Продажи
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i];
+    if (!row) continue;
+    colGroup = -1; colDate = -1; colRc = -1; qtyCols.length = 0;
+    for (let j = 0; j < row.length; j++) {
+      const h = String(row[j] || '').trim().toLowerCase();
+      if (h.includes('группааналогов') || h.includes('группа аналогов')) colGroup = j;
+      else if (h === 'дата') colDate = j;
+      else if (h.includes('расход') || h.includes('продажи')) qtyCols.push(j);
+      else if (h.includes('мест хранения') || h.includes('количество мест')) colRc = j;
+    }
+    if (colGroup >= 0 && colDate >= 0 && qtyCols.length > 0) { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) return null;
+
+  const items = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const group = String(row[colGroup] || '').trim();
+    if (!group || group === 'н.опр') continue;
+    // Берём меньшее ненулевое значение из колонок расход/продажи
+    let qty;
+    if (qtyCols.length === 1) {
+      qty = Math.round((parseNum(row[qtyCols[0]])) * 100) / 100;
+    } else {
+      const vals = qtyCols.map(c => Math.round(parseNum(row[c]) * 100) / 100).filter(v => v > 0);
+      qty = vals.length ? Math.min(...vals) : 0;
+    }
+    if (!qty) continue;
+    const saleDate = excelDateToStr(row[colDate]);
+    if (!saleDate) continue;
+    const rc = colRc >= 0 ? (parseNum(row[colRc]) | 0) : 0;
+    items.push({ sale_date: saleDate, analog_group: group, quantity: qty, restaurant_count: rc });
+  }
+  return items.length ? items : null;
+}
+
+// ═══ 1С УТ: сложная вложенная структура ═══
+function parse1cUT(rows) {
   const items = [];
   let cur = null, skip = true;
   for (const row of rows) {
@@ -543,12 +602,39 @@ function parseSalesFile(rows) {
       cur = s.replace(/^[\s"]+|[\s"]+$/g, '');
     }
   }
-  return items;
+  return items.length ? items : null;
+}
+
+// Парсинг числа из строки (убирает запятые-разделители тысяч: "2,547.00" → 2547)
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  return parseFloat(String(v || '0').replace(/,/g, '')) || 0;
+}
+
+// Конвертация Excel serial date → YYYY-MM-DD
+function excelDateToStr(v) {
+  if (v instanceof Date) {
+    const dd = String(v.getUTCDate()).padStart(2, '0');
+    const mm = String(v.getUTCMonth() + 1).padStart(2, '0');
+    return `${v.getUTCFullYear()}-${mm}-${dd}`;
+  }
+  if (typeof v === 'number') {
+    const d = new Date((v - 25569) * 86400000);
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${mm}-${dd}`;
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m2) return s.slice(0, 10);
+  return null;
 }
 </script>
 
 <style scoped>
-.rsv { display: flex; flex-direction: column; height: 100%; overflow: hidden; gap: 0; flex: 1; min-height: 0; }
+.rsv { display: flex; flex-direction: column; height: 100%; overflow: hidden; gap: 0; flex: 1; min-height: 0; position: relative; }
 
 /* Header */
 .rsv-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; flex-shrink: 0; }
@@ -558,6 +644,8 @@ function parseSalesFile(rows) {
 .rsv-check { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; user-select: none; }
 .rsv-check input { cursor: pointer; }
 
+.rsv-overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-overlay, rgba(0,0,0,0.35)); border-radius: 12px; gap: 12px; }
+.rsv-overlay-text { color: #fff; font-size: 14px; font-weight: 600; }
 .rsv-center { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; }
 .rsv-empty { color: var(--text-muted); }
 .rsv-muted { color: var(--text-muted); font-size: 12px; }

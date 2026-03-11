@@ -168,6 +168,7 @@
         :cda-safety-coef="orderStore.settings.safetyCoef"
         :filter-query="filterQuery"
         :price-map="priceMap"
+        :trend-map="trendMap"
         @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
@@ -533,7 +534,7 @@ onMounted(async () => {
   document.addEventListener('click', closeShareDropdown);
   draftTickTimer = setInterval(() => { draftTick.value++; }, 30000);
   // Загрузить цены, если поставщик уже выбран
-  if (orderStore.settings.supplier) loadPrices();
+  if (orderStore.settings.supplier) { loadPrices(); loadTrends(); }
 });
 
 function hasUnsavedData() {
@@ -658,6 +659,7 @@ async function onSupplierChange(e) {
     draftStore.save();
     orderVisible.value = true;
     loadPrices();
+    loadTrends();
   } catch { toast.error('Ошибка', 'Не удалось загрузить товары'); }
   finally { supplierLoading.value = false; }
 }
@@ -933,6 +935,78 @@ async function loadPrices() {
     }
     priceMap.value = map;
   } catch { if (gen === _loadPricesGen) priceMap.value = {}; }
+}
+
+// ─── Тренды реализации ресторанов ─────────────────────────────────────────────
+const trendMap = ref({}); // sku -> { pct, cur, prev }
+
+let _loadTrendsGen = 0;
+async function loadTrends() {
+  const skus = orderStore.items.map(i => String(i.sku)).filter(Boolean);
+  if (!skus.length) { trendMap.value = {}; return; }
+  const gen = ++_loadTrendsGen;
+  try {
+    // 1) SKU → analog_group
+    const { data: prods } = await db.from('products').select('sku, analog_group').in('sku', skus);
+    if (gen !== _loadTrendsGen) return;
+    const skuToGroup = {};
+    const groups = new Set();
+    for (const p of (prods || [])) {
+      if (p.analog_group) { skuToGroup[String(p.sku)] = p.analog_group; groups.add(p.analog_group); }
+    }
+    console.log('[Trends] SKU с группами:', Object.keys(skuToGroup).length, '/', skus.length, ', уник. групп:', groups.size);
+    if (!groups.size) { trendMap.value = {}; return; }
+
+    // 2) Реализация за 28 дней
+    const now = new Date();
+    const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
+    const dateFrom = d28.toISOString().slice(0, 10);
+    const groupList = [...groups];
+    console.log('[Trends] Запрос реализации, дата от:', dateFrom, ', групп:', groupList.length, ', первые 3:', groupList.slice(0, 3));
+    // Загружаем пачками по 50 групп (чтобы URL не был слишком длинным)
+    let allSales = [];
+    for (let i = 0; i < groupList.length; i += 50) {
+      const batch = groupList.slice(i, i + 50);
+      const { data: sales, error } = await db.from('restaurant_sales')
+        .select('sale_date, analog_group, quantity')
+        .gte('sale_date', dateFrom)
+        .in('analog_group', batch)
+        .limit(500000);
+      if (error) console.error('[Trends] API error:', error);
+      if (gen !== _loadTrendsGen) return;
+      if (sales) allSales = allSales.concat(sales);
+    }
+    console.log('[Trends] Записей реализации:', allSales.length);
+
+    // 3) Считаем тренд: последние 14 дней vs предыдущие 14 дней
+    const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
+    const d14str = d14.toISOString().slice(0, 10);
+    const groupStats = {}; // group → { cur, prev }
+    for (const s of allSales) {
+      const g = s.analog_group;
+      if (!groupStats[g]) groupStats[g] = { cur: 0, prev: 0 };
+      const qty = parseFloat(s.quantity) || 0;
+      if (s.sale_date >= d14str) groupStats[g].cur += qty;
+      else groupStats[g].prev += qty;
+    }
+
+    // 4) Маппим на SKU
+    const map = {};
+    for (const sku of skus) {
+      const g = skuToGroup[sku];
+      if (!g || !groupStats[g]) continue;
+      const { cur, prev } = groupStats[g];
+      if (prev <= 0) continue;
+      const pct = Math.round((cur - prev) / prev * 100);
+      if (pct === 0) continue;
+      map[sku] = { pct, cur: Math.round(cur), prev: Math.round(prev), group: g };
+    }
+    console.log('[Trends] Товаров с трендом:', Object.keys(map).length);
+    trendMap.value = map;
+  } catch (e) {
+    console.error('loadTrends error:', e);
+    if (gen === _loadTrendsGen) trendMap.value = {};
+  }
 }
 
 // ─── Загрузить из 1С ──────────────────────────────────────────────────────────

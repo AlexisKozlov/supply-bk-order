@@ -103,10 +103,13 @@
           {{ calcDisplayText }}
         </span>
         <template v-else>{{ calcDisplayText }}</template>
+        <button v-if="trend" class="trend-btn" :class="trend.pct > 0 ? 'trend-up' : 'trend-down'"
+          @click.stop="applyTrend"
+          :title="(trend.group || '') + ': ' + trend.cur + ' vs ' + trend.prev + ' (14д к 14д). Клик — применить к расчёту'">
+          {{ trend.pct > 0 ? '↑' : '↓' }}{{ Math.abs(trend.pct) }}%
+        </button>
       </div>
-      <button class="btn small calc-to-order" style="margin-top:4px;font-size:11px;padding:4px 8px;" @click="applyCalc">
-        → В заказ
-      </button>
+      <button class="btn small calc-to-order" style="margin-top:4px;font-size:11px;padding:4px 8px;" @click="applyCalc">→ В заказ</button>
     </td>
 
     <!-- Заказ: штуки / коробки -->
@@ -188,6 +191,7 @@ const props = defineProps({
   cdaParams: { type: Object, default: null },
   priceInfo: { type: Object, default: null },
   hasPrices: { type: Boolean, default: false },
+  trend: { type: Object, default: null },
 });
 
 const emit = defineEmits(['remove', 'edit-product', 'drag-start', 'drag-over', 'drop', 'drag-end', 'nav']);
@@ -375,6 +379,19 @@ const tooltipHtml = computed(() => {
     ? `<div class="calc-tip-row" style="color:#D32F2F"><span class="calc-tip-lbl">Дефицит до прихода:</span><span class="calc-tip-val">${fmt(Math.abs(stockAfter))} ${inputUnit}</span></div>`
     : '';
 
+  // Блок тренда для подсказки
+  const t = props.trend;
+  const trendBlock = t ? `
+    <hr class="calc-tip-hr">
+    <div class="calc-tip-row" style="color:${t.pct > 0 ? '#E65100' : '#1565C0'}">
+      <span class="calc-tip-lbl">Тренд ресторанов (14д к 14д):</span>
+      <span class="calc-tip-val">${t.pct > 0 ? '+' : ''}${t.pct}%</span>
+    </div>
+    <div class="calc-tip-row"><span class="calc-tip-lbl">Последние 14 дней:</span><span class="calc-tip-val">${nf.format(t.cur)}</span></div>
+    <div class="calc-tip-row"><span class="calc-tip-lbl">Предыдущие 14 дней:</span><span class="calc-tip-val">${nf.format(t.prev)}</span></div>
+    ${t.group ? `<div class="calc-tip-row" style="font-size:10px;color:#999"><span class="calc-tip-lbl">Группа:</span><span class="calc-tip-val">${escHtml(t.group)}</span></div>` : ''}
+  ` : '';
+
   if (props.cdaMode && calc.value.buffer) {
     const b = calc.value.buffer;
     return `
@@ -389,6 +406,7 @@ const tooltipHtml = computed(() => {
       <hr class="calc-tip-hr">
       <div class="calc-tip-row"><span class="calc-tip-lbl">Буфер:</span><span class="calc-tip-val">${fmt(b.total)} ${inputUnit}</span></div>
       <div class="calc-tip-row"><span class="calc-tip-lbl">Итого к заказу:</span><span class="calc-tip-val">${calcDisplayText.value}</span></div>
+      ${trendBlock}
     `;
   }
 
@@ -402,6 +420,7 @@ const tooltipHtml = computed(() => {
     <hr class="calc-tip-hr">
     <div class="calc-tip-row"><span class="calc-tip-lbl">Нужно после прихода (запас ${s.safetyDays || 0} дн.):</span><span class="calc-tip-val">${fmt(need)} ${inputUnit}</span></div>
     <div class="calc-tip-row"><span class="calc-tip-lbl">Итого к заказу:</span><span class="calc-tip-val">${calcDisplayText.value}</span></div>
+    ${trendBlock}
   `;
 });
 
@@ -483,6 +502,27 @@ function applyCalc() {
   if (order == null || isNaN(order) || order < 0) return;
   orderStore.updateItemField(props.item.id, 'finalOrder', Math.round(order));
   orderStore.updateItemField(props.item.id, '_manualOrder', false);
+  draftStore.save();
+}
+
+function applyTrend() {
+  if (!props.trend) return;
+  const order = calc.value.calculatedOrder;
+  if (order == null || isNaN(order) || order <= 0) return;
+  const adjusted = Math.round(order * (1 + props.trend.pct / 100));
+  if (adjusted <= 0) return;
+  // Округляем по кратности
+  const m = mult.value;
+  const q = qpb.value;
+  let rounded;
+  if (props.settings.unit === 'boxes') {
+    rounded = m > 1 ? Math.ceil(adjusted / m) * m : adjusted;
+  } else {
+    const step = q * m;
+    rounded = step > 1 ? Math.ceil(adjusted / step) * step : adjusted;
+  }
+  orderStore.updateItemField(props.item.id, 'finalOrder', rounded);
+  orderStore.updateItemField(props.item.id, '_manualOrder', true);
   draftStore.save();
 }
 
