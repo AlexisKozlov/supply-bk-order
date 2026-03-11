@@ -492,13 +492,9 @@ function editAnalogGroup(group) {
 async function saveRenameGroup() {
   const { oldName, newName } = renameModal.value;
   if (!newName.trim() || newName.trim() === oldName) { renameModal.value.show = false; return; }
-  const items = products.value.filter(p => p.analog_group === oldName);
-  let hasError = false;
-  for (const p of items) {
-    const { error } = await db.from('products').update({ analog_group: newName.trim() }).eq('id', p.id);
-    if (error) hasError = true;
-  }
-  if (hasError) { toast.error('Ошибка при переименовании', ''); }
+  // Обновляем все товары группы одним запросом, чтобы избежать частичного переименования
+  const { error } = await db.from('products').update({ analog_group: newName.trim() }).eq('analog_group', oldName);
+  if (error) { toast.error('Ошибка при переименовании', ''); }
   else {
     toast.success('Группа переименована', `${oldName} → ${newName.trim()}`);
     if (expandedGroups.has(oldName)) {

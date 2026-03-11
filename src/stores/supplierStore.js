@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { db } from '@/lib/apiClient.js';
+import { db, orVal } from '@/lib/apiClient.js';
 import { getEntityGroup as _getGroup } from '@/lib/utils.js';
 
 function getEntityGroup(legalEntity) {
@@ -21,7 +21,7 @@ async function loadActiveSuppliers(entities, cacheKey) {
   if (entities.length === 1) {
     prodQuery = prodQuery.eq('legal_entity', entities[0]);
   } else {
-    prodQuery = prodQuery.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
+    prodQuery = prodQuery.or(entities.map(e => orVal('legal_entity', 'eq', e)).join(','));
   }
   const { data: activeProducts } = await prodQuery;
   const set = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
@@ -52,7 +52,7 @@ export const useSupplierStore = defineStore('supplier', () => {
         if (entities.length === 1) {
           query = query.eq('legal_entity', entities[0]);
         } else {
-          query = query.or(entities.map(e => `legal_entity.eq.${e}`).join(','));
+          query = query.or(entities.map(e => orVal('legal_entity', 'eq', e)).join(','));
         }
 
         const { data, error } = await query;

@@ -24,6 +24,16 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 
+// Проверка секретного токена вебхука
+$webhookSecret = $_ENV['TELEGRAM_WEBHOOK_SECRET'] ?? '';
+if ($webhookSecret !== '') {
+    $headerSecret = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
+    if (!hash_equals($webhookSecret, $headerSecret)) {
+        http_response_code(403);
+        exit;
+    }
+}
+
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input) exit;
 
@@ -200,7 +210,7 @@ function cmdStock($chatId, $user, $editMsgId = null) {
                    COALESCE(p.unit_of_measure, 'шт') as uom,
                    CASE WHEN a.consumption > 0 THEN ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) ELSE 999 END as days_left
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci
             WHERE a.consumption > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -239,7 +249,7 @@ function cmdConsumption($chatId, $user, $editMsgId = null) {
 
     $sql = "SELECT a.sku, p.name, a.consumption, a.period_days, COALESCE(p.unit_of_measure, 'шт') as uom
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci
             WHERE a.consumption > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -278,8 +288,8 @@ function cmdPrices($chatId, $user, $editMsgId = null) {
 
     $sql = "SELECT ph.sku, p.name as product_name, ph.old_price, ph.new_price, ph.changed_by, ph.changed_at, ph.supplier
             FROM price_history ph
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = ph.legal_entity COLLATE utf8mb4_general_ci
-            WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku COLLATE utf8mb4_general_ci = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity COLLATE utf8mb4_general_ci = ph.legal_entity COLLATE utf8mb4_general_ci)";
+            LEFT JOIN products p ON p.sku = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci
+            WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci)";
     $params = [];
     if ($entity) { $sql .= " AND ph.legal_entity = ?"; $params[] = $entity; }
     $sql .= " ORDER BY ph.changed_at DESC LIMIT 15";
@@ -1530,8 +1540,8 @@ function gatherContext($user) {
     // Последние изменения цен (только действующие)
     $sql = "SELECT ph.sku, p.name as product_name, ph.supplier, ph.old_price, ph.new_price, ph.changed_at
             FROM price_history ph
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = ph.legal_entity COLLATE utf8mb4_general_ci
-            WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku COLLATE utf8mb4_general_ci = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity COLLATE utf8mb4_general_ci = ph.legal_entity COLLATE utf8mb4_general_ci)";
+            LEFT JOIN products p ON p.sku = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci
+            WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci)";
     if ($entity) { $sql .= " AND ph.legal_entity = ?"; }
     $sql .= " ORDER BY ph.changed_at DESC LIMIT 10";
     $s = $pdo->prepare($sql); $s->execute($params);
@@ -3232,11 +3242,14 @@ function showSettings($chatId, $msgId, $userName) {
     if (!$settings) return;
 
     $labels = [
-        'psc_expiry' => 'ПСЦ истекает',
-        'overdue_delivery' => 'Просроченная поставка',
-        'price_changed' => 'Цены изменились',
-        'low_stock' => 'Остатки заканчиваются',
-        'daily_summary' => 'Ежедневная сводка',
+        'daily_summary' => '📊 Ежедневная сводка',
+        'data_updates' => '📥 Загрузка данных',
+        'expiring_items' => '⚠️ Истекающие сроки',
+        'restaurant_sales' => '🍽 Реализация ресторанов',
+        'psc_expiry' => '📋 ПСЦ истекает',
+        'price_changed' => '💰 Цены изменились',
+        'overdue_delivery' => '📦 Просроченная поставка',
+        'low_stock' => '📉 Остатки заканчиваются',
     ];
 
     $text = "⚙️ <b>Настройки уведомлений</b>\n\nНажмите кнопку чтобы включить/выключить:";
@@ -3365,7 +3378,7 @@ if (isset($input['callback_query'])) {
 
     if (str_starts_with($data, 'toggle_')) {
         $field = substr($data, 7);
-        $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary'];
+        $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary', 'data_updates', 'expiring_items', 'restaurant_sales'];
         if (in_array($field, $allowed)) {
             $u = $pdo->prepare("SELECT name FROM users WHERE telegram_chat_id = ?");
             $u->execute([$chatId]);

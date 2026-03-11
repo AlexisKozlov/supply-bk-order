@@ -65,6 +65,26 @@ function sendTelegramBulk($botToken, $chatIds, $text, $parseMode = 'HTML') {
     return $sent;
 }
 
+/**
+ * Возвращает chat_id пользователей, у которых включена указанная настройка уведомлений.
+ * Если у пользователя нет записи в telegram_settings — считаем что уведомление включено (по умолчанию).
+ */
+function getSubscribedChatIds($pdo, $settingField) {
+    $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary', 'data_updates', 'expiring_items', 'restaurant_sales'];
+    if (!in_array($settingField, $allowed)) {
+        // Без фильтра — всем
+        $s = $pdo->query("SELECT telegram_chat_id FROM users WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
+        return $s->fetchAll(PDO::FETCH_COLUMN);
+    }
+    $s = $pdo->prepare("SELECT u.telegram_chat_id
+        FROM users u
+        LEFT JOIN telegram_settings ts ON ts.user_name = u.name
+        WHERE u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id != ''
+          AND COALESCE(ts.`$settingField`, 1) = 1");
+    $s->execute();
+    return $s->fetchAll(PDO::FETCH_COLUMN);
+}
+
 function notifyTelegramDataUpdate($pdo, $type, $userName, $legalEntity = '', $count = 0) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
@@ -79,13 +99,116 @@ function notifyTelegramDataUpdate($pdo, $type, $userName, $legalEntity = '', $co
     $label = $typeNames[$type] ?? $type;
     $leInfo = $legalEntity ? " ({$legalEntity})" : '';
 
-    $text = "<b>{$label}</b> — данные обновлены{$leInfo}\n";
-    $text .= "👤 {$userName} в {$time}\n";
+    $safeUser = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
+    $safeLE = htmlspecialchars($leInfo, ENT_QUOTES, 'UTF-8');
+    $text = "<b>{$label}</b> — данные обновлены{$safeLE}\n";
+    $text .= "👤 {$safeUser} в {$time}\n";
     $text .= "📝 Загружено записей: {$count}";
 
-    $s = $pdo->query("SELECT telegram_chat_id FROM users WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
-    $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
+    $chatIds = getSubscribedChatIds($pdo, 'data_updates');
     sendTelegramBulk($botToken, $chatIds, $text);
+}
+
+/**
+ * После загрузки сроков годности — уведомление о товарах с истекающим сроком (до 30 дней), по юрлицам.
+ */
+function notifyTelegramExpiringItems($pdo, $userName) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    if (!$botToken) return;
+
+    try {
+        $s = $pdo->prepare("SELECT customer, product_name, expiry_date, quantity
+            FROM stock_malling
+            WHERE expiry_date IS NOT NULL
+              AND expiry_date >= CURDATE()
+              AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+            ORDER BY customer, expiry_date ASC");
+        $s->execute();
+        $rows = $s->fetchAll(PDO::FETCH_ASSOC);
+        if (empty($rows)) return;
+
+        // Группируем по юрлицу
+        $grouped = [];
+        foreach ($rows as $r) {
+            $grouped[$r['customer']][] = $r;
+        }
+
+        $tz = new DateTimeZone('Europe/Minsk');
+        $today = new DateTime('now', $tz);
+        $safeUser = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
+
+        $text = "⚠️ <b>Истекающие сроки годности</b> (до 30 дней)\n";
+        $text .= "👤 Загрузил: {$safeUser}\n\n";
+
+        foreach ($grouped as $entity => $items) {
+            $safeEntity = htmlspecialchars($entity, ENT_QUOTES, 'UTF-8');
+            $count = count($items);
+            $text .= "🏢 <b>{$safeEntity}</b> — {$count} поз.\n";
+            // Показываем до 10 позиций на юрлицо
+            $shown = 0;
+            foreach ($items as $item) {
+                if ($shown >= 10) { $text .= "   … и ещё " . ($count - 10) . "\n"; break; }
+                $exp = new DateTime($item['expiry_date']);
+                $days = (int)$today->diff($exp)->days;
+                $daysStr = $days === 0 ? 'сегодня!' : ($days === 1 ? 'завтра' : "через {$days} д.");
+                $name = htmlspecialchars(mb_substr($item['product_name'], 0, 40), ENT_QUOTES, 'UTF-8');
+                $qty = floatval($item['quantity']);
+                $qtyStr = ($qty == intval($qty)) ? intval($qty) : $qty;
+                $text .= "   • {$name} — {$qtyStr} шт, {$daysStr}\n";
+                $shown++;
+            }
+            $text .= "\n";
+        }
+
+        $chatIds = getSubscribedChatIds($pdo, 'expiring_items');
+        sendTelegramBulk($botToken, $chatIds, $text);
+    } catch (PDOException $e) {
+        error_log("notifyTelegramExpiringItems error: " . $e->getMessage());
+    }
+}
+
+/**
+ * После загрузки реализации ресторанов — уведомление о новых днях.
+ */
+function notifyTelegramRestaurantSales($pdo, $userName, $items, $count) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    if (!$botToken) return;
+
+    try {
+        $tz = new DateTimeZone('Europe/Minsk');
+        $time = (new DateTime('now', $tz))->format('H:i');
+        $safeUser = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
+
+        // Определяем диапазон загруженных дат
+        $dates = array_filter(array_unique(array_column($items, 'sale_date')));
+        sort($dates);
+        $datesCount = count($dates);
+        $groupsCount = count(array_unique(array_column($items, 'analog_group')));
+
+        // Общий диапазон в БД после загрузки
+        $s = $pdo->query("SELECT MIN(sale_date) as min_date, MAX(sale_date) as max_date, COUNT(DISTINCT sale_date) as total_days FROM restaurant_sales");
+        $totals = $s->fetch(PDO::FETCH_ASSOC);
+
+        $text = "🍽 <b>Реализация ресторанов</b> — данные обновлены\n";
+        $text .= "👤 {$safeUser} в {$time}\n";
+        $text .= "📝 Загружено записей: {$count}\n";
+        if ($datesCount > 0) {
+            $from = (new DateTime($dates[0]))->format('d.m.Y');
+            $to = (new DateTime($dates[$datesCount - 1]))->format('d.m.Y');
+            $text .= "📅 Дни: {$from} — {$to} ({$datesCount} дн.)\n";
+            $text .= "📦 Товарных групп: {$groupsCount}\n";
+        }
+        if ($totals && $totals['min_date']) {
+            $totalFrom = (new DateTime($totals['min_date']))->format('d.m.Y');
+            $totalTo = (new DateTime($totals['max_date']))->format('d.m.Y');
+            $text .= "\n📊 Всего в базе: {$totalFrom} — {$totalTo} ({$totals['total_days']} дн.)";
+        }
+
+        $chatIds = getSubscribedChatIds($pdo, 'restaurant_sales');
+        sendTelegramBulk($botToken, $chatIds, $text);
+    } catch (PDOException $e) {
+        error_log("notifyTelegramRestaurantSales error: " . $e->getMessage());
+    }
 }
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
@@ -111,7 +234,9 @@ $TABLE_TO_MODULE = [
 ];
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
-$ENTITY_TABLES = ['orders','order_items','plans','item_order','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports'];
+// Таблицы с колонкой legal_entity — для автоматической фильтрации по юрлицу
+// order_items и item_order НЕ включены: у них нет legal_entity, доступ контролируется через родительскую таблицу orders
+$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports'];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
     $base = $templates[$role] ?? $templates['user'];
@@ -124,7 +249,7 @@ function resolvePermissions($role, $permissionsJson, $templates) {
 
 function checkLegalEntityAccess($sessionUser, $legalEntity) {
     if (!$sessionUser) return true;
-    if (!$legalEntity) return false;
+    if (!$legalEntity) return true; // Запись без юрлица — доступна всем авторизованным
     if (($sessionUser['role'] ?? '') === 'admin') return true;
     $userEntities = $sessionUser['legal_entities'] ?? '';
     if (is_string($userEntities)) {
@@ -145,9 +270,11 @@ function uuid() { return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', random_
 
 function verifyAndMigratePassword($pdo, $userName, $inputPassword, $storedHash) {
     if (password_verify($inputPassword, $storedHash)) return true;
-    if (hash_equals($storedHash, $inputPassword)) {
+    // Fallback: plain-text migration — only if stored value is NOT a bcrypt hash
+    if (strncmp($storedHash, '$2', 2) !== 0 && hash_equals($storedHash, $inputPassword)) {
         $hash = password_hash($inputPassword, PASSWORD_BCRYPT);
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([$hash, $userName]);
+        error_log("Password migrated to bcrypt for user: $userName");
         return true;
     }
     return false;
@@ -178,10 +305,15 @@ function getSessionUser($pdo) {
         global $endpoint;
         if (($endpoint ?? '') === 'uploads') {
             $token = $_GET['token'];
+            // Убираем токен из GET, чтобы он не попал в логи ошибок PHP
+            unset($_GET['token']);
+            // Запрещаем кэширование URL с токеном
+            header('Cache-Control: no-store, no-cache, must-revalidate');
+            header('Pragma: no-cache');
         }
     }
     if (!$token) { $_sessionUserCache['result'] = null; return null; }
-    if (mt_rand(1, 100) === 1) {
+    if (mt_rand(1, 100) <= 5) {
         try { $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()"); } catch (PDOException $e) { /* не критично */ }
     }
     $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at, u.telegram_chat_id FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
@@ -248,11 +380,16 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     }
     elseif ($val === 'is.null') { $where[] = "`$key` IS NULL"; }
     elseif ($val === 'not.is.null') { $where[] = "`$key` IS NOT NULL"; }
+    elseif (preg_match('/^not\.(eq|neq|gt|gte|lt|lte)\.(.+)$/', $val, $m)) {
+        $ops = ['eq'=>'!=','neq'=>'=','gt'=>'<=','gte'=>'<','lt'=>'>=','lte'=>'>'];
+        $where[] = "`$key` {$ops[$m[1]]} ?"; $params[] = $m[2];
+    }
     else { $where[]="`$key`=?"; $params[]=$val; }
 }
 
 function parseOr($orStr, &$where, &$params, $allowedFields = []) {
-    $parts = preg_split('/,(?=[a-zA-Z_])/', $orStr);
+    // Разделяем по запятой перед именем колонки, но не по экранированным запятым (\,)
+    $parts = preg_split('/(?<!\\\\),(?=[a-zA-Z_])/', $orStr);
     $orClauses = [];
     foreach ($parts as $part) {
         if (preg_match('/^(\w+)\.(eq|neq|gt|gte|lt|lte)\.(.+)$/', $part, $m)) {
@@ -260,12 +397,14 @@ function parseOr($orStr, &$where, &$params, $allowedFields = []) {
             if (!empty($allowedFields) && !in_array($m[1], $allowedFields)) continue;
             $ops = ['eq'=>'=','neq'=>'!=','gt'=>'>','gte'=>'>=','lt'=>'<','lte'=>'<='];
             $orClauses[] = "`{$m[1]}` {$ops[$m[2]]} ?";
-            $params[] = $m[3];
+            // Убираем экранирование спецсимволов в значении
+            $params[] = str_replace(['\\,', '\\(', '\\)', '\\\\'], [',', '(', ')', '\\'], $m[3]);
         } elseif (preg_match('/^(\w+)\.ilike\.(.+)$/', $part, $m)) {
             if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $m[1])) continue;
             if (!empty($allowedFields) && !in_array($m[1], $allowedFields)) continue;
             $orClauses[] = "`{$m[1]}` LIKE ? ESCAPE '\\\\'";
-            $likeVal = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $m[2]);
+            $raw = str_replace(['\\,', '\\(', '\\)', '\\\\'], [',', '(', ')', '\\'], $m[2]);
+            $likeVal = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $raw);
             $params[] = str_replace(['%25','*'], '%', $likeVal);
         }
     }

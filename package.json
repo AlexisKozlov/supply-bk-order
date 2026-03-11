@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "rm -rf dist && vite build && ln -sf \"$(pwd)/api\" \"$(pwd)/dist/api\"",
+    "build": "rm -rf dist && vite build && mkdir -p dist/api && cp -r api/*.php api/includes api/migrations dist/api/",
     "preview": "vite preview"
   },
   "dependencies": {

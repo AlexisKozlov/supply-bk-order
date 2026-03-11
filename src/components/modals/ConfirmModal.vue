@@ -16,11 +16,11 @@
 <script setup>
 import { onMounted, onUnmounted } from 'vue';
 
-defineProps({ title: String, message: String });
+const props = defineProps({ title: String, message: String, dangerous: { type: Boolean, default: false } });
 const emit = defineEmits(['confirm', 'cancel']);
 
 function onKey(e) {
-  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); emit('confirm'); }
+  if (e.key === 'Enter' && !props.dangerous) { e.preventDefault(); e.stopPropagation(); emit('confirm'); }
   else if (e.key === 'Escape') { e.stopPropagation(); emit('cancel'); }
 }
 onMounted(() => document.addEventListener('keydown', onKey));

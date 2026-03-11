@@ -76,8 +76,9 @@
 <script setup>
 import { onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import { formatDateTime as formatDate } from '@/lib/utils.js';
 
-defineProps({
+const props = defineProps({
   show: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   entries: { type: Array, default: () => [] },
@@ -120,12 +121,6 @@ function badgeClass(action) {
   return '';
 }
 
-function formatDate(str) {
-  if (!str) return '';
-  const d = new Date(str);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
-         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 </script>
 
 <style scoped>

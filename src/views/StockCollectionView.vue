@@ -105,6 +105,7 @@
                 <th v-for="prod in collectionData.products" :key="prod.id" class="col-prod sortable" @click="toggleSort('prod_' + prod.id)">
                   <div>{{ prod.product_name }} <span class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></div>
                   <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
+                  <div v-if="prod.note" class="th-note" :title="prod.note">{{ prod.note }}</div>
                 </th>
                 <th v-if="activeCollection.status === 'active'" class="col-del"></th>
               </tr>
@@ -312,6 +313,9 @@
                   </div>
                 </template>
               </div>
+
+              <!-- Note -->
+              <input v-model="p.note" type="text" placeholder="Примечание (видно сборщикам)" class="sc-input full sc-note-input" />
             </div>
             <button class="sc-btn outline full" @click="addProductRow" style="margin-top: 8px;">+ Добавить товар</button>
           </div>
@@ -408,7 +412,7 @@ const missingRestaurants = computed(() => {
 });
 
 function makeProductRow() {
-  return { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], showDrop: false, searchQuery: '', manual: false, supplier: '', searching: false };
+  return { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], showDrop: false, searchQuery: '', manual: false, supplier: '', searching: false, note: '' };
 }
 function addProductRow() {
   newProducts.value.push(makeProductRow());
@@ -505,6 +509,7 @@ async function createCollection() {
       name: p.name.trim(),
       sku: p.sku.trim() || null,
       unit: p.unit,
+      note: p.note.trim() || null,
     }));
     const { data } = await db.rpc('sc_create_collection', {
       legal_entity: orderStore.settings.legalEntity,
@@ -974,6 +979,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 }
 .sc-tbl thead th.col-prod { white-space: normal; word-break: break-word; max-width: 80px; font-size: 10px; line-height: 1.3; }
 .sc-tbl thead th .th-unit { font-weight: 400; font-size: 9px; opacity: 0.7; margin-top: 1px; }
+.sc-tbl thead th .th-note { font-weight: 400; font-size: 9px; color: #c88; font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .sc-tbl tbody td {
   padding: 5px 5px; border-bottom: 1px solid #f0ece6; text-align: center;
 }
@@ -1089,6 +1095,8 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-product-unit-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .sc-product-unit-label { font-size: 12px; color: var(--muted); font-weight: 500; }
 .sc-unit-locked { font-size: 12px; font-weight: 700; color: #502314; padding: 5px 12px; background: #F0EBE4; border-radius: 6px; }
+.sc-note-input { margin-top: 8px; font-size: 12px; }
+.sc-note-input::placeholder { font-style: italic; }
 
 /* Dropdown */
 .sc-drop {

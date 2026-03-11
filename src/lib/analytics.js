@@ -737,11 +737,7 @@ export async function getForecastData(legalEntity) {
         if (!withYoy.length) return null;
         return Math.round(withYoy.reduce((s, i) => s + i.yoyChange, 0) / withYoy.length);
       })(),
-      lastYearBoxes: (() => {
-        const withLy = items.filter(i => i.lastYearBoxes !== null);
-        if (!withLy.length) return null;
-        return Math.round(withLy.reduce((s, i) => s + i.lastYearBoxes, 0) * 10) / 10;
-      })(),
+      // lastYearBoxes не задаётся у отдельных позиций прогноза — убираем агрегацию
     });
   }
 

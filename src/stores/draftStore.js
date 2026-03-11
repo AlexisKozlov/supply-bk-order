@@ -300,7 +300,10 @@ export const useDraftStore = defineStore('draft', () => {
       // Обрабатываем по порядку
       for (const entry of entries.sort((a, b) => a.id.localeCompare(b.id))) {
         try {
-          const fetchOpts = { method: entry.method, headers: { 'Content-Type': 'application/json' } };
+          const headers = { 'Content-Type': 'application/json' };
+          const sessionToken = localStorage.getItem('bk_session_token');
+          if (sessionToken) headers['X-Session-Token'] = sessionToken;
+          const fetchOpts = { method: entry.method, headers };
           if (entry.body) fetchOpts.body = JSON.stringify(entry.body);
           const resp = await fetch(entry.url, fetchOpts);
           if (resp.ok) {

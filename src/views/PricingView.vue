@@ -516,7 +516,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter } from '@/lib/utils.js';
+import { applyEntityFilter, formatDate, formatDateTimeFull as formatDateTime } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -679,13 +679,6 @@ function formatPrice(v) {
   const n = parseFloat(v);
   if (isNaN(n)) return '—';
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function formatDate(d) {
-  if (!d) return '';
-  const ds = typeof d === 'string' && d.length === 10 ? d + 'T00:00:00' : d;
-  const dt = new Date(ds);
-  if (isNaN(dt)) return d;
-  return dt.toLocaleDateString('ru-RU');
 }
 function statusLabel(s) {
   return { draft: 'Черновик', active: 'Действует', archived: 'Архив' }[s] || s;
@@ -1187,12 +1180,6 @@ async function showHistory(p) {
   }
 }
 
-function formatDateTime(d) {
-  if (!d) return '';
-  const dt = new Date(d);
-  if (isNaN(dt)) return d;
-  return dt.toLocaleDateString('ru-RU') + ' ' + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 
 function priceDiffClass(h) {
   if (!h.old_price) return '';

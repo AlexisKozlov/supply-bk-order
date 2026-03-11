@@ -736,7 +736,10 @@ function planMetaTooltip(item) {
 
 function displayStock(item, field) {
   const val = item[field]; if (val == null) return '';
-  return inputUnit.value === 'boxes' ? Math.ceil(val / getQpb(item)) : val;
+  if (inputUnit.value !== 'boxes') return val;
+  const qpb = getQpb(item);
+  const boxes = val / qpb;
+  return boxes % 1 === 0 ? boxes : +boxes.toFixed(1);
 }
 
 // Безопасный вычислитель арифметических выражений (без new Function)
@@ -862,7 +865,7 @@ function onTransitInput(idx, weekIdx, rawValue) {
 function cwDeficitDisplay(stockAfter, item) {
   const deficit = Math.abs(stockAfter);
   const qpb = getQpb(item);
-  if (inputUnit.value === 'boxes' && qpb > 1) {
+  if (inputUnit.value === 'boxes') {
     return '−' + Math.ceil(deficit / qpb) + ' кор';
   }
   return '−' + Math.ceil(deficit) + ' шт';

@@ -503,7 +503,7 @@ td input[type="number"]:focus {
 .order-table:not(.plan-table) > tbody > tr > td:first-child:active {
   cursor: grabbing;
 }
-tbody tr {
+.order-table tbody tr {
   animation: rowFadeIn 0.2s ease both;
 }
 
@@ -1136,7 +1136,7 @@ td.plan-td-result:hover {
 }
 
 .setting-group label {
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -1316,10 +1316,7 @@ td.plan-td-result:hover {
   font-weight: 500;
 }
 .calc-wrap:hover .calc-tip { display: block; }
-.calc-tip-row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-.calc-tip-lbl { color: #b0ada8; }
-.calc-tip-val { font-weight: 600; white-space: nowrap; }
-.calc-tip-hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 5px 0; }
+/* calc-tip-row/lbl/val/hr — удалены, используется версия в style.css под .calc-tip-portal */
 
 /* ─── History View ─── */
 .history-view {

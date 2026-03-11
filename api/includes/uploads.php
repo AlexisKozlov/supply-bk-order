@@ -64,7 +64,7 @@ if ($endpoint === 'upload' && $subpoint === 'act') {
         'application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png',
         'image/webp' => 'webp', 'image/heic' => 'heic', default => 'bin',
     };
-    $filename = 'act_' . preg_replace('/[^a-zA-Z0-9_-]/', '', $orderId) . '_' . time() . '.' . $ext;
+    $filename = 'act_' . preg_replace('/[^a-zA-Z0-9_-]/', '', $orderId) . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
     $uploadDir = __DIR__ . '/../uploads/acts/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
     $dest = $uploadDir . $filename;
@@ -87,7 +87,8 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
     $caller = getSessionUser($pdo);
     if ($caller) {
-        $actS = $pdo->prepare("SELECT legal_entity FROM orders WHERE act_file LIKE ?"); $actS->execute(['%' . $filename]);
+        $safeName = str_replace(['%', '_'], ['\\%', '\\_'], $filename);
+        $actS = $pdo->prepare("SELECT legal_entity FROM orders WHERE act_file LIKE ? ESCAPE '\\\\'"); $actS->execute(['%' . $safeName]);
         $actRow = $actS->fetch();
         if ($actRow && !checkLegalEntityAccess($caller, $actRow['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
     }
@@ -137,7 +138,7 @@ if ($endpoint === 'upload' && $subpoint === 'psc') {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
         'application/vnd.ms-excel' => 'xls', default => 'bin',
     };
-    $filename = 'psc_' . intval($agreementId) . '_' . time() . '.' . $ext;
+    $filename = 'psc_' . intval($agreementId) . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
     $uploadDir = __DIR__ . '/../uploads/psc/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
     $dest = $uploadDir . $filename;
@@ -163,8 +164,9 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'psc' && isset($parts[2])) 
     if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
     $caller = getSessionUser($pdo);
     if ($caller) {
-        $fchk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE file_path LIKE ?");
-        $fchk->execute(['%' . $filename]);
+        $safeName = str_replace(['%', '_'], ['\\%', '\\_'], $filename);
+        $fchk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE file_path LIKE ? ESCAPE '\\\\'");
+        $fchk->execute(['%' . $safeName]);
         $fle = $fchk->fetchColumn();
         if ($fle && !checkLegalEntityAccess($caller, $fle)) respond(['error' => 'Нет доступа'], 403);
     }
@@ -239,7 +241,7 @@ if ($endpoint === 'upload' && $subpoint === 'tender-kp') {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
         'application/msword' => 'doc', default => 'bin',
     };
-    $filename = 'tkp_' . $tenderId . '_' . time() . '_' . mt_rand(100,999) . '.' . $ext;
+    $filename = 'tkp_' . $tenderId . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
     $uploadDir = __DIR__ . '/../uploads/tenders/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
     $dest = $uploadDir . $filename;
@@ -304,7 +306,7 @@ if ($endpoint === 'upload' && $subpoint === 'bug-screenshot') {
         'image/jpeg' => 'jpg', 'image/png' => 'png',
         'image/webp' => 'webp', 'image/gif' => 'gif', default => 'bin',
     };
-    $filename = 'bug_' . time() . '_' . mt_rand(1000,9999) . '.' . $ext;
+    $filename = 'bug_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
     $uploadDir = __DIR__ . '/../uploads/bugs/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
     $dest = $uploadDir . $filename;

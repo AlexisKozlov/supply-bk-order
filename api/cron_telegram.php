@@ -85,6 +85,8 @@ if ($hour === 9 && $minute < 5) {
         // Юрлица пользователя
         $le = $user['legal_entities'];
         $entities = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
+        // Пользователь без привязки к юрлицам — пропускаем (не показываем чужие данные)
+        if (empty($entities)) continue;
         $leFilter = '';
         $leParams = [];
         if (!empty($entities)) {

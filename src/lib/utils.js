@@ -1,4 +1,5 @@
 import { getEntityGroup } from '@/lib/legalEntities.js';
+import { orVal } from '@/lib/apiClient.js';
 
 // Re-export для обратной совместимости (другие модули импортируют из utils)
 export { getEntityGroup };
@@ -12,7 +13,7 @@ export function applyEntityFilter(query, legalEntity, column = 'legal_entity') {
   if (group.length === 1) {
     return query.eq(column, group[0]);
   }
-  return query.or(group.map(e => `${column}.eq.${e}`).join(','));
+  return query.or(group.map(e => orVal(column, 'eq', e)).join(','));
 }
 
 export function daysBetween(date1, date2) {
@@ -77,6 +78,71 @@ export function formatMoscowRelative(str) {
   if (diff < 172800) return 'вчера';
   if (diff < 604800) return `${Math.floor(diff / 86400)} дн назад`;
   return formatMoscowDateTime(str);
+}
+
+/**
+ * Парсит строку даты, безопасно обрабатывая даты без времени (YYYY-MM-DD).
+ * Добавляет T00:00:00, чтобы дата не сдвигалась из-за таймзоны.
+ */
+export function parseLocalDate(str) {
+  if (!str) return null;
+  if (typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return new Date(str + 'T00:00:00');
+  }
+  return new Date(str);
+}
+
+/**
+ * Форматирует дату в «дд.мм.гггг» (полная дата).
+ */
+export function formatDate(d) {
+  if (!d) return '';
+  const dt = parseLocalDate(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/**
+ * Форматирует дату в «дд.мм» (короткая, без года).
+ */
+export function formatDateShort(d) {
+  if (!d) return '';
+  const dt = parseLocalDate(d);
+  if (isNaN(dt)) return '';
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
+/**
+ * Форматирует дату и время в «дд.мм.гг чч:мм» (2-значный год).
+ */
+export function formatDateTime(d) {
+  if (!d) return '';
+  const dt = parseLocalDate(d);
+  if (isNaN(dt)) return '';
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
+         dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Форматирует дату и время в «дд.мм.гггг чч:мм» (4-значный год).
+ */
+export function formatDateTimeFull(d) {
+  if (!d) return '';
+  const dt = parseLocalDate(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString('ru-RU') + ' ' +
+         dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Форматирует дату и время в «дд.мм чч:мм» (без года).
+ */
+export function formatDateTimeShort(d) {
+  if (!d) return '';
+  const dt = parseLocalDate(d);
+  if (isNaN(dt)) return '';
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
+         dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
 export function debug(...args) {

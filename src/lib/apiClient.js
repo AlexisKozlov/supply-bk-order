@@ -77,9 +77,12 @@ class QueryBuilder {
   lte(c, v)   { this._f[c] = `lte.${v}`;    return this; }
   in(c, v)    { if (!Array.isArray(v) || !v.length) { this._emptyIn = true; return this; } this._f[c] = `in.(${v.map(x => String(x).replace(/,/g, '\\,')).join(',')})`; return this; }
   is(c, v)    { this._f[c] = v === null ? 'is.null' : `eq.${v}`; return this; }
+  // Примечание: несколько фильтров на одну и ту же колонку не поддерживаются —
+  // каждый новый вызов .eq()/.neq()/etc. для той же колонки перезапишет предыдущий.
+  // Для сложных условий на одну колонку используйте .or().
   not(c, op, v) {
     if (op === 'is' && v === null) { this._f[c] = 'not.is.null'; return this; }
-    this._f[c] = `neq.${v}`; return this;
+    this._f[c] = `not.${op}.${v}`; return this;
   }
   ilike(c, v) { this._f[c] = `ilike.${v}`;  return this; }
   or(conditions) { this._or = conditions;    return this; }
@@ -192,3 +195,13 @@ export const db = {
 };
 
 export function setSessionToken(t) { localStorage.setItem('bk_session_token', t); }
+
+/**
+ * Экранирует значение для использования в or()-условиях.
+ * Запятые, скобки и обратные слэши в значении экранируются,
+ * чтобы бэкенд не разбил строку в неправильном месте.
+ */
+export function orVal(col, op, val) {
+  const safe = String(val).replace(/[\\,()]/g, c => '\\' + c);
+  return `${col}.${op}.${safe}`;
+}

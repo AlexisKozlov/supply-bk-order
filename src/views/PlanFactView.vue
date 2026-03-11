@@ -268,7 +268,7 @@ import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useDraftStore } from '@/stores/draftStore.js'
 import { useConfirm } from '@/composables/useConfirm.js'
-import { applyEntityFilter } from '@/lib/utils.js'
+import { applyEntityFilter, formatDate, formatDateShort } from '@/lib/utils.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
@@ -476,15 +476,6 @@ async function loadCounts(requestId) {
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
 
-function formatDate(dateStr) {
-  if (!dateStr) return '—'
-  const d = new Date(dateStr + 'T00:00:00')
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-function formatDateShort(d) {
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-}
 
 function getDiscrepancyCount(order) {
   if (!order.order_items) return 0

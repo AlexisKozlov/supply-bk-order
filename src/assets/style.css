@@ -196,7 +196,7 @@ body {
   font-size: 9px; font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1.2px;
-  color: rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.55);
   flex-shrink: 0;
 }
 
@@ -247,7 +247,7 @@ body {
   font-size: 8px; font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.55);
   margin-bottom: 2px;
 }
 
@@ -295,7 +295,7 @@ body {
 
 .user-info { flex: 1; min-width: 0; }
 .user-name { font-size: 12px; font-weight: 600; color: white; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.user-role { font-size: 10px; color: rgba(255,255,255,0.3); }
+.user-role { font-size: 10px; color: rgba(255,255,255,0.55); }
 
 .btn-icon {
   background: none; border: none; color: rgba(255,255,255,0.4);
@@ -316,18 +316,11 @@ body {
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .topbar-user { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 
-.sidebar-avatar {
-  width: 32px; height: 32px;
-  background: linear-gradient(135deg, var(--bk-red), var(--bk-orange));
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  color: white; font-weight: 700; font-size: 11px;
-  flex-shrink: 0;
-}
+/* .sidebar-avatar — удалён, дубликат .user-avatar-letters (строка 287) */
 
 .sidebar-user-info { flex: 1; min-width: 0; }
 .sidebar-user-name { font-size: 12px; font-weight: 600; color: white; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-user-role { font-size: 10px; color: rgba(255,255,255,0.3); }
+.sidebar-user-role { font-size: 10px; color: rgba(255,255,255,0.55); }
 
 /* User dropdown */
 .user-dropdown {
@@ -634,7 +627,8 @@ select:focus, input:focus, textarea:focus {
 }
 select:focus-visible, input:focus-visible, textarea:focus-visible,
 button:focus-visible, .btn:focus-visible {
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -1241,7 +1235,7 @@ input[type="number"]:focus {
 /* ═══════ VERSION IN SIDEBAR ═══════ */
 .sidebar-version {
   font-size: 10px;
-  color: rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.45);
   text-align: center;
   padding: 6px 0 2px;
   font-weight: 600;
@@ -1378,6 +1372,10 @@ input[type="number"]:focus {
     right: 0;
     left: auto;
   }
+
+  .summary-details-panel {
+    min-width: unset;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1460,7 +1458,7 @@ input[type="number"]:focus {
 @keyframes welcomeSlide {
   from { opacity: 0; transform: translateY(20px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+}
 
 /* ═══════ DESKTOP SIDEBAR TOGGLE ═══════ */
 .desktop-sidebar-toggle {
@@ -2184,13 +2182,9 @@ button:disabled .bk-icon-wrap svg {
 @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pageOut { from { opacity: 1; } to { opacity: 0; } }
 
-/* ═══════ TABLE ROW ANIMATIONS (reserved) ═══════ */
-
 /* ═══════ PARAMS EXPAND ANIMATION ═══════ */
 .params-fields-animated { animation: expandIn 0.2s ease; }
 @keyframes expandIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
-
-/* ═══════ TABLE ROW ANIMATIONS (unused — removed TransitionGroup) ═══════ */
 
 /* Hide mobile-only elements on desktop */
 .mob-calc-btn { display: none !important; }
@@ -2528,5 +2522,13 @@ button:disabled .bk-icon-wrap svg {
   }
   .plan-mob-total b { color: var(--bk-brown); }
   .plan-mob-total-units { font-size: 10px; color: var(--text-muted); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 

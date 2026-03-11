@@ -36,11 +36,13 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT value FROM settings WHERE `key`='order_calculator_password'"); $s->execute();
         $stored = $s->fetchColumn();
         if ($stored) {
-            $ok = password_verify($pwd, $stored) || hash_equals($stored, $pwd);
+            $isLegacyPlain = strncmp($stored, '$2', 2) !== 0;
+            $ok = password_verify($pwd, $stored) || ($isLegacyPlain && hash_equals($stored, $pwd));
             if ($ok) {
-                if (hash_equals($stored, $pwd)) {
+                if ($isLegacyPlain) {
                     $hash = password_hash($pwd, PASSWORD_BCRYPT);
                     $pdo->prepare("UPDATE settings SET value=? WHERE `key`='order_calculator_password'")->execute([$hash]);
+                    error_log("Legacy password migrated to bcrypt for setting: order_calculator_password");
                 }
                 respond(['success'=>true]);
             }
@@ -156,7 +158,7 @@ if ($endpoint === 'rpc') {
         if (!$row) respond(['error' => 'not_found', 'expired' => true]);
         if (strtotime($row['expires_at']) < time()) respond(['error' => 'expired', 'expired' => true]);
         // Товары
-        $s2 = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
+        $s2 = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
         $s2->execute([$row['collection_id']]);
         $products = $s2->fetchAll();
         // Рестораны, которые уже ответили
@@ -201,6 +203,7 @@ if ($endpoint === 'rpc') {
             foreach ($items as $item) {
                 $pid = intval($item['product_id'] ?? 0);
                 $sv = floatval($item['stock'] ?? 0);
+                if ($sv < 0 || $sv > 999999) continue;
                 if ($pid > 0 && isset($allowedSet[$pid])) $ins->execute([$collId, $pid, $restNum, $sv]);
             }
             $pdo->commit();
@@ -297,7 +300,7 @@ if ($endpoint === 'rpc') {
         // Отправляем приветствие в Telegram
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if ($botToken) {
-            $tgMsg = "✅ Аккаунт <b>{$sessionUser['name']}</b> привязан!\n\nТеперь вам доступны все команды бота.\nНажмите /start для меню.";
+            $tgMsg = "✅ Аккаунт <b>" . htmlspecialchars($sessionUser['name'], ENT_QUOTES, 'UTF-8') . "</b> привязан!\n\nТеперь вам доступны все команды бота.\nНажмите /start для меню.";
             sendTelegramMessage($botToken, $chatId, $tgMsg);
         }
         respond(['success' => true, 'user_name' => $sessionUser['name']]);
@@ -347,12 +350,13 @@ if ($endpoint === 'rpc') {
             $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, name, created_by) VALUES (?, ?, ?)");
             $s->execute([$le, $name, $uname]);
             $collId = $pdo->lastInsertId();
-            $ins = $pdo->prepare("INSERT INTO stock_collection_products (collection_id, product_name, product_sku, unit, sort_order) VALUES (?, ?, ?, ?, ?)");
+            $ins = $pdo->prepare("INSERT INTO stock_collection_products (collection_id, product_name, product_sku, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?)");
             foreach ($products as $i => $p) {
                 $pname = mb_substr($p['name'] ?? '', 0, 255);
                 $psku = mb_substr($p['sku'] ?? '', 0, 50) ?: null;
                 $punit = in_array($p['unit'] ?? '', ['boxes', 'pieces', 'kg', 'liters']) ? $p['unit'] : 'pieces';
-                $ins->execute([$collId, $pname, $psku, $punit, $i]);
+                $pnote = mb_substr($p['note'] ?? '', 0, 500) ?: null;
+                $ins->execute([$collId, $pname, $psku, $punit, $i, $pnote]);
             }
             $pdo->commit();
         } catch (Exception $e) {
@@ -400,7 +404,7 @@ if ($endpoint === 'rpc') {
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
         if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         // Товары
-        $s = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
+        $s = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
         $s->execute([$collId]);
         $products = $s->fetchAll();
         // Данные
@@ -575,7 +579,7 @@ if ($endpoint === 'rpc') {
                 $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
                 $tgTitle = mb_substr($title, 0, 255);
                 $tgMessage = mb_substr($message, 0, 2000);
-                $tgText = "📢 <b>{$tgTitle}</b>\n\n{$tgMessage}\n\n— {$userName}";
+                $tgText = "📢 <b>" . htmlspecialchars($tgTitle, ENT_QUOTES, 'UTF-8') . "</b>\n\n" . htmlspecialchars($tgMessage, ENT_QUOTES, 'UTF-8') . "\n\n— " . htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
                 $tgSent = sendTelegramBulk($botToken, $chatIds, $tgText);
             }
         }
@@ -592,7 +596,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'delete_all_notifications_for_user') {
         $userName = $authUserName;
         if (!$userName) respond(['success' => false, 'error' => 'Не все параметры указаны'], 400);
-        $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE (target_user = ? OR type = 'broadcast') AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $userName, $userName]);
+        $pdo->prepare("UPDATE notifications SET deleted_by = JSON_ARRAY_APPEND(COALESCE(deleted_by, '[]'), '$', ?) WHERE (target_user IS NULL OR target_user = '' OR target_user = ? OR type = 'broadcast') AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))")->execute([$userName, $userName, $userName]);
         respond(['success' => true]);
     }
     if ($fn === 'get_active_broadcasts') {
@@ -721,6 +725,7 @@ if ($endpoint === 'rpc') {
                 $inserted++;
             }
             $pdo->commit();
+            notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
             respond(['success' => true, 'count' => $inserted]);
         } catch (PDOException $e) {
             $pdo->rollBack();
@@ -741,9 +746,22 @@ if ($endpoint === 'rpc') {
         if (empty($items)) respond(['error' => 'Список позиций пуст'], 400);
         if (count($items) > 5000) respond(['error' => 'Слишком много записей (макс. 5000)'], 400);
         $allowed = ['customer','warehouse','product_name','production_date','expiry_date','block_reason','expiry_status','quantity','uploaded_at','uploaded_by'];
+        // Определяем юрлица в загружаемых данных и проверяем доступ
+        $uploadedEntities = array_unique(array_filter(array_column($items, 'customer')));
+        if ($caller['role'] !== 'admin') {
+            foreach ($uploadedEntities as $ue) {
+                if (!checkLegalEntityAccess($caller, $ue)) {
+                    respond(['error' => "Нет доступа к юр. лицу: $ue"], 403);
+                }
+            }
+        }
         try {
             $pdo->beginTransaction();
-            $pdo->exec("DELETE FROM `stock_malling`");
+            // Удаляем только данные юрлиц, которые есть в загрузке (не трогаем чужие)
+            if (!empty($uploadedEntities)) {
+                $ph = implode(',', array_fill(0, count($uploadedEntities), '?'));
+                $pdo->prepare("DELETE FROM `stock_malling` WHERE `customer` IN($ph)")->execute(array_values($uploadedEntities));
+            }
             foreach ($items as $item) {
                 $item = array_intersect_key($item, array_flip($allowed));
                 if (empty($item)) continue;
@@ -754,6 +772,7 @@ if ($endpoint === 'rpc') {
             }
             $pdo->commit();
             notifyTelegramDataUpdate($pdo, 'shelf_life', $caller['name'], '', count($items));
+            notifyTelegramExpiringItems($pdo, $caller['name']);
             respond(['success' => true, 'count' => count($items)]);
         } catch (PDOException $e) {
             $pdo->rollBack();
@@ -1159,7 +1178,19 @@ if ($endpoint === 'rpc') {
         if (!$ag) respond(['error' => 'Протокол не найден'], 404);
         if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         if ($ag['status'] !== 'archived') respond(['error' => 'Протокол не в архиве'], 400);
-        $pdo->prepare("UPDATE price_agreements SET status='active' WHERE id=?")->execute([$id]);
+        $docType = $ag['doc_type'] ?? 'psc';
+        $pdo->beginTransaction();
+        try {
+            // Архивируем текущий активный ПСЦ того же поставщика (аналогично approve_agreement)
+            if ($docType === 'psc') {
+                $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE supplier=? AND legal_entity=? AND status='active' AND doc_type='psc'")->execute([$ag['supplier'], $ag['legal_entity']]);
+            }
+            $pdo->prepare("UPDATE price_agreements SET status='active' WHERE id=?")->execute([$id]);
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            respond(['error' => 'Ошибка восстановления'], 500);
+        }
         respond(['success' => true]);
     }
 
@@ -1585,16 +1616,12 @@ if ($endpoint === 'rpc') {
         if (!$orderId || empty($order)) respond(['error' => 'Не указаны данные заказа'], 400);
         if (count($items) > 5000) respond(['error' => 'Слишком много позиций (макс. 5000)'], 400);
         // Проверяем доступ к юрлицу заказа
-        $orderCheck = $pdo->prepare("SELECT legal_entity, updated_at FROM orders WHERE id=?");
+        $orderCheck = $pdo->prepare("SELECT legal_entity FROM orders WHERE id=?");
         $orderCheck->execute([$orderId]);
         $orderRow = $orderCheck->fetch();
         if (!$orderRow) respond(['error' => 'Заказ не найден'], 404);
         if (!checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
-        // Проверка конкурентного редактирования
         $expectedUpdatedAt = $body['expected_updated_at'] ?? null;
-        if ($expectedUpdatedAt && $orderRow['updated_at'] && $orderRow['updated_at'] !== $expectedUpdatedAt) {
-            respond(['error' => 'Заказ был изменён другим пользователем'], 409);
-        }
         // Белый список полей заказа
         $orderWhitelist = ['supplier','legal_entity','delivery_date','delivery_date_2','unit','note','details','cda_mode','safety_coef','today_date','safety_days','period_days','has_transit','show_stock_column'];
         $order = array_intersect_key($order, array_flip($orderWhitelist));
@@ -1603,6 +1630,14 @@ if ($endpoint === 'rpc') {
         $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category'];
         $pdo->beginTransaction();
         try {
+            // Блокируем строку и проверяем конкурентное редактирование внутри транзакции
+            $lockS = $pdo->prepare("SELECT updated_at FROM orders WHERE id=? FOR UPDATE");
+            $lockS->execute([$orderId]);
+            $locked = $lockS->fetch();
+            if ($expectedUpdatedAt && $locked['updated_at'] && $locked['updated_at'] !== $expectedUpdatedAt) {
+                $pdo->rollBack();
+                respond(['error' => 'Заказ был изменён другим пользователем'], 409);
+            }
             // Блокируем заказ
             $lockStmt = $pdo->prepare("SELECT id FROM `orders` WHERE id=? FOR UPDATE");
             $lockStmt->execute([$orderId]);

@@ -685,22 +685,15 @@ function onUnitChange(e) {
     orderStore.items.forEach(item => {
       const qpb = getQpb(item);
       if (oldUnit === 'pieces' && newUnit === 'boxes') {
-        // Сохраняем оригиналы в штуках для обратной конвертации без потери точности
-        item._stockPcs = item.stock;
-        item._transitPcs = item.transit;
-        item._cpPcs = item.consumptionPeriod;
-        item._finalOrderPcs = item.finalOrder;
         item.consumptionPeriod = item.consumptionPeriod ? Math.round(item.consumptionPeriod / qpb * 100) / 100 : 0;
         item.stock   = item.stock   ? Math.round(item.stock   / qpb * 100) / 100 : 0;
         item.transit = item.transit ? Math.round(item.transit / qpb * 100) / 100 : 0;
         item.finalOrder = item.finalOrder ? Math.round(item.finalOrder / qpb) : 0;
-      } else {
-        // Восстановить из оригиналов если есть, иначе пересчитать
-        item.consumptionPeriod = item._cpPcs ?? Math.round(item.consumptionPeriod * qpb);
-        item.stock   = item._stockPcs ?? Math.round(item.stock * qpb);
-        item.transit = item._transitPcs ?? Math.round(item.transit * qpb);
-        item.finalOrder = item._finalOrderPcs ?? Math.round(item.finalOrder * qpb);
-        delete item._stockPcs; delete item._transitPcs; delete item._cpPcs; delete item._finalOrderPcs;
+      } else if (oldUnit === 'boxes' && newUnit === 'pieces') {
+        item.consumptionPeriod = Math.round(item.consumptionPeriod * qpb);
+        item.stock   = Math.round(item.stock * qpb);
+        item.transit = Math.round(item.transit * qpb);
+        item.finalOrder = Math.round(item.finalOrder * qpb);
       }
     });
   }
@@ -1057,7 +1050,8 @@ function buildOrderText() {
     const accountingBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb;
     const physBoxes = Math.ceil(accountingBoxes / mult);
     if (physBoxes <= 0) return null;
-    const pieces = Math.round(accountingBoxes * qpb);
+    // Штуки считаем от физических коробок (после округления), чтобы соответствовать реальной отгрузке
+    const pieces = Math.round(physBoxes * mult * qpb);
     const unit = item.unitOfMeasure || 'шт';
     return { text: `${item.sku ? item.sku + '  ' : ''}${item.name} - ${physBoxes} коробок (${nf.format(pieces)} ${unit})`, boxes: physBoxes, pieces, name: item.name, sku: item.sku, unit, qpb };
   }).filter(Boolean);

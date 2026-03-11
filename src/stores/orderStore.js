@@ -95,7 +95,7 @@ export const useOrderStore = defineStore('order', () => {
   });
 
   function _snapshot() {
-    _history.push(toRaw(items.value).map(i => ({ ...toRaw(i) })));
+    _history.push({ items: toRaw(items.value).map(i => ({ ...toRaw(i) })), unit: settings.unit });
     _historyVersion.value++;
   }
 
@@ -206,14 +206,17 @@ export const useOrderStore = defineStore('order', () => {
   function undo() {
     const state = _history.undo();
     if (!state) return;
-    items.value = state; // History уже возвращает клон
+    // Обратная совместимость: старый формат — массив, новый — {items, unit}
+    items.value = Array.isArray(state) ? state : state.items;
+    if (state.unit) settings.unit = state.unit;
     _historyVersion.value++;
   }
 
   function redo() {
     const state = _history.redo();
     if (!state) return;
-    items.value = state; // History уже возвращает клон
+    items.value = Array.isArray(state) ? state : state.items;
+    if (state.unit) settings.unit = state.unit;
     _historyVersion.value++;
   }
 
@@ -246,6 +249,18 @@ export const useOrderStore = defineStore('order', () => {
 
   async function loadOrderIntoForm(order, legalEntity, isEditing = false, isViewOnly = false) {
     const myRequestId = ++_loadRequestId;
+
+    const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
+    let productMap = {};
+    if (skus.length > 0) {
+      let prodQuery = db.from('products').select('*').in('sku', skus);
+      prodQuery = applyEntityFilter(prodQuery, legalEntity);
+      const { data: productsData } = await prodQuery;
+      if (myRequestId !== _loadRequestId) return; // Новый вызов перехватил — выходим
+      if (productsData) productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));
+    }
+
+    // Состояние обновляем ПОСЛЕ асинхронных операций и проверки requestId
     items.value = [];
     settings.legalEntity = legalEntity;
     settings.supplier = order.supplier || '';
@@ -259,16 +274,6 @@ export const useOrderStore = defineStore('order', () => {
     settings.note = order.notes || order.note || '';
     settings.cdaMode = order.cda_mode === true || order.cda_mode === 1 || order.cda_mode === '1';
     settings.safetyCoef = parseFloat(order.safety_coef) || 1.0;
-
-    const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
-    let productMap = {};
-    if (skus.length > 0) {
-      let prodQuery = db.from('products').select('*').in('sku', skus);
-      prodQuery = applyEntityFilter(prodQuery, settings.legalEntity);
-      const { data: productsData } = await prodQuery;
-      if (myRequestId !== _loadRequestId) return; // Новый вызов перехватил — выходим
-      if (productsData) productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));
-    }
 
     for (const histItem of (order.order_items || [])) {
       const productData = histItem.sku ? productMap[histItem.sku] : null;

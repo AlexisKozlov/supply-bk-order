@@ -190,6 +190,7 @@ import { useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
+import { formatDateTimeShort as formatDate } from '@/lib/utils.js';
 
 const route = useRoute();
 const userStore = useUserStore();
@@ -222,7 +223,9 @@ function logAction(action) {
 let stopRouteWatch = null;
 onMounted(() => {
   logAction('Открыта: ' + route.path);
-  stopRouteWatch = route;
+  stopRouteWatch = watch(() => route.path, (path) => {
+    logAction('Переход: ' + path);
+  });
 
   // Клики
   document.addEventListener('click', onDocClick, true);
@@ -274,6 +277,7 @@ watch(showForm, (open) => {
 
 onUnmounted(() => {
   stopChatPoll();
+  if (stopRouteWatch) stopRouteWatch();
   document.removeEventListener('click', onDocClick, true);
   document.removeEventListener('paste', onPaste);
   window.removeEventListener('error', onGlobalError);
@@ -515,12 +519,6 @@ function statusLabel(s) {
   return { new: 'Новое', in_progress: 'В работе', resolved: 'Решено', closed: 'Закрыто' }[s] || s;
 }
 
-function formatDate(str) {
-  if (!str) return '';
-  const d = new Date(str);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' +
-    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 </script>
 
 <style scoped>

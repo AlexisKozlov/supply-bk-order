@@ -332,6 +332,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { formatDateShort as fmtDateShort, formatDateTime as formatDate } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -557,11 +558,6 @@ async function loadCollectionProductData(prodId, prod) {
   } catch {}
 }
 
-function fmtDateShort(s) {
-  if (!s) return '';
-  const ds = typeof s === 'string' && s.length === 10 ? s + 'T00:00:00' : s;
-  return new Date(ds).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-}
 
 // --- File upload ---
 function openFilePicker() {
@@ -737,11 +733,6 @@ async function loadHistory() {
   } catch {}
 }
 
-function formatDate(s) {
-  if (!s) return '';
-  const d = new Date(s);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 </script>
 
 <style scoped>

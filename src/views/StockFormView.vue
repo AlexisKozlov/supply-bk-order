@@ -54,6 +54,7 @@
             <div class="sf-product-name">{{ prod.product_name }}</div>
             <div class="sf-product-unit">{{ unitFull(prod.unit) }}</div>
           </div>
+          <div v-if="prod.note" class="sf-product-note">{{ prod.note }}</div>
           <div class="sf-product-input-wrap">
             <input
               v-model="stockValues[prod.id]"
@@ -373,6 +374,10 @@ async function submitEdit() {
 .sf-product-unit {
   font-size: 10px; font-weight: 600; color: #FF8733;
   background: #FFF3E0; padding: 1px 6px; border-radius: 5px;
+}
+.sf-product-note {
+  font-size: 12px; color: #888; margin-top: 2px;
+  font-style: italic; line-height: 1.3;
 }
 .sf-product-input-wrap { position: relative; }
 .sf-input {

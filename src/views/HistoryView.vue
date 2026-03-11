@@ -253,7 +253,8 @@ import { useDraftStore } from '@/stores/draftStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { copyToClipboard, getQpb, getMultiplicity } from '@/lib/utils.js';
+import { copyToClipboard, getQpb, getMultiplicity, formatDate, formatDateTime, parseLocalDate as parseDate } from '@/lib/utils.js';
+const formatDateShort = formatDate; // в этом файле обе функции показывают дд.мм.гггг
 import { useConfirm } from '@/composables/useConfirm.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import AuditLogModal from '@/components/modals/AuditLogModal.vue';
@@ -359,26 +360,6 @@ const colorMap = computed(() => {
 function supplierColor(name) { return colorMap.value[name] || '#999'; }
 
 // --- Formatting ---
-function parseDate(str) {
-  if (!str) return null;
-  // Даты без времени (YYYY-MM-DD) парсим как локальные, чтобы не сдвигался день
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return new Date(str + 'T00:00:00');
-  return new Date(str);
-}
-function formatDateShort(str) {
-  const d = parseDate(str);
-  return d ? d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
-}
-function formatDate(str) {
-  const d = parseDate(str);
-  return d ? d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
-}
-function formatDateTime(str) {
-  const d = parseDate(str);
-  if (!d) return '';
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
-         d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
 function dayOfWeek(str) {
   const d = parseDate(str);
   return d ? d.toLocaleDateString('ru-RU', { weekday: 'short' }) : '';

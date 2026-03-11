@@ -47,6 +47,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
+import { formatDate } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -79,13 +80,6 @@ function statusLabel(s) {
 }
 function countByStatus(s) { return tenders.value.filter(t => t.status === s).length; }
 
-function formatDate(d) {
-  if (!d) return '';
-  const ds = typeof d === 'string' && d.length === 10 ? d + 'T00:00:00' : d;
-  const dt = new Date(ds);
-  if (isNaN(dt)) return d;
-  return dt.toLocaleDateString('ru-RU');
-}
 
 let _loadGen = 0;
 async function loadTenders() {

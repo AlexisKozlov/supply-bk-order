@@ -21,8 +21,8 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       qty_per_box:        Math.round(item.qtyPerBox || 1),
       multiplicity:       mult,
       consumption_period: Math.round(item.consumptionPeriod || 0),
-      stock:              Math.round(item.stock || 0),
-      transit:            Math.round(item.transit || 0),
+      stock:              Math.round((item.stock || 0) * 100) / 100,
+      transit:            Math.round((item.transit || 0) * 100) / 100,
     };
   });
 

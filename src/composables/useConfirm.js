@@ -27,5 +27,12 @@ export function useConfirm() {
     confirmModal.value.show = false;
   }
 
-  return { confirmModal, confirm, onConfirm, onCancel };
+  function onClose() {
+    if (confirmModal.value.show && confirmModal.value.resolve) {
+      confirmModal.value.resolve(false);
+    }
+    confirmModal.value.show = false;
+  }
+
+  return { confirmModal, confirm, onConfirm, onCancel, onClose };
 }

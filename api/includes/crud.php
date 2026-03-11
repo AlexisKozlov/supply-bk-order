@@ -27,8 +27,12 @@ $table = $endpoint;
 
 // RBAC: модульная проверка прав
 $sessionUser = getSessionUser($pdo);
-if ($method !== 'GET' && !$sessionUser) {
-    respond(['error' => 'Требуется авторизация по сессии для операций записи'], 401);
+// API-ключ без сессии: разрешаем только чтение
+if (!$sessionUser) {
+    if ($method !== 'GET') {
+        respond(['error' => 'Требуется авторизация по сессии для операций записи'], 401);
+    }
+    // API-ключ даёт только чтение, RBAC не применяется (нет пользователя для проверки ролей)
 }
 if ($sessionUser) {
     $userRole = $sessionUser['role'] ?? 'user';
@@ -84,8 +88,40 @@ if ($sessionUser && in_array($table, $ENTITY_TABLES)) {
     }
     // Для операций записи проверяем legal_entity в теле запроса
     if ($method !== 'GET' && !empty($body)) {
-        $bodyLE = $body['legal_entity'] ?? null;
-        if ($bodyLE && !checkLegalEntityAccess($sessionUser, $bodyLE)) {
+        // Batch insert: проверяем legal_entity в каждой записи массива
+        $recsToCheck = (isset($body[0]) && is_array($body[0])) ? $body : [$body];
+        foreach ($recsToCheck as $rec) {
+            $bodyLE = $rec['legal_entity'] ?? null;
+            if ($bodyLE && !checkLegalEntityAccess($sessionUser, $bodyLE)) {
+                respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            }
+        }
+    }
+}
+
+// Дочерние таблицы тендеров — проверяем юрлицо через родительский тендер
+$TENDER_CHILD_TABLES = ['tender_items', 'tender_offers', 'tender_offer_prices', 'tender_files'];
+if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER_CHILD_TABLES)) {
+    // Определяем tender_id из запроса
+    $tenderId = null;
+    if ($method === 'GET') {
+        $tenderId = $_GET['tender_id'] ?? null;
+        if ($tenderId) $tenderId = preg_replace('/^eq\./', '', $tenderId);
+    } elseif (!empty($body)) {
+        $rec = (isset($body[0]) && is_array($body[0])) ? $body[0] : $body;
+        $tenderId = $rec['tender_id'] ?? null;
+        // Для tender_offer_prices — через offer_id
+        if (!$tenderId && ($rec['offer_id'] ?? null)) {
+            $s = $pdo->prepare("SELECT tender_id FROM tender_offers WHERE id = ?");
+            $s->execute([$rec['offer_id']]);
+            $tenderId = $s->fetchColumn() ?: null;
+        }
+    }
+    if ($tenderId) {
+        $s = $pdo->prepare("SELECT legal_entity FROM tenders WHERE id = ?");
+        $s->execute([$tenderId]);
+        $tenderLE = $s->fetchColumn();
+        if ($tenderLE && !checkLegalEntityAccess($sessionUser, $tenderLE)) {
             respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
     }
@@ -142,7 +178,7 @@ $writeWhitelist = [
     'stock_1c'     => ['id','sku','legal_entity','stock','updated_at'],
     'cards'        => ['id','sku','name','supplier','legal_entity','is_active','data','category'],
     'settings'     => ['key','value'],
-    'item_order'   => ['id','supplier','legal_entity','item_id','sort_order'],
+    'item_order'   => ['id','supplier','legal_entity','item_id','position'],
     'tenders'      => ['id','name','description','legal_entity','status','deadline','winner_supplier','summary','note','created_by','created_at','updated_at'],
     'tender_items' => ['id','tender_id','name','quantity','unit','sort_order','note'],
     'tender_offers'=> ['id','tender_id','supplier','delivery_days','payment_terms','conditions','note','created_at'],
@@ -211,6 +247,20 @@ if ($method === 'GET') {
         $params[] = $searchTerm;
     }
 
+    // Внедряем фильтр по юрлицу в SQL для entity tables, если пользователь не админ и фильтр не указан
+    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && $table !== 'notifications') {
+        $userEntities = $sessionUser['legal_entities'] ?? '';
+        if (is_string($userEntities)) $userEntities = json_decode($userEntities, true);
+        if (is_array($userEntities) && !empty($userEntities)) {
+            $lePh = implode(',', array_fill(0, count($userEntities), '?'));
+            $where[] = "`legal_entity` IN($lePh)";
+            $params = array_merge($params, $userEntities);
+        } else {
+            // У пользователя нет привязки к юрлицам — не показывать ничего
+            $where[] = "1=0";
+        }
+    }
+
     $sql = "SELECT $sel FROM `$table`";
     if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
     if (isset($_GET['order'])) {
@@ -246,14 +296,7 @@ if ($method === 'GET') {
         } catch (PDOException $e) { /* не блокируем основной ответ */ }
     }
 
-    // Пост-проверка доступа к юрлицу для entity tables, запрошенных по ID без фильтра legal_entity
-    if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $ENTITY_TABLES) && !isset($_GET['legal_entity']) && $table !== 'notifications') {
-        $data = array_filter($data, function($row) use ($sessionUser) {
-            if (!isset($row['legal_entity'])) return true;
-            return checkLegalEntityAccess($sessionUser, $row['legal_entity']);
-        });
-        $data = array_values($data);
-    }
+    // Пост-проверка больше не нужна — фильтр по юрлицу внедряется в SQL выше
 
     if ($hasSubSelect && $subTable && in_array($subTable, $allowed) && !empty($data)) {
         $fk = $table === 'orders' ? 'order_id' : 'id';

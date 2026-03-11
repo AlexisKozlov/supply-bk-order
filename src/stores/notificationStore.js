@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import { db } from '@/lib/apiClient.js';
+import { db, orVal } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 
 const POLL_INTERVAL = 60000;
@@ -56,7 +56,7 @@ export const useNotificationStore = defineStore('notification', () => {
     try {
       const { data } = await db.from('notifications')
         .select('*')
-        .or(`target_user.eq.${name},type.eq.broadcast`)
+        .or(`${orVal('target_user', 'eq', name)},type.eq.broadcast`)
         .order('created_at', { ascending: false })
         .limit(50);
       notifications.value = data || [];
@@ -181,6 +181,7 @@ export const useNotificationStore = defineStore('notification', () => {
     if (!user) {
       stopPolling();
       cleanup();
+      clearOnLogout();
     }
   });
 
@@ -205,5 +206,12 @@ export const useNotificationStore = defineStore('notification', () => {
     }
   }
 
-  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling, cleanup };
+  function clearOnLogout() {
+    broadcastDismissed.value = new Set();
+    activeBroadcasts.value = [];
+    notifications.value = [];
+    sessionStartTime.value = null;
+  }
+
+  return { notifications, visibleNotifications, loading, unreadCount, activeBroadcasts, currentBroadcast, load, markRead, markAllRead, deleteNotification, deleteAll, checkBroadcasts, dismissBroadcast, startPolling, stopPolling, cleanup, clearOnLogout };
 });

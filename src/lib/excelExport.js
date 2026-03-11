@@ -965,6 +965,11 @@ export async function exportSupplierOrder(settings, items, priceMap) {
 /**
  * Заявка поставщику — печать (PDF через iframe + print)
  */
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 export function printSupplierOrder(settings, items, priceMap) {
   const hasPrices = priceMap && Object.keys(priceMap).length > 0;
 
@@ -1003,8 +1008,8 @@ export function printSupplierOrder(settings, items, priceMap) {
 
     return `<tr>
       <td style="text-align:center;">${idx + 1}</td>
-      <td>${item.sku || ''}</td>
-      <td>${item.name || ''}</td>
+      <td>${escapeHtml(item.sku)}</td>
+      <td>${escapeHtml(item.name)}</td>
       <td class="right">${physBoxes}</td>
       ${priceTd}${sumTd}
     </tr>`;
@@ -1041,7 +1046,7 @@ export function printSupplierOrder(settings, items, priceMap) {
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<title>Заявка - ${settings.supplier || ''}</title>
+<title>Заявка - ${escapeHtml(settings.supplier)}</title>
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; padding: 30px; }
   h2 { text-align: center; margin-bottom: 20px; }
@@ -1058,10 +1063,10 @@ export function printSupplierOrder(settings, items, priceMap) {
 </head><body>
 <h2>Заявка на поставку</h2>
 <div class="meta">
-  <div><b>От:</b> ${settings.legalEntity || ''}</div>
-  <div><b>Поставщик:</b> ${settings.supplier || ''}</div>
-  <div><b>Дата поставки:</b> ${deliveryDate}</div>
-  <div><b>Дата заявки:</b> ${today}</div>
+  <div><b>От:</b> ${escapeHtml(settings.legalEntity)}</div>
+  <div><b>Поставщик:</b> ${escapeHtml(settings.supplier)}</div>
+  <div><b>Дата поставки:</b> ${escapeHtml(deliveryDate)}</div>
+  <div><b>Дата заявки:</b> ${escapeHtml(today)}</div>
 </div>
 <table>
   <thead><tr>
@@ -1078,7 +1083,7 @@ export function printSupplierOrder(settings, items, priceMap) {
     ${priceTotals}
   </tr>${vatRow}${totalWithVatRow}</tfoot>
 </table>
-<div class="footer">Контактное лицо: ${settings.userName || ''}</div>
+<div class="footer">Контактное лицо: ${escapeHtml(settings.userName)}</div>
 </body></html>`;
 
   const iframe = document.createElement('iframe');

@@ -62,6 +62,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
+import { formatDate } from '@/lib/utils.js';
 
 const props = defineProps({
   orderA: { type: Object, required: true },
@@ -76,14 +77,9 @@ function onKey(e) {
 onMounted(() => document.addEventListener('keydown', onKey));
 onUnmounted(() => document.removeEventListener('keydown', onKey));
 
-function formatDate(str) {
-  if (!str) return '—';
-  const ds = typeof str === 'string' && str.length === 10 ? str + 'T00:00:00' : str;
-  return new Date(ds).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
 
 function getItems(order) {
-  return (order.order_items || []).filter(i => i.qty_boxes && Math.round(i.qty_boxes) > 0);
+  return (order.order_items || []).filter(i => i.qty_boxes && i.qty_boxes > 0);
 }
 
 const diffRows = computed(() => {

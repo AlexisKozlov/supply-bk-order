@@ -87,6 +87,7 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
+import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 
 const route = useRoute();
@@ -107,13 +108,12 @@ const loggingIn = ref(false);
 const loginError = ref('');
 
 const bgCanvas = ref(null);
-let bgRaf = null;
-let bgResize = null;
+const { start: startBg, stop: stopBg } = useCanvasParticles(bgCanvas);
 
 const token = route.query.token || '';
 
 onMounted(async () => {
-  initBackground();
+  startBg();
 
   if (!token) {
     error.value = 'Ссылка недействительна';
@@ -144,8 +144,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (bgRaf) cancelAnimationFrame(bgRaf);
-  if (bgResize) window.removeEventListener('resize', bgResize);
+  stopBg();
 });
 
 async function confirm() {
@@ -190,71 +189,7 @@ async function login() {
   }
 }
 
-function initBackground() {
-  const c = bgCanvas.value;
-  if (!c) return;
-  const ctx = c.getContext('2d');
-  let w, h;
-  const resize = () => { w = c.width = window.innerWidth; h = c.height = window.innerHeight; };
-  resize();
-  bgResize = resize;
-  window.addEventListener('resize', bgResize);
-
-  const orbs = [
-    { x: 0.3, y: 0.7, r: 300, rgb: [180,30,0], sp: 0.4, ph: 0 },
-    { x: 0.7, y: 0.65, r: 250, rgb: [200,60,0], sp: 0.3, ph: 2 },
-    { x: 0.5, y: 0.8, r: 350, rgb: [160,40,0], sp: 0.5, ph: 4 },
-  ];
-  const sparks = Array.from({ length: 30 }, () => ({
-    x: Math.random(), y: Math.random(),
-    vy: -(0.0002 + Math.random() * 0.0008),
-    vx: (Math.random() - 0.5) * 0.0003,
-    r: 0.5 + Math.random() * 1.5,
-    ph: Math.random() * Math.PI * 2,
-    sp: 0.01 + Math.random() * 0.02,
-    bright: Math.random(),
-  }));
-
-  let t = 0;
-  const loop = () => {
-    t += 0.016;
-    if (w <= 0 || h <= 0) { bgRaf = requestAnimationFrame(loop); return; }
-    const bg = ctx.createLinearGradient(0, 0, 0, h);
-    bg.addColorStop(0, '#110a05'); bg.addColorStop(0.4, '#1a0e07');
-    bg.addColorStop(0.7, '#221309'); bg.addColorStop(1, '#2a180c');
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-    for (const o of orbs) {
-      const breath = 0.6 + 0.4 * Math.sin(t * o.sp + o.ph);
-      const r = o.r * (0.9 + breath * 0.2);
-      const px = o.x * w + Math.sin(t * 0.2 + o.ph) * 20;
-      const py = o.y * h + Math.cos(t * 0.15 + o.ph) * 15;
-      const g = ctx.createRadialGradient(px, py, 0, px, py, r);
-      const a = 0.08 + breath * 0.06;
-      g.addColorStop(0, `rgba(${o.rgb},${a * 1.5})`);
-      g.addColorStop(0.3, `rgba(${o.rgb},${a * 0.8})`);
-      g.addColorStop(0.7, `rgba(${o.rgb},${a * 0.2})`);
-      g.addColorStop(1, `rgba(${o.rgb},0)`);
-      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-    }
-    for (const s of sparks) {
-      s.ph += s.sp;
-      s.x += s.vx + Math.sin(s.ph) * 0.0002;
-      s.y += s.vy;
-      if (s.y < -0.05) { s.y = 1.05; s.x = Math.random(); }
-      const px = s.x * w, py = s.y * h;
-      const glow = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(s.ph * 2));
-      ctx.globalAlpha = glow * (s.bright > 0.7 ? 0.8 : 0.4);
-      ctx.shadowBlur = s.r * 6;
-      ctx.shadowColor = s.bright > 0.7 ? '#FFB060' : '#D65000';
-      ctx.beginPath(); ctx.arc(px, py, s.r * glow, 0, Math.PI * 2);
-      ctx.fillStyle = s.bright > 0.7 ? '#FFD090' : '#FF8040';
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-    bgRaf = requestAnimationFrame(loop);
-  };
-  loop();
-}
+/* Анимация фона вынесена в useCanvasParticles */
 </script>
 
 <style scoped>

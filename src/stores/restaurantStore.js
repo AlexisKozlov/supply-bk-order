@@ -44,16 +44,20 @@ export const useRestaurantStore = defineStore('restaurant', () => {
 
   async function _doLoad(group, myId) {
     try {
-      const [rRes, sRes] = await Promise.all([
-        db.from('restaurants').select('*').eq('legal_entity_group', group).order('sort_order'),
-        db.from('delivery_schedule').select('*'),
-      ]);
+      const rRes = await db.from('restaurants').select('*').eq('legal_entity_group', group).order('sort_order');
       if (myId !== _loadId) return; // Устарел — новая загрузка уже идёт
       if (rRes.error) throw new Error(rRes.error);
-      if (sRes.error) throw new Error(sRes.error);
       restaurants.value = rRes.data || [];
-      const ids = new Set(restaurants.value.map(r => String(r.id)));
-      schedule.value = (sRes.data || []).filter(s => ids.has(String(s.restaurant_id)));
+      const rIds = restaurants.value.map(r => r.id);
+      // Загружаем расписание только для ресторанов данной группы
+      if (rIds.length) {
+        const sRes = await db.from('delivery_schedule').select('*').in('restaurant_id', rIds);
+        if (myId !== _loadId) return;
+        if (sRes.error) throw new Error(sRes.error);
+        schedule.value = sRes.data || [];
+      } else {
+        schedule.value = [];
+      }
       loaded.value = true;
       loadedGroup.value = group;
     } catch (e) {

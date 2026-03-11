@@ -101,6 +101,8 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders'];
+
 router.beforeEach((to) => {
   const userStore = useUserStore();
   if (!userStore.currentUser) {
@@ -110,15 +112,13 @@ router.beforeEach((to) => {
     return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
   }
   if (to.meta.requiresAdmin && userStore.currentUser?.role !== 'admin') {
-    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders'];
-    const first = modules.find(m => userStore.hasAccess(m, 'view'));
+    const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));
     return first ? { name: first } : { name: 'home' };
   }
   // Модульная проверка прав
   if (to.meta.module && !userStore.hasAccess(to.meta.module, 'view')) {
     // Редирект на первый доступный модуль
-    const modules = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders'];
-    const first = modules.find(m => userStore.hasAccess(m, 'view'));
+    const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));
     return first ? { name: first } : { name: 'home' };
   }
 });
