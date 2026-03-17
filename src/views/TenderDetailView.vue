@@ -65,6 +65,9 @@
             <div class="td-card-title">
               Позиции тендера
               <button v-if="!isViewer" class="btn small secondary" @click="addItem">+ Позиция</button>
+              <button v-if="!isViewer && tender.items.some(it => it.sku)" class="btn small outline" @click="reloadConsumption" :disabled="reloadingConsumption" style="margin-left:4px;">
+                {{ reloadingConsumption ? 'Загрузка...' : 'Обновить расход' }}
+              </button>
             </div>
             <div v-if="!tender.items.length" class="td-empty">Добавьте товары или услуги</div>
             <div v-else class="td-items-table-wrap">
@@ -89,12 +92,16 @@
                         <button v-if="item.sku && !isViewer" class="td-item-unlink" @click="unlinkItem(item)" title="Отвязать от справочника">&times;</button>
                       </div>
                     </td>
-                    <td><input v-model.number="item.quantity" type="number" min="0" class="td-cell-input" placeholder="—" :disabled="isViewer" /></td>
+                    <td><input v-model.number="item.quantity" type="number" min="0" class="td-cell-input" placeholder="—" :disabled="isViewer"
+                      @focus="(e) => onItemCalcFocus(e, i, 'quantity')"
+                      @blur="itemCalc.onBlur"
+                      @keydown="(e) => onItemCalcKeydown(e, i, 'quantity')" /></td>
                     <td><input v-model="item.unit" class="td-cell-input" placeholder="шт" :disabled="isViewer" /></td>
                     <td class="td-consumption-cell">
-                      <span v-if="item.monthly_consumption != null" class="td-consumption-val">{{ fmtConsumption(item.monthly_consumption) }}</span>
-                      <span v-else-if="item.sku" class="td-consumption-na">нет данных</span>
-                      <span v-else class="td-consumption-na">—</span>
+                      <input v-model.number="item.monthly_consumption" type="number" min="0" step="0.1" class="td-cell-input td-consumption-input" placeholder="—" :disabled="isViewer"
+                        @focus="(e) => onItemCalcFocus(e, i, 'monthly_consumption')"
+                        @blur="itemCalc.onBlur"
+                        @keydown="(e) => onItemCalcKeydown(e, i, 'monthly_consumption')" />
                     </td>
                     <td><input v-model="item.note" class="td-cell-input" placeholder="—" :disabled="isViewer" /></td>
                     <td v-if="!isViewer"><button class="remove-btn" @click="removeItem(i)">&times;</button></td>
@@ -122,7 +129,10 @@
             <div class="td-offer-conditions">
               <div class="form-group">
                 <label>Срок поставки (дней)</label>
-                <input v-model.number="offer.delivery_days" type="number" min="0" class="form-input" :disabled="isViewer" placeholder="—" />
+                <input v-model.number="offer.delivery_days" type="number" min="0" class="form-input" :disabled="isViewer" placeholder="—"
+                  @focus="(e) => onOfferCalcFocus(e, oi, 0, 'delivery_days')"
+                  @blur="offerCalc.onBlur"
+                  @keydown="(e) => onOfferCalcKeydown(e, oi, 0, 'delivery_days')" />
               </div>
               <div class="form-group">
                 <label>Условия оплаты</label>
@@ -140,28 +150,43 @@
                 <thead>
                   <tr>
                     <th>Позиция</th>
-                    <th style="width:100px;">Цена</th>
-                    <th v-if="tender.items.some(it => it.quantity)" style="width:100px;">Сумма</th>
+                    <th style="width:110px;">Цена, RUB</th>
+                    <th style="width:110px;">Цена, BYN</th>
+                    <th v-if="tender.items.some(it => it.quantity)" style="width:110px;">Сумма, RUB</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="(item, ii) in tender.items" :key="ii">
                     <td class="td-price-item-name">{{ item.name || '(без названия)' }}</td>
                     <td>
-                      <input v-model.number="offer.prices[ii]" type="number" step="0.01" min="0"
-                        class="td-cell-input price-cell" :class="{ 'cheapest': isCheapest(ii, offer.prices[ii]) }"
-                        :disabled="isViewer" placeholder="—" />
+                      <input :value="offer.prices_rub[ii]" type="number" step="0.01" min="0"
+                        class="td-cell-input price-cell" :class="{ 'cheapest': isCheapest(ii, offer.prices_rub[ii]) }"
+                        :disabled="isViewer" placeholder="—"
+                        @input="onPriceRubInput(offer, ii, $event)"
+                        @focus="(e) => onOfferCalcFocus(e, oi, ii, 'price_rub')"
+                        @blur="offerCalc.onBlur"
+                        @keydown="(e) => onOfferCalcKeydown(e, oi, ii, 'price_rub')" />
+                    </td>
+                    <td>
+                      <input :value="offer.prices_byn[ii]" type="number" step="0.01" min="0"
+                        class="td-cell-input price-cell"
+                        :disabled="isViewer" placeholder="—"
+                        @input="onPriceBynInput(offer, ii, $event)"
+                        @focus="(e) => onOfferCalcFocus(e, oi, ii, 'price_byn')"
+                        @blur="offerCalc.onBlur"
+                        @keydown="(e) => onOfferCalcKeydown(e, oi, ii, 'price_byn')" />
                     </td>
                     <td v-if="tender.items.some(it => it.quantity)" class="td-sum-cell">
-                      {{ item.quantity && offer.prices[ii] ? formatPrice(item.quantity * offer.prices[ii]) : '' }}
+                      {{ item.quantity && offer.prices_rub[ii] ? formatPrice(item.quantity * offer.prices_rub[ii]) : '' }}
                     </td>
                   </tr>
                 </tbody>
                 <tfoot>
                   <tr class="td-prices-total">
                     <td style="font-weight:700;">Итого</td>
-                    <td class="td-sum-cell" style="font-weight:700;">{{ formatPrice(offerTotal(offer)) }}</td>
-                    <td v-if="tender.items.some(it => it.quantity)" class="td-sum-cell" style="font-weight:700;">{{ formatPrice(offerTotalWithQty(offer)) }}</td>
+                    <td class="td-sum-cell" style="font-weight:700;">{{ formatPrice(offerTotalCur(offer, 'rub')) }}</td>
+                    <td class="td-sum-cell" style="font-weight:700;">{{ formatPrice(offerTotalCur(offer, 'byn')) }}</td>
+                    <td v-if="tender.items.some(it => it.quantity)" class="td-sum-cell" style="font-weight:700;">{{ formatPrice(offerTotalWithQtyCur(offer, 'rub')) }}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -205,7 +230,13 @@
             <div class="td-card">
               <div class="td-card-title">
                 Сравнительная таблица
-                <button class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="exportComparison"><BkIcon name="export" size="sm" /> Excel</button>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <div class="td-currency-toggle">
+                    <button class="td-cur-btn" :class="{ active: compareCurrency === 'RUB' }" @click="compareCurrency = 'RUB'">RUB</button>
+                    <button class="td-cur-btn" :class="{ active: compareCurrency === 'BYN' }" @click="compareCurrency = 'BYN'">BYN</button>
+                  </div>
+                  <button class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="exportComparison"><BkIcon name="export" size="sm" /> Excel</button>
+                </div>
               </div>
               <div class="comparison-wrap">
                 <table class="comp-table">
@@ -225,30 +256,30 @@
                       <td class="comp-qty-col">{{ item.quantity ? `${item.quantity} ${item.unit || ''}`.trim() : '' }}</td>
                       <td v-for="(o, oi) in tender.offers" :key="oi"
                         :class="{
-                          cheapest: isCheapest(ii, o.prices[ii]),
-                          expensive: isMostExpensive(ii, o.prices[ii]),
+                          cheapest: isCheapest(ii, getComparePrice(o, ii)),
+                          expensive: isMostExpensive(ii, getComparePrice(o, ii)),
                           winner: tender.winner_supplier && o.supplier === tender.winner_supplier,
                         }">
-                        <div class="comp-price">{{ o.prices[ii] > 0 ? formatPrice(o.prices[ii]) : '—' }}</div>
-                        <div v-if="item.quantity && o.prices[ii] > 0" class="comp-sum">{{ formatPrice(o.prices[ii] * item.quantity) }}</div>
+                        <div class="comp-price">{{ getComparePrice(o, ii) > 0 ? formatPrice(getComparePrice(o, ii)) : '—' }}</div>
+                        <div v-if="item.quantity && getComparePrice(o, ii) > 0" class="comp-sum">{{ formatPrice(getComparePrice(o, ii) * item.quantity) }}</div>
                       </td>
                     </tr>
                   </tbody>
                   <tfoot>
                     <tr class="comp-total-row">
-                      <td class="comp-fixed-col"><strong>Итого (цена)</strong></td>
+                      <td class="comp-fixed-col"><strong>Итого (цена), {{ compareCurrency }}</strong></td>
                       <td class="comp-qty-col"></td>
                       <td v-for="(o, oi) in tender.offers" :key="oi"
                         :class="{ 'cheapest-total': isCheapestTotal(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
-                        <strong>{{ formatPrice(offerTotal(o)) }}</strong>
+                        <strong>{{ formatPrice(offerTotalCur(o, compareCurrency.toLowerCase())) }}</strong>
                       </td>
                     </tr>
                     <tr v-if="tender.items.some(it => it.quantity)" class="comp-total-row">
-                      <td class="comp-fixed-col"><strong>Итого (сумма)</strong></td>
+                      <td class="comp-fixed-col"><strong>Итого (сумма), {{ compareCurrency }}</strong></td>
                       <td class="comp-qty-col"></td>
                       <td v-for="(o, oi) in tender.offers" :key="oi"
                         :class="{ 'cheapest-total': isCheapestTotalQty(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
-                        <strong>{{ formatPrice(offerTotalWithQty(o)) }}</strong>
+                        <strong>{{ formatPrice(offerTotalWithQtyCur(o, compareCurrency.toLowerCase())) }}</strong>
                       </td>
                     </tr>
                     <tr class="comp-extra-row">
@@ -290,7 +321,7 @@
                   @click="!isViewer && (tender.winner_supplier = tender.winner_supplier === o.supplier ? '' : o.supplier)">
                   <div>
                     <div class="wcard-name">{{ o.supplier || '(?)' }}</div>
-                    <div class="wcard-total">{{ formatPrice(offerTotalWithQty(o)) }}</div>
+                    <div class="wcard-total">{{ formatPrice(offerTotalWithQtyCur(o, compareCurrency.toLowerCase())) }} {{ compareCurrency }}</div>
                   </div>
                   <div class="wcard-check">{{ tender.winner_supplier === o.supplier ? '✓' : '' }}</div>
                 </div>
@@ -301,7 +332,7 @@
             <div v-if="tender.winner_supplier && savings" class="side-section">
               <div class="side-label">Экономия</div>
               <div class="saving-card">
-                <div class="saving-amount">{{ formatPrice(savings) }}</div>
+                <div class="saving-amount">{{ formatPrice(savings) }} {{ compareCurrency }}</div>
                 <div class="saving-pct" v-if="savingsPercent">−{{ savingsPercent }}%</div>
                 <div class="saving-sub">vs самое дорогое предложение</div>
               </div>
@@ -384,7 +415,7 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
-import { formatDate } from '@/lib/utils.js';
+import { formatDate, applyEntityFilter } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -392,8 +423,60 @@ import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
+import { useCalculator } from '@/lib/useCalculator.js';
 
 const { confirmModal, confirm, onConfirm, onCancel } = useConfirm();
+
+// ═══ Калькулятор в инпутах ═══
+let _calcActiveIdx = -1;
+let _calcActiveField = '';
+let _calcActiveOfferIdx = -1;
+
+const itemCalc = useCalculator((val) => {
+  if (_calcActiveIdx >= 0 && _calcActiveField) {
+    tender.value.items[_calcActiveIdx][_calcActiveField] = val;
+  }
+});
+
+const offerCalc = useCalculator((val) => {
+  if (_calcActiveOfferIdx < 0) return;
+  const offer = tender.value.offers[_calcActiveOfferIdx];
+  if (_calcActiveField === 'delivery_days') {
+    offer.delivery_days = val;
+  } else if (_calcActiveField === 'price_rub') {
+    offer.prices_rub[_calcActiveIdx] = val;
+    offer.prices[_calcActiveIdx] = val;
+    offer.prices_byn[_calcActiveIdx] = val != null ? Math.round(val * rubToBynRate.value * 100) / 100 : null;
+  } else if (_calcActiveField === 'price_byn') {
+    offer.prices_byn[_calcActiveIdx] = val;
+    offer.prices_rub[_calcActiveIdx] = val != null && rubToBynRate.value > 0 ? Math.round(val / rubToBynRate.value * 100) / 100 : null;
+    offer.prices[_calcActiveIdx] = offer.prices_rub[_calcActiveIdx];
+  }
+}, { decimals: 2 });
+
+function onItemCalcFocus(e, idx, field) {
+  _calcActiveIdx = idx;
+  _calcActiveField = field;
+  itemCalc.onFocus(e);
+}
+function onItemCalcKeydown(e, idx, field) {
+  _calcActiveIdx = idx;
+  _calcActiveField = field;
+  itemCalc.onKeydown(e);
+}
+
+function onOfferCalcFocus(e, offerIdx, itemIdx, field) {
+  _calcActiveOfferIdx = offerIdx;
+  _calcActiveIdx = itemIdx;
+  _calcActiveField = field;
+  offerCalc.onFocus(e);
+}
+function onOfferCalcKeydown(e, offerIdx, itemIdx, field) {
+  _calcActiveOfferIdx = offerIdx;
+  _calcActiveIdx = itemIdx;
+  _calcActiveField = field;
+  offerCalc.onKeydown(e);
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -417,8 +500,11 @@ function statusLabel(s) { return statuses.find(x => x.value === s)?.label || s; 
 const tab = ref('info');
 const loadingTender = ref(false);
 const saving = ref(false);
+const reloadingConsumption = ref(false);
 const editingName = ref(false);
 const nameInput = ref(null);
+const rubToBynRate = ref(0.0375);
+const compareCurrency = ref('RUB');
 
 const tender = ref({
   name: '', description: '', status: 'draft', deadline: '', winner_supplier: '', summary: '', note: '',
@@ -477,16 +563,34 @@ async function pickProduct(item, product, idx) {
   item.monthly_consumption = null;
   itemSearch.index = -1;
   itemSearch.results = [];
-  // Подтянуть расход
+  // Подтянуть расход (включая аналоги)
   try {
+    const le = orderStore.settings.legalEntity;
+    // Найти группу аналогов товара
+    let skusToQuery = [product.sku];
+    const { data: prodData } = await db.from('products')
+      .select('analog_group')
+      .eq('sku', product.sku);
+    const analogGroup = prodData?.[0]?.analog_group;
+    if (analogGroup) {
+      let aq = db.from('products').select('sku').eq('analog_group', analogGroup);
+      aq = applyEntityFilter(aq, le);
+      const { data: analogProducts } = await aq;
+      if (analogProducts?.length) {
+        skusToQuery = analogProducts.map(p => p.sku);
+      }
+    }
+    // Суммировать расход по всем SKU группы
     const { data } = await db.from('analysis_data')
       .select('consumption, period_days')
-      .eq('sku', product.sku)
-      .eq('legal_entity', orderStore.settings.legalEntity);
+      .in('sku', skusToQuery)
+      .eq('legal_entity', le);
     if (data?.length) {
-      const d = data[0];
-      const daily = (d.period_days > 0) ? d.consumption / d.period_days : 0;
-      item.monthly_consumption = Math.round(daily * 30 * 10) / 10;
+      let totalDaily = 0;
+      for (const d of data) {
+        if (d.period_days > 0) totalDaily += d.consumption / d.period_days;
+      }
+      item.monthly_consumption = Math.round(totalDaily * 30 * 10) / 10;
     }
   } catch {}
 }
@@ -498,6 +602,74 @@ function onItemNameBlur() {
 function unlinkItem(item) {
   item.sku = null;
   item.monthly_consumption = null;
+}
+
+async function reloadConsumption() {
+  reloadingConsumption.value = true;
+  try {
+    const le = orderStore.settings.legalEntity;
+    const skuItems = tender.value.items.filter(it => it.sku);
+    if (!skuItems.length) return;
+
+    // Собрать все SKU и их группы аналогов
+    const allSkus = skuItems.map(it => it.sku);
+    const { data: prodData } = await db.from('products')
+      .select('sku, analog_group')
+      .in('sku', allSkus);
+
+    const skuToGroup = new Map();
+    const groups = new Set();
+    for (const p of (prodData || [])) {
+      if (p.analog_group) {
+        skuToGroup.set(p.sku, p.analog_group);
+        groups.add(p.analog_group);
+      }
+    }
+
+    // Найти все SKU аналогов
+    let allQuerySkus = [...allSkus];
+    const groupToSkus = new Map();
+    if (groups.size) {
+      let aq = db.from('products').select('sku, analog_group').in('analog_group', [...groups]);
+      aq = applyEntityFilter(aq, le);
+      const { data: analogProducts } = await aq;
+      for (const p of (analogProducts || [])) {
+        if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);
+        groupToSkus.get(p.analog_group).push(p.sku);
+        allQuerySkus.push(p.sku);
+      }
+    }
+    allQuerySkus = [...new Set(allQuerySkus)];
+
+    // Загрузить расход
+    const { data: adData } = await db.from('analysis_data')
+      .select('sku, consumption, period_days')
+      .in('sku', allQuerySkus)
+      .eq('legal_entity', le);
+
+    const dailyMap = new Map();
+    for (const d of (adData || [])) {
+      if (d.period_days > 0) dailyMap.set(d.sku, d.consumption / d.period_days);
+    }
+
+    // Обновить расход для каждой позиции
+    for (const item of skuItems) {
+      let totalDaily = 0;
+      const group = skuToGroup.get(item.sku);
+      if (group && groupToSkus.has(group)) {
+        for (const gs of groupToSkus.get(group)) {
+          totalDaily += dailyMap.get(gs) || 0;
+        }
+      } else {
+        totalDaily = dailyMap.get(item.sku) || 0;
+      }
+      item.monthly_consumption = totalDaily > 0 ? Math.round(totalDaily * 30 * 10) / 10 : null;
+    }
+  } catch (e) {
+    console.error('reloadConsumption error', e);
+  } finally {
+    reloadingConsumption.value = false;
+  }
 }
 
 function fmtConsumption(val) {
@@ -536,16 +708,24 @@ async function loadTender() {
       monthly_consumption: it.monthly_consumption != null ? parseFloat(it.monthly_consumption) : null,
     }));
 
+    if (data.rub_to_byn_rate) rubToBynRate.value = parseFloat(data.rub_to_byn_rate);
+
     tender.value.offers = (data.offers || []).map(o => {
-      const prices = [];
+      const prices = [], prices_rub = [], prices_byn = [];
       for (let i = 0; i < items.length; i++) {
         const op = (o.prices || []).find(p => p.item_id === items[i].id);
         prices[i] = op ? parseFloat(op.price) : null;
+        prices_rub[i] = op && op.price_rub != null ? parseFloat(op.price_rub) : (op ? parseFloat(op.price) : null);
+        prices_byn[i] = op && op.price_byn != null ? parseFloat(op.price_byn) : null;
+        // Если есть RUB но нет BYN — пересчитать
+        if (prices_rub[i] != null && prices_byn[i] == null) {
+          prices_byn[i] = Math.round(prices_rub[i] * rubToBynRate.value * 100) / 100;
+        }
       }
       return {
         supplier: o.supplier || '', delivery_days: o.delivery_days || null,
         payment_terms: o.payment_terms || '', conditions: o.conditions || '',
-        note: o.note || '', prices,
+        note: o.note || '', prices, prices_rub, prices_byn,
       };
     });
 
@@ -560,17 +740,19 @@ async function loadTender() {
 // Позиции
 function addItem() {
   tender.value.items.push({ name: '', sku: null, quantity: null, unit: 'шт', note: '', monthly_consumption: null });
-  for (const o of tender.value.offers) o.prices.push(null);
+  for (const o of tender.value.offers) { o.prices.push(null); o.prices_rub.push(null); o.prices_byn.push(null); }
 }
 function removeItem(i) {
   tender.value.items.splice(i, 1);
-  for (const o of tender.value.offers) o.prices.splice(i, 1);
+  for (const o of tender.value.offers) { o.prices.splice(i, 1); o.prices_rub.splice(i, 1); o.prices_byn.splice(i, 1); }
 }
 
 function addOffer() {
   tender.value.offers.push({
     supplier: '', delivery_days: null, payment_terms: '', conditions: '', note: '',
     prices: tender.value.items.map(() => null),
+    prices_rub: tender.value.items.map(() => null),
+    prices_byn: tender.value.items.map(() => null),
   });
 }
 
@@ -635,6 +817,40 @@ async function deleteFile(fileId) {
   }
 }
 
+// Ввод цен с пересчётом валют
+function onPriceRubInput(offer, ii, event) {
+  const val = event.target.value !== '' ? parseFloat(event.target.value) : null;
+  offer.prices_rub[ii] = val;
+  offer.prices[ii] = val;
+  offer.prices_byn[ii] = val != null ? Math.round(val * rubToBynRate.value * 100) / 100 : null;
+}
+function onPriceBynInput(offer, ii, event) {
+  const val = event.target.value !== '' ? parseFloat(event.target.value) : null;
+  offer.prices_byn[ii] = val;
+  offer.prices_rub[ii] = val != null && rubToBynRate.value > 0 ? Math.round(val / rubToBynRate.value * 100) / 100 : null;
+  offer.prices[ii] = offer.prices_rub[ii];
+}
+
+// Цена в выбранной валюте для сравнения
+function getComparePrice(offer, ii) {
+  const key = compareCurrency.value === 'BYN' ? 'prices_byn' : 'prices_rub';
+  return offer[key]?.[ii] || 0;
+}
+
+// Итого по валюте
+function offerTotalCur(o, cur) {
+  const arr = cur === 'byn' ? o.prices_byn : o.prices_rub;
+  return (arr || []).reduce((s, p) => s + (parseFloat(p) || 0), 0);
+}
+function offerTotalWithQtyCur(o, cur) {
+  const arr = cur === 'byn' ? o.prices_byn : o.prices_rub;
+  let s = 0;
+  for (let i = 0; i < tender.value.items.length; i++) {
+    s += (parseFloat(arr?.[i]) || 0) * (parseFloat(tender.value.items[i].quantity) || 1);
+  }
+  return s;
+}
+
 // Вычисления
 function formatPrice(v) {
   const n = parseFloat(v);
@@ -644,31 +860,35 @@ function formatPrice(v) {
 
 function isCheapest(ii, price) {
   if (!price || price <= 0) return false;
-  const all = tender.value.offers.map(o => o.prices[ii]).filter(p => p > 0);
+  // Сравниваем по RUB (или по той же валюте, что передана)
+  const all = tender.value.offers.map(o => o.prices_rub?.[ii] || o.prices[ii]).filter(p => p > 0);
   return all.length >= 2 && price <= Math.min(...all);
 }
 function isMostExpensive(ii, price) {
   if (!price || price <= 0) return false;
-  const all = tender.value.offers.map(o => o.prices[ii]).filter(p => p > 0);
+  const all = tender.value.offers.map(o => o.prices_rub?.[ii] || o.prices[ii]).filter(p => p > 0);
   return all.length >= 2 && price >= Math.max(...all);
 }
-function offerTotal(o) { return o.prices.reduce((s, p) => s + (parseFloat(p) || 0), 0); }
+function offerTotal(o) { return (o.prices_rub || o.prices).reduce((s, p) => s + (parseFloat(p) || 0), 0); }
 function offerTotalWithQty(o) {
+  const arr = o.prices_rub || o.prices;
   let s = 0;
   for (let i = 0; i < tender.value.items.length; i++) {
-    s += (parseFloat(o.prices[i]) || 0) * (parseFloat(tender.value.items[i].quantity) || 1);
+    s += (parseFloat(arr[i]) || 0) * (parseFloat(tender.value.items[i].quantity) || 1);
   }
   return s;
 }
 function isCheapestTotal(o) {
   if (tender.value.offers.length < 2) return false;
-  const t = offerTotal(o);
-  return t > 0 && tender.value.offers.every(x => x === o || offerTotal(x) <= 0 || t <= offerTotal(x));
+  const cur = compareCurrency.value.toLowerCase();
+  const t = offerTotalCur(o, cur);
+  return t > 0 && tender.value.offers.every(x => x === o || offerTotalCur(x, cur) <= 0 || t <= offerTotalCur(x, cur));
 }
 function isCheapestTotalQty(o) {
   if (tender.value.offers.length < 2) return false;
-  const t = offerTotalWithQty(o);
-  return t > 0 && tender.value.offers.every(x => x === o || offerTotalWithQty(x) <= 0 || t <= offerTotalWithQty(x));
+  const cur = compareCurrency.value.toLowerCase();
+  const t = offerTotalWithQtyCur(o, cur);
+  return t > 0 && tender.value.offers.every(x => x === o || offerTotalWithQtyCur(x, cur) <= 0 || t <= offerTotalWithQtyCur(x, cur));
 }
 function isFastestDelivery(o) {
   if (!o.delivery_days) return false;
@@ -680,14 +900,16 @@ const savings = computed(() => {
   if (!tender.value.winner_supplier || tender.value.offers.length < 2) return 0;
   const winner = tender.value.offers.find(o => o.supplier === tender.value.winner_supplier);
   if (!winner) return 0;
-  const winnerTotal = offerTotalWithQty(winner);
-  const maxTotal = Math.max(...tender.value.offers.map(o => offerTotalWithQty(o)));
+  const cur = compareCurrency.value.toLowerCase();
+  const winnerTotal = offerTotalWithQtyCur(winner, cur);
+  const maxTotal = Math.max(...tender.value.offers.map(o => offerTotalWithQtyCur(o, cur)));
   return maxTotal > winnerTotal ? maxTotal - winnerTotal : 0;
 });
 
 const savingsPercent = computed(() => {
   if (!savings.value) return 0;
-  const maxTotal = Math.max(...tender.value.offers.map(o => offerTotalWithQty(o)));
+  const cur = compareCurrency.value.toLowerCase();
+  const maxTotal = Math.max(...tender.value.offers.map(o => offerTotalWithQtyCur(o, cur)));
   return maxTotal > 0 ? Math.round(savings.value / maxTotal * 100) : 0;
 });
 
@@ -722,12 +944,14 @@ async function save() {
       winner_supplier: tender.value.winner_supplier || null,
       summary: tender.value.summary || null,
       note: tender.value.note || null,
-      items: tender.value.items.map(it => ({ name: it.name, sku: it.sku || null, quantity: it.quantity, unit: it.unit, note: it.note || null })),
+      items: tender.value.items.map(it => ({ name: it.name, sku: it.sku || null, quantity: it.quantity, unit: it.unit, note: it.note || null, monthly_consumption: it.monthly_consumption != null ? parseFloat(it.monthly_consumption) : null })),
       offers: tender.value.offers.map(o => ({
         supplier: o.supplier, delivery_days: o.delivery_days || null,
         payment_terms: o.payment_terms || null, conditions: o.conditions || null,
         note: o.note || null,
-        prices: o.prices.map(p => p != null ? parseFloat(p) : null),
+        prices: (o.prices_rub || o.prices).map(p => p != null ? parseFloat(p) : null),
+        prices_rub: (o.prices_rub || []).map(p => p != null ? parseFloat(p) : null),
+        prices_byn: (o.prices_byn || []).map(p => p != null ? parseFloat(p) : null),
       })),
     });
     if (error) { toast.error('Ошибка', error); return; }
@@ -756,8 +980,10 @@ async function exportComparison() {
     const sG = { ...sC, fill: { fgColor: { rgb: 'E8F5E9' } } };
     const sB = { font: { sz: 11, name: 'Calibri', bold: true }, border: borders, alignment: { vertical: 'center' } };
 
+    const cur = compareCurrency.value.toLowerCase();
+    const curLabel = compareCurrency.value;
     const headers = ['Позиция', 'Кол-во'];
-    tender.value.offers.forEach(o => headers.push(o.supplier || '(?)'));
+    tender.value.offers.forEach(o => headers.push(`${o.supplier || '(?)'} (${curLabel})`));
 
     const rows = [];
     // Позиции
@@ -768,16 +994,17 @@ async function exportComparison() {
         { v: item.quantity ? `${item.quantity} ${item.unit || ''}`.trim() : '', s: sC },
       ];
       for (const o of tender.value.offers) {
-        const p = o.prices[ii];
+        const arr = cur === 'byn' ? o.prices_byn : o.prices_rub;
+        const p = arr?.[ii] || 0;
         const cheap = isCheapest(ii, p);
         row.push({ v: p > 0 ? p : '', t: p > 0 ? 'n' : 's', s: cheap ? { ...sR, ...sG } : sR });
       }
       rows.push(row);
     }
     // Итого
-    const totalRow = [{ v: 'ИТОГО', s: sB }, { v: '', s: sC }];
+    const totalRow = [{ v: `ИТОГО (${curLabel})`, s: sB }, { v: '', s: sC }];
     for (const o of tender.value.offers) {
-      const t = offerTotalWithQty(o);
+      const t = offerTotalWithQtyCur(o, cur);
       totalRow.push({ v: t > 0 ? t : '', t: t > 0 ? 'n' : 's', s: { ...sR, font: { ...sR.font, bold: true } } });
     }
     rows.push(totalRow);
@@ -875,8 +1102,8 @@ onMounted(() => { loadTender(); });
 
 /* ═══ Таблица позиций ═══ */
 .td-items-table-wrap { overflow-x:auto; }
-.td-items-table { width:100%; border-collapse:collapse; font-size:13px; }
-.td-items-table th { font-size:10px; font-weight:700; color:var(--text-muted); text-align:left; padding:6px 8px; border-bottom:2px solid #E8E0D6; text-transform:uppercase; letter-spacing:0.3px; }
+.td-items-table { min-width:100%; width:max-content; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+.td-items-table th { font-size:10px; font-weight:700; color:var(--text-muted); text-align:left; padding:6px 8px; border-bottom:2px solid #E8E0D6; text-transform:uppercase; letter-spacing:0.3px; overflow:hidden; resize:horizontal; min-width:50px; }
 .td-items-table td { padding:4px 6px; border-bottom:1px solid #F0EBE4; }
 .td-cell-input { width:100%; padding:6px 8px; border:1px solid transparent; border-radius:6px; font-size:12px; background:transparent; font-family:inherit; box-sizing:border-box; transition:all .15s; }
 .td-cell-input:hover:not(:disabled) { border-color:#D4C4B0; }
@@ -909,10 +1136,10 @@ onMounted(() => { loadTender(); });
 .td-offer-supplier-input:disabled { border-bottom-color:transparent; color:var(--text); }
 .td-offer-conditions { display:flex; gap:10px; flex-wrap:wrap; }
 .td-offer-conditions .form-group { flex:1; min-width:140px; }
-.td-offer-prices { margin-top:14px; }
+.td-offer-prices { margin-top:14px; overflow-x:auto; }
 .td-offer-prices-title { font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.3px; }
-.td-prices-table { width:100%; border-collapse:collapse; font-size:12px; }
-.td-prices-table th { font-size:10px; font-weight:700; color:var(--text-muted); text-align:left; padding:6px 8px; border-bottom:1.5px solid #D4C4B0; }
+.td-prices-table { min-width:100%; width:max-content; border-collapse:collapse; font-size:12px; table-layout:fixed; }
+.td-prices-table th { font-size:10px; font-weight:700; color:var(--text-muted); text-align:left; padding:6px 8px; border-bottom:1.5px solid #D4C4B0; overflow:hidden; resize:horizontal; min-width:50px; }
 .td-prices-table td { padding:5px 8px; border-bottom:1px solid #F0EBE4; }
 .td-price-item-name { font-size:12px; color:var(--text-muted); }
 .price-cell { text-align:right !important; }
@@ -930,14 +1157,20 @@ onMounted(() => { loadTender(); });
 .td-file-upload-btn { display:inline-flex; align-items:center; gap:4px; padding:5px 12px; border-radius:6px; border:1.5px dashed #D4C4B0; font-size:11px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:all .15s; }
 .td-file-upload-btn:hover { border-color:var(--bk-orange); color:var(--bk-brown); background:#FEFBF7; }
 
+/* Переключатель валюты */
+.td-currency-toggle { display:inline-flex; border-radius:6px; overflow:hidden; border:1.5px solid #D4C4B0; }
+.td-cur-btn { padding:4px 12px; font-size:11px; font-weight:700; border:none; cursor:pointer; background:white; color:var(--text-muted); font-family:inherit; transition:all .15s; }
+.td-cur-btn.active { background:var(--bk-brown, #502314); color:white; }
+.td-cur-btn:hover:not(.active) { background:#F5F0EB; }
+
 /* ═══ Layout сравнения: таблица + сайдбар ═══ */
 .compare-layout { display:grid; grid-template-columns:1fr 300px; gap:20px; align-items:start; }
 .compare-main { min-width:0; }
 
 /* Таблица сравнения */
 .comparison-wrap { overflow-x:auto; }
-.comp-table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
-.comp-table th { background:var(--bk-brown, #502314); color:white; padding:12px 14px; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+.comp-table { min-width:100%; width:max-content; border-collapse:separate; border-spacing:0; font-size:13px; table-layout:fixed; }
+.comp-table th { background:var(--bk-brown, #502314); color:white; padding:12px 14px; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; overflow:hidden; resize:horizontal; min-width:80px; }
 .comp-table th:first-child { border-radius:10px 0 0 0; }
 .comp-table th:last-child { border-radius:0 10px 0 0; }
 .comp-table th.winner { background:#2E7D32; }
