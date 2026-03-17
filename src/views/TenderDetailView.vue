@@ -71,18 +71,31 @@
               <table class="td-items-table">
                 <thead>
                   <tr>
-                    <th style="width:40%;">Название</th>
-                    <th style="width:15%;">Кол-во</th>
-                    <th style="width:12%;">Ед.</th>
+                    <th style="width:35%;">Название</th>
+                    <th style="width:12%;">Кол-во</th>
+                    <th style="width:10%;">Ед.</th>
+                    <th style="width:12%;">Расход/мес</th>
                     <th>Примечание</th>
                     <th v-if="!isViewer" style="width:36px;"></th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="(item, i) in tender.items" :key="i">
-                    <td><input v-model="item.name" class="td-cell-input" placeholder="Название" :disabled="isViewer" /></td>
+                    <td class="td-name-cell">
+                      <div class="td-name-wrap">
+                        <input v-model="item.name" class="td-cell-input" :ref="el => setItemInputRef(el, i)" placeholder="Название" :disabled="isViewer"
+                          @input="onItemNameInput(item)" @blur="onItemNameBlur" />
+                        <span v-if="item.sku" class="td-item-sku" :title="'Артикул: ' + item.sku">{{ item.sku }}</span>
+                        <button v-if="item.sku && !isViewer" class="td-item-unlink" @click="unlinkItem(item)" title="Отвязать от справочника">&times;</button>
+                      </div>
+                    </td>
                     <td><input v-model.number="item.quantity" type="number" min="0" class="td-cell-input" placeholder="—" :disabled="isViewer" /></td>
                     <td><input v-model="item.unit" class="td-cell-input" placeholder="шт" :disabled="isViewer" /></td>
+                    <td class="td-consumption-cell">
+                      <span v-if="item.monthly_consumption != null" class="td-consumption-val">{{ fmtConsumption(item.monthly_consumption) }}</span>
+                      <span v-else-if="item.sku" class="td-consumption-na">нет данных</span>
+                      <span v-else class="td-consumption-na">—</span>
+                    </td>
                     <td><input v-model="item.note" class="td-cell-input" placeholder="—" :disabled="isViewer" /></td>
                     <td v-if="!isViewer"><button class="remove-btn" @click="removeItem(i)">&times;</button></td>
                   </tr>
@@ -353,11 +366,22 @@
 
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
       @confirm="onConfirm" @cancel="onCancel" />
+
+    <!-- Дропдаун поиска товара (через Teleport, чтобы не обрезался overflow) -->
+    <Teleport to="body">
+      <div v-if="itemSearch.index >= 0 && itemSearch.results.length" class="td-item-dropdown" :style="dropdownStyle"
+        @mousedown.prevent>
+        <div v-for="pr in itemSearch.results" :key="pr.id" class="td-item-option"
+          @mousedown.prevent="pickProduct(tender.items[itemSearch.index], pr, itemSearch.index)">
+          <span class="td-item-opt-sku">{{ pr.sku }}</span> {{ pr.name }}
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, onMounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatDate } from '@/lib/utils.js';
@@ -403,6 +427,86 @@ const tender = ref({
   files: [],
 });
 
+// ═══ Поиск товара для позиции ═══
+const itemSearch = reactive({ index: -1, results: [], timer: null });
+const itemInputRefs = {};
+
+function setItemInputRef(el, i) {
+  if (el) itemInputRefs[i] = el;
+}
+
+const dropdownStyle = computed(() => {
+  const el = itemInputRefs[itemSearch.index];
+  if (!el) return { display: 'none' };
+  const rect = el.getBoundingClientRect();
+  return {
+    position: 'fixed',
+    top: rect.bottom + 'px',
+    left: rect.left + 'px',
+    width: Math.max(rect.width, 280) + 'px',
+    zIndex: 99999,
+  };
+});
+
+function onItemNameInput(item) {
+  const i = tender.value.items.indexOf(item);
+  clearTimeout(itemSearch.timer);
+  if (item.sku) { item.sku = null; item.monthly_consumption = null; }
+  const q = item.name?.trim();
+  if (!q || q.length < 2) { itemSearch.index = -1; itemSearch.results = []; return; }
+  itemSearch.index = i;
+  itemSearch.timer = setTimeout(() => searchItemProducts(q, i), 300);
+}
+
+async function searchItemProducts(query, idx) {
+  try {
+    const le = orderStore.settings.legalEntity;
+    const params = new URLSearchParams({ q: query, legal_entity: le, limit: '8' });
+    const r = await fetch(`/api/search_products?${params}`, {
+      headers: { 'X-Session-Token': sessionToken },
+    });
+    if (r.ok && itemSearch.index === idx) {
+      itemSearch.results = await r.json();
+    }
+  } catch { itemSearch.results = []; }
+}
+
+async function pickProduct(item, product, idx) {
+  item.name = product.name;
+  item.sku = product.sku;
+  item.monthly_consumption = null;
+  itemSearch.index = -1;
+  itemSearch.results = [];
+  // Подтянуть расход
+  try {
+    const { data } = await db.from('analysis_data')
+      .select('consumption, period_days')
+      .eq('sku', product.sku)
+      .eq('legal_entity', orderStore.settings.legalEntity);
+    if (data?.length) {
+      const d = data[0];
+      const daily = (d.period_days > 0) ? d.consumption / d.period_days : 0;
+      item.monthly_consumption = Math.round(daily * 30 * 10) / 10;
+    }
+  } catch {}
+}
+
+function onItemNameBlur() {
+  setTimeout(() => { itemSearch.index = -1; itemSearch.results = []; }, 150);
+}
+
+function unlinkItem(item) {
+  item.sku = null;
+  item.monthly_consumption = null;
+}
+
+function fmtConsumption(val) {
+  if (val == null) return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return '—';
+  return n % 1 === 0 ? n.toLocaleString('ru-RU') : n.toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
 function startEditName() {
   editingName.value = true;
   nextTick(() => nameInput.value?.focus());
@@ -426,8 +530,10 @@ async function loadTender() {
 
     const items = (data.items || []).sort((a, b) => a.sort_order - b.sort_order);
     tender.value.items = items.map(it => ({
-      name: it.name || '', quantity: it.quantity ? parseFloat(it.quantity) : null,
+      name: it.name || '', sku: it.sku || null,
+      quantity: it.quantity ? parseFloat(it.quantity) : null,
       unit: it.unit || '', note: it.note || '',
+      monthly_consumption: it.monthly_consumption != null ? parseFloat(it.monthly_consumption) : null,
     }));
 
     tender.value.offers = (data.offers || []).map(o => {
@@ -453,7 +559,7 @@ async function loadTender() {
 
 // Позиции
 function addItem() {
-  tender.value.items.push({ name: '', quantity: null, unit: 'шт', note: '' });
+  tender.value.items.push({ name: '', sku: null, quantity: null, unit: 'шт', note: '', monthly_consumption: null });
   for (const o of tender.value.offers) o.prices.push(null);
 }
 function removeItem(i) {
@@ -616,7 +722,7 @@ async function save() {
       winner_supplier: tender.value.winner_supplier || null,
       summary: tender.value.summary || null,
       note: tender.value.note || null,
-      items: tender.value.items.map(it => ({ name: it.name, quantity: it.quantity, unit: it.unit, note: it.note || null })),
+      items: tender.value.items.map(it => ({ name: it.name, sku: it.sku || null, quantity: it.quantity, unit: it.unit, note: it.note || null })),
       offers: tender.value.offers.map(o => ({
         supplier: o.supplier, delivery_days: o.delivery_days || null,
         payment_terms: o.payment_terms || null, conditions: o.conditions || null,
@@ -780,6 +886,19 @@ onMounted(() => { loadTender(); });
 .remove-btn { background:none; border:1px solid #E8E0D6; border-radius:6px; width:26px; height:26px; cursor:pointer; font-size:16px; color:var(--text-muted); display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; }
 .remove-btn:hover { background:#FFF0F0; border-color:#E57373; color:#C62828; }
 
+/* Привязка товара к справочнику */
+.td-name-cell { position:relative; }
+.td-name-wrap { display:flex; align-items:center; gap:4px; }
+.td-name-wrap .td-cell-input { flex:1; min-width:0; }
+.td-item-sku { font-size:10px; color:var(--bk-orange); font-weight:600; background:rgba(255,135,50,0.1); padding:1px 6px; border-radius:4px; white-space:nowrap; flex-shrink:0; }
+.td-item-unlink { background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:0 2px; line-height:1; transition:color .15s; flex-shrink:0; }
+.td-item-unlink:hover { color:#C62828; }
+
+/* Колонка расхода */
+.td-consumption-cell { text-align:center; }
+.td-consumption-val { font-size:12px; font-weight:600; color:var(--bk-brown); }
+.td-consumption-na { font-size:11px; color:var(--text-muted); font-style:italic; }
+
 /* ═══ Предложения ═══ */
 .td-offers-header { margin-bottom:14px; }
 .td-offers-list { display:flex; flex-direction:column; gap:14px; }
@@ -902,4 +1021,13 @@ td.best-term { color:#1565C0; font-weight:600; background:#E3F2FD; }
   .comp-fixed-col { min-width:100px; }
   .wcard { padding:8px 12px; }
 }
+</style>
+
+<style>
+/* Дропдаун поиска товара (Teleport — вне scoped) */
+.td-item-dropdown { background:white; border:1px solid #E8E0D6; border-radius:8px; max-height:200px; overflow-y:auto; box-shadow:0 8px 28px rgba(44,24,16,0.15); }
+.td-item-option { padding:8px 12px; cursor:pointer; font-size:12px; border-bottom:1px solid #F0EBE4; transition:background .1s; }
+.td-item-option:last-child { border-bottom:none; }
+.td-item-option:hover { background:#FFF8F0; }
+.td-item-opt-sku { color:#7A6B5F; font-size:10px; margin-right:5px; }
 </style>
