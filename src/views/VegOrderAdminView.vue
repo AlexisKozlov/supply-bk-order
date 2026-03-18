@@ -76,7 +76,7 @@
               <div class="veg-summary-lbl">Товаров</div>
             </div>
             <div class="veg-summary-item">
-              <div class="veg-summary-num">{{ allRestaurants.length - missingRestaurants.length }}</div>
+              <div class="veg-summary-num">{{ restaurantsWithDelivery.length - missingRestaurants.length }}</div>
               <div class="veg-summary-lbl">Ответов</div>
             </div>
             <div class="veg-summary-item">
@@ -625,9 +625,17 @@ function restHasDataForDates(restNum, dates) {
   );
 }
 
+// Рестораны, у которых есть доставка на видимые даты (по графику)
+const restaurantsWithDelivery = computed(() => {
+  const dates = visibleDates.value;
+  return allRestaurants.value.filter(r =>
+    dates.some(d => restHasDeliveryOnDate(r.number, d))
+  );
+});
+
 const missingRestaurants = computed(() => {
   const dates = visibleDates.value;
-  return allRestaurants.value.filter(r => !restHasDataForDates(r.number, dates));
+  return restaurantsWithDelivery.value.filter(r => !restHasDataForDates(r.number, dates));
 });
 
 // Build rows: all restaurants that have data, + missing if filter enabled
