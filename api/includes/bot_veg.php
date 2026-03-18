@@ -393,8 +393,8 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     $session = $pdo->query("SELECT id, name FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
     if (!$session) return;
 
-    // Товары сессии
-    $s = $pdo->prepare("SELECT sp.id, sp.product_name, sp.unit, sp.sort_order FROM veg_session_products sp WHERE sp.session_id = ? ORDER BY sp.sort_order, sp.product_name");
+    // Товары сессии (с кратностью)
+    $s = $pdo->prepare("SELECT sp.id, sp.product_name, sp.unit, sp.multiplicity, sp.sort_order FROM veg_session_products sp WHERE sp.session_id = ? ORDER BY sp.sort_order, sp.product_name");
     $s->execute([$session['id']]);
     $products = $s->fetchAll();
 
@@ -419,6 +419,12 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
         return;
     }
 
+    // Показываем кратность
+    $hasMultiplicity = false;
+    foreach ($products as $p) {
+        if ($p['multiplicity'] > 0) { $hasMultiplicity = true; break; }
+    }
+
     $text .= "Отправьте количества в формате:\n<code>";
     foreach ($products as $p) {
         $unit = $p['unit'] === 'pcs' ? 'шт' : 'кг';
@@ -426,7 +432,19 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
         $text .= "{$p['product_name']}: {$qty}\n";
     }
     $text .= "</code>\n";
-    $text .= "Скопируйте, измените числа и отправьте.\n";
+
+    if ($hasMultiplicity) {
+        $text .= "\n⚠️ <b>Кратность заказа:</b>\n";
+        foreach ($products as $p) {
+            if ($p['multiplicity'] > 0) {
+                $unit = $p['unit'] === 'pcs' ? 'шт' : 'кг';
+                $m = rtrim(rtrim(number_format($p['multiplicity'], 2, '.', ''), '0'), '.');
+                $text .= "  • {$p['product_name']}: кратно <b>{$m}</b> {$unit}\n";
+            }
+        }
+    }
+
+    $text .= "\nСкопируйте, измените числа и отправьте.\n";
     $text .= "Или <b>0</b> если товар не нужен.";
 
     // Сохраняем контекст ввода (через файл — работает и для ресторанов без аккаунта)
@@ -448,8 +466,8 @@ function vegOrderProcessInput($chatId, $text, $mode) {
     $deliveryDate = $parts[2];
     $sessionId = (int)$parts[3];
 
-    // Товары сессии
-    $s = $pdo->prepare("SELECT id, product_name, unit FROM veg_session_products WHERE session_id = ? ORDER BY sort_order, product_name");
+    // Товары сессии (с кратностью)
+    $s = $pdo->prepare("SELECT id, product_name, unit, multiplicity FROM veg_session_products WHERE session_id = ? ORDER BY sort_order, product_name");
     $s->execute([$sessionId]);
     $products = $s->fetchAll();
 
@@ -473,21 +491,33 @@ function vegOrderProcessInput($chatId, $text, $mode) {
         return true;
     }
 
-    // Сопоставляем с товарами и сохраняем
+    // Сопоставляем с товарами, проверяем кратность и сохраняем
     $saved = 0;
     $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at) VALUES (?, ?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), submitted_at = NOW()");
     $resultLines = [];
+    $roundedLines = [];
 
     foreach ($products as $p) {
-        $matched = false;
         foreach ($quantities as $name => $qty) {
-            // Совпадение по названию (может быть неточным)
             if (mb_strtolower($name) === mb_strtolower($p['product_name']) || mb_strpos(mb_strtolower($p['product_name']), mb_strtolower($name)) !== false) {
-                $ins->execute([$sessionId, $p['id'], $restNum, $deliveryDate, $qty]);
                 $unit = $p['unit'] === 'pcs' ? 'шт' : 'кг';
-                if ($qty > 0) $resultLines[] = "• {$p['product_name']}: <b>{$qty}</b> {$unit}";
+                $mult = floatval($p['multiplicity'] ?? 0);
+
+                // Проверка и округление кратности
+                if ($qty > 0 && $mult > 0) {
+                    $rounded = ceil($qty / $mult) * $mult;
+                    if (abs($rounded - $qty) > 0.001) {
+                        $roundedLines[] = "  ⚠️ {$p['product_name']}: {$qty} → <b>{$rounded}</b> {$unit} (кратно {$mult})";
+                        $qty = $rounded;
+                    }
+                }
+
+                $ins->execute([$sessionId, $p['id'], $restNum, $deliveryDate, $qty]);
+                if ($qty > 0) {
+                    $qtyFmt = rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.');
+                    $resultLines[] = "• {$p['product_name']}: <b>{$qtyFmt}</b> {$unit}";
+                }
                 $saved++;
-                $matched = true;
                 break;
             }
         }
@@ -504,6 +534,9 @@ function vegOrderProcessInput($chatId, $text, $mode) {
     $dateFmt = date('d.m', strtotime($deliveryDate));
     $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>{$restNum}</b>\n📅 Доставка: {$dateFmt}\n\n";
     $msg .= implode("\n", $resultLines);
+    if ($roundedLines) {
+        $msg .= "\n\n📐 <b>Округлено по кратности:</b>\n" . implode("\n", $roundedLines);
+    }
 
     sendMessage($chatId, $msg, ['inline_keyboard' => [
         [['text' => '📋 Мои заявки', 'callback_data' => 'veg_my_orders']],
