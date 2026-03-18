@@ -192,6 +192,13 @@
               </span>
             </div>
           </div>
+
+          <!-- Copy missing restaurants button -->
+          <div v-if="missingRestaurants.length" class="veg-copy-missing">
+            <button class="veg-btn outline" @click="copyMissingRestaurants">
+              {{ copiedMissing ? 'Скопировано!' : `Скопировать не ответивших (${missingRestaurants.length})` }}
+            </button>
+          </div>
         </div>
         <div v-else class="veg-empty" style="padding: 40px 0;">Загрузка данных...</div>
       </div>
@@ -536,6 +543,17 @@ function copyToken() {
 function copyText(txt) {
   navigator.clipboard.writeText(txt);
   toastStore.show('Скопировано');
+}
+
+// Copy missing restaurants
+const copiedMissing = ref(false);
+function copyMissingRestaurants() {
+  const nums = missingRestaurants.value.map(r => r.number).join(', ');
+  const text = `Нет заявок на овощи планеты ресторанов: ${nums}`;
+  navigator.clipboard.writeText(text);
+  copiedMissing.value = true;
+  toastStore.show('Список скопирован');
+  setTimeout(() => { copiedMissing.value = false; }, 2000);
 }
 
 // ═══ Close/Delete ═══
@@ -1197,6 +1215,7 @@ async function saveScheduleAll() {
   font-size: 12px; padding: 3px 8px; background: #fff; border-radius: 6px;
   border: 1px solid #FFE082; color: #555;
 }
+.veg-copy-missing { margin-top: 16px; text-align: center; padding-bottom: 20px; }
 
 /* Schedule */
 .veg-schedule { }

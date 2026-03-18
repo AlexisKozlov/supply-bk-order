@@ -263,12 +263,17 @@ if ($endpoint === 'rpc') {
         $dlRows = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules")->fetchAll();
         $deadlineRules = [];
         foreach ($dlRows as $r) $deadlineRules[(int)$r['delivery_dow']] = $r;
-        // Рассчитываем 2 ближайших дня доставки
+        // Рассчитываем 2 ближайших дня доставки (только в пределах текущей недели пн-сб)
         $tz = new DateTimeZone('Europe/Minsk');
         $now = new DateTime('now', $tz);
+        // Конец текущей недели — суббота (6)
+        $currentDow = (int)$now->format('N');
+        $daysUntilSaturday = 6 - $currentDow;
+        if ($daysUntilSaturday < 0) $daysUntilSaturday = 0; // воскресенье — 0 дней
+        $maxOffset = $daysUntilSaturday;
         $deliveries = [];
         if (!empty($days)) {
-            for ($offset = 0; $offset < 7 && count($deliveries) < 2; $offset++) {
+            for ($offset = 0; $offset <= $maxOffset && count($deliveries) < 2; $offset++) {
                 $date = clone $now;
                 $date->modify("+{$offset} days");
                 $dow = (int)$date->format('N');
@@ -298,6 +303,30 @@ if ($endpoint === 'rpc') {
             }
         }
         respond(['days' => array_map('intval', $days), 'deliveries' => $deliveries]);
+    }
+    if ($fn === 'veg_get_previous_orders') {
+        $tokenVal = $body['token_value'] ?? '';
+        $restNum = $body['restaurant_number'] ?? '';
+        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
+        $s = $pdo->prepare("SELECT session_id FROM veg_tokens WHERE token = ? AND expires_at > NOW()");
+        $s->execute([$tokenVal]);
+        $tok = $s->fetch();
+        if (!$tok) respond(['error' => 'expired']);
+        // Найти предыдущую сессию (независимо от статуса)
+        $prev = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
+        $prev->execute([$tok['session_id']]);
+        $prevSess = $prev->fetch();
+        if (!$prevSess) respond(['orders' => []]);
+        // Получить заказы из предыдущей сессии с названиями товаров
+        $st = $pdo->prepare("
+            SELECT sp.product_name, o.delivery_date, o.quantity, o.admin_qty
+            FROM veg_orders o
+            JOIN veg_session_products sp ON sp.id = o.product_id
+            WHERE o.session_id = ? AND o.restaurant_number = ?
+        ");
+        $st->execute([$prevSess['id'], $restNum]);
+        respond(['orders' => $st->fetchAll()]);
     }
     if ($fn === 'veg_get_existing_orders') {
         $tokenVal = $body['token_value'] ?? '';
@@ -1558,8 +1587,9 @@ if ($endpoint === 'rpc') {
             $pdo->prepare("DELETE FROM tender_items WHERE tender_id=?")->execute([$tenderId]);
             $itemIdMap = [];
             foreach ($items as $i => $item) {
-                $pdo->prepare("INSERT INTO tender_items (tender_id, name, sku, quantity, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$tenderId, $item['name'] ?? '', $item['sku'] ?? null, $item['quantity'] ?? null, $item['unit'] ?? null, $i, $item['note'] ?? null]);
+                $mc = isset($item['monthly_consumption']) && $item['monthly_consumption'] !== null ? floatval($item['monthly_consumption']) : null;
+                $pdo->prepare("INSERT INTO tender_items (tender_id, name, sku, quantity, unit, monthly_consumption, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([$tenderId, $item['name'] ?? '', $item['sku'] ?? null, $item['quantity'] ?? null, $item['unit'] ?? null, $mc, $i, $item['note'] ?? null]);
                 $itemIdMap[$i] = $pdo->lastInsertId();
             }
 
@@ -1570,10 +1600,14 @@ if ($endpoint === 'rpc') {
                     ->execute([$tenderId, $offer['supplier'] ?? '', $offer['delivery_days'] ?? null, $offer['payment_terms'] ?? null, $offer['conditions'] ?? null, $offer['note'] ?? null]);
                 $offerId = $pdo->lastInsertId();
                 $prices = $offer['prices'] ?? [];
+                $pricesRub = $offer['prices_rub'] ?? [];
+                $pricesByn = $offer['prices_byn'] ?? [];
                 foreach ($prices as $idx => $price) {
                     if (!isset($itemIdMap[$idx])) continue;
-                    $pdo->prepare("INSERT INTO tender_offer_prices (offer_id, item_id, price) VALUES (?, ?, ?)")
-                        ->execute([$offerId, $itemIdMap[$idx], $price]);
+                    $priceRub = isset($pricesRub[$idx]) && $pricesRub[$idx] !== null ? floatval($pricesRub[$idx]) : null;
+                    $priceByn = isset($pricesByn[$idx]) && $pricesByn[$idx] !== null ? floatval($pricesByn[$idx]) : null;
+                    $pdo->prepare("INSERT INTO tender_offer_prices (offer_id, item_id, price, price_rub, price_byn) VALUES (?, ?, ?, ?, ?)")
+                        ->execute([$offerId, $itemIdMap[$idx], $price, $priceRub, $priceByn]);
                 }
             }
 
@@ -1601,20 +1635,64 @@ if ($endpoint === 'rpc') {
         // Позиции
         $s = $pdo->prepare("SELECT * FROM tender_items WHERE tender_id=? ORDER BY sort_order"); $s->execute([$id]);
         $items = $s->fetchAll();
-        // Подтянуть расход из analysis_data по SKU
+        // Подтянуть расход из analysis_data по SKU (с учётом аналогов)
         $skus = array_filter(array_column($items, 'sku'));
         $consumptionMap = [];
         if (!empty($skus)) {
+            // Найти группы аналогов для всех SKU позиций
             $ph = implode(',', array_fill(0, count($skus), '?'));
-            $s = $pdo->prepare("SELECT sku, consumption, period_days FROM analysis_data WHERE sku IN ($ph) AND legal_entity = ?");
-            $s->execute(array_merge($skus, [$tender['legal_entity']]));
+            $s = $pdo->prepare("SELECT sku, analog_group FROM products WHERE sku IN ($ph) AND analog_group IS NOT NULL AND analog_group != ''");
+            $s->execute($skus);
+            $skuToGroup = [];
+            $groups = [];
+            foreach ($s->fetchAll() as $row) {
+                $skuToGroup[$row['sku']] = $row['analog_group'];
+                $groups[$row['analog_group']] = true;
+            }
+            // Найти все SKU аналогов
+            $allSkusForQuery = $skus;
+            $groupToSkus = [];
+            if (!empty($groups)) {
+                $gph = implode(',', array_fill(0, count($groups), '?'));
+                $s = $pdo->prepare("SELECT sku, analog_group FROM products WHERE analog_group IN ($gph)");
+                $s->execute(array_keys($groups));
+                foreach ($s->fetchAll() as $row) {
+                    $groupToSkus[$row['analog_group']][] = $row['sku'];
+                    $allSkusForQuery[] = $row['sku'];
+                }
+            }
+            $allSkusForQuery = array_values(array_unique($allSkusForQuery));
+            // Загрузить расход по всем SKU (основные + аналоги)
+            $ph2 = implode(',', array_fill(0, count($allSkusForQuery), '?'));
+            $s = $pdo->prepare("SELECT sku, consumption, period_days FROM analysis_data WHERE sku IN ($ph2) AND legal_entity = ?");
+            $s->execute(array_merge($allSkusForQuery, [$tender['legal_entity']]));
+            $adMap = [];
             foreach ($s->fetchAll() as $row) {
                 $daily = ($row['period_days'] > 0) ? $row['consumption'] / $row['period_days'] : 0;
-                $consumptionMap[$row['sku']] = round($daily * 30, 1);
+                $adMap[$row['sku']] = $daily;
+            }
+            // Суммировать расход: основной SKU + все аналоги из группы
+            foreach ($skus as $sku) {
+                $totalDaily = 0;
+                if (isset($skuToGroup[$sku]) && isset($groupToSkus[$skuToGroup[$sku]])) {
+                    foreach ($groupToSkus[$skuToGroup[$sku]] as $gs) {
+                        $totalDaily += $adMap[$gs] ?? 0;
+                    }
+                } else {
+                    $totalDaily = $adMap[$sku] ?? 0;
+                }
+                $consumptionMap[$sku] = $totalDaily > 0 ? round($totalDaily * 30, 1) : null;
             }
         }
         foreach ($items as &$item) {
-            $item['monthly_consumption'] = $item['sku'] ? ($consumptionMap[$item['sku']] ?? null) : null;
+            // Если сохранён ручной расход — использовать его, иначе подтянуть автоматически
+            if ($item['monthly_consumption'] !== null) {
+                $item['monthly_consumption'] = floatval($item['monthly_consumption']);
+                $item['consumption_auto'] = $item['sku'] ? ($consumptionMap[$item['sku']] ?? null) : null;
+            } else {
+                $item['monthly_consumption'] = $item['sku'] ? ($consumptionMap[$item['sku']] ?? null) : null;
+                $item['consumption_auto'] = $item['monthly_consumption'];
+            }
         }
         unset($item);
         $tender['items'] = $items;
@@ -1623,7 +1701,7 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT id, tender_id, supplier, delivery_days, payment_terms, conditions, note, created_at FROM tender_offers WHERE tender_id=? ORDER BY id"); $s->execute([$id]);
         $offers = $s->fetchAll();
         foreach ($offers as &$offer) {
-            $s2 = $pdo->prepare("SELECT item_id, price FROM tender_offer_prices WHERE offer_id=?"); $s2->execute([$offer['id']]);
+            $s2 = $pdo->prepare("SELECT item_id, price, price_rub, price_byn FROM tender_offer_prices WHERE offer_id=?"); $s2->execute([$offer['id']]);
             $offer['prices'] = $s2->fetchAll();
         }
         $tender['offers'] = $offers;
@@ -1631,6 +1709,11 @@ if ($endpoint === 'rpc') {
         // Файлы КП
         $s = $pdo->prepare("SELECT id, supplier, file_name, file_path, uploaded_at FROM tender_files WHERE tender_id=? ORDER BY uploaded_at"); $s->execute([$id]);
         $tender['files'] = $s->fetchAll();
+
+        // Курс валют
+        $rateStmt = $pdo->prepare("SELECT value FROM settings WHERE `key`='rub_to_byn_rate'");
+        $rateStmt->execute();
+        $tender['rub_to_byn_rate'] = floatval($rateStmt->fetchColumn() ?: '0.0375');
 
         respond($tender);
     }
@@ -1997,7 +2080,17 @@ if ($endpoint === 'rpc') {
             if (!isset($schedMap[$rn])) $schedMap[$rn] = [];
             $schedMap[$rn][] = intval($r['day_of_week']);
         }
-        respond(['products' => $products, 'orders' => $orders, 'notes' => $notes, 'restaurants' => $restaurants, 'tokens' => $tokens, 'schedule' => $schedMap]);
+        // Предыдущая сессия — заказы (для не ответивших)
+        $prevSess = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
+        $prevSess->execute([$sessId]);
+        $prevS = $prevSess->fetch();
+        $prevOrders = [];
+        if ($prevS) {
+            $sp = $pdo->prepare("SELECT o.restaurant_number, sp.product_name, sp.unit, o.delivery_date, o.quantity, o.admin_qty FROM veg_orders o JOIN veg_session_products sp ON sp.id = o.product_id WHERE o.session_id = ? ORDER BY o.restaurant_number, o.delivery_date");
+            $sp->execute([$prevS['id']]);
+            $prevOrders = $sp->fetchAll();
+        }
+        respond(['products' => $products, 'orders' => $orders, 'notes' => $notes, 'restaurants' => $restaurants, 'tokens' => $tokens, 'schedule' => $schedMap, 'prev_orders' => $prevOrders]);
     }
     if ($fn === 'veg_update_order') {
         $orderId = intval($body['order_id'] ?? 0);

@@ -79,6 +79,17 @@
                 <div v-else-if="del.deadline" class="veg-deadline-badge">до {{ formatDeadline(del.deadline) }}</div>
               </div>
 
+              <!-- Expired: show previous order info -->
+              <div v-if="del.expired && hasPrevData(del.date)" class="sf-prev-order-block">
+                <div class="sf-prev-order-title">Заказ будет выполнен по предыдущей заявке:</div>
+                <div v-for="prod in info.products" :key="'prev-' + prod.id + '-' + del.date" class="sf-prev-order-item">
+                  <span class="sf-prev-order-name">{{ prod.product_name }}</span>
+                  <strong v-if="prevInfo(del.date, prod)" class="sf-prev-order-qty">{{ prevInfo(del.date, prod).qty }} {{ unitShort(prod.unit) }}</strong>
+                  <span v-else class="sf-prev-order-qty sf-prev-order-none">—</span>
+                </div>
+              </div>
+
+              <template v-if="!del.expired">
               <div v-for="prod in info.products" :key="prod.id + '-' + del.date" class="sf-product" :class="{ 'sf-product-error': multError(del.date, prod) }">
                 <div class="sf-product-top">
                   <div class="sf-product-name">{{ prod.product_name }}</div>
@@ -96,7 +107,6 @@
                     placeholder="0"
                     class="sf-input"
                     :class="{ filled: orderValues[del.date + '_' + prod.id], error: multError(del.date, prod) }"
-                    :disabled="del.expired"
                     @focus="$event.target.select()"
                   />
                   <span class="sf-input-unit">{{ unitShort(prod.unit) }}</span>
@@ -105,6 +115,7 @@
                   Должно быть кратно {{ prod.multiplicity }}
                 </div>
               </div>
+              </template>
             </div>
 
             <div v-if="deliveries.length > 1 && activeDay === 0" class="veg-next-day-hint" @click="activeDay = 1">
@@ -345,6 +356,11 @@ function prevInfo(date, prod) {
   const sorted = prevOrders.sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
   const q = orderQty(sorted[0]);
   return q > 0 ? { date: sorted[0].delivery_date, qty: q } : null;
+}
+
+function hasPrevData(date) {
+  if (!info.value) return false;
+  return info.value.products.some(p => prevInfo(date, p));
 }
 
 function fmtShort(dateStr) {
@@ -619,6 +635,19 @@ async function submitEdit() {
 .sf-prev-hint {
   font-size: 11px; color: #7E57C2; font-weight: 600;
 }
+.sf-prev-order-block {
+  background: #FFF8E1; border-radius: 10px; padding: 12px 14px; margin-top: 4px;
+}
+.sf-prev-order-title {
+  font-size: 13px; font-weight: 700; color: #F57F17; margin-bottom: 8px;
+}
+.sf-prev-order-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0; font-size: 14px; color: #333;
+}
+.sf-prev-order-name { font-weight: 500; }
+.sf-prev-order-qty { color: #502314; }
+.sf-prev-order-none { color: #bbb; }
 .sf-product-error { background: #FFF5F5; }
 .sf-mult-error {
   font-size: 11px; color: #D62700; margin-top: 2px; font-weight: 600;
