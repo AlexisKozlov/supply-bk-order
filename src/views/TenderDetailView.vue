@@ -119,11 +119,20 @@
           <button v-if="!isViewer" class="btn primary" @click="addOffer">+ Предложение поставщика</button>
         </div>
         <div v-if="!tender.offers.length" class="td-empty" style="padding:40px;">Добавьте предложения от поставщиков</div>
-        <div v-else class="td-offers-list">
-          <div v-for="(offer, oi) in tender.offers" :key="oi" class="td-offer-card">
+        <template v-else>
+          <!-- Вкладки поставщиков -->
+          <div class="td-offer-tabs">
+            <button v-for="(offer, oi) in tender.offers" :key="oi"
+              class="td-offer-tab" :class="{ active: activeOfferIdx === oi }"
+              @click="activeOfferIdx = oi">
+              {{ offer.supplier || 'Поставщик ' + (oi + 1) }}
+            </button>
+          </div>
+          <div class="td-offers-list">
+          <div v-for="(offer, oi) in tender.offers" :key="oi" v-show="activeOfferIdx === oi" class="td-offer-card">
             <div class="td-offer-header">
               <input v-model="offer.supplier" class="td-offer-supplier-input" placeholder="Название поставщика" :disabled="isViewer" />
-              <button v-if="!isViewer" class="remove-btn" @click="tender.offers.splice(oi, 1)" title="Удалить">&times;</button>
+              <button v-if="!isViewer" class="remove-btn" @click="removeOffer(oi)" title="Удалить">&times;</button>
             </div>
             <!-- Условия -->
             <div class="td-offer-conditions">
@@ -160,7 +169,7 @@
                     <td class="td-price-item-name">{{ item.name || '(без названия)' }}</td>
                     <td>
                       <input :value="offer.prices_rub[ii]" type="number" step="0.01" min="0"
-                        class="td-cell-input price-cell" :class="{ 'cheapest': isCheapest(ii, offer.prices_rub[ii]) }"
+                        class="td-cell-input price-cell" :class="{ 'cheapest': isCheapest(ii, offer.prices_rub[ii], 'rub') }"
                         :disabled="isViewer" placeholder="—"
                         @input="onPriceRubInput(offer, ii, $event)"
                         @focus="(e) => onOfferCalcFocus(e, oi, ii, 'price_rub')"
@@ -217,6 +226,7 @@
             </div>
           </div>
         </div>
+        </template>
       </div>
 
       <!-- ═══ Таб: Сравнение ═══ -->
@@ -256,8 +266,8 @@
                       <td class="comp-qty-col">{{ item.quantity ? `${item.quantity} ${item.unit || ''}`.trim() : '' }}</td>
                       <td v-for="(o, oi) in tender.offers" :key="oi"
                         :class="{
-                          cheapest: isCheapest(ii, getComparePrice(o, ii)),
-                          expensive: isMostExpensive(ii, getComparePrice(o, ii)),
+                          cheapest: isCheapest(ii, getComparePrice(o, ii), compareCurrency.toLowerCase()),
+                          expensive: isMostExpensive(ii, getComparePrice(o, ii), compareCurrency.toLowerCase()),
                           winner: tender.winner_supplier && o.supplier === tender.winner_supplier,
                         }">
                         <div class="comp-price">{{ getComparePrice(o, ii) > 0 ? formatPrice(getComparePrice(o, ii)) : '—' }}</div>
@@ -498,6 +508,7 @@ const statuses = [
 function statusLabel(s) { return statuses.find(x => x.value === s)?.label || s; }
 
 const tab = ref('info');
+const activeOfferIdx = ref(0);
 const loadingTender = ref(false);
 const saving = ref(false);
 const reloadingConsumption = ref(false);
@@ -754,6 +765,14 @@ function addOffer() {
     prices_rub: tender.value.items.map(() => null),
     prices_byn: tender.value.items.map(() => null),
   });
+  activeOfferIdx.value = tender.value.offers.length - 1;
+}
+
+function removeOffer(oi) {
+  tender.value.offers.splice(oi, 1);
+  if (activeOfferIdx.value >= tender.value.offers.length) {
+    activeOfferIdx.value = Math.max(0, tender.value.offers.length - 1);
+  }
 }
 
 // Файлы КП
@@ -858,15 +877,16 @@ function formatPrice(v) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function isCheapest(ii, price) {
+function isCheapest(ii, price, cur) {
   if (!price || price <= 0) return false;
-  // Сравниваем по RUB (или по той же валюте, что передана)
-  const all = tender.value.offers.map(o => o.prices_rub?.[ii] || o.prices[ii]).filter(p => p > 0);
+  const key = cur === 'byn' ? 'prices_byn' : 'prices_rub';
+  const all = tender.value.offers.map(o => parseFloat(o[key]?.[ii]) || 0).filter(p => p > 0);
   return all.length >= 2 && price <= Math.min(...all);
 }
-function isMostExpensive(ii, price) {
+function isMostExpensive(ii, price, cur) {
   if (!price || price <= 0) return false;
-  const all = tender.value.offers.map(o => o.prices_rub?.[ii] || o.prices[ii]).filter(p => p > 0);
+  const key = cur === 'byn' ? 'prices_byn' : 'prices_rub';
+  const all = tender.value.offers.map(o => parseFloat(o[key]?.[ii]) || 0).filter(p => p > 0);
   return all.length >= 2 && price >= Math.max(...all);
 }
 function offerTotal(o) { return (o.prices_rub || o.prices).reduce((s, p) => s + (parseFloat(p) || 0), 0); }
@@ -922,7 +942,9 @@ const winnerCheapestCount = computed(() => {
   if (!winnerOffer.value) return 0;
   let count = 0;
   for (let i = 0; i < tender.value.items.length; i++) {
-    if (isCheapest(i, winnerOffer.value.prices[i])) count++;
+    const cur = compareCurrency.value.toLowerCase();
+    const key = cur === 'byn' ? 'prices_byn' : 'prices_rub';
+    if (isCheapest(i, parseFloat(winnerOffer.value[key]?.[i]) || 0, cur)) count++;
   }
   return count;
 });
@@ -996,7 +1018,7 @@ async function exportComparison() {
       for (const o of tender.value.offers) {
         const arr = cur === 'byn' ? o.prices_byn : o.prices_rub;
         const p = arr?.[ii] || 0;
-        const cheap = isCheapest(ii, p);
+        const cheap = isCheapest(ii, p, cur);
         row.push({ v: p > 0 ? p : '', t: p > 0 ? 'n' : 's', s: cheap ? { ...sR, ...sG } : sR });
       }
       rows.push(row);
@@ -1128,6 +1150,10 @@ onMounted(() => { loadTender(); });
 
 /* ═══ Предложения ═══ */
 .td-offers-header { margin-bottom:14px; }
+.td-offer-tabs { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:14px; }
+.td-offer-tab { padding:8px 16px; border:1.5px solid #E8E0D6; border-radius:10px; background:#fff; color:#8C7B6E; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; transition:all 0.15s; }
+.td-offer-tab.active { border-color:#D62300; background:#FFF5F0; color:#D62300; }
+.td-offer-tab:hover:not(.active) { border-color:#ccc; background:#fafafa; }
 .td-offers-list { display:flex; flex-direction:column; gap:14px; }
 .td-offer-card { background:white; border-radius:14px; padding:20px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
 .td-offer-header { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
