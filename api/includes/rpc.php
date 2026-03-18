@@ -2563,7 +2563,7 @@ if ($endpoint === 'rpc') {
     }
 
     if ($fn === 'tg_admin_recent_questions') {
-        $rows = $pdo->query("SELECT user_name, question AS last_question, asked_at AS last_question_at, legal_entity AS last_entity
+        $rows = $pdo->query("SELECT user_name, question AS last_question, answer, asked_at AS last_question_at, legal_entity AS last_entity
             FROM tg_question_log
             ORDER BY asked_at DESC LIMIT 50")->fetchAll();
         respond(['questions' => $rows]);
