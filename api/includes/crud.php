@@ -15,9 +15,11 @@ $allowed = [
     'price_agreements', 'product_prices', 'price_history',
     'tenders', 'tender_items', 'tender_offers', 'tender_offer_prices', 'tender_files',
     'bug_reports', 'bug_report_replies', 'restaurant_sales', 'report_exclusions',
+    'veg_sessions', 'veg_session_products', 'veg_tokens', 'veg_delivery_days', 'veg_orders', 'veg_restaurant_notes', 'veg_deadline_rules',
+    'dist_sessions', 'dist_session_products', 'dist_entries', 'dist_notes',
 ];
 // Защита: только чтение через REST, запись — через RPC
-$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files'];
+$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files', 'veg_tokens'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -161,6 +163,12 @@ $filterWhitelist = [
     'product_prices'   => ['id','sku','supplier','legal_entity','agreement_id','vat_rate','updated_by','updated_at'],
     'restaurant_sales' => ['id','analog_group','sale_date'],
     'report_exclusions' => ['id','analog_group'],
+    'veg_sessions'          => ['id','status','created_by'],
+    'veg_session_products'  => ['id','session_id'],
+    'veg_tokens'            => ['id','session_id'],
+    'veg_delivery_days'     => ['id','restaurant_number','day_of_week'],
+    'veg_orders'            => ['id','session_id','product_id','restaurant_number','delivery_date'],
+    'veg_restaurant_notes'  => ['id','session_id','restaurant_number'],
 ];
 
 // Белый список колонок для записи (POST/PATCH)
@@ -192,6 +200,12 @@ $writeWhitelist = [
     'stock_collection_data' => ['id','stock'],
     'stock_collection_products' => ['id'],
     'stock_collection_tokens' => ['id'],
+    'veg_sessions'          => ['id','name','date_from','date_to','status'],
+    'veg_session_products'  => ['id','session_id','product_name','unit','multiplicity','sort_order'],
+    'veg_tokens'            => ['id'],
+    'veg_delivery_days'     => ['id','restaurant_number','day_of_week'],
+    'veg_orders'            => ['id','quantity','admin_note','admin_qty'],
+    'veg_restaurant_notes'  => ['id','session_id','restaurant_number','note'],
 ];
 
 if ($method === 'GET') {

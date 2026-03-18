@@ -255,6 +255,7 @@ if ($endpoint === 'rpc') {
     }
     if ($fn === 'veg_get_schedule') {
         $restNum = $body['restaurant_number'] ?? '';
+        $tokenVal = $body['token_value'] ?? '';
         if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
         $s = $pdo->prepare("SELECT day_of_week FROM veg_delivery_days WHERE restaurant_number = ? ORDER BY day_of_week");
         $s->execute([$restNum]);
@@ -263,42 +264,84 @@ if ($endpoint === 'rpc') {
         $dlRows = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules")->fetchAll();
         $deadlineRules = [];
         foreach ($dlRows as $r) $deadlineRules[(int)$r['delivery_dow']] = $r;
-        // Рассчитываем 2 ближайших дня доставки (только в пределах текущей недели пн-сб)
+
         $tz = new DateTimeZone('Europe/Minsk');
         $now = new DateTime('now', $tz);
-        // Конец текущей недели — суббота (6)
-        $currentDow = (int)$now->format('N');
-        $daysUntilSaturday = 6 - $currentDow;
-        if ($daysUntilSaturday < 0) $daysUntilSaturday = 0; // воскресенье — 0 дней
-        $maxOffset = $daysUntilSaturday;
+
+        // Определяем диапазон дат из сессии (через токен)
+        $dateFrom = null;
+        $dateTo = null;
+        if ($tokenVal && preg_match('/^[a-f0-9]{64}$/', $tokenVal)) {
+            $tq = $pdo->prepare("SELECT s.date_from, s.date_to FROM veg_tokens t JOIN veg_sessions s ON s.id = t.session_id WHERE t.token = ? AND t.expires_at > NOW()");
+            $tq->execute([$tokenVal]);
+            $tr = $tq->fetch();
+            if ($tr) { $dateFrom = $tr['date_from']; $dateTo = $tr['date_to']; }
+        }
+
         $deliveries = [];
         if (!empty($days)) {
-            for ($offset = 0; $offset <= $maxOffset && count($deliveries) < 2; $offset++) {
-                $date = clone $now;
-                $date->modify("+{$offset} days");
-                $dow = (int)$date->format('N');
-                if (in_array($dow, $days)) {
-                    $deadline = null;
-                    $deadlineStr = null;
-                    if (isset($deadlineRules[$dow])) {
-                        $rule = $deadlineRules[$dow];
-                        $deadlineDow = (int)$rule['deadline_dow'];
-                        $deadline = clone $date;
-                        $diff = $dow - $deadlineDow;
-                        if ($diff <= 0) $diff += 7;
-                        $deadline->modify("-{$diff} days");
-                        $timeParts = explode(':', $rule['deadline_time']);
-                        $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
-                        $deadlineStr = $deadline->format('Y-m-d H:i:s');
+            if ($dateFrom && $dateTo) {
+                // Перебираем все дни в диапазоне сессии
+                $cursor = new DateTime($dateFrom, $tz);
+                $end = new DateTime($dateTo, $tz);
+                while ($cursor <= $end) {
+                    $dow = (int)$cursor->format('N');
+                    if (in_array($dow, $days)) {
+                        $deadline = null;
+                        $deadlineStr = null;
+                        if (isset($deadlineRules[$dow])) {
+                            $rule = $deadlineRules[$dow];
+                            $deadlineDow = (int)$rule['deadline_dow'];
+                            $deadline = clone $cursor;
+                            $diff = $dow - $deadlineDow;
+                            if ($diff <= 0) $diff += 7;
+                            $deadline->modify("-{$diff} days");
+                            $timeParts = explode(':', $rule['deadline_time']);
+                            $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
+                            $deadlineStr = $deadline->format('Y-m-d H:i:s');
+                        }
+                        $expired = $deadline && $now >= $deadline;
+                        $deliveries[] = [
+                            'date' => $cursor->format('Y-m-d'),
+                            'day_of_week' => $dow,
+                            'deadline' => $deadlineStr,
+                            'expired' => $expired,
+                        ];
                     }
-                    $expired = $deadline && $now >= $deadline;
-                    if ($offset === 0 && $expired) continue;
-                    $deliveries[] = [
-                        'date' => $date->format('Y-m-d'),
-                        'day_of_week' => $dow,
-                        'deadline' => $deadlineStr,
-                        'expired' => $expired,
-                    ];
+                    $cursor->modify('+1 day');
+                }
+            } else {
+                // Обратная совместимость: если диапазон не задан — старая логика
+                $currentDow = (int)$now->format('N');
+                $daysUntilSaturday = 6 - $currentDow;
+                if ($daysUntilSaturday < 0) $daysUntilSaturday = 0;
+                for ($offset = 0; $offset <= $daysUntilSaturday && count($deliveries) < 2; $offset++) {
+                    $date = clone $now;
+                    $date->modify("+{$offset} days");
+                    $dow = (int)$date->format('N');
+                    if (in_array($dow, $days)) {
+                        $deadline = null;
+                        $deadlineStr = null;
+                        if (isset($deadlineRules[$dow])) {
+                            $rule = $deadlineRules[$dow];
+                            $deadlineDow = (int)$rule['deadline_dow'];
+                            $deadline = clone $date;
+                            $diff = $dow - $deadlineDow;
+                            if ($diff <= 0) $diff += 7;
+                            $deadline->modify("-{$diff} days");
+                            $timeParts = explode(':', $rule['deadline_time']);
+                            $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
+                            $deadlineStr = $deadline->format('Y-m-d H:i:s');
+                        }
+                        $expired = $deadline && $now >= $deadline;
+                        if ($offset === 0 && $expired) continue;
+                        $deliveries[] = [
+                            'date' => $date->format('Y-m-d'),
+                            'day_of_week' => $dow,
+                            'deadline' => $deadlineStr,
+                            'expired' => $expired,
+                        ];
+                    }
                 }
             }
         }
@@ -1989,12 +2032,17 @@ if ($endpoint === 'rpc') {
         $name = mb_substr($body['name'] ?? '', 0, 255);
         $products = $body['products'] ?? []; // [{name, unit}]
         $uname = $authUserName ?: ($body['user_name'] ?? '');
+        $dateFrom = $body['date_from'] ?? null;
+        $dateTo = $body['date_to'] ?? null;
         if (!$name || empty($products)) respond(['error' => 'Не все параметры указаны'], 400);
         if (count($products) > 200) respond(['error' => 'Слишком много товаров (макс. 200)'], 400);
+        // Валидация дат
+        if ($dateFrom && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) $dateFrom = null;
+        if ($dateTo && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) $dateTo = null;
         $pdo->beginTransaction();
         try {
-            $s = $pdo->prepare("INSERT INTO veg_sessions (name, created_by) VALUES (?, ?)");
-            $s->execute([$name, $uname]);
+            $s = $pdo->prepare("INSERT INTO veg_sessions (name, date_from, date_to, created_by) VALUES (?, ?, ?, ?)");
+            $s->execute([$name, $dateFrom, $dateTo, $uname]);
             $sessId = $pdo->lastInsertId();
             $ins = $pdo->prepare("INSERT INTO veg_session_products (session_id, product_name, unit, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?)");
             foreach ($products as $i => $p) {
@@ -2044,6 +2092,12 @@ if ($endpoint === 'rpc') {
     if ($fn === 'veg_get_session_data') {
         $sessId = intval($body['session_id'] ?? 0);
         if (!$sessId) respond(['error' => 'Не все параметры указаны'], 400);
+        // Даты сессии
+        $sessMeta = $pdo->prepare("SELECT date_from, date_to FROM veg_sessions WHERE id = ?");
+        $sessMeta->execute([$sessId]);
+        $sessRow = $sessMeta->fetch();
+        $dateFrom = $sessRow['date_from'] ?? null;
+        $dateTo = $sessRow['date_to'] ?? null;
         // Товары
         $s = $pdo->prepare("SELECT id, product_name, unit, multiplicity, sort_order FROM veg_session_products WHERE session_id = ? ORDER BY sort_order");
         $s->execute([$sessId]);
@@ -2090,7 +2144,7 @@ if ($endpoint === 'rpc') {
             $sp->execute([$prevS['id']]);
             $prevOrders = $sp->fetchAll();
         }
-        respond(['products' => $products, 'orders' => $orders, 'notes' => $notes, 'restaurants' => $restaurants, 'tokens' => $tokens, 'schedule' => $schedMap, 'prev_orders' => $prevOrders]);
+        respond(['products' => $products, 'orders' => $orders, 'notes' => $notes, 'restaurants' => $restaurants, 'tokens' => $tokens, 'schedule' => $schedMap, 'prev_orders' => $prevOrders, 'date_from' => $dateFrom, 'date_to' => $dateTo]);
     }
     if ($fn === 'veg_update_order') {
         $orderId = intval($body['order_id'] ?? 0);

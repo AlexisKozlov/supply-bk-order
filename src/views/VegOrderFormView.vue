@@ -154,10 +154,11 @@
         <h2>Заявка отправлена!</h2>
         <div class="sf-success-rest">Ресторан {{ selectedRestaurant }}</div>
         <div class="sf-success-details">
-          <template v-for="del in deliveries.filter(d => !d.expired)" :key="del.date">
+          <template v-for="del in deliveries" :key="del.date">
             <div class="veg-success-day">
               {{ formatDeliveryDate(del.date) }}
-              <span v-if="del.deadline" class="veg-success-deadline">до {{ formatDeadline(del.deadline) }}</span>
+              <span v-if="del.expired" class="veg-success-deadline" style="color:#D62700;">дедлайн прошёл</span>
+              <span v-else-if="del.deadline" class="veg-success-deadline">до {{ formatDeadline(del.deadline) }}</span>
             </div>
             <template v-if="dayHasData(del.date)">
               <div v-for="prod in info.products" :key="prod.id + '-' + del.date" class="sf-success-item">
@@ -400,7 +401,7 @@ async function onRestaurantChange() {
   scheduleLoading.value = true;
   try {
     const [schedRes, ordRes, prevRes] = await Promise.all([
-      db.rpc('veg_get_schedule', { restaurant_number: selectedRestaurant.value }),
+      db.rpc('veg_get_schedule', { restaurant_number: selectedRestaurant.value, token_value: token }),
       db.rpc('veg_get_existing_orders', { token_value: token, restaurant_number: selectedRestaurant.value }),
       db.rpc('veg_get_previous_orders', { token_value: token, restaurant_number: selectedRestaurant.value }),
     ]);

@@ -2,7 +2,7 @@
   <div class="veg">
     <div class="veg-top">
       <h1 class="veg-title">Заказ овощей</h1>
-      <button class="veg-btn fill" @click="showCreate = true">+ Новая сессия</button>
+      <button class="veg-btn fill" @click="initCreateDates(); showCreate = true">+ Новая сессия</button>
     </div>
 
     <!-- Tabs -->
@@ -30,6 +30,7 @@
             </span>
           </div>
           <div class="veg-card-meta">
+            <span v-if="s.date_from && s.date_to">{{ fmtShortDate(s.date_from) }} — {{ fmtShortDate(s.date_to) }} · </span>
             {{ s.created_by || '---' }} · {{ fmtDate(s.created_at) }}
           </div>
         </div>
@@ -101,19 +102,19 @@
             </label>
           </div>
 
-          <!-- Date tabs -->
+          <!-- Date tabs (мульти-выбор) -->
           <div v-if="deliveryDates.length" class="veg-dates-row">
             <span class="veg-dates-label">Дата доставки:</span>
             <button
               v-for="dd in deliveryDates" :key="dd"
               class="veg-date-chip"
-              :class="{ active: selectedDate === dd }"
-              @click="selectedDate = dd"
+              :class="{ active: allDatesSelected || selectedDates.includes(dd) }"
+              @click="toggleDate(dd)"
             >{{ fmtShortDate(dd) }}</button>
             <button
               class="veg-date-chip"
-              :class="{ active: selectedDate === 'all' }"
-              @click="selectedDate = 'all'"
+              :class="{ active: allDatesSelected }"
+              @click="selectAllDates"
             >Все</button>
           </div>
 
@@ -138,7 +139,7 @@
                     <span class="veg-rest-num">{{ row.number }}</span>
                     <span class="veg-rest-addr">{{ row.city }}{{ row.address ? ', ' + row.address : '' }}</span>
                     <span v-if="row.isVM" class="veg-vm-badge">ВМ</span>
-                    <button v-if="row.hasData" class="veg-del-row" :title="selectedDate !== 'all' ? 'Удалить заявку на ' + fmtShortDate(selectedDate) : 'Удалить все заявки'" @click.stop="confirmDeleteOrders(row.number)">×</button>
+                    <button v-if="row.hasData" class="veg-del-row" :title="visibleDates.length === 1 ? 'Удалить заявку на ' + fmtShortDate(visibleDates[0]) : 'Удалить все заявки'" @click.stop="confirmDeleteOrders(row.number)">×</button>
                   </td>
                   <template v-for="dd in visibleDates" :key="dd">
                     <td
@@ -271,6 +272,12 @@
           <h3 style="margin-bottom: 14px;">Новая сессия</h3>
           <div style="display:flex;flex-direction:column;gap:10px;">
             <input v-model="createName" type="text" class="veg-input" placeholder="Название, напр. 'Неделя 12 (17-23 марта)'" />
+            <div style="font-size:13px;font-weight:600;color:#555;">Неделя доставки:</div>
+            <div style="display:flex;gap:8px;">
+              <input v-model="createDateFrom" type="date" class="veg-input" style="flex:1;" />
+              <span style="align-self:center;color:#999;">—</span>
+              <input v-model="createDateTo" type="date" class="veg-input" style="flex:1;" />
+            </div>
             <div style="font-size:13px;font-weight:600;color:#555;margin-top:4px;">Товары:</div>
             <div v-for="(p, idx) in createProducts" :key="idx" class="veg-product-block">
               <div class="veg-product-row">
@@ -364,12 +371,29 @@ const sessionData = ref(null);
 // Create
 const showCreate = ref(false);
 const createName = ref('');
+const createDateFrom = ref('');
+const createDateTo = ref('');
 const createProducts = ref([
   { name: 'Томат', unit: 'kg', multiplicity: 6 },
   { name: 'Лук репчатый', unit: 'kg', multiplicity: 1 },
   { name: 'Салат айсберг', unit: 'pcs', multiplicity: '' },
 ]);
 const creating = ref(false);
+
+// Автозаполнение дат: ближайший пн–сб
+function initCreateDates() {
+  const now = new Date();
+  const dow = now.getDay() || 7;
+  // Следующий понедельник
+  const daysToMon = dow <= 5 ? (8 - dow) : (8 - dow); // если пн-пт → следующий пн, если сб/вс → ближайший пн
+  const mon = new Date(now);
+  mon.setDate(mon.getDate() + (8 - dow));
+  const sat = new Date(mon);
+  sat.setDate(sat.getDate() + 5);
+  const fmt = d => d.toISOString().slice(0, 10);
+  createDateFrom.value = fmt(mon);
+  createDateTo.value = fmt(sat);
+}
 
 // Token
 const showTokenModal = ref(false);
@@ -458,6 +482,8 @@ async function createSession() {
   try {
     const { data } = await db.rpc('veg_create_session', {
       name,
+      date_from: createDateFrom.value || null,
+      date_to: createDateTo.value || null,
       products: prods.map(p => ({ name: p.name.trim(), unit: p.unit, multiplicity: p.multiplicity ? parseFloat(String(p.multiplicity).replace(',', '.')) : null })),
       user_name: userStore.currentUser?.name,
     });
@@ -480,7 +506,7 @@ async function openSession(s) {
   activeSession.value = s;
   sessionData.value = null;
   tokenLink.value = '';
-  selectedDate.value = 'all';
+  selectedDates.value = [];
   await refreshData();
 }
 
@@ -594,18 +620,58 @@ function askDeleteSession() {
 }
 
 // ═══ Data table ═══
-const selectedDate = ref('all');
+const selectedDates = ref([]);  // пустой = все выбраны
+
+function toggleDate(dd) {
+  const idx = selectedDates.value.indexOf(dd);
+  if (idx >= 0) {
+    selectedDates.value.splice(idx, 1);
+  } else {
+    selectedDates.value.push(dd);
+  }
+  // Если выбраны все — сбросить в «все»
+  if (selectedDates.value.length === deliveryDates.value.length) {
+    selectedDates.value = [];
+  }
+}
+
+function selectAllDates() {
+  selectedDates.value = [];
+}
+
+const allDatesSelected = computed(() => selectedDates.value.length === 0);
 
 const deliveryDates = computed(() => {
-  if (!sessionData.value?.orders) return [];
-  const dates = [...new Set(sessionData.value.orders.map(o => o.delivery_date))];
-  dates.sort();
-  return dates;
+  if (!sessionData.value) return [];
+  // Даты из заявок
+  const dates = new Set((sessionData.value.orders || []).map(o => o.delivery_date));
+  // Даты из диапазона сессии + расписание
+  const df = sessionData.value.date_from;
+  const dt = sessionData.value.date_to;
+  if (df && dt && sessionData.value.schedule) {
+    const allDows = new Set();
+    for (const days of Object.values(sessionData.value.schedule)) {
+      for (const d of days) allDows.add(d);
+    }
+    const cursor = new Date(df + 'T00:00:00');
+    const end = new Date(dt + 'T00:00:00');
+    while (cursor <= end) {
+      const dow = cursor.getDay() || 7;
+      if (allDows.has(dow)) {
+        const y = cursor.getFullYear();
+        const m = String(cursor.getMonth() + 1).padStart(2, '0');
+        const d = String(cursor.getDate()).padStart(2, '0');
+        dates.add(`${y}-${m}-${d}`);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+  return [...dates].sort();
 });
 
 const visibleDates = computed(() => {
-  if (selectedDate.value === 'all') return deliveryDates.value;
-  return deliveryDates.value.filter(d => d === selectedDate.value);
+  if (selectedDates.value.length === 0) return deliveryDates.value;
+  return deliveryDates.value.filter(d => selectedDates.value.includes(d));
 });
 
 const regions = computed(() => {
@@ -621,7 +687,7 @@ function restHasDataForDates(restNum, dates) {
   return sessionData.value.orders.some(o =>
     String(o.restaurant_number) === String(restNum) &&
     dates.includes(o.delivery_date) &&
-    parseFloat(o.quantity) > 0
+    (parseFloat(o.quantity) > 0 || (o.admin_qty !== null && o.admin_qty !== undefined && o.admin_qty !== '' && parseFloat(o.admin_qty) > 0))
   );
 }
 
@@ -675,13 +741,15 @@ const filteredRows = computed(() => {
       r.address.toLowerCase().includes(q)
     );
   }
-  // При фильтре по конкретной дате — показывать только рестораны, у которых доставка в этот день
-  if (selectedDate.value !== 'all' && sessionData.value?.schedule) {
-    const d = new Date(selectedDate.value + 'T00:00:00');
-    const dow = d.getDay() || 7; // 1=пн..7=вс
+  // При фильтре по конкретным датам — показывать только рестораны, у которых доставка хотя бы в один из выбранных дней
+  if (selectedDates.value.length > 0 && sessionData.value?.schedule) {
+    const dows = selectedDates.value.map(dateStr => {
+      const d = new Date(dateStr + 'T00:00:00');
+      return d.getDay() || 7;
+    });
     rows = rows.filter(r => {
       const days = sessionData.value.schedule[r.number] || [];
-      return days.includes(dow);
+      return dows.some(dow => days.includes(dow));
     });
   }
   return rows;
@@ -786,7 +854,7 @@ async function saveNote(restNum, note) {
 }
 
 function confirmDeleteOrders(restNum) {
-  const date = selectedDate.value !== 'all' ? selectedDate.value : null;
+  const date = visibleDates.value.length === 1 ? visibleDates.value[0] : null;
   const dateLabel = date ? ` на ${fmtShortDate(date)}` : '';
   confirmModal.value = {
     title: 'Удалить заявку',
@@ -808,11 +876,19 @@ function confirmDeleteOrders(restNum) {
 }
 
 // ═══ Excel ═══
+function getQtyValue(restNum, dd, prodId) {
+  const admin = getCellAdmin(restNum, dd, prodId);
+  const qty = admin !== null ? admin : getCellQty(restNum, dd, prodId);
+  const num = parseFloat(qty);
+  return isNaN(num) ? 0 : num;
+}
+
 async function exportExcel() {
   if (!sessionData.value) return;
   const XLSX = await import('xlsx-js-style');
   const products = sessionData.value.products || [];
   const dates = visibleDates.value;
+  const colCount = 2 + dates.length * products.length + 1; // №, Адрес, ...qty..., Пометка
 
   const border = {
     top: { style: 'thin', color: { rgb: 'BDBDBD' } },
@@ -831,12 +907,18 @@ async function exportExcel() {
     font: { bold: true, sz: 14, name: 'Calibri', color: { rgb: '2E7D32' } },
     alignment: { horizontal: 'left' },
   };
+  const regionStyle = {
+    font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '5D4037' } },
+    alignment: { horizontal: 'left', vertical: 'center' },
+    border,
+  };
   const restStyle = {
     font: { bold: true, sz: 11, name: 'Calibri' },
     alignment: { horizontal: 'left', vertical: 'center' },
     border,
   };
-  const cityStyle = { font: { sz: 10, color: { rgb: '666666' }, name: 'Calibri' }, border, alignment: { vertical: 'center' } };
+  const addrStyle = { font: { sz: 10, color: { rgb: '666666' }, name: 'Calibri' }, border, alignment: { vertical: 'center' } };
   const qtyStyle = {
     font: { sz: 11, name: 'Calibri' },
     alignment: { horizontal: 'center', vertical: 'center' },
@@ -853,17 +935,36 @@ async function exportExcel() {
     fill: { fgColor: { rgb: 'FFEBEE' } },
   };
   const noteStyle = { font: { sz: 10, italic: true, name: 'Calibri', color: { rgb: '555555' } }, border, alignment: { vertical: 'center' } };
-  const vmStyle = {
-    ...restStyle,
-    fill: { fgColor: { rgb: 'E3F2FD' } },
-  };
+  const vmStyle = { ...restStyle, fill: { fgColor: { rgb: 'E3F2FD' } } };
   const evenRowBg = { fgColor: { rgb: 'F5F5F5' } };
+  const subtotalStyle = {
+    font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: '5D4037' } },
+    fill: { fgColor: { rgb: 'EFEBE9' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border,
+  };
+  const grandTotalStyle = {
+    font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: '2E7D32' } },
+    fill: { fgColor: { rgb: 'C8E6C9' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: { top: { style: 'medium', color: { rgb: '2E7D32' } }, bottom: { style: 'medium', color: { rgb: '2E7D32' } }, left: border.left, right: border.right },
+  };
+
+  // Группировка по регионам
+  const dataRows = filteredRows.value;
+  const regionGroups = {};
+  const regionOrder = [];
+  for (const row of dataRows) {
+    const reg = row.city || 'Без города';
+    if (!regionGroups[reg]) { regionGroups[reg] = []; regionOrder.push(reg); }
+    regionGroups[reg].push(row);
+  }
 
   // Title row
   const titleRow = [activeSession.value.name];
 
   // Header row
-  const header = ['№', 'Город / Адрес'];
+  const header = ['№', 'Адрес'];
   for (const dd of dates) {
     for (const p of products) {
       header.push(`${p.product_name}\n${fmtShortDate(dd)}`);
@@ -872,100 +973,125 @@ async function exportExcel() {
   header.push('Пометка');
 
   const aoa = [titleRow, header];
-  for (const row of filteredRows.value) {
-    const vmLabel = row.isVM ? ` (ВМ)` : '';
-    const r = [row.number + vmLabel, `${row.city}${row.address ? ', ' + row.address : ''}`];
+  // rowMeta: тип каждой строки данных (после title+header) для стилизации
+  const rowMeta = []; // { type: 'region'|'data'|'subtotal'|'total', row?, regionName? }
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
+
+  for (const reg of regionOrder) {
+    const rows = regionGroups[reg];
+    // Заголовок региона
+    const regionRow = [reg];
+    for (let i = 1; i < header.length; i++) regionRow.push('');
+    aoa.push(regionRow);
+    merges.push({ s: { r: aoa.length - 1, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } });
+    rowMeta.push({ type: 'region' });
+
+    // Рестораны
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      const vmLabel = row.isVM ? ' (ВМ)' : '';
+      const r = [row.number + vmLabel, row.address || ''];
+      for (const dd of dates) {
+        for (const p of products) {
+          const v = getQtyValue(row.number, dd, p.id);
+          r.push(v || '');
+        }
+      }
+      r.push(row.note || '');
+      aoa.push(r);
+      rowMeta.push({ type: 'data', row, isEven: ri % 2 === 1 });
+    }
+
+    // Промежуточный итог по региону
+    const subRow = [`Итого ${reg}`, ''];
     for (const dd of dates) {
       for (const p of products) {
-        const admin = getCellAdmin(row.number, dd, p.id);
-        const qty = admin !== null ? admin : getCellQty(row.number, dd, p.id);
-        const num = parseFloat(qty);
-        r.push(isNaN(num) ? '' : num);
+        let sum = 0;
+        for (const row of rows) sum += getQtyValue(row.number, dd, p.id);
+        subRow.push(sum || '');
       }
     }
-    r.push(row.note || '');
-    aoa.push(r);
+    subRow.push('');
+    aoa.push(subRow);
+    rowMeta.push({ type: 'subtotal' });
   }
 
-  // Totals row
-  const totalRow = ['ИТОГО', ''];
+  // Общий итог
+  const grandRow = ['ИТОГО', ''];
   for (const dd of dates) {
     for (const p of products) {
       let sum = 0;
-      for (const row of filteredRows.value) {
-        const admin = getCellAdmin(row.number, dd, p.id);
-        const qty = admin !== null ? admin : getCellQty(row.number, dd, p.id);
-        const num = parseFloat(qty);
-        if (!isNaN(num)) sum += num;
-      }
-      totalRow.push(sum || '');
+      for (const row of dataRows) sum += getQtyValue(row.number, dd, p.id);
+      grandRow.push(sum || '');
     }
   }
-  totalRow.push('');
-  aoa.push(totalRow);
+  grandRow.push('');
+  aoa.push(grandRow);
+  rowMeta.push({ type: 'total' });
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = merges;
 
   // Style title
   const titleCell = ws[XLSX.utils.encode_cell({ r: 0, c: 0 })];
   if (titleCell) titleCell.s = titleStyle;
-  // Merge title
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
 
   // Style header (row 1)
   for (let c = 0; c < header.length; c++) {
     const cell = ws[XLSX.utils.encode_cell({ r: 1, c })];
-    if (cell) cell.s = c === 0 || c === 1 ? headerRestStyle : headerStyle;
+    if (cell) cell.s = c <= 1 ? headerRestStyle : headerStyle;
   }
 
   // Style data rows
-  const dataRows = filteredRows.value;
-  for (let ri = 0; ri < dataRows.length; ri++) {
-    const row = dataRows[ri];
-    const r = ri + 2; // offset for title + header
-    const isEven = ri % 2 === 1;
-    // Restaurant number
-    const numCell = ws[XLSX.utils.encode_cell({ r, c: 0 })];
-    if (numCell) numCell.s = row.isVM ? vmStyle : { ...restStyle, ...(isEven ? { fill: evenRowBg } : {}) };
-    // City
-    const cityCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
-    if (cityCell) cityCell.s = { ...cityStyle, ...(isEven ? { fill: evenRowBg } : {}) };
-    // Quantities
-    for (let c = 2; c < header.length - 1; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r, c })];
-      if (!cell) continue;
-      const val = cell.v;
-      // Check if this is admin-modified
-      const dateIdx = Math.floor((c - 2) / products.length);
-      const prodIdx = (c - 2) % products.length;
-      const dd = dates[dateIdx];
-      const prod = products[prodIdx];
-      const isAdmin = dd && prod && getCellAdmin(row.number, dd, prod.id) !== null;
-      if (isAdmin) cell.s = adminQtyStyle;
-      else if (val !== '' && val !== 0) cell.s = { ...qtyFilledStyle, ...(isEven ? { fill: { fgColor: { rgb: 'E8F5E9' } } } : {}) };
-      else cell.s = { ...qtyStyle, ...(isEven ? { fill: evenRowBg } : {}) };
-    }
-    // Note
-    const noteCell = ws[XLSX.utils.encode_cell({ r, c: header.length - 1 })];
-    if (noteCell) noteCell.s = { ...noteStyle, ...(isEven ? { fill: evenRowBg } : {}) };
-  }
+  for (let ri = 0; ri < rowMeta.length; ri++) {
+    const r = ri + 2; // offset: title + header
+    const meta = rowMeta[ri];
 
-  // Style totals row
-  const totR = dataRows.length + 2;
-  const totalStyle = {
-    font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: '2E7D32' } },
-    fill: { fgColor: { rgb: 'C8E6C9' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border: { top: { style: 'medium', color: { rgb: '2E7D32' } }, bottom: { style: 'medium', color: { rgb: '2E7D32' } }, left: border.left, right: border.right },
-  };
-  for (let c = 0; c < header.length; c++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: totR, c })];
-    if (cell) cell.s = c === 0 ? { ...totalStyle, alignment: { horizontal: 'left' } } : totalStyle;
+    if (meta.type === 'region') {
+      for (let c = 0; c < header.length; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (cell) cell.s = regionStyle;
+      }
+    } else if (meta.type === 'data') {
+      const { row, isEven } = meta;
+      // №
+      const numCell = ws[XLSX.utils.encode_cell({ r, c: 0 })];
+      if (numCell) numCell.s = row.isVM ? vmStyle : { ...restStyle, ...(isEven ? { fill: evenRowBg } : {}) };
+      // Адрес
+      const aCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
+      if (aCell) aCell.s = { ...addrStyle, ...(isEven ? { fill: evenRowBg } : {}) };
+      // Количества
+      for (let c = 2; c < header.length - 1; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (!cell) continue;
+        const dateIdx = Math.floor((c - 2) / products.length);
+        const prodIdx = (c - 2) % products.length;
+        const dd = dates[dateIdx];
+        const prod = products[prodIdx];
+        const isAdmin = dd && prod && getCellAdmin(row.number, dd, prod.id) !== null;
+        if (isAdmin) cell.s = adminQtyStyle;
+        else if (cell.v !== '' && cell.v !== 0) cell.s = { ...qtyFilledStyle, ...(isEven ? { fill: { fgColor: { rgb: 'E8F5E9' } } } : {}) };
+        else cell.s = { ...qtyStyle, ...(isEven ? { fill: evenRowBg } : {}) };
+      }
+      // Пометка
+      const nCell = ws[XLSX.utils.encode_cell({ r, c: header.length - 1 })];
+      if (nCell) nCell.s = { ...noteStyle, ...(isEven ? { fill: evenRowBg } : {}) };
+    } else if (meta.type === 'subtotal') {
+      for (let c = 0; c < header.length; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (cell) cell.s = c === 0 ? { ...subtotalStyle, alignment: { horizontal: 'left' } } : subtotalStyle;
+      }
+    } else if (meta.type === 'total') {
+      for (let c = 0; c < header.length; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (cell) cell.s = c === 0 ? { ...grandTotalStyle, alignment: { horizontal: 'left' } } : grandTotalStyle;
+      }
+    }
   }
 
   // Column widths
   ws['!cols'] = [
-    { wch: 14 }, { wch: 22 },
+    { wch: 14 }, { wch: 28 },
     ...Array(header.length - 3).fill({ wch: 14 }),
     { wch: 22 },
   ];
@@ -973,7 +1099,8 @@ async function exportExcel() {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Овощи');
-  XLSX.writeFile(wb, `Овощи_${activeSession.value.name.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}.xlsx`);
+  const datesList = dates.map(d => fmtShortDate(d)).join(', ');
+  XLSX.writeFile(wb, `Бургер БК Заявки на ${datesList}.xlsx`);
 }
 
 // ═══ Schedule tab ═══

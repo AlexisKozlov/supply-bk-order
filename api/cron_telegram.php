@@ -456,34 +456,50 @@ try {
                         $msgText .= "📅 Доставка: {$dayName} ({$deliveryDate})\n\n";
                         $msgText .= "Заявка не была подана. Заказ будет выполнен по предыдущей заявке.";
 
-                        // Подтягиваем количества из предыдущей сессии
-                        $prevSessStmt = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
-                        $prevSessStmt->execute([$sessId]);
-                        $prevSessId = $prevSessStmt->fetchColumn();
-                        if ($prevSessId) {
-                            $prevOrdStmt = $pdo->prepare("
-                                SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
-                                FROM veg_orders o
-                                JOIN veg_session_products sp ON sp.id = o.product_id
-                                WHERE o.session_id = ? AND o.restaurant_number = ? AND o.quantity > 0
-                                ORDER BY o.delivery_date DESC, sp.sort_order
-                            ");
-                            $prevOrdStmt->execute([$prevSessId, $restNum]);
-                            $prevItems = $prevOrdStmt->fetchAll();
-                            if ($prevItems) {
-                                // Берём последние количества по каждому товару
-                                $byProduct = [];
-                                foreach ($prevItems as $pi) {
-                                    if (!isset($byProduct[$pi['product_name']])) {
-                                        $qty = ($pi['admin_qty'] !== null && $pi['admin_qty'] !== '') ? $pi['admin_qty'] : $pi['quantity'];
-                                        $unit = $pi['unit'] === 'pcs' ? 'шт' : 'кг';
-                                        $byProduct[$pi['product_name']] = floatval($qty) . ' ' . $unit;
-                                    }
+                        // Подтягиваем количества: сначала из текущей сессии (другие даты), потом из предыдущей
+                        $prevItems = [];
+                        // 1. Текущая сессия — заявки этого ресторана на другие даты доставки
+                        $curOrdStmt = $pdo->prepare("
+                            SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
+                            FROM veg_orders o
+                            JOIN veg_session_products sp ON sp.id = o.product_id
+                            WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date != ? AND o.quantity > 0
+                            ORDER BY o.delivery_date DESC, sp.sort_order
+                        ");
+                        $curOrdStmt->execute([$sessId, $restNum, $deliveryDate]);
+                        $prevItems = $curOrdStmt->fetchAll();
+
+                        // 2. Если в текущей сессии нет — ищем в предыдущей
+                        if (!$prevItems) {
+                            $prevSessStmt = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
+                            $prevSessStmt->execute([$sessId]);
+                            $prevSessId = $prevSessStmt->fetchColumn();
+                            if ($prevSessId) {
+                                $prevOrdStmt = $pdo->prepare("
+                                    SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
+                                    FROM veg_orders o
+                                    JOIN veg_session_products sp ON sp.id = o.product_id
+                                    WHERE o.session_id = ? AND o.restaurant_number = ? AND o.quantity > 0
+                                    ORDER BY o.delivery_date DESC, sp.sort_order
+                                ");
+                                $prevOrdStmt->execute([$prevSessId, $restNum]);
+                                $prevItems = $prevOrdStmt->fetchAll();
+                            }
+                        }
+
+                        if ($prevItems) {
+                            // Берём последние количества по каждому товару
+                            $byProduct = [];
+                            foreach ($prevItems as $pi) {
+                                if (!isset($byProduct[$pi['product_name']])) {
+                                    $qty = ($pi['admin_qty'] !== null && $pi['admin_qty'] !== '') ? $pi['admin_qty'] : $pi['quantity'];
+                                    $unit = $pi['unit'] === 'pcs' ? 'шт' : 'кг';
+                                    $byProduct[$pi['product_name']] = floatval($qty) . ' ' . $unit;
                                 }
-                                $msgText .= "\n\n📋 <b>Предыдущая заявка:</b>";
-                                foreach ($byProduct as $name => $qtyStr) {
-                                    $msgText .= "\n• {$name} — <b>{$qtyStr}</b>";
-                                }
+                            }
+                            $msgText .= "\n\n📋 <b>Предыдущая заявка:</b>";
+                            foreach ($byProduct as $name => $qtyStr) {
+                                $msgText .= "\n• {$name} — <b>{$qtyStr}</b>";
                             }
                         }
 
