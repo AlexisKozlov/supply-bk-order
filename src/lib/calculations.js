@@ -59,7 +59,7 @@ export function calculateItem(item, settings) {
 
   return {
     calculatedOrder,
-    coverageDate: calcCoverageDate(deliveryDate, stockAfterDelivery, item.finalOrder || calculatedOrder, daily),
+    coverageDate: calcCoverageDate(deliveryDate, stockAfterDelivery, item.finalOrder != null ? item.finalOrder : calculatedOrder, daily),
     palletsInfo: calculatePallets(item, unit),
   };
 }
@@ -98,7 +98,7 @@ export function calculateBufferItem(item, settings, cdaParams) {
 
   return {
     calculatedOrder,
-    coverageDate: calcCoverageDate(deliveryDate, stockAfterDelivery, item.finalOrder || calculatedOrder, daily),
+    coverageDate: calcCoverageDate(deliveryDate, stockAfterDelivery, item.finalOrder != null ? item.finalOrder : calculatedOrder, daily),
     palletsInfo: calculatePallets(item, unit),
     buffer: {
       green: Math.round(green * 10) / 10,
