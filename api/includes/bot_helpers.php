@@ -157,66 +157,80 @@ function handleFreeText($chatId, $text, $user) {
     if (isFollowUp($text)) {
         $lastCtx = getLastContext($user['name']);
         if ($lastCtx && $lastCtx['last_question']) {
-            // Объединяем: берём предмет из прошлого вопроса + уточнение из текущего
             $effectiveText = $lastCtx['last_question'] . ' ' . $text;
             error_log("Bot: follow-up detected. Combined: {$effectiveText}");
         }
     }
 
-    // Отправляем «думает...» сообщение
-    sendTyping($chatId);
-    $thinkMsg = sendMessageAndGetId($chatId, "🔍 Ищу данные...");
-
     $entity = getUserEntity($user);
-    $context = gatherContext($user);
-
-    // Поиск данных по вопросу (каждый блок в try-catch чтобы одна ошибка не сломала весь ответ)
-    $lookupContext = '';
-    // Определяем какие lookup-ы нужны по ключевым словам в вопросе
-    $q = mb_strtolower($effectiveText);
-    $lookups = selectRelevantLookups($q);
-    foreach ($lookups as $fn) {
-        try {
-            $result = $fn($effectiveText, $entity);
-            if ($result) $lookupContext .= $result;
-        } catch (Exception $e) {
-            error_log("Bot {$fn} error: " . $e->getMessage());
-        }
-    }
 
     // Сохраняем контекст для возможных follow-up вопросов
     $questionLogId = saveLastContext($user['name'], $effectiveText, $entity);
 
-    // Ограничиваем размер контекста чтобы ИИ не путался
-    // Если lookup данных много — урезаем общий контекст (gatherContext), оставляя точечные данные
-    $totalLen = mb_strlen($context) + mb_strlen($lookupContext);
-    if ($totalLen > 12000) {
-        // Lookup-данные приоритетнее — обрезаем общий контекст
-        $maxGeneral = max(2000, 12000 - mb_strlen($lookupContext));
-        $context = mb_substr($context, 0, $maxGeneral) . "\n…(сокращено)\n";
-    }
-    if (mb_strlen($lookupContext) > 10000) {
-        $lookupContext = mb_substr($lookupContext, 0, 9500) . "\n…(данных больше, показаны основные)\n";
-    }
-    $context .= $lookupContext;
-
-    // Обновляем статус — теперь думает ИИ
-    if ($thinkMsg) {
-        editMessage($chatId, $thinkMsg, "🤖 Формирую ответ...");
-    }
+    // Отправляем «думает...» сообщение
     sendTyping($chatId);
+    $thinkMsg = sendMessageAndGetId($chatId, "🔍 Ищу данные...");
 
     $answer = null;
     $aiStart = microtime(true);
-    try {
-        $answer = askAI($effectiveText, $context);
-    } catch (Exception $e) {
-        error_log("Bot askAI error: " . $e->getMessage());
-    }
-    $aiTime = round(microtime(true) - $aiStart, 1);
-    error_log("Bot: AI response in {$aiTime}s, context=" . strlen($context) . " bytes, answer=" . ($answer ? strlen($answer) . ' bytes' : 'null'));
 
-    // Сохраняем ответ AI в лог вопросов
+    // === 1. Пробуем Gemini с инструментами (умный режим) ===
+    try {
+        $answer = askWithTools($effectiveText, $entity, $user['name']);
+        if ($answer) {
+            error_log("Bot: Gemini Tools OK in " . round(microtime(true) - $aiStart, 1) . "s");
+        }
+    } catch (Exception $e) {
+        error_log("Bot askWithTools error: " . $e->getMessage());
+    }
+
+    // === 2. Fallback: старый способ (контекст + модели) ===
+    if (!$answer) {
+        error_log("Bot: Gemini Tools failed, falling back to legacy mode");
+        if ($thinkMsg) {
+            editMessage($chatId, $thinkMsg, "🤖 Формирую ответ...");
+        }
+        sendTyping($chatId);
+
+        $context = gatherContext($user);
+        $lookupContext = '';
+        $q = mb_strtolower($effectiveText);
+        $lookups = selectRelevantLookups($q);
+        foreach ($lookups as $fn) {
+            try {
+                $result = $fn($effectiveText, $entity);
+                if ($result) $lookupContext .= $result;
+            } catch (Exception $e) {
+                error_log("Bot {$fn} error: " . $e->getMessage());
+            }
+        }
+
+        $totalLen = mb_strlen($context) + mb_strlen($lookupContext);
+        if ($totalLen > 12000) {
+            $maxGeneral = max(2000, 12000 - mb_strlen($lookupContext));
+            $context = mb_substr($context, 0, $maxGeneral) . "\n…(сокращено)\n";
+        }
+        if (mb_strlen($lookupContext) > 10000) {
+            $lookupContext = mb_substr($lookupContext, 0, 9500) . "\n…(данных больше, показаны основные)\n";
+        }
+        $context .= $lookupContext;
+
+        try {
+            $answer = askAI($effectiveText, $context);
+        } catch (Exception $e) {
+            error_log("Bot askAI error: " . $e->getMessage());
+        }
+
+        // Если ИИ недоступен — прямой ответ из данных
+        if (!$answer) {
+            $answer = buildDirectAnswer($lookupContext);
+        }
+    }
+
+    $aiTime = round(microtime(true) - $aiStart, 1);
+    error_log("Bot: AI response in {$aiTime}s, answer=" . ($answer ? strlen($answer) . ' bytes' : 'null'));
+
+    // Сохраняем ответ в лог
     saveQuestionAnswer($questionLogId, $answer);
 
     // Удаляем сообщение-статус
@@ -226,28 +240,19 @@ function handleFreeText($chatId, $text, $user) {
 
     $menuMarkup = ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]];
     if ($answer) {
-        // Telegram ограничивает 4096 символов
         if (mb_strlen($answer) > 4000) {
             $answer = mb_substr($answer, 0, 3990) . "\n\n…";
         }
         sendMessage($chatId, $answer, $menuMarkup);
     } else {
-        // Если ИИ недоступен — попробуем дать прямой ответ из собранных данных
-        $directAnswer = buildDirectAnswer($lookupContext);
-        if ($directAnswer) {
-            sendMessage($chatId, $directAnswer, $menuMarkup);
-        } else {
-            error_log("Bot: askAI returned null. GROQ_KEY len=" . strlen($GLOBALS['GROQ_API_KEY'] ?? '') . " context len=" . strlen($context));
-            // Формируем подсказку
-            $hint = "Не удалось обработать запрос.\n\nПопробуйте уточнить вопрос:\n";
-            $hint .= "• Укажите <b>артикул</b> или <b>полное название</b> товара\n";
-            $hint .= "• Добавьте контекст: «остаток», «цена», «когда приедет», «аналоги»\n";
-            $hint .= "• Или используйте кнопки меню ниже";
-            sendMessage($chatId, $hint, ['inline_keyboard' => [
-                [['text' => '🔍 Поиск карточек', 'callback_data' => 'cmd_cards']],
-                [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']],
-            ]]);
-        }
+        $hint = "Не удалось обработать запрос.\n\nПопробуйте уточнить вопрос:\n";
+        $hint .= "• Укажите <b>артикул</b> или <b>полное название</b> товара\n";
+        $hint .= "• Добавьте контекст: «остаток», «цена», «когда приедет», «аналоги»\n";
+        $hint .= "• Или используйте кнопки меню ниже";
+        sendMessage($chatId, $hint, ['inline_keyboard' => [
+            [['text' => '🔍 Поиск карточек', 'callback_data' => 'cmd_cards']],
+            [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']],
+        ]]);
     }
 }
 

@@ -116,6 +116,7 @@ function sendDocument($chatId, $filename, $content, $caption = '') {
 require_once __DIR__ . '/includes/bot_ai.php';
 require_once __DIR__ . '/includes/bot_lookup.php';
 require_once __DIR__ . '/includes/bot_helpers.php';
+require_once __DIR__ . '/includes/bot_tools.php';
 require_once __DIR__ . '/includes/bot_veg.php';
 
 // ═══ Получить пользователя по chat_id ═══
@@ -1320,6 +1321,7 @@ if (isset($input['callback_query'])) {
         switch ($cmd) {
             case 'menu':
                 setUserMode($user['name'], null);
+                @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
                 editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
                 break;
             case 'orders': cmdOrders($chatId, $user, $msgId); break;
@@ -1574,6 +1576,7 @@ if (isset($input['callback_query'])) {
     }
     if (str_starts_with($data, 'vegord_rest_')) {
         answerCallback($cb['id']);
+        @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода
         vegOrderSelectDay($chatId, $msgId, substr($data, 12));
         exit;
     }
@@ -1645,6 +1648,7 @@ if ($text === '/help' || $text === '/menu') {
     $user = getUser($chatId);
     if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     setUserMode($user['name'], null); // сброс режима
+    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
     $tips = "\n\n💡 <i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Что скоро просрочится?\n• Когда доставка в ресторан 45?";
     sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
     exit;
@@ -1765,13 +1769,18 @@ if ($text === '/psc') {
 // Режим ввода заявки на овощи (через файл — работает и без аккаунта)
 $vegOrderFile = sys_get_temp_dir() . "/vegord_{$chatId}.txt";
 if (file_exists($vegOrderFile)) {
-    $vegMode = trim(@file_get_contents($vegOrderFile));
-    if ($vegMode && str_starts_with($vegMode, 'vegord_')) {
-        if (str_starts_with($text, '/')) {
-            @unlink($vegOrderFile);
-        } else {
-            vegOrderProcessInput($chatId, $text, $vegMode);
-            exit;
+    // Автоочистка: если файл старше 30 минут — удаляем (защита от зависания)
+    if (time() - filemtime($vegOrderFile) > 1800) {
+        @unlink($vegOrderFile);
+    } else {
+        $vegMode = trim(@file_get_contents($vegOrderFile));
+        if ($vegMode && str_starts_with($vegMode, 'vegord_')) {
+            if (str_starts_with($text, '/')) {
+                @unlink($vegOrderFile);
+            } else {
+                vegOrderProcessInput($chatId, $text, $vegMode);
+                exit;
+            }
         }
     }
 }
