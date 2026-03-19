@@ -48,12 +48,16 @@
         </div>
       </template>
 
-      <template v-if="userStore.isAdmin">
+      <template v-if="userStore.isAdmin || userStore.hasAccess('telegram', 'view')">
         <div class="sidebar-section" v-if="!sidebarCollapsed">Администрирование</div>
         <nav class="sidebar-nav">
-          <router-link :to="{ name: 'admin' }" class="sidebar-item" :class="{ active: currentRoute === 'admin' }">
+          <router-link v-if="userStore.isAdmin" :to="{ name: 'admin' }" class="sidebar-item" :class="{ active: currentRoute === 'admin' }">
             <span class="sidebar-icon"><BkIcon name="gear" size="sm" light/></span>
             <span v-if="!sidebarCollapsed">Админ панель</span>
+          </router-link>
+          <router-link v-if="userStore.hasAccess('telegram', 'view')" :to="{ name: 'telegram-admin' }" class="sidebar-item" :class="{ active: currentRoute === 'telegram-admin' }">
+            <span class="sidebar-icon" style="font-size:14px;">✈</span>
+            <span v-if="!sidebarCollapsed">Telegram-бот</span>
           </router-link>
         </nav>
       </template>
@@ -360,8 +364,10 @@ const toolsItems = [
   { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
   { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
   { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
-  { module: 'order', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
-  { module: 'order', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
+  { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
+  { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
+  { module: 'veg', route: 'veg-admin', icon: 'veg', label: 'Овощи' },
+  { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
   { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
 ];
 
@@ -462,6 +468,8 @@ const pageNames = {
   'tenders': 'Тендеры',
   'tender-detail': 'Тендер',
   'stock-collection': 'Сбор остатков',
+  'veg-admin': 'Овощи',
+  'telegram-admin': 'Telegram-бот',
 };
 
 function sendHeartbeat() {

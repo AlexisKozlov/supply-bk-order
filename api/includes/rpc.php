@@ -1933,7 +1933,7 @@ if ($endpoint === 'rpc') {
         $order['created_at'] = date('Y-m-d H:i:s');
         $order['created_by'] = $caller['name'];
         // Белый список полей позиции
-        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','analog_group','category'];
+        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','analog_group','category','sort_order'];
         $pdo->beginTransaction();
         try {
             // Вставляем заказ
@@ -1985,7 +1985,7 @@ if ($endpoint === 'rpc') {
         $order = array_intersect_key($order, array_flip($orderWhitelist));
         $order['updated_at'] = date('Y-m-d H:i:s');
         // Белый список полей позиции
-        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category'];
+        $itemWhitelist = ['sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category','sort_order'];
         $pdo->beginTransaction();
         try {
             // Блокируем строку и проверяем конкурентное редактирование внутри транзакции

@@ -26,7 +26,9 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     };
   });
 
-  const itemsWithOrder = allItems.filter(i => i.qty_boxes > 0);
+  const itemsWithOrder = allItems
+    .filter(i => i.qty_boxes > 0)
+    .map((i, idx) => ({ ...i, sort_order: idx }));
   if (!itemsWithOrder.length) {
     return { error: 'Нет позиций с количеством. Укажите количество для заказа.' };
   }

@@ -6,7 +6,7 @@
         <h1 class="page-title" style="margin-bottom:0">Анализ</h1>
         <div class="anv-mode-toggle">
           <button class="anv-mode-btn" :class="{ active: viewMode === 'stock' }" @click="viewMode = 'stock'">Запасы</button>
-          <button class="anv-mode-btn" :class="{ active: viewMode === 'sales' }" @click="viewMode = 'sales'">Реализация</button>
+          <button v-if="userStore.hasAccess('restaurant-sales', 'view')" class="anv-mode-btn" :class="{ active: viewMode === 'sales' }" @click="viewMode = 'sales'">Реализация</button>
           <button class="anv-mode-btn" :class="{ active: viewMode === 'report' }" @click="viewMode = 'report'">Отчёт</button>
         </div>
       </div>
@@ -416,17 +416,23 @@ async function loadProducts() {
     const { data, error } = await q;
     if (myRequestId !== _loadRequestId) return;
     if (error) { toast.error('Ошибка', 'Не удалось загрузить товары'); return; }
-    items.value = (data || []).map(p => ({
-      id: p.id,
-      sku: p.sku || '',
-      name: p.name || '',
-      analog_group: p.analog_group || '',
-      supplier_name: p.supplier || '',
-      qtyPerBox: p.qty_per_box || 1,
-      category: p.category || '',
-      stock: 0,
-      consumption: 0,
-    }));
+    const ignoredSkus = new Set([
+      '70432','70433','70452','70453','70573','70583',
+      '70599','70601','70682','70686','71695','91041','91428',
+    ]);
+    items.value = (data || [])
+      .filter(p => !ignoredSkus.has(String(p.sku)))
+      .map(p => ({
+        id: p.id,
+        sku: p.sku || '',
+        name: p.name || '',
+        analog_group: p.analog_group || '',
+        supplier_name: p.supplier || '',
+        qtyPerBox: p.qty_per_box || 1,
+        category: p.category || '',
+        stock: 0,
+        consumption: 0,
+      }));
     await Promise.all([loadSavedData(myRequestId), loadPrices()]);
   } catch {
     if (myRequestId !== _loadRequestId) return;

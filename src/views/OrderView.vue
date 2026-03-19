@@ -748,6 +748,9 @@ async function onSaveConfirm(note) {
 
     if (result.error) { toast.error('Ошибка сохранения', result.error); return; }
 
+    // Сохраняем порядок товаров для этого поставщика
+    orderStore.saveItemOrder().catch(() => {});
+
     const label = orderStore.editingOrderId ? 'Заказ обновлён' : 'Заказ сохранён';
     toast.success(label, `Сохранено: ${result.itemsCount} позиций`);
 

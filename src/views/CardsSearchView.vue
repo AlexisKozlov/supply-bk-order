@@ -15,7 +15,7 @@
         <div class="nav-links">
           <router-link to="/" class="nav-link">Главная</router-link>
           <a href="https://docs.google.com/spreadsheets/d/1120BAXbfgI6YK66DGk-e-Z_ocqXqp4M_Rxp6qHhibek/edit?gid=0#gid=0" target="_blank" class="nav-link">Овощи</a>
-          <a href="https://docs.google.com/spreadsheets/d/1LymUxkYXmhx2sEta8qI9qj1IohgS2z79IBZ7EMlKeLc/edit?gid=378091923#gid=378091923" target="_blank" class="nav-link">Планета ресторанов</a>
+          <a href="#" class="nav-link" @click.prevent="showPlanetaModal = true">Планета ресторанов</a>
           <a href="https://docs.google.com/spreadsheets/d/1dv-s5Rqe9Hgyg1fbPeCWEwh0MaKMNkj7JK_gFyxPDdU/edit?pli=1&gid=0#gid=0" target="_blank" class="nav-link">График поставок</a>
           <a href="https://docs.google.com/spreadsheets/d/1ToILNXjzvBwvyRm8687h-RJrUA3RuffMx3vJuCdF-xQ/edit?gid=0#gid=0" target="_blank" class="nav-link">Контакты поставщиков</a>
         </div>
@@ -333,6 +333,45 @@
       <div v-if="adminOpen" class="admin-overlay" @click="closeAdmin"></div>
     </Transition>
 
+    <!-- Модалка: Планета ресторанов -->
+    <Transition name="overlay-fade">
+      <div v-if="showPlanetaModal" class="planeta-overlay" @click="showPlanetaModal = false"></div>
+    </Transition>
+    <Transition name="planeta-pop">
+      <div v-if="showPlanetaModal" class="planeta-modal">
+        <button class="planeta-close" @click="showPlanetaModal = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        <div class="planeta-header">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#D62300" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <h3 class="planeta-title">Планета ресторанов</h3>
+        </div>
+        <div class="planeta-body">
+          <p class="planeta-text">Заявка на овощи подаётся через сайт портала закупок или через Telegram-бота.</p>
+
+          <div class="planeta-step">
+            <span class="planeta-step-num">1</span>
+            <div class="planeta-step-content">
+              <div class="planeta-step-title">Актуальная ссылка на заказ</div>
+              <p class="planeta-step-text">Ссылку на текущий заказ можно получить у бота — он присылает её каждый раз при открытии нового заказа.</p>
+            </div>
+          </div>
+
+          <div class="planeta-step">
+            <span class="planeta-step-num">2</span>
+            <div class="planeta-step-content">
+              <div class="planeta-step-title">Telegram-бот</div>
+              <p class="planeta-step-text">Для подачи заявки и получения ссылок используйте бота:</p>
+              <a href="https://t.me/supplyportal_bot" target="_blank" class="planeta-bot-link">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 3L1 11l8 2m12-10l-8 18-4-8m12-10l-12 10"/></svg>
+                @supplyportal_bot
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Футер -->
     <footer class="page-footer">
       <div v-if="guestCount > 0" class="footer-item footer-guests">
@@ -391,6 +430,9 @@ const guestCount = ref(0)
 const maintenanceMode = ref(false)
 const maintenanceMessage = ref('')
 const maintenanceEndTime = ref(null)
+
+// Планета ресторанов
+const showPlanetaModal = ref(false)
 
 // Toast
 const toastVisible = ref(false)
@@ -863,17 +905,28 @@ async function updateCard() {
         headers: adminHeaders(),
         body: JSON.stringify({ id: newId, name: editForm.value.name.trim(), analogs })
       })
-      if (!createRes.ok) throw new Error('Не удалось создать карточку с новым ID')
-      await fetchWithTimeout(`${API_BASE}/cards/${oldId}`, {
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}))
+        throw new Error(err.error || 'Не удалось создать карточку с новым ID')
+      }
+      const delRes = await fetchWithTimeout(`${API_BASE}/cards/${encodeURIComponent(oldId)}`, {
         method: 'DELETE',
         headers: adminHeaders()
       })
+      if (!delRes.ok) {
+        const err = await delRes.json().catch(() => ({}))
+        throw new Error(err.error || 'Не удалось удалить старую карточку')
+      }
     } else {
-      await fetchWithTimeout(`${API_BASE}/cards/${oldId}`, {
+      const patchRes = await fetchWithTimeout(`${API_BASE}/cards/${encodeURIComponent(oldId)}`, {
         method: 'PATCH',
         headers: adminHeaders(),
         body: JSON.stringify({ name: editForm.value.name.trim(), analogs })
       })
+      if (!patchRes.ok) {
+        const err = await patchRes.json().catch(() => ({}))
+        throw new Error(err.error || `HTTP ${patchRes.status}`)
+      }
     }
     editingCard.value = null
     showToast('Карточка обновлена', 'success')
@@ -891,10 +944,14 @@ async function deleteCard() {
   if (!confirm(`Удалить карточку ${editingCard.value.id}?`)) return
 
   try {
-    await fetchWithTimeout(`${API_BASE}/cards/${editingCard.value.id}`, {
+    const res = await fetchWithTimeout(`${API_BASE}/cards/${encodeURIComponent(editingCard.value.id)}`, {
       method: 'DELETE',
       headers: adminHeaders()
     })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || `HTTP ${res.status}`)
+    }
     editingCard.value = null
     editSearchQuery.value = ''
     editResults.value = []
@@ -1033,7 +1090,8 @@ function tryAutoLogin() {
 // ESC закрывает панель
 function handleKeydown(e) {
   if (e.key === 'Escape') {
-    if (adminOpen.value) closeAdmin()
+    if (showPlanetaModal.value) showPlanetaModal.value = false
+    else if (adminOpen.value) closeAdmin()
     else if (showAdminLogin.value) showAdminLogin.value = false
   }
 }
@@ -2169,6 +2227,132 @@ select.field-input {
 .toast-slide-enter-active, .toast-slide-leave-active { transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
 .toast-slide-enter-from { opacity: 0; transform: translateX(-50%) translateY(20px); }
 .toast-slide-leave-to { opacity: 0; transform: translateX(-50%) translateY(20px); }
+
+/* ═══ PLANETA MODAL ═══ */
+.planeta-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26,14,8,0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 250;
+}
+.planeta-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: 92vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  z-index: 260;
+  padding: 28px 24px 24px;
+}
+.planeta-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7f5f2;
+  border: none;
+  border-radius: 8px;
+  color: #9B8B7E;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.planeta-close:hover {
+  background: #eee9e3;
+  color: #D62300;
+}
+.planeta-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.planeta-title {
+  font-family: 'Flame', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #2C1810;
+  margin: 0;
+}
+.planeta-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.planeta-text {
+  font-size: 0.88rem;
+  color: #6B5344;
+  line-height: 1.5;
+  margin: 0;
+}
+.planeta-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.planeta-step-num {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #D62300, #FF5722);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.planeta-step-content {
+  flex: 1;
+  min-width: 0;
+}
+.planeta-step-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #2C1810;
+  margin-bottom: 4px;
+}
+.planeta-step-text {
+  font-size: 0.82rem;
+  color: #6B5344;
+  line-height: 1.45;
+  margin: 0;
+}
+.planeta-bot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #0088cc, #229ED9);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  transition: all 0.2s;
+  box-shadow: 0 2px 10px rgba(0,136,204,0.3);
+}
+.planeta-bot-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0,136,204,0.4);
+}
+.planeta-pop-enter-active { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.planeta-pop-leave-active { transition: all 0.2s ease; }
+.planeta-pop-enter-from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+.planeta-pop-leave-to { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
 
 /* ═══ MOBILE ═══ */
 @media (max-width: 640px) {

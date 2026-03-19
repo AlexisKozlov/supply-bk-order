@@ -72,7 +72,6 @@
           </div>
 
           <div class="adm-user-actions">
-            <button class="adm-act-btn" @click.stop="openPermissions(u)" title="Права"><BkIcon name="key" size="sm"/></button>
             <button class="adm-act-btn" @click.stop="openUserModal(u)" title="Редактировать"><BkIcon name="edit" size="sm"/></button>
             <button class="adm-act-btn adm-act-del" @click.stop="deleteUser(u)" title="Удалить"
               :disabled="u.name === userStore.currentUser?.name"><BkIcon name="delete" size="sm"/></button>
@@ -832,49 +831,6 @@
       </div>
     </Teleport>
 
-    <!-- ═══ Модалка прав доступа ═══ -->
-    <Teleport to="body">
-      <div v-if="showPermModal" class="modal" @click.self="showPermModal = false">
-        <div class="modal-box" style="max-width:620px;">
-          <div class="modal-header">
-            <h2>Права доступа</h2>
-            <button class="modal-close" @click="showPermModal = false"><BkIcon name="close" size="sm"/></button>
-          </div>
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
-            {{ permUser?.name }} · роль: {{ permUser?.role }}
-            <span v-if="permUser?.display_role"> ({{ permUser.display_role }})</span>
-          </div>
-
-          <div class="perm-matrix">
-            <div class="perm-row perm-header">
-              <span class="perm-module">Модуль</span>
-              <span class="perm-level">По роли</span>
-              <span class="perm-level">Текущий</span>
-              <span class="perm-level">Изменить</span>
-            </div>
-            <div v-for="m in permModules" :key="m.key" class="perm-row">
-              <span class="perm-module">{{ m.label }}</span>
-              <span class="perm-level perm-base">{{ permLevelLabel(m.base) }}</span>
-              <span class="perm-level" :class="'perm-lvl-' + m.current">{{ permLevelLabel(m.current) }}</span>
-              <select v-model="m.override" class="perm-select" :disabled="permUser?.role === 'admin'">
-                <option value="">По роли</option>
-                <option value="none">Нет</option>
-                <option value="view">Просмотр</option>
-                <option value="edit">Редактирование</option>
-                <option value="full">Полный</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
-            <button class="btn secondary" @click="showPermModal = false">Отмена</button>
-            <button class="btn primary" @click="savePermissions" :disabled="savingPerms">
-              {{ savingPerms ? 'Сохранение...' : 'Сохранить' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
       @confirm="onConfirmOk"
