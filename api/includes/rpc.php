@@ -356,20 +356,23 @@ if ($endpoint === 'rpc') {
         $s->execute([$tokenVal]);
         $tok = $s->fetch();
         if (!$tok) respond(['error' => 'expired']);
-        // Найти предыдущую сессию (независимо от статуса)
-        $prev = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
+        // Найти предыдущую сессию с заказами этого ресторана (проверяем до 5 сессий назад)
+        $prev = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 5");
         $prev->execute([$tok['session_id']]);
-        $prevSess = $prev->fetch();
-        if (!$prevSess) respond(['orders' => []]);
-        // Получить заказы из предыдущей сессии с названиями товаров
-        $st = $pdo->prepare("
-            SELECT sp.product_name, o.delivery_date, o.quantity, o.admin_qty
-            FROM veg_orders o
-            JOIN veg_session_products sp ON sp.id = o.product_id
-            WHERE o.session_id = ? AND o.restaurant_number = ?
-        ");
-        $st->execute([$prevSess['id'], $restNum]);
-        respond(['orders' => $st->fetchAll()]);
+        $prevSessions = $prev->fetchAll();
+        $orders = [];
+        foreach ($prevSessions as $ps) {
+            $st = $pdo->prepare("
+                SELECT sp.product_name, o.delivery_date, o.quantity, o.admin_qty
+                FROM veg_orders o
+                JOIN veg_session_products sp ON sp.id = o.product_id
+                WHERE o.session_id = ? AND o.restaurant_number = ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+            ");
+            $st->execute([$ps['id'], $restNum]);
+            $orders = $st->fetchAll();
+            if ($orders) break; // нашли сессию с заказами — используем её
+        }
+        respond(['orders' => $orders]);
     }
     if ($fn === 'veg_get_existing_orders') {
         $tokenVal = $body['token_value'] ?? '';

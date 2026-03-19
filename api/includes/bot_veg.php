@@ -404,6 +404,59 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     $existing = [];
     foreach ($s->fetchAll() as $r) $existing[$r['product_id']] = $r['quantity'];
 
+    // Предыдущая заявка: сначала из текущей сессии (другие даты), потом из предыдущих сессий
+    $prevByProduct = [];
+    $prevDate = null;
+    // 1. Текущая сессия — заявки этого ресторана на другие (более ранние) даты доставки
+    $ps = $pdo->prepare("
+        SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty, o.delivery_date
+        FROM veg_orders o
+        JOIN veg_session_products sp ON sp.id = o.product_id
+        WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date < ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+        ORDER BY o.delivery_date DESC, sp.sort_order
+    ");
+    $ps->execute([$session['id'], $restNum, $deliveryDate]);
+    $prevItems = $ps->fetchAll();
+    if ($prevItems) {
+        $prevDate = $prevItems[0]['delivery_date'];
+        foreach ($prevItems as $pi) {
+            if ($pi['delivery_date'] !== $prevDate) break; // только последний день
+            if (!isset($prevByProduct[$pi['product_name']])) {
+                $qty = ($pi['admin_qty'] !== null && $pi['admin_qty'] !== '') ? $pi['admin_qty'] : $pi['quantity'];
+                $unit = $pi['unit'] === 'pcs' ? 'шт' : 'кг';
+                $prevByProduct[$pi['product_name']] = rtrim(rtrim(number_format(floatval($qty), 2, '.', ''), '0'), '.') . ' ' . $unit;
+            }
+        }
+    }
+    // 2. Если в текущей сессии нет — ищем в предыдущих сессиях (до 5 назад)
+    if (!$prevByProduct) {
+        $prevSessStmt = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 5");
+        $prevSessStmt->execute([$session['id']]);
+        while ($prevSessRow = $prevSessStmt->fetch()) {
+            $po = $pdo->prepare("
+                SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty, o.delivery_date
+                FROM veg_orders o
+                JOIN veg_session_products sp ON sp.id = o.product_id
+                WHERE o.session_id = ? AND o.restaurant_number = ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+                ORDER BY o.delivery_date DESC, sp.sort_order
+            ");
+            $po->execute([$prevSessRow['id'], $restNum]);
+            $prevItems = $po->fetchAll();
+            if ($prevItems) {
+                $prevDate = $prevItems[0]['delivery_date'];
+                foreach ($prevItems as $pi) {
+                    if ($pi['delivery_date'] !== $prevDate) break;
+                    if (!isset($prevByProduct[$pi['product_name']])) {
+                        $qty = ($pi['admin_qty'] !== null && $pi['admin_qty'] !== '') ? $pi['admin_qty'] : $pi['quantity'];
+                        $unit = $pi['unit'] === 'pcs' ? 'шт' : 'кг';
+                        $prevByProduct[$pi['product_name']] = rtrim(rtrim(number_format(floatval($qty), 2, '.', ''), '0'), '.') . ' ' . $unit;
+                    }
+                }
+                break; // нашли — выходим
+            }
+        }
+    }
+
     $dateFmt = date('d.m', strtotime($deliveryDate));
     $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
     $dow = (int)date('N', strtotime($deliveryDate));
@@ -412,6 +465,16 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     $text = "🥬 <b>Заявка: рест. {$restNum}</b>\n";
     $text .= "📅 {$dayName} {$dateFmt}\n";
     $text .= "─────────────────────\n";
+
+    // Показываем предыдущую заявку
+    if ($prevByProduct) {
+        $prevDateFmt = date('d.m', strtotime($prevDate));
+        $text .= "📋 <b>Пред. заявка ({$prevDateFmt}):</b>\n";
+        foreach ($prevByProduct as $name => $qtyStr) {
+            $text .= "  • {$name} — <b>{$qtyStr}</b>\n";
+        }
+        $text .= "─────────────────────\n";
+    }
 
     if (!$products) {
         $text .= "<i>Товары не настроены.</i>";

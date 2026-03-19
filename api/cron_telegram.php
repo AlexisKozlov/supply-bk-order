@@ -703,27 +703,27 @@ try {
                             SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
                             FROM veg_orders o
                             JOIN veg_session_products sp ON sp.id = o.product_id
-                            WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date != ? AND o.quantity > 0
+                            WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date != ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
                             ORDER BY o.delivery_date DESC, sp.sort_order
                         ");
                         $curOrdStmt->execute([$sessId, $restNum, $deliveryDate]);
                         $prevItems = $curOrdStmt->fetchAll();
 
-                        // 2. Если в текущей сессии нет — ищем в предыдущей
+                        // 2. Если в текущей сессии нет — ищем в предыдущих (до 5 сессий назад)
                         if (!$prevItems) {
-                            $prevSessStmt = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 1");
+                            $prevSessStmt = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 5");
                             $prevSessStmt->execute([$sessId]);
-                            $prevSessId = $prevSessStmt->fetchColumn();
-                            if ($prevSessId) {
+                            while ($prevSessRow = $prevSessStmt->fetch()) {
                                 $prevOrdStmt = $pdo->prepare("
                                     SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
                                     FROM veg_orders o
                                     JOIN veg_session_products sp ON sp.id = o.product_id
-                                    WHERE o.session_id = ? AND o.restaurant_number = ? AND o.quantity > 0
+                                    WHERE o.session_id = ? AND o.restaurant_number = ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
                                     ORDER BY o.delivery_date DESC, sp.sort_order
                                 ");
-                                $prevOrdStmt->execute([$prevSessId, $restNum]);
+                                $prevOrdStmt->execute([$prevSessRow['id'], $restNum]);
                                 $prevItems = $prevOrdStmt->fetchAll();
+                                if ($prevItems) break; // нашли — выходим
                             }
                         }
 
