@@ -633,7 +633,7 @@ try {
                             // Дедлайн должен быть в будущем или только что прошёл
                             $minutesLeft = ($deadline->getTimestamp() - $now->getTimestamp()) / 60;
 
-                            if ($minutesLeft > -10 && $minutesLeft < 200) {
+                            if ($minutesLeft > -10 && $minutesLeft < 2000) {
                                 $nextDelivery = [
                                     'date' => $check->format('Y-m-d'),
                                     'deadline' => $deadline,
