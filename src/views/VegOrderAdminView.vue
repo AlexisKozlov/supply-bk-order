@@ -9,6 +9,7 @@
     <div class="veg-tabs">
       <button class="veg-tab" :class="{ active: tab === 'sessions' }" @click="tab = 'sessions'">Сессии</button>
       <button class="veg-tab" :class="{ active: tab === 'schedule' }" @click="tab = 'schedule'; loadSchedule()">Расписание</button>
+      <button class="veg-tab" :class="{ active: tab === 'stats' }" @click="tab = 'stats'; loadStats()">Статистика</button>
     </div>
 
     <!-- SESSIONS TAB -->
@@ -84,7 +85,11 @@
               <div class="veg-summary-num">{{ missingRestaurants.length }}</div>
               <div class="veg-summary-lbl">Не ответили</div>
             </div>
-            <div style="margin-left: auto; display: flex; gap: 6px;">
+            <div style="margin-left: auto; display: flex; gap: 6px; align-items: center;">
+              <label class="veg-auto-refresh" :title="autoRefresh ? 'Автообновление каждые 30 сек' : 'Автообновление выключено'">
+                <input type="checkbox" v-model="autoRefresh" />
+                <span class="veg-auto-refresh-dot" :class="{ on: autoRefresh }"></span>
+              </label>
               <button class="veg-btn sm outline" @click="exportExcel">Excel</button>
               <button class="veg-btn sm outline" @click="refreshData">Обновить</button>
             </div>
@@ -167,7 +172,7 @@
                           {{ getCellQty(row.number, dd, prod.id) }}
                         </span>
                         <span v-else class="veg-qty-empty">—</span>
-                        <span v-if="getPrevDayQty(row.number, dd, prod.id)" class="veg-prev-day">{{ getPrevDayQty(row.number, dd, prod.id) }}</span>
+                        <span v-if="!getCellQty(row.number, dd, prod.id) && getCellAdmin(row.number, dd, prod.id) === null && getPrevDayQty(row.number, dd, prod.id)" class="veg-prev-day">{{ getPrevDayQty(row.number, dd, prod.id) }}</span>
                       </template>
                     </td>
                   </template>
@@ -256,6 +261,56 @@
                   </td>
                   <td v-for="d in 7" :key="d" class="veg-td-check" @click="toggleScheduleDay(r.number, d)">
                     <input type="checkbox" :checked="scheduleMap[String(r.number)]?.includes(d)" @click.stop="toggleScheduleDay(r.number, d)" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- STATS TAB -->
+    <template v-if="tab === 'stats'">
+      <div class="veg-stats">
+        <div class="veg-stats-header">
+          <h3 class="veg-section-title">Статистика участия ресторанов</h3>
+          <div class="veg-stats-controls">
+            <label style="font-size:13px;color:#555;">Последние сессий:</label>
+            <select v-model="statsLimit" class="veg-input" style="width:70px;" @change="loadStats">
+              <option :value="5">5</option>
+              <option :value="10">10</option>
+              <option :value="20">20</option>
+              <option :value="50">50</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="statsLoading" class="veg-empty">Загрузка...</div>
+        <template v-else-if="statsData">
+          <p class="veg-schedule-hint">За последние {{ statsData.sessions_count }} сессий. Сортировка по проценту участия.</p>
+          <div class="veg-tbl-wrap">
+            <table class="veg-tbl">
+              <thead>
+                <tr>
+                  <th style="width:60px;">№</th>
+                  <th>Ресторан</th>
+                  <th style="width:90px;">Участие</th>
+                  <th style="width:80px;">Подано</th>
+                  <th style="width:80px;">Пропущено</th>
+                  <th style="width:120px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in sortedStats" :key="r.number" :class="{ 'veg-stat-bad': r.rate < 50, 'veg-stat-warn': r.rate >= 50 && r.rate < 80 }">
+                  <td class="veg-td-num">{{ r.number }}</td>
+                  <td>{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</td>
+                  <td class="veg-td-rate"><strong>{{ r.rate }}%</strong></td>
+                  <td class="veg-td-num">{{ r.participated }}/{{ r.total }}</td>
+                  <td class="veg-td-num">{{ r.missed }}</td>
+                  <td>
+                    <div class="veg-stat-bar">
+                      <div class="veg-stat-bar-fill" :style="{ width: r.rate + '%', background: r.rate >= 80 ? '#4CAF50' : r.rate >= 50 ? '#FF9800' : '#F44336' }"></div>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -354,7 +409,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
@@ -417,6 +472,25 @@ const scheduleLoading = ref(false);
 const scheduleMap = reactive({}); // { restNum: [1,3,5] }
 const scheduleFilter = ref('');
 const scheduleSaving = ref(false);
+
+// Stats
+const statsLoading = ref(false);
+const statsData = ref(null);
+const statsLimit = ref(10);
+
+const sortedStats = computed(() => {
+  if (!statsData.value?.stats) return [];
+  return [...statsData.value.stats].sort((a, b) => a.rate - b.rate);
+});
+
+async function loadStats() {
+  statsLoading.value = true;
+  try {
+    const { data } = await db.rpc('veg_get_stats', { limit: statsLimit.value });
+    statsData.value = data;
+  } catch (e) { console.warn('[veg] stats', e); }
+  finally { statsLoading.value = false; }
+}
 
 // Deadlines
 const deadlineRules = ref([]);
@@ -524,6 +598,28 @@ async function refreshData() {
     sessionData.value = data;
   } catch (e) { console.warn('[veg] refresh', e); }
 }
+
+// Автообновление каждые 30 секунд
+const autoRefresh = ref(true);
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  if (!autoRefresh.value) return;
+  autoRefreshTimer = setInterval(() => {
+    if (activeSession.value && autoRefresh.value && !editCell.value) {
+      refreshData();
+    }
+  }, 30000);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+}
+
+watch(autoRefresh, (val) => { if (val) startAutoRefresh(); else stopAutoRefresh(); });
+watch(() => activeSession.value, (s) => { if (s) startAutoRefresh(); else stopAutoRefresh(); });
+onUnmounted(stopAutoRefresh);
 
 // ═══ Token ═══
 const activeTokens = computed(() => {
@@ -765,6 +861,21 @@ const orderLookup = computed(() => {
   return map;
 });
 
+// Lookup заявок предыдущей сессии (по имени товара → последняя дата доставки)
+const prevSessionLookup = computed(() => {
+  const map = {};
+  for (const o of (sessionData.value?.prev_orders || [])) {
+    const key = `${o.restaurant_number}_${o.product_name}`;
+    const q = o.admin_qty !== null && o.admin_qty !== undefined ? parseFloat(o.admin_qty) : parseFloat(o.quantity);
+    if (!q || q <= 0) continue;
+    // Берём последнюю дату доставки (данные отсортированы по restaurant_number, delivery_date)
+    if (!map[key] || o.delivery_date > map[key].date) {
+      map[key] = { qty: q, date: o.delivery_date };
+    }
+  }
+  return map;
+});
+
 function getCellQty(restNum, date, prodId) {
   const o = orderLookup.value[`${restNum}_${date}_${prodId}`];
   if (!o) return '';
@@ -780,14 +891,27 @@ function getCellAdmin(restNum, date, prodId) {
 }
 
 function getPrevDayQty(restNum, date, prodId) {
-  const prevDates = deliveryDates.value.filter(d => d < date);
-  if (prevDates.length === 0) return null;
-  const prevDate = prevDates[prevDates.length - 1];
-  const o = orderLookup.value[`${restNum}_${prevDate}_${prodId}`];
-  if (!o) return null;
-  const adminQ = o.admin_qty !== null && o.admin_qty !== undefined ? parseFloat(o.admin_qty) : NaN;
-  const q = !isNaN(adminQ) ? adminQ : parseFloat(o.quantity);
-  if (q <= 0) return null;
+  // Не показываем предыдущую заявку для дней, когда у ресторана нет доставки
+  if (!restHasDeliveryOnDate(restNum, date)) return null;
+
+  // Ищем предыдущий день доставки этого ресторана в текущей сессии
+  const prevDates = deliveryDates.value.filter(d => d < date && restHasDeliveryOnDate(restNum, d));
+  if (prevDates.length > 0) {
+    // Не первый день — показываем заявку из предыдущего дня текущей сессии
+    const prevDate = prevDates[prevDates.length - 1];
+    const o = orderLookup.value[`${restNum}_${prevDate}_${prodId}`];
+    if (!o) return null;
+    const adminQ = o.admin_qty !== null && o.admin_qty !== undefined ? parseFloat(o.admin_qty) : NaN;
+    const q = !isNaN(adminQ) ? adminQ : parseFloat(o.quantity);
+    if (q <= 0) return null;
+    return q === Math.floor(q) ? Math.floor(q) : q;
+  }
+  // Первый день доставки ресторана в сессии — ищем в предыдущей сессии
+  const prod = (sessionData.value?.products || []).find(p => p.id === prodId);
+  if (!prod) return null;
+  const prev = prevSessionLookup.value[`${restNum}_${prod.product_name}`];
+  if (!prev) return null;
+  const q = prev.qty;
   return q === Math.floor(q) ? Math.floor(q) : q;
 }
 
@@ -1335,6 +1459,18 @@ async function saveScheduleAll() {
 .veg-qty-admin { font-weight: 800; color: #D62700; }
 .veg-qty-empty { color: #ccc; font-size: 14px; }
 .veg-prev-day { display: block; font-size: 10px; color: #7E57C2; font-weight: 600; line-height: 1; margin-top: 2px; white-space: nowrap; }
+.veg-auto-refresh { cursor: pointer; display: flex; align-items: center; padding: 4px; }
+.veg-auto-refresh input { display: none; }
+.veg-auto-refresh-dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; transition: background 0.2s; }
+.veg-auto-refresh-dot.on { background: #4CAF50; animation: veg-pulse 2s infinite; }
+@keyframes veg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.veg-stats-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.veg-stats-controls { display: flex; align-items: center; gap: 6px; }
+.veg-td-rate { text-align: center; }
+.veg-stat-bad td { background: #FFF3F0; }
+.veg-stat-warn td { background: #FFF8E1; }
+.veg-stat-bar { width: 100%; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+.veg-stat-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
 .veg-cell-input {
   width: 60px; padding: 4px 4px; border: 2px solid #66BB6A;
   border-radius: 6px; font-size: 13px; font-weight: 700; text-align: center;

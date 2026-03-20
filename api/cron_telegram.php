@@ -25,11 +25,12 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 
-function tgSend($chatId, $text, $disablePreview = false) {
+function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
     global $BOT_TOKEN;
     $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
     $payload = ['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML'];
     if ($disablePreview) $payload['disable_web_page_preview'] = true;
+    if ($replyMarkup) $payload['reply_markup'] = $replyMarkup;
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
@@ -688,7 +689,7 @@ try {
                     $dayNames = [1=>'понедельник',2=>'вторник',3=>'среда',4=>'четверг',5=>'пятница',6=>'субботу',7=>'воскресенье'];
                     $dayName = $dayNames[$nextDelivery['dow']] ?? '';
 
-                    $linkLine = $vegFormLink ? "\n\n🔗 <a href=\"{$vegFormLink}\">Подать заявку</a>" : '';
+                    // Ссылка теперь в inline-кнопке, убираем из текста
 
                     if ($reminderType === 'expired') {
                         $msgText = "⚠️ <b>Дедлайн заявки на овощи истёк!</b>\n\n";
@@ -743,14 +744,14 @@ try {
                             }
                         }
 
-                        $msgText .= $linkLine;
+                        // кнопки добавляются ниже
                     } elseif ($reminderType === 'evening') {
                         $msgText = "🌙 <b>Напоминание: заявка на овощи</b>\n\n";
                         $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
                         $msgText .= "📅 Доставка: {$dayName} ({$deliveryDate})\n";
                         $msgText .= "⏳ Дедлайн завтра: <b>{$deadlineFmt}</b>\n\n";
                         $msgText .= "Не забудьте подать заявку!";
-                        $msgText .= $linkLine;
+                        // кнопки добавляются ниже
                     } else {
                         $timeLabels = ['3h'=>'3 часа','2h'=>'2 часа','1h'=>'1 час','30m'=>'30 минут'];
                         $timeLabel = $timeLabels[$reminderType] ?? $reminderType;
@@ -759,12 +760,20 @@ try {
                         $msgText .= "📅 Доставка: {$dayName} ({$deliveryDate})\n";
                         $msgText .= "⏳ До дедлайна: <b>{$timeLabel}</b> (до {$deadlineFmt})\n\n";
                         $msgText .= "Заявка ещё не подана! Пожалуйста, заполните заявку.";
-                        $msgText .= $linkLine;
+                        // кнопки добавляются ниже
                     }
+
+                    // Формируем inline-кнопки
+                    $buttons = [];
+                    $buttons[] = ['text' => '📝 Подать через бота', 'callback_data' => "vegord_rest_{$restNum}"];
+                    if ($vegFormLink) {
+                        $buttons[] = ['text' => '🌐 Подать на сайте', 'url' => $vegFormLink];
+                    }
+                    $keyboard = ['inline_keyboard' => [$buttons]];
 
                     // Отправляем (без превью ссылок)
                     foreach ($chatIds as $cid) {
-                        tgSend($cid, $msgText, true);
+                        tgSend($cid, $msgText, true, $keyboard);
                         $sent++;
                     }
 

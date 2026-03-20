@@ -2055,6 +2055,44 @@ if ($endpoint === 'rpc') {
                 $ins->execute([$sessId, $pname, $punit, $pmult, $i]);
             }
             $pdo->commit();
+
+            // Уведомление подписчикам в Telegram о новой сессии
+            try {
+                $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+                if ($botToken) {
+                    // Все уникальные chat_id подписчиков
+                    $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs")->fetchAll(PDO::FETCH_COLUMN);
+                    if ($allSubs) {
+                        $dateRange = '';
+                        if ($dateFrom && $dateTo) {
+                            $df = date('d.m', strtotime($dateFrom));
+                            $dt = date('d.m', strtotime($dateTo));
+                            $dateRange = "\n📅 Период: <b>{$df} — {$dt}</b>";
+                        }
+                        $prodList = [];
+                        foreach ($products as $p) {
+                            $pname = $p['name'] ?? '';
+                            if ($pname) $prodList[] = $pname;
+                        }
+                        $prodLine = $prodList ? "\n📦 Товары: " . implode(', ', $prodList) : '';
+                        $msgText = "📢 <b>Открыт сбор заявок на овощи</b>\n\n";
+                        $msgText .= "🗂 Сессия: <b>" . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "</b>";
+                        $msgText .= $dateRange;
+                        $msgText .= $prodLine;
+                        $msgText .= "\n\nПодайте заявку, когда получите ссылку.";
+
+                        foreach ($allSubs as $cid) {
+                            $payload = json_encode(['chat_id' => $cid, 'text' => $msgText, 'parse_mode' => 'HTML']);
+                            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+                            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+                            curl_exec($ch); curl_close($ch);
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                error_log('veg_create_session telegram notify error: ' . $e->getMessage());
+            }
+
         } catch (Exception $e) {
             $pdo->rollBack();
             error_log('veg_create_session error: ' . $e->getMessage());
@@ -2148,6 +2186,70 @@ if ($endpoint === 'rpc') {
             $prevOrders = $sp->fetchAll();
         }
         respond(['products' => $products, 'orders' => $orders, 'notes' => $notes, 'restaurants' => $restaurants, 'tokens' => $tokens, 'schedule' => $schedMap, 'prev_orders' => $prevOrders, 'date_from' => $dateFrom, 'date_to' => $dateTo]);
+    }
+    if ($fn === 'veg_get_stats') {
+        // Статистика по ресторанам: участие в сессиях, пропуски дедлайнов
+        $limitSessions = intval($body['limit'] ?? 10);
+        if ($limitSessions < 1) $limitSessions = 10;
+        if ($limitSessions > 50) $limitSessions = 50;
+
+        // Последние N сессий
+        $sessStmt = $pdo->prepare("SELECT id, name, date_from, date_to, created_at FROM veg_sessions ORDER BY id DESC LIMIT " . $limitSessions);
+        $sessStmt->execute();
+        $recentSessions = $sessStmt->fetchAll();
+        $sessIds = array_column($recentSessions, 'id');
+        if (!$sessIds) respond(['sessions' => [], 'stats' => []]);
+
+        $placeholders = implode(',', array_fill(0, count($sessIds), '?'));
+
+        // Все рестораны с расписанием доставки (активные)
+        $restStmt = $pdo->prepare("SELECT number, address, city, region FROM restaurants WHERE active = 1 AND legal_entity_group = 'BK_VM' ORDER BY number");
+        $restStmt->execute();
+        $allRests = $restStmt->fetchAll();
+
+        // Расписание доставки
+        $schedStmt = $pdo->query("SELECT restaurant_number, day_of_week FROM veg_delivery_days");
+        $restWithSchedule = [];
+        foreach ($schedStmt->fetchAll() as $r) {
+            $restWithSchedule[$r['restaurant_number']] = true;
+        }
+
+        // Заказы по сессиям и ресторанам (только с quantity > 0)
+        $ordStmt = $pdo->prepare("SELECT DISTINCT session_id, restaurant_number FROM veg_orders WHERE session_id IN ({$placeholders}) AND quantity > 0");
+        $ordStmt->execute($sessIds);
+        $orderMap = [];
+        foreach ($ordStmt->fetchAll() as $r) {
+            $orderMap[$r['session_id'] . '_' . $r['restaurant_number']] = true;
+        }
+
+        // Собираем статистику
+        $stats = [];
+        foreach ($allRests as $rest) {
+            $num = $rest['number'];
+            if (!isset($restWithSchedule[$num])) continue; // нет расписания — не участвует
+            $participated = 0;
+            $missed = 0;
+            foreach ($sessIds as $sid) {
+                if (isset($orderMap[$sid . '_' . $num])) {
+                    $participated++;
+                } else {
+                    $missed++;
+                }
+            }
+            $total = count($sessIds);
+            $stats[] = [
+                'number' => $num,
+                'address' => $rest['address'],
+                'city' => $rest['city'],
+                'region' => $rest['region'],
+                'total' => $total,
+                'participated' => $participated,
+                'missed' => $missed,
+                'rate' => $total > 0 ? round($participated / $total * 100) : 0,
+            ];
+        }
+
+        respond(['sessions_count' => count($sessIds), 'stats' => $stats]);
     }
     if ($fn === 'veg_update_order') {
         $orderId = intval($body['order_id'] ?? 0);

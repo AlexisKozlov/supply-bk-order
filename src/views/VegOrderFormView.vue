@@ -90,6 +90,13 @@
               </div>
 
               <template v-if="!del.expired">
+              <button
+                v-if="hasPrevData(del.date) && !dayHasData(del.date)"
+                class="sf-repeat-btn"
+                @click="fillFromPrev(del.date)"
+              >
+                Повторить предыдущий заказ
+              </button>
               <div v-for="prod in info.products" :key="prod.id + '-' + del.date" class="sf-product" :class="{ 'sf-product-error': multError(del.date, prod) }">
                 <div class="sf-product-top">
                   <div class="sf-product-name">{{ prod.product_name }}</div>
@@ -364,6 +371,16 @@ function hasPrevData(date) {
   return info.value.products.some(p => prevInfo(date, p));
 }
 
+function fillFromPrev(date) {
+  if (!info.value) return;
+  for (const prod of info.value.products) {
+    const prev = prevInfo(date, prod);
+    if (prev && prev.qty > 0) {
+      orderValues[date + '_' + prod.id] = String(prev.qty);
+    }
+  }
+}
+
 function fmtShort(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   const dd = String(d.getDate()).padStart(2, '0');
@@ -636,6 +653,13 @@ async function submitEdit() {
 .sf-prev-hint {
   font-size: 11px; color: #7E57C2; font-weight: 600;
 }
+.sf-repeat-btn {
+  width: 100%; padding: 10px; margin-bottom: 8px;
+  background: #F3E5F5; color: #7E57C2; border: 1.5px dashed #CE93D8;
+  border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+  transition: background 0.15s;
+}
+.sf-repeat-btn:active { background: #E1BEE7; }
 .sf-prev-order-block {
   background: #FFF8E1; border-radius: 10px; padding: 12px 14px; margin-top: 4px;
 }
