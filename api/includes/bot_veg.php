@@ -320,7 +320,7 @@ function vegStartOrder($chatId, $msgId = null) {
 // Шаг 2: выбор дня доставки
 function vegOrderSelectDay($chatId, $msgId, $restNum) {
     global $pdo;
-    $session = $pdo->query("SELECT id, name FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
+    $session = $pdo->query("SELECT id, name, date_from, date_to FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
     if (!$session) { editMessage($chatId, $msgId, "Нет активной сессии.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]); return; }
 
     // Дни доставки для этого ресторана
@@ -345,6 +345,11 @@ function vegOrderSelectDay($chatId, $msgId, $restNum) {
     $text = "🥬 <b>Ресторан {$restNum}</b>\n📝 {$session['name']}\n\nВыберите день доставки:";
     $btns = [];
 
+    // Диапазон дат сессии (если задан — показываем только дни внутри него)
+    $sessionFrom = $session['date_from'] ? new DateTime($session['date_from'], $tz) : null;
+    $sessionTo = $session['date_to'] ? new DateTime($session['date_to'], $tz) : null;
+    if ($sessionTo) $sessionTo->setTime(23, 59, 59);
+
     // Ищем ближайшие даты доставки (7 дней вперёд)
     for ($i = 0; $i <= 7; $i++) {
         $check = clone $now;
@@ -352,6 +357,9 @@ function vegOrderSelectDay($chatId, $msgId, $restNum) {
         $checkDow = (int)$check->format('N');
         if (!in_array($checkDow, $days)) continue;
         if (!isset($deadlines[$checkDow])) continue;
+        // Пропускаем дни вне диапазона сессии
+        if ($sessionFrom && $check < $sessionFrom) continue;
+        if ($sessionTo && $check > $sessionTo) continue;
 
         $rule = $deadlines[$checkDow];
         $deadlineDow = (int)$rule['deadline_dow'];
