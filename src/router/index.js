@@ -36,6 +36,7 @@ const routes = [
       { path: 'tenders/:id', name: 'tender-detail', component: () => import('@/views/TenderDetailView.vue'), meta: { title: 'Тендер', module: 'tenders' } },
       { path: 'veg-admin', name: 'veg-admin', component: () => import('@/views/VegOrderAdminView.vue'), meta: { title: 'Овощи', module: 'veg' } },
       { path: 'distribution', name: 'distribution', component: () => import('@/views/DistributionView.vue'), meta: { title: 'Распределение', module: 'distribution' } },
+      { path: 'pallet-calc', name: 'pallet-calc', component: () => import('@/views/PalletCalcView.vue'), meta: { title: 'Калькулятор паллет', module: 'pallet-calc' } },
     ],
   },
   {
@@ -110,7 +111,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'pallet-calc'];
 
 router.beforeEach((to) => {
   const userStore = useUserStore();

@@ -213,9 +213,9 @@ function notifyTelegramRestaurantSales($pdo, $userName, $items, $count) {
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
@@ -233,12 +233,13 @@ $TABLE_TO_MODULE = [
     'tenders'=>'tenders','tender_items'=>'tenders','tender_offers'=>'tenders','tender_offer_prices'=>'tenders','tender_files'=>'tenders',
     'veg_sessions'=>'veg','veg_session_products'=>'veg','veg_tokens'=>'veg','veg_delivery_days'=>'veg','veg_orders'=>'veg','veg_restaurant_notes'=>'veg','veg_deadline_rules'=>'veg',
     'dist_sessions'=>'distribution','dist_session_products'=>'distribution','dist_entries'=>'distribution','dist_notes'=>'distribution',
+    'plt_products'=>'pallet-calc','plt_deliveries'=>'pallet-calc','plt_delivery_items'=>'pallet-calc','plt_daily_stock'=>'pallet-calc','plt_summary'=>'pallet-calc',
 ];
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
 // Таблицы с колонкой legal_entity — для автоматической фильтрации по юрлицу
 // order_items и item_order НЕ включены: у них нет legal_entity, доступ контролируется через родительскую таблицу orders
-$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports'];
+$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary'];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
     $base = $templates[$role] ?? $templates['user'];

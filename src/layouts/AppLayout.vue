@@ -369,6 +369,7 @@ const toolsItems = [
   { module: 'veg', route: 'veg-admin', icon: 'veg', label: 'Овощи' },
   { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
   { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
+  { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
 ];
 
 const showToolsMenu = ref(false); // legacy, не используется
