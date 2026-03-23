@@ -150,7 +150,7 @@
                     <td
                       v-for="prod in sessionData.products" :key="prod.id + dd"
                       class="veg-td-qty"
-                      :class="{ 'veg-td-no-delivery': !restHasDeliveryOnDate(row.number, dd) }"
+                      :class="{ 'veg-td-no-delivery': !restHasDeliveryOnDate(row.number, dd), 'veg-td-refused': restDayAllZeros(row.number, dd) }"
                       @dblclick="startEdit(row.number, dd, prod.id)"
                     >
                       <template v-if="editCell === `${row.number}_${dd}_${prod.id}`">
@@ -168,11 +168,11 @@
                         <span v-if="getCellAdmin(row.number, dd, prod.id) !== null" class="veg-qty-admin" :title="'Исходное: ' + getCellQty(row.number, dd, prod.id)">
                           {{ getCellAdmin(row.number, dd, prod.id) }}
                         </span>
-                        <span v-else-if="getCellQty(row.number, dd, prod.id)" class="veg-qty">
+                        <span v-else-if="getCellQty(row.number, dd, prod.id) !== ''" class="veg-qty">
                           {{ getCellQty(row.number, dd, prod.id) }}
                         </span>
                         <span v-else class="veg-qty-empty">—</span>
-                        <span v-if="!getCellQty(row.number, dd, prod.id) && getCellAdmin(row.number, dd, prod.id) === null && getPrevDayQty(row.number, dd, prod.id)" class="veg-prev-day">{{ getPrevDayQty(row.number, dd, prod.id) }}</span>
+                        <span v-if="getCellQty(row.number, dd, prod.id) === '' && getCellAdmin(row.number, dd, prod.id) === null && getPrevDayQty(row.number, dd, prod.id)" class="veg-prev-day">{{ getPrevDayQty(row.number, dd, prod.id) }}</span>
                       </template>
                     </td>
                   </template>
@@ -782,8 +782,7 @@ function restHasDataForDates(restNum, dates) {
   if (!sessionData.value?.orders) return false;
   return sessionData.value.orders.some(o =>
     String(o.restaurant_number) === String(restNum) &&
-    dates.includes(o.delivery_date) &&
-    (parseFloat(o.quantity) > 0 || (o.admin_qty !== null && o.admin_qty !== undefined && o.admin_qty !== '' && parseFloat(o.admin_qty) > 0))
+    dates.includes(o.delivery_date)
   );
 }
 
@@ -880,7 +879,21 @@ function getCellQty(restNum, date, prodId) {
   const o = orderLookup.value[`${restNum}_${date}_${prodId}`];
   if (!o) return '';
   const v = parseFloat(o.quantity);
-  return v === 0 ? '' : (v === Math.floor(v) ? Math.floor(v) : v);
+  return v === Math.floor(v) ? Math.floor(v) : v;
+}
+
+function restDayAllZeros(restNum, date) {
+  if (!sessionData.value?.products) return false;
+  const prods = sessionData.value.products;
+  const hasAny = prods.some(p => orderLookup.value[`${restNum}_${date}_${p.id}`]);
+  if (!hasAny) return false;
+  return prods.every(p => {
+    const o = orderLookup.value[`${restNum}_${date}_${p.id}`];
+    if (!o) return true;
+    const adminQ = o.admin_qty !== null && o.admin_qty !== undefined ? parseFloat(o.admin_qty) : NaN;
+    const q = !isNaN(adminQ) ? adminQ : parseFloat(o.quantity);
+    return q === 0;
+  });
 }
 
 function getCellAdmin(restNum, date, prodId) {
@@ -1455,6 +1468,7 @@ async function saveScheduleAll() {
 
 .veg-td-qty { text-align: center; cursor: pointer; min-width: 60px; }
 .veg-td-no-delivery { background: #f0f0f0 !important; cursor: default !important; opacity: 0.4; }
+.veg-td-refused { background: #FFF3E0 !important; }
 .veg-qty { font-weight: 700; color: #333; }
 .veg-qty-admin { font-weight: 800; color: #D62700; }
 .veg-qty-empty { color: #ccc; font-size: 14px; }

@@ -376,7 +376,7 @@ function vegOrderSelectDay($chatId, $msgId, $restNum) {
         $dayName = $dayNames[$checkDow] ?? '';
 
         // Проверяем есть ли уже заявка
-        $existing = $pdo->prepare("SELECT COUNT(*) FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date=? AND quantity > 0");
+        $existing = $pdo->prepare("SELECT COUNT(*) FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date=?");
         $existing->execute([$session['id'], $restNum, $dateStr]);
         $hasOrder = $existing->fetchColumn() > 0;
 
@@ -522,9 +522,40 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     @file_put_contents(sys_get_temp_dir() . "/vegord_{$chatId}.txt", "vegord_{$restNum}_{$deliveryDate}_{$session['id']}");
 
     $btns = [
+        [['text' => '🚫 Поставка не нужна', 'callback_data' => "vegord_skip_{$restNum}_{$deliveryDate}"]],
         [['text' => '◂ Назад', 'callback_data' => "vegord_rest_{$restNum}"]],
     ];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Поставка не нужна — все товары = 0
+function vegOrderSkipDay($chatId, $msgId, $restNum, $deliveryDate) {
+    global $pdo;
+    $session = $pdo->query("SELECT id FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
+    if (!$session) return;
+
+    $s = $pdo->prepare("SELECT id, product_name, unit FROM veg_session_products WHERE session_id = ? ORDER BY sort_order, product_name");
+    $s->execute([$session['id']]);
+    $products = $s->fetchAll();
+    if (!$products) return;
+
+    $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at)
+        VALUES (?, ?, ?, ?, 0, NOW())
+        ON DUPLICATE KEY UPDATE quantity = 0, submitted_at = NOW()");
+    foreach ($products as $p) {
+        $ins->execute([$session['id'], $p['id'], $restNum, $deliveryDate]);
+    }
+
+    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
+
+    $dateFmt = date('d.m', strtotime($deliveryDate));
+    $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>{$restNum}</b>\n📅 Доставка: {$dateFmt}\n\n";
+    $msg .= "<i>Все товары: 0 (поставка не нужна)</i>";
+
+    editMessage($chatId, $msgId, $msg, ['inline_keyboard' => [
+        [['text' => '📋 Мои заявки', 'callback_data' => 'veg_my_orders']],
+        [['text' => '◂ Меню овощей', 'callback_data' => 'veg_my_subs']],
+    ]]);
 }
 
 // Обработка введённых количеств
@@ -604,7 +635,11 @@ function vegOrderProcessInput($chatId, $text, $mode) {
 
     $dateFmt = date('d.m', strtotime($deliveryDate));
     $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>{$restNum}</b>\n📅 Доставка: {$dateFmt}\n\n";
-    $msg .= implode("\n", $resultLines);
+    if (empty($resultLines)) {
+        $msg .= "<i>Все товары: 0 (ничего не нужно)</i>";
+    } else {
+        $msg .= implode("\n", $resultLines);
+    }
     if ($roundedLines) {
         $msg .= "\n\n📐 <b>Округлено по кратности:</b>\n" . implode("\n", $roundedLines);
     }

@@ -90,6 +90,7 @@
               </div>
 
               <template v-if="!del.expired">
+              <div class="veg-day-actions">
               <button
                 v-if="hasPrevData(del.date) && !dayHasData(del.date)"
                 class="sf-repeat-btn"
@@ -97,6 +98,14 @@
               >
                 Повторить предыдущий заказ
               </button>
+              <button
+                v-if="!dayAllZeros(del.date)"
+                class="sf-skip-btn"
+                @click="fillZeros(del.date)"
+              >
+                Поставка не нужна
+              </button>
+              </div>
               <div v-for="prod in info.products" :key="prod.id + '-' + del.date" class="sf-product" :class="{ 'sf-product-error': multError(del.date, prod) }">
                 <div class="sf-product-top">
                   <div class="sf-product-name">{{ prod.product_name }}</div>
@@ -381,6 +390,21 @@ function fillFromPrev(date) {
   }
 }
 
+function fillZeros(date) {
+  if (!info.value) return;
+  for (const prod of info.value.products) {
+    orderValues[date + '_' + prod.id] = '0';
+  }
+}
+
+function dayAllZeros(date) {
+  if (!info.value) return false;
+  return info.value.products.every(p => {
+    const val = String(orderValues[date + '_' + p.id] || '').replace(',', '.').trim();
+    return val === '0';
+  });
+}
+
 function fmtShort(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   const dd = String(d.getDate()).padStart(2, '0');
@@ -392,8 +416,8 @@ function fmtShort(dateStr) {
 function dayHasData(date) {
   if (!info.value) return false;
   return info.value.products.some(p => {
-    const v = parseFloat(String(orderValues[date + '_' + p.id] || '0').replace(',', '.')) || 0;
-    return v > 0;
+    const val = String(orderValues[date + '_' + p.id] || '').replace(',', '.').trim();
+    return val !== '';
   });
 }
 
@@ -440,7 +464,7 @@ async function onRestaurantChange() {
         if (key in orderValues) {
           const adminQ = o.admin_qty !== null && o.admin_qty !== undefined ? parseFloat(o.admin_qty) : NaN;
           const q = !isNaN(adminQ) ? adminQ : parseFloat(o.quantity);
-          orderValues[key] = q > 0 ? String(q) : '';
+          orderValues[key] = (!isNaN(q)) ? String(q) : '';
           hasScheduledOrders = true;  // есть заказ хотя бы на один день из расписания
         }
       }
@@ -458,11 +482,17 @@ function buildItems() {
     if (del.expired) continue;
     for (const prod of (info.value?.products || [])) {
       const key = del.date + '_' + prod.id;
-      const qty = parseFloat(String(orderValues[key] || '0').replace(',', '.')) || 0;
+      const val = String(orderValues[key] || '').replace(',', '.').trim();
+      if (val === '') continue;  // пустое поле — не заказано, не отправляем
+      const qty = parseFloat(val) || 0;
       items.push({ product_id: prod.id, delivery_date: del.date, quantity: qty });
     }
   }
   return items;
+}
+
+function activeDates() {
+  return deliveries.value.filter(d => !d.expired).map(d => d.date);
 }
 
 async function submit() {
@@ -474,6 +504,7 @@ async function submit() {
       token_value: token,
       restaurant_number: selectedRestaurant.value,
       items: buildItems(),
+      submitted_dates: activeDates(),
     });
     if (data?.error) { error.value = data.error === 'session_closed' ? 'Сессия закрыта' : data.error; }
     else { submitted.value = true; }
@@ -489,6 +520,7 @@ async function submitEdit() {
       token_value: token,
       restaurant_number: selectedRestaurant.value,
       items: buildItems(),
+      submitted_dates: activeDates(),
     });
     if (data?.error) { error.value = data.error; }
     else { editing.value = false; }
@@ -653,13 +685,22 @@ async function submitEdit() {
 .sf-prev-hint {
   font-size: 11px; color: #7E57C2; font-weight: 600;
 }
-.sf-repeat-btn {
-  width: 100%; padding: 10px; margin-bottom: 8px;
-  background: #F3E5F5; color: #7E57C2; border: 1.5px dashed #CE93D8;
-  border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+.veg-day-actions {
+  display: flex; gap: 8px; margin-bottom: 8px;
+}
+.sf-repeat-btn, .sf-skip-btn {
+  flex: 1; padding: 10px;
+  border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
   transition: background 0.15s;
 }
+.sf-repeat-btn {
+  background: #F3E5F5; color: #7E57C2; border: 1.5px dashed #CE93D8;
+}
 .sf-repeat-btn:active { background: #E1BEE7; }
+.sf-skip-btn {
+  background: #FFF3E0; color: #E65100; border: 1.5px dashed #FFB74D;
+}
+.sf-skip-btn:active { background: #FFE0B2; }
 .sf-prev-order-block {
   background: #FFF8E1; border-radius: 10px; padding: 12px 14px; margin-top: 4px;
 }

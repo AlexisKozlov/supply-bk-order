@@ -421,15 +421,12 @@ if ($endpoint === 'rpc') {
             ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), submitted_at = NOW()");
         $pdo->beginTransaction();
         try {
-            foreach ($items as $item) {
-                $pid = intval($item['product_id'] ?? 0);
-                $delDate = $item['delivery_date'] ?? '';
-                $qty = floatval($item['quantity'] ?? 0);
-                if ($qty < 0 || $qty > 999999) continue;
-                if ($pid <= 0 || !isset($allowedSet[$pid])) continue;
-                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $delDate)) continue;
-                // Проверяем дедлайн
-                $delDt = new DateTime($delDate, $tz);
+            // Даты, по которым ресторан отправляет форму (включая полностью пустые дни)
+            $submittedDates = $body['submitted_dates'] ?? [];
+            $clearDates = [];
+            foreach ($submittedDates as $sd) {
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $sd)) continue;
+                $delDt = new DateTime($sd, $tz);
                 $dow = (int)$delDt->format('N');
                 if (isset($deadlineRules[$dow])) {
                     $rule = $deadlineRules[$dow];
@@ -442,6 +439,25 @@ if ($endpoint === 'rpc') {
                     $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
                     if ($now >= $deadline) continue;
                 }
+                $clearDates[$sd] = true;
+            }
+
+            // Удаляем старые записи без admin_qty для всех дат, по которым ресторан отправил форму
+            // (если поле стёрто — запись удалится; если заполнено — перезапишется ниже)
+            if ($clearDates) {
+                $datePlaceholders = implode(',', array_fill(0, count($clearDates), '?'));
+                $del = $pdo->prepare("DELETE FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date IN ({$datePlaceholders}) AND (admin_qty IS NULL)");
+                $del->execute(array_merge([$sessId, $restNum], array_keys($clearDates)));
+            }
+
+            foreach ($items as $item) {
+                $pid = intval($item['product_id'] ?? 0);
+                $delDate = $item['delivery_date'] ?? '';
+                $qty = floatval($item['quantity'] ?? 0);
+                if ($qty < 0 || $qty > 999999) continue;
+                if ($pid <= 0 || !isset($allowedSet[$pid])) continue;
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $delDate)) continue;
+                if (!isset($clearDates[$delDate])) continue;
                 $ins->execute([$sessId, $pid, $restNum, $delDate, $qty]);
             }
             $pdo->commit();
@@ -463,18 +479,24 @@ if ($endpoint === 'rpc') {
                         foreach ($items as $it) {
                             $pid = intval($it['product_id'] ?? 0);
                             $qty = floatval($it['quantity'] ?? 0);
-                            if ($qty <= 0 || !isset($prodNames[$pid])) continue;
+                            if (!isset($prodNames[$pid])) continue;
                             $dd = $it['delivery_date'] ?? '';
-                            $lines[] = "  • {$prodNames[$pid]}: {$qty} (доставка {$dd})";
+                            if ($qty > 0) {
+                                $lines[] = "  • {$prodNames[$pid]}: {$qty} (доставка {$dd})";
+                            }
                         }
-                        if ($lines) {
+                        {
                             // Получаем адрес ресторана
                             $ra = $pdo->prepare("SELECT address FROM restaurants WHERE number=? AND legal_entity_group='BK_VM' LIMIT 1");
                             $ra->execute([$restNum]);
                             $addr = $ra->fetchColumn() ?: $restNum;
                             $msgText = "✅ <b>Заявка на овощи отправлена</b>\n\n";
                             $msgText .= "🏪 Ресторан <b>{$restNum}</b> — {$addr}\n\n";
-                            $msgText .= implode("\n", $lines);
+                            if ($lines) {
+                                $msgText .= implode("\n", $lines);
+                            } else {
+                                $msgText .= "<i>Все товары: 0 (ничего не нужно)</i>";
+                            }
                             // Логируем что уведомление отправлено
                             $pdo->prepare("INSERT IGNORE INTO veg_reminder_log (session_id, restaurant_number, delivery_date, reminder_type) VALUES (?, ?, CURDATE(), 'submitted')")
                                 ->execute([$sessId, $restNum]);
@@ -2214,8 +2236,8 @@ if ($endpoint === 'rpc') {
             $restWithSchedule[$r['restaurant_number']] = true;
         }
 
-        // Заказы по сессиям и ресторанам (только с quantity > 0)
-        $ordStmt = $pdo->prepare("SELECT DISTINCT session_id, restaurant_number FROM veg_orders WHERE session_id IN ({$placeholders}) AND quantity > 0");
+        // Заказы по сессиям и ресторанам (включая quantity = 0 — это тоже ответ)
+        $ordStmt = $pdo->prepare("SELECT DISTINCT session_id, restaurant_number FROM veg_orders WHERE session_id IN ({$placeholders})");
         $ordStmt->execute($sessIds);
         $orderMap = [];
         foreach ($ordStmt->fetchAll() as $r) {

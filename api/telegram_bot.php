@@ -1591,6 +1591,17 @@ if (isset($input['callback_query'])) {
         }
         exit;
     }
+    if (str_starts_with($data, 'vegord_skip_')) {
+        answerCallback($cb['id']);
+        $rest = substr($data, 12); // "27_2026-03-19"
+        $sep = strpos($rest, '_');
+        if ($sep !== false) {
+            $restNum = substr($rest, 0, $sep);
+            $date = substr($rest, $sep + 1);
+            vegOrderSkipDay($chatId, $msgId, $restNum, $date);
+        }
+        exit;
+    }
 
     if (str_starts_with($data, 'veg_page_')) {
         answerCallback($cb['id']);
