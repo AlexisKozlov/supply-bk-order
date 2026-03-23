@@ -75,6 +75,7 @@
             <div class="sc-summary-lbl">Ответов</div>
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px;">
+            <button v-if="activeCollection.status === 'active'" class="sc-btn sm outline" @click="openEditProducts">Товары</button>
             <button class="sc-btn sm outline" @click="exportExcel">Excel</button>
             <button class="sc-btn sm outline" @click="refreshData">Обновить</button>
           </div>
@@ -324,6 +325,109 @@
             <button class="sc-btn outline" @click="tryCloseCreate">Отмена</button>
             <button class="sc-btn fill" @click="createCollection" :disabled="!canCreate || creating">
               {{ creating ? '...' : 'Создать' }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Edit products modal -->
+      <div v-if="showEditProducts" class="modal" @click.self="showEditProducts = false">
+        <div class="modal-box" style="max-width: 600px;">
+          <div class="sc-modal-head">
+            <h3>Редактирование товаров</h3>
+            <button class="sc-x" @click="showEditProducts = false">✕</button>
+          </div>
+
+          <div class="sc-field">
+            <label>Товары в сборе</label>
+            <div v-for="(p, i) in editProducts" :key="p.id || ('new_' + i)" class="sc-product-card">
+              <button v-if="editProducts.length > 1" class="sc-card-remove" @click="removeEditProduct(i)">✕</button>
+
+              <!-- Existing product: editable fields -->
+              <div v-if="p.id && !p._searchMode" class="sc-product-edit-fields">
+                <div class="sc-product-edit-row">
+                  <input v-model="p.product_name" type="text" placeholder="Название товара" class="sc-input full"/>
+                </div>
+                <div class="sc-product-edit-row" style="margin-top: 6px;">
+                  <input v-model="p.product_sku" type="text" placeholder="Артикул (SKU)" class="sc-input" style="width: 140px;"/>
+                </div>
+              </div>
+
+              <!-- New product: search or manual entry -->
+              <div v-else class="sc-product-search">
+                <div v-if="p._fromDb" class="sc-product-selected">
+                  <div class="sc-product-selected-info">
+                    <div class="sc-product-selected-name">{{ p.product_name }}</div>
+                    <div class="sc-product-selected-meta">
+                      <span v-if="p.product_sku">{{ p.product_sku }}</span>
+                    </div>
+                  </div>
+                  <button class="sc-btn sm outline" @click="p._fromDb = false; p._searchQuery = ''; p.product_name = ''; p.product_sku = '';">Изменить</button>
+                </div>
+                <template v-else>
+                  <input
+                    v-model="p._searchQuery"
+                    type="text"
+                    placeholder="Найти товар в базе или ввести вручную..."
+                    class="sc-input full"
+                    @input="onEditProductInput(i)"
+                    @focus="p._showDrop = true"
+                    @keydown.escape="p._showDrop = false"
+                  />
+                  <div v-if="p._showDrop && p._results?.length" class="sc-drop" @mousedown.prevent>
+                    <div
+                      v-for="r in p._results" :key="r.id"
+                      class="sc-drop-item"
+                      @click="pickEditProduct(i, r)"
+                    >
+                      <div class="sc-drop-name">{{ r.name }}</div>
+                      <div class="sc-drop-meta">
+                        {{ r.sku }}
+                        <template v-if="r.supplier"> · {{ r.supplier }}</template>
+                      </div>
+                    </div>
+                    <div class="sc-drop-item sc-drop-manual" @click="setEditManual(i)">
+                      <div class="sc-drop-name">Ввести вручную</div>
+                      <div class="sc-drop-meta">Товара нет в базе — ввести название и артикул</div>
+                    </div>
+                  </div>
+                  <div v-if="p._searchQuery && !p._results?.length && !p._searching" class="sc-manual-hint">
+                    Не найдено в базе — можно
+                    <button class="sc-link-btn" @click="setEditManual(i)">ввести вручную</button>
+                  </div>
+                  <div v-if="p._manual" class="sc-manual-fields">
+                    <input v-model="p.product_name" type="text" placeholder="Название товара" class="sc-input full"/>
+                    <input v-model="p.product_sku" type="text" placeholder="Артикул (SKU)" class="sc-input full" style="margin-top: 6px;"/>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Unit selector -->
+              <div class="sc-product-unit-row">
+                <span class="sc-product-unit-label">Единица сбора:</span>
+                <div class="sc-switcher">
+                  <button :class="{ on: p.unit === 'boxes' }" @click="p.unit = 'boxes'">Коробки</button>
+                  <button :class="{ on: p.unit === 'pieces' }" @click="p.unit = 'pieces'">Штуки</button>
+                  <button :class="{ on: p.unit === 'kg' }" @click="p.unit = 'kg'">Кг</button>
+                  <button :class="{ on: p.unit === 'liters' }" @click="p.unit = 'liters'">Литры</button>
+                </div>
+              </div>
+
+              <!-- Note -->
+              <input v-model="p.note" type="text" placeholder="Примечание (видно сборщикам)" class="sc-input full sc-note-input" />
+
+              <!-- Warning if product has data and being deleted -->
+              <div v-if="p._markedForDelete" class="sc-product-delete-warn">
+                Будет удалён при сохранении (вместе с собранными остатками)
+                <button class="sc-link-btn" @click="p._markedForDelete = false; editProducts.splice(i, 0, editProducts.splice(i, 1)[0]);">Отменить</button>
+              </div>
+            </div>
+            <button class="sc-btn outline full" @click="addEditProductRow" style="margin-top: 8px;">+ Добавить товар</button>
+          </div>
+
+          <div class="sc-modal-foot">
+            <button class="sc-btn outline" @click="showEditProducts = false">Отмена</button>
+            <button class="sc-btn fill" @click="saveEditProducts" :disabled="savingProducts || !canSaveProducts">
+              {{ savingProducts ? '...' : 'Сохранить' }}
             </button>
           </div>
         </div>
@@ -785,6 +889,173 @@ function deleteEntry(d) {
   };
 }
 
+// ═══ Edit products ═══
+const showEditProducts = ref(false);
+const editProducts = ref([]);
+const savingProducts = ref(false);
+let editSearchTimers = {};
+
+const canSaveProducts = computed(() => {
+  const active = editProducts.value.filter(p => !p._markedForDelete);
+  return active.length > 0 && active.every(p => (p.product_name || '').trim());
+});
+
+function openEditProducts() {
+  if (!collectionData.value?.products) return;
+  editProducts.value = collectionData.value.products.map(p => ({
+    ...p,
+    note: p.note || '',
+    _original: { ...p },
+    _markedForDelete: false,
+    _searchMode: false,
+  }));
+  showEditProducts.value = true;
+}
+
+function addEditProductRow() {
+  editProducts.value.push({
+    id: null,
+    product_name: '',
+    product_sku: '',
+    unit: 'pieces',
+    note: '',
+    sort_order: editProducts.value.length,
+    _searchMode: true,
+    _fromDb: false,
+    _searchQuery: '',
+    _results: [],
+    _showDrop: false,
+    _searching: false,
+    _manual: false,
+    _markedForDelete: false,
+  });
+}
+
+function removeEditProduct(i) {
+  const p = editProducts.value[i];
+  if (p.id) {
+    // Existing product — check if it has collected data
+    const hasData = collectionData.value?.data?.some(d => d.product_id === p.id);
+    if (hasData) {
+      confirmModal.value = {
+        show: true, title: 'Удалить товар', danger: true,
+        text: `Товар «${p.product_name}» уже содержит собранные остатки. При удалении все эти данные будут потеряны. Продолжить?`,
+        btnText: 'Удалить',
+        action: () => { editProducts.value.splice(i, 1); },
+      };
+    } else {
+      editProducts.value.splice(i, 1);
+    }
+  } else {
+    editProducts.value.splice(i, 1);
+  }
+}
+
+function onEditProductInput(i) {
+  const p = editProducts.value[i];
+  p._fromDb = false;
+  p._manual = false;
+  p._showDrop = true;
+  clearTimeout(editSearchTimers[i]);
+  if ((p._searchQuery || '').length < 2) { p._results = []; p._searching = false; return; }
+  p._searching = true;
+  editSearchTimers[i] = setTimeout(() => searchEditProduct(i), 250);
+}
+
+async function searchEditProduct(i) {
+  const p = editProducts.value[i];
+  try {
+    const le = orderStore.settings.legalEntity;
+    const params = new URLSearchParams({ q: p._searchQuery, legal_entity: le, limit: '10' });
+    const r = await fetch(`/api/search_products?${params}`, {
+      headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' },
+    });
+    if (r.ok) p._results = await r.json();
+  } catch { p._results = []; } finally { p._searching = false; }
+}
+
+function pickEditProduct(i, product) {
+  const p = editProducts.value[i];
+  p.product_name = product.name;
+  p.product_sku = product.sku || '';
+  p._fromDb = true;
+  p._manual = false;
+  p._showDrop = false;
+  p._results = [];
+  p._searchQuery = '';
+  const uom = product.unit_of_measure;
+  if (uom === 'кг') p.unit = 'kg';
+  else if (uom === 'л') p.unit = 'liters';
+  else p.unit = 'pieces';
+}
+
+function setEditManual(i) {
+  const p = editProducts.value[i];
+  p._manual = true;
+  p.product_name = p._searchQuery;
+  p._showDrop = false;
+}
+
+async function saveEditProducts() {
+  savingProducts.value = true;
+  try {
+    const collId = activeCollection.value.id;
+    const active = editProducts.value.filter(p => !p._markedForDelete);
+
+    // 1. Delete removed products (existing ones that are no longer in the list)
+    const originalIds = (collectionData.value?.products || []).map(p => p.id);
+    const keepIds = active.filter(p => p.id).map(p => p.id);
+    const toDelete = originalIds.filter(id => !keepIds.includes(id));
+
+    for (const id of toDelete) {
+      // Delete associated data first
+      await db.from('stock_collection_data').delete().eq('product_id', id);
+      await db.from('stock_collection_products').delete().eq('id', id);
+    }
+
+    // 2. Update existing products
+    for (const p of active.filter(p => p.id)) {
+      const orig = p._original;
+      if (orig && (p.product_name !== orig.product_name || p.product_sku !== orig.product_sku || p.unit !== orig.unit || p.note !== orig.note)) {
+        await db.from('stock_collection_products').update({
+          product_name: p.product_name.trim(),
+          product_sku: (p.product_sku || '').trim() || null,
+          unit: p.unit,
+          note: (p.note || '').trim() || null,
+        }).eq('id', p.id);
+      }
+    }
+
+    // 3. Insert new products
+    const newOnes = active.filter(p => !p.id && (p.product_name || '').trim());
+    for (let i = 0; i < newOnes.length; i++) {
+      const p = newOnes[i];
+      await db.from('stock_collection_products').insert({
+        collection_id: collId,
+        product_name: p.product_name.trim(),
+        product_sku: (p.product_sku || '').trim() || null,
+        unit: p.unit,
+        sort_order: keepIds.length + i,
+        note: (p.note || '').trim() || null,
+      });
+    }
+
+    // 4. Update sort_order for all
+    for (let i = 0; i < active.length; i++) {
+      const p = active[i];
+      if (p.id && p.sort_order !== i) {
+        await db.from('stock_collection_products').update({ sort_order: i }).eq('id', p.id);
+      }
+    }
+
+    showEditProducts.value = false;
+    toastStore.success('Сохранено', 'Список товаров обновлён');
+    await refreshData();
+  } catch (e) {
+    toastStore.error('Ошибка', 'Не удалось сохранить изменения');
+  } finally { savingProducts.value = false; }
+}
+
 // Export
 async function exportExcel() {
   if (!collectionData.value) return;
@@ -1124,6 +1395,16 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-switcher button:not(:last-child) { border-right: 1.5px solid #EDE7DF; }
 .sc-switcher .on { background: #502314 !important; color: #fff !important; }
 .sc-switcher button:hover:not(.on) { background: #F9F6F2; }
+
+/* Edit products */
+.sc-product-edit-fields { }
+.sc-product-edit-row { display: flex; gap: 8px; }
+.sc-product-delete-warn {
+  margin-top: 8px; padding: 6px 10px; background: #FFF3E0;
+  border: 1px solid #FFE082; border-radius: 6px;
+  font-size: 11px; color: #E65100;
+  display: flex; align-items: center; gap: 8px;
+}
 
 @media (max-width: 640px) {
   .sc-product-card { padding: 10px; }

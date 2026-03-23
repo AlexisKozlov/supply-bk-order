@@ -198,7 +198,7 @@ $writeWhitelist = [
     'deficit_results'  => ['id','session_id','restaurant_number','current_stock','daily_consumption','days_to_cover','need','allocated','delivery_day'],
     'stock_collections'=> ['id','name'],
     'stock_collection_data' => ['id','stock'],
-    'stock_collection_products' => ['id'],
+    'stock_collection_products' => ['id','collection_id','product_name','product_sku','unit','note','sort_order'],
     'stock_collection_tokens' => ['id'],
     'veg_sessions'          => ['id','name','date_from','date_to','status'],
     'veg_session_products'  => ['id','session_id','product_name','unit','multiplicity','sort_order'],
@@ -360,7 +360,7 @@ if ($method === 'POST') {
     }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','stock_collection_tokens'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Недопустимое имя колонки: '.$col], 400); }
