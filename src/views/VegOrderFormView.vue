@@ -176,7 +176,10 @@
               <span v-if="del.expired" class="veg-success-deadline" style="color:#D62700;">дедлайн прошёл</span>
               <span v-else-if="del.deadline" class="veg-success-deadline">до {{ formatDeadline(del.deadline) }}</span>
             </div>
-            <template v-if="dayHasData(del.date)">
+            <template v-if="dayAllZeros(del.date)">
+              <div class="sf-success-empty" style="color:#E65100;">Поставка не нужна</div>
+            </template>
+            <template v-else-if="dayHasData(del.date)">
               <div v-for="prod in info.products" :key="prod.id + '-' + del.date" class="sf-success-item">
                 <span>{{ prod.product_name }}</span>
                 <strong>{{ orderValues[del.date + '_' + prod.id] || 0 }} {{ unitShort(prod.unit) }}</strong>

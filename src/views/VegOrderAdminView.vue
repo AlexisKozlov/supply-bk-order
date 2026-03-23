@@ -1131,7 +1131,8 @@ async function exportExcel() {
       for (const dd of dates) {
         for (const p of products) {
           const v = getQtyValue(row.number, dd, p.id);
-          r.push(v || '');
+          const hasOrder = getCellQty(row.number, dd, p.id) !== '' || getCellAdmin(row.number, dd, p.id) !== null;
+          r.push(hasOrder ? v : '');
         }
       }
       r.push(row.note || '');
@@ -1144,8 +1145,14 @@ async function exportExcel() {
     for (const dd of dates) {
       for (const p of products) {
         let sum = 0;
-        for (const row of rows) sum += getQtyValue(row.number, dd, p.id);
-        subRow.push(sum || '');
+        let hasAny = false;
+        for (const row of rows) {
+          if (getCellQty(row.number, dd, p.id) !== '' || getCellAdmin(row.number, dd, p.id) !== null) {
+            sum += getQtyValue(row.number, dd, p.id);
+            hasAny = true;
+          }
+        }
+        subRow.push(hasAny ? sum : '');
       }
     }
     subRow.push('');
@@ -1158,8 +1165,14 @@ async function exportExcel() {
   for (const dd of dates) {
     for (const p of products) {
       let sum = 0;
-      for (const row of dataRows) sum += getQtyValue(row.number, dd, p.id);
-      grandRow.push(sum || '');
+      let hasAny = false;
+      for (const row of dataRows) {
+        if (getCellQty(row.number, dd, p.id) !== '' || getCellAdmin(row.number, dd, p.id) !== null) {
+          sum += getQtyValue(row.number, dd, p.id);
+          hasAny = true;
+        }
+      }
+      grandRow.push(hasAny ? sum : '');
     }
   }
   grandRow.push('');

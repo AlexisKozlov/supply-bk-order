@@ -653,7 +653,7 @@ try {
                     $deadlineFmt = $nextDelivery['deadline']->format('d.m H:i');
 
                     // Проверяем есть ли заявка
-                    $orderCheck = $pdo->prepare("SELECT COUNT(*) FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date=? AND quantity > 0");
+                    $orderCheck = $pdo->prepare("SELECT COUNT(*) FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date=?");
                     $orderCheck->execute([$sessId, $restNum, $deliveryDate]);
                     $hasOrder = $orderCheck->fetchColumn() > 0;
 
@@ -704,7 +704,7 @@ try {
                             SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
                             FROM veg_orders o
                             JOIN veg_session_products sp ON sp.id = o.product_id
-                            WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date != ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+                            WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date != ?
                             ORDER BY o.delivery_date DESC, sp.sort_order
                         ");
                         $curOrdStmt->execute([$sessId, $restNum, $deliveryDate]);
@@ -719,7 +719,7 @@ try {
                                     SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty
                                     FROM veg_orders o
                                     JOIN veg_session_products sp ON sp.id = o.product_id
-                                    WHERE o.session_id = ? AND o.restaurant_number = ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+                                    WHERE o.session_id = ? AND o.restaurant_number = ?
                                     ORDER BY o.delivery_date DESC, sp.sort_order
                                 ");
                                 $prevOrdStmt->execute([$prevSessRow['id'], $restNum]);

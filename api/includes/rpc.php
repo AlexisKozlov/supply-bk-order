@@ -366,7 +366,7 @@ if ($endpoint === 'rpc') {
                 SELECT sp.product_name, o.delivery_date, o.quantity, o.admin_qty
                 FROM veg_orders o
                 JOIN veg_session_products sp ON sp.id = o.product_id
-                WHERE o.session_id = ? AND o.restaurant_number = ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+                WHERE o.session_id = ? AND o.restaurant_number = ?
             ");
             $st->execute([$ps['id'], $restNum]);
             $orders = $st->fetchAll();

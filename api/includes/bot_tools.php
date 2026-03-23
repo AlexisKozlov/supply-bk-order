@@ -545,7 +545,7 @@ function toolVegStatus($restaurant) {
     }
 
     // Сводка: кто подал, кто нет
-    $s = $pdo->prepare("SELECT DISTINCT restaurant_number FROM veg_orders WHERE session_id = ? AND (quantity > 0 OR (admin_qty IS NOT NULL AND admin_qty > 0))");
+    $s = $pdo->prepare("SELECT DISTINCT restaurant_number FROM veg_orders WHERE session_id = ?");
     $s->execute([$session['id']]);
     $submitted = $s->fetchAll(PDO::FETCH_COLUMN);
 

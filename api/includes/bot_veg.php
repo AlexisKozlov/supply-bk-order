@@ -242,7 +242,7 @@ function vegShowRestOrders($chatId, $msgId, $restNum) {
     $s = $pdo->prepare("SELECT vo.delivery_date, sp.product_name, sp.unit, vo.quantity
         FROM veg_orders vo
         JOIN veg_session_products sp ON sp.id = vo.product_id AND sp.session_id = vo.session_id
-        WHERE vo.session_id = ? AND vo.restaurant_number = ? AND vo.quantity > 0
+        WHERE vo.session_id = ? AND vo.restaurant_number = ?
         ORDER BY vo.delivery_date, sp.sort_order, sp.product_name");
     $s->execute([$session['id'], $restNum]);
     $orders = $s->fetchAll();
@@ -263,8 +263,18 @@ function vegShowRestOrders($chatId, $msgId, $restNum) {
             $dayName = $dayNames[$dow] ?? '';
             $dateFmt = (new DateTime($date))->format('d.m');
             $text .= "📅 <b>{$dayName} {$dateFmt}</b>\n";
+            $allZero = true;
             foreach ($items as $item) {
-                $text .= "  • {$item['product_name']}: <b>{$item['quantity']}</b> {$item['unit']}\n";
+                if (floatval($item['quantity']) > 0) $allZero = false;
+            }
+            if ($allZero) {
+                $text .= "  <i>Поставка не нужна</i>\n";
+            } else {
+                foreach ($items as $item) {
+                    if (floatval($item['quantity']) > 0) {
+                        $text .= "  • {$item['product_name']}: <b>{$item['quantity']}</b> {$item['unit']}\n";
+                    }
+                }
             }
             $text .= "\n";
         }
@@ -380,11 +390,11 @@ function vegOrderSelectDay($chatId, $msgId, $restNum) {
         $existing->execute([$session['id'], $restNum, $dateStr]);
         $hasOrder = $existing->fetchColumn() > 0;
 
-        $status = $hasOrder ? '✅' : ($minutesLeft < 0 ? '⏰ истёк' : '');
-        $label = "{$dayName} {$dateFmt} {$status}";
-
-        if ($minutesLeft >= 0 || $hasOrder) {
-            $btns[] = [['text' => $label, 'callback_data' => "vegord_day_{$restNum}_{$dateStr}"]];
+        if ($minutesLeft >= 0) {
+            $status = $hasOrder ? '✅' : '';
+            $btns[] = [['text' => "{$dayName} {$dateFmt} {$status}", 'callback_data' => "vegord_day_{$restNum}_{$dateStr}"]];
+        } elseif ($hasOrder) {
+            $btns[] = [['text' => "{$dayName} {$dateFmt} ✅ (дедлайн прошёл)", 'callback_data' => "vegord_day_{$restNum}_{$dateStr}"]];
         }
     }
 
@@ -395,11 +405,84 @@ function vegOrderSelectDay($chatId, $msgId, $restNum) {
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
+// Проверка дедлайна для даты доставки
+function vegCheckDeadline($deliveryDate) {
+    global $pdo;
+    $dlRows = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules")->fetchAll();
+    $deadlines = [];
+    foreach ($dlRows as $r) $deadlines[(int)$r['delivery_dow']] = $r;
+
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+    $delDt = new DateTime($deliveryDate, $tz);
+    $dow = (int)$delDt->format('N');
+
+    if (!isset($deadlines[$dow])) return true; // нет правила — разрешаем
+    $rule = $deadlines[$dow];
+    $deadlineDow = (int)$rule['deadline_dow'];
+    $deadline = clone $delDt;
+    $diff = $dow - $deadlineDow;
+    if ($diff <= 0) $diff += 7;
+    $deadline->modify("-{$diff} days");
+    $timeParts = explode(':', $rule['deadline_time']);
+    $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
+
+    return $now < $deadline; // true = дедлайн ещё не прошёл
+}
+
 // Шаг 3: показ товаров для ввода количеств
 function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     global $pdo;
     $session = $pdo->query("SELECT id, name FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
     if (!$session) return;
+
+    // Проверяем дедлайн
+    if (!vegCheckDeadline($deliveryDate)) {
+        // Показываем что было в заявке (только просмотр)
+        $ords = $pdo->prepare("SELECT sp.product_name, sp.unit, vo.quantity, vo.admin_qty
+            FROM veg_orders vo
+            JOIN veg_session_products sp ON sp.id = vo.product_id
+            WHERE vo.session_id = ? AND vo.restaurant_number = ? AND vo.delivery_date = ?
+            ORDER BY sp.sort_order, sp.product_name");
+        $ords->execute([$session['id'], $restNum, $deliveryDate]);
+        $rows = $ords->fetchAll();
+
+        $dateFmt = date('d.m', strtotime($deliveryDate));
+        $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+        $dow = (int)date('N', strtotime($deliveryDate));
+        $text = "📋 <b>Заявка: рест. {$restNum}</b>\n";
+        $text .= "📅 {$dayNames[$dow]} {$dateFmt}\n";
+        $text .= "⏰ <i>Дедлайн прошёл — изменить нельзя</i>\n";
+        $text .= "─────────────────────\n";
+
+        if ($rows) {
+            $allZero = true;
+            foreach ($rows as $r) {
+                $q = ($r['admin_qty'] !== null && $r['admin_qty'] !== '') ? floatval($r['admin_qty']) : floatval($r['quantity']);
+                if ($q > 0) $allZero = false;
+            }
+            if ($allZero) {
+                $text .= "<i>Поставка не нужна</i>\n";
+            } else {
+                foreach ($rows as $r) {
+                    $q = ($r['admin_qty'] !== null && $r['admin_qty'] !== '') ? floatval($r['admin_qty']) : floatval($r['quantity']);
+                    $unit = $r['unit'] === 'pcs' ? 'шт' : 'кг';
+                    $qFmt = rtrim(rtrim(number_format($q, 2, '.', ''), '0'), '.');
+                    if ($r['admin_qty'] !== null && $r['admin_qty'] !== '') {
+                        $origQ = rtrim(rtrim(number_format(floatval($r['quantity']), 2, '.', ''), '0'), '.');
+                        $text .= "  • {$r['product_name']}: <b>{$qFmt}</b> {$unit} <i>(было {$origQ})</i>\n";
+                    } else {
+                        $text .= "  • {$r['product_name']}: <b>{$qFmt}</b> {$unit}\n";
+                    }
+                }
+            }
+        } else {
+            $text .= "<i>Заявка не была подана</i>\n";
+        }
+
+        editMessage($chatId, $msgId, $text, ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "vegord_rest_{$restNum}"]]]]);
+        return;
+    }
 
     // Товары сессии (с кратностью)
     $s = $pdo->prepare("SELECT sp.id, sp.product_name, sp.unit, sp.multiplicity, sp.sort_order FROM veg_session_products sp WHERE sp.session_id = ? ORDER BY sp.sort_order, sp.product_name");
@@ -420,7 +503,7 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
         SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty, o.delivery_date
         FROM veg_orders o
         JOIN veg_session_products sp ON sp.id = o.product_id
-        WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date < ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+        WHERE o.session_id = ? AND o.restaurant_number = ? AND o.delivery_date < ?
         ORDER BY o.delivery_date DESC, sp.sort_order
     ");
     $ps->execute([$session['id'], $restNum, $deliveryDate]);
@@ -445,7 +528,7 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
                 SELECT sp.product_name, sp.unit, o.quantity, o.admin_qty, o.delivery_date
                 FROM veg_orders o
                 JOIN veg_session_products sp ON sp.id = o.product_id
-                WHERE o.session_id = ? AND o.restaurant_number = ? AND (o.quantity > 0 OR (o.admin_qty IS NOT NULL AND o.admin_qty > 0))
+                WHERE o.session_id = ? AND o.restaurant_number = ?
                 ORDER BY o.delivery_date DESC, sp.sort_order
             ");
             $po->execute([$prevSessRow['id'], $restNum]);
@@ -534,6 +617,12 @@ function vegOrderSkipDay($chatId, $msgId, $restNum, $deliveryDate) {
     $session = $pdo->query("SELECT id FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
     if (!$session) return;
 
+    // Проверяем дедлайн
+    if (!vegCheckDeadline($deliveryDate)) {
+        editMessage($chatId, $msgId, "⏰ Дедлайн для этой даты доставки уже прошёл.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "vegord_rest_{$restNum}"]]]]);
+        return;
+    }
+
     $s = $pdo->prepare("SELECT id, product_name, unit FROM veg_session_products WHERE session_id = ? ORDER BY sort_order, product_name");
     $s->execute([$session['id']]);
     $products = $s->fetchAll();
@@ -567,6 +656,13 @@ function vegOrderProcessInput($chatId, $text, $mode) {
     $restNum = $parts[1];
     $deliveryDate = $parts[2];
     $sessionId = (int)$parts[3];
+
+    // Проверяем дедлайн
+    if (!vegCheckDeadline($deliveryDate)) {
+        @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
+        sendMessage($chatId, "⏰ Дедлайн для этой даты доставки уже прошёл. Заявка не сохранена.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "vegord_rest_{$restNum}"]]]]);
+        return true;
+    }
 
     // Товары сессии (с кратностью)
     $s = $pdo->prepare("SELECT id, product_name, unit, multiplicity FROM veg_session_products WHERE session_id = ? ORDER BY sort_order, product_name");
