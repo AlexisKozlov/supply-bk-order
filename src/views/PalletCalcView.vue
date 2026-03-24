@@ -198,32 +198,34 @@
               <tr>
                 <th class="col-date">Дата</th>
                 <th class="col-day">День</th>
-                <th class="col-stock">Остатки Х</th>
-                <th class="col-stock">Остатки М</th>
+                <th class="col-stock bg-stock">Остатки Х</th>
+                <th class="col-stock bg-stock">Остатки М</th>
+                <th class="col-total bg-delivery">Итого Х</th>
+                <th class="col-total bg-delivery">Итого М</th>
                 <th class="col-deliveries">Приходы Холод</th>
-                <th class="col-total">Итого Х</th>
                 <th class="col-deliveries">Приходы Мороз</th>
-                <th class="col-total">Итого М</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="row in sumRows" :key="row.date" :class="{ weekend: row.isWeekend, today: row.isToday }">
                 <td class="col-date">{{ row.dateStr }}</td>
                 <td class="col-day">{{ row.dayName }}</td>
-                <td class="col-stock" @dblclick="editStock(row, 'cold')">
+                <td class="col-stock bg-stock" @dblclick="editStock(row, 'cold')">
                   <template v-if="editingStock?.date === row.date && editingStock?.type === 'cold'">
                     <input type="number" v-model.number="editingStock.value" class="plt-input-num stock-input"
                       @keyup.enter="saveStock" @keyup.escape="editingStock = null" @blur="saveStock" />
                   </template>
                   <span v-else class="stock-val" :class="{ empty: row.coldStock == null }">{{ row.coldStock ?? '—' }}</span>
                 </td>
-                <td class="col-stock" @dblclick="editStock(row, 'frozen')">
+                <td class="col-stock bg-stock" @dblclick="editStock(row, 'frozen')">
                   <template v-if="editingStock?.date === row.date && editingStock?.type === 'frozen'">
                     <input type="number" v-model.number="editingStock.value" class="plt-input-num stock-input"
                       @keyup.enter="saveStock" @keyup.escape="editingStock = null" @blur="saveStock" />
                   </template>
                   <span v-else class="stock-val" :class="{ empty: row.frozenStock == null }">{{ row.frozenStock ?? '—' }}</span>
                 </td>
+                <td class="col-total bg-delivery num">{{ row.totalCold || '' }}</td>
+                <td class="col-total bg-delivery num">{{ row.totalFrozen || '' }}</td>
                 <td class="col-deliveries">
                   <span v-if="row.coldEntries.length" class="plt-entries">
                     <span v-for="(e, i) in row.coldEntries" :key="i" class="plt-entry" @dblclick="canEdit && editSummaryEntry(e)">
@@ -231,7 +233,6 @@
                     </span>
                   </span>
                 </td>
-                <td class="col-total num">{{ row.totalCold || '' }}</td>
                 <td class="col-deliveries">
                   <span v-if="row.frozenEntries.length" class="plt-entries">
                     <span v-for="(e, i) in row.frozenEntries" :key="i" class="plt-entry" @dblclick="canEdit && editSummaryEntry(e)">
@@ -239,18 +240,17 @@
                     </span>
                   </span>
                 </td>
-                <td class="col-total num">{{ row.totalFrozen || '' }}</td>
               </tr>
             </tbody>
             <tfoot>
               <tr class="plt-total">
                 <td colspan="2">Итого</td>
+                <td class="bg-stock num"></td>
+                <td class="bg-stock num"></td>
+                <td class="bg-delivery num">{{ sumTotalColdDeliveries || '' }}</td>
+                <td class="bg-delivery num">{{ sumTotalFrozenDeliveries || '' }}</td>
                 <td class="num"></td>
                 <td class="num"></td>
-                <td class="num"></td>
-                <td class="num">{{ sumTotalColdDeliveries || '' }}</td>
-                <td class="num"></td>
-                <td class="num">{{ sumTotalFrozenDeliveries || '' }}</td>
               </tr>
             </tfoot>
           </table>
@@ -266,6 +266,8 @@
             <input type="text" v-model="refSearch" class="plt-input" placeholder="Поиск по артикулу или названию..." />
           </div>
           <div class="plt-ref-stats">{{ filteredRefProducts.length }} из {{ refProducts.length }} товаров</div>
+          <button v-if="canEdit" class="plt-btn sm outline" @click="triggerImportRef">Загрузить из Меркурия</button>
+          <input ref="importFileInput" type="file" accept=".xlsx,.xls" style="display:none" @change="importRefFile" />
           <button v-if="canEdit" class="plt-btn sm fill" @click="addRefProduct">+ Добавить товар</button>
         </div>
         <div class="plt-ref-table-wrap">
@@ -473,15 +475,20 @@ let searchTimeout = null;
 function onProductSearch() {
   clearTimeout(searchTimeout);
   searchHighlight.value = 0;
-  const q = productSearch.value.trim().toLowerCase();
+  const q = productSearch.value.replace(/\u00A0/g, ' ').trim().toLowerCase();
   if (!q || q.length < 2) { searchResults.value = []; return; }
 
   searchTimeout = setTimeout(() => {
     const addedIds = new Set(calcItems.value.map(i => i.product_id));
+    // Extract potential SKU from the beginning of the query
+    const skuFromQuery = q.split(/\s+/)[0] || '';
     const results = allProducts.value.filter(p => {
       if (addedIds.has(p.id)) return false;
-      const haystack = (p.sku || '') + ' ' + p.name;
-      return haystack.toLowerCase().includes(q);
+      // Match by SKU if query starts with an article code
+      if (skuFromQuery && (p.sku || '').toLowerCase() === skuFromQuery) return true;
+      // Also match by substring in name
+      const haystack = ((p.sku || '') + ' ' + p.name).replace(/\u00A0/g, ' ').toLowerCase();
+      return haystack.includes(q);
     });
     searchResults.value = results.slice(0, 15);
   }, 150);
@@ -538,7 +545,7 @@ function parseBulkText() {
 
   for (const line of lines) {
     // Extract SKU from beginning of line
-    const skuMatch = line.match(/^(\d[\d_]*)/);
+    const skuMatch = line.match(/^(\S+)/);
     let product = null;
 
     if (skuMatch) {
@@ -547,8 +554,8 @@ function parseBulkText() {
     }
     // Fallback: search by substring
     if (!product) {
-      const lower = line.toLowerCase();
-      product = allProducts.value.find(p => !addedIds.has(p.id) && p.name.toLowerCase().includes(lower));
+      const lower = line.replace(/\u00A0/g, ' ').toLowerCase();
+      product = allProducts.value.find(p => !addedIds.has(p.id) && p.name.replace(/\u00A0/g, ' ').toLowerCase().includes(lower));
     }
 
     if (product) {
@@ -564,6 +571,7 @@ function parseBulkText() {
 }
 
 function applyBulkProducts() {
+  let added = 0;
   for (const p of bulkMatched.value) {
     if (!calcItems.value.some(i => i.product_id === p.id)) {
       calcItems.value.push({
@@ -571,13 +579,14 @@ function applyBulkProducts() {
         storage_type: p.storage_type, boxes_per_pallet: p.boxes_per_pallet,
         boxes: 0, pallets: 0,
       });
+      added++;
     }
   }
   showBulkPaste.value = false;
   bulkText.value = '';
   bulkResults.value = null;
   bulkMatched.value = [];
-  toastStore.success(`Добавлено ${bulkMatched.value.length || 'товаров'}`);
+  toastStore.success(`Добавлено ${added} товаров`);
 }
 
 // Paste column of numbers into boxes
@@ -709,14 +718,18 @@ async function openDelivery(d) {
   try {
     const { data, error } = await db.from('plt_delivery_items').select('*').eq('delivery_id', d.id);
     if (error) throw error;
-    calcItems.value = (data || []).map(item => ({
-      product_id: item.product_id,
-      name: item.product_name,
-      storage_type: item.storage_type,
-      boxes_per_pallet: item.boxes_per_pallet,
-      boxes: item.boxes,
-      pallets: item.pallets,
-    }));
+    calcItems.value = (data || []).map(item => {
+      const ref = allProducts.value.find(p => p.id === item.product_id);
+      return {
+        product_id: item.product_id,
+        name: item.product_name,
+        sku: ref?.sku || null,
+        storage_type: item.storage_type,
+        boxes_per_pallet: item.boxes_per_pallet,
+        boxes: item.boxes,
+        pallets: item.pallets,
+      };
+    });
   } catch (e) {
     toastStore.error('Ошибка загрузки');
   }
@@ -879,17 +892,103 @@ async function exportSummaryExcel() {
   try {
     const XLSX = await import('xlsx-js-style');
     const wb = XLSX.utils.book_new();
-    const header = ['Дата', 'День', 'Остатки Х', 'Остатки М', 'Приходы Холод', 'Приходы Мороз'];
-    const rows = sumRows.value.map(r => [
-      r.dateStr, r.dayName, r.coldStock ?? '', r.frozenStock ?? '',
-      r.coldEntries.map(e => `${e.supplier_name} (${e.cold_pallets})`).join(', '),
-      r.frozenEntries.map(e => `${e.supplier_name} (${e.frozen_pallets})`).join(', '),
-    ]);
-    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws['!cols'] = [{ wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 45 }, { wch: 45 }];
+
+    const border = { top: { style: 'thin', color: { rgb: 'CCCCCC' } }, bottom: { style: 'thin', color: { rgb: 'CCCCCC' } }, left: { style: 'thin', color: { rgb: 'CCCCCC' } }, right: { style: 'thin', color: { rgb: 'CCCCCC' } } };
+    const fontBase = { name: 'Arial', sz: 10 };
+    const fontHeader = { name: 'Arial', sz: 10, bold: true, color: { rgb: 'FFFFFF' } };
+    const fontTotal = { name: 'Arial', sz: 10, bold: true };
+
+    const stockFill = { fgColor: { rgb: 'DAEEF3' } };  // голубой
+    const deliveryFill = { fgColor: { rgb: 'D5E8D4' } };  // зелёный
+    const ttlFill = { fgColor: { rgb: 'FCE4D6' } };  // оранжевый
+    const weekendFill = { fgColor: { rgb: 'F2F2F2' } };
+    const headerDarkFill = { fgColor: { rgb: '502314' } };  // BK тёмно-коричневый
+    const totalFill = { fgColor: { rgb: 'FFF2CC' } };
+
+    const center = { horizontal: 'center', vertical: 'center', wrapText: true };
+    const left = { vertical: 'center', wrapText: true };
+
+    // Header row
+    const headers = ['Дата', 'День', 'Остатки Х', 'Остатки М', 'Итого Х', 'Итого М', 'Приходы Холод', 'Приходы Мороз', 'ТТЛ Холод', 'ТТЛ Мороз'];
+
+    const aoa = [headers];
+    const totalRow = ['Итого', '', '', '', 0, 0, '', '', '', ''];
+
+    for (const r of sumRows.value) {
+      const coldText = r.coldEntries.map(e => `${e.supplier_name} (${e.cold_pallets})`).join(', ');
+      const frozenText = r.frozenEntries.map(e => `${e.supplier_name} (${e.frozen_pallets})`).join(', ');
+      aoa.push([
+        r.dateStr, r.dayName,
+        r.coldStock ?? '', r.frozenStock ?? '',
+        r.totalCold || '', r.totalFrozen || '',
+        coldText, frozenText,
+        '', '',
+      ]);
+      totalRow[4] += r.totalCold || 0;
+      totalRow[5] += r.totalFrozen || 0;
+    }
+    totalRow[4] = totalRow[4] || '';
+    totalRow[5] = totalRow[5] || '';
+    aoa.push(totalRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Column widths
+    ws['!cols'] = [
+      { wch: 8 }, { wch: 5 },     // дата, день
+      { wch: 11 }, { wch: 11 },    // остатки
+      { wch: 9 }, { wch: 9 },      // итого
+      { wch: 42 }, { wch: 42 },    // приходы детали
+      { wch: 11 }, { wch: 11 },    // ТТЛ
+    ];
+
+    // Style header row
+    for (let c = 0; c < 10; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+      ws[addr].s = { font: fontHeader, fill: headerDarkFill, alignment: center, border };
+    }
+
+    // Style data rows
+    const dataRows = sumRows.value.length;
+    for (let ri = 0; ri < dataRows; ri++) {
+      const r = ri + 1; // row index in sheet (0 = header)
+      const row = sumRows.value[ri];
+      const isWE = row.isWeekend;
+
+      for (let c = 0; c < 10; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+
+        let fill = null;
+        if (c === 2 || c === 3) fill = stockFill;
+        else if (c === 4 || c === 5) fill = deliveryFill;
+        else if (c === 8 || c === 9) fill = ttlFill;
+        else if (isWE) fill = weekendFill;
+
+        ws[addr].s = {
+          font: fontBase,
+          alignment: (c >= 6 && c <= 7) ? left : center,
+          border,
+          ...(fill ? { fill } : {}),
+        };
+      }
+    }
+
+    // Style total row
+    const totalR = dataRows + 1;
+    for (let c = 0; c < 10; c++) {
+      const addr = XLSX.utils.encode_cell({ r: totalR, c });
+      if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+      ws[addr].s = { font: fontTotal, alignment: center, border, fill: totalFill };
+    }
+
+    // Row heights
+    ws['!rows'] = [{ hpt: 28 }]; // header height
+
     XLSX.utils.book_append_sheet(wb, ws, shortName(legalEntity.value));
     XLSX.writeFile(wb, `Паллеты_${shortName(legalEntity.value)}_${sumMonth.value}.xlsx`);
-  } catch (e) { toastStore.error('Ошибка экспорта'); }
+  } catch (e) { console.error(e); toastStore.error('Ошибка экспорта'); }
 }
 
 // ═══ REFERENCE ═══
@@ -901,10 +1000,10 @@ const editingRef = ref(null);
 const editRefData = ref({});
 
 const filteredRefProducts = computed(() => {
-  const q = refSearch.value.trim().toLowerCase();
+  const q = refSearch.value.replace(/\u00A0/g, ' ').trim().toLowerCase();
   if (!q) return refProducts.value;
   return refProducts.value.filter(p => {
-    const h = ((p.sku || '') + ' ' + p.name).toLowerCase();
+    const h = ((p.sku || '') + ' ' + p.name).replace(/\u00A0/g, ' ').toLowerCase();
     return h.includes(q);
   });
 });
@@ -962,7 +1061,7 @@ async function addRefProduct() {
   if (!result) return;
   const [name, bpp, storageType] = result;
   if (!name?.trim() || !bpp || +bpp < 1) { toastStore.error('Заполните все поля'); return; }
-  const skuMatch = name.trim().match(/^(\d[\d_]*)\s/);
+  const skuMatch = name.trim().match(/^(\S+)\s/);
   try {
     await db.from('plt_products').insert({
       entity_group: entityGroup(legalEntity.value),
@@ -975,6 +1074,156 @@ async function addRefProduct() {
     await loadRefProducts();
     await loadAllProducts();
   } catch (e) { toastStore.error('Ошибка'); }
+}
+
+// ═══ Import from Merkury ═══
+const importFileInput = ref(null);
+
+function triggerImportRef() {
+  importFileInput.value?.click();
+}
+
+async function importRefFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  event.target.value = '';
+
+  try {
+    const XLSX = await import('xlsx-js-style');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+
+    // Parse rows starting from row 3 (0-indexed), skip header rows 0-2
+    const parsed = [];
+    const skippedDry = [];
+    for (let r = 3; r <= range.e.r; r++) {
+      const brand = String(ws[XLSX.utils.encode_cell({ r, c: 3 })]?.v || '').trim();
+      const nameRaw = String(ws[XLSX.utils.encode_cell({ r, c: 6 })]?.v || '').replace(/\u00A0/g, ' ').trim();
+      const bppRaw = ws[XLSX.utils.encode_cell({ r, c: 14 })]?.v;
+
+      if (!nameRaw || !brand) continue;
+
+      // Determine storage type from brand
+      let storageType = null;
+      if (/мороз/i.test(brand)) storageType = 'frozen';
+      else if (/холод/i.test(brand)) storageType = 'cold';
+      else { skippedDry.push(nameRaw.substring(0, 50)); continue; }
+
+      // Determine entity group from brand suffix
+      let group = null;
+      if (/БК/i.test(brand)) group = 'bk_vm';
+      else if (/ПС/i.test(brand)) group = 'ps';
+      else continue;
+
+      const bpp = parseInt(bppRaw) || 0;
+      if (bpp < 1) continue;
+
+      // Extract SKU — alphanumeric token at the start (158704, TRW01, 55011_1, 56014)
+      const skuMatch = nameRaw.match(/^([A-Za-z0-9][A-Za-z0-9_]*)/);
+      const sku = skuMatch ? skuMatch[1].replace(/_$/, '') : null;
+
+      parsed.push({ name: nameRaw, sku, storage_type: storageType, boxes_per_pallet: bpp, entity_group: group });
+    }
+
+    if (!parsed.length) {
+      toastStore.error('Не найдено товаров Холод/Мороз в файле');
+      return;
+    }
+
+    // Filter for current entity group
+    const currentGroup = entityGroup(legalEntity.value);
+    const forGroup = parsed.filter(p => p.entity_group === currentGroup);
+
+    if (!forGroup.length) {
+      toastStore.error(`Нет товаров для ${shortName(legalEntity.value)} (${currentGroup}) в файле`);
+      return;
+    }
+
+    // Deduplicate by SKU (keep last occurrence — if same article appears twice, use the last one)
+    const bySku = new Map();
+    const noSku = [];
+    for (const p of forGroup) {
+      if (p.sku) bySku.set(p.sku, p);
+      else noSku.push(p);
+    }
+    const items = [...bySku.values(), ...noSku];
+    const dupeCount = forGroup.length - items.length;
+
+    // Check which existing products will be removed
+    const { data: existingProducts } = await db.from('plt_products').select('id,sku,name').eq('entity_group', currentGroup);
+    const existingBySku = new Map();
+    for (const p of (existingProducts || [])) {
+      if (p.sku) existingBySku.set(p.sku, p);
+    }
+
+    const newSkus = new Set(items.filter(p => p.sku).map(p => p.sku));
+    const candidates = (existingProducts || []).filter(p => !p.sku || !newSkus.has(p.sku));
+
+    // Check which candidates are used in deliveries — those we keep, rest we delete
+    let usedInDeliveries = [];
+    let safeToDelete = candidates;
+    if (candidates.length) {
+      const candidateIds = candidates.map(p => p.id);
+      const { data: usedItems } = await db.from('plt_delivery_items').select('product_id').filter('product_id', 'in', `(${candidateIds.join(',')})`);
+      if (usedItems?.length) {
+        const usedProductIds = new Set(usedItems.map(i => i.product_id));
+        usedInDeliveries = candidates.filter(p => usedProductIds.has(p.id));
+        safeToDelete = candidates.filter(p => !usedProductIds.has(p.id));
+      }
+    }
+
+    // Confirm with user
+    const coldCount = items.filter(p => p.storage_type === 'cold').length;
+    const frozenCount = items.filter(p => p.storage_type === 'frozen').length;
+    let confirmText = `Найдено ${items.length} товаров: ${coldCount} холод, ${frozenCount} мороз.`;
+    if (dupeCount) confirmText += `\nДубликатов по артикулу убрано: ${dupeCount}.`;
+    if (skippedDry.length) confirmText += `\nПропущено (Сухой и пр.): ${skippedDry.length}.`;
+    if (safeToDelete.length) confirmText += `\n\nБудет удалено из справочника: ${safeToDelete.length} (нет в новом файле, не использовались в поставках).`;
+    if (usedInDeliveries.length) {
+      confirmText += `\n\nОстанутся в справочнике (используются в поставках): ${usedInDeliveries.length}`;
+      confirmText += '\n' + usedInDeliveries.slice(0, 5).map(p => `  • ${p.name.substring(0, 50)}`).join('\n');
+      if (usedInDeliveries.length > 5) confirmText += `\n  ...и ещё ${usedInDeliveries.length - 5}`;
+    }
+
+    const ok = await showConfirm('Загрузить справочник', confirmText, { btn: 'Загрузить' });
+    if (!ok) return;
+
+    // Upsert: update existing by SKU, insert new
+    const toInsert = [];
+
+    for (let idx = 0; idx < items.length; idx++) {
+      const p = items[idx];
+      const existing = p.sku ? existingBySku.get(p.sku) : null;
+      if (existing) {
+        await db.from('plt_products').update({
+          name: p.name, storage_type: p.storage_type, boxes_per_pallet: p.boxes_per_pallet, sort_order: idx,
+        }).eq('id', existing.id);
+      } else {
+        toInsert.push({ entity_group: currentGroup, name: p.name, sku: p.sku, storage_type: p.storage_type, boxes_per_pallet: p.boxes_per_pallet, sort_order: idx });
+      }
+    }
+
+    // Delete only products that are NOT used in any deliveries
+    for (const p of safeToDelete) {
+      await db.from('plt_products').delete().eq('id', p.id);
+    }
+
+    // Insert new products in batches
+    for (let i = 0; i < toInsert.length; i += 50) {
+      const batch = toInsert.slice(i, i + 50);
+      const { error } = await db.from('plt_products').insert(batch);
+      if (error) throw error;
+    }
+
+    toastStore.success(`Загружено ${items.length} товаров`);
+    await loadRefProducts();
+    await loadAllProducts();
+  } catch (e) {
+    console.error('[PalletCalc import]', e);
+    toastStore.error('Ошибка импорта файла');
+  }
 }
 
 // ═══ Lifecycle ═══
@@ -1102,13 +1351,22 @@ onMounted(async () => {
 .plt-sum-controls { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 .plt-sum-actions { margin-left: auto; display: flex; gap: 8px; }
 .plt-sum-table-wrap { overflow-x: auto; }
+.sum-table { border: 1px solid #ccc; }
+.sum-table th { border: 1px solid #bbb; border-bottom: 2px solid #999; }
+.sum-table td { border: 1px solid #ddd; }
 .sum-table .col-date { width: 65px; font-weight: 600; }
 .sum-table .col-day { width: 40px; color: #999; font-size: 12px; }
 .sum-table .col-stock { width: 90px; text-align: center; cursor: pointer; }
 .sum-table .col-deliveries { min-width: 200px; }
 .sum-table .col-total { width: 70px; text-align: center; font-weight: 700; color: #D62700; }
+.sum-table .bg-stock { background: #E3F2FD; }
+.sum-table .bg-delivery { background: #E8F5E9; }
 .sum-table tr.weekend td { background: #fafafa; }
+.sum-table tr.weekend .bg-stock { background: #DDEAF7; }
+.sum-table tr.weekend .bg-delivery { background: #DDEEE0; }
 .sum-table tr.today td { background: #FFFDE7; }
+.sum-table tr.today .bg-stock { background: #D6ECFA; }
+.sum-table tr.today .bg-delivery { background: #D6ECDA; }
 .sum-table tr.today .col-date { color: #D62700; }
 .stock-val { font-weight: 600; color: #502314; }
 .stock-val.empty { color: #ddd; font-weight: 400; }
