@@ -214,6 +214,7 @@
                   <span class="edit-card-name">{{ card.name }}</span>
                 </div>
                 <div class="edit-card-analogs" v-if="card.analogs.length">{{ card.analogs.join(', ') }}</div>
+                <div class="edit-card-meta" v-if="card.updated_by">Изменил: {{ card.updated_by }}</div>
               </div>
               <button @click="startEdit(card)" class="btn-ghost btn-sm">Изменить</button>
             </div>
@@ -233,6 +234,10 @@
               <div class="form-group">
                 <label>Аналоги <span class="label-hint">через запятую</span></label>
                 <input v-model="editForm.analogs" type="text" class="field-input" />
+              </div>
+              <div class="edit-card-meta" v-if="editingCard.updated_by" style="margin-bottom:8px;">
+                Последнее изменение: <strong>{{ editingCard.updated_by }}</strong>
+                <span v-if="editingCard.updated_at"> ({{ fmtCardDate(editingCard.updated_at) }})</span>
               </div>
               <div class="edit-actions">
                 <button type="submit" class="btn-primary">Сохранить</button>
@@ -471,6 +476,13 @@ async function checkMaintenance() {
 }
 
 // --- Нормализация (точная копия оригинала) ---
+function fmtCardDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+         dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 function normalize(str) {
   return str
     .toLowerCase()
@@ -493,6 +505,8 @@ async function loadCards() {
         id: c.id?.toString() || '',
         name: c.name || '',
         analogs,
+        updated_by: c.updated_by || null,
+        updated_at: c.updated_at || null,
         _normId: normalize(c.id?.toString() || ''),
         _normName: normalize(c.name || ''),
         _normAnalogs: analogs.map(a => normalize(a)),
@@ -843,7 +857,7 @@ async function addCard() {
     const res = await fetchWithTimeout(`${API_BASE}/cards`, {
       method: 'POST',
       headers: adminHeaders(),
-      body: JSON.stringify({ id: newCard.value.id.trim(), name: newCard.value.name.trim(), analogs })
+      body: JSON.stringify({ id: newCard.value.id.trim(), name: newCard.value.name.trim(), analogs, created_by: userStore.currentUser?.name || null, updated_by: userStore.currentUser?.name || null })
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -903,7 +917,7 @@ async function updateCard() {
       const createRes = await fetchWithTimeout(`${API_BASE}/cards`, {
         method: 'POST',
         headers: adminHeaders(),
-        body: JSON.stringify({ id: newId, name: editForm.value.name.trim(), analogs })
+        body: JSON.stringify({ id: newId, name: editForm.value.name.trim(), analogs, created_by: userStore.currentUser?.name || null, updated_by: userStore.currentUser?.name || null })
       })
       if (!createRes.ok) {
         const err = await createRes.json().catch(() => ({}))
@@ -921,7 +935,7 @@ async function updateCard() {
       const patchRes = await fetchWithTimeout(`${API_BASE}/cards/${encodeURIComponent(oldId)}`, {
         method: 'PATCH',
         headers: adminHeaders(),
-        body: JSON.stringify({ name: editForm.value.name.trim(), analogs })
+        body: JSON.stringify({ name: editForm.value.name.trim(), analogs, updated_by: userStore.currentUser?.name || null })
       })
       if (!patchRes.ok) {
         const err = await patchRes.json().catch(() => ({}))
@@ -1863,6 +1877,11 @@ select.field-input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.edit-card-meta {
+  font-size: 0.7rem;
+  color: #9B8B7E;
+  margin-top: 2px;
 }
 .edit-form {
   margin-top: 14px;

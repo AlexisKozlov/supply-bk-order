@@ -18,7 +18,7 @@
     </div>
 
     <!-- ═══ TAB: КАЛЬКУЛЯТОР ═══ -->
-    <div v-if="tab === 'calculator'" class="plt-body">
+    <div v-if="tab === 'calculator'" class="plt-body" @paste="onPasteImage">
       <div class="plt-calc">
         <!-- Delivery header -->
         <div class="plt-calc-header">
@@ -29,6 +29,10 @@
           <div class="plt-field" style="flex:1;min-width:200px;">
             <label>Поставщик</label>
             <input type="text" v-model="calcSupplierName" class="plt-input" placeholder="Введите название поставщика" />
+          </div>
+          <div class="plt-field" style="min-width:140px;">
+            <label>№ заказа</label>
+            <input type="text" v-model="calcOrderNumber" class="plt-input" placeholder="Необязательно" />
           </div>
         </div>
 
@@ -62,7 +66,56 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Import buttons -->
+        <div v-if="calcSupplierName.trim()" class="plt-import-btns">
           <button class="plt-btn sm outline" @click="showBulkPaste = true" title="Вставить список товаров из 1С">Вставить список</button>
+          <button class="plt-btn sm outline" @click="$refs.ocrFileInput.click()" :disabled="ocrLoading" title="Загрузить скриншот заказа из 1С">
+            {{ ocrLoading ? 'Распознаю...' : 'Загрузить скрин' }}
+          </button>
+          <button class="plt-btn sm outline" @click="$refs.excelFileInput.click()" title="Загрузить Excel-файл предзаказа">Загрузить файл</button>
+          <span v-if="!ocrLoading" class="plt-import-hint">или Ctrl+V со скриншотом</span>
+          <input ref="ocrFileInput" type="file" accept="image/*" style="display:none" @change="onOcrFileSelected" />
+          <input ref="excelFileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" @change="onExcelFileSelected" />
+        </div>
+
+        <!-- OCR loading bar -->
+        <div v-if="ocrLoading" class="plt-ocr-loading">
+          <div class="plt-ocr-loading-text">Распознаю изображение...</div>
+          <div class="plt-ocr-loading-bar"><div class="plt-ocr-loading-fill"></div></div>
+        </div>
+
+        <!-- OCR results modal -->
+        <div v-if="showOcrResults" class="plt-overlay" @click.self="showOcrResults = false">
+          <div class="plt-modal" style="max-width:700px;">
+            <div class="plt-modal-head">
+              <span>Распознанные товары</span>
+              <button class="plt-btn-icon" @click="showOcrResults = false"><BkIcon name="close" :size="18" /></button>
+            </div>
+            <div class="plt-modal-body">
+              <div v-if="ocrMatched.length" class="plt-ocr-list">
+                <div v-for="(m, i) in ocrMatched" :key="i" class="plt-ocr-row">
+                  <span class="plt-ocr-name">{{ m.name }}</span>
+                  <span v-if="m.ocrSku" class="plt-ocr-fuzzy" title="OCR прочитал неточно, подобран ближайший артикул">≈</span>
+                  <span class="plt-badge" :class="m.storage_type">{{ m.storage_type === 'cold' ? 'Х' : 'М' }}</span>
+                  <input type="number" v-model.number="m.boxes" min="0" class="plt-input-num" style="width:90px" />
+                  <span class="plt-ocr-hint">кор</span>
+                </div>
+              </div>
+              <div v-if="ocrNotFound.length" class="plt-bulk-results" style="margin-top:12px;">
+                <div class="plt-bulk-missing-title">Не найдены:</div>
+                <div v-for="(line, i) in ocrNotFound" :key="i" class="plt-bulk-missing-item">{{ line }}</div>
+              </div>
+              <div v-if="!ocrMatched.length && !ocrNotFound.length" class="plt-empty">Не удалось распознать товары</div>
+            </div>
+            <div class="plt-modal-foot">
+              <div class="plt-ocr-summary" v-if="ocrMatched.length">Найдено: <strong>{{ ocrMatched.length }}</strong> товаров</div>
+              <div style="flex:1"></div>
+              <button class="plt-btn outline" @click="showOcrResults = false">Отмена</button>
+              <button class="plt-btn fill" :disabled="!ocrMatched.length" @click="applyOcrResults">Добавить</button>
+            </div>
+          </div>
         </div>
 
         <!-- Bulk paste modal -->
@@ -164,6 +217,7 @@
           <div v-for="d in dateDeliveries" :key="d.id" class="plt-delivery-card">
             <div class="plt-delivery-info">
               <strong>{{ d.supplier_name }}</strong>
+              <span v-if="d.order_number" class="plt-order-num">№{{ d.order_number }}</span>
               <span v-if="d.total_cold" class="plt-badge cold">Х: {{ d.total_cold }}</span>
               <span v-if="d.total_frozen" class="plt-badge frozen">М: {{ d.total_frozen }}</span>
               <span class="plt-delivery-time">{{ formatTime(d.created_at) }}</span>
@@ -464,6 +518,7 @@ async function loadAllProducts() {
 // ═══ CALCULATOR ═══
 const calcDate = ref(new Date().toISOString().slice(0, 10));
 const calcSupplierName = ref('');
+const calcOrderNumber = ref('');
 const calcItems = ref([]);
 const editingDeliveryId = ref(null); // null = новая, число = редактирование
 const productSearch = ref('');
@@ -544,8 +599,20 @@ function parseBulkText() {
   const notFound = [];
 
   for (const line of lines) {
+    // Split by tab to handle 1С format: "артикул Название\tхарактеристика\tколичество"
+    const parts = line.split('\t').map(p => p.trim());
+    const mainPart = parts[0]; // артикул + название
+
+    // Try to extract quantity from last tab-separated part (e.g. "384,000" or "384")
+    let qty = 0;
+    const lastPart = parts[parts.length - 1];
+    if (parts.length > 1 && lastPart) {
+      const num = parseFloat(lastPart.replace(/\s/g, '').replace(',', '.'));
+      if (!isNaN(num) && num > 0) qty = Math.round(num);
+    }
+
     // Extract SKU from beginning of line
-    const skuMatch = line.match(/^(\S+)/);
+    const skuMatch = mainPart.match(/^(\S+)/);
     let product = null;
 
     if (skuMatch) {
@@ -554,15 +621,16 @@ function parseBulkText() {
     }
     // Fallback: search by substring
     if (!product) {
-      const lower = line.replace(/\u00A0/g, ' ').toLowerCase();
+      const lower = mainPart.replace(/\u00A0/g, ' ').toLowerCase();
       product = allProducts.value.find(p => !addedIds.has(p.id) && p.name.replace(/\u00A0/g, ' ').toLowerCase().includes(lower));
     }
 
     if (product) {
-      found.push(product);
+      found.push({ ...product, _qty: qty });
       addedIds.add(product.id);
     } else {
-      notFound.push(line.length > 60 ? line.slice(0, 60) + '...' : line);
+      const short = mainPart.length > 60 ? mainPart.slice(0, 60) + '...' : mainPart;
+      notFound.push(short);
     }
   }
 
@@ -574,10 +642,12 @@ function applyBulkProducts() {
   let added = 0;
   for (const p of bulkMatched.value) {
     if (!calcItems.value.some(i => i.product_id === p.id)) {
+      const boxes = p._qty || 0;
+      const pallets = boxes > 0 && p.boxes_per_pallet > 0 ? Math.ceil(boxes / p.boxes_per_pallet) : 0;
       calcItems.value.push({
         product_id: p.id, name: p.name, sku: p.sku,
         storage_type: p.storage_type, boxes_per_pallet: p.boxes_per_pallet,
-        boxes: 0, pallets: 0,
+        boxes, pallets,
       });
       added++;
     }
@@ -587,6 +657,303 @@ function applyBulkProducts() {
   bulkResults.value = null;
   bulkMatched.value = [];
   toastStore.success(`Добавлено ${added} товаров`);
+}
+
+// OCR — загрузка скриншота заказа
+const ocrLoading = ref(false);
+const showOcrResults = ref(false);
+const ocrMatched = ref([]);
+const ocrNotFound = ref([]);
+
+function onPasteImage(event) {
+  if (ocrLoading.value) return;
+  // Не перехватывать вставку в текстовые поля (textarea, input)
+  const tag = event.target?.tagName?.toLowerCase();
+  if (tag === 'textarea' || tag === 'input') return;
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (file) sendToOcr(file);
+      return;
+    }
+  }
+}
+
+async function onOcrFileSelected(event) {
+  const file = event.target.files?.[0];
+  event.target.value = ''; // reset input
+  if (file) sendToOcr(file);
+}
+
+async function sendToOcr(file) {
+  ocrLoading.value = true;
+  try {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const token = localStorage.getItem('bk_session_token') || '';
+    const res = await fetch('/api/ocr', {
+      method: 'POST',
+      headers: token ? { 'X-Session-Token': token } : {},
+      body: formData,
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Ошибка сервера');
+
+    parseOcrText(json.text || '');
+    showOcrResults.value = true;
+  } catch (e) {
+    console.error('[PalletCalc] OCR error', e);
+    toastStore.error('Ошибка распознавания изображения');
+  } finally {
+    ocrLoading.value = false;
+  }
+}
+
+function parseOcrText(text) {
+  console.log('[PalletCalc] OCR raw text:', text);
+  // Normalize: remove non-breaking spaces, fix common OCR artifacts
+  // Replace look-alike characters: ‚ (U+201A) and similar → comma, trailing dots
+  const normalized = text.replace(/\u00A0/g, ' ').replace(/[|]/g, '').replace(/[‚„]/g, ',').replace(/\.$/gm, '');
+  const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
+  const addedIds = new Set(calcItems.value.map(i => i.product_id));
+  const matched = [];
+  const notFound = [];
+
+  // Helper: count how many words from query appear in target
+  function nameScore(query, target) {
+    const qWords = query.toLowerCase().replace(/[^а-яёa-z0-9\s]/g, '').split(/\s+/).filter(w => w.length >= 3);
+    const tLower = target.toLowerCase();
+    if (!qWords.length) return 0;
+    let hits = 0;
+    for (const w of qWords) {
+      if (tLower.includes(w)) hits++;
+    }
+    return hits / qWords.length; // 0..1
+  }
+
+  for (const line of lines) {
+    // Find SKU anywhere in the line (sequence of 3+ digits)
+    const skuMatch = line.match(/(\d{3,})/);
+    if (!skuMatch) continue; // skip lines without SKU (headers, etc.)
+
+    const sku = skuMatch[1];
+
+    // Extract the name part (text between SKU and quantity/end)
+    const afterSku = line.slice(skuMatch.index + skuMatch[0].length);
+    const namePart = afterSku.replace(/[\d.,<>]+\s*$/g, '').replace(/<[^>]*>/g, '').trim();
+
+    // Extract quantity — last meaningful number
+    const qtyMatches = [...afterSku.matchAll(/(\d+)\s*[.,\s]\s*0{3}\b|(\d+)/g)]
+      .map(m => {
+        if (m[1]) return parseInt(m[1]);
+        return parseInt(m[2]);
+      })
+      .filter(n => !isNaN(n) && n > 0);
+    const qty = qtyMatches.length ? qtyMatches[qtyMatches.length - 1] : 0;
+
+    // 1. Exact SKU match
+    let product = allProducts.value.find(p => p.sku === sku && !addedIds.has(p.id));
+    let matchType = 'exact';
+
+    // 2. Fuzzy SKU match (1-2 digit errors)
+    if (!product && sku.length >= 3) {
+      const maxDist = sku.length >= 7 ? 2 : 1;
+      let bestDist = maxDist + 1;
+      for (const p of allProducts.value) {
+        if (addedIds.has(p.id) || !p.sku || p.sku.length !== sku.length) continue;
+        let dist = 0;
+        for (let i = 0; i < sku.length; i++) {
+          if (sku[i] !== p.sku[i]) dist++;
+          if (dist >= bestDist) break;
+        }
+        if (dist < bestDist) {
+          bestDist = dist;
+          product = p;
+        }
+      }
+      if (bestDist > maxDist) product = null;
+      else matchType = 'fuzzySku';
+    }
+
+    // 3. Name-based match (if SKU didn't work but we have readable text)
+    if (!product && namePart.length >= 5) {
+      let bestScore = 0;
+      for (const p of allProducts.value) {
+        if (addedIds.has(p.id)) continue;
+        const score = nameScore(namePart, p.name);
+        if (score > bestScore && score >= 0.5) {
+          bestScore = score;
+          product = p;
+        }
+      }
+      if (product) matchType = 'name';
+    }
+
+    if (product) {
+      matched.push({
+        product_id: product.id, name: product.name, sku: product.sku,
+        storage_type: product.storage_type, boxes_per_pallet: product.boxes_per_pallet,
+        boxes: qty,
+        ocrSku: matchType !== 'exact' ? sku : null,
+      });
+      addedIds.add(product.id);
+    } else {
+      const short = line.length > 70 ? line.slice(0, 70) + '...' : line;
+      notFound.push(short);
+    }
+  }
+
+  ocrMatched.value = matched;
+  ocrNotFound.value = notFound;
+}
+
+function applyOcrResults() {
+  let added = 0;
+  for (const m of ocrMatched.value) {
+    if (!calcItems.value.some(i => i.product_id === m.product_id)) {
+      const boxes = m.boxes || 0;
+      const pallets = boxes > 0 && m.boxes_per_pallet > 0 ? Math.ceil(boxes / m.boxes_per_pallet) : 0;
+      calcItems.value.push({
+        product_id: m.product_id, name: m.name, sku: m.sku,
+        storage_type: m.storage_type, boxes_per_pallet: m.boxes_per_pallet,
+        boxes, pallets,
+      });
+      added++;
+    }
+  }
+  showOcrResults.value = false;
+  ocrMatched.value = [];
+  ocrNotFound.value = [];
+  toastStore.success(`Добавлено ${added} товаров`);
+}
+
+// Excel file import
+async function onExcelFileSelected(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+
+  try {
+    const XLSX = await import('xlsx-js-style');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+
+    // Collect all rows from all sheets
+    const allRows = [];
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      for (const row of rows) {
+        if (!row.length) continue;
+        allRows.push(row);
+      }
+    }
+
+    if (!allRows.length) { toastStore.error('Файл пустой'); return; }
+
+    // Try to detect which columns contain SKU/name and quantity
+    // Strategy: find columns with numbers that look like SKUs and quantities
+    const addedIds = new Set(calcItems.value.map(i => i.product_id));
+    const matched = [];
+    const notFoundLines = [];
+
+    for (const row of allRows) {
+      const cells = row.map(c => String(c ?? '').trim());
+
+      // Find SKU: first cell that is a 3+ digit number
+      let sku = null;
+      let namePart = '';
+      let qty = 0;
+
+      for (const cell of cells) {
+        if (!sku && /^\d{3,}$/.test(cell)) {
+          sku = cell;
+          continue;
+        }
+        // Name: longest non-numeric text cell
+        if (cell.length > namePart.length && !/^\d+([.,]\d+)?$/.test(cell) && cell.length >= 3) {
+          namePart = cell;
+        }
+      }
+
+      // Quantity: last numeric cell in the row (that isn't the SKU)
+      for (let i = cells.length - 1; i >= 0; i--) {
+        const clean = cells[i].replace(/\s/g, '').replace(',', '.');
+        const num = parseFloat(clean);
+        if (!isNaN(num) && num > 0 && cells[i] !== sku) {
+          // "384.000" or "384,000" with only zeroes after decimal → integer
+          const decMatch = clean.match(/^(\d+)\.0+$/);
+          qty = decMatch ? parseInt(decMatch[1]) : Math.round(num);
+          break;
+        }
+      }
+
+      if (!sku && !namePart) continue; // skip empty/header rows
+
+      // Match product: by SKU first, then by name
+      let product = null;
+      if (sku) {
+        product = allProducts.value.find(p => p.sku === sku && !addedIds.has(p.id));
+        // Fuzzy SKU
+        if (!product) {
+          const maxDist = sku.length >= 7 ? 2 : 1;
+          let bestDist = maxDist + 1;
+          for (const p of allProducts.value) {
+            if (addedIds.has(p.id) || !p.sku || p.sku.length !== sku.length) continue;
+            let dist = 0;
+            for (let i = 0; i < sku.length; i++) {
+              if (sku[i] !== p.sku[i]) dist++;
+              if (dist >= bestDist) break;
+            }
+            if (dist < bestDist) { bestDist = dist; product = p; }
+          }
+          if (bestDist > maxDist) product = null;
+        }
+      }
+
+      // Name-based match
+      if (!product && namePart.length >= 5) {
+        const qWords = namePart.toLowerCase().replace(/[^а-яёa-z0-9\s]/g, '').split(/\s+/).filter(w => w.length >= 3);
+        let bestScore = 0;
+        for (const p of allProducts.value) {
+          if (addedIds.has(p.id)) continue;
+          const tLower = p.name.toLowerCase();
+          let hits = 0;
+          for (const w of qWords) { if (tLower.includes(w)) hits++; }
+          const score = qWords.length ? hits / qWords.length : 0;
+          if (score > bestScore && score >= 0.5) { bestScore = score; product = p; }
+        }
+      }
+
+      if (product) {
+        matched.push({
+          product_id: product.id, name: product.name, sku: product.sku,
+          storage_type: product.storage_type, boxes_per_pallet: product.boxes_per_pallet,
+          boxes: qty,
+          ocrSku: (sku && sku !== product.sku) ? sku : null,
+        });
+        addedIds.add(product.id);
+      } else {
+        const label = [sku, namePart].filter(Boolean).join(' ');
+        if (label.length >= 3) notFoundLines.push(label.length > 70 ? label.slice(0, 70) + '...' : label);
+      }
+    }
+
+    ocrMatched.value = matched;
+    ocrNotFound.value = notFoundLines;
+    showOcrResults.value = true;
+
+    if (!matched.length && !notFoundLines.length) {
+      toastStore.error('Не удалось найти товары в файле');
+    }
+  } catch (e) {
+    console.error('[PalletCalc] Excel import error', e);
+    toastStore.error('Ошибка чтения файла');
+  }
 }
 
 // Paste column of numbers into boxes
@@ -627,6 +994,7 @@ async function saveDelivery() {
       // === UPDATE existing ===
       const { error: updErr } = await db.from('plt_deliveries').update({
         supplier_name: supplierName,
+        order_number: calcOrderNumber.value.trim() || null,
         total_cold: calcTotalCold.value,
         total_frozen: calcTotalFrozen.value,
       }).eq('id', deliveryId);
@@ -650,6 +1018,7 @@ async function saveDelivery() {
         legal_entity: legalEntity.value,
         delivery_date: calcDate.value,
         supplier_name: supplierName,
+        order_number: calcOrderNumber.value.trim() || null,
         total_cold: calcTotalCold.value,
         total_frozen: calcTotalFrozen.value,
         created_by: userStore.currentUser?.display_name || null,
@@ -699,6 +1068,7 @@ function cancelEdit() {
   editingDeliveryId.value = null;
   calcItems.value = [];
   calcSupplierName.value = '';
+  calcOrderNumber.value = '';
 }
 
 async function loadDateDeliveries() {
@@ -715,6 +1085,7 @@ async function loadDateDeliveries() {
 async function openDelivery(d) {
   editingDeliveryId.value = d.id;
   calcSupplierName.value = d.supplier_name;
+  calcOrderNumber.value = d.order_number || '';
   try {
     const { data, error } = await db.from('plt_delivery_items').select('*').eq('delivery_id', d.id);
     if (error) throw error;
@@ -888,106 +1259,146 @@ async function deleteSummaryEntry() {
 }
 
 // Excel
+function buildSummaryRows(stockData, entriesData) {
+  const [year, month] = sumMonth.value.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(year, month - 1, day);
+    const dow = d.getDay();
+    const date = d.toISOString().slice(0, 10);
+    const stockRow = stockData.find(s => s.stock_date === date);
+    const dayEntries = entriesData.filter(e => e.entry_date === date);
+    rows.push({
+      date, dateStr: `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}`,
+      dayName: DAYS_RU[dow], isWeekend: dow === 0 || dow === 6, isToday: date === today,
+      coldStock: stockRow?.cold_pallets ?? null, frozenStock: stockRow?.frozen_pallets ?? null,
+      coldEntries: dayEntries.filter(e => e.cold_pallets > 0),
+      frozenEntries: dayEntries.filter(e => e.frozen_pallets > 0),
+      totalCold: dayEntries.reduce((s, e) => s + (e.cold_pallets || 0), 0),
+      totalFrozen: dayEntries.reduce((s, e) => s + (e.frozen_pallets || 0), 0),
+    });
+  }
+  return rows;
+}
+
+function buildSummarySheet(XLSX, rows) {
+  const border = { top: { style: 'thin', color: { rgb: 'CCCCCC' } }, bottom: { style: 'thin', color: { rgb: 'CCCCCC' } }, left: { style: 'thin', color: { rgb: 'CCCCCC' } }, right: { style: 'thin', color: { rgb: 'CCCCCC' } } };
+  const fontBase = { name: 'Arial', sz: 10 };
+  const fontHeader = { name: 'Arial', sz: 10, bold: true, color: { rgb: 'FFFFFF' } };
+  const fontTotal = { name: 'Arial', sz: 10, bold: true };
+
+  const stockFill = { fgColor: { rgb: 'DAEEF3' } };
+  const deliveryFill = { fgColor: { rgb: 'D5E8D4' } };
+  const ttlFill = { fgColor: { rgb: 'FCE4D6' } };
+  const weekendFill = { fgColor: { rgb: 'F2F2F2' } };
+  const headerDarkFill = { fgColor: { rgb: '502314' } };
+  const totalFill = { fgColor: { rgb: 'FFF2CC' } };
+
+  const center = { horizontal: 'center', vertical: 'center', wrapText: true };
+  const left = { vertical: 'center', wrapText: true };
+
+  const headers = ['Дата', 'День', 'Остатки Х', 'Остатки М', 'Итого Х', 'Итого М', 'Приходы Холод', 'Приходы Мороз', 'ТТЛ Холод', 'ТТЛ Мороз'];
+  const aoa = [headers];
+  const totalRow = ['Итого', '', '', '', 0, 0, '', '', '', ''];
+
+  for (const r of rows) {
+    const coldText = r.coldEntries.map(e => `${e.supplier_name} (${e.cold_pallets})`).join(', ');
+    const frozenText = r.frozenEntries.map(e => `${e.supplier_name} (${e.frozen_pallets})`).join(', ');
+    aoa.push([
+      r.dateStr, r.dayName,
+      r.coldStock ?? '', r.frozenStock ?? '',
+      r.totalCold || '', r.totalFrozen || '',
+      coldText, frozenText,
+      '', '',
+    ]);
+    totalRow[4] += r.totalCold || 0;
+    totalRow[5] += r.totalFrozen || 0;
+  }
+  totalRow[4] = totalRow[4] || '';
+  totalRow[5] = totalRow[5] || '';
+  aoa.push(totalRow);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  ws['!cols'] = [
+    { wch: 8 }, { wch: 5 },
+    { wch: 11 }, { wch: 11 },
+    { wch: 9 }, { wch: 9 },
+    { wch: 42 }, { wch: 42 },
+    { wch: 11 }, { wch: 11 },
+  ];
+
+  for (let c = 0; c < 10; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+    ws[addr].s = { font: fontHeader, fill: headerDarkFill, alignment: center, border };
+  }
+
+  const dataRows = rows.length;
+  for (let ri = 0; ri < dataRows; ri++) {
+    const r = ri + 1;
+    const row = rows[ri];
+    const isWE = row.isWeekend;
+
+    for (let c = 0; c < 10; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+
+      let fill = null;
+      if (c === 2 || c === 3) fill = stockFill;
+      else if (c === 4 || c === 5) fill = deliveryFill;
+      else if (c === 8 || c === 9) fill = ttlFill;
+      else if (isWE) fill = weekendFill;
+
+      ws[addr].s = {
+        font: fontBase,
+        alignment: (c >= 6 && c <= 7) ? left : center,
+        border,
+        ...(fill ? { fill } : {}),
+      };
+    }
+  }
+
+  const totalR = dataRows + 1;
+  for (let c = 0; c < 10; c++) {
+    const addr = XLSX.utils.encode_cell({ r: totalR, c });
+    if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+    ws[addr].s = { font: fontTotal, alignment: center, border, fill: totalFill };
+  }
+
+  ws['!rows'] = [{ hpt: 28 }];
+  return ws;
+}
+
 async function exportSummaryExcel() {
   try {
     const XLSX = await import('xlsx-js-style');
     const wb = XLSX.utils.book_new();
 
-    const border = { top: { style: 'thin', color: { rgb: 'CCCCCC' } }, bottom: { style: 'thin', color: { rgb: 'CCCCCC' } }, left: { style: 'thin', color: { rgb: 'CCCCCC' } }, right: { style: 'thin', color: { rgb: 'CCCCCC' } } };
-    const fontBase = { name: 'Arial', sz: 10 };
-    const fontHeader = { name: 'Arial', sz: 10, bold: true, color: { rgb: 'FFFFFF' } };
-    const fontTotal = { name: 'Arial', sz: 10, bold: true };
+    const [year, month] = sumMonth.value.split('-').map(Number);
+    const from = `${year}-${String(month).padStart(2, '0')}-01`;
+    const to = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
 
-    const stockFill = { fgColor: { rgb: 'DAEEF3' } };  // голубой
-    const deliveryFill = { fgColor: { rgb: 'D5E8D4' } };  // зелёный
-    const ttlFill = { fgColor: { rgb: 'FCE4D6' } };  // оранжевый
-    const weekendFill = { fgColor: { rgb: 'F2F2F2' } };
-    const headerDarkFill = { fgColor: { rgb: '502314' } };  // BK тёмно-коричневый
-    const totalFill = { fgColor: { rgb: 'FFF2CC' } };
-
-    const center = { horizontal: 'center', vertical: 'center', wrapText: true };
-    const left = { vertical: 'center', wrapText: true };
-
-    // Header row
-    const headers = ['Дата', 'День', 'Остатки Х', 'Остатки М', 'Итого Х', 'Итого М', 'Приходы Холод', 'Приходы Мороз', 'ТТЛ Холод', 'ТТЛ Мороз'];
-
-    const aoa = [headers];
-    const totalRow = ['Итого', '', '', '', 0, 0, '', '', '', ''];
-
-    for (const r of sumRows.value) {
-      const coldText = r.coldEntries.map(e => `${e.supplier_name} (${e.cold_pallets})`).join(', ');
-      const frozenText = r.frozenEntries.map(e => `${e.supplier_name} (${e.frozen_pallets})`).join(', ');
-      aoa.push([
-        r.dateStr, r.dayName,
-        r.coldStock ?? '', r.frozenStock ?? '',
-        r.totalCold || '', r.totalFrozen || '',
-        coldText, frozenText,
-        '', '',
+    // Загружаем данные всех юрлиц параллельно
+    const allData = await Promise.all(entities.map(async (entity) => {
+      const [stockRes, entriesRes] = await Promise.all([
+        db.from('plt_daily_stock').select('*').eq('legal_entity', entity).gte('stock_date', from).lte('stock_date', to),
+        db.from('plt_summary').select('*').eq('legal_entity', entity).gte('entry_date', from).lte('entry_date', to).order('supplier_name'),
       ]);
-      totalRow[4] += r.totalCold || 0;
-      totalRow[5] += r.totalFrozen || 0;
-    }
-    totalRow[4] = totalRow[4] || '';
-    totalRow[5] = totalRow[5] || '';
-    aoa.push(totalRow);
+      if (stockRes.error) throw stockRes.error;
+      if (entriesRes.error) throw entriesRes.error;
+      return { entity, stock: stockRes.data || [], entries: entriesRes.data || [] };
+    }));
 
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-    // Column widths
-    ws['!cols'] = [
-      { wch: 8 }, { wch: 5 },     // дата, день
-      { wch: 11 }, { wch: 11 },    // остатки
-      { wch: 9 }, { wch: 9 },      // итого
-      { wch: 42 }, { wch: 42 },    // приходы детали
-      { wch: 11 }, { wch: 11 },    // ТТЛ
-    ];
-
-    // Style header row
-    for (let c = 0; c < 10; c++) {
-      const addr = XLSX.utils.encode_cell({ r: 0, c });
-      if (!ws[addr]) ws[addr] = { v: '', t: 's' };
-      ws[addr].s = { font: fontHeader, fill: headerDarkFill, alignment: center, border };
+    for (const { entity, stock, entries } of allData) {
+      const rows = buildSummaryRows(stock, entries);
+      const ws = buildSummarySheet(XLSX, rows);
+      XLSX.utils.book_append_sheet(wb, ws, shortName(entity));
     }
 
-    // Style data rows
-    const dataRows = sumRows.value.length;
-    for (let ri = 0; ri < dataRows; ri++) {
-      const r = ri + 1; // row index in sheet (0 = header)
-      const row = sumRows.value[ri];
-      const isWE = row.isWeekend;
-
-      for (let c = 0; c < 10; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c });
-        if (!ws[addr]) ws[addr] = { v: '', t: 's' };
-
-        let fill = null;
-        if (c === 2 || c === 3) fill = stockFill;
-        else if (c === 4 || c === 5) fill = deliveryFill;
-        else if (c === 8 || c === 9) fill = ttlFill;
-        else if (isWE) fill = weekendFill;
-
-        ws[addr].s = {
-          font: fontBase,
-          alignment: (c >= 6 && c <= 7) ? left : center,
-          border,
-          ...(fill ? { fill } : {}),
-        };
-      }
-    }
-
-    // Style total row
-    const totalR = dataRows + 1;
-    for (let c = 0; c < 10; c++) {
-      const addr = XLSX.utils.encode_cell({ r: totalR, c });
-      if (!ws[addr]) ws[addr] = { v: '', t: 's' };
-      ws[addr].s = { font: fontTotal, alignment: center, border, fill: totalFill };
-    }
-
-    // Row heights
-    ws['!rows'] = [{ hpt: 28 }]; // header height
-
-    XLSX.utils.book_append_sheet(wb, ws, shortName(legalEntity.value));
-    XLSX.writeFile(wb, `Паллеты_${shortName(legalEntity.value)}_${sumMonth.value}.xlsx`);
+    XLSX.writeFile(wb, `Паллеты_${sumMonth.value}.xlsx`);
   } catch (e) { console.error(e); toastStore.error('Ошибка экспорта'); }
 }
 
@@ -1166,7 +1577,7 @@ async function importRefFile(event) {
     let safeToDelete = candidates;
     if (candidates.length) {
       const candidateIds = candidates.map(p => p.id);
-      const { data: usedItems } = await db.from('plt_delivery_items').select('product_id').filter('product_id', 'in', `(${candidateIds.join(',')})`);
+      const { data: usedItems } = await db.from('plt_delivery_items').select('product_id').in('product_id', candidateIds);
       if (usedItems?.length) {
         const usedProductIds = new Set(usedItems.map(i => i.product_id));
         usedInDeliveries = candidates.filter(p => usedProductIds.has(p.id));
@@ -1239,6 +1650,7 @@ function onEntityChange() {
   editingDeliveryId.value = null;
   calcItems.value = [];
   calcSupplierName.value = '';
+  calcOrderNumber.value = '';
   dateDeliveries.value = [];
   loadDateDeliveries();
   if (tab.value === 'summary') loadSummary();
@@ -1344,6 +1756,20 @@ onMounted(async () => {
 .plt-delivery-card { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border: 1px solid #eee; border-radius: 10px; margin-bottom: 6px; transition: all .15s; }
 .plt-delivery-card:hover { border-color: #FF8733; background: #FFF8F0; }
 .plt-delivery-info { display: flex; align-items: center; gap: 10px; font-size: 14px; flex: 1; flex-wrap: wrap; }
+.plt-order-num { font-size: 13px; color: #666; }
+.plt-ocr-list { display: flex; flex-direction: column; gap: 6px; }
+.plt-ocr-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #eee; }
+.plt-ocr-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plt-ocr-hint { font-size: 12px; color: #999; }
+.plt-ocr-summary { font-size: 13px; color: #666; }
+.plt-ocr-fuzzy { font-size: 14px; color: #e67e22; cursor: help; font-weight: bold; }
+.plt-import-btns { display: flex; align-items: center; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.plt-import-hint { font-size: 12px; color: #999; }
+.plt-ocr-loading { margin-top: 8px; }
+.plt-ocr-loading-text { font-size: 13px; color: #666; margin-bottom: 6px; }
+.plt-ocr-loading-bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; }
+.plt-ocr-loading-fill { height: 100%; width: 40%; background: #502314; border-radius: 3px; animation: ocrSlide 1.2s ease-in-out infinite; }
+@keyframes ocrSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 .plt-delivery-time { font-size: 12px; color: #999; }
 .plt-delivery-btns { display: flex; gap: 6px; flex-shrink: 0; }
 

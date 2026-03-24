@@ -98,7 +98,7 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
     if ($fn === 'get_cards') {
-        $s = $pdo->query("SELECT id, name, analogs FROM cards ORDER BY name");
+        $s = $pdo->query("SELECT id, name, analogs, updated_by, updated_at FROM cards ORDER BY name");
         respond($s->fetchAll());
     }
     if ($fn === 'get_cards_last_update') {

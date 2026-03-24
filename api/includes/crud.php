@@ -141,7 +141,7 @@ $filterWhitelist = [
     'settings'    => ['key'],
     'audit_log'   => ['entity_type','entity_id','action','user_name'],
     'stock_1c'    => ['sku','legal_entity'],
-    'cards'       => ['id','sku','name','supplier','legal_entity','is_active','analogs'],
+    'cards'       => ['id','sku','name','supplier','legal_entity','is_active','analogs','updated_by'],
     'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],
     'restaurants' => ['id','legal_entity','legal_entity_group'],
     'delivery_schedule' => ['id','restaurant_id','legal_entity'],
@@ -190,7 +190,7 @@ $writeWhitelist = [
     'audit_log'    => ['action','entity_type','entity_id','user_name','details','changes','created_at'],
     'analysis_data'=> ['id','sku','legal_entity','data','updated_at'],
     'stock_1c'     => ['id','sku','legal_entity','stock','updated_at'],
-    'cards'        => ['id','sku','name','supplier','legal_entity','is_active','data','category','analogs'],
+    'cards'        => ['id','sku','name','supplier','legal_entity','is_active','data','category','analogs','created_by','updated_by'],
     'settings'     => ['key','value'],
     'item_order'   => ['id','supplier','legal_entity','item_id','position'],
     'tenders'      => ['id','name','description','legal_entity','status','deadline','winner_supplier','summary','note','created_by','created_at','updated_at'],
@@ -381,7 +381,7 @@ if ($method === 'POST') {
         if ($table === 'audit_log' && $sessionUser) { $rec['user_name'] = $sessionUser['name']; }
         $cols = array_keys($rec); $ph = implode(',', array_fill(0, count($cols), '?')); $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
         try {
-            if ($table === 'analysis_data') {
+            if ($table === 'analysis_data' || $table === 'cards') {
                 // Upsert: при дубле обновляем данные
                 $upd = implode(',', array_map(fn($c) => "`$c`=VALUES(`$c`)", $cols));
                 $s = $pdo->prepare("INSERT INTO `$table` ($cn) VALUES ($ph) ON DUPLICATE KEY UPDATE $upd");

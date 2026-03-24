@@ -897,9 +897,8 @@ function setFormModuleAccess(module, level) {
   }
 }
 
-watch(() => form.value.role, () => {
-  form.value.permissions = {};
-});
+// При смене роли НЕ сбрасываем индивидуальные права —
+// они пересчитаются как diff от нового шаблона при сохранении
 
 function resetPermissionsToTemplate() {
   form.value.permissions = {};

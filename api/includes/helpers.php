@@ -213,15 +213,15 @@ function notifyTelegramRestaurantSales($pdo, $userName, $items, $count) {
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','cards'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','cards'=>'view'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','cards'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
     'orders'=>'order','order_items'=>'order',
     'plans'=>'planning',
-    'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'database',
+    'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'cards',
     'delivery_schedule'=>'delivery-schedule',
     'analysis_data'=>'analysis','stock_1c'=>'analysis','restaurant_sales'=>'restaurant-sales',
     'stock_malling'=>'shelf-life',

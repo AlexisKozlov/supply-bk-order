@@ -70,7 +70,7 @@ $uri = preg_replace('#^/api/#', '', $uri);
 $uri = trim($uri, '/');
 $parts = explode('/', $uri);
 $endpoint = $parts[0] ?? '';
-$subpoint = $parts[1] ?? null;
+$subpoint = isset($parts[1]) ? urldecode($parts[1]) : null;
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $rawInput = file_get_contents('php://input');
 $maxBodySize = 50 * 1024 * 1024; // 50 MB
@@ -90,6 +90,9 @@ require_once __DIR__ . '/includes/search.php';
 
 // RPC-эндпоинты
 require_once __DIR__ . '/includes/rpc.php';
+
+// OCR (распознавание скриншотов)
+require_once __DIR__ . '/includes/ocr.php';
 
 // Авторизация для REST
 if (!checkAuth($pdo)) { respond(['error'=>'Unauthorized'], 401); }

@@ -61,7 +61,7 @@ const routes = [
     path: '/search-cards',
     name: 'search-cards',
     component: () => import('@/views/CardsSearchView.vue'),
-    meta: { title: 'Поиск карточек' },
+    meta: { title: 'Поиск карточек', module: 'cards' },
   },
   {
     path: '/telegram-link',

@@ -122,7 +122,7 @@ export const useHistoryStore = defineStore('history', () => {
     const { error } = await db.rpc('delete_order', { order_id: orderId });
     if (error) return { error: 'Не удалось удалить заказ: ' + error };
     orders.value = orders.value.filter(o => o.id !== orderId);
-    db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} }).catch(() => {});
+    try { await db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} }); } catch (e) { /* ignore */ }
     return { success: true };
   }
 
