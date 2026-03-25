@@ -79,6 +79,9 @@ function cmdVegStats($chatId, $msgId) {
 
 function vegShowMySubs($chatId, $msgId = null) {
     global $pdo;
+    // Сброс режима карточек при возврате в меню
+    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
+
     $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
         FROM veg_telegram_subs vs
         LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
@@ -87,32 +90,44 @@ function vegShowMySubs($chatId, $msgId = null) {
     $s->execute([$chatId]);
     $subs = $s->fetchAll();
 
-    $text = "🥬 <b>Заявки на овощи</b>\n\n";
+    $text = "🏪 <b>Меню ресторана</b>\n";
+    $text .= "─────────────────────\n";
+
     if ($subs) {
-        $text .= "Вы подписаны на уведомления:\n";
+        $text .= "\n<b>Подписки на уведомления:</b>\n";
         foreach ($subs as $sub) {
-            $addr = $sub['address'] ? mb_substr($sub['address'], 0, 40) : $sub['city'];
-            $text .= "  • Ресторан <b>{$sub['restaurant_number']}</b> — {$addr}\n";
+            $addr = $sub['address'] ? mb_substr($sub['address'], 0, 35) : $sub['city'];
+            $text .= "  • Р-н <b>{$sub['restaurant_number']}</b> — {$addr}\n";
         }
-        $text .= "\nВы будете получать напоминания о дедлайнах и подтверждения заявок.\n";
-    } else {
-        $text .= "Вы ещё не подписаны ни на один ресторан.\n";
     }
+
     $text .= "\nВыберите действие:";
 
-    $btns = [
-        [['text' => '➕ Подписаться на ресторан', 'callback_data' => 'veg_pick_rest']],
-    ];
+    $btns = [];
+
+    // Овощные заявки
     if ($subs) {
-        $btns[] = [['text' => '📝 Подать заявку', 'callback_data' => 'vegord_start']];
-        $btns[] = [['text' => '📋 Мои заявки', 'callback_data' => 'veg_my_orders']];
-        $btns[] = [['text' => '🔔 Мои подписки (нажмите для отписки)', 'callback_data' => 'veg_my_subs_manage']];
+        $btns[] = [
+            ['text' => '📝 Подать заявку', 'callback_data' => 'vegord_start'],
+            ['text' => '📋 Мои заявки', 'callback_data' => 'veg_my_orders'],
+        ];
     }
+
+    // Подписки
+    $btns[] = [['text' => '➕ Подписаться на ресторан', 'callback_data' => 'veg_pick_rest']];
+    if ($subs) {
+        $btns[] = [['text' => '🔔 Управление подписками', 'callback_data' => 'veg_my_subs_manage']];
+    }
+
+    // Заявка через сайт
     $formLink = vegGetFormLink();
     if ($formLink) {
         $btns[] = [['text' => '🌐 Заявка через сайт', 'url' => $formLink]];
     }
-    $btns[] = [['text' => '◂ Закрыть', 'callback_data' => 'start_back']];
+
+    // Поиск карточек — доступен всем
+    $btns[] = [['text' => '🔍 Поиск карточек товаров', 'callback_data' => 'cmd_cards']];
+
     $markup = ['inline_keyboard' => $btns];
 
     if ($msgId) editMessage($chatId, $msgId, $text, $markup);
@@ -557,14 +572,39 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     $text .= "📅 {$dayName} {$dateFmt}\n";
     $text .= "─────────────────────\n";
 
-    // Показываем предыдущую заявку
-    if ($prevByProduct) {
-        $prevDateFmt = date('d.m', strtotime($prevDate));
-        $text .= "📋 <b>Пред. заявка ({$prevDateFmt}):</b>\n";
-        foreach ($prevByProduct as $name => $qtyStr) {
-            $text .= "  • {$name} — <b>{$qtyStr}</b>\n";
+    // Если заявка на этот день уже подана — показываем её
+    $hasExisting = !empty($existing);
+    if ($hasExisting) {
+        $allZero = true;
+        foreach ($products as $p) {
+            if (floatval($existing[$p['id']] ?? 0) > 0) { $allZero = false; break; }
+        }
+        if ($allZero) {
+            $text .= "✅ <b>Заявка подана:</b> поставка не нужна\n";
+        } else {
+            $text .= "✅ <b>Ваша заявка:</b>\n";
+            foreach ($products as $p) {
+                $qty = floatval($existing[$p['id']] ?? 0);
+                if ($qty > 0) {
+                    $unit = $p['unit'] === 'pcs' ? 'шт' : 'кг';
+                    $qFmt = rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.');
+                    $text .= "  • {$p['product_name']}: <b>{$qFmt}</b> {$unit}\n";
+                }
+            }
         }
         $text .= "─────────────────────\n";
+        $text .= "Чтобы <b>изменить</b>, отправьте новые количества:\n";
+    } else {
+        // Показываем предыдущую заявку как ориентир
+        if ($prevByProduct) {
+            $prevDateFmt = date('d.m', strtotime($prevDate));
+            $text .= "📋 <b>Пред. заявка ({$prevDateFmt}):</b>\n";
+            foreach ($prevByProduct as $name => $qtyStr) {
+                $text .= "  • {$name} — <b>{$qtyStr}</b>\n";
+            }
+            $text .= "─────────────────────\n";
+        }
+        $text .= "Отправьте количества в формате:\n";
     }
 
     if (!$products) {
@@ -579,11 +619,12 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
         if ($p['multiplicity'] > 0) { $hasMultiplicity = true; break; }
     }
 
-    $text .= "Отправьте количества в формате:\n<code>";
+    $text .= "<code>";
     foreach ($products as $p) {
         $unit = $p['unit'] === 'pcs' ? 'шт' : 'кг';
         $qty = $existing[$p['id']] ?? 0;
-        $text .= "{$p['product_name']}: {$qty}\n";
+        $qFmt = rtrim(rtrim(number_format(floatval($qty), 2, '.', ''), '0'), '.');
+        $text .= "{$p['product_name']}: {$qFmt}\n";
     }
     $text .= "</code>\n";
 

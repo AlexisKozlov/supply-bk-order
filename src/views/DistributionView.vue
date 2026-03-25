@@ -192,8 +192,15 @@
               </div>
             </div>
           </div>
+          <div class="prod-manual">
+            <div class="prod-manual-row">
+              <input v-model="manualSku" class="modal-input" placeholder="Артикул" style="width:120px;"/>
+              <input v-model="manualName" class="modal-input" placeholder="Название товара (вручную)" style="flex:1;"/>
+              <button class="dist-btn ghost sm" :disabled="!manualName.trim()" @click="addManualToNew">+</button>
+            </div>
+          </div>
           <div v-if="newProducts.length" class="prod-list">
-            <div v-for="(np, i) in newProducts" :key="np.product_id" class="prod-row">
+            <div v-for="(np, i) in newProducts" :key="np.product_id || np.custom_name" class="prod-row">
               <div class="prod-name"><span class="prod-sku">{{ np.sku }}</span> {{ np.name }}</div>
               <input v-model.number="np.default_qty" type="number" min="0.1" step="0.1" class="prod-qty" placeholder="Кол-во"/>
               <select v-model="np.unit" class="prod-unit">
@@ -233,8 +240,15 @@
               </div>
             </div>
           </div>
+          <div class="prod-manual">
+            <div class="prod-manual-row">
+              <input v-model="addManualSku" class="modal-input" placeholder="Артикул" style="width:120px;"/>
+              <input v-model="addManualName" class="modal-input" placeholder="Или введите название вручную" style="flex:1;"/>
+              <button class="dist-btn ghost sm" :disabled="!addManualName.trim()" @click="selectManualProduct">OK</button>
+            </div>
+          </div>
           <div v-if="addSelectedProduct" class="prod-selected">
-            <div class="prod-name"><span class="prod-sku">{{ addSelectedProduct.sku }}</span> {{ addSelectedProduct.name }}</div>
+            <div class="prod-name"><span v-if="addSelectedProduct.sku" class="prod-sku">{{ addSelectedProduct.sku }}</span> {{ addSelectedProduct.name }}</div>
             <div style="display:flex;gap:8px;margin-top:8px">
               <input v-model.number="addQty" type="number" min="0.1" step="0.1" class="prod-qty" placeholder="Кол-во"/>
               <select v-model="addUnit" class="prod-unit">
@@ -314,6 +328,8 @@ const newProducts = ref([]);
 const creating = ref(false);
 const productSearchQuery = ref('');
 const productSearchResults = ref([]);
+const manualName = ref('');
+const manualSku = ref('');
 
 // Add product to existing session
 const showAddProduct = ref(false);
@@ -322,6 +338,8 @@ const addProductResults = ref([]);
 const addSelectedProduct = ref(null);
 const addQty = ref(1);
 const addUnit = ref('кор');
+const addManualName = ref('');
+const addManualSku = ref('');
 
 // Edit qty
 const editingQty = ref(null);
@@ -670,6 +688,34 @@ function selectAddProduct(pr) {
   addSelectedProduct.value = pr;
   addProductQuery.value = '';
   addProductResults.value = [];
+  addManualName.value = '';
+  addManualSku.value = '';
+}
+
+function addManualToNew() {
+  const name = manualName.value.trim();
+  if (!name) return;
+  const sku = manualSku.value.trim();
+  newProducts.value.push({
+    product_id: null,
+    custom_name: name,
+    custom_sku: sku || null,
+    name,
+    sku: sku || '',
+    default_qty: 1,
+    unit: 'кор',
+  });
+  manualName.value = '';
+  manualSku.value = '';
+}
+
+function selectManualProduct() {
+  const name = addManualName.value.trim();
+  if (!name) return;
+  const sku = addManualSku.value.trim();
+  addSelectedProduct.value = { id: null, name, sku: sku || '', custom_name: name, custom_sku: sku || null };
+  addManualName.value = '';
+  addManualSku.value = '';
 }
 
 // ═══ Create session ═══
@@ -679,7 +725,9 @@ async function createSession() {
     const { data } = await db.rpc('dist_create_session', {
       name: newName.value.trim(),
       products: newProducts.value.map(p => ({
-        product_id: p.product_id,
+        product_id: p.product_id || null,
+        custom_name: p.custom_name || null,
+        custom_sku: p.custom_sku || null,
         default_qty: p.default_qty,
         unit: p.unit,
       })),
@@ -701,10 +749,13 @@ async function createSession() {
 async function addProductToSession() {
   if (!addSelectedProduct.value || !activeSession.value) return;
   try {
+    const pr = addSelectedProduct.value;
     await db.rpc('dist_add_products', {
       session_id: activeSession.value.id,
       products: [{
-        product_id: addSelectedProduct.value.id,
+        product_id: pr.id || null,
+        custom_name: pr.custom_name || null,
+        custom_sku: pr.custom_sku || null,
         default_qty: addQty.value,
         unit: addUnit.value,
       }],
@@ -970,6 +1021,8 @@ async function exportExcel() {
 .prod-option { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border-light); }
 .prod-option:hover { background: var(--bk-cream); }
 .prod-sku { color: var(--text-muted); font-size: 11px; margin-right: 6px; }
+.prod-manual { margin-top: 8px; }
+.prod-manual-row { display: flex; gap: 6px; align-items: center; }
 
 /* Product rows */
 .prod-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }

@@ -748,11 +748,15 @@ function cmdSales($chatId, $user, $editMsgId = null) {
 
 // ═══ График доставок ═══
 
-function cmdCards($chatId, $user, $editMsgId = null) {
+function cmdCards($chatId, $user = null, $editMsgId = null) {
     global $pdo;
 
     // Включаем режим поиска карточек
-    setUserMode($user['name'], 'cards');
+    if ($user) {
+        setUserMode($user['name'], 'cards');
+    }
+    // Для всех (и ресторанов без аккаунта) — temp-файл
+    file_put_contents(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt", '1');
 
     $s = $pdo->prepare("SELECT COUNT(*) as cnt FROM cards");
     $s->execute();
@@ -770,9 +774,111 @@ function cmdCards($chatId, $user, $editMsgId = null) {
 
     $btns = [
         [['text' => '❌ Выход из поиска', 'callback_data' => 'cmd_cards_exit']],
-        [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']],
     ];
+    if ($user) {
+        $btns[] = [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']];
+    } else {
+        $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+    }
     botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
+}
+
+// Стемминг русских слов — обрезка окончаний до основы
+function ruStem($word) {
+    $word = mb_strtolower($word);
+    $word = str_replace('ё', 'е', $word);
+    $len = mb_strlen($word);
+    if ($len <= 3) return $word;
+    // Длинные окончания (3-4 буквы)
+    $suffixes4 = ['ками','ений','ения','ться','ного','ному','ными','ного','нном','ться','шить','ения','ский','ская','ское','ские'];
+    $suffixes3 = ['ами','ями','ому','ому','ных','ным','ной','ное','ные','ний','ого','ому','ить','ать','ять','ует','ает','ции','тся','ика','ику','ики','ике','ист','ные'];
+    $suffixes2 = ['ов','ев','ей','ий','ый','ая','ое','ые','ой','ом','ам','ям','ах','ях','ми','ие','ия','ки','ка','ку','ке','ок','ек','он','ин','ть','ся','ны','на','но'];
+    $suffixes1 = ['а','о','у','е','ы','и','ь','й','я'];
+    foreach ($suffixes4 as $s) {
+        $sl = mb_strlen($s);
+        if ($len > $sl + 2 && mb_substr($word, -$sl) === $s) return mb_substr($word, 0, -$sl);
+    }
+    foreach ($suffixes3 as $s) {
+        $sl = mb_strlen($s);
+        if ($len > $sl + 2 && mb_substr($word, -$sl) === $s) return mb_substr($word, 0, -$sl);
+    }
+    foreach ($suffixes2 as $s) {
+        $sl = mb_strlen($s);
+        if ($len > $sl + 2 && mb_substr($word, -$sl) === $s) return mb_substr($word, 0, -$sl);
+    }
+    foreach ($suffixes1 as $s) {
+        if ($len > 3 && mb_substr($word, -1) === $s) return mb_substr($word, 0, -1);
+    }
+    return $word;
+}
+
+// Словарь синонимов — расширяет запрос близкими словами
+function expandSynonyms($words) {
+    static $synonyms = [
+        'картошка' => ['картофель','картошк','фри'],
+        'картофель' => ['картошка','картошк','фри'],
+        'помидор' => ['томат','томатн'],
+        'томат' => ['помидор','помидорн'],
+        'огурец' => ['огурч','корнишон'],
+        'корнишон' => ['огурец','огурч'],
+        'лук' => ['луков','репчат'],
+        'курица' => ['куриц','курин','цыпл','наггетс','чикен'],
+        'куриный' => ['курин','курица','цыпл','чикен'],
+        'чикен' => ['курица','курин','куриц'],
+        'наггетс' => ['наггетсы','курица','куриц'],
+        'говядина' => ['говяж','говядин','ангус','бургер'],
+        'говяжий' => ['говядин','говяж','ангус'],
+        'свинина' => ['свинин','свиной','свин'],
+        'булка' => ['булочк','булоч','хлеб'],
+        'булочка' => ['булочк','булоч','булка','хлеб'],
+        'хлеб' => ['булочк','булоч','булка'],
+        'стакан' => ['стаканч','стаканов','стакан'],
+        'стаканчик' => ['стакан','стаканч','стаканов'],
+        'крышка' => ['крышеч','крышк'],
+        'сок' => ['напиток','напит'],
+        'напиток' => ['напит','сок','вода','газ'],
+        'кола' => ['кока','пепси','газ','напит'],
+        'вода' => ['питьев','аура','газ'],
+        'молоко' => ['молоч','молок'],
+        'сыр' => ['сырн','чиз','чеддер'],
+        'чиз' => ['сыр','сырн','чеддер'],
+        'салат' => ['салатн','зелен','латук','айсберг'],
+        'кетчуп' => ['кетчуп','томатн','соус'],
+        'майонез' => ['майонезн','соус'],
+        'соус' => ['заправк','дип'],
+        'дип' => ['соус','заправк'],
+        'мороженое' => ['моро','пломбир','сандей','айс'],
+        'кофе' => ['кофейн','капучин','латте','американо'],
+        'капучино' => ['кофе','кофейн'],
+        'масло' => ['масл','фритюр'],
+        'фритюр' => ['масло','масл'],
+        'коробка' => ['короб','упаков','тар'],
+        'упаковка' => ['упаков','короб','коробк','тар'],
+        'пакет' => ['пакетик','мешок','тар'],
+        'салфетка' => ['салфет','бумаг'],
+    ];
+    $expanded = $words;
+    foreach ($words as $w) {
+        $wLower = mb_strtolower($w);
+        if (isset($synonyms[$wLower])) {
+            foreach ($synonyms[$wLower] as $syn) {
+                $expanded[] = $syn;
+            }
+        }
+    }
+    return array_unique($expanded);
+}
+
+// Разбить текст на стемы
+function stemWords($text) {
+    $text = mb_strtolower($text);
+    $text = str_replace('ё', 'е', $text);
+    $words = preg_split('/[^а-яa-z0-9]+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+    $stems = [];
+    foreach ($words as $w) {
+        if (mb_strlen($w) >= 2) $stems[] = ruStem($w);
+    }
+    return $stems;
 }
 
 // Поиск карточки — прямой ответ без ИИ
@@ -811,7 +917,6 @@ function searchCardDirect($chatId, $query) {
                 break;
             }
         }
-        // Если не найден как основной — ищем в аналогах
         if (empty($results)) {
             foreach ($allCards as $c) {
                 $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
@@ -821,7 +926,6 @@ function searchCardDirect($chatId, $query) {
                 }
             }
         }
-        // Частичное совпадение артикула
         if (empty($results)) {
             foreach ($allCards as $c) {
                 if ($c['id'] && strpos($c['id'], $articleMatch) !== false) {
@@ -832,40 +936,55 @@ function searchCardDirect($chatId, $query) {
         }
     }
 
-    // 2. Текстовый поиск (если артикул не нашёлся или запрос текстовый)
+    // 2. Текстовый поиск — сначала точное вхождение, потом по стемам (морфология)
     if (empty($results)) {
+        // 2а. Точное вхождение подстроки (как раньше)
         foreach ($allCards as $c) {
-            $normId = $normalize($c['id'] ?? '');
             $normName = $normalize($c['name']);
-            $normFull = $normId . $normName;
-            $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
-            if (!is_array($analogs)) $analogs = [];
-
-            if ($normId === $q) {
-                $results[] = ['card' => $c, 'reason' => 'точное совпадение артикула'];
-                continue;
-            }
+            $normFull = $normalize($c['id'] ?? '') . $normName;
             if ($normFull && mb_strpos($normFull, $q) !== false) {
                 $results[] = ['card' => $c, 'reason' => 'найдено по названию'];
-                continue;
+                if (count($results) >= 10) break;
             }
-            if ($normId && mb_strpos($normId, $q) !== false) {
-                $results[] = ['card' => $c, 'reason' => 'часть артикула'];
-                continue;
-            }
-            foreach ($analogs as $a) {
-                if (mb_strpos($normalize($a), $q) !== false) {
-                    $results[] = ['card' => $c, 'reason' => "найдено по аналогу ({$a})"];
-                    break;
-                }
-            }
-            if (mb_strpos($normName, $q) !== false) {
-                if (!in_array($c['id'], array_column(array_column($results, 'card'), 'id'))) {
-                    $results[] = ['card' => $c, 'reason' => 'найдено по названию'];
-                }
-            }
+        }
+    }
 
-            if (count($results) >= 10) break;
+    // 2б. Поиск по основам слов (стемминг) — каждое слово запроса ищем в названии
+    if (empty($results)) {
+        // Разбиваем запрос на слова, добавляем синонимы, затем стемим
+        $rawWords = preg_split('/[^а-яёa-z0-9]+/iu', mb_strtolower($queryRaw), -1, PREG_SPLIT_NO_EMPTY);
+        $expandedWords = expandSynonyms($rawWords);
+        $queryStems = array_unique(array_map('ruStem', array_filter($expandedWords, fn($w) => mb_strlen($w) >= 2)));
+        $queryWordCount = count($rawWords); // оригинальное число слов для scoring
+
+        if (!empty($queryStems)) {
+            $scored = [];
+            foreach ($allCards as $c) {
+                $nameStems = stemWords($c['name']);
+                if (empty($nameStems)) continue;
+                // Считаем сколько стемов из запроса (с синонимами) нашлись в названии
+                $matched = 0;
+                foreach ($queryStems as $qs) {
+                    foreach ($nameStems as $ns) {
+                        if (mb_strpos($ns, $qs) !== false || mb_strpos($qs, $ns) !== false) {
+                            $matched++;
+                            break;
+                        }
+                    }
+                }
+                if ($matched > 0) {
+                    $scored[] = ['card' => $c, 'score' => $matched / count($queryStems), 'matched' => $matched];
+                }
+            }
+            // Сортируем по доле совпавших слов (больше = лучше)
+            usort($scored, function($a, $b) { return $b['score'] <=> $a['score'] ?: $b['matched'] <=> $a['matched']; });
+            $added = [];
+            foreach ($scored as $s) {
+                if (isset($added[$s['card']['id']])) continue;
+                $results[] = ['card' => $s['card'], 'reason' => 'найдено по названию'];
+                $added[$s['card']['id']] = true;
+                if (count($results) >= 10) break;
+            }
         }
     }
 
@@ -901,22 +1020,62 @@ function searchCardDirect($chatId, $query) {
         return;
     }
 
-    $text = "🔍 Результаты по «<b>{$queryRaw}</b>»:\n\n";
+    // Собираем все артикулы (основные + аналоги) для проверки остатков
+    $allSkus = [];
+    foreach ($results as $r) {
+        $c = $r['card'];
+        $allSkus[] = $c['id'];
+        $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
+        if (is_array($analogs)) {
+            foreach ($analogs as $a) $allSkus[] = $a;
+        }
+    }
+    $allSkus = array_unique(array_filter($allSkus));
+
+    // Проверяем какие артикулы есть на остатках (analysis_data, только БК)
+    $inStock = [];
+    if ($allSkus) {
+        $placeholders = implode(',', array_fill(0, count($allSkus), '?'));
+        $params = array_values($allSkus);
+        $params[] = 'ООО "Бургер БК"';
+        $st = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = a.sku COLLATE utf8mb4_unicode_ci AND p.legal_entity COLLATE utf8mb4_unicode_ci = a.legal_entity COLLATE utf8mb4_unicode_ci WHERE a.sku IN ({$placeholders}) AND a.legal_entity = ? AND a.stock > 0");
+        $st->execute($params);
+        foreach ($st->fetchAll() as $row) {
+            $qpb = floatval($row['qty_per_box']) ?: 1;
+            $inStock[$row['sku']] = ['name' => $row['name'], 'stock' => round(floatval($row['stock']) / $qpb, 1)];
+        }
+    }
+
+    $text = "🔍 По запросу «<b>{$queryRaw}</b>»:\n\n";
     foreach ($results as $i => $r) {
         $c = $r['card'];
         $analogs = $c['analogs'] ? json_decode($c['analogs'], true) : [];
         if (!is_array($analogs)) $analogs = [];
 
-        $num = $i + 1;
-        $text .= "<b>{$num}. {$c['id']}</b> {$c['name']}\n";
-        $text .= "   <i>{$r['reason']}</i>\n";
-        if (!empty($analogs)) {
-            $text .= "   Аналоги: " . implode(', ', $analogs) . "\n";
+        // Ищем какой артикул из группы на остатках (основной + аналоги)
+        $stockSku = null;
+        $groupSkus = array_merge([$c['id']], $analogs);
+        foreach ($groupSkus as $sku) {
+            if (isset($inStock[$sku])) {
+                $stockSku = $sku;
+                break;
+            }
         }
-        $text .= "\n";
+
+        $text .= "<code>{$c['id']} {$c['name']}</code>\n";
+        if ($stockSku) {
+            $stockQty = rtrim(rtrim(number_format($inStock[$stockSku]['stock'], 1, '.', ''), '0'), '.');
+            if ($stockSku === $c['id']) {
+                $text .= "  📦 <i>на остатках ({$stockQty} кор.)</i>\n";
+            } else {
+                $stockName = $inStock[$stockSku]['name'];
+                $label = $stockName ? "{$stockSku} {$stockName}" : $stockSku;
+                $text .= "  📦 <i>на остатках ({$stockQty} кор.): </i><code>{$label}</code>\n";
+            }
+        }
     }
 
-    $text .= "<i>Отправьте ещё артикул или название для поиска</i>";
+    $text .= "\n<i>Нажмите на строку, чтобы скопировать</i>";
 
     // Обрезка по лимиту Telegram
     if (mb_strlen($text) > 4000) {
@@ -1313,6 +1472,25 @@ if (isset($input['callback_query'])) {
     if (str_starts_with($data, 'cmd_')) {
         $cmd = substr($data, 4);
         $user = getUser($chatId);
+
+        // Карточки доступны всем (и ресторанам без привязки аккаунта)
+        if ($cmd === 'cards' || $cmd === 'cards_exit') {
+            answerCallback($cb['id']);
+            if ($cmd === 'cards') {
+                cmdCards($chatId, $user, $msgId);
+            } else {
+                // cards_exit — выход из режима поиска
+                @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
+                if ($user) {
+                    setUserMode($user['name'], null);
+                    editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
+                } else {
+                    vegShowMySubs($chatId, $msgId);
+                }
+            }
+            exit;
+        }
+
         if (!$user) {
             answerCallback($cb['id'], 'Нажмите /start для привязки аккаунта');
             exit;
@@ -1321,6 +1499,7 @@ if (isset($input['callback_query'])) {
         switch ($cmd) {
             case 'menu':
                 setUserMode($user['name'], null);
+                @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
                 @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
                 editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
                 break;
@@ -1355,10 +1534,6 @@ if (isset($input['callback_query'])) {
                 break;
             case 'sales': cmdSales($chatId, $user, $msgId); break;
             case 'cards': cmdCards($chatId, $user, $msgId); break;
-            case 'cards_exit':
-                setUserMode($user['name'], null);
-                editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
-                break;
             case 'veg_stats': cmdVegStats($chatId, $msgId); break;
             case 'settings': showSettings($chatId, $msgId, $user['name']); break;
         }
@@ -1633,12 +1808,14 @@ $text = trim($msg['text'] ?? '');
 
 // /veg — подписка на уведомления о заявках (доступна всем, без привязки аккаунта)
 if ($text === '/veg') {
+    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
     vegShowMySubs($chatId);
     exit;
 }
 
 // /start
 if ($text === '/start') {
+    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
     $user = getUser($chatId);
     if ($user) {
         $greeting = "Привет, <b>{$user['name']}</b>! 👋\n\n";
@@ -1659,6 +1836,7 @@ if ($text === '/help' || $text === '/menu') {
     $user = getUser($chatId);
     if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     setUserMode($user['name'], null); // сброс режима
+    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
     $tips = "\n\n💡 <i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Что скоро просрочится?\n• Когда доставка в ресторан 45?";
     sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
@@ -1721,10 +1899,9 @@ if ($text === '/settings') {
     exit;
 }
 
-// /cards
+// /cards — доступно всем (и ресторанам)
 if ($text === '/cards') {
     $user = getUser($chatId);
-    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdCards($chatId, $user);
     exit;
 }
@@ -1793,6 +1970,20 @@ if (file_exists($vegOrderFile)) {
                 exit;
             }
         }
+    }
+}
+
+// Режим поиска карточек (temp-файл) — работает и без привязки аккаунта
+$cardsModeFile = sys_get_temp_dir() . "/cards_mode_{$chatId}.txt";
+if (file_exists($cardsModeFile)) {
+    // Автоочистка: если файл старше 30 минут — удаляем
+    if (time() - filemtime($cardsModeFile) > 1800) {
+        @unlink($cardsModeFile);
+    } elseif (!str_starts_with($text, '/')) {
+        searchCardDirect($chatId, $text);
+        exit;
+    } else {
+        @unlink($cardsModeFile);
     }
 }
 

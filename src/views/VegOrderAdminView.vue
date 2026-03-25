@@ -296,7 +296,7 @@
                   <th>Ресторан</th>
                   <th style="width:90px;">Участие</th>
                   <th style="width:80px;">Подано</th>
-                  <th style="width:80px;">Пропущено</th>
+                  <th style="width:80px;">Пропуск</th>
                   <th style="width:120px;"></th>
                 </tr>
               </thead>
@@ -306,7 +306,7 @@
                   <td>{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</td>
                   <td class="veg-td-rate"><strong>{{ r.rate }}%</strong></td>
                   <td class="veg-td-num">{{ r.participated }}/{{ r.total }}</td>
-                  <td class="veg-td-num">{{ r.missed }}</td>
+                  <td class="veg-td-num" style="color:#F44336;">{{ r.missed }}</td>
                   <td>
                     <div class="veg-stat-bar">
                       <div class="veg-stat-bar-fill" :style="{ width: r.rate + '%', background: r.rate >= 80 ? '#4CAF50' : r.rate >= 50 ? '#FF9800' : '#F44336' }"></div>

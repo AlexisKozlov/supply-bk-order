@@ -11,12 +11,15 @@
         <input v-model="form.name" placeholder="Наименование*" />
 
         <label>Поставщик
-          <select v-model="form.supplier">
-            <option value="">— Выберите поставщика —</option>
-            <option v-for="s in suppliers" :key="s.name || s.short_name" :value="s.name || s.short_name">
-              {{ s.name || s.short_name }}
-            </option>
-          </select>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select v-model="form.supplier" style="flex:1;">
+              <option value="">— Выберите поставщика —</option>
+              <option v-for="s in allSuppliers" :key="s.short_name" :value="s.short_name">
+                {{ s.short_name }}
+              </option>
+            </select>
+            <button type="button" class="btn secondary" style="white-space:nowrap;padding:6px 10px;font-size:12px;" @click="showNewSupplier = true">+ Новый</button>
+          </div>
         </label>
 
         <div class="modal-row-2">
@@ -61,19 +64,27 @@
       @confirm="$emit('close')"
       @cancel="showConfirmClose = false"
     />
+
+    <EditSupplierModal
+      v-if="showNewSupplier"
+      @close="showNewSupplier = false"
+      @saved="onSupplierCreated"
+    />
   </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { db } from '@/lib/apiClient.js';
+import { db, orVal } from '@/lib/apiClient.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
+import { getEntityGroup } from '@/lib/utils.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useFormDirty } from '@/composables/useFormDirty.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
 
 const orderStore = useOrderStore();
 
@@ -86,6 +97,7 @@ const supplierStore = useSupplierStore();
 const toast         = useToastStore();
 const saving        = ref(false);
 const showConfirmClose = ref(false);
+const showNewSupplier = ref(false);
 
 const form = ref({
   sku: '',
@@ -99,14 +111,32 @@ const form = ref({
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
 
-const suppliers = computed(() => supplierStore.getSuppliersForEntity(form.value.legal_entity));
+// Все поставщики (включая без товаров — для новых товаров это важно)
+const allSuppliers = ref([]);
+
+async function loadAllSuppliers() {
+  const le = form.value.legal_entity;
+  if (!le) return;
+  const entities = getEntityGroup(le);
+  let query = db.from('suppliers').select('short_name').order('short_name');
+  if (entities.length === 1) {
+    query = query.eq('legal_entity', entities[0]);
+  } else {
+    query = query.or(entities.map(e => orVal('legal_entity', 'eq', e)).join(','));
+  }
+  const { data } = await query;
+  if (data) {
+    const seen = new Set();
+    allSuppliers.value = data.filter(s => { if (seen.has(s.short_name)) return false; seen.add(s.short_name); return true; });
+  }
+}
 
 function onKey(e) {
   if (e.key === 'Escape' && !showConfirmClose.value) tryClose();
 }
 onMounted(async () => {
   document.addEventListener('keydown', onKey);
-  await supplierStore.loadSuppliers(form.value.legal_entity);
+  await loadAllSuppliers();
   saveSnapshot();
 });
 onUnmounted(() => document.removeEventListener('keydown', onKey));
@@ -114,6 +144,12 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
 function tryClose() {
   if (isDirty()) { showConfirmClose.value = true; return; }
   emit('close');
+}
+
+async function onSupplierCreated() {
+  showNewSupplier.value = false;
+  await loadAllSuppliers();
+  // Авто-выбор последнего добавленного (будет последним по алфавиту, но список перезагружен)
 }
 
 async function submit() {

@@ -99,7 +99,11 @@
               <span class="result-name">{{ card.name }}</span>
             </div>
             <div class="result-footer">
-              <span class="result-reason">{{ card.reason }}</span>
+              <span v-if="card.stockSku" class="result-stock">
+                📦
+                <template v-if="card.isSameSku">на остатках ({{ card.stockQty }} кор.)</template>
+                <template v-else>на остатках ({{ card.stockQty }} кор.): {{ card.stockSku }} {{ card.stockName }}</template>
+              </span>
               <span class="result-copy-hint">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 Скопировать
@@ -422,6 +426,7 @@ function fetchWithTimeout(url, opts = {}, timeout = 30000) {
 
 // --- Состояние ---
 const allCards = ref([])
+const stockSkus = ref({}) // { sku: { name, stock } }
 const query = ref('')
 const results = ref([])
 const searched = ref(false)
@@ -490,6 +495,71 @@ function normalize(str) {
     .replace(/[^a-zа-я0-9]/gi, '')
 }
 
+// Стемминг русских слов — обрезка окончаний до основы
+function ruStem(word) {
+  word = word.toLowerCase().replace(/ё/g, 'е')
+  const len = word.length
+  if (len <= 3) return word
+  const cuts = [
+    ['ками','ений','ения','ться','ного','ному','ными','нном','шить','ский','ская','ское','ские'],
+    ['ами','ями','ому','ных','ным','ной','ное','ные','ний','ого','ить','ать','ять','ует','ает','ции','тся','ика','ику','ики','ике','ист'],
+    ['ов','ев','ей','ий','ый','ая','ое','ые','ой','ом','ам','ям','ах','ях','ми','ие','ия','ки','ка','ку','ке','ок','ек','он','ин','ть','ся','ны','на','но'],
+    ['а','о','у','е','ы','и','ь','й','я']
+  ]
+  for (const group of cuts) {
+    for (const s of group) {
+      if (len > s.length + 2 && word.endsWith(s)) return word.slice(0, -s.length)
+    }
+  }
+  // Одна буква — минимум 4 символа
+  if (len > 3) {
+    for (const s of cuts[3]) {
+      if (word.endsWith(s)) return word.slice(0, -1)
+    }
+  }
+  return word
+}
+
+function stemWords(text) {
+  return text.toLowerCase().replace(/ё/g, 'е')
+    .split(/[^а-яa-z0-9]+/i).filter(w => w.length >= 2).map(ruStem)
+}
+
+// Словарь синонимов
+const SYNONYMS = {
+  картошка:['картофель','картошк','фри'], картофель:['картошка','картошк','фри'],
+  помидор:['томат','томатн'], томат:['помидор','помидорн'],
+  огурец:['огурч','корнишон'], корнишон:['огурец','огурч'],
+  лук:['луков','репчат'],
+  курица:['куриц','курин','цыпл','наггетс','чикен'], куриный:['курин','курица','цыпл','чикен'],
+  чикен:['курица','курин','куриц'], наггетс:['наггетсы','курица','куриц'],
+  говядина:['говяж','говядин','ангус','бургер'], говяжий:['говядин','говяж','ангус'],
+  свинина:['свинин','свиной','свин'],
+  булка:['булочк','булоч','хлеб'], булочка:['булочк','булоч','булка','хлеб'], хлеб:['булочк','булоч','булка'],
+  стакан:['стаканч','стаканов'], стаканчик:['стакан','стаканч','стаканов'],
+  крышка:['крышеч','крышк'],
+  сок:['напиток','напит'], напиток:['напит','сок','вода','газ'],
+  кола:['кока','пепси','газ','напит'], вода:['питьев','аура','газ'],
+  молоко:['молоч','молок'], сыр:['сырн','чиз','чеддер'], чиз:['сыр','сырн','чеддер'],
+  салат:['салатн','зелен','латук','айсберг'],
+  кетчуп:['кетчуп','томатн','соус'], майонез:['майонезн','соус'],
+  соус:['заправк','дип'], дип:['соус','заправк'],
+  мороженое:['моро','пломбир','сандей','айс'],
+  кофе:['кофейн','капучин','латте','американо'], капучино:['кофе','кофейн'],
+  масло:['масл','фритюр'], фритюр:['масло','масл'],
+  коробка:['короб','упаков','тар'], упаковка:['упаков','короб','коробк','тар'],
+  пакет:['пакетик','мешок','тар'], салфетка:['салфет','бумаг'],
+}
+
+function expandSynonyms(words) {
+  const expanded = [...words]
+  for (const w of words) {
+    const syns = SYNONYMS[w.toLowerCase()]
+    if (syns) expanded.push(...syns)
+  }
+  return [...new Set(expanded)]
+}
+
 // --- Загрузка карточек ---
 async function loadCards() {
   loading.value = true
@@ -517,6 +587,18 @@ async function loadCards() {
     loadError.value = 'Ошибка загрузки карточек: ' + e.message
   } finally {
     loading.value = false
+  }
+}
+
+// --- Загрузка остатков (для пометки «на остатках») ---
+async function loadStockSkus() {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/rpc/get_stock_skus`)
+    if (res.ok) {
+      stockSkus.value = await res.json()
+    }
+  } catch {
+    // Не критично — поиск работает и без остатков
   }
 }
 
@@ -666,7 +748,7 @@ function doSearch() {
     }
 
     if (foundCard) {
-      results.value = [{ ...foundCard, reason }]
+      results.value = [enrichWithStock(foundCard, reason)]
       logSearch(queryRaw, true, 'article', foundCard.id)
       return
     }
@@ -721,8 +803,66 @@ function doSearch() {
     }
   }
 
-  results.value = foundCards
+  // 6. Если ничего не найдено — поиск по основам слов (стемминг + синонимы)
+  if (!foundCards.length) {
+    const rawWords = queryRaw.toLowerCase().replace(/ё/g, 'е').split(/[^а-яa-z0-9]+/i).filter(w => w.length >= 2)
+    const expandedWords = expandSynonyms(rawWords)
+    const queryStems = [...new Set(expandedWords.map(ruStem))]
+    if (queryStems.length) {
+      const scored = []
+      for (const c of allCards.value) {
+        const nameStems = stemWords(c.name)
+        if (!nameStems.length) continue
+        let matched = 0
+        for (const qs of queryStems) {
+          for (const ns of nameStems) {
+            if (ns.includes(qs) || qs.includes(ns)) { matched++; break }
+          }
+        }
+        if (matched > 0) {
+          scored.push({ card: c, score: matched / queryStems.length, matched })
+        }
+      }
+      scored.sort((a, b) => b.score - a.score || b.matched - a.matched)
+      const added = new Set()
+      for (const s of scored) {
+        if (added.has(s.card.id)) continue
+        foundCards.push({ ...s.card, reason: 'найдено по названию' })
+        added.add(s.card.id)
+        if (!matchType) { matchType = 'stem'; matchedCardId = s.card.id }
+        if (foundCards.length >= 10) break
+      }
+    }
+  }
+
+  results.value = foundCards.map(c => enrichWithStock(c, c.reason))
   logSearch(queryRaw, foundCards.length > 0, matchType, matchedCardId)
+}
+
+// Добавляет информацию об остатках к карточке
+function enrichWithStock(card, reason) {
+  const groupSkus = [card.id, ...card.analogs]
+  let stockSku = null
+  for (const sku of groupSkus) {
+    if (stockSkus.value[sku]) {
+      stockSku = sku
+      break
+    }
+  }
+  if (stockSku) {
+    const info = stockSkus.value[stockSku]
+    const stockQty = parseFloat(info.stock) || 0
+    const qtyFmt = stockQty % 1 === 0 ? stockQty.toFixed(0) : stockQty.toFixed(1)
+    return {
+      ...card,
+      reason,
+      stockSku,
+      stockName: info.name || '',
+      stockQty: qtyFmt,
+      isSameSku: stockSku === card.id
+    }
+  }
+  return { ...card, reason, stockSku: null }
 }
 
 // --- Копирование ---
@@ -1115,6 +1255,7 @@ onMounted(() => {
   maintenanceTimer = setInterval(checkMaintenance, 60000)
   loadCards()
   loadLastUpdate()
+  loadStockSkus()
   tryAutoLogin()
   sendGuestHeartbeat()
   heartbeatInterval = setInterval(sendGuestHeartbeat, 30000)
@@ -1517,6 +1658,11 @@ onBeforeUnmount(() => {
 .result-reason {
   font-size: 0.76rem;
   color: #9B8B7E;
+  font-weight: 500;
+}
+.result-stock {
+  font-size: 0.78rem;
+  color: #4a8c5c;
   font-weight: 500;
 }
 .result-copy-hint {

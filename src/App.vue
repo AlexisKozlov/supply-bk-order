@@ -22,7 +22,7 @@ const userStore = useUserStore();
 const router = useRouter();
 
 const showMaintenance = computed(() =>
-  userStore.isAuthenticated && userStore.maintenanceMode && !userStore.isAdmin
+  userStore.maintenanceMode && !userStore.isAdmin
 );
 
 function logout() {
@@ -31,8 +31,6 @@ function logout() {
 }
 
 onMounted(async () => {
-  if (userStore.isAuthenticated) {
-    await userStore.checkMaintenance();
-  }
+  await userStore.checkMaintenance();
 });
 </script>

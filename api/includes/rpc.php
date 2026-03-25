@@ -107,6 +107,19 @@ if ($endpoint === 'rpc') {
         respond($row ?: ['value' => null]);
     }
 
+    // Артикулы на остатках (для поиска карточек)
+    if ($fn === 'get_stock_skus') {
+        $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = a.sku COLLATE utf8mb4_unicode_ci AND p.legal_entity COLLATE utf8mb4_unicode_ci = a.legal_entity COLLATE utf8mb4_unicode_ci WHERE a.legal_entity = ? AND a.stock > 0");
+        $s->execute(['ООО "Бургер БК"']);
+        $rows = $s->fetchAll();
+        $result = [];
+        foreach ($rows as $r) {
+            $qpb = floatval($r['qty_per_box']) ?: 1;
+            $result[$r['sku']] = ['name' => $r['name'], 'stock' => round(floatval($r['stock']) / $qpb, 1)];
+        }
+        respond($result);
+    }
+
     // ═══ DEFICIT: публичные RPC (форма сбора остатков — legacy) ═══
     if ($fn === 'deficit_validate_token') {
         $tokenVal = $body['token_value'] ?? '';
@@ -2236,12 +2249,14 @@ if ($endpoint === 'rpc') {
             $restWithSchedule[$r['restaurant_number']] = true;
         }
 
-        // Заказы по сессиям и ресторанам (включая quantity = 0 — это тоже ответ)
-        $ordStmt = $pdo->prepare("SELECT DISTINCT session_id, restaurant_number FROM veg_orders WHERE session_id IN ({$placeholders})");
+        // Заказы по сессиям и ресторанам
+        // self = ресторан подал сам (quantity > 0), admin = админ внёс (quantity = 0, admin_qty IS NOT NULL)
+        $ordStmt = $pdo->prepare("SELECT session_id, restaurant_number, MAX(CASE WHEN quantity > 0 THEN 1 ELSE 0 END) as has_self FROM veg_orders WHERE session_id IN ({$placeholders}) GROUP BY session_id, restaurant_number");
         $ordStmt->execute($sessIds);
-        $orderMap = [];
+        $orderMap = []; // key => 'self' | 'admin'
         foreach ($ordStmt->fetchAll() as $r) {
-            $orderMap[$r['session_id'] . '_' . $r['restaurant_number']] = true;
+            $key = $r['session_id'] . '_' . $r['restaurant_number'];
+            $orderMap[$key] = $r['has_self'] ? 'self' : 'admin';
         }
 
         // Собираем статистику
@@ -2252,10 +2267,11 @@ if ($endpoint === 'rpc') {
             $participated = 0;
             $missed = 0;
             foreach ($sessIds as $sid) {
-                if (isset($orderMap[$sid . '_' . $num])) {
+                $key = $sid . '_' . $num;
+                if (isset($orderMap[$key]) && $orderMap[$key] === 'self') {
                     $participated++;
                 } else {
-                    $missed++;
+                    $missed++; // пропуск = нет заявки ИЛИ внёс админ
                 }
             }
             $total = count($sessIds);
@@ -2478,9 +2494,12 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("INSERT INTO dist_sessions (name, created_by) VALUES (?, ?)");
         $s->execute([$name, $caller['name'] ?? 'unknown']);
         $sessionId = $pdo->lastInsertId();
-        $ins = $pdo->prepare("INSERT INTO dist_session_products (session_id, product_id, default_qty, unit, sort_order) VALUES (?, ?, ?, ?, ?)");
+        $ins = $pdo->prepare("INSERT INTO dist_session_products (session_id, product_id, custom_name, custom_sku, default_qty, unit, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
         foreach ($products as $i => $p) {
-            $ins->execute([$sessionId, $p['product_id'], $p['default_qty'] ?? 1, $p['unit'] ?? 'кор', $i]);
+            $productId = !empty($p['product_id']) ? $p['product_id'] : null;
+            $customName = !empty($p['custom_name']) ? trim($p['custom_name']) : null;
+            $customSku = !empty($p['custom_sku']) ? trim($p['custom_sku']) : null;
+            $ins->execute([$sessionId, $productId, $customName, $customSku, $p['default_qty'] ?? 1, $p['unit'] ?? 'кор', $i]);
         }
         respond(['success' => true, 'session_id' => (int)$sessionId]);
     }
@@ -2516,8 +2535,8 @@ if ($endpoint === 'rpc') {
         $session = $s->fetch();
         if (!$session) respond(['error' => 'Сессия не найдена'], 404);
         // Товары сессии с данными из справочника
-        $s = $pdo->prepare("SELECT sp.id, sp.product_id, sp.default_qty, sp.unit, sp.sort_order,
-            p.name as product_name, p.sku as article, p.supplier
+        $s = $pdo->prepare("SELECT sp.id, sp.product_id, sp.custom_name, sp.custom_sku, sp.default_qty, sp.unit, sp.sort_order,
+            COALESCE(sp.custom_name, p.name) as product_name, COALESCE(sp.custom_sku, p.sku) as article, p.supplier
             FROM dist_session_products sp
             LEFT JOIN products p ON p.id = sp.product_id
             WHERE sp.session_id = ?
@@ -2606,9 +2625,12 @@ if ($endpoint === 'rpc') {
         $s = $pdo->prepare("SELECT COALESCE(MAX(sort_order),0) FROM dist_session_products WHERE session_id=?");
         $s->execute([$sessionId]);
         $maxOrder = (int)$s->fetchColumn();
-        $ins = $pdo->prepare("INSERT INTO dist_session_products (session_id, product_id, default_qty, unit, sort_order) VALUES (?, ?, ?, ?, ?)");
+        $ins = $pdo->prepare("INSERT INTO dist_session_products (session_id, product_id, custom_name, custom_sku, default_qty, unit, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
         foreach ($products as $i => $p) {
-            $ins->execute([$sessionId, $p['product_id'], $p['default_qty'] ?? 1, $p['unit'] ?? 'кор', $maxOrder + $i + 1]);
+            $productId = !empty($p['product_id']) ? $p['product_id'] : null;
+            $customName = !empty($p['custom_name']) ? trim($p['custom_name']) : null;
+            $customSku = !empty($p['custom_sku']) ? trim($p['custom_sku']) : null;
+            $ins->execute([$sessionId, $productId, $customName, $customSku, $p['default_qty'] ?? 1, $p['unit'] ?? 'кор', $maxOrder + $i + 1]);
         }
         respond(['success' => true]);
     }
