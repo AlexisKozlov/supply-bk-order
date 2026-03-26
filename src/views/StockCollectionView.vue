@@ -41,6 +41,9 @@
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="openTokenModal">
             Ссылка для ресторанов
           </button>
+          <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying">
+            {{ notifying ? 'Отправка...' : '🔔 Напомнить в Telegram' }}
+          </button>
           <button class="sc-btn outline" @click="openRename">Переименовать</button>
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline red-text" @click="askCloseCollection">
             Закрыть сбор
@@ -466,6 +469,7 @@ const tokenLink = ref('');
 const copied = ref(false);
 const creatingToken = ref(false);
 const showTokenModal = ref(false);
+const notifying = ref(false);
 
 // Confirm modal
 const confirmModal = ref({ show: false, title: '', text: '', btnText: '', danger: false, action: () => {} });
@@ -679,6 +683,17 @@ async function doCreateToken() {
       tokenLink.value = `${window.location.origin}/stock-form/${data.token}`;
     }
   } catch { toastStore.error('Ошибка', 'Не удалось создать ссылку'); } finally { creatingToken.value = false; }
+}
+
+async function notifyRestaurants() {
+  if (!activeCollection.value) return
+  notifying.value = true
+  try {
+    const { data, error } = await db.rpc('sc_notify_restaurants', { collection_id: activeCollection.value.id })
+    if (error) throw new Error(error)
+    toastStore.show(`Уведомления отправлены (${data.sent})`)
+  } catch (e) { toastStore.error('Ошибка', e.message || e) }
+  finally { notifying.value = false }
 }
 
 function copyToken() {

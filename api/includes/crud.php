@@ -8,7 +8,8 @@
 $allowed = [
     'products', 'suppliers', 'orders', 'order_items', 'plans', 'item_order',
     'settings', 'audit_log', 'stock_1c', 'search_logs', 'cards', 'users',
-    'analysis_data', 'notifications', 'restaurants', 'delivery_schedule',
+    'analysis_data', 'notifications', 'restaurants', 'delivery_schedule', 'order_corrections',
+    'chat_conversations', 'chat_messages', 'supplier_payments', 'hidden_analogs',
     'error_logs', 'changelog', 'product_adu', 'stock_malling',
     'deficit_sessions', 'deficit_results', 'deficit_tokens', 'deficit_restaurant_stock',
     'stock_collections', 'stock_collection_products', 'stock_collection_data', 'stock_collection_tokens',
@@ -133,7 +134,7 @@ if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER
 // Белый список полей, доступных для фильтрации через GET-параметры
 $filterWhitelist = [
     'products'    => ['id','sku','name','supplier','legal_entity','is_active','analog_group','category'],
-    'suppliers'   => ['id','short_name','legal_entity','is_active','dlt','doc'],
+    'suppliers'   => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','country'],
     'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit','received_at'],
     'order_items' => ['id','order_id','sku','name'],
     'plans'       => ['id','supplier','legal_entity','created_at'],
@@ -145,6 +146,15 @@ $filterWhitelist = [
     'notifications'=> ['id','type','target_user','entity_type','entity_id','legal_entity'],
     'restaurants' => ['id','legal_entity','legal_entity_group'],
     'delivery_schedule' => ['id','restaurant_id','legal_entity'],
+    'order_corrections' => ['id','restaurant_number','delivery_date','status','created_at'],
+    'chat_conversations' => ['id','restaurant_number','status','restaurant_chat_id'],
+    'chat_messages' => ['id','conversation_id','direction','is_read'],
+    'dist_sessions' => ['id','status','created_by'],
+    'dist_session_products' => ['id','session_id'],
+    'dist_entries' => ['id','session_product_id','restaurant_number'],
+    'dist_notes' => ['id','session_id','restaurant_number'],
+    'supplier_payments' => ['id','order_id','supplier','legal_entity','status','payment_date','created_at'],
+    'hidden_analogs' => ['id','analog_group'],
     'analysis_data' => ['id','legal_entity','sku'],
     'error_logs'    => ['id','level','source','user_name','created_at'],
     'changelog'     => ['id','version','created_at'],
@@ -179,11 +189,11 @@ $filterWhitelist = [
 
 // Белый список колонок для записи (POST/PATCH)
 $writeWhitelist = [
-    'orders'       => ['id','supplier','legal_entity','delivery_date','delivery_date_2','unit','note','items','details','created_by','created_at','updated_at','cda_mode','safety_coef','act_file','received_at','received_by','today_date','safety_days','period_days','has_transit','show_stock_column'],
+    'orders'       => ['id','supplier','legal_entity','delivery_date','delivery_date_2','unit','note','items','details','created_by','created_at','updated_at','cda_mode','safety_coef','act_file','received_at','received_by','today_date','safety_days','period_days','has_transit','show_stock_column','ttn_date'],
     'order_items'  => ['id','order_id','sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category','sort_order'],
     'plans'        => ['id','supplier','legal_entity','data','created_by','updated_by','created_at','updated_at','notes','period_type','period_count','items','start_date','planning_date','consumption_period_days','input_unit','note'],
     'products'     => ['id','sku','name','supplier','qty_per_box','boxes_per_pallet','unit_of_measure','legal_entity','multiplicity','analog_group','is_active','category'],
-    'suppliers'    => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','palletization','notes','schedule'],
+    'suppliers'    => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','palletization','notes','schedule','whatsapp','telegram','viber','email','country','payment_delay_days'],
     'notifications'=> ['id','type','title','message','target_user','entity_type','entity_id','legal_entity','created_by','created_at','read_by','deleted_by'],
     'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','note','doc_type','file_name','file_path','created_by','approved_by','created_at'],
     'product_prices'   => ['id','sku','supplier','legal_entity','price','vat_rate','unit_type','currency','agreement_id','updated_by','updated_at'],
@@ -206,6 +216,7 @@ $writeWhitelist = [
     'stock_collection_data' => ['id','stock'],
     'stock_collection_products' => ['id','collection_id','product_name','product_sku','unit','note','sort_order'],
     'stock_collection_tokens' => ['id'],
+    'hidden_analogs'        => ['id','analog_group','hidden_by'],
     'veg_sessions'          => ['id','name','date_from','date_to','status'],
     'veg_session_products'  => ['id','session_id','product_name','unit','multiplicity','sort_order'],
     'veg_tokens'            => ['id'],
@@ -371,7 +382,7 @@ if ($method === 'POST') {
     }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','stock_collection_tokens','plt_products','plt_deliveries','plt_delivery_items','plt_daily_stock','plt_summary'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','stock_collection_tokens','plt_products','plt_deliveries','plt_delivery_items','plt_daily_stock','plt_summary','hidden_analogs','order_corrections','chat_conversations','chat_messages','supplier_payments','order_file'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Недопустимое имя колонки: '.$col], 400); }

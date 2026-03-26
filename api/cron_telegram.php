@@ -452,7 +452,10 @@ if ($recentSales && $recentSales['cnt'] > 0) {
     $text .= "Групп товаров: <b>{$recentSales['groups_cnt']}</b>\n";
     $text .= "Последняя дата: <b>{$recentSales['last_date']}</b>";
     foreach ($users as $user) {
+        // Проверяем, не отправляли ли уже (защита от дублей при перекрытии интервалов крона)
+        if (wasNotified($pdo, 'restaurant_sales', 'all', $user['telegram_chat_id'], 600)) continue;
         tgSend($user['telegram_chat_id'], $text);
+        logNotification($pdo, 'restaurant_sales', 'all', $user['telegram_chat_id']);
         $sent++;
     }
 }
@@ -568,6 +571,108 @@ if ($dow === 5 && $hour === 17 && $minute < 5) {
         logNotification($pdo, 'weekly_report', $entities[0], $user['telegram_chat_id']);
         $sent++;
     }
+}
+
+// ═══ Оплаты российских поставщиков ═══
+try {
+    // За 7 дней до оплаты + за день до дедлайна заявки
+    $payments = $pdo->query("SELECT sp.*, o.created_by FROM supplier_payments sp LEFT JOIN orders o ON o.id = sp.order_id WHERE sp.status IN ('upcoming', 'request_due')")->fetchAll();
+    $tz = new DateTimeZone('Europe/Moscow');
+    $now = new DateTime('now', $tz);
+    $today = $now->format('Y-m-d');
+
+    foreach ($payments as $p) {
+        $payDate = new DateTime($p['payment_date']);
+        $daysUntilPay = (int)$now->diff($payDate)->format('%r%a');
+        $deadlineDt = new DateTime($p['request_deadline']);
+        $hoursUntilDeadline = ($deadlineDt->getTimestamp() - $now->getTimestamp()) / 3600;
+
+        // Определяем создателя заказа для уведомления
+        $createdBy = $p['created_by'] ?: null;
+        if (!$createdBy) continue;
+        $userSt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL");
+        $userSt->execute([$createdBy]);
+        $chatId = $userSt->fetchColumn();
+        if (!$chatId) continue;
+
+        $amountStr = $p['amount'] ? number_format(floatval($p['amount']), 0, '.', ' ') . ' ' . ($p['currency'] ?: 'RUB') : 'сумма не указана';
+        $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+        $payDow = $dayNames[(int)$payDate->format('N')] ?? '';
+        $payFmt = $payDow . ' ' . $payDate->format('d.m.Y');
+
+        // За 7 дней до оплаты
+        if ($daysUntilPay <= 7 && $daysUntilPay > 1 && $p['status'] === 'upcoming') {
+            if (!wasNotified($pdo, 'payment_7days', "pay_{$p['id']}", $chatId, 86400)) {
+                $text = "💰 <b>Оплата через {$daysUntilPay} дн.</b>\n";
+                $text .= "─────────────────────\n";
+                $text .= "📦 Поставщик: <b>{$p['supplier']}</b>\n";
+                $text .= "💵 Сумма: <b>{$amountStr}</b>\n";
+                $text .= "📅 Оплата: {$payFmt}\n";
+                $text .= "⏰ Заявку подать до: " . date('d.m H:i', strtotime($p['request_deadline'])) . "\n";
+                $text .= "\n<i>Не забудьте подать заявку в Битрикс!</i>";
+                tgSend($chatId, $text);
+                logNotification($pdo, 'payment_7days', "pay_{$p['id']}", $chatId);
+                $sent++;
+            }
+        }
+
+        // За день до дедлайна заявки (< 24 часов)
+        if ($hoursUntilDeadline <= 24 && $hoursUntilDeadline > 0) {
+            if (!wasNotified($pdo, 'payment_deadline', "pay_{$p['id']}", $chatId, 43200)) {
+                $hoursFmt = $hoursUntilDeadline < 2 ? 'менее 2 часов' : round($hoursUntilDeadline) . ' ч';
+                $text = "⚠️ <b>Дедлайн заявки на оплату!</b>\n";
+                $text .= "─────────────────────\n";
+                $text .= "📦 Поставщик: <b>{$p['supplier']}</b>\n";
+                $text .= "💵 Сумма: <b>{$amountStr}</b>\n";
+                $text .= "📅 Оплата: {$payFmt}\n";
+                $text .= "⏰ Осталось: <b>{$hoursFmt}</b>\n";
+                $text .= "\n<b>Подайте заявку в Битрикс сейчас!</b>";
+                tgSend($chatId, $text);
+                logNotification($pdo, 'payment_deadline', "pay_{$p['id']}", $chatId);
+                // Обновляем статус
+                $pdo->prepare("UPDATE supplier_payments SET status = 'request_due' WHERE id = ? AND status = 'upcoming'")->execute([$p['id']]);
+                $sent++;
+            }
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] payment reminder error: ' . $e->getMessage());
+}
+
+// ═══ Напоминания о сборе остатков ═══
+try {
+    // Активные сборы старше 4 часов — напоминаем незаполнившим ресторанам
+    $activeSc = $pdo->query("SELECT id, name FROM stock_collections WHERE status = 'active' AND created_at < NOW() - INTERVAL 4 HOUR")->fetchAll();
+    foreach ($activeSc as $sc) {
+        // Рестораны которые уже заполнили
+        $filled = $pdo->prepare("SELECT DISTINCT restaurant_number FROM stock_collection_data WHERE collection_id = ?");
+        $filled->execute([$sc['id']]);
+        $filledSet = array_flip($filled->fetchAll(PDO::FETCH_COLUMN));
+
+        // Все подписанные рестораны
+        $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number FROM veg_telegram_subs")->fetchAll();
+        foreach ($subs as $sub) {
+            if (isset($filledSet[$sub['restaurant_number']])) continue;
+            // Проверяем не отправляли ли уже напоминание (раз в 12 часов)
+            if (wasNotified($pdo, 'stock_collection_reminder', "sc_{$sc['id']}_{$sub['restaurant_number']}", $sub['chat_id'], 43200)) continue;
+
+            $text = "📋 <b>Напоминание: сбор остатков</b>\n";
+            $text .= "─────────────────────\n";
+            $text .= "📝 {$sc['name']}\n";
+            $text .= "🏪 Ресторан <b>{$sub['restaurant_number']}</b>\n\n";
+            $text .= "Вы ещё не заполнили остатки.\nПожалуйста, заполните через бот.";
+
+            $keyboard = json_encode(['inline_keyboard' => [
+                [['text' => '📋 Заполнить', 'callback_data' => 'rest_sc_start']],
+            ]]);
+
+            tgSend($sub['chat_id'], $text, false, json_decode($keyboard, true));
+            logNotification($pdo, 'stock_collection_reminder', "sc_{$sc['id']}_{$sub['restaurant_number']}", $sub['chat_id']);
+            $sent++;
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] stock collection reminder error: ' . $e->getMessage());
 }
 
 // ═══ Напоминания о заявках на овощи ═══

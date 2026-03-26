@@ -683,8 +683,28 @@ if ($endpoint === 'rpc') {
             error_log('sc_create_collection error: ' . $e->getMessage());
             respond(['error' => 'Ошибка создания сбора'], 500);
         }
+        // Уведомляем рестораны о новом сборе
+        scNotifyRestaurants($pdo, $collId, $name, count($products));
+
         respond(['id' => $collId]);
     }
+
+    // Повторная отправка уведомлений ресторанам о сборе
+    if ($fn === 'sc_notify_restaurants') {
+        $collId = intval($body['collection_id'] ?? 0);
+        if (!$collId) respond(['error' => 'collection_id required'], 400);
+        $col = $pdo->prepare("SELECT name, status FROM stock_collections WHERE id = ?");
+        $col->execute([$collId]);
+        $c = $col->fetch();
+        if (!$c) respond(['error' => 'Не найден'], 404);
+        if ($c['status'] !== 'active') respond(['error' => 'Сбор закрыт']);
+        $products = $pdo->prepare("SELECT COUNT(*) FROM stock_collection_products WHERE collection_id = ?");
+        $products->execute([$collId]);
+        $cnt = $products->fetchColumn();
+        $sent = scNotifyRestaurants($pdo, $collId, $c['name'], $cnt);
+        respond(['success' => true, 'sent' => $sent]);
+    }
+
     if ($fn === 'sc_create_token') {
         $collId = intval($body['collection_id'] ?? 0);
         $uname = $authUserName ?: ($body['user_name'] ?? '');
@@ -1021,7 +1041,7 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
         $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
-        if (($ACCESS_LEVELS[$perms['analysis'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+        if (($ACCESS_LEVELS[$perms['restaurant-sales'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
             respond(['error' => 'Недостаточно прав'], 403);
         }
         $items = $body['items'] ?? [];
@@ -2723,6 +2743,7 @@ if ($endpoint === 'rpc') {
         $linked = $pdo->query("SELECT u.name, u.email, u.role, u.display_role, u.telegram_chat_id, u.legal_entities,
             ts.daily_summary, ts.psc_expiry, ts.price_changed, ts.overdue_delivery,
             ts.data_updates, ts.expiring_items, ts.restaurant_sales, ts.low_stock,
+            ts.correction_notifications, ts.chat_notifications,
             ts.last_question_at
             FROM users u
             LEFT JOIN telegram_settings ts ON ts.user_name = u.name
@@ -2820,7 +2841,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'tg_admin_toggle_setting') {
         $userName = $body['user_name'] ?? '';
         $field = $body['field'] ?? '';
-        $allowed = ['daily_summary', 'psc_expiry', 'price_changed', 'overdue_delivery', 'data_updates', 'expiring_items', 'restaurant_sales', 'low_stock'];
+        $allowed = ['daily_summary', 'psc_expiry', 'price_changed', 'overdue_delivery', 'data_updates', 'expiring_items', 'restaurant_sales', 'low_stock', 'correction_notifications', 'chat_notifications'];
         if (!$userName || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
         $pdo->prepare("UPDATE telegram_settings SET `$field` = NOT `$field` WHERE user_name = ?")->execute([$userName]);
         $newVal = $pdo->prepare("SELECT `$field` FROM telegram_settings WHERE user_name = ?");
@@ -2834,6 +2855,436 @@ if ($endpoint === 'rpc') {
         if (!$userName) respond(['error' => 'Не указан пользователь'], 400);
         $pdo->prepare("UPDATE users SET telegram_chat_id = NULL WHERE name = ?")->execute([$userName]);
         respond(['success' => true]);
+    }
+
+    // ═══ Корректировки заказов ═══
+
+    if ($fn === 'correction_review') {
+        $id = intval($body['id'] ?? 0);
+        $action = $body['action'] ?? '';
+        $comment = trim($body['comment'] ?? '');
+        if (!$id || !in_array($action, ['approve', 'reject'])) respond(['error' => 'Неверные параметры'], 400);
+
+        $caller = getSessionUser($pdo);
+        $callerName = $caller['name'] ?? 'unknown';
+
+        $newStatus = $action === 'approve' ? 'approved' : 'rejected';
+        $callerChatId = $caller['telegram_chat_id'] ?? null;
+        $upd = $pdo->prepare("UPDATE order_corrections SET status = ?, reviewer_chat_id = ?, reviewer_name = ?, review_comment = ?, reviewed_at = NOW() WHERE id = ? AND status IN ('pending', 'in_progress')");
+        $upd->execute([$newStatus, $callerChatId, $callerName, $comment ?: null, $id]);
+        if ($upd->rowCount() === 0) respond(['error' => 'Уже обработано']);
+
+        $corr = $pdo->prepare("SELECT * FROM order_corrections WHERE id = ?");
+        $corr->execute([$id]);
+        $c = $corr->fetch();
+        if (!$c) respond(['error' => 'Не найдено'], 404);
+
+        // Определяем батч — все позиции этого ресторана на эту дату от того же отправителя
+        $batchSt = $pdo->prepare("SELECT * FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ? ORDER BY id");
+        $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
+        $batchItems = $batchSt->fetchAll();
+
+        // Проверяем остались ли pending
+        $hasPending = false;
+        foreach ($batchItems as $bi) { if ($bi['status'] === 'pending') { $hasPending = true; break; } }
+
+        // Если все обработаны — отправляем сводку ресторану
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if (!$hasPending && $botToken && $c['restaurant_chat_id']) {
+            $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+            $dow = (int)(new DateTime($c['delivery_date']))->format('N');
+            $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($c['delivery_date']));
+
+            $text = "📋 <b>Результат корректировки заказа</b>\n";
+            $text .= "🏪 Ресторан <b>{$c['restaurant_number']}</b> | Доставка: {$dateFmt}\n";
+            $text .= "─────────────────────\n";
+            foreach ($batchItems as $bi) {
+                $uom = $bi['unit_of_measure'] ?: 'кор.';
+                $qty = rtrim(rtrim(number_format(floatval($bi['quantity']), 2, '.', ''), '0'), '.') . " {$uom}";
+                if ($bi['status'] === 'approved') {
+                    $label = $bi['action'] === 'add' ? 'Добавлено' : 'Убрано';
+                    $text .= "✅ <b>{$label}:</b> {$bi['product_name']} — {$qty}\n";
+                } else {
+                    $label = $bi['action'] === 'add' ? 'Добавить' : 'Убрать';
+                    $text .= "❌ <b>Отклонено</b> ({$label}): {$bi['product_name']} — {$qty}\n";
+                    if ($bi['review_comment']) $text .= "    Причина: {$bi['review_comment']}\n";
+                }
+            }
+            $text .= "─────────────────────\n";
+            $text .= "Обработал: {$callerName}";
+
+            $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
+            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+            curl_exec($ch); curl_close($ch);
+
+            // Обновляем сообщения закупщиков — перестраиваем с актуальными статусами
+            $nm = json_decode($c['notify_messages'] ?? '{}', true);
+            $messages = $nm['messages'] ?? [];
+            $batchIdsNm = $nm['batch_ids'] ?? array_column($batchItems, 'id');
+            if ($messages && $batchIdsNm) {
+                // Перестраиваем текст и кнопки
+                require_once __DIR__ . '/bot_veg.php';
+                $msgData = corrBuildReviewMessage($pdo, $batchIdsNm);
+                foreach ($messages as $m) {
+                    $epayload = json_encode(['chat_id' => $m['chat_id'], 'message_id' => $m['message_id'], 'text' => $msgData['text'], 'parse_mode' => 'HTML', 'reply_markup' => json_encode($msgData['keyboard'])]);
+                    $ch2 = curl_init("https://api.telegram.org/bot{$botToken}/editMessageText");
+                    curl_setopt_array($ch2, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $epayload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+                    curl_exec($ch2); curl_close($ch2);
+                }
+            }
+        }
+
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'correction_delete') {
+        $perms = resolvePermissions($authUser['role'] ?? 'user', $authUser['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($perms['corrections'] ?? 'none') === 'view' || ($perms['corrections'] ?? 'none') === 'none') respond(['error' => 'Нет прав'], 403);
+        $ids = $body['ids'] ?? [];
+        if (empty($ids)) respond(['error' => 'Нет ID'], 400);
+        $ids = array_map('intval', $ids);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $pdo->prepare("DELETE FROM order_corrections WHERE id IN ({$ph})")->execute($ids);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'correction_clear_all') {
+        if (($authUser['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
+        $pdo->exec("DELETE FROM order_corrections");
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'correction_get_settings') {
+        $st = $pdo->query("SELECT u.name, ts.correction_notifications FROM users u JOIN telegram_settings ts ON ts.user_name = u.name WHERE u.telegram_chat_id IS NOT NULL ORDER BY u.name");
+        respond($st->fetchAll());
+    }
+
+    if ($fn === 'correction_toggle_notification') {
+        $userName = $body['user_name'] ?? '';
+        if (!$userName) respond(['error' => 'user_name required'], 400);
+        $pdo->prepare("UPDATE telegram_settings SET correction_notifications = NOT correction_notifications WHERE user_name = ?")->execute([$userName]);
+        respond(['success' => true]);
+    }
+
+    // ═══ Оплаты поставщиков ═══
+
+    if ($fn === 'create_payment_if_needed') {
+        $orderId = $body['order_id'] ?? '';
+        $deliveryDate = $body['delivery_date'] ?? '';
+        if (!$orderId || !$deliveryDate) respond(['error' => 'order_id and delivery_date required'], 400);
+
+        // Получаем заказ и поставщика
+        $order = $pdo->prepare("SELECT o.id, o.supplier, o.legal_entity, o.created_by,
+            (SELECT SUM(oi.qty_boxes * COALESCE(pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci WHERE oi.order_id = o.id) as total_amount
+            FROM orders o WHERE o.id = ?");
+        $order->execute([$orderId]);
+        $o = $order->fetch();
+        if (!$o) respond(['skip' => true]); // заказ не найден
+
+        // Проверяем поставщика — российский + есть отсрочка
+        $sup = $pdo->prepare("SELECT country, payment_delay_days FROM suppliers WHERE short_name = ? AND legal_entity = ?");
+        $sup->execute([$o['supplier'], $o['legal_entity']]);
+        $s = $sup->fetch();
+        if (!$s) {
+            // Пробуем без legal_entity
+            $sup2 = $pdo->prepare("SELECT country, payment_delay_days FROM suppliers WHERE short_name = ? LIMIT 1");
+            $sup2->execute([$o['supplier']]);
+            $s = $sup2->fetch();
+        }
+        if (!$s || $s['country'] !== 'RU' || !$s['payment_delay_days']) respond(['skip' => true]);
+
+        // Проверяем нет ли уже оплаты
+        $exists = $pdo->prepare("SELECT id FROM supplier_payments WHERE order_id = ?");
+        $exists->execute([$orderId]);
+        if ($exists->fetch()) respond(['skip' => true, 'reason' => 'already_exists']);
+
+        $delayDays = intval($s['payment_delay_days']);
+        $dDate = new DateTime($deliveryDate);
+
+        // Дата окончания отсрочки
+        $dueDate = clone $dDate;
+        $dueDate->modify("+{$delayDays} days");
+
+        // Ближайший ВТ(2) или ЧТ(4) после dueDate
+        $payDate = clone $dueDate;
+        while (true) {
+            $dow = (int)$payDate->format('N');
+            if ($dow === 2 || $dow === 4) break; // ВТ или ЧТ
+            $payDate->modify('+1 day');
+        }
+
+        // Дедлайн заявки: предыдущий день 15:00
+        $deadline = clone $payDate;
+        $deadline->modify('-1 day');
+        $deadline->setTime(15, 0, 0);
+
+        $ins = $pdo->prepare("INSERT INTO supplier_payments (order_id, supplier, legal_entity, delivery_date, payment_delay_days, payment_due_date, payment_date, request_deadline, amount, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $ins->execute([
+            $orderId, $o['supplier'], $o['legal_entity'], $deliveryDate,
+            $delayDays, $dueDate->format('Y-m-d'), $payDate->format('Y-m-d'),
+            $deadline->format('Y-m-d H:i:s'),
+            $o['total_amount'] ?: null,
+            $o['created_by'],
+        ]);
+
+        respond(['success' => true, 'payment_id' => $pdo->lastInsertId(), 'payment_date' => $payDate->format('Y-m-d')]);
+    }
+
+    if ($fn === 'update_payment') {
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+        $allowed = ['amount', 'status', 'note', 'payment_date', 'delivery_date', 'request_deadline'];
+        $sets = []; $params = [];
+        foreach ($allowed as $f) {
+            if (array_key_exists($f, $body)) {
+                $sets[] = "`{$f}` = ?";
+                $params[] = $body[$f];
+            }
+        }
+        $caller = getSessionUser($pdo);
+        if (($body['status'] ?? '') === 'paid') {
+            $sets[] = "paid_by = ?"; $params[] = $caller['name'] ?? 'unknown';
+            $sets[] = "paid_at = NOW()";
+        }
+        if (($body['status'] ?? '') === 'requested') {
+            $sets[] = "paid_by = ?"; $params[] = $caller['name'] ?? 'unknown';
+        }
+        if (empty($sets)) respond(['error' => 'nothing to update'], 400);
+        $params[] = $id;
+        $pdo->prepare("UPDATE supplier_payments SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'dashboard_kpi') {
+        $period = $body['period'] ?? 'week';
+        $le = $body['legal_entity'] ?? null;
+        $days = ['week' => 7, 'month' => 30, 'quarter' => 90][$period] ?? 7;
+        $from = date('Y-m-d', strtotime("-{$days} days"));
+        $prevFrom = date('Y-m-d', strtotime("-" . ($days * 2) . " days"));
+        $leWhere = $le ? " AND o.legal_entity = " . $pdo->quote($le) : '';
+        $leWhereA = $le ? " AND legal_entity = " . $pdo->quote($le) : '';
+
+        $curOrders = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE created_at_new >= ?" . ($le ? " AND legal_entity = ?" : ''));
+        $curOrders->execute($le ? [$from, $le] : [$from]);
+        $ordersCount = intval($curOrders->fetchColumn());
+
+        // Заказы прошлый период
+        $prevOrders = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE created_at_new >= ? AND created_at_new < ?");
+        $prevOrders->execute([$prevFrom, $from]);
+        $prevCount = intval($prevOrders->fetchColumn());
+        $ordersDelta = $prevCount > 0 ? round(($ordersCount - $prevCount) / $prevCount * 100) : 0;
+
+        // Сумма (из order_items * product_prices)
+        $amtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0) as total
+            FROM orders o JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci
+            WHERE o.created_at_new >= ?");
+        $amtSt->execute([$from]);
+        $totalAmount = floatval($amtSt->fetchColumn());
+
+        $prevAmtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0)
+            FROM orders o JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci
+            WHERE o.created_at_new >= ? AND o.created_at_new < ?");
+        $prevAmtSt->execute([$prevFrom, $from]);
+        $prevAmount = floatval($prevAmtSt->fetchColumn());
+        $amountDelta = $prevAmount > 0 ? round(($totalAmount - $prevAmount) / $prevAmount * 100) : 0;
+
+        // Выполнение поставок
+        $totalDel = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date >= ? AND delivery_date <= CURDATE()");
+        $totalDel->execute([$from]);
+        $totalDeliveries = intval($totalDel->fetchColumn());
+        $receivedDel = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date >= ? AND delivery_date <= CURDATE() AND received_at IS NOT NULL");
+        $receivedDel->execute([$from]);
+        $received = intval($receivedDel->fetchColumn());
+        $deliveredPct = $totalDeliveries > 0 ? round($received / $totalDeliveries * 100) : 100;
+
+        // Просроченные
+        $overdue = $pdo->query("SELECT COUNT(*) FROM orders WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= '{$from}'")->fetchColumn();
+
+        // Низкий запас
+        $lowStock = $pdo->query("SELECT COUNT(*) FROM analysis_data WHERE consumption > 0 AND stock > 0 AND stock / (consumption / GREATEST(period_days, 1)) <= 3")->fetchColumn();
+
+        // Корректировки
+        $corrPending = $pdo->query("SELECT COUNT(*) FROM order_corrections WHERE status = 'pending'")->fetchColumn();
+
+        // Чат непрочитанные
+        $chatUnread = $pdo->query("SELECT COUNT(*) FROM chat_messages cm JOIN chat_conversations cc ON cc.id = cm.conversation_id WHERE cm.is_read = 0 AND cm.direction = 'from_restaurant' AND cc.status = 'open'")->fetchColumn();
+
+        // Оплаты
+        $paymentsUp = $pdo->query("SELECT COUNT(*) FROM supplier_payments WHERE status IN ('upcoming', 'request_due')")->fetchColumn();
+
+        // Топ поставщиков
+        $topSt = $pdo->prepare("SELECT o.supplier, SUM(oi.qty_boxes * COALESCE(pp.price, 0)) as total
+            FROM orders o JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci
+            WHERE o.created_at_new >= ?
+            GROUP BY o.supplier ORDER BY total DESC LIMIT 10");
+        $topSt->execute([$from]);
+        $topSuppliers = $topSt->fetchAll();
+
+        // Просроченные заказы (детали)
+        $overdueSt = $pdo->query("SELECT id, supplier, delivery_date, DATEDIFF(CURDATE(), delivery_date) as days_overdue FROM orders WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= '{$from}'" . ($le ? " AND legal_entity = " . $pdo->quote($le) : '') . " ORDER BY delivery_date LIMIT 10");
+        $overdueOrders = $overdueSt->fetchAll();
+
+        // Ближайшие оплаты
+        $paysSt = $pdo->query("SELECT id, supplier, payment_date, amount, currency FROM supplier_payments WHERE status IN ('upcoming','request_due') ORDER BY payment_date LIMIT 5");
+        $upcomingPayments = $paysSt->fetchAll();
+
+        // Тендеры
+        $activeTenders = intval($pdo->query("SELECT COUNT(*) FROM tenders WHERE status = 'collecting'")->fetchColumn());
+        // Сборы остатков
+        $activeCollections = intval($pdo->query("SELECT COUNT(*) FROM stock_collections WHERE status = 'active'")->fetchColumn());
+
+        respond([
+            'ordersCount' => $ordersCount, 'ordersDelta' => $ordersDelta,
+            'totalAmount' => round($totalAmount, 0), 'amountDelta' => $amountDelta,
+            'deliveredPct' => $deliveredPct, 'overdueCount' => intval($overdue),
+            'lowStockCount' => intval($lowStock), 'correctionsPending' => intval($corrPending),
+            'chatUnread' => intval($chatUnread), 'paymentsUpcoming' => intval($paymentsUp),
+            'topSuppliers' => $topSuppliers,
+            'overdueOrders' => $overdueOrders, 'upcomingPayments' => $upcomingPayments,
+            'activeTenders' => $activeTenders, 'activeCollections' => $activeCollections,
+        ]);
+    }
+
+    if ($fn === 'get_user_tg_settings') {
+        $userName = $body['user_name'] ?? '';
+        if (!$userName) respond(['error' => 'user_name required'], 400);
+        $st = $pdo->prepare("SELECT daily_summary, psc_expiry, price_changed, overdue_delivery, data_updates, expiring_items, restaurant_sales, low_stock, correction_notifications, chat_notifications FROM telegram_settings WHERE user_name = ?");
+        $st->execute([$userName]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        respond($row ?: []);
+    }
+
+    // ═══ Чат с ресторанами ═══
+
+    if ($fn === 'chat_get_conversations') {
+        $status = $body['status'] ?? 'open';
+        $st = $pdo->prepare("SELECT cc.*,
+            (SELECT COUNT(*) FROM chat_messages cm WHERE cm.conversation_id = cc.id AND cm.is_read = 0 AND cm.direction = 'from_restaurant') as unread_count,
+            (SELECT cm2.message_text FROM chat_messages cm2 WHERE cm2.conversation_id = cc.id ORDER BY cm2.id DESC LIMIT 1) as last_message
+            FROM chat_conversations cc WHERE cc.status = ? ORDER BY cc.last_message_at DESC LIMIT 100");
+        $st->execute([$status]);
+        respond($st->fetchAll());
+    }
+
+    if ($fn === 'chat_get_messages') {
+        $convId = intval($body['conversation_id'] ?? 0);
+        if (!$convId) respond(['error' => 'conversation_id required'], 400);
+        // Помечаем как прочитанные
+        $pdo->prepare("UPDATE chat_messages SET is_read = 1 WHERE conversation_id = ? AND direction = 'from_restaurant' AND is_read = 0")->execute([$convId]);
+        $st = $pdo->prepare("SELECT * FROM chat_messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 500");
+        $st->execute([$convId]);
+        respond($st->fetchAll());
+    }
+
+    if ($fn === 'chat_send_message') {
+        $convId = intval($body['conversation_id'] ?? 0);
+        $text = trim($body['message_text'] ?? '');
+        if (!$convId || !$text) respond(['error' => 'conversation_id and message_text required'], 400);
+        $caller = getSessionUser($pdo);
+        $senderName = $caller['name'] ?? 'Закупки';
+
+        $ins = $pdo->prepare("INSERT INTO chat_messages (conversation_id, direction, sender_name, message_text, is_read) VALUES (?, 'from_purchasing', ?, ?, 1)");
+        $ins->execute([$convId, $senderName, $text]);
+        $pdo->prepare("UPDATE chat_conversations SET last_message_at = NOW() WHERE id = ?")->execute([$convId]);
+
+        // Отправляем в Telegram ресторану
+        $conv = $pdo->prepare("SELECT restaurant_chat_id, restaurant_number FROM chat_conversations WHERE id = ?");
+        $conv->execute([$convId]);
+        $c = $conv->fetch();
+        if ($c && $c['restaurant_chat_id']) {
+            $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+            if ($botToken) {
+                $tgText = "📨 <b>Ответ от отдела закупок</b>\n";
+                $tgText .= "🏪 Ресторан {$c['restaurant_number']}\n";
+                $tgText .= "─────────────────────\n";
+                $tgText .= htmlspecialchars($text, ENT_QUOTES, 'UTF-8') . "\n";
+                $tgText .= "─────────────────────\n";
+                $tgText .= "<i>Ответил: {$senderName}</i>";
+                $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $tgText, 'parse_mode' => 'HTML']);
+                $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+                curl_exec($ch); curl_close($ch);
+            }
+        }
+        respond(['success' => true, 'message_id' => $pdo->lastInsertId()]);
+    }
+
+    if ($fn === 'chat_close_conversation') {
+        $convId = intval($body['conversation_id'] ?? 0);
+        if (!$convId) respond(['error' => 'conversation_id required'], 400);
+        $caller = getSessionUser($pdo);
+        $pdo->prepare("UPDATE chat_conversations SET status = 'closed', closed_by = ?, closed_at = NOW() WHERE id = ?")
+            ->execute([$caller['name'] ?? 'unknown', $convId]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'chat_reopen_conversation') {
+        $convId = intval($body['conversation_id'] ?? 0);
+        if (!$convId) respond(['error' => 'conversation_id required'], 400);
+        $pdo->prepare("UPDATE chat_conversations SET status = 'open', closed_by = NULL, closed_at = NULL WHERE id = ?")->execute([$convId]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'chat_unread_total') {
+        $cnt = $pdo->query("SELECT COUNT(*) FROM chat_messages cm JOIN chat_conversations cc ON cc.id = cm.conversation_id WHERE cm.is_read = 0 AND cm.direction = 'from_restaurant' AND cc.status = 'open'")->fetchColumn();
+        respond(['count' => intval($cnt)]);
+    }
+
+    if ($fn === 'chat_send_photo') {
+        $convId = intval($_POST['conversation_id'] ?? $body['conversation_id'] ?? 0);
+        if (!$convId) respond(['error' => 'conversation_id required'], 400);
+        if (empty($_FILES['photo'])) respond(['error' => 'Файл не выбран'], 400);
+
+        $caller = getSessionUser($pdo);
+        $senderName = $caller['name'] ?? 'Закупки';
+
+        $conv = $pdo->prepare("SELECT restaurant_chat_id, restaurant_number FROM chat_conversations WHERE id = ?");
+        $conv->execute([$convId]);
+        $c = $conv->fetch();
+        if (!$c) respond(['error' => 'Диалог не найден'], 404);
+
+        // Отправляем фото в Telegram ресторану и получаем file_id
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        $photoFileId = null;
+        if ($botToken && $c['restaurant_chat_id']) {
+            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendPhoto");
+            $postData = [
+                'chat_id' => $c['restaurant_chat_id'],
+                'photo' => new CURLFile($_FILES['photo']['tmp_name'], $_FILES['photo']['type'], $_FILES['photo']['name']),
+                'caption' => "📨 Фото от отдела закупок ({$senderName})",
+            ];
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $postData, CURLOPT_TIMEOUT => 30]);
+            $resp = json_decode(curl_exec($ch), true);
+            curl_close($ch);
+            if (isset($resp['result']['photo'])) {
+                $photos = $resp['result']['photo'];
+                $photoFileId = end($photos)['file_id'] ?? null;
+            }
+        }
+
+        if (!$photoFileId) respond(['error' => 'Не удалось отправить фото'], 500);
+
+        // Сохраняем в базу
+        $ins = $pdo->prepare("INSERT INTO chat_messages (conversation_id, direction, sender_name, photo_file_id, is_read) VALUES (?, 'from_purchasing', ?, ?, 1)");
+        $ins->execute([$convId, $senderName, $photoFileId]);
+        $pdo->prepare("UPDATE chat_conversations SET last_message_at = NOW() WHERE id = ?")->execute([$convId]);
+
+        respond(['success' => true, 'photo_file_id' => $photoFileId]);
+    }
+
+    if ($fn === 'chat_get_photo') {
+        $fileId = $body['file_id'] ?? ($_GET['file_id'] ?? '');
+        if (!$fileId) respond(['error' => 'file_id required'], 400);
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        $resp = @file_get_contents("https://api.telegram.org/bot{$botToken}/getFile?" . http_build_query(['file_id' => $fileId]));
+        $data = json_decode($resp, true);
+        $filePath = $data['result']['file_path'] ?? null;
+        if (!$filePath) respond(['error' => 'File not found'], 404);
+        respond(['url' => "https://api.telegram.org/file/bot{$botToken}/{$filePath}"]);
     }
 
     respond(['error'=>'Not found'], 404);

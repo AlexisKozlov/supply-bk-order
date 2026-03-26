@@ -1689,7 +1689,8 @@ let _collapseHintTimer = null;
 watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.value = true; clearTimeout(_collapseHintTimer); _collapseHintTimer = setTimeout(() => { showCollapseHint.value = false; }, 4000); } });
 
 function hasPlanUnsavedData() {
-  return items.value.length > 0 && !viewOnly.value;
+  if (viewOnly.value || !items.value.length) return false;
+  return items.value.some(i => i.consumption > 0 || i.stock > 0 || i.transit > 0 || i.order > 0);
 }
 
 function onPlanBeforeUnload(e) {

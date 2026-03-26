@@ -45,6 +45,8 @@ export const icons = {
 
   edit: `<svg viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="#FF8733" stroke-width="1.8"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" fill="#FF8733" stroke="#D62700" stroke-width="1.8"/></svg>`,
 
+  chat: `<svg viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" fill="#FF8733" stroke="#D62700" stroke-width="1.5"/></svg>`,
+
   delete: `<svg viewBox="0 0 24 24" fill="none"><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" fill="#FFEBEE" stroke="#D62700" stroke-width="1.8"/><path d="M3 6h18" stroke="#D62700" stroke-width="2" stroke-linecap="round"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" stroke="#D62700" stroke-width="1.8"/><line x1="10" y1="10" x2="10" y2="17" stroke="#D62700" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="10" x2="14" y2="17" stroke="#D62700" stroke-width="2" stroke-linecap="round"/></svg>`,
 
   add: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#E8F5E9" stroke="#2E7D32" stroke-width="1.5"/><line x1="12" y1="8" x2="12" y2="16" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round"/><line x1="8" y1="12" x2="16" y2="12" stroke="#2E7D32" stroke-width="2.5" stroke-linecap="round"/></svg>`,
@@ -178,6 +180,8 @@ export const iconsLight = {
   stockCollection: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2.5" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/><rect x="8" y="1" width="8" height="4" rx="1.5" fill="#4FC3F7" stroke="rgba(255,255,255,0.4)" stroke-width="1"/><path d="M8.5 10.5l2 2 5-5" stroke="#66BB6A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 16.5l2 2 5-5" stroke="#A5D6A7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 
   tender: `<svg viewBox="0 0 24 24" fill="none"><rect x="6" y="13" width="12" height="3" rx="1" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/><rect x="4" y="16" width="16" height="4" rx="1.5" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/><path d="M12 4v5" stroke="#FFD54F" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="4" r="2.5" fill="rgba(255,255,255,0.1)" stroke="#FFD54F" stroke-width="1.3"/><path d="M7 13l-3 3M17 13l3 3" stroke="rgba(255,255,255,0.4)" stroke-width="1.3" stroke-linecap="round"/></svg>`,
+
+  chat: `<svg viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.5)" stroke-width="1.3"/><path d="M8 9h8M8 13h5" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>`,
 
   veg: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 22c-4-3-8-7.5-8-12C4 5.5 7.5 2 12 2c1.5 0 3 .4 4 1.2C17.5 2.4 19 2 20 3c1 1 .6 2.5-.2 4 .8 1 1.2 2.5 1.2 4 0 4.5-4 9-9 12z" fill="rgba(102,187,106,0.3)" stroke="#81C784" stroke-width="1.3"/><path d="M12 22V8" stroke="#A5D6A7" stroke-width="1.3" stroke-linecap="round"/><path d="M12 12c-3-2-4-5-3-7" stroke="#A5D6A7" stroke-width="1" stroke-linecap="round"/><path d="M12 15c2-1.5 3.5-4 3-6" stroke="#A5D6A7" stroke-width="1" stroke-linecap="round"/></svg>`,
 

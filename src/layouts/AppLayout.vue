@@ -15,13 +15,20 @@
         </button>
       </div>
 
+      <!-- Кнопка быстрого поиска -->
+      <button class="sidebar-search-btn" @click="openCommandPalette" :title="sidebarCollapsed ? 'Поиск (/)' : ''">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <span v-if="!sidebarCollapsed">Поиск...</span>
+        <kbd v-if="!sidebarCollapsed" class="sidebar-search-kbd">/</kbd>
+      </button>
+
       <div class="sidebar-nav-scroll">
       <template v-for="section in sidebarSections" :key="section.title">
-        <template v-if="section.items.some(i => userStore.hasAccess(i.module, 'view'))">
+        <template v-if="section.items.some(i => userStore.hasAccess(i.module, 'view') && isModuleVisible(i.module))">
           <div class="sidebar-section" v-if="!sidebarCollapsed">{{ section.title }}</div>
           <nav class="sidebar-nav">
             <template v-for="item in section.items" :key="item.module">
-              <router-link v-if="userStore.hasAccess(item.module, 'view')" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }">
+              <router-link v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module)" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }">
                 <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                 <span v-if="!sidebarCollapsed">{{ item.label }}</span>
               </router-link>
@@ -31,18 +38,19 @@
       </template>
 
       <!-- Инструменты — ряд иконок -->
-      <template v-if="toolsItems.some(t => userStore.hasAccess(t.module, 'view'))">
+      <template v-if="toolsItems.some(t => userStore.hasAccess(t.module, 'view') && isModuleVisible(t.module, t.route))">
         <div class="sidebar-section" v-if="!sidebarCollapsed">Инструменты</div>
         <div class="sidebar-tools-row" :class="{ 'sidebar-tools-row-collapsed': sidebarCollapsed }">
-          <template v-for="item in toolsItems" :key="item.module">
+          <template v-for="item in toolsItems" :key="item.route">
             <router-link
-              v-if="userStore.hasAccess(item.module, 'view')"
+              v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module, item.route)"
               :to="{ name: item.route }"
               class="sidebar-tool-icon"
               :class="{ active: currentRoute === item.route }"
               :title="item.label"
             >
               <BkIcon :name="item.icon" size="sm" light/>
+              <span v-if="badgeCounts[item.module]" class="sidebar-badge">{{ badgeCounts[item.module] }}</span>
             </router-link>
           </template>
         </div>
@@ -83,6 +91,12 @@
           </button>
           <button class="user-dropdown-btn" @click="showChangePassword = true; showUserMenu = false;">
             <BkIcon name="key" size="sm" light/> Сменить пароль
+          </button>
+          <button class="user-dropdown-btn" @click="$router.push({ name: 'user-settings' }); showUserMenu = false;">
+            <BkIcon name="gear" size="sm" light/> Настройки
+          </button>
+          <button v-if="userStore.hasAccess('analysis', 'edit')" class="user-dropdown-btn" @click="$router.push({ name: 'import' }); showUserMenu = false;">
+            <BkIcon name="import" size="sm" light/> Импорт данных
           </button>
           <a class="user-dropdown-btn telegram-btn" href="https://t.me/supplyportal_bot" target="_blank" @click="showUserMenu = false">
             <span class="tg-icon">✈</span>
@@ -292,6 +306,9 @@
     <!-- Индикатор отсутствия соединения -->
     <OfflineIndicator />
 
+    <!-- Командная палитра (Ctrl+K или /) -->
+    <CommandPalette ref="cmdPalette" />
+
   </div>
 </template>
 
@@ -308,6 +325,7 @@ import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import BroadcastPopup from '@/components/BroadcastPopup.vue';
 import BugReportButton from '@/components/BugReportButton.vue';
 import OfflineIndicator from '@/components/ui/OfflineIndicator.vue';
+import CommandPalette from '@/components/ui/CommandPalette.vue';
 
 
 const router = useRouter();
@@ -344,6 +362,16 @@ function handleOffline() { isOffline.value = true; }
 
 const sidebarCollapsed = ref(localStorage.getItem('bk_sidebar_collapsed') === 'true');
 const sidebarOpen = ref(false);
+const hiddenModules = ref(JSON.parse(localStorage.getItem('bk_hidden_modules') || '[]'));
+function isModuleVisible(module, route = null) { return !hiddenModules.value.includes(route || module) && !hiddenModules.value.includes(module); }
+// Обновление при изменении из страницы настроек
+window.addEventListener('storage', (e) => {
+  if (e.key === 'bk_hidden_modules') hiddenModules.value = JSON.parse(e.newValue || '[]');
+});
+// Также custom event для SPA (storage не срабатывает в той же вкладке)
+window.addEventListener('bk_settings_changed', () => {
+  hiddenModules.value = JSON.parse(localStorage.getItem('bk_hidden_modules') || '[]');
+});
 
 const sidebarSections = [
   { title: 'Заказы', items: [
@@ -360,6 +388,7 @@ const sidebarSections = [
 ];
 
 const toolsItems = [
+  { module: 'analytics', route: 'dashboard', icon: 'home', label: 'Дашборд' },
   { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
   { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
   { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
@@ -370,6 +399,9 @@ const toolsItems = [
   { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
   { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
   { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
+  { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
+  { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
+  { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
 ];
 
 const showToolsMenu = ref(false); // legacy, не используется
@@ -471,7 +503,32 @@ const pageNames = {
   'stock-collection': 'Сбор остатков',
   'veg-admin': 'Овощи',
   'telegram-admin': 'Telegram-бот',
+  'corrections': 'Корректировки',
+  'chat': 'Чат с ресторанами',
+  'pallet-calc': 'Калькулятор паллет',
+  'distribution': 'Распределение',
 };
+
+const cmdPalette = ref(null)
+function openCommandPalette() {
+  if (cmdPalette.value) { cmdPalette.value.open = true }
+}
+
+// Badges для непрочитанных
+const badgeCounts = ref({})
+async function loadBadges() {
+  if (!userStore.isAuthenticated) return
+  try {
+    const [chatRes, corrRes] = await Promise.all([
+      db.rpc('chat_unread_total'),
+      db.from('order_corrections').select('id').eq('status', 'pending').limit(100),
+    ])
+    badgeCounts.value = {}
+    if (chatRes.data?.count > 0) badgeCounts.value['chat'] = chatRes.data.count
+    if (corrRes.data?.length > 0) badgeCounts.value['corrections'] = corrRes.data.length
+  } catch {}
+}
+let badgeTimer = null
 
 function sendHeartbeat() {
   if (isOffline.value) return;
@@ -518,6 +575,9 @@ onMounted(() => {
   if (allowed && allowed.length > 0 && !allowed.includes(orderStore.settings.legalEntity)) {
     orderStore.settings.legalEntity = allowed[0];
   }
+
+  loadBadges()
+  badgeTimer = setInterval(loadBadges, 30000)
 
   const justLoggedIn = sessionStorage.getItem('bk_just_logged_in');
   if (justLoggedIn) {
@@ -787,7 +847,9 @@ function confirmLogout() {
   padding: 2px 6px 4px;
   align-items: center;
 }
+.sidebar-badge { position: absolute; top: -4px; right: -4px; background: #F44336; color: #fff; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
 .sidebar-tool-icon {
+  position: relative;
   width: calc(33.333% - 3px);
   flex: none;
   height: 34px;

@@ -538,7 +538,9 @@ onMounted(async () => {
 });
 
 function hasUnsavedData() {
-  return orderStore.items.length > 0 && !orderStore.viewOnlyMode;
+  if (orderStore.viewOnlyMode || !orderStore.items.length) return false;
+  // Проверяем есть ли реально заполненные данные (не просто пустые товары)
+  return orderStore.items.some(i => i.consumptionPeriod > 0 || i.stock > 0 || i.transit > 0 || i.finalOrder > 0);
 }
 
 function onBeforeUnload(e) {

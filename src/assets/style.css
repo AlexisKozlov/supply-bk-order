@@ -115,6 +115,11 @@ body {
 }
 .sidebar-collapse-btn:hover { color: rgba(255,255,255,0.8); }
 
+.sidebar-search-btn { display: flex; align-items: center; gap: 8px; width: calc(100% - 16px); margin: 4px 8px 8px; padding: 8px 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+.sidebar-search-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
+.sidebar-search-kbd { margin-left: auto; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; font-size: 11px; font-family: monospace; }
+.sidebar.collapsed .sidebar-search-btn { width: 36px; margin: 4px auto 8px; padding: 8px; justify-content: center; }
+
 /* Collapsed sidebar */
 .sidebar.collapsed {
   width: 52px;
@@ -1918,9 +1923,11 @@ input[type="number"]:focus {
   overflow-y: auto;
   overflow-x: hidden;
 }
-.sidebar-nav-scroll::-webkit-scrollbar { width: 4px; }
-.sidebar-nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
-.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+.sidebar-nav-scroll::-webkit-scrollbar { width: 3px; }
+.sidebar-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+.sidebar-nav-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
 
 /* ═══ ORDER RESULT MODAL ═══ */
 .order-result-modal { max-width: 680px; }

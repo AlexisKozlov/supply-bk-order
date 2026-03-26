@@ -211,11 +211,49 @@ function notifyTelegramRestaurantSales($pdo, $userName, $items, $count) {
     }
 }
 
+// Уведомление ресторанов о новом сборе остатков
+function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCount) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    if (!$botToken) return 0;
+
+    // Все подписанные рестораны (chat_id уникальные)
+    $st = $pdo->query("SELECT DISTINCT chat_id, GROUP_CONCAT(DISTINCT restaurant_number ORDER BY CAST(restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests FROM veg_telegram_subs GROUP BY chat_id");
+    $subs = $st->fetchAll();
+    if (!$subs) return 0;
+
+    $text = "📋 <b>Новый сбор остатков</b>\n";
+    $text .= "─────────────────────\n";
+    $text .= "📝 {$collectionName}\n";
+    $text .= "📦 Товаров: {$productsCount}\n\n";
+    $text .= "Заполните остатки по вашему ресторану через бот:\n";
+    $text .= "Меню → Основные поставки → Сбор остатков";
+
+    $keyboard = json_encode(['inline_keyboard' => [
+        [['text' => '📋 Заполнить остатки', 'callback_data' => 'rest_sc_start']],
+    ]]);
+
+    $sent = 0;
+    foreach ($subs as $sub) {
+        $payload = json_encode([
+            'chat_id' => $sub['chat_id'],
+            'text' => $text,
+            'parse_mode' => 'HTML',
+            'reply_markup' => $keyboard,
+        ]);
+        $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+        $resp = curl_exec($ch); curl_close($ch);
+        $respData = json_decode($resp, true);
+        if (!empty($respData['ok'])) $sent++;
+    }
+    return $sent;
+}
+
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','cards'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','cards'=>'view'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','cards'=>'view'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','cards'=>'view','corrections'=>'edit','chat'=>'edit'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','cards'=>'view','corrections'=>'view','chat'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
@@ -234,6 +272,10 @@ $TABLE_TO_MODULE = [
     'veg_sessions'=>'veg','veg_session_products'=>'veg','veg_tokens'=>'veg','veg_delivery_days'=>'veg','veg_orders'=>'veg','veg_restaurant_notes'=>'veg','veg_deadline_rules'=>'veg',
     'dist_sessions'=>'distribution','dist_session_products'=>'distribution','dist_entries'=>'distribution','dist_notes'=>'distribution',
     'plt_products'=>'pallet-calc','plt_deliveries'=>'pallet-calc','plt_delivery_items'=>'pallet-calc','plt_daily_stock'=>'pallet-calc','plt_summary'=>'pallet-calc',
+    'order_corrections'=>'corrections',
+    'chat_conversations'=>'chat','chat_messages'=>'chat',
+    'product_adu'=>'analysis','report_exclusions'=>'restaurant-sales','changelog'=>'history',
+    'supplier_payments'=>'plan-fact',
 ];
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа

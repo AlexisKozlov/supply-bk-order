@@ -109,12 +109,21 @@
               <div>
                 <div class="pf-drawer-title">{{ selectedOrder?.supplier }}</div>
                 <div class="pf-drawer-subtitle">
-                  <template v-if="tab === 'transit'">
+                  <template v-if="tab === 'transit' || tab === 'pending'">
                     Доставка:
                     <input type="date" class="pf-date-input" :value="editDeliveryDate" @change="onDeliveryDateChange" />
+                    <template v-if="isRuSupplier">
+                      <span class="pf-drawer-sep">·</span>
+                      Дата ТТН:
+                      <input type="date" class="pf-date-input" v-model="editTtnDate" />
+                    </template>
                   </template>
                   <template v-else>
                     Доставка: {{ formatDate(selectedOrder?.delivery_date) }}
+                    <template v-if="selectedOrder?.ttn_date">
+                      <span class="pf-drawer-sep">·</span>
+                      ТТН: {{ formatDate(selectedOrder.ttn_date) }}
+                    </template>
                   </template>
                   <template v-if="selectedOrder?.created_by">
                     <span class="pf-drawer-sep">·</span>
@@ -340,6 +349,10 @@ const selectedOrder = ref(null)
 const drawerItems = ref([])
 const actFile = ref(null)
 const editDeliveryDate = ref('')
+const editTtnDate = ref('')
+const supplierCountry = ref(null)
+
+const isRuSupplier = computed(() => supplierCountry.value === 'RU')
 
 function nowLocal() {
   const d = new Date()
@@ -535,6 +548,12 @@ function openDrawer(order) {
   selectedOrder.value = order
   actFile.value = null
   editDeliveryDate.value = order.delivery_date || ''
+  editTtnDate.value = order.ttn_date || ''
+  // Загружаем страну поставщика
+  supplierCountry.value = null
+  db.from('suppliers').select('country').eq('short_name', order.supplier).limit(1).then(({ data }) => {
+    supplierCountry.value = data?.[0]?.country || null
+  })
   drawerItems.value = (order.order_items || []).map(item => {
     // qty_boxes и received_qty теперь в учётных коробках
     const orderAccounting = Number(item.qty_boxes) || 0
@@ -672,7 +691,17 @@ async function acceptAsOrdered() {
       items: items.map(i => ({ id: i.id, received_qty: i.qty_boxes }))
     })
     const now = nowLocal()
-    await db.from('orders').update({ received_at: now, received_by: userName }).eq('id', selectedOrder.value.id)
+    const updateData2 = { received_at: now, received_by: userName }
+    if (editDeliveryDate.value && editDeliveryDate.value !== selectedOrder.value.delivery_date) {
+      updateData2.delivery_date = editDeliveryDate.value
+    }
+    if (editTtnDate.value) updateData2.ttn_date = editTtnDate.value
+    await db.from('orders').update(updateData2).eq('id', selectedOrder.value.id)
+    const paymentDate2 = editTtnDate.value || editDeliveryDate.value || selectedOrder.value.delivery_date
+    await db.rpc('create_payment_if_needed', {
+      order_id: selectedOrder.value.id,
+      delivery_date: paymentDate2,
+    }).catch(() => {})
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
@@ -707,7 +736,19 @@ async function saveReceived() {
     }))
     await db.rpc('batch_update_received_qty', { items: allItems })
     const now = nowLocal()
-    await db.from('orders').update({ received_at: now, received_by: userName }).eq('id', selectedOrder.value.id)
+    // Обновляем дату поставки и дату ТТН
+    const updateData = { received_at: now, received_by: userName }
+    if (editDeliveryDate.value && editDeliveryDate.value !== selectedOrder.value.delivery_date) {
+      updateData.delivery_date = editDeliveryDate.value
+    }
+    if (editTtnDate.value) updateData.ttn_date = editTtnDate.value
+    await db.from('orders').update(updateData).eq('id', selectedOrder.value.id)
+    // Создаём запись оплаты для российских поставщиков (отсрочка от даты ТТН)
+    const paymentDate = editTtnDate.value || editDeliveryDate.value || selectedOrder.value.delivery_date
+    await db.rpc('create_payment_if_needed', {
+      order_id: selectedOrder.value.id,
+      delivery_date: paymentDate,
+    }).catch(() => {})
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
@@ -972,6 +1013,9 @@ async function revertToTransit() {
 }
 .pf-btn-revert:hover { background: rgba(214, 39, 0, 0.06); }
 
+.pf-date-edit { margin-bottom: 8px; }
+.pf-date-label { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.pf-date-input { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
 .pf-act-upload { display: flex; align-items: center; gap: 4px; }
 .pf-act-upload-btn {
   display: inline-flex; align-items: center; gap: 4px;

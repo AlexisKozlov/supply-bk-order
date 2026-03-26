@@ -229,6 +229,8 @@
               <th title="Истекающие сроки">⚠️</th>
               <th title="Реализация ресторанов">🍽</th>
               <th title="Остатки заканчиваются">📉</th>
+              <th title="Корректировки заказов">✏️</th>
+              <th title="Сообщения из ресторанов">💬</th>
             </tr>
           </thead>
           <tbody>
@@ -242,6 +244,8 @@
               <td :class="cellClass(u.expiring_items)" class="tga-cell-toggle" @click="toggleSetting(u, 'expiring_items')">{{ u.expiring_items ? '✓' : '✕' }}</td>
               <td :class="cellClass(u.restaurant_sales)" class="tga-cell-toggle" @click="toggleSetting(u, 'restaurant_sales')">{{ u.restaurant_sales ? '✓' : '✕' }}</td>
               <td :class="cellClass(u.low_stock)" class="tga-cell-toggle" @click="toggleSetting(u, 'low_stock')">{{ u.low_stock ? '✓' : '✕' }}</td>
+              <td :class="cellClass(u.correction_notifications)" class="tga-cell-toggle" @click="toggleSetting(u, 'correction_notifications')">{{ u.correction_notifications ? '✓' : '✕' }}</td>
+              <td :class="cellClass(u.chat_notifications)" class="tga-cell-toggle" @click="toggleSetting(u, 'chat_notifications')">{{ u.chat_notifications ? '✓' : '✕' }}</td>
             </tr>
           </tbody>
         </table>
@@ -255,6 +259,8 @@
         <span>⚠️ Истекающие сроки</span>
         <span>🍽 Реализация ресторанов</span>
         <span>📉 Остатки заканчиваются</span>
+        <span>✏️ Корректировки заказов</span>
+        <span>💬 Сообщения из ресторанов</span>
       </div>
     </div>
 

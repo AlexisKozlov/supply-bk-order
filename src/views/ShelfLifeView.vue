@@ -434,13 +434,13 @@ async function parseStockMailing(file) {
   const findCol = (kws) => { for (const kw of kws) { const i = headers.findIndex(h => h.includes(kw)); if (i >= 0) return i; } return -1; };
 
   const colMap = {
-    customer: findCol(['заказчик', 'покупатель', 'клиент']),
-    warehouse: findCol(['склад']),
-    product_name: findCol(['наименование', 'номенклатура', 'товар', 'продукт']),
+    customer: findCol(['заказчик', 'наименования заказчика', 'покупатель', 'клиент']),
+    warehouse: findCol(['название склада', 'склад хранения', 'склад']),
+    product_name: findCol(['наименование товара', 'наименование номенклатуры', 'наименование продукт', 'номенклатура']),
     production_date: findCol(['дата производства', 'дата выработки', 'дата изготовления']),
     expiry_date: findCol(['годен до', 'срок годности', 'дата окончания']),
     block_reason: findCol(['причина блокировк', 'блокировк']),
-    expiry_status: findCol(['статус годности', 'статус годн', 'статус']),
+    expiry_status: findCol(['статус годности', 'статус годн']),
     quantity: findCol(['остатки', 'остаток', 'количество', 'кол-во', 'кол.']),
   };
 

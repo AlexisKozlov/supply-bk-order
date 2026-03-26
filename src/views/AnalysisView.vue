@@ -119,6 +119,19 @@
       <button class="anv-tab" :class="{ active: activeTab === 'dead' }" @click="activeTab = 'dead'">
         <span class="anv-tab-dot" style="background:#757575"></span> Мёртвый <span v-if="statusCounts.dead" class="anv-tab-cnt anv-tab-cnt-dead">{{ statusCounts.dead }}</span>
       </button>
+      <button v-if="hiddenAnalogs.length" class="anv-tab" :class="{ active: showHidden }" @click="showHidden = !showHidden" style="margin-left:auto;">
+        👁 Скрытые <span class="anv-tab-cnt">{{ hiddenAnalogs.length }}</span>
+      </button>
+    </div>
+
+    <!-- Список скрытых для восстановления -->
+    <div v-if="showHidden && hiddenAnalogs.length" class="anv-hidden-list">
+      <div class="anv-hidden-title">Скрытые группы аналогов (выведенные товары):</div>
+      <div class="anv-hidden-items">
+        <span v-for="name in hiddenAnalogs" :key="name" class="anv-hidden-tag" @click="unhideAnalog(name)">
+          {{ name }} ✕
+        </span>
+      </div>
     </div>
 
     <!-- Toolbar -->
@@ -215,6 +228,7 @@
                     </td>
                     <td class="anv-td-name">
                       <span class="anv-group-name">{{ group.name }}</span>
+                      <button v-if="!isViewer && group.totalStock <= 0" class="anv-hide-btn-inline" @click.stop="hideAnalog(group.name)" title="Скрыть (товар выведен)">👁</button>
                       <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
                       <span v-if="group.totalStock === 0 && group.totalConsumption > 0" class="anv-no-stock">нет на складе</span>
                     </td>
@@ -348,6 +362,28 @@ const filterSupplier = ref('');
 const filterCategory = ref('');
 
 const activeTab = ref('all');
+const hiddenAnalogs = ref([]);
+const showHidden = ref(false);
+async function loadHiddenAnalogs() {
+  try {
+    const { data } = await db.from('hidden_analogs').select('analog_group');
+    hiddenAnalogs.value = (data || []).map(r => r.analog_group);
+  } catch {}
+}
+async function hideAnalog(name) {
+  try {
+    const { error } = await db.from('hidden_analogs').insert({ analog_group: name, hidden_by: userStore.currentUser?.name });
+    if (error) { console.error('hideAnalog error:', error); return; }
+    hiddenAnalogs.value.push(name);
+  } catch (e) { console.error('hideAnalog:', e); }
+}
+async function unhideAnalog(name) {
+  try {
+    const { error } = await db.from('hidden_analogs').delete().eq('analog_group', name);
+    if (error) { console.error('unhideAnalog error:', error); return; }
+    hiddenAnalogs.value = hiddenAnalogs.value.filter(n => n !== name);
+  } catch (e) { console.error('unhideAnalog:', e); }
+}
 const expandedSections = reactive(new Set(['Сухой', 'Холод', 'Мороз', '']));
 const compactMode = ref(localStorage.getItem('bk_analysis_compact') === '1');
 const dashboardHidden = ref(localStorage.getItem('bk_analysis_dash_hidden') === '1');
@@ -649,6 +685,10 @@ const groupsWithData = computed(() => {
 
 const filteredGroups = computed(() => {
   let result = groupsWithData.value;
+  // Скрытые аналоги
+  if (!showHidden.value && hiddenAnalogs.value.length) {
+    result = result.filter(g => !hiddenAnalogs.value.includes(g.name));
+  }
 
   // Tab filter
   if (activeTab.value === 'red') {
@@ -890,7 +930,7 @@ watch(() => orderStore.settings.legalEntity, () => {
   expandedSections.add('Сухой'); expandedSections.add('Холод'); expandedSections.add('Мороз'); expandedSections.add('');
   loadProducts();
 });
-onMounted(() => { loadProducts(); });
+onMounted(() => { loadProducts(); loadHiddenAnalogs(); });
 onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 </script>
 
@@ -1461,6 +1501,13 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   border-color: var(--bk-orange);
   background: #FFF8ED;
 }
+.anv-hide-btn-inline { background: none; border: none; cursor: pointer; opacity: 0.3; font-size: 12px; margin-left: 6px; transition: opacity 0.15s; padding: 0 2px; }
+.anv-hide-btn-inline:hover { opacity: 1; }
+.anv-hidden-list { padding: 8px 16px; background: #FFF8E1; border-radius: 8px; margin-bottom: 12px; }
+.anv-hidden-title { font-size: 12px; font-weight: 600; color: #F57F17; margin-bottom: 6px; }
+.anv-hidden-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.anv-hidden-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; background: #fff; border: 1px solid #FFD54F; border-radius: 12px; font-size: 12px; cursor: pointer; }
+.anv-hidden-tag:hover { background: #E8F5E9; border-color: #66BB6A; }
 
 /* ═══ Days Badge ═══ */
 .anv-days-badge {

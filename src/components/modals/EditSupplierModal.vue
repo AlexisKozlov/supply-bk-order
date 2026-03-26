@@ -47,6 +47,23 @@
           </div>
         </div>
 
+        <div style="margin-top:12px;font-size:13px;font-weight:600;color:#555;margin-bottom:6px;">Оплата</div>
+        <div class="modal-row-2">
+          <div class="modal-field">
+            <span class="modal-field-label">Страна</span>
+            <select v-model="form.country">
+              <option value="BY">Беларусь</option>
+              <option value="RU">Россия</option>
+              <option value="OTHER">Другая</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <span class="modal-field-label">Отсрочка оплаты (дн.)</span>
+            <input type="number" v-model.number="form.payment_delay_days" min="0" placeholder="напр. 30" />
+            <span class="modal-field-hint">Дней после поставки</span>
+          </div>
+        </div>
+
         <div class="actions" style="display:flex;gap:8px;margin-top:16px;">
           <button class="btn primary" @click="save" :disabled="saving">
             {{ saving ? 'Сохранение...' : (supplier ? 'Сохранить' : 'Создать') }}
@@ -91,7 +108,7 @@ const oldShortName = ref('');
 const form = ref({
   short_name: '', full_name: '', legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
   whatsapp: '', telegram: '', viber: '', email: '',
-  dlt: null, doc: null,
+  dlt: null, doc: null, country: 'BY', payment_delay_days: null,
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
 
@@ -111,6 +128,8 @@ onMounted(() => {
       email: props.supplier.email || '',
       dlt: props.supplier.dlt ?? null,
       doc: props.supplier.doc ?? null,
+      country: props.supplier.country || 'BY',
+      payment_delay_days: props.supplier.payment_delay_days ?? null,
     });
     oldShortName.value = props.supplier.short_name || '';
   }
@@ -138,6 +157,8 @@ async function save() {
       email: form.value.email.trim() || null,
       dlt: form.value.dlt != null && form.value.dlt !== '' ? form.value.dlt : null,
       doc: form.value.doc != null && form.value.doc !== '' ? form.value.doc : null,
+      country: form.value.country || 'BY',
+      payment_delay_days: form.value.payment_delay_days != null && form.value.payment_delay_days !== '' ? form.value.payment_delay_days : null,
     };
     let error;
     if (props.supplier) {

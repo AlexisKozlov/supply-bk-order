@@ -1,12 +1,7 @@
 <template>
   <div class="cards-page">
 
-    <!-- Тех. работы -->
-    <MaintenanceScreen v-if="maintenanceMode && !isAdmin"
-      :message="maintenanceMessage"
-      :end-time="maintenanceEndTime"
-      :show-home-link="true"
-    />
+    <!-- Тех. работы — страница карточек всегда доступна -->
 
     <!-- Hero-секция с поиском -->
     <header class="hero">
@@ -108,6 +103,9 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 Скопировать
               </span>
+              <button v-if="canShare" class="result-share-btn" @click.stop="shareCard(card)" title="Поделиться">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
+              </button>
             </div>
           </div>
         </div>
@@ -636,7 +634,7 @@ async function logSearch(queryStr, found, matchType, matchedCardId) {
 // --- Гостевой heartbeat ---
 async function sendGuestHeartbeat() {
   // Не считаем гостя онлайн, если показана страница техработ
-  if (maintenanceMode.value && !isAdmin.value) return;
+  // Поиск карточек доступен всегда, даже при тех. работах
   try {
     await fetchWithTimeout(`${API_BASE}/rpc/guest_heartbeat`, {
       method: 'POST',
@@ -885,6 +883,11 @@ function showToast(msg, type = 'info') {
   toastType.value = type
   toastVisible.value = true
   toastTimer = setTimeout(() => { toastVisible.value = false }, 3000)
+}
+
+const canShare = typeof navigator.share === 'function'
+async function shareCard(card) {
+  try { await navigator.share({ text: `${card.id} ${card.name}`, title: 'Карточка товара' }) } catch {}
 }
 
 function clearSearch() {
@@ -1677,6 +1680,9 @@ onBeforeUnmount(() => {
 .result-card:hover .result-copy-hint {
   opacity: 1;
 }
+.result-share-btn { background: none; border: 1px solid #ddd; border-radius: 6px; padding: 4px 6px; cursor: pointer; opacity: 0; transition: opacity .2s; }
+.result-card:hover .result-share-btn { opacity: 0.6; }
+.result-share-btn:hover { opacity: 1 !important; background: #f5f0eb; }
 
 /* ═══ NOT FOUND ═══ */
 .not-found {
