@@ -114,20 +114,18 @@ const allModulesRaw = [
 ]
 const allModules = allModulesRaw.filter(m => userStore.hasAccess(m.module, 'view'))
 
-const hiddenModules = ref(JSON.parse(localStorage.getItem('bk_hidden_modules') || '[]'))
+const hiddenModules = computed(() => userStore.getHiddenModules())
 
 function toggleModule(module) {
-  const idx = hiddenModules.value.indexOf(module)
-  if (idx >= 0) hiddenModules.value.splice(idx, 1)
-  else hiddenModules.value.push(module)
-  localStorage.setItem('bk_hidden_modules', JSON.stringify(hiddenModules.value))
-  window.dispatchEvent(new Event('bk_settings_changed'))
+  const current = [...hiddenModules.value]
+  const idx = current.indexOf(module)
+  if (idx >= 0) current.splice(idx, 1)
+  else current.push(module)
+  userStore.setHiddenModules(current)
 }
 
 function resetModules() {
-  hiddenModules.value = []
-  localStorage.setItem('bk_hidden_modules', '[]')
-  window.dispatchEvent(new Event('bk_settings_changed'))
+  userStore.setHiddenModules([])
 }
 
 // Telegram

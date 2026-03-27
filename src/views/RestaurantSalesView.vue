@@ -202,6 +202,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { parseSalesFile } from '@/lib/salesImport.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -515,15 +516,7 @@ async function onFileSelected(e) {
   e.target.value = '';
   importing.value = true;
   try {
-    const mod = await import('xlsx-js-style');
-    const XLSX = mod.default || mod;
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
-    console.log('Sales import: rows:', rows.length, 'header:', JSON.stringify(rows[0]));
-    const items = parseSalesFile(rows);
-    console.log('Sales import: parsed items:', items.length);
+    const items = await parseSalesFile(file);
     if (!items.length) { toast.error('Ошибка', 'Не удалось распознать данные'); return; }
     toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…`);
     for (let i = 0; i < items.length; i += 10000) {
@@ -537,100 +530,7 @@ async function onFileSelected(e) {
   finally { importing.value = false; }
 }
 
-function parseSalesFile(rows) {
-  // Пробуем Qlik-формат, если не подходит — 1С УТ
-  return parseQlik(rows) || parse1cUT(rows) || [];
-}
-
-// ═══ Qlik: колонки ГруппаАналогов, Дата, Расход/Продажи, Количество мест хранения ═══
-function parseQlik(rows) {
-  let colGroup = -1, colDate = -1, colRc = -1, headerIdx = -1;
-  const qtyCols = []; // может быть и Расход, и Продажи
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const row = rows[i];
-    if (!row) continue;
-    colGroup = -1; colDate = -1; colRc = -1; qtyCols.length = 0;
-    for (let j = 0; j < row.length; j++) {
-      const h = String(row[j] || '').trim().toLowerCase();
-      if (h.includes('группааналогов') || h.includes('группа аналогов')) colGroup = j;
-      else if (h === 'дата') colDate = j;
-      else if (h.includes('расход') || h.includes('продажи')) qtyCols.push(j);
-      else if (h.includes('мест хранения') || h.includes('количество мест')) colRc = j;
-    }
-    if (colGroup >= 0 && colDate >= 0 && qtyCols.length > 0) { headerIdx = i; break; }
-  }
-  if (headerIdx < 0) return null;
-
-  const items = [];
-  for (let i = headerIdx + 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row) continue;
-    const group = String(row[colGroup] || '').trim();
-    if (!group || group === 'н.опр') continue;
-    // Берём меньшее ненулевое значение из колонок расход/продажи
-    let qty;
-    if (qtyCols.length === 1) {
-      qty = Math.round((parseNum(row[qtyCols[0]])) * 100) / 100;
-    } else {
-      const vals = qtyCols.map(c => Math.round(parseNum(row[c]) * 100) / 100).filter(v => v > 0);
-      qty = vals.length ? Math.min(...vals) : 0;
-    }
-    if (!qty) continue;
-    const saleDate = excelDateToStr(row[colDate]);
-    if (!saleDate) continue;
-    const rc = colRc >= 0 ? (parseNum(row[colRc]) | 0) : 0;
-    items.push({ sale_date: saleDate, analog_group: group, quantity: qty, restaurant_count: rc });
-  }
-  return items.length ? items : null;
-}
-
-// ═══ 1С УТ: сложная вложенная структура ═══
-function parse1cUT(rows) {
-  const items = [];
-  let cur = null, skip = true;
-  for (const row of rows) {
-    const v = row[0];
-    if (v == null) continue;
-    const s = String(v).trim();
-    if (!s || s === 'Регистратор.Дата' || s === 'Группа аналогов' || s === 'Параметры:') continue;
-    if (s === 'Итого') break;
-    const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
-    if (m) {
-      if (cur && !skip) items.push({ sale_date: `${m[3]}-${m[2]}-${m[1]}`, analog_group: cur, quantity: Math.round((parseFloat(row[4])||0)*100)/100, restaurant_count: parseInt(row[5])||0 });
-    } else if (row[4] != null && !isNaN(parseFloat(row[4]))) {
-      if (skip) { skip = false; cur = null; continue; }
-      cur = s.replace(/^[\s"]+|[\s"]+$/g, '');
-    }
-  }
-  return items.length ? items : null;
-}
-
-// Парсинг числа из строки (убирает запятые-разделители тысяч: "2,547.00" → 2547)
-function parseNum(v) {
-  if (typeof v === 'number') return v;
-  return parseFloat(String(v || '0').replace(/,/g, '')) || 0;
-}
-
-// Конвертация Excel serial date → YYYY-MM-DD
-function excelDateToStr(v) {
-  if (v instanceof Date) {
-    const dd = String(v.getUTCDate()).padStart(2, '0');
-    const mm = String(v.getUTCMonth() + 1).padStart(2, '0');
-    return `${v.getUTCFullYear()}-${mm}-${dd}`;
-  }
-  if (typeof v === 'number') {
-    const d = new Date((v - 25569) * 86400000);
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${mm}-${dd}`;
-  }
-  const s = String(v).trim();
-  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m2) return s.slice(0, 10);
-  return null;
-}
+// parseSalesFile — из @/lib/salesImport.js
 </script>
 
 <style scoped>

@@ -362,16 +362,8 @@ function handleOffline() { isOffline.value = true; }
 
 const sidebarCollapsed = ref(localStorage.getItem('bk_sidebar_collapsed') === 'true');
 const sidebarOpen = ref(false);
-const hiddenModules = ref(JSON.parse(localStorage.getItem('bk_hidden_modules') || '[]'));
+const hiddenModules = computed(() => userStore.getHiddenModules());
 function isModuleVisible(module, route = null) { return !hiddenModules.value.includes(route || module) && !hiddenModules.value.includes(module); }
-// Обновление при изменении из страницы настроек
-window.addEventListener('storage', (e) => {
-  if (e.key === 'bk_hidden_modules') hiddenModules.value = JSON.parse(e.newValue || '[]');
-});
-// Также custom event для SPA (storage не срабатывает в той же вкладке)
-window.addEventListener('bk_settings_changed', () => {
-  hiddenModules.value = JSON.parse(localStorage.getItem('bk_hidden_modules') || '[]');
-});
 
 const sidebarSections = [
   { title: 'Заказы', items: [
@@ -690,7 +682,7 @@ function goToAdmin() {
 
 const entityTransition = ref(false);
 const entityClass = computed(() => {
-  const le = orderStore.settings.legalEntity;
+  const le = orderStore.settings.legalEntity || '';
   if (le.includes('Воглия')) return 'entity-voglya';
   if (le.includes('Пицца')) return 'entity-pizza';
   return 'entity-burger';

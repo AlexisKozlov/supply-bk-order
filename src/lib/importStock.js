@@ -272,7 +272,7 @@ function aggregateByProduct(data) {
 
 // ─── Парсинг файлов ────────────────────────────────────────────────────────
 
-async function parseFile(file, legalEntity) {
+export async function parseFile(file, legalEntity) {
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'csv' || ext === 'tsv') return parseCSV(file, ext === 'tsv' ? '\t' : null, legalEntity);
 

@@ -86,9 +86,9 @@ export const useUserStore = defineStore('user', () => {
       }
       // Сохранить сессионный токен если сервер выдал (миграция)
       if (data.session_token) setSessionToken(data.session_token);
-      // Обновить роль из сервера (защита от подмены в localStorage)
+      // Обновить роль и настройки из сервера (защита от подмены в localStorage)
       if (data.user) {
-        const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null };
+        const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
         currentUser.value = updated;
         localStorage.setItem('bk_user', JSON.stringify(updated));
       }
@@ -134,6 +134,17 @@ export const useUserStore = defineStore('user', () => {
     try { sessionStorage.removeItem('bk_just_logged_in'); } catch(e) {}
   }
 
+  function getHiddenModules() {
+    return currentUser.value?.hidden_modules || [];
+  }
+
+  async function setHiddenModules(modules) {
+    if (!currentUser.value) return;
+    currentUser.value = { ...currentUser.value, hidden_modules: modules };
+    localStorage.setItem('bk_user', JSON.stringify(currentUser.value));
+    try { await db.rpc('save_hidden_modules', { modules }); } catch (e) { /* сохранится при следующей попытке */ }
+  }
+
   function getAllowedEntities() {
     const allowed = currentUser.value?.legal_entities;
     if (!allowed || !allowed.length) return null;
@@ -161,6 +172,8 @@ export const useUserStore = defineStore('user', () => {
     login,
     logout,
     getAllowedEntities,
+    getHiddenModules,
+    setHiddenModules,
     checkMaintenance,
     getAccess,
     hasAccess,

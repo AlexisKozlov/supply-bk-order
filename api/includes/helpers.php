@@ -361,7 +361,7 @@ function getSessionUser($pdo) {
     if (mt_rand(1, 100) <= 5) {
         try { $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()"); } catch (PDOException $e) { /* не критично */ }
     }
-    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at, u.telegram_chat_id FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
+    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at, u.telegram_chat_id, u.hidden_modules FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) { $_sessionUserCache['result'] = null; return null; }

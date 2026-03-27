@@ -23,6 +23,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import { parseFile } from '@/lib/importStock.js'
+import { parseStockMalling } from '@/lib/shelfLifeImport.js'
+import { parseSalesFile } from '@/lib/salesImport.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useUserStore } from '@/stores/userStore.js'
@@ -55,9 +58,13 @@ const imports = computed(() => [
 ])
 
 function pickFile(type) {
+  if (type === 'analysis' && !orderStore.settings.legalEntity) {
+    toast.error('Не выбрано юрлицо', 'Выберите юр. лицо в боковом меню')
+    return
+  }
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '.xlsx,.xls'
+  input.accept = type === 'analysis' ? '.xlsx,.xls,.csv,.tsv' : '.xlsx,.xls'
   input.onchange = (e) => {
     const file = e.target.files?.[0]
     if (file) uploadFile(type, file)
@@ -65,125 +72,65 @@ function pickFile(type) {
   input.click()
 }
 
+function localNow() {
+  const d = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
 async function uploadFile(type, file) {
   uploading.value = type
   try {
-    // Читаем файл и парсим на фронте, затем вызываем тот же RPC что и модули
-    const XLSX = await import('xlsx-js-style')
-    const data = await file.arrayBuffer()
-    const wb = XLSX.read(data, { cellDates: true })
-    const ws = wb.Sheets[wb.SheetNames[0]]
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 })
-
     if (type === 'analysis') {
-      // Переходим на страницу анализа — там свой импорт
-      toast.show('Используйте импорт на странице «Анализ запасов»')
+      // Идентично AnalysisView: parseFile → replace_analysis_data
+      const le = orderStore.settings.legalEntity
+      const parsed = await parseFile(file, le)
+      if (!parsed.length) { toast.error('Не распознано', 'Не найдены артикулы, остатки или расход в файле'); return }
+      const userName = userStore.currentUser?.name || 'import'
+      const now = localNow()
+      const items = parsed.filter(r => r.sku).map(r => ({
+        id: `${le}_${r.sku}`,
+        legal_entity: le,
+        sku: r.sku,
+        stock: r.stock || 0,
+        consumption: r.consumption || 0,
+        period_days: 30,
+        updated_by: userName,
+        updated_at: now,
+      }))
+      if (!items.length) { toast.error('Не распознано', 'Не найдены товары с артикулами'); return }
+      const { error } = await db.rpc('replace_analysis_data', { legal_entity: le, items })
+      if (error) throw new Error(error)
+      toast.success('Загружено', `${items.length} позиций для «${le}»`)
+
     } else if (type === 'sales') {
-      // Парсим и отправляем через RPC
-      const items = parseSalesRows(rows)
-      if (!items.length) { toast.error('Не распознано', 'Нужны колонки: Группа аналогов, Дата'); return }
-      const batchSize = 10000
-      for (let i = 0; i < items.length; i += batchSize) {
-        await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + batchSize), notify: i + batchSize >= items.length })
+      // Идентично RestaurantSalesView: parseSalesFile → replace_restaurant_sales
+      const items = await parseSalesFile(file)
+      if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные'); return }
+      toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…`)
+      for (let i = 0; i < items.length; i += 10000) {
+        const isLast = i + 10000 >= items.length
+        const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast })
+        if (error) { toast.error('Ошибка', error); return }
       }
-      toast.success('Загружено', `${items.length} записей реализации`)
+      toast.success('Загружено', `${items.length.toLocaleString('ru')} записей реализации`)
+
     } else if (type === 'shelf') {
-      // Парсим и отправляем
-      const items = parseShelfRows(rows)
-      if (!items.length) { toast.error('Не распознано', 'Нужны колонки: Наименование, Годен до'); return }
-      await db.rpc('replace_stock_malling', { items })
-      toast.success('Загружено', `${items.length} записей сроков годности`)
+      // Идентично ShelfLifeView: parseStockMalling → replace_stock_malling
+      const items = await parseStockMalling(file)
+      if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные в файле'); return }
+      const userName = userStore.currentUser?.name || ''
+      const now = localNow()
+      const payload = items.map(item => ({ ...item, uploaded_at: now, uploaded_by: userName }))
+      const { data, error } = await db.rpc('replace_stock_malling', { items: payload })
+      if (error) throw new Error(error)
+      toast.success('Загружено', `${data?.count || items.length} позиций сроков годности`)
     }
+
     await loadLastUpdates()
   } catch (e) {
     toast.error('Ошибка', e.message || 'Не удалось загрузить')
   } finally { uploading.value = null }
-}
-
-function parseSalesRows(rows) {
-  // Ищем заголовок
-  let headerIdx = -1, cols = {}
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const cells = (rows[i] || []).map(c => String(c ?? '').toLowerCase())
-    for (let ci = 0; ci < cells.length; ci++) {
-      if (cells[ci].includes('группа') && cells[ci].includes('аналог')) cols.group = ci
-      if (cells[ci] === 'дата' || cells[ci] === 'date') cols.date = ci
-      if (cells[ci].includes('продажи') || cells[ci].includes('расход') || cells[ci].includes('количество')) cols.qty = ci
-      if (cells[ci].includes('мест хранения') || cells[ci].includes('ресторан')) cols.rest = ci
-    }
-    if (cols.group !== undefined && cols.date !== undefined) { headerIdx = i; break }
-  }
-  if (headerIdx < 0) return []
-  const items = []
-  for (let i = headerIdx + 1; i < rows.length; i++) {
-    const r = rows[i] || []
-    const group = String(r[cols.group] ?? '').trim()
-    const dateRaw = r[cols.date]
-    const qty = parseFloat(r[cols.qty] ?? 0) || 0
-    const rc = parseInt(r[cols.rest] ?? 0) || 0
-    if (!group || !dateRaw) continue
-    let date = ''
-    if (dateRaw instanceof Date) date = dateRaw.toISOString().slice(0, 10)
-    else { const s = String(dateRaw); const m = s.match(/(\d{2})\.(\d{2})\.(\d{4})/); date = m ? `${m[3]}-${m[2]}-${m[1]}` : s.slice(0, 10) }
-    if (!date) continue
-    items.push({ sale_date: date, analog_group: group, quantity: qty, restaurant_count: rc })
-  }
-  return items
-}
-
-function parseShelfRows(rows) {
-  // Аналогично ShelfLifeView парсингу
-  const keywords = ['заказчик', 'склад', 'наименование', 'годен', 'дата производства', 'блокировк', 'остаток', 'статус']
-  let headerIdx = -1
-  for (let i = 0; i < Math.min(rows.length, 15); i++) {
-    const cells = (rows[i] || []).map(c => String(c ?? '').toLowerCase().trim())
-    if (cells.filter(c => c && keywords.some(kw => c.includes(kw))).length >= 3) { headerIdx = i; break }
-  }
-  if (headerIdx < 0) return []
-  const headers = (rows[headerIdx] || []).map(h => String(h ?? '').toLowerCase().trim())
-  const find = (kws) => { for (const kw of kws) { const i = headers.findIndex(h => h.includes(kw)); if (i >= 0) return i } return -1 }
-  const cm = {
-    customer: find(['заказчик', 'покупатель']),
-    warehouse: find(['название склада', 'склад хранения', 'склад']),
-    product_name: find(['наименование товара', 'наименование номенклатуры', 'номенклатура']),
-    production_date: find(['дата производства', 'дата выработки']),
-    expiry_date: find(['годен до', 'срок годности']),
-    block_reason: find(['причина блокировк', 'блокировк']),
-    expiry_status: find(['статус годности', 'статус годн']),
-    quantity: find(['остатки', 'остаток', 'количество', 'кол-во']),
-  }
-  if (cm.product_name < 0) return []
-  const parseDate = (v) => {
-    if (!v) return null
-    if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10)
-    const s = String(v).trim()
-    const m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/)
-    if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`
-    const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
-    if (m2) return s.slice(0, 10)
-    return null
-  }
-  const items = []
-  const userName = userStore.currentUser?.name || 'import'
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
-  for (let i = headerIdx + 1; i < rows.length; i++) {
-    const r = rows[i] || []
-    const name = String(r[cm.product_name] ?? '').trim()
-    if (!name) continue
-    items.push({
-      customer: cm.customer >= 0 ? String(r[cm.customer] ?? '').trim() : '',
-      warehouse: cm.warehouse >= 0 ? String(r[cm.warehouse] ?? '').trim() : '',
-      product_name: name,
-      production_date: cm.production_date >= 0 ? parseDate(r[cm.production_date]) : null,
-      expiry_date: cm.expiry_date >= 0 ? parseDate(r[cm.expiry_date]) : null,
-      block_reason: cm.block_reason >= 0 ? (String(r[cm.block_reason] ?? '').trim() || null) : null,
-      expiry_status: cm.expiry_status >= 0 ? (String(r[cm.expiry_status] ?? '').trim() || null) : null,
-      quantity: cm.quantity >= 0 ? (parseFloat(r[cm.quantity]) || 0) : 0,
-      uploaded_at: now,
-      uploaded_by: userName,
-    })
-  }
-  return items
 }
 
 async function loadLastUpdates() {
