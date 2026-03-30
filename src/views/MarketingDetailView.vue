@@ -12,51 +12,48 @@
     <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
 
     <template v-else>
-      <!-- Основное -->
+      <!-- Основное — компактная полоса -->
       <div class="mktd-card">
-        <div class="mktd-card-title">Основное</div>
         <div class="mktd-form">
           <div class="mktd-row">
-            <div class="mktd-field" style="flex:2;">
+            <div class="mktd-field" style="flex:3;">
               <label>Название</label>
               <input v-model="activity.name" :disabled="isViewer" class="mktd-input" placeholder="Название активности" />
             </div>
-            <div class="mktd-field">
+            <div class="mktd-field" style="flex:0 0 120px;">
               <label>Тип</label>
               <select v-model="activity.type" :disabled="isViewer" class="mktd-input">
                 <option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option>
               </select>
             </div>
-            <div class="mktd-field">
+            <div class="mktd-field" style="flex:0 0 110px;">
               <label>Статус</label>
               <select v-model="activity.status" :disabled="isViewer" class="mktd-input">
                 <option value="active">Активная</option>
                 <option value="completed">Завершённая</option>
               </select>
             </div>
-          </div>
-          <div class="mktd-row">
-            <div class="mktd-field">
+            <div class="mktd-field" style="flex:0 0 130px;">
               <label>Дата начала</label>
               <input type="date" v-model="activity.date_from" :disabled="isViewer" class="mktd-input" />
             </div>
-            <div class="mktd-field">
+            <div class="mktd-field" style="flex:0 0 130px;">
               <label>Дата окончания</label>
               <input type="date" v-model="activity.date_to" :disabled="isViewer" class="mktd-input" />
             </div>
-            <div class="mktd-field">
-              <label>Кол-во ресторанов</label>
+            <div class="mktd-field" style="flex:0 0 80px;">
+              <label>Рестораны</label>
               <input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-input" placeholder="0" min="1" />
             </div>
-            <div class="mktd-field" v-if="activityDays">
-              <label>Длительность</label>
-              <div class="mktd-info">{{ activityDays }} дн</div>
+            <div class="mktd-field" v-if="activityDays" style="flex:0 0 60px;">
+              <label>Дней</label>
+              <div class="mktd-info">{{ activityDays }}</div>
             </div>
           </div>
-          <div class="mktd-row">
+          <div v-if="activity.note || !isViewer" class="mktd-row">
             <div class="mktd-field" style="flex:1;">
               <label>Заметки</label>
-              <textarea v-model="activity.note" :disabled="isViewer" class="mktd-input mktd-textarea" placeholder="Комментарии, ссылки..." rows="2"></textarea>
+              <textarea v-model="activity.note" :disabled="isViewer" class="mktd-input mktd-textarea" placeholder="Комментарии, ссылки..." rows="1"></textarea>
             </div>
           </div>
         </div>
@@ -205,25 +202,22 @@
         </div>
       </div>
 
-      <!-- Файлы -->
-      <div class="mktd-card">
-        <div class="mktd-card-title">
-          Файлы
-          <span v-if="activity.files.length" class="mktd-card-count">{{ activity.files.length }}</span>
-        </div>
-        <div class="mktd-files">
-          <div v-for="f in activity.files" :key="f.id" class="mktd-file">
-            <a :href="fileUrl(f)" target="_blank" class="mktd-file-name"><BkIcon name="export" size="xs" /> {{ f.file_name }}</a>
-            <button v-if="!isViewer" class="mktd-remove-btn" @click="deleteFile(f)" title="Удалить"><BkIcon name="close" size="xs" /></button>
+      <!-- Файлы — компактно -->
+      <div class="mktd-card" style="padding:12px 20px;">
+        <div class="mktd-files-row">
+          <span style="font-weight:700;font-size:13px;color:var(--bk-brown);">Файлы</span>
+          <div class="mktd-files-list">
+            <span v-for="f in activity.files" :key="f.id" class="mktd-file-chip">
+              <a :href="fileUrl(f)" target="_blank" class="mktd-file-link"><BkIcon name="export" size="xs" /> {{ f.file_name }}</a>
+              <button v-if="!isViewer" class="mktd-remove-btn" @click.stop="deleteFile(f)" title="Удалить"><BkIcon name="close" size="xs" /></button>
+            </span>
+            <span v-if="!activity.files.length" class="mktd-muted" style="font-size:12px;">Нет вложений</span>
           </div>
-          <div v-if="!activity.files.length" class="mktd-muted" style="font-size:12px;">Нет вложений</div>
-          <div v-if="!isViewer && activity.id" style="margin-top:8px;">
-            <label class="btn small">
-              <BkIcon name="import" size="sm" /> Загрузить файл
-              <input type="file" style="display:none;" @change="uploadFile" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx,.doc" />
+          <label v-if="!isViewer && activity.id" class="btn small" style="flex-shrink:0;">
+            <BkIcon name="import" size="sm" /> Загрузить
+            <input type="file" style="display:none;" @change="uploadFile" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx,.doc" />
             </label>
-            <span v-if="uploading" style="font-size:11px;color:var(--text-muted);margin-left:8px;">Загрузка...</span>
-          </div>
+          <span v-if="uploading" style="font-size:11px;color:var(--text-muted);margin-left:4px;">Загрузка...</span>
         </div>
       </div>
     </template>
@@ -607,7 +601,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.mktd-view { padding: 0; max-width: 960px; }
+.mktd-view { padding: 0; }
 .mktd-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
 .mktd-back { font-size: 13px; color: var(--text-muted); text-decoration: none; display: flex; align-items: center; gap: 4px; font-weight: 500; }
 .mktd-back:hover { color: var(--bk-brown); }
@@ -635,7 +629,8 @@ onBeforeUnmount(() => {
 .mktd-items-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--bk-brown, #502314); font-weight: 700; padding: 8px 8px; border-bottom: 2px solid var(--bk-orange, #D62300); text-align: center; white-space: nowrap; background: #FFF8F0; }
 .mktd-items-table td { padding: 8px 8px; border-bottom: 1px solid #F5F0EB; text-align: center; vertical-align: middle; }
 .mktd-items-table tbody tr:hover { background: #FFFBF5; }
-.mktd-input-sm { padding: 6px 8px; font-size: 12px; }
+.mktd-input-sm { padding: 6px 8px; font-size: 12px; min-height: 30px; }
+select.mktd-input, select.mktd-input-sm { background: #fff; color: var(--text); appearance: auto; cursor: pointer; }
 .mktd-item-name { padding-right: 55px !important; }
 .mktd-item-sku { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 10px; font-weight: 800; color: var(--bk-orange); background: rgba(214,35,0,0.06); padding: 2px 6px; border-radius: 4px; }
 .mktd-total-cell { font-weight: 700; color: var(--bk-brown, #502314); font-size: 13px; }
@@ -644,11 +639,12 @@ onBeforeUnmount(() => {
 .mktd-muted { color: var(--text-muted); }
 
 /* Files */
-.mktd-files { display: flex; flex-direction: column; gap: 8px; }
-.mktd-file { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #FAFAF8; border: 1px solid #F0EBE5; border-radius: 8px; transition: border-color 0.15s; }
-.mktd-file:hover { border-color: var(--bk-orange); }
-.mktd-file-name { font-size: 13px; font-weight: 500; color: var(--text); text-decoration: none; display: flex; align-items: center; gap: 4px; flex: 1; }
-.mktd-file-name:hover { color: var(--bk-orange); }
+.mktd-files-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mktd-files-list { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; align-items: center; }
+.mktd-file-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: #FAFAF8; border: 1px solid #E8E0D8; border-radius: 6px; font-size: 12px; }
+.mktd-file-chip:hover { border-color: var(--bk-orange); }
+.mktd-file-link { color: var(--text); text-decoration: none; display: flex; align-items: center; gap: 3px; font-weight: 500; }
+.mktd-file-link:hover { color: var(--bk-orange); }
 
 /* Dropdown */
 .mktd-dropdown { background: white; border: 1px solid #E8E0D8; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); max-height: 220px; overflow-y: auto; }
