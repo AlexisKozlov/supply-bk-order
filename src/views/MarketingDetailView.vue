@@ -191,8 +191,9 @@
                   <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams / 1000) : '—' }}</td>
                   <td class="mktd-total-cell">{{ ing.totalQty > 0 ? formatNum(ing.totalQty) : '—' }}</td>
                   <td class="mktd-total-cell">
-                    <template v-if="ing.qtyPerBox > 0 && ing.totalQty > 0">{{ formatNum(Math.ceil(ing.totalQty / ing.qtyPerBox)) }}</template>
-                    <template v-else-if="ing.qtyPerBox === -1">—<div style="font-size:9px;color:var(--text-muted);">разн. кейс.</div></template>
+                    <template v-if="ing.qtyPerBox === -1">—<div style="font-size:9px;color:var(--text-muted);">разн. кейс.</div></template>
+                    <template v-else-if="ing.qtyPerBox > 0 && ing.totalQty > 0">{{ formatNum(Math.ceil(ing.totalQty / ing.qtyPerBox)) }}</template>
+                    <template v-else-if="ing.qtyPerBox > 0 && ing.totalGrams > 0 && ing.productUnit === 'кг'">{{ formatNum(Math.ceil(ing.totalGrams / 1000 / ing.qtyPerBox)) }}</template>
                     <template v-else>—</template>
                   </td>
                   <td style="font-size:11px;color:var(--text-muted);">{{ ing.fromDishes.join(', ') }}</td>
@@ -384,6 +385,8 @@ const ingredientsList = computed(() => {
       if (ing.sku) map[key].skus.add(ing.sku);
       if (ing.brutto) map[key].totalGrams += parseFloat(ing.brutto) * portions;
       if (ing.qty) map[key].totalQty += parseFloat(ing.qty) * portions;
+      // Запоминаем единицу измерения товара (кг, шт и т.д.)
+      if (ing.product_unit && !map[key].productUnit) map[key].productUnit = ing.product_unit;
       // Если кейсовка отличается от уже записанной — обнуляем (неоднозначно)
       if (ing.qty_per_box) {
         const qpb = parseFloat(ing.qty_per_box);
