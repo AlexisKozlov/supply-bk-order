@@ -2073,7 +2073,7 @@ if ($endpoint === 'rpc') {
             }
             // 3) Для найденных карточек — найти аналоги в products
             $allCardSkus = [];
-            foreach (array_merge($foundDirectly, $foundViaAnalogs) as $sku => $cr) {
+            foreach ($foundDirectly + $foundViaAnalogs as $sku => $cr) {
                 $analogs = json_decode($cr['analogs'], true) ?: [];
                 $analogs[] = $cr['id']; // сама карточка тоже может быть в products
                 foreach ($analogs as $a) $allCardSkus[] = (string)$a;
@@ -2087,7 +2087,7 @@ if ($endpoint === 'rpc') {
                 while ($pr = $s->fetch()) $productByCardSku[$pr['sku']] = $pr;
             }
             // 4) Связать: recipe_sku → card → analog_skus → product
-            foreach (array_merge($foundDirectly, $foundViaAnalogs) as $origSku => $cr) {
+            foreach ($foundDirectly + $foundViaAnalogs as $origSku => $cr) {
                 $analogs = json_decode($cr['analogs'], true) ?: [];
                 $analogs[] = $cr['id'];
                 foreach ($analogs as $a) {
