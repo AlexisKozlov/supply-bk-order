@@ -39,7 +39,7 @@
     </div>
 
     <!-- Гант -->
-    <MarketingGantt v-else-if="viewMode === 'gantt'" :activities="filtered" @select="openActivity" />
+    <MarketingGantt v-else-if="viewMode === 'gantt'" :activities="filtered.filter(a => a.date_from)" @select="openActivity" />
 
     <!-- Список -->
     <div v-else-if="viewMode === 'list'" class="mkt-list">
@@ -234,7 +234,7 @@ async function loadRecipes() {
     const { data: recs } = await db.from('recipes').select('id, code, name, thk').order('name', { ascending: true });
     if (!recs?.length) { recipes.value = []; return; }
     // Load all ingredients in one query
-    const { data: ings } = await db.from('recipe_ingredients').select('id, recipe_id, sku, name, brutto, qty').order('sort_order', { ascending: true });
+    const { data: ings } = await db.from('recipe_ingredients').select('id, recipe_id, sku, name, brutto, qty').order('sort_order', { ascending: true }).limit(10000);
     const ingMap = {};
     for (const i of (ings || [])) {
       if (!ingMap[i.recipe_id]) ingMap[i.recipe_id] = [];
@@ -350,7 +350,7 @@ watch(legalEntity, () => { activities.value = []; loadActivities(); });
 .mkt-recipe-count { font-size: 11px; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
 .mkt-recipe-body { padding: 0 16px 14px; border-top: 1px solid #F5F0EB; }
 .mkt-recipe-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-.mkt-recipe-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: rgba(80,35,20,0.5); font-weight: 700; padding: 6px 8px; border-bottom: 2px solid #F5F0EB; text-align: center; }
+.mkt-recipe-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--bk-brown, #502314); font-weight: 700; padding: 8px 8px; border-bottom: 2px solid var(--bk-orange, #D62300); text-align: center; background: #FFF8F0; }
 .mkt-recipe-table td { padding: 5px 8px; border-bottom: 1px solid #F5F0EB; text-align: center; }
 .mkt-recipe-table tbody tr:hover { background: #FFFBF5; }
 

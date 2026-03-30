@@ -39,7 +39,7 @@ const props = defineProps({
 defineEmits(['select']);
 
 const scrollEl = ref(null);
-const PX_PER_DAY = 5;
+const PX_PER_DAY = 8;
 
 function toDate(s) { return s ? new Date(s + 'T00:00:00') : null; }
 function daysBetween(a, b) { return Math.round((b - a) / 86400000); }

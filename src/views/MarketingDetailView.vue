@@ -115,15 +115,19 @@
                   <input v-else-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
                   <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
                 </td>
-                <!-- Несколько месяцев — колонка на каждый -->
+                <!-- Несколько месяцев — колонка на каждый (только для AUV) -->
                 <template v-else>
-                  <td v-for="m in activityMonths" :key="m.key">
-                    <input v-if="item.calc_method === 'auv'" type="number"
-                      :value="getItemAuvForMonth(item, m.key)"
-                      @change="setItemAuvForMonth(item, m.key, $event.target.value)"
-                      :disabled="isViewer" class="mktd-input mktd-input-sm mktd-input-month" placeholder="AUV" step="0.01" />
-                    <input v-else-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
-                    <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
+                  <template v-if="item.calc_method === 'auv'">
+                    <td v-for="m in activityMonths" :key="m.key">
+                      <input type="number"
+                        :value="getItemAuvForMonth(item, m.key)"
+                        @change="setItemAuvForMonth(item, m.key, $event.target.value)"
+                        :disabled="isViewer" class="mktd-input mktd-input-sm mktd-input-month" placeholder="AUV" step="0.01" />
+                    </td>
+                  </template>
+                  <td v-else :colspan="activityMonths.length">
+                    <input v-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Общий объём" />
+                    <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Фикс. кол-во" />
                   </td>
                 </template>
                 <td>
@@ -236,7 +240,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
@@ -573,6 +577,14 @@ async function onConfirm() {
 }
 function onCancel() { confirmModal.show = false; }
 
+// ─── Ctrl+S ─────────────────────────────────────────────────────────────────
+function onKeydown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    if (!isViewer.value && !saving.value) save();
+  }
+}
+
 // ─── Mount ──────────────────────────────────────────────────────────────────
 onMounted(() => {
   const id = route.params.id;
@@ -581,6 +593,10 @@ onMounted(() => {
   } else {
     activity.value.legal_entity = legalEntity.value;
   }
+  document.addEventListener('keydown', onKeydown);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown);
 });
 </script>
 
