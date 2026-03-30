@@ -128,7 +128,8 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(item, ii) in activity.items" :key="ii">
+              <template v-for="(item, ii) in activity.items" :key="ii">
+              <tr>
                 <td style="text-align:left;position:relative;">
                   <input class="mktd-input mktd-item-name" v-model="item.name" :disabled="isViewer"
                     placeholder="Поиск блюда..."
@@ -221,6 +222,7 @@
                   </div>
                 </td>
               </tr>
+              </template>
             </tbody>
           </table>
           <div class="mktd-add-btns">
