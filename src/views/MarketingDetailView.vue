@@ -194,31 +194,22 @@
               </tr>
               <!-- Подблюда категории -->
               <tr v-if="item.calc_method === 'category'" class="mktd-sub-row">
-                <td :colspan="colspanDishes" style="padding:4px 8px 10px;">
+                <td :colspan="colspanDishes" style="padding:6px 12px;">
                   <div class="mktd-sub-panel">
                     <div class="mktd-sub-header">
-                      <span style="font-size:11px;font-weight:600;color:var(--text-muted);">Блюда в категории ({{ (item.sub_items || []).length }})</span>
-                      <div style="display:flex;gap:4px;">
-                        <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:2px 8px;" @click="addSubItem(ii)">+ Блюдо</button>
-                        <button v-if="!isViewer && (item.sub_items || []).length >= 2" class="td-btn td-btn-outline" style="font-size:10px;padding:2px 8px;" @click="calcShares(ii)">Доли по реализации</button>
+                      <div class="mktd-sub-chips">
+                        <span v-for="(sub, si) in (item.sub_items || [])" :key="si" class="mktd-sub-chip">
+                          <span class="mktd-sub-chip-name">{{ sub.name }}</span>
+                          <span class="mktd-sub-chip-share">{{ Math.round((sub.share || 0) * 100) }}%</span>
+                          <button v-if="!isViewer" class="mktd-sub-chip-x" @click="item.sub_items.splice(si, 1)">×</button>
+                        </span>
+                        <span v-if="!(item.sub_items || []).length" class="mktd-muted" style="font-size:11px;">Нет блюд в категории</span>
+                      </div>
+                      <div style="display:flex;gap:4px;flex-shrink:0;">
+                        <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:3px 10px;" @click="openSubModal(ii)">Выбрать блюда</button>
+                        <button v-if="!isViewer && (item.sub_items || []).length >= 2" class="td-btn td-btn-outline" style="font-size:10px;padding:3px 10px;" @click="calcShares(ii)">Доли</button>
                       </div>
                     </div>
-                    <div v-for="(sub, si) in (item.sub_items || [])" :key="si" class="mktd-sub-item" style="position:relative;">
-                      <input class="mktd-input mktd-input-sm" v-model="sub.name" :disabled="isViewer" placeholder="Поиск блюда..."
-                        @input="onSubSearch(ii, si, sub.name)" @blur="closeSubSearch()" style="flex:2;" />
-                      <div v-if="subSearch.itemIdx === ii && subSearch.subIdx === si && subSearch.results.length" class="mktd-sub-dropdown">
-                        <div v-for="r in subSearch.results" :key="r.id" class="mktd-dropdown-item" @mousedown.prevent="pickSubRecipe(ii, si, r)">
-                          <span class="mktd-dropdown-sku">{{ r.code }}</span> {{ r.name }}
-                        </div>
-                      </div>
-                      <div style="display:flex;align-items:center;gap:4px;flex:0 0 80px;">
-                        <input type="number" class="mktd-input mktd-input-sm" :value="Math.round((sub.share || 0) * 100)" @change="sub.share = (parseFloat($event.target.value) || 0) / 100" :disabled="isViewer" style="width:50px;text-align:center;" />
-                        <span style="font-size:11px;color:var(--text-muted);">%</span>
-                      </div>
-                      <span v-if="sub.code" class="mktd-item-sku" style="position:static;">{{ sub.code }}</span>
-                      <button v-if="!isViewer" class="mktd-remove-btn" @click="item.sub_items.splice(si, 1)"><BkIcon name="close" size="xs" /></button>
-                    </div>
-                    <div v-if="!(item.sub_items || []).length" class="mktd-muted" style="font-size:11px;padding:4px 0;">Добавьте блюда в категорию</div>
                   </div>
                 </td>
               </tr>
@@ -330,6 +321,41 @@
     </Teleport>
 
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message" @confirm="onConfirm" @cancel="onCancel" />
+
+    <!-- Модалка выбора блюд для категории -->
+    <Teleport to="body">
+      <div v-if="subModal.show" class="mktd-modal-overlay" @click.self="subModal.show = false">
+        <div class="mktd-modal">
+          <div class="mktd-modal-header">
+            <h3>Выбрать блюда в категорию</h3>
+            <button class="mktd-remove-btn" @click="subModal.show = false" style="font-size:18px;">×</button>
+          </div>
+          <div class="mktd-modal-search">
+            <input class="mktd-input" v-model="subModal.query" placeholder="Поиск блюда..." @input="onSubModalSearch" ref="subModalInput" />
+          </div>
+          <div class="mktd-modal-list">
+            <label v-for="r in subModal.results" :key="r.id" class="mktd-modal-item" :class="{ selected: subModal.selected.has(r.id) }">
+              <input type="checkbox" :checked="subModal.selected.has(r.id)" @change="toggleSubSelect(r)" />
+              <span class="mktd-dropdown-sku">{{ r.code }}</span>
+              <span>{{ r.name }}</span>
+            </label>
+            <div v-if="subModal.query.length >= 2 && !subModal.results.length && !subModal.loading" class="mktd-muted" style="padding:12px;text-align:center;">Ничего не найдено</div>
+            <div v-if="subModal.loading" class="mktd-muted" style="padding:12px;text-align:center;">Поиск...</div>
+            <div v-if="subModal.query.length < 2" class="mktd-muted" style="padding:12px;text-align:center;">Введите минимум 2 символа</div>
+          </div>
+          <div v-if="subModal.selected.size" class="mktd-modal-selected">
+            Выбрано: {{ subModal.selected.size }}
+            <span v-for="[id, r] in subModal.selected" :key="id" class="mktd-sub-chip" style="margin-left:4px;">
+              {{ r.name }} <button class="mktd-sub-chip-x" @click="subModal.selected.delete(id)">×</button>
+            </span>
+          </div>
+          <div class="mktd-modal-footer">
+            <button class="td-btn td-btn-outline" @click="subModal.show = false">Отмена</button>
+            <button class="td-btn td-btn-primary" @click="applySubModal" :disabled="!subModal.selected.size">Добавить ({{ subModal.selected.size }})</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -675,26 +701,58 @@ async function calcShares(ii) {
   toast.success('Доли рассчитаны', data?.total_sales > 0 ? 'По реализации' : 'Поровну (нет данных)');
 }
 
-// Sub-item search
-const subSearch = reactive({ itemIdx: -1, subIdx: -1, results: [], timer: null });
-function onSubSearch(ii, si, val) {
-  subSearch.itemIdx = ii; subSearch.subIdx = si;
-  clearTimeout(subSearch.timer);
-  const q = (val || '').trim();
-  if (q.length < 2) { subSearch.results = []; return; }
-  subSearch.timer = setTimeout(async () => {
-    const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(30);
-    if (subSearch.itemIdx === ii && subSearch.subIdx === si) subSearch.results = data || [];
+// Модалка выбора блюд для категории
+const subModal = reactive({ show: false, itemIdx: -1, query: '', results: [], selected: new Map(), loading: false, timer: null });
+const subModalInput = ref(null);
+
+function openSubModal(ii) {
+  const item = activity.value.items[ii];
+  subModal.itemIdx = ii;
+  subModal.query = '';
+  subModal.results = [];
+  subModal.loading = false;
+  // Pre-select existing sub_items
+  subModal.selected = new Map();
+  for (const sub of (item.sub_items || [])) {
+    if (sub.recipe_id) subModal.selected.set(sub.recipe_id, { id: sub.recipe_id, name: sub.name, code: sub.code });
+  }
+  subModal.show = true;
+  nextTick(() => { subModalInput.value?.focus(); });
+}
+
+function onSubModalSearch() {
+  clearTimeout(subModal.timer);
+  const q = subModal.query.trim();
+  if (q.length < 2) { subModal.results = []; return; }
+  subModal.loading = true;
+  subModal.timer = setTimeout(async () => {
+    const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(50);
+    subModal.results = data || [];
+    subModal.loading = false;
   }, 250);
 }
-function closeSubSearch() { setTimeout(() => { subSearch.results = []; subSearch.itemIdx = -1; }, 200); }
-function pickSubRecipe(ii, si, recipe) {
-  const item = activity.value.items[ii];
-  if (!item.sub_items?.[si]) return;
-  item.sub_items[si].recipe_id = recipe.id;
-  item.sub_items[si].name = recipe.name;
-  item.sub_items[si].code = recipe.code;
-  subSearch.results = []; subSearch.itemIdx = -1;
+
+function toggleSubSelect(recipe) {
+  if (subModal.selected.has(recipe.id)) subModal.selected.delete(recipe.id);
+  else subModal.selected.set(recipe.id, recipe);
+}
+
+function applySubModal() {
+  const item = activity.value.items[subModal.itemIdx];
+  if (!item) return;
+  const existing = new Map((item.sub_items || []).map(s => [s.recipe_id, s]));
+  const newSubs = [];
+  for (const [id, r] of subModal.selected) {
+    if (existing.has(id)) { newSubs.push(existing.get(id)); }
+    else { newSubs.push({ recipe_id: id, name: r.name, code: r.code, share: 0 }); }
+  }
+  // Если доли не заданы — поровну
+  if (newSubs.length && newSubs.every(s => !s.share)) {
+    const share = Math.round(10000 / newSubs.length) / 10000;
+    newSubs.forEach(s => s.share = share);
+  }
+  item.sub_items = newSubs;
+  subModal.show = false;
 }
 
 // ─── Product search ─────────────────────────────────────────────────────────
@@ -983,13 +1041,31 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 
 /* ─── Категории / sub-items ────────────────────────────────────────────── */
 .mktd-sub-row td { background: #FAFAF8 !important; }
-.mktd-sub-panel { padding: 4px 0; }
-.mktd-sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.mktd-sub-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-.mktd-sub-dropdown { position: absolute; top: 100%; left: 0; z-index: 100; background: white; border: 1px solid #E8E0D8; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-height: 180px; overflow-y: auto; width: 300px; }
+.mktd-sub-panel { padding: 2px 0; }
+.mktd-sub-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.mktd-sub-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; align-items: center; }
+.mktd-sub-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: #E8F5E9; border: 1px solid #A5D6A7; border-radius: 6px; font-size: 11px; font-weight: 500; color: #2E7D32; }
+.mktd-sub-chip-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mktd-sub-chip-share { font-weight: 700; color: #1B5E20; font-size: 10px; }
+.mktd-sub-chip-x { background: none; border: none; cursor: pointer; color: #66BB6A; font-size: 14px; line-height: 1; padding: 0 2px; }
+.mktd-sub-chip-x:hover { color: #D62300; }
 .mktd-add-btns { display: flex; gap: 6px; margin-top: 8px; }
 .mktd-move-btn { background: none; border: none; cursor: pointer; color: #ccc; font-size: 10px; padding: 1px 3px; line-height: 1; }
 .mktd-move-btn:hover { color: var(--bk-brown); }
+
+/* Modal */
+.mktd-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+.mktd-modal { background: white; border-radius: 14px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); width: 560px; max-width: 95vw; max-height: 80vh; display: flex; flex-direction: column; }
+.mktd-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 12px; border-bottom: 1px solid #E8E0D8; }
+.mktd-modal-header h3 { margin: 0; font-size: 16px; font-weight: 700; color: var(--bk-brown); }
+.mktd-modal-search { padding: 12px 20px 8px; }
+.mktd-modal-list { flex: 1; overflow-y: auto; padding: 0 20px; max-height: 320px; }
+.mktd-modal-item { display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid #F5F0EB; cursor: pointer; font-size: 13px; transition: background 0.1s; }
+.mktd-modal-item:hover { background: #FFFBF5; }
+.mktd-modal-item.selected { background: #E8F5E9; }
+.mktd-modal-item input[type="checkbox"] { accent-color: #4CAF50; }
+.mktd-modal-selected { padding: 8px 20px; border-top: 1px solid #E8E0D8; font-size: 12px; font-weight: 600; color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.mktd-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid #E8E0D8; }
 
 .mktd-supplier-cell { cursor: pointer; }
 .mktd-supplier-cell:hover { background: rgba(214,35,0,0.03); }

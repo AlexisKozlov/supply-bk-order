@@ -2150,33 +2150,64 @@ if ($endpoint === 'rpc') {
         $recipeIds = $body['recipe_ids'] ?? [];
         if (empty($recipeIds)) respond(['error' => 'Не указаны блюда'], 400);
         $ph = implode(',', array_fill(0, count($recipeIds), '?'));
-        // Получить названия рецептов
-        $s = $pdo->prepare("SELECT id, name FROM recipes WHERE id IN ($ph)");
+
+        // Загрузить ингредиенты всех блюд → найти analog_group для каждого
+        $recipeAGs = []; // recipe_id → [analog_group, ...]
+        $allAGs = []; // все analog_group всех блюд
+        $s = $pdo->prepare("SELECT ri.recipe_id, p.analog_group
+            FROM recipe_ingredients ri
+            JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci
+            WHERE ri.recipe_id IN ($ph) AND p.analog_group IS NOT NULL");
         $s->execute($recipeIds);
-        $recipes = $s->fetchAll();
-        // Поиск реализации по названию блюда в restaurant_sales.analog_group
+        while ($row = $s->fetch()) {
+            $recipeAGs[$row['recipe_id']][] = $row['analog_group'];
+            $allAGs[] = $row['analog_group'];
+        }
+
+        // Найти уникальные ингредиенты для каждого блюда (которые есть только в одном блюде из списка)
+        $agCount = array_count_values($allAGs); // сколько раз каждый AG встречается (в разных рецептах)
+        // Подсчёт: сколько РАЗНЫХ рецептов содержат этот AG
+        $agRecipeCount = [];
+        foreach ($recipeAGs as $rid => $ags) {
+            foreach (array_unique($ags) as $ag) {
+                $agRecipeCount[$ag] = ($agRecipeCount[$ag] ?? 0) + 1;
+            }
+        }
+
+        // Для каждого блюда: найти уникальный ингредиент → его реализацию
+        $s2 = $pdo->prepare("SELECT id, name FROM recipes WHERE id IN ($ph)");
+        $s2->execute($recipeIds);
+        $recipes = $s2->fetchAll();
+
         $shares = [];
         $totalSales = 0;
         foreach ($recipes as $r) {
-            // Сначала точное совпадение по analog_group
-            $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group = ?");
-            $s->execute([$r['name']]);
-            $qty = floatval($s->fetchColumn() ?: 0);
-            if ($qty <= 0) {
-                // Поиск по analysis_data через recipes → recipe_ingredients → products → analog_group
-                $s = $pdo->prepare("SELECT DISTINCT p.analog_group FROM recipe_ingredients ri JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci WHERE ri.recipe_id = ? AND p.analog_group IS NOT NULL LIMIT 1");
-                $s->execute([$r['id']]);
-                $ag = $s->fetchColumn();
-                if ($ag) {
-                    $s = $pdo->prepare("SELECT SUM(consumption) as qty FROM analysis_data WHERE sku IN (SELECT sku FROM products WHERE analog_group = ?)");
-                    $s->execute([$ag]);
-                    $qty = floatval($s->fetchColumn() ?: 0);
-                }
+            $rid = $r['id'];
+            $uniqueAGs = [];
+            foreach (array_unique($recipeAGs[$rid] ?? []) as $ag) {
+                if (($agRecipeCount[$ag] ?? 0) === 1) $uniqueAGs[] = $ag; // уникальный для этого блюда
             }
-            $shares[] = ['recipe_id' => intval($r['id']), 'name' => $r['name'], 'sales' => $qty];
+
+            $qty = 0;
+            // Ищем реализацию уникальных ингредиентов в restaurant_sales
+            if (!empty($uniqueAGs)) {
+                $ph3 = implode(',', array_fill(0, count($uniqueAGs), '?'));
+                $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group IN ($ph3)");
+                $s->execute($uniqueAGs);
+                $qty = floatval($s->fetchColumn() ?: 0);
+            }
+            // Fallback: analysis_data
+            if ($qty <= 0 && !empty($uniqueAGs)) {
+                $ph3 = implode(',', array_fill(0, count($uniqueAGs), '?'));
+                $s = $pdo->prepare("SELECT SUM(ad.consumption) as qty FROM analysis_data ad JOIN products p ON p.sku = ad.sku WHERE p.analog_group IN ($ph3)");
+                $s->execute($uniqueAGs);
+                $qty = floatval($s->fetchColumn() ?: 0);
+            }
+
+            $shares[] = ['recipe_id' => intval($rid), 'name' => $r['name'], 'sales' => $qty, 'unique_ingredients' => $uniqueAGs];
             $totalSales += $qty;
         }
-        // Рассчитать доли
+
         foreach ($shares as &$sh) {
             $sh['share'] = $totalSales > 0 ? round($sh['sales'] / $totalSales, 4) : round(1 / count($shares), 4);
         }
