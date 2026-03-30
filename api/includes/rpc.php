@@ -1889,7 +1889,8 @@ if ($endpoint === 'rpc') {
 
             $pdo->prepare("DELETE FROM marketing_activity_items WHERE activity_id=?")->execute([$actId]);
             foreach ($items as $i => $item) {
-                $pdo->prepare("INSERT INTO marketing_activity_items (activity_id, product_id, sku, name, calc_method, auv, total_volume, fixed_qty, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                $auvPeriods = isset($item['auv_periods']) && is_array($item['auv_periods']) ? json_encode($item['auv_periods']) : null;
+                $pdo->prepare("INSERT INTO marketing_activity_items (activity_id, product_id, sku, name, calc_method, auv, auv_periods, total_volume, fixed_qty, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     ->execute([
                         $actId,
                         $item['product_id'] ?? null,
@@ -1897,6 +1898,7 @@ if ($endpoint === 'rpc') {
                         $item['name'] ?? '',
                         $item['calc_method'] ?? 'auv',
                         $item['auv'] ?? null,
+                        $auvPeriods,
                         $item['total_volume'] ?? null,
                         $item['fixed_qty'] ?? null,
                         $item['unit'] ?? 'шт',

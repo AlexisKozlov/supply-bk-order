@@ -81,12 +81,13 @@
           <table class="mktd-items-table" v-if="activity.items.length">
             <thead>
               <tr>
-                <th style="min-width:200px;text-align:left;">Блюдо</th>
-                <th style="width:120px;">Метод расчёта</th>
-                <th style="width:100px;">Значение</th>
-                <th style="width:60px;">Ед.</th>
-                <th style="width:110px;">Итого порций</th>
-                <th style="width:140px;">Заметка</th>
+                <th style="min-width:180px;text-align:left;">Блюдо</th>
+                <th style="width:100px;">Метод</th>
+                <th v-if="!hasMultipleMonths" style="width:90px;">AUV / кол-во</th>
+                <th v-for="m in activityMonths" v-else :key="m.key" style="width:80px;" class="mktd-month-th">{{ m.label }}<div class="mktd-month-days">{{ m.days }} дн</div></th>
+                <th style="width:50px;">Ед.</th>
+                <th style="width:100px;">Итого</th>
+                <th style="width:120px;">Заметка</th>
                 <th style="width:36px;" v-if="!isViewer"></th>
               </tr>
             </thead>
@@ -104,15 +105,27 @@
                 <td>
                   <select v-model="item.calc_method" :disabled="isViewer" class="mktd-input mktd-input-sm">
                     <option value="auv">AUV</option>
-                    <option value="total_volume">Общий объём</option>
-                    <option value="fixed_qty">Фикс. кол-во</option>
+                    <option value="total_volume">Объём</option>
+                    <option value="fixed_qty">Фикс.</option>
                   </select>
                 </td>
-                <td>
+                <!-- Один период или не AUV -->
+                <td v-if="!hasMultipleMonths">
                   <input v-if="item.calc_method === 'auv'" type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="шт/рест/день" step="0.01" />
                   <input v-else-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
                   <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
                 </td>
+                <!-- Несколько месяцев — колонка на каждый -->
+                <template v-else>
+                  <td v-for="m in activityMonths" :key="m.key">
+                    <input v-if="item.calc_method === 'auv'" type="number"
+                      :value="getItemAuvForMonth(item, m.key)"
+                      @change="setItemAuvForMonth(item, m.key, $event.target.value)"
+                      :disabled="isViewer" class="mktd-input mktd-input-sm mktd-input-month" placeholder="AUV" step="0.01" />
+                    <input v-else-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
+                    <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
+                  </td>
+                </template>
                 <td>
                   <select v-model="item.unit" :disabled="isViewer" class="mktd-input mktd-input-sm">
                     <option value="шт">шт</option>
@@ -272,10 +285,52 @@ const activityDays = computed(() => {
   return Math.max(Math.round((to - from) / 86400000) + 1, 0);
 });
 
+// Месяцы в рамках активности (для AUV по периодам)
+const _monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+const activityMonths = computed(() => {
+  if (!activity.value.date_from || !activity.value.date_to) return [];
+  const from = new Date(activity.value.date_from + 'T00:00:00');
+  const to = new Date(activity.value.date_to + 'T00:00:00');
+  const months = [];
+  const d = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (d <= to) {
+    const mStart = new Date(Math.max(d, from));
+    const mEndRaw = new Date(d.getFullYear(), d.getMonth() + 1, 0); // last day of month
+    const mEnd = new Date(Math.min(mEndRaw, to));
+    const days = Math.round((mEnd - mStart) / 86400000) + 1;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    months.push({ key, label: `${_monthNames[d.getMonth()]} ${d.getFullYear()}`, days });
+    d.setMonth(d.getMonth() + 1);
+  }
+  return months;
+});
+const hasMultipleMonths = computed(() => activityMonths.value.length > 1);
+
+function getItemAuvForMonth(item, monthKey) {
+  if (!item.auv_periods) return item.auv || 0;
+  const found = item.auv_periods.find(p => p.month === monthKey);
+  return found ? (found.auv || 0) : (item.auv || 0);
+}
+
+function setItemAuvForMonth(item, monthKey, val) {
+  if (!item.auv_periods) item.auv_periods = activityMonths.value.map(m => ({ month: m.key, auv: item.auv || 0 }));
+  const found = item.auv_periods.find(p => p.month === monthKey);
+  if (found) found.auv = parseFloat(val) || 0;
+  else item.auv_periods.push({ month: monthKey, auv: parseFloat(val) || 0 });
+}
+
 function itemTotal(item) {
-  const days = activityDays.value;
   const rests = activity.value.restaurant_count || 0;
-  if (item.calc_method === 'auv') return (item.auv || 0) * rests * days;
+  if (item.calc_method === 'auv') {
+    if (hasMultipleMonths.value && item.auv_periods?.length) {
+      // Сумма по месяцам: AUV_месяц × рестораны × дней_в_месяце
+      return activityMonths.value.reduce((sum, m) => {
+        const auv = getItemAuvForMonth(item, m.key);
+        return sum + auv * rests * m.days;
+      }, 0);
+    }
+    return (item.auv || 0) * rests * activityDays.value;
+  }
   if (item.calc_method === 'total_volume') return item.total_volume || 0;
   return item.fixed_qty || 0;
 }
@@ -460,7 +515,7 @@ async function save() {
       note: activity.value.note || null,
       items: activity.value.items.map((it, i) => ({
         product_id: it.product_id, sku: it.sku, name: it.name,
-        calc_method: it.calc_method, auv: it.auv, total_volume: it.total_volume,
+        calc_method: it.calc_method, auv: it.auv, auv_periods: it.auv_periods || null, total_volume: it.total_volume,
         fixed_qty: it.fixed_qty, unit: it.unit, note: it.note,
       })),
     };
@@ -489,6 +544,7 @@ async function loadActivity(id) {
         product_id: it.product_id, sku: it.sku, name: it.name,
         calc_method: it.calc_method || 'auv',
         auv: it.auv ? parseFloat(it.auv) : null,
+        auv_periods: it.auv_periods ? (typeof it.auv_periods === 'string' ? JSON.parse(it.auv_periods) : it.auv_periods) : null,
         total_volume: it.total_volume ? parseFloat(it.total_volume) : null,
         fixed_qty: it.fixed_qty ? parseFloat(it.fixed_qty) : null,
         unit: it.unit || 'шт', note: it.note || '',
@@ -588,6 +644,9 @@ onMounted(() => {
 .mktd-tab.active .mktd-card-count { background: rgba(255,255,255,0.3); }
 
 /* Ingredients info */
+.mktd-month-th { font-size: 10px !important; line-height: 1.3; }
+.mktd-month-days { font-size: 9px; font-weight: 500; opacity: 0.6; }
+.mktd-input-month { width: 65px; text-align: center; font-weight: 600; }
 .mktd-ing-group td { background: #FFFBF5 !important; }
 .mktd-ing-info { font-size: 12px; color: var(--text-muted); padding: 8px 0 12px; }
 .mktd-ing-warn { color: #D97706; font-weight: 600; }
