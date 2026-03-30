@@ -46,7 +46,7 @@
               v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module, item.route)"
               :to="{ name: item.route }"
               class="sidebar-tool-icon"
-              :class="{ active: currentRoute === item.route }"
+              :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
               :title="item.label"
             >
               <BkIcon :name="item.icon" size="sm" light/>
@@ -390,6 +390,7 @@ const toolsItems = [
   { module: 'veg', route: 'veg-admin', icon: 'veg', label: 'Овощи' },
   { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
   { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
+  { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
   { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
   { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
   { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
@@ -492,6 +493,9 @@ const pageNames = {
   'restaurant-sales': 'Реализация ресторанов',
   'tenders': 'Тендеры',
   'tender-detail': 'Тендер',
+  'marketing': 'Маркетинг',
+  'marketing-new': 'Новая активность',
+  'marketing-detail': 'Маркетинговая активность',
   'stock-collection': 'Сбор остатков',
   'veg-admin': 'Овощи',
   'telegram-admin': 'Telegram-бот',

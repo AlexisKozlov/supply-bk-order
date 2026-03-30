@@ -1,0 +1,27 @@
+-- Справочник рецептур (блюда)
+CREATE TABLE IF NOT EXISTS recipes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(50) DEFAULT NULL,
+  name VARCHAR(255) NOT NULL,
+  thk VARCHAR(255) DEFAULT NULL,
+  brutto_total DECIMAL(10,2) DEFAULT NULL,
+  qty_total INT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_code (code),
+  INDEX idx_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Ингредиенты рецептуры
+CREATE TABLE IF NOT EXISTS recipe_ingredients (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  recipe_id INT NOT NULL,
+  sku VARCHAR(50) DEFAULT NULL,
+  name VARCHAR(255) NOT NULL DEFAULT '',
+  brutto DECIMAL(10,4) DEFAULT NULL,
+  qty DECIMAL(10,4) DEFAULT NULL,
+  sort_order INT DEFAULT 0,
+  FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+  INDEX idx_recipe (recipe_id),
+  INDEX idx_sku (sku)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -97,6 +97,8 @@
           <BkIcon name="eye" size="sm"/> {{ hideExcluded ? 'Показать' : 'Скрыть' }} искл. ({{ excludedCount }})
         </button>
         <button class="btn small" @click="fillConsumption" :disabled="fillLoading || viewOnly" title="Загрузить расход и остаток из анализа запасов"><BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расх/ост</button>
+        <button v-if="!existingOrders.length" class="btn small" @click="loadExistingOrders().then(recalcAll)" :disabled="existingOrdersLoading || !supplier" title="Учесть непринятые заказы у этого поставщика"><BkIcon v-if="existingOrdersLoading" name="loading" size="sm"/><BkIcon v-else name="order" size="sm"/> Заказы в пути</button>
+        <button v-else class="btn small" @click="clearExistingOrders" title="Убрать заказы в пути из расчёта"><BkIcon name="order" size="sm"/> Заказы в пути ({{ existingOrders.length }}) ✕</button>
         <button class="btn small" @click="loadFrom1c" :disabled="load1cLoading || viewOnly" title="Загрузить из 1С"><BkIcon v-if="load1cLoading" name="loading" size="sm"/><BkIcon v-else name="oneC" size="sm"/> 1С</button>
         <button class="btn small" @click="doImport" :disabled="viewOnly" title="Импорт из файла"><BkIcon name="import" size="sm"/> Импорт</button>
         <button class="btn small danger" @click="clearAll" :disabled="viewOnly" title="Очистить данные">Очистить</button>
@@ -238,6 +240,7 @@
                 @blur="planCalc.onBlur(); applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
+              <div v-if="item.plan[m]?.existingBoxes > 0" class="plan-existing-order" :title="'Заказ в пути: ' + item.plan[m].existingBoxes + ' кор'">📦 {{ item.plan[m].existingBoxes }}</div>
               <div v-if="item.plan[m]?.daysRemaining > 1" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[m].daysRemaining)">{{ item.plan[m].daysRemaining }} дн</div>
             </td>
             <td class="plan-td-total" :class="{ 'plan-has-value': itemTotalBoxes(item) > 0 }" :title="planItemPriceTooltip(item)">
@@ -547,6 +550,8 @@ const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 const truckEnabled = ref(false);
 const truckPallets = ref(32);
 const hideExcluded = ref(false);
+const existingOrders = ref([]); // заказы в пути (без received_at) для этого поставщика
+const existingOrdersLoading = ref(false);
 let _prevPlanItems = null;
 const _loadedCreatedBy = ref(null);
 const _loadedNote = ref('');
@@ -924,14 +929,22 @@ function recalcItem(idx, fromMonth = 0) {
     item.plan = headers.map((_, m) => { const o = old[m]; if (o && o.locked) return { ...o, month: m }; return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }; });
   }
   const mu = daily * 30; const wu = daily * 7;
+  // Существующие заказы в пути для этого SKU
+  const skuOrders = item.sku ? (ordersByPeriod.value[item.sku] || {}) : {};
   // Если нет текущих недель — начальный остаток как раньше
   if (!cwHeaders.length) co = (item.stockOnHand || 0) + (item.stockAtSupplier || 0);
-  for (let m = 0; m < fromMonth && m < headers.length; m++) { co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m]?.orderUnits || 0); if (co < 0) co = 0; }
+  for (let m = 0; m < fromMonth && m < headers.length; m++) {
+    const existingUnits = (skuOrders[m] || 0) * qpb;
+    co = co - (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio + (item.plan[m]?.orderUnits || 0) + existingUnits;
+    if (co < 0) co = 0;
+  }
   for (let m = fromMonth; m < headers.length; m++) {
+    const existingUnits = (skuOrders[m] || 0) * qpb;
     const need = (periodType.value === 'weeks' ? wu : mu) * headers[m].ratio;
-    const deficit = need - Math.min(co, need);
-    if (item.plan[m].locked) { item.plan[m].need = Math.round(need); item.plan[m].deficit = Math.round(deficit); item.plan[m].orderUnits = item.plan[m].orderBoxes * pbu; co = co - need + item.plan[m].orderUnits; }
-    else { let ob = 0, ou = 0; if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); if (mult > 1) ob = Math.ceil(ob / mult) * mult; ou = ob * pbu; } item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false }; co = co - need + ou; }
+    const available = co + existingUnits;
+    const deficit = need - Math.min(available, need);
+    if (item.plan[m].locked) { item.plan[m].need = Math.round(need); item.plan[m].deficit = Math.round(deficit); item.plan[m].orderUnits = item.plan[m].orderBoxes * pbu; item.plan[m].existingBoxes = skuOrders[m] || 0; co = available - need + item.plan[m].orderUnits; }
+    else { let ob = 0, ou = 0; if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); if (mult > 1) ob = Math.ceil(ob / mult) * mult; ou = ob * pbu; } item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false, existingBoxes: skuOrders[m] || 0 }; co = available - need + ou; }
     if (co < 0) co = 0;
     item.plan[m].daysRemaining = daily > 0 ? Math.round(co / daily) : null;
   }
@@ -1290,6 +1303,101 @@ async function _loadValidationData(gen) {
 }
 
 // ─── Загрузить расход/остаток из анализа запасов ──────────────────────────
+// ─── Существующие заказы (в пути) ─────────────────────────────────────────
+// Карта: sku → periodIndex → qty_boxes из непринятых заказов
+const ordersByPeriod = computed(() => {
+  const map = {}; // { sku: { periodIdx: totalBoxes } }
+  if (!existingOrders.value.length || !periodHeaders.value.length) return map;
+  const headers = periodHeaders.value;
+  for (const order of existingOrders.value) {
+    const dd = new Date(order.delivery_date + 'T00:00:00');
+    // Найти период, в который попадает delivery_date
+    let pi = -1;
+    for (let i = 0; i < headers.length; i++) {
+      const pStart = headers[i].startDate;
+      const pEnd = i + 1 < headers.length ? headers[i + 1].startDate : null;
+      if (pEnd) {
+        if (dd >= pStart && dd < pEnd) { pi = i; break; }
+      } else {
+        if (dd >= pStart) { pi = i; break; }
+      }
+    }
+    if (pi < 0) continue;
+    for (const oi of (order._items || [])) {
+      if (!oi.sku) continue;
+      if (!map[oi.sku]) map[oi.sku] = {};
+      map[oi.sku][pi] = (map[oi.sku][pi] || 0) + (oi.qty_boxes || 0);
+    }
+  }
+  return map;
+});
+
+// Общее кол-во заказов в пути по периоду (для отображения)
+function periodExistingOrders(pi) {
+  const headers = periodHeaders.value;
+  if (!existingOrders.value.length || !headers.length) return [];
+  const result = [];
+  for (const order of existingOrders.value) {
+    const dd = new Date(order.delivery_date + 'T00:00:00');
+    const pStart = headers[pi]?.startDate;
+    const pEnd = pi + 1 < headers.length ? headers[pi + 1].startDate : null;
+    const inPeriod = pEnd ? (dd >= pStart && dd < pEnd) : (dd >= pStart);
+    if (inPeriod) result.push(order);
+  }
+  return result;
+}
+
+async function loadExistingOrders() {
+  if (!supplier.value) { existingOrders.value = []; return; }
+  const headers = periodHeaders.value;
+  if (!headers.length) { existingOrders.value = []; return; }
+  existingOrdersLoading.value = true;
+  try {
+    const dateFrom = toLocalDateStr(headers[0].startDate);
+    const lastH = headers[headers.length - 1];
+    // Конец последнего периода: примерная дата
+    const endDate = new Date(lastH.startDate);
+    if (periodType.value === 'weeks') {
+      const freqWeeks = periodFrequency.value === 'w2' ? 2 : 1;
+      endDate.setDate(endDate.getDate() + freqWeeks * 7);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+    const dateTo = toLocalDateStr(endDate);
+
+    const { data: orders } = await db.from('orders').select('id, supplier, delivery_date')
+      .eq('legal_entity', orderStore.settings.legalEntity)
+      .eq('supplier', supplier.value)
+      .gte('delivery_date', dateFrom)
+      .lte('delivery_date', dateTo)
+      .is('received_at', null);
+
+    if (!orders?.length) { existingOrders.value = []; return; }
+
+    // Загрузить позиции этих заказов
+    const orderIds = orders.map(o => o.id);
+    const { data: orderItems } = await db.from('order_items').select('order_id, sku, name, qty_boxes').in('order_id', orderIds);
+
+    const itemMap = {};
+    for (const oi of (orderItems || [])) {
+      if (!itemMap[oi.order_id]) itemMap[oi.order_id] = [];
+      itemMap[oi.order_id].push(oi);
+    }
+
+    existingOrders.value = orders.map(o => ({ ...o, _items: itemMap[o.id] || [] }));
+  } catch (err) {
+    console.error('[loadExistingOrders]', err);
+    existingOrders.value = [];
+  } finally {
+    existingOrdersLoading.value = false;
+  }
+}
+
+function clearExistingOrders() {
+  existingOrders.value = [];
+  recalcAll();
+}
+
 async function fillConsumption() {
   if (!items.value.length) return;
   snapshot();
@@ -2270,5 +2378,6 @@ watch(() => route.query.planId, async (newId) => {
 .plan-exclude-btn { border: none; background: none; cursor: pointer; padding: 1px 3px; border-radius: 3px; color: var(--bk-green, #2E7D32); font-size: 12px; line-height: 1; }
 .plan-exclude-btn:hover { background: rgba(0,0,0,0.06); }
 .plan-exclude-btn.is-excluded { color: var(--text-muted, #999); }
+.plan-existing-order { font-size: 10px; color: #1565C0; background: #E3F2FD; border-radius: 3px; padding: 0 4px; margin-top: 2px; white-space: nowrap; line-height: 1.4; }
 .excluded-badge { font-size: 10px; color: var(--text-muted, #999); background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; margin-left: 4px; white-space: nowrap; }
 </style>

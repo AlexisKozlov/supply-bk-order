@@ -19,9 +19,11 @@ $allowed = [
     'veg_sessions', 'veg_session_products', 'veg_tokens', 'veg_delivery_days', 'veg_orders', 'veg_restaurant_notes', 'veg_deadline_rules',
     'dist_sessions', 'dist_session_products', 'dist_entries', 'dist_notes',
     'plt_products', 'plt_deliveries', 'plt_delivery_items', 'plt_daily_stock', 'plt_summary',
+    'marketing_activities', 'marketing_activity_items', 'marketing_activity_files',
+    'recipes', 'recipe_ingredients',
 ];
 // Защита: только чтение через REST, запись — через RPC
-$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files', 'veg_tokens'];
+$readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files', 'veg_tokens', 'marketing_activity_files'];
 // settings — только чтение и обновление (без delete/insert для защиты системных ключей)
 $noInsertDelete = ['settings'];
 // audit_log — только чтение и вставка (без update/delete для защиты целостности)
@@ -185,6 +187,11 @@ $filterWhitelist = [
     'plt_delivery_items'    => ['id','delivery_id','product_id'],
     'plt_daily_stock'       => ['id','legal_entity','stock_date'],
     'plt_summary'           => ['id','legal_entity','entry_date','supplier_name','delivery_id','is_manual'],
+    'marketing_activities'      => ['id','name','type','status','date_from','date_to','legal_entity','restaurant_count','created_by','created_at'],
+    'marketing_activity_items'  => ['id','activity_id','product_id','sku','name','calc_method'],
+    'marketing_activity_files'  => ['id','activity_id'],
+    'recipes'                   => ['id','code','name','thk'],
+    'recipe_ingredients'        => ['id','recipe_id','sku','name'],
 ];
 
 // Белый список колонок для записи (POST/PATCH)

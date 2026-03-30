@@ -1854,6 +1854,187 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    // ═══ Маркетинг: сохранить активность ═══
+    if ($fn === 'save_marketing_activity') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['marketing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+
+        $actId = intval($body['id'] ?? 0);
+        $name = trim($body['name'] ?? '');
+        $type = $body['type'] ?? 'promo';
+        $status = $body['status'] ?? 'active';
+        $dateFrom = $body['date_from'] ?? null;
+        $dateTo = $body['date_to'] ?? null;
+        $le = $body['legal_entity'] ?? '';
+        $restaurantCount = isset($body['restaurant_count']) ? intval($body['restaurant_count']) : null;
+        $note = $body['note'] ?? null;
+        $items = $body['items'] ?? [];
+
+        if (!$name) respond(['error' => 'Укажите название'], 400);
+        if (!$le) respond(['error' => 'Не указано юрлицо'], 400);
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+
+        $pdo->beginTransaction();
+        try {
+            if ($actId) {
+                $pdo->prepare("UPDATE marketing_activities SET name=?, type=?, status=?, date_from=?, date_to=?, restaurant_count=?, note=?, updated_at=NOW() WHERE id=? AND legal_entity=?")
+                    ->execute([$name, $type, $status, $dateFrom, $dateTo, $restaurantCount, $note, $actId, $le]);
+            } else {
+                $pdo->prepare("INSERT INTO marketing_activities (name, type, status, date_from, date_to, legal_entity, restaurant_count, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([$name, $type, $status, $dateFrom, $dateTo, $le, $restaurantCount, $note, $caller['name'] ?? '']);
+                $actId = $pdo->lastInsertId();
+            }
+
+            $pdo->prepare("DELETE FROM marketing_activity_items WHERE activity_id=?")->execute([$actId]);
+            foreach ($items as $i => $item) {
+                $pdo->prepare("INSERT INTO marketing_activity_items (activity_id, product_id, sku, name, calc_method, auv, total_volume, fixed_qty, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([
+                        $actId,
+                        $item['product_id'] ?? null,
+                        $item['sku'] ?? null,
+                        $item['name'] ?? '',
+                        $item['calc_method'] ?? 'auv',
+                        $item['auv'] ?? null,
+                        $item['total_volume'] ?? null,
+                        $item['fixed_qty'] ?? null,
+                        $item['unit'] ?? 'шт',
+                        $i,
+                        $item['note'] ?? null,
+                    ]);
+            }
+
+            $pdo->commit();
+            respond(['success' => true, 'id' => intval($actId)]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('save_marketing_activity error: ' . $e->getMessage());
+            respond(['error' => 'Ошибка сохранения'], 500);
+        }
+    }
+
+    // ═══ Маркетинг: загрузить активность ═══
+    if ($fn === 'get_marketing_activity') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+
+        $s = $pdo->prepare("SELECT * FROM marketing_activities WHERE id=?"); $s->execute([$id]);
+        $act = $s->fetch();
+        if (!$act) respond(['error' => 'Активность не найдена'], 404);
+        if (!checkLegalEntityAccess($caller, $act['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+
+        $s = $pdo->prepare("SELECT * FROM marketing_activity_items WHERE activity_id=? ORDER BY sort_order"); $s->execute([$id]);
+        $act['items'] = $s->fetchAll();
+
+        $s = $pdo->prepare("SELECT * FROM marketing_activity_files WHERE activity_id=? ORDER BY uploaded_at"); $s->execute([$id]);
+        $act['files'] = $s->fetchAll();
+
+        respond($act);
+    }
+
+    // ═══ Маркетинг: удалить активность ═══
+    if ($fn === 'delete_marketing_activity') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['marketing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) respond(['error' => 'Недостаточно прав'], 403);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $s = $pdo->prepare("SELECT legal_entity FROM marketing_activities WHERE id=?"); $s->execute([$id]);
+        $le = $s->fetchColumn();
+        if (!$le) respond(['error' => 'Не найдена'], 404);
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
+        // Удалить файлы с диска
+        $fs = $pdo->prepare("SELECT file_path FROM marketing_activity_files WHERE activity_id=?"); $fs->execute([$id]);
+        while ($fp = $fs->fetchColumn()) {
+            $fpath = __DIR__ . '/../uploads/marketing/' . basename($fp);
+            if (file_exists($fpath)) unlink($fpath);
+        }
+        $pdo->prepare("DELETE FROM marketing_activities WHERE id=?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    // ═══ Рецептуры: импорт из JSON (парсинг на фронте) ═══
+    if ($fn === 'import_recipes') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['marketing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+
+        $recipes = $body['recipes'] ?? [];
+        if (empty($recipes)) respond(['error' => 'Нет данных для импорта'], 400);
+
+        $pdo->beginTransaction();
+        try {
+            // Очистить старые рецептуры
+            $pdo->exec("DELETE FROM recipe_ingredients");
+            $pdo->exec("DELETE FROM recipes");
+
+            $imported = 0;
+            foreach ($recipes as $r) {
+                $code = $r['code'] ?? null;
+                $name = trim($r['name'] ?? '');
+                if (!$name) continue;
+                $thk = $r['thk'] ?? null;
+                $brutto = $r['brutto'] ?? null;
+                $qty = $r['qty'] ?? null;
+
+                $pdo->prepare("INSERT INTO recipes (code, name, thk, brutto_total, qty_total) VALUES (?, ?, ?, ?, ?)")
+                    ->execute([$code, $name, $thk, $brutto, $qty]);
+                $recipeId = $pdo->lastInsertId();
+
+                foreach (($r['ingredients'] ?? []) as $i => $ing) {
+                    $pdo->prepare("INSERT INTO recipe_ingredients (recipe_id, sku, name, brutto, qty, sort_order) VALUES (?, ?, ?, ?, ?, ?)")
+                        ->execute([$recipeId, $ing['sku'] ?? null, $ing['name'] ?? '', $ing['brutto'] ?? null, $ing['qty'] ?? null, $i]);
+                }
+                $imported++;
+            }
+
+            $pdo->commit();
+            respond(['success' => true, 'imported' => $imported]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('import_recipes error: ' . $e->getMessage());
+            respond(['error' => 'Ошибка импорта рецептур'], 500);
+        }
+    }
+
+    // ═══ Рецептуры: получить ингредиенты для списка блюд ═══
+    if ($fn === 'get_recipe_ingredients') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+
+        $dishNames = $body['dish_names'] ?? [];
+        $dishCodes = $body['dish_codes'] ?? [];
+        if (empty($dishNames) && empty($dishCodes)) respond(['error' => 'Не указаны блюда'], 400);
+
+        $recipes = [];
+        if (!empty($dishCodes)) {
+            $ph = implode(',', array_fill(0, count($dishCodes), '?'));
+            $s = $pdo->prepare("SELECT * FROM recipes WHERE code IN ($ph)");
+            $s->execute($dishCodes);
+            $recipes = $s->fetchAll();
+        } elseif (!empty($dishNames)) {
+            $ph = implode(',', array_fill(0, count($dishNames), '?'));
+            $s = $pdo->prepare("SELECT * FROM recipes WHERE name IN ($ph)");
+            $s->execute($dishNames);
+            $recipes = $s->fetchAll();
+        }
+
+        $result = [];
+        foreach ($recipes as $r) {
+            $s = $pdo->prepare("SELECT * FROM recipe_ingredients WHERE recipe_id=? ORDER BY sort_order");
+            $s->execute([$r['id']]);
+            $r['ingredients'] = $s->fetchAll();
+            $result[] = $r;
+        }
+
+        respond(['recipes' => $result]);
+    }
+
     // ═══ Баг-репорты: создать ═══
     if ($fn === 'create_bug_report') {
         $caller = getSessionUser($pdo);
@@ -3018,12 +3199,12 @@ if ($endpoint === 'rpc') {
         $dueDate = clone $dDate;
         $dueDate->modify("+{$delayDays} days");
 
-        // Ближайший ВТ(2) или ЧТ(4) после dueDate
+        // Ближайший ВТ(2) или ЧТ(4) до или на dueDate (отсрочка — крайний срок)
         $payDate = clone $dueDate;
         while (true) {
             $dow = (int)$payDate->format('N');
             if ($dow === 2 || $dow === 4) break; // ВТ или ЧТ
-            $payDate->modify('+1 day');
+            $payDate->modify('-1 day');
         }
 
         // Дедлайн заявки: предыдущий день 15:00
