@@ -240,54 +240,49 @@
                 <button class="mktd-ing-gbtn" :class="{ active: ingGroupBy === 'all' }" @click="ingGroupBy = 'all'">Все</button>
               </div>
             </div>
-            <table class="mktd-items-table">
-              <thead>
-                <tr>
-                  <th style="text-align:left;min-width:160px;">Ингредиент</th>
-                  <th style="width:90px;">Артикул</th>
-                  <th style="width:110px;">Поставщик</th>
-                  <th style="width:80px;">Кг / Л</th>
-                  <th style="width:70px;">Шт</th>
-                  <th style="width:70px;">Кейсы</th>
-                  <th style="width:120px;">Блюда</th>
-                  <th style="min-width:180px;">Комментарий</th>
-                </tr>
-              </thead>
-              <tbody>
-                <template v-for="([groupName, ings], gi) in ingredientsGrouped" :key="groupName">
-                  <tr v-if="ingredientsGrouped.length > 1" class="mktd-ing-group-row">
-                    <td colspan="8" class="mktd-ing-group-td">{{ groupName }} <span class="mktd-ing-group-cnt">{{ ings.length }}</span></td>
-                  </tr>
-                  <tr v-for="ing in ings" :key="ing.analogGroup || ing.name">
-                    <td style="text-align:left;">
-                      <span style="font-weight:600;">{{ ing.name }}</span>
-                      <span v-if="ing.analogGroup && ing.skus.length > 1" class="mktd-muted" style="font-size:9px;margin-left:3px;">группа</span>
-                    </td>
-                    <td style="font-size:10px;">
-                      <span v-for="s in ing.skus.slice(0,2)" :key="s" class="mktd-item-sku" style="position:static;display:inline-block;margin:1px;">{{ s }}</span>
-                      <span v-if="ing.skus.length > 2" class="mktd-muted" style="font-size:9px;">+{{ ing.skus.length - 2 }}</span>
-                    </td>
-                    <td style="font-size:11px;">{{ ing.supplierOverride || ing.supplier || '—' }}</td>
-                    <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams / 1000) : '—' }}</td>
-                    <td class="mktd-total-cell">{{ ing.totalQty > 0 ? formatNum(ing.totalQty) : '—' }}</td>
-                    <td class="mktd-total-cell">
-                      <template v-if="ing.qtyPerBox === -1"><span class="mktd-muted" style="font-size:9px;">разн.</span></template>
-                      <template v-else-if="ing.qtyPerBox > 0 && ing.totalQty > 0">{{ formatNum(Math.ceil(ing.totalQty / ing.qtyPerBox)) }}</template>
-                      <template v-else-if="ing.qtyPerBox > 0 && ing.totalGrams > 0 && (ing.productUnit === 'кг' || ing.productUnit === 'л')">{{ formatNum(Math.ceil(ing.totalGrams / 1000 / ing.qtyPerBox)) }}</template>
-                      <template v-else>—</template>
-                    </td>
-                    <td style="font-size:10px;color:var(--text-muted);">{{ ing.fromDishes.join(', ') }}</td>
-                    <td @dblclick="startEditComment(ing)" style="cursor:pointer;">
-                      <template v-if="editingComment === (ing.analogGroup || ing.name)">
-                        <input class="mktd-input mktd-input-sm" v-model="ing.comment" @blur="editingComment = null" @keydown.enter="editingComment = null" style="width:100%;" />
-                      </template>
-                      <span v-else-if="ing.comment" style="font-size:11px;">{{ ing.comment }}</span>
-                      <span v-else class="mktd-muted" style="font-size:10px;">—</span>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
+            <!-- Поиск по ингредиентам -->
+            <div style="margin-bottom:10px;">
+              <input v-model="ingFilter" class="mktd-input" style="max-width:300px;" placeholder="Фильтр ингредиентов..." />
+            </div>
+
+            <div class="mktd-ing-list">
+              <template v-for="([groupName, ings], gi) in ingredientsGrouped" :key="groupName">
+                <div v-if="ingredientsGrouped.length > 1" class="mktd-ing-grp-title">{{ groupName }} <span>{{ ings.length }}</span></div>
+                <div v-for="ing in filterIngs(ings)" :key="ing.analogGroup || ing.name"
+                  class="mktd-ing-row" :class="{ expanded: expandedIng === ingKey(ing) }"
+                  @click="expandedIng = expandedIng === ingKey(ing) ? null : ingKey(ing)">
+                  <div class="mktd-ing-main">
+                    <div class="mktd-ing-name">{{ ing.name }}</div>
+                    <div class="mktd-ing-nums">
+                      <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
+                      <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
+                      <span v-if="ingCases(ing)" class="mktd-ing-cases">{{ ingCases(ing) }} <small>кейс.</small></span>
+                    </div>
+                    <div class="mktd-ing-sup" v-if="ing.supplier">{{ ing.supplier }}</div>
+                    <BkIcon :name="expandedIng === ingKey(ing) ? 'chevronUp' : 'chevronDown'" size="xs" style="color:var(--text-muted);flex-shrink:0;" />
+                  </div>
+                  <div v-if="expandedIng === ingKey(ing)" class="mktd-ing-detail" @click.stop>
+                    <div class="mktd-ing-detail-grid">
+                      <div><span class="mktd-ing-dlabel">Артикулы:</span> {{ ing.skus.join(', ') || '—' }}</div>
+                      <div v-if="ing.originalSkus.length"><span class="mktd-ing-dlabel">Было:</span> {{ ing.originalSkus.join(', ') }}</div>
+                      <div><span class="mktd-ing-dlabel">Поставщик:</span>
+                        <input v-if="!isViewer" class="mktd-input mktd-input-sm" v-model="ing.supplierOverride" :placeholder="ing.supplier || 'Не определён'" style="display:inline;width:180px;" />
+                        <span v-else>{{ ing.supplierOverride || ing.supplier || '—' }}</span>
+                      </div>
+                      <div><span class="mktd-ing-dlabel">Из блюд:</span> {{ ing.fromDishes.join(', ') }}</div>
+                      <div v-if="ing.totalGrams > 0"><span class="mktd-ing-dlabel">Итого кг:</span> {{ formatNum(ing.totalGrams / 1000) }}</div>
+                      <div v-if="ing.totalQty > 0"><span class="mktd-ing-dlabel">Итого шт:</span> {{ formatNum(ing.totalQty) }}</div>
+                      <div v-if="ingCases(ing)"><span class="mktd-ing-dlabel">Кейсов:</span> {{ ingCases(ing) }}</div>
+                      <div><span class="mktd-ing-dlabel">Комментарий:</span>
+                        <input v-if="!isViewer" class="mktd-input mktd-input-sm" v-model="ing.comment" placeholder="—" style="display:inline;width:250px;" />
+                        <span v-else>{{ ing.comment || '—' }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div v-if="!ingredientsList.length" class="mktd-muted" style="padding:20px;text-align:center;">Нет ингредиентов</div>
+            </div>
           </div>
         </div>
       </div>
@@ -649,6 +644,24 @@ const ingredientsGrouped = computed(() => {
   if (ingGroupBy.value === 'supplier') return ingredientsBySupplier.value;
   return [['Все ингредиенты', ingredientsList.value]];
 });
+
+const ingFilter = ref('');
+const expandedIng = ref(null);
+
+function ingKey(ing) { return ing.analogGroup || ing.name; }
+
+function filterIngs(ings) {
+  const q = ingFilter.value.trim().toLowerCase();
+  if (!q) return ings;
+  return ings.filter(i => i.name.toLowerCase().includes(q) || (i.supplier || '').toLowerCase().includes(q) || i.skus.some(s => s.includes(q)));
+}
+
+function ingCases(ing) {
+  if (ing.qtyPerBox === -1) return null;
+  if (ing.qtyPerBox > 0 && ing.totalQty > 0) return formatNum(Math.ceil(ing.totalQty / ing.qtyPerBox));
+  if (ing.qtyPerBox > 0 && ing.totalGrams > 0 && (ing.productUnit === 'кг' || ing.productUnit === 'л')) return formatNum(Math.ceil(ing.totalGrams / 1000 / ing.qtyPerBox));
+  return null;
+}
 
 function startEditSupplier(ing) {
   if (isViewer.value) return;
@@ -1115,9 +1128,25 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-ing-gbtn:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
 .mktd-ing-gbtn:not(:first-child):not(:last-child) { margin-left: -1px; }
 .mktd-ing-gbtn.active { background: var(--bk-brown, #502314); color: #fff; border-color: var(--bk-brown, #502314); }
-.mktd-ing-group-row td { background: none !important; border-bottom: none !important; padding-top: 14px !important; }
-.mktd-ing-group-td { font-weight: 700; font-size: 13px; color: var(--bk-brown, #502314); border-bottom: 2px solid var(--bk-orange) !important; padding-bottom: 4px !important; }
-.mktd-ing-group-cnt { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-left: 4px; }
+/* Ingredient list — card-based */
+.mktd-ing-list { display: flex; flex-direction: column; gap: 3px; }
+.mktd-ing-grp-title { font-weight: 700; font-size: 12px; color: var(--bk-brown); padding: 10px 0 4px; border-bottom: 2px solid var(--bk-orange); margin-top: 8px; }
+.mktd-ing-grp-title:first-child { margin-top: 0; }
+.mktd-ing-grp-title span { font-weight: 500; color: var(--text-muted); font-size: 11px; margin-left: 4px; }
+.mktd-ing-row { border-radius: 8px; cursor: pointer; transition: background 0.1s; }
+.mktd-ing-row:hover { background: #FEFCF9; }
+.mktd-ing-row.expanded { background: #FEFCF9; box-shadow: inset 0 0 0 1px #E8E0D8; }
+.mktd-ing-main { display: flex; align-items: center; gap: 12px; padding: 8px 10px; }
+.mktd-ing-name { font-weight: 600; font-size: 13px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mktd-ing-nums { display: flex; gap: 10px; flex-shrink: 0; }
+.mktd-ing-val { font-size: 13px; font-weight: 600; color: var(--bk-brown); }
+.mktd-ing-val small { font-weight: 500; font-size: 10px; color: var(--text-muted); }
+.mktd-ing-cases { font-size: 13px; font-weight: 700; color: #1565C0; background: #E3F2FD; padding: 1px 8px; border-radius: 4px; }
+.mktd-ing-cases small { font-weight: 600; font-size: 10px; color: #1976D2; }
+.mktd-ing-sup { font-size: 11px; color: var(--text-muted); flex-shrink: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mktd-ing-detail { padding: 0 10px 10px; }
+.mktd-ing-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; font-size: 12px; color: var(--text); }
+.mktd-ing-dlabel { font-weight: 600; color: var(--text-muted); font-size: 11px; }
 
 .mktd-supplier-cell { cursor: pointer; }
 .mktd-supplier-cell:hover { background: rgba(214,35,0,0.03); }
