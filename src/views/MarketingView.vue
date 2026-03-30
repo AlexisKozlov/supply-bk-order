@@ -6,13 +6,18 @@
         <div class="mkt-view-toggle">
           <button class="db-sort-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">Список</button>
           <button class="db-sort-btn" :class="{ active: viewMode === 'gantt' }" @click="viewMode = 'gantt'">Гант</button>
+          <button class="db-sort-btn" :class="{ active: viewMode === 'recipes' }" @click="viewMode = 'recipes'; loadRecipes()">Рецептуры</button>
         </div>
-        <button v-if="!isViewer" class="btn primary" @click="createActivity">+ Новая активность</button>
+        <button v-if="!isViewer && viewMode !== 'recipes'" class="btn primary" @click="createActivity">+ Новая активность</button>
+        <label v-if="!isViewer && viewMode === 'recipes'" class="btn primary" style="cursor:pointer;">
+          <BkIcon name="import" size="sm" /> Импорт рецептур
+          <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importRecipes" />
+        </label>
       </div>
     </div>
 
-    <!-- Фильтры -->
-    <div class="mkt-filters">
+    <!-- Фильтры (только для активностей) -->
+    <div v-if="viewMode !== 'recipes'" class="mkt-filters">
       <button class="db-sort-btn" :class="{ active: statusFilter === '' }" @click="statusFilter = ''">Все <span v-if="activities.length" class="mkt-count">{{ activities.length }}</span></button>
       <button class="db-sort-btn" :class="{ active: statusFilter === 'active' }" @click="statusFilter = 'active'">Активные <span v-if="countByStatus('active')" class="mkt-count">{{ countByStatus('active') }}</span></button>
       <button class="db-sort-btn" :class="{ active: statusFilter === 'completed' }" @click="statusFilter = 'completed'">Завершённые <span v-if="countByStatus('completed')" class="mkt-count">{{ countByStatus('completed') }}</span></button>
@@ -24,10 +29,10 @@
     </div>
 
     <!-- Загрузка -->
-    <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+    <div v-if="loading && viewMode !== 'recipes'" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
 
     <!-- Пусто -->
-    <div v-else-if="!filtered.length" class="mkt-empty">
+    <div v-else-if="!filtered.length && viewMode !== 'recipes'" class="mkt-empty">
       <div class="mkt-empty-icon"><BkIcon name="marketing" size="lg" /></div>
       <div class="mkt-empty-text">{{ statusFilter || typeFilter ? 'Нет активностей с такими фильтрами' : 'Маркетинговых активностей пока нет' }}</div>
       <button v-if="!isViewer && !statusFilter && !typeFilter" class="btn primary" @click="createActivity" style="margin-top:12px;">Создать первую</button>
@@ -37,7 +42,7 @@
     <MarketingGantt v-else-if="viewMode === 'gantt'" :activities="filtered" @select="openActivity" />
 
     <!-- Список -->
-    <div v-else class="mkt-list">
+    <div v-else-if="viewMode === 'list'" class="mkt-list">
       <div v-for="a in filtered" :key="a.id" class="mkt-card" :style="'border-left-color:' + typeColor(a.type)" @click="openActivity(a.id)">
         <div class="mkt-card-left">
           <div class="mkt-card-top">
@@ -56,6 +61,60 @@
         </div>
       </div>
     </div>
+
+    <!-- Рецептуры -->
+    <template v-if="viewMode === 'recipes'">
+      <div v-if="recipesLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка рецептур..." /></div>
+      <template v-else>
+        <div class="mkt-recipes-stats">
+          <span><strong>{{ recipes.length }}</strong> блюд</span>
+          <span>·</span>
+          <span><strong>{{ recipesIngCount }}</strong> ингредиентов</span>
+          <span v-if="recipeSearch" class="mkt-muted">· показано {{ filteredRecipes.length }}</span>
+        </div>
+        <div class="mkt-recipes-search">
+          <input v-model="recipeSearch" class="mkt-input" placeholder="Поиск по блюдам и ингредиентам..." />
+        </div>
+        <div v-if="!filteredRecipes.length" class="mkt-empty">
+          <div class="mkt-empty-text">{{ recipes.length ? 'Ничего не найдено' : 'Рецептуры ещё не загружены. Импортируйте файл.' }}</div>
+        </div>
+        <div v-else class="mkt-recipes-list">
+          <div v-for="r in filteredRecipes" :key="r.id" class="mkt-recipe-card" :class="{ open: expandedRecipe === r.id }" @click="expandedRecipe = expandedRecipe === r.id ? null : r.id">
+            <div class="mkt-recipe-header">
+              <div class="mkt-recipe-name">
+                <span v-if="r.code" class="mkt-recipe-code">{{ r.code }}</span>
+                {{ r.name }}
+              </div>
+              <div class="mkt-recipe-meta">
+                <span v-if="r.thk" class="mkt-recipe-thk">{{ r.thk }}</span>
+                <span class="mkt-recipe-count">{{ (r.ingredients || []).length }} инг.</span>
+                <BkIcon :name="expandedRecipe === r.id ? 'chevronUp' : 'chevronDown'" size="xs" />
+              </div>
+            </div>
+            <div v-if="expandedRecipe === r.id" class="mkt-recipe-body" @click.stop>
+              <table class="mkt-recipe-table">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;">Ингредиент</th>
+                    <th>SKU</th>
+                    <th>Брутто, г</th>
+                    <th>Кол-во, шт</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="ing in r.ingredients" :key="ing.id">
+                    <td style="text-align:left;">{{ ing.name }}</td>
+                    <td><span v-if="ing.sku" style="color:var(--bk-orange);font-weight:700;font-size:11px;">{{ ing.sku }}</span></td>
+                    <td>{{ ing.brutto > 0 ? parseFloat(ing.brutto).toLocaleString('ru-RU') : '—' }}</td>
+                    <td>{{ ing.qty > 0 ? parseFloat(ing.qty).toLocaleString('ru-RU') : '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -84,6 +143,22 @@ const loading = ref(false);
 const viewMode = ref('list');
 const statusFilter = ref('');
 const typeFilter = ref('');
+
+// Recipes
+const recipes = ref([]);
+const recipesLoading = ref(false);
+const recipeSearch = ref('');
+const expandedRecipe = ref(null);
+const recipesIngCount = computed(() => recipes.value.reduce((s, r) => s + (r.ingredients?.length || 0), 0));
+const filteredRecipes = computed(() => {
+  const q = recipeSearch.value.trim().toLowerCase();
+  if (!q) return recipes.value;
+  return recipes.value.filter(r => {
+    if (r.name.toLowerCase().includes(q)) return true;
+    if (r.code && r.code.includes(q)) return true;
+    return (r.ingredients || []).some(i => i.name.toLowerCase().includes(q) || (i.sku && i.sku.includes(q)));
+  });
+});
 
 const types = [
   { value: 'promo', label: 'Промо', color: '#1D4ED8' },
@@ -152,6 +227,66 @@ function openActivity(id) {
   router.push({ name: 'marketing-detail', params: { id } });
 }
 
+async function loadRecipes() {
+  if (recipes.value.length) return; // already loaded
+  recipesLoading.value = true;
+  try {
+    const { data: recs } = await db.from('recipes').select('id, code, name, thk').order('name', { ascending: true });
+    if (!recs?.length) { recipes.value = []; return; }
+    // Load all ingredients in one query
+    const { data: ings } = await db.from('recipe_ingredients').select('id, recipe_id, sku, name, brutto, qty').order('sort_order', { ascending: true });
+    const ingMap = {};
+    for (const i of (ings || [])) {
+      if (!ingMap[i.recipe_id]) ingMap[i.recipe_id] = [];
+      ingMap[i.recipe_id].push(i);
+    }
+    recipes.value = recs.map(r => ({ ...r, ingredients: ingMap[r.id] || [] }));
+  } finally { recipesLoading.value = false; }
+}
+
+async function importRecipes(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const XLSX = (await import('xlsx-js-style')).default;
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const range = XLSX.utils.decode_range(ws['!ref']);
+
+    const parsed = [];
+    let current = null;
+    for (let r = 1; r <= range.e.r; r++) {
+      const cellA = ws[XLSX.utils.encode_cell({ r, c: 0 })];
+      const cellB = ws[XLSX.utils.encode_cell({ r, c: 1 })];
+      const cellC = ws[XLSX.utils.encode_cell({ r, c: 2 })];
+      const cellD = ws[XLSX.utils.encode_cell({ r, c: 3 })];
+      if (!cellA?.v) continue;
+      const name = String(cellA.v).trim();
+      const hasRecipe = cellB?.v && String(cellB.v).includes('ТХК');
+      if (hasRecipe) {
+        const dishName = name.replace(/^\d+\.\s*/, '');
+        const code = (name.match(/^(\d+)/) || [])[1] || null;
+        current = { code, name: dishName, thk: String(cellB.v).trim(), brutto: cellC?.v || null, qty: cellD?.v || null, ingredients: [] };
+        parsed.push(current);
+      } else if (current) {
+        const m = name.match(/^(\d+)\s+(.+)/);
+        current.ingredients.push({ sku: m ? m[1] : null, name: m ? m[2].trim() : name.trim(), brutto: cellC?.v || null, qty: cellD?.v || null });
+      }
+    }
+
+    if (!parsed.length) { toast.error('Не найдено блюд', 'Проверьте формат файла'); return; }
+    const { data, error } = await db.rpc('import_recipes', { recipes: parsed });
+    if (error) { toast.error('Ошибка импорта', error); return; }
+    toast.success('Импортировано', `${data.imported} блюд`);
+    recipes.value = []; // force reload
+    loadRecipes();
+  } catch (err) {
+    console.error(err);
+    toast.error('Ошибка', 'Не удалось обработать файл');
+  } finally { e.target.value = ''; }
+}
+
 onMounted(() => { loadActivities(); });
 watch(legalEntity, () => { activities.value = []; loadActivities(); });
 </script>
@@ -194,6 +329,29 @@ watch(legalEntity, () => { activities.value = []; loadActivities(); });
 .mkt-card-meta { display: flex; gap: 10px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
 .mkt-card-meta span { display: inline-flex; align-items: center; gap: 3px; }
 .mkt-card-days { font-size: 12px; font-weight: 600; white-space: nowrap; text-align: right; padding-left: 12px; color: var(--text-muted); }
+
+/* Recipes */
+.mkt-recipes-stats { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; display: flex; gap: 6px; align-items: center; }
+.mkt-recipes-stats strong { color: var(--bk-brown, #502314); }
+.mkt-recipes-search { margin-bottom: 12px; }
+.mkt-input { width: 100%; max-width: 400px; padding: 8px 12px; border: 1.5px solid #E8E0D8; border-radius: 8px; font-size: 13px; font-family: inherit; background: #FAFAF8; color: var(--text); box-sizing: border-box; }
+.mkt-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(214,35,0,0.08); }
+.mkt-muted { color: var(--text-muted); }
+.mkt-recipes-list { display: flex; flex-direction: column; gap: 6px; }
+.mkt-recipe-card { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.15s; overflow: hidden; }
+.mkt-recipe-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.mkt-recipe-card.open { box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+.mkt-recipe-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; gap: 12px; }
+.mkt-recipe-name { font-weight: 600; font-size: 14px; color: var(--bk-brown, #502314); }
+.mkt-recipe-code { color: var(--bk-orange); font-weight: 700; font-size: 12px; margin-right: 6px; }
+.mkt-recipe-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.mkt-recipe-thk { font-size: 10px; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mkt-recipe-count { font-size: 11px; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.mkt-recipe-body { padding: 0 16px 14px; border-top: 1px solid #F5F0EB; }
+.mkt-recipe-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.mkt-recipe-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: rgba(80,35,20,0.5); font-weight: 700; padding: 6px 8px; border-bottom: 2px solid #F5F0EB; text-align: center; }
+.mkt-recipe-table td { padding: 5px 8px; border-bottom: 1px solid #F5F0EB; text-align: center; }
+.mkt-recipe-table tbody tr:hover { background: #FFFBF5; }
 
 @media (max-width: 480px) {
   .mkt-header { flex-direction: column; align-items: stretch; }

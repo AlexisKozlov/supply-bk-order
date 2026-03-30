@@ -507,7 +507,7 @@ onMounted(() => {
 
 /* Cards */
 .mktd-card { background: white; border-radius: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); padding: 20px 24px; margin-bottom: 16px; }
-.mktd-card-title { font-weight: 700; font-size: 15px; color: var(--bk-brown, #502314); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 2px solid #F5F0EB; }
+.mktd-card-title { font-weight: 700; font-size: 15px; color: var(--bk-brown, #502314); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 2px solid #E8E0D8; }
 .mktd-card-count { font-size: 11px; background: var(--bk-orange); color: #fff; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
 
 /* Form */
@@ -524,7 +524,7 @@ onMounted(() => {
 /* Items table */
 .mktd-items-wrap { overflow-x: auto; margin: 0 -8px; padding: 0 8px; }
 .mktd-items-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
-.mktd-items-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(80,35,20,0.5); font-weight: 700; padding: 8px 8px; border-bottom: 2px solid #F5F0EB; text-align: center; white-space: nowrap; }
+.mktd-items-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--bk-brown, #502314); font-weight: 700; padding: 8px 8px; border-bottom: 2px solid var(--bk-orange, #D62300); text-align: center; white-space: nowrap; background: #FFF8F0; }
 .mktd-items-table td { padding: 8px 8px; border-bottom: 1px solid #F5F0EB; text-align: center; vertical-align: middle; }
 .mktd-items-table tbody tr:hover { background: #FFFBF5; }
 .mktd-input-sm { padding: 6px 8px; font-size: 12px; }
