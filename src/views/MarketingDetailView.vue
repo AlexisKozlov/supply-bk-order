@@ -76,13 +76,13 @@
           <table class="mktd-items-table" v-if="activity.items.length">
             <thead>
               <tr>
-                <th style="min-width:180px;text-align:left;">Блюдо</th>
+                <th style="min-width:120px;text-align:left;">Блюдо</th>
                 <th style="width:100px;">Метод</th>
                 <th v-if="!hasMultipleMonths" style="width:90px;">AUV / кол-во</th>
                 <th v-for="m in activityMonths" v-else :key="m.key" style="width:80px;" class="mktd-month-th">{{ m.label }}<div class="mktd-month-days">{{ m.days }} дн</div></th>
                 <th style="width:70px;">Ед.</th>
                 <th style="width:100px;">Итого</th>
-                <th style="width:120px;">Заметка</th>
+                <th style="min-width:250px;">Заметка</th>
                 <th style="width:36px;" v-if="!isViewer"></th>
               </tr>
             </thead>
@@ -165,14 +165,14 @@
             <table class="mktd-items-table">
               <thead>
                 <tr>
-                  <th style="text-align:left;">Ингредиент / группа</th>
+                  <th style="min-width:120px;text-align:left;">Ингредиент / группа</th>
                   <th style="width:100px;">Артикулы</th>
                   <th style="width:120px;">Поставщик</th>
                   <th style="width:90px;">Итого, кг</th>
                   <th style="width:90px;">Итого, шт</th>
                   <th style="width:80px;">Кейсы</th>
                   <th style="width:140px;">Из блюд</th>
-                  <th style="width:140px;">Комментарий</th>
+                  <th style="min-width:250px;">Комментарий</th>
                 </tr>
               </thead>
               <tbody>
