@@ -352,8 +352,8 @@ function onItemSearch(ii, val) {
   const q = (val || '').trim();
   if (q.length < 2) { search.results = []; return; }
   search.timer = setTimeout(async () => {
-    // Search in recipes first, then products
-    const { data: recipes } = await db.from('recipes').select('id, code, name').or(`code.ilike.%${q}%,name.ilike.%${q}%`).limit(10);
+    // Search recipes by name (use direct ilike filter on name column)
+    const { data: recipes } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).limit(10);
     if (search.index === ii) search.results = (recipes || []).map(r => ({ id: r.id, sku: r.code, name: r.name, _type: 'recipe' }));
   }, 250);
 }

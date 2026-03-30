@@ -265,8 +265,9 @@ async function importRecipes(e) {
       const name = String(cellA.v).trim();
       const hasRecipe = cellB?.v && String(cellB.v).includes('ТХК');
       if (hasRecipe) {
-        const dishName = name.replace(/^\d+\.\s*/, '');
-        const code = (name.match(/^(\d+)/) || [])[1] || null;
+        const pm = name.match(/^([\d.]+)\.\s+(.+)/) || name.match(/^([\d.]+)\s+(.+)/);
+        const code = pm ? pm[1] : null;
+        const dishName = pm ? pm[2] : name;
         current = { code, name: dishName, thk: String(cellB.v).trim(), brutto: cellC?.v || null, qty: cellD?.v || null, ingredients: [] };
         parsed.push(current);
       } else if (current) {

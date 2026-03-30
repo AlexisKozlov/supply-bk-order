@@ -190,8 +190,8 @@ $filterWhitelist = [
     'marketing_activities'      => ['id','name','type','status','date_from','date_to','legal_entity','restaurant_count','created_by','created_at'],
     'marketing_activity_items'  => ['id','activity_id','product_id','sku','name','calc_method'],
     'marketing_activity_files'  => ['id','activity_id'],
-    'recipes'                   => ['id','code','name','thk'],
-    'recipe_ingredients'        => ['id','recipe_id','sku','name'],
+    'recipes'                   => ['id','code','name','thk','brutto_total','qty_total','created_at'],
+    'recipe_ingredients'        => ['id','recipe_id','sku','name','brutto','qty'],
 ];
 
 // Белый список колонок для записи (POST/PATCH)
