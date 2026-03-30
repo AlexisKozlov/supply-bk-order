@@ -240,12 +240,30 @@
             <div class="td-card">
               <div class="td-card-title">
                 Сравнительная таблица
-                <div style="display:flex;gap:6px;align-items:center;">
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <button class="td-btn" :class="compareMode ? 'td-btn-primary' : 'td-btn-outline'" style="font-size:11px;padding:5px 14px;" @click="toggleCompareMode">
+                    <BkIcon name="eye" size="sm" /> {{ compareMode ? 'Выйти из сравнения' : 'Режим сравнения' }}
+                  </button>
                   <div class="td-currency-toggle">
                     <button class="td-cur-btn" :class="{ active: compareCurrency === 'RUB' }" @click="compareCurrency = 'RUB'">RUB</button>
                     <button class="td-cur-btn" :class="{ active: compareCurrency === 'BYN' }" @click="compareCurrency = 'BYN'">BYN</button>
                   </div>
                   <button class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="exportComparison"><BkIcon name="export" size="sm" /> Excel</button>
+                </div>
+              </div>
+              <!-- Панель выбора поставщиков -->
+              <div v-if="compareMode" class="comp-mode-panel">
+                <div class="comp-mode-suppliers">
+                  <label v-for="(o, oi) in tender.offers" :key="oi" class="comp-mode-label" :class="{ active: selectedSuppliers.has(oi) }">
+                    <input type="checkbox" :checked="selectedSuppliers.has(oi)" @change="toggleSupplierSelect(oi)" />
+                    {{ o.supplier || '(?)' }}
+                  </label>
+                </div>
+                <div class="comp-mode-options">
+                  <label class="comp-mode-label-small">
+                    <input type="checkbox" v-model="compareOnlyCommon" /> Только общие позиции
+                  </label>
+                  <span v-if="compareOnlyCommon" class="comp-mode-count">{{ compItemsCount }} из {{ compTotalItems }} поз.</span>
                 </div>
               </div>
               <div class="comparison-wrap">
@@ -254,17 +272,17 @@
                     <tr>
                       <th class="comp-fixed-col">Позиция</th>
                       <th class="comp-qty-col">Кол-во</th>
-                      <th v-for="(o, oi) in tender.offers" :key="oi" class="comp-sup-col"
+                      <th v-for="(o, oi) in compOffers" :key="oi" class="comp-sup-col"
                         :class="{ winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
                         {{ o.supplier || '(?)' }}
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(item, ii) in tender.items" :key="ii">
+                    <tr v-for="{ item, ii } in compItems" :key="ii">
                       <td class="comp-fixed-col">{{ item.name }}</td>
                       <td class="comp-qty-col">{{ item.quantity ? `${item.quantity} ${item.unit || ''}`.trim() : '' }}</td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi"
+                      <td v-for="(o, oi) in compOffers" :key="oi"
                         :class="{
                           cheapest: isCheapest(ii, getComparePrice(o, ii), compareCurrency.toLowerCase()),
                           expensive: isMostExpensive(ii, getComparePrice(o, ii), compareCurrency.toLowerCase()),
@@ -277,42 +295,42 @@
                   </tbody>
                   <tfoot>
                     <tr class="comp-total-row">
-                      <td class="comp-fixed-col"><strong>Итого (цена), {{ compareCurrency }}</strong></td>
+                      <td class="comp-fixed-col"><strong>Итого (цена), {{ compareCurrency }}{{ compareMode ? ' *' : '' }}</strong></td>
                       <td class="comp-qty-col"></td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi"
-                        :class="{ 'cheapest-total': isCheapestTotal(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
-                        <strong>{{ formatPrice(offerTotalCur(o, compareCurrency.toLowerCase())) }}</strong>
+                      <td v-for="(o, oi) in compOffers" :key="oi"
+                        :class="{ 'cheapest-total': isCheapestTotalComp(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
+                        <strong>{{ formatPrice(compOfferTotalCur(o, compareCurrency.toLowerCase())) }}</strong>
                       </td>
                     </tr>
                     <tr v-if="tender.items.some(it => it.quantity)" class="comp-total-row">
-                      <td class="comp-fixed-col"><strong>Итого (сумма), {{ compareCurrency }}</strong></td>
+                      <td class="comp-fixed-col"><strong>Итого (сумма), {{ compareCurrency }}{{ compareMode ? ' *' : '' }}</strong></td>
                       <td class="comp-qty-col"></td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi"
-                        :class="{ 'cheapest-total': isCheapestTotalQty(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
-                        <strong>{{ formatPrice(offerTotalWithQtyCur(o, compareCurrency.toLowerCase())) }}</strong>
+                      <td v-for="(o, oi) in compOffers" :key="oi"
+                        :class="{ 'cheapest-total': isCheapestTotalQtyComp(o), winner: tender.winner_supplier && o.supplier === tender.winner_supplier }">
+                        <strong>{{ formatPrice(compOfferTotalWithQtyCur(o, compareCurrency.toLowerCase())) }}</strong>
                       </td>
                     </tr>
                     <tr class="comp-extra-row">
                       <td class="comp-fixed-col">Срок поставки</td>
                       <td class="comp-qty-col"></td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi" :class="{ 'best-term': isFastestDelivery(o) }">
+                      <td v-for="(o, oi) in compOffers" :key="oi" :class="{ 'best-term': isFastestDelivery(o) }">
                         {{ o.delivery_days ? `${o.delivery_days} дн.` : '—' }}
                       </td>
                     </tr>
                     <tr class="comp-extra-row">
                       <td class="comp-fixed-col">Условия оплаты</td>
                       <td class="comp-qty-col"></td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi">{{ o.payment_terms || '—' }}</td>
+                      <td v-for="(o, oi) in compOffers" :key="oi">{{ o.payment_terms || '—' }}</td>
                     </tr>
-                    <tr v-if="tender.offers.some(o => o.conditions)" class="comp-extra-row">
+                    <tr v-if="compOffers.some(o => o.conditions)" class="comp-extra-row">
                       <td class="comp-fixed-col">Доп. условия</td>
                       <td class="comp-qty-col"></td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi">{{ o.conditions || '—' }}</td>
+                      <td v-for="(o, oi) in compOffers" :key="oi">{{ o.conditions || '—' }}</td>
                     </tr>
-                    <tr v-if="tender.offers.some(o => o.note)" class="comp-extra-row">
+                    <tr v-if="compOffers.some(o => o.note)" class="comp-extra-row">
                       <td class="comp-fixed-col">Примечание</td>
                       <td class="comp-qty-col"></td>
-                      <td v-for="(o, oi) in tender.offers" :key="oi" style="font-style:italic;">{{ o.note || '' }}</td>
+                      <td v-for="(o, oi) in compOffers" :key="oi" style="font-style:italic;">{{ o.note || '' }}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -326,12 +344,12 @@
             <div class="side-section">
               <div class="side-label">Победитель</div>
               <div class="winner-cards">
-                <div v-for="(o, oi) in tender.offers" :key="oi"
+                <div v-for="(o, oi) in compOffers" :key="oi"
                   class="wcard" :class="{ active: tender.winner_supplier === o.supplier }"
                   @click="!isViewer && (tender.winner_supplier = tender.winner_supplier === o.supplier ? '' : o.supplier)">
                   <div>
                     <div class="wcard-name">{{ o.supplier || '(?)' }}</div>
-                    <div class="wcard-total">{{ formatPrice(offerTotalWithQtyCur(o, compareCurrency.toLowerCase())) }} {{ compareCurrency }}</div>
+                    <div class="wcard-total">{{ formatPrice(compOfferTotalWithQtyCur(o, compareCurrency.toLowerCase())) }} {{ compareCurrency }}</div>
                   </div>
                   <div class="wcard-check">{{ tender.winner_supplier === o.supplier ? '✓' : '' }}</div>
                 </div>
@@ -516,6 +534,9 @@ const editingName = ref(false);
 const nameInput = ref(null);
 const rubToBynRate = ref(0.0375);
 const compareCurrency = ref('RUB');
+const compareMode = ref(false);
+const selectedSuppliers = ref(new Set());
+const compareOnlyCommon = ref(true);
 
 const tender = ref({
   name: '', description: '', status: 'draft', deadline: '', winner_supplier: '', summary: '', note: '',
@@ -850,6 +871,58 @@ function onPriceBynInput(offer, ii, event) {
   offer.prices[ii] = offer.prices_rub[ii];
 }
 
+// ─── Режим сравнения ──────────────────────────────────────────────────────
+function toggleCompareMode() {
+  compareMode.value = !compareMode.value;
+  if (compareMode.value) {
+    selectedSuppliers.value = new Set();
+  }
+}
+function toggleSupplierSelect(oi) {
+  const s = selectedSuppliers.value;
+  if (s.has(oi)) s.delete(oi); else s.add(oi);
+  selectedSuppliers.value = new Set(s);
+}
+
+const compOffers = computed(() => {
+  if (!compareMode.value) return tender.value.offers;
+  return tender.value.offers.filter((_, i) => selectedSuppliers.value.has(i));
+});
+
+const compItems = computed(() => {
+  const items = tender.value.items;
+  if (!compareMode.value || !compareOnlyCommon.value) return items.map((item, ii) => ({ item, ii }));
+  const offers = compOffers.value;
+  if (offers.length < 2) return items.map((item, ii) => ({ item, ii }));
+  return items.reduce((acc, item, ii) => {
+    const allHavePrice = offers.every(o => {
+      const key = compareCurrency.value === 'BYN' ? 'prices_byn' : 'prices_rub';
+      return parseFloat(o[key]?.[ii]) > 0;
+    });
+    if (allHavePrice) acc.push({ item, ii });
+    return acc;
+  }, []);
+});
+
+const compItemsCount = computed(() => compItems.value.length);
+const compTotalItems = computed(() => tender.value.items.length);
+
+// Итого только по отфильтрованным позициям (для режима сравнения)
+function compOfferTotalCur(o, cur) {
+  const arr = cur === 'byn' ? o.prices_byn : o.prices_rub;
+  return compItems.value.reduce((s, { ii }) => s + (parseFloat(arr?.[ii]) || 0), 0);
+}
+function compOfferTotalWithQtyCur(o, cur) {
+  const arr = cur === 'byn' ? o.prices_byn : o.prices_rub;
+  let s = 0;
+  for (const { item, ii } of compItems.value) {
+    const p = parseFloat(arr?.[ii]) || 0;
+    const q = item.quantity || 1;
+    s += p * q;
+  }
+  return s;
+}
+
 // Цена в выбранной валюте для сравнения
 function getComparePrice(offer, ii) {
   const key = compareCurrency.value === 'BYN' ? 'prices_byn' : 'prices_rub';
@@ -880,13 +953,15 @@ function formatPrice(v) {
 function isCheapest(ii, price, cur) {
   if (!price || price <= 0) return false;
   const key = cur === 'byn' ? 'prices_byn' : 'prices_rub';
-  const all = tender.value.offers.map(o => parseFloat(o[key]?.[ii]) || 0).filter(p => p > 0);
+  const offers = compOffers.value;
+  const all = offers.map(o => parseFloat(o[key]?.[ii]) || 0).filter(p => p > 0);
   return all.length >= 2 && price <= Math.min(...all);
 }
 function isMostExpensive(ii, price, cur) {
   if (!price || price <= 0) return false;
   const key = cur === 'byn' ? 'prices_byn' : 'prices_rub';
-  const all = tender.value.offers.map(o => parseFloat(o[key]?.[ii]) || 0).filter(p => p > 0);
+  const offers = compOffers.value;
+  const all = offers.map(o => parseFloat(o[key]?.[ii]) || 0).filter(p => p > 0);
   return all.length >= 2 && price >= Math.max(...all);
 }
 function offerTotal(o) { return (o.prices_rub || o.prices).reduce((s, p) => s + (parseFloat(p) || 0), 0); }
@@ -909,6 +984,20 @@ function isCheapestTotalQty(o) {
   const cur = compareCurrency.value.toLowerCase();
   const t = offerTotalWithQtyCur(o, cur);
   return t > 0 && tender.value.offers.every(x => x === o || offerTotalWithQtyCur(x, cur) <= 0 || t <= offerTotalWithQtyCur(x, cur));
+}
+function isCheapestTotalComp(o) {
+  const offers = compOffers.value;
+  if (offers.length < 2) return false;
+  const cur = compareCurrency.value.toLowerCase();
+  const t = compOfferTotalCur(o, cur);
+  return t > 0 && offers.every(x => x === o || compOfferTotalCur(x, cur) <= 0 || t <= compOfferTotalCur(x, cur));
+}
+function isCheapestTotalQtyComp(o) {
+  const offers = compOffers.value;
+  if (offers.length < 2) return false;
+  const cur = compareCurrency.value.toLowerCase();
+  const t = compOfferTotalWithQtyCur(o, cur);
+  return t > 0 && offers.every(x => x === o || compOfferTotalWithQtyCur(x, cur) <= 0 || t <= compOfferTotalWithQtyCur(x, cur));
 }
 function isFastestDelivery(o) {
   if (!o.delivery_days) return false;
@@ -1195,6 +1284,17 @@ onMounted(() => { loadTender(); });
 
 /* Таблица сравнения */
 .comparison-wrap { overflow-x:auto; }
+
+/* ─── Compare mode panel ──────────────────────────────────────────────── */
+.comp-mode-panel { padding: 10px 16px; background: #FFF8E1; border-bottom: 1px solid #FFE082; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.comp-mode-suppliers { display: flex; flex-wrap: wrap; gap: 6px; }
+.comp-mode-label { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; background: #fff; border: 1.5px solid #ddd; transition: all 0.15s; user-select: none; }
+.comp-mode-label.active { background: #E8F5E9; border-color: #4CAF50; color: #2E7D32; }
+.comp-mode-label input[type="checkbox"] { margin: 0; accent-color: #4CAF50; }
+.comp-mode-options { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.comp-mode-label-small { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); cursor: pointer; user-select: none; }
+.comp-mode-label-small input[type="checkbox"] { margin: 0; }
+.comp-mode-count { font-size: 11px; color: var(--bk-orange, #E65100); font-weight: 600; }
 .comp-table { min-width:100%; width:max-content; border-collapse:separate; border-spacing:0; font-size:13px; table-layout:fixed; }
 .comp-table th { background:var(--bk-brown, #502314); color:white; padding:12px 14px; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; overflow:hidden; resize:horizontal; min-width:80px; }
 .comp-table th:first-child { border-radius:10px 0 0 0; }
