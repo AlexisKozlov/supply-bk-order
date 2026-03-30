@@ -246,17 +246,45 @@
       </div>
     </div>
 
-    <!-- Expired -->
+    <!-- Expired / Closed / Not found -->
     <div class="sf-card" v-else>
       <div class="sf-expired">
-        <div class="sf-expired-icon">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <circle cx="24" cy="24" r="24" fill="#FFEBEE"/>
-            <path d="M16 16l16 16M32 16l-16 16" stroke="#D62700" stroke-width="3" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <h2>Ссылка недействительна</h2>
-        <p>Срок действия ссылки истёк или сессия была закрыта. Обратитесь к отделу закупок за новой ссылкой.</p>
+        <!-- Session closed — no active collection -->
+        <template v-if="expiredReason === 'closed'">
+          <div class="sf-expired-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="24" fill="#FFF3E0"/>
+              <path d="M24 14v12M24 30v2" stroke="#E65100" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h2>Сбор заявок завершён</h2>
+          <p>На данный момент сбор заказов на овощи не проводится. Когда начнётся новый сбор, вам пришлют новую ссылку.</p>
+        </template>
+
+        <!-- Token expired -->
+        <template v-else-if="expiredReason === 'expired'">
+          <div class="sf-expired-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="24" fill="#FFF3E0"/>
+              <circle cx="24" cy="24" r="10" stroke="#E65100" stroke-width="2" fill="none"/>
+              <path d="M24 18v7l4 3" stroke="#E65100" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h2>Срок ссылки истёк</h2>
+          <p>Эта ссылка больше не действует. Обратитесь в отдел закупок — вам пришлют новую.</p>
+        </template>
+
+        <!-- Not found or other error -->
+        <template v-else>
+          <div class="sf-expired-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="24" fill="#FFEBEE"/>
+              <path d="M16 16l16 16M32 16l-16 16" stroke="#D62700" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h2>Ссылка недействительна</h2>
+          <p>Проверьте правильность ссылки. Если проблема повторяется — обратитесь в отдел закупок.</p>
+        </template>
       </div>
     </div>
 
@@ -305,6 +333,7 @@ function formatDayShort(dateStr) {
 
 const loading = ref(true);
 const expired = ref(false);
+const expiredReason = ref(''); // 'closed' | 'expired' | 'not_found' | 'error'
 const submitted = ref(false);
 const submitting = ref(false);
 const error = ref('');
@@ -427,7 +456,11 @@ function dayHasData(date) {
 onMounted(async () => {
   try {
     const { data } = await db.rpc('veg_validate_token', { token_value: token });
-    if (!data || data.error || data.expired) { expired.value = true; return; }
+    if (!data || data.error || data.expired) {
+      expired.value = true;
+      expiredReason.value = data?.error || 'error';
+      return;
+    }
     info.value = data;
     // Init empty values
     for (const p of data.products) {
@@ -435,7 +468,7 @@ onMounted(async () => {
     }
     const { data: rd } = await db.rpc('veg_get_restaurants', {});
     restaurants.value = rd || [];
-  } catch { expired.value = true; } finally { loading.value = false; }
+  } catch { expired.value = true; expiredReason.value = 'error'; } finally { loading.value = false; }
 });
 
 async function onRestaurantChange() {

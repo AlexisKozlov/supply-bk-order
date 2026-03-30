@@ -20,6 +20,7 @@
         <span v-if="planningDateStr" class="ps-chip">план с {{ planningDateDisplay }}</span>
         <span class="ps-chip">{{ inputUnit === 'boxes' ? 'коробки' : 'штуки' }}</span>
         <span class="ps-chip">расход/{{ consumptionPeriodDays }}дн</span>
+        <span v-if="truckEnabled" class="ps-chip">машина {{ truckPallets }} пал</span>
         <span class="params-toggle-hint">
           <BkIcon :name="settingsExpanded ? 'chevronUp' : 'chevronDown'" size="xs"/>
         </span>
@@ -33,12 +34,16 @@
           </select>
         </div>
         <div class="pf-group">
-          <label>Период</label>
-          <select v-model="periodValue" @change="onPeriodChange" :disabled="viewOnly">
-            <option value="w1">1 неделя</option><option value="w2">2 недели</option><option value="w4">4 недели</option>
-            <option value="w6">6 недель</option><option value="w8">8 недель</option><option value="w12">12 недель</option>
-            <option value="m1">1 месяц</option><option value="m2">2 месяца</option><option value="m3">3 месяца</option>
+          <label>Частота заказа</label>
+          <select v-model="periodFrequency" @change="onFrequencyChange" :disabled="viewOnly">
+            <option value="w1">Раз в неделю</option>
+            <option value="w2">Раз в 2 недели</option>
+            <option value="m1">Раз в месяц</option>
           </select>
+        </div>
+        <div class="pf-group">
+          <label>Кол-во периодов</label>
+          <input type="number" v-model.number="periodCountInput" min="1" max="12" :disabled="viewOnly" @change="onPeriodCountChange" style="width:60px;"/>
         </div>
         <div class="pf-group">
           <label>Дата начала</label>
@@ -62,6 +67,11 @@
             <option :value="30">30 дней</option>
           </select>
         </div>
+        <div class="pf-group pf-group-truck">
+          <label><input type="checkbox" v-model="truckEnabled" :disabled="viewOnly" style="margin-right:4px;vertical-align:middle;"/> Машина</label>
+          <input v-if="truckEnabled" type="number" v-model.number="truckPallets" min="1" max="100" :disabled="viewOnly" style="width:60px;" placeholder="32"/>
+          <span v-if="truckEnabled" style="font-size:11px;color:var(--text-muted);">паллет</span>
+        </div>
         <div v-if="showCollapseHint" class="params-collapse-hint" @click="settingsExpanded = false; showCollapseHint = false;">
           Параметры заполнены — нажмите чтобы свернуть ▲
         </div>
@@ -83,6 +93,9 @@
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
         <button class="compact-toggle" :class="{ active: compactPlan }" @click="toggleCompactPlan" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
+        <button v-if="excludedCount > 0" class="compact-toggle" :class="{ active: hideExcluded }" @click="hideExcluded = !hideExcluded" :title="hideExcluded ? 'Показать исключённые' : 'Скрыть исключённые'">
+          <BkIcon name="eye" size="sm"/> {{ hideExcluded ? 'Показать' : 'Скрыть' }} искл. ({{ excludedCount }})
+        </button>
         <button class="btn small" @click="fillConsumption" :disabled="fillLoading || viewOnly" title="Загрузить расход и остаток из анализа запасов"><BkIcon v-if="fillLoading" name="loading" size="sm"/><BkIcon v-else name="history" size="sm"/> Загрузить расх/ост</button>
         <button class="btn small" @click="loadFrom1c" :disabled="load1cLoading || viewOnly" title="Загрузить из 1С"><BkIcon v-if="load1cLoading" name="loading" size="sm"/><BkIcon v-else name="oneC" size="sm"/> 1С</button>
         <button class="btn small" @click="doImport" :disabled="viewOnly" title="Импорт из файла"><BkIcon name="import" size="sm"/> Импорт</button>
@@ -167,11 +180,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="{ item, idx } in filteredItems" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
+          <tr v-for="{ item, idx } in filteredItems" :key="item.sku || idx" :class="{ 'has-order': itemHasOrder(item), 'item-hidden': item._hidden, 'item-excluded': item._excluded }">
             <td class="plan-td-name" style="text-align:left;" :title="compactPlan ? planMetaTooltip(item) : ''" @dblclick="openProductEdit(item)">
-              <div style="font-weight:600;color:var(--text);" :style="compactPlan ? 'font-size:12px' : 'font-size:13px'">
-                <b v-if="item.sku" style="color:var(--bk-orange);margin-right:4px;">{{ item.sku }}</b>{{ item.name }}
+              <div style="font-weight:600;color:var(--text);display:flex;align-items:center;gap:4px;" :style="compactPlan ? 'font-size:12px' : 'font-size:13px'">
+                <span><b v-if="item.sku" style="color:var(--bk-orange);margin-right:4px;">{{ item.sku }}</b>{{ item.name }}</span>
                 <span v-if="item._hidden" class="hidden-badge">скрыта</span>
+                <button v-if="!viewOnly" class="plan-exclude-btn" :class="{ 'is-excluded': item._excluded }" @click.stop="toggleExclude(idx)" :title="item._excluded ? 'Включить в расчёт' : 'Исключить из расчёта'">
+                  <BkIcon :name="item._excluded ? 'eyeOff' : 'eye'" size="xs"/>
+                </button>
               </div>
               <div v-if="!compactPlan" style="font-size:11px;color:var(--text-muted);font-weight:500;">{{ item.qtyPerBox }} {{ item.unitOfMeasure || 'шт' }}/кор{{ item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : '' }}{{ item.multiplicity > 1 ? ' · кратн.' + item.multiplicity : '' }}</div>
             </td>
@@ -188,8 +204,8 @@
               </div>
               <div class="cw-days" v-else>—</div>
             </td>
-            <!-- Период 0 — readonly -->
-            <td v-if="item.plan.length" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
+            <!-- Период 0 — readonly (только без даты планирования) -->
+            <td v-if="item.plan.length && !planningDateStr" class="plan-td-result" :class="{ 'plan-has-value': item.plan[0]?.orderBoxes > 0 }" :title="compactPlan && item.plan[0]?.orderBoxes > 0 ? nf.format(item.plan[0].orderUnits) + ' ' + item.unitOfMeasure : ''">
               <template v-if="item.plan[0]?.orderBoxes > 0">
                 <span class="plan-result-value">{{ item.plan[0].orderBoxes }} кор</span>
                 <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[0].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[0].orderUnits) }} {{ item.unitOfMeasure }}</span>
@@ -197,8 +213,8 @@
               <span v-else class="plan-result-zero">—</span>
               <div v-if="item.plan[0]?.daysRemaining > 1" class="cw-days plan-period-days" :class="cwDaysClass(item.plan[0].daysRemaining)">{{ item.plan[0].daysRemaining }} дн</div>
             </td>
-            <!-- Периоды 1+ — dblclick -->
-            <td v-for="m in periodHeaders.length - 1" :key="m" class="plan-td-result"
+            <!-- Редактируемые периоды: с даты планирования — все (0+), без неё — с 1-го -->
+            <td v-for="m in editablePeriodIndices" :key="m" class="plan-td-result"
               :class="{ 'plan-has-value': item.plan[m]?.orderBoxes > 0, 'plan-cell-locked': item.plan[m]?.locked }"
               :title="compactPlan && item.plan[m]?.orderBoxes > 0 ? nf.format(item.plan[m].orderUnits) + ' ' + item.unitOfMeasure : ''"
               @dblclick="startEdit(idx, m, $event)">
@@ -216,9 +232,9 @@
                 <span v-else class="plan-result-zero">—</span>
               </template>
               <!-- Inline edit input (#6 fix) -->
-              <input v-else type="number" class="plan-edit-input" :value="item.plan[m]?.orderBoxes || 0"
-                @keydown.enter.prevent="applyEdit(idx, m, $event.target.value)"
-                @keydown.escape.prevent="cancelEdit()"
+              <input v-else type="text" class="plan-edit-input" :value="item.plan[m]?.orderBoxes || 0"
+                @keydown="e => onPeriodKeydown(e, idx, m)"
+                @focus="e => onPeriodFocus(e, idx, m)"
                 @blur="planCalc.onBlur(); applyEdit(idx, m, $event.target.value)"
                 ref="editInputRef"
                 style="width:60px;text-align:center;font-size:13px;font-weight:700;padding:2px 4px;border:2px solid var(--bk-orange);border-radius:4px;"/>
@@ -243,6 +259,56 @@
             </td>
           </tr>
         </tbody>
+        <tfoot v-if="truckEnabled && items.length">
+          <!-- Итого паллет -->
+          <tr class="plan-truck-row">
+            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label">Паллеты</td>
+            <td v-for="(h, pi) in periodHeaders" :key="'pal-' + pi" class="plan-truck-cell">
+              <span v-if="periodPallets(pi) > 0" class="plan-truck-pallets">{{ periodPallets(pi) }} пал</span>
+              <span v-else class="plan-result-zero">—</span>
+            </td>
+            <td></td>
+          </tr>
+          <!-- Загрузка машин -->
+          <tr class="plan-truck-row plan-truck-row-detail">
+            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label">
+              Машина ({{ truckPallets }} пал)
+            </td>
+            <td v-for="(h, pi) in periodHeaders" :key="'truck-' + pi" class="plan-truck-cell">
+              <template v-if="periodTruckInfo(pi)">
+                <div v-for="t in periodTruckInfo(pi).trucks" :key="t.number" class="plan-truck-item"
+                  :class="{ 'plan-truck-full': t.percent === 100, 'plan-truck-low': t.percent < 50 }">
+                  <span class="plan-truck-num">{{ periodTruckInfo(pi).truckCount > 1 ? t.number + ':' : '' }}</span>
+                  <span class="plan-truck-val">{{ t.pallets }}/{{ truckPallets }}</span>
+                  <span class="plan-truck-pct">({{ t.percent }}%)</span>
+                </div>
+              </template>
+              <span v-else class="plan-result-zero">—</span>
+            </td>
+            <td></td>
+          </tr>
+          <!-- Кнопка "Создать заказ" -->
+          <tr class="plan-truck-row plan-order-btn-row">
+            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label"></td>
+            <td v-for="(h, pi) in periodHeaders" :key="'ord-' + pi" class="plan-truck-cell">
+              <button v-if="(planningDateStr || pi > 0) && periodTotalBoxes(pi) > 0 && !viewOnly" class="btn small plan-create-order-btn" @click="createOrderFromPeriod(pi)" title="Создать заказ из этого периода">
+                <BkIcon name="order" size="sm"/> Заказ
+              </button>
+            </td>
+            <td></td>
+          </tr>
+        </tfoot>
+        <tfoot v-else-if="items.length && !viewOnly">
+          <tr class="plan-order-btn-row">
+            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label"></td>
+            <td v-for="(h, pi) in periodHeaders" :key="'ord2-' + pi" class="plan-truck-cell">
+              <button v-if="(planningDateStr || pi > 0) && periodTotalBoxes(pi) > 0" class="btn small plan-create-order-btn" @click="createOrderFromPeriod(pi)" title="Создать заказ из этого периода">
+                <BkIcon name="order" size="sm"/> Заказ
+              </button>
+            </td>
+            <td></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
 
@@ -254,10 +320,13 @@
 
     <!-- Мобильный карточный вид планирования -->
     <div v-if="items.length" class="plan-mobile-cards">
-      <div v-for="{ item, idx } in filteredItems" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item), 'item-hidden': item._hidden }">
-        <div class="plan-mob-name">
-          <b v-if="item.sku">{{ item.sku }}</b> {{ item.name }}
+      <div v-for="{ item, idx } in filteredItems" :key="'mob-' + (item.sku || idx)" class="plan-mob-card" :class="{ 'plan-mob-has-order': itemHasOrder(item), 'item-hidden': item._hidden, 'item-excluded': item._excluded }">
+        <div class="plan-mob-name" style="display:flex;align-items:center;gap:6px;">
+          <span><b v-if="item.sku">{{ item.sku }}</b> {{ item.name }}</span>
           <span v-if="item._hidden" class="hidden-badge">скрыта</span>
+          <button v-if="!viewOnly" class="plan-exclude-btn" :class="{ 'is-excluded': item._excluded }" @click.stop="toggleExclude(idx)" :title="item._excluded ? 'Включить в расчёт' : 'Исключить из расчёта'">
+            <BkIcon :name="item._excluded ? 'eyeOff' : 'eye'" size="xs"/>
+          </button>
         </div>
         <div class="plan-mob-inputs">
           <div class="plan-mob-field">
@@ -285,9 +354,9 @@
               @click="pi > 0 && !viewOnly && startMobEdit(idx, pi)">
               <span class="plan-mob-period-label">{{ periodHeaders[pi]?.label || '' }}</span>
               <template v-if="editingCell && editingCell.idx === idx && editingCell.m === pi">
-                <input type="number" class="plan-mob-edit-input" :value="p.orderBoxes || 0"
-                  @keydown.enter.prevent="applyEdit(idx, pi, $event.target.value)"
-                  @keydown.escape.prevent="cancelEdit()"
+                <input type="text" class="plan-mob-edit-input" :value="p.orderBoxes || 0"
+                  @keydown="e => onPeriodKeydown(e, idx, pi)"
+                  @focus="e => onPeriodFocus(e, idx, pi)"
                   @blur="planCalc.onBlur(); applyEdit(idx, pi, $event.target.value)"
                   @click.stop />
               </template>
@@ -386,7 +455,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, triggerRef } from 'vue';
-import { useRoute, onBeforeRouteLeave } from 'vue-router';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -407,6 +476,7 @@ import ViewerBanner from '@/components/ViewerBanner.vue';
 
 
 const route = useRoute();
+const router = useRouter();
 const orderStore = useOrderStore();
 const supplierStore = useSupplierStore();
 const toast = useToastStore();
@@ -417,7 +487,9 @@ const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
 const isViewer = computed(() => !userStore.hasAccess('planning', 'edit'));
 const supplier = ref('');
-const periodValue = ref('m3');
+const periodFrequency = ref('w1');
+const periodCountInput = ref(4);
+const periodValue = computed(() => periodFrequency.value.charAt(0) + periodCountInput.value);
 const startDateStr = ref(toLocalDateStr(new Date()));
 const planningDateStr = ref('');
 const inputUnit = ref('boxes');
@@ -472,6 +544,9 @@ function tryCloseSaveModal() {
 const saving = ref(false); // { idx, m } for inline edit (#6)
 const isFullscreen = ref(false);
 const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
+const truckEnabled = ref(false);
+const truckPallets = ref(32);
+const hideExcluded = ref(false);
 let _prevPlanItems = null;
 const _loadedCreatedBy = ref(null);
 const _loadedNote = ref('');
@@ -480,12 +555,18 @@ const _loadedNote = ref('');
 const filterQuery           = ref('');
 const allSupplierProducts   = ref([]);
 
+const excludedCount = computed(() => items.value.filter(i => i._excluded).length);
+
 const filteredItems = computed(() => {
   const q = (filterQuery.value || '').trim().toLowerCase();
-  if (!q) return items.value.map((item, idx) => ({ item, idx }));
+  const hide = hideExcluded.value;
   return items.value.reduce((acc, item, idx) => {
-    const haystack = `${item.sku || ''} ${item.name || ''}`.toLowerCase();
-    if (haystack.includes(q)) acc.push({ item, idx });
+    if (hide && item._excluded) return acc;
+    if (q) {
+      const haystack = `${item.sku || ''} ${item.name || ''}`.toLowerCase();
+      if (!haystack.includes(q)) return acc;
+    }
+    acc.push({ item, idx });
     return acc;
   }, []);
 });
@@ -528,6 +609,11 @@ const planCalc = useCalculator((val) => {
 
 function applyCalcResult(idx, field, val) {
   const item = items.value[idx]; if (!item) return;
+  // Period cell calculator result
+  if (typeof field === 'object' && field.type === 'period') {
+    applyEdit(idx, field.m, val);
+    return;
+  }
   const qpb = getQpb(item);
   if (field === 'consumption') { item.monthlyConsumption = val; triggerValidation(); }
   else if (field === 'stock') { item.stockOnHand = inputUnit.value === 'boxes' ? val * qpb : val; }
@@ -609,8 +695,9 @@ function redo() {
 const suppliers = computed(() => supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity));
 const unitLabel = computed(() => inputUnit.value === 'boxes' ? 'кор' : 'шт');
 const periodLabel = computed(() => {
-  const map = { w1:'1 нед', w2:'2 нед', w4:'4 нед', w6:'6 нед', w8:'8 нед', w12:'12 нед', m1:'1 мес', m2:'2 мес', m3:'3 мес' };
-  return map[periodValue.value] || periodValue.value;
+  const freqMap = { w1: '/нед', w2: '/2нед', m1: '/мес' };
+  const freq = freqMap[periodFrequency.value] || '';
+  return `${periodCountInput.value} пер. ${freq}`;
 });
 const startDateDisplay = computed(() => {
   const d = new Date(startDateStr.value + 'T00:00:00');
@@ -626,8 +713,8 @@ const consumptionColumnLabel = computed(() => {
   if (d === 30) return 'Расход/мес';
   return `Расход/${d}дн`;
 });
-const periodType = computed(() => periodValue.value.startsWith('w') ? 'weeks' : 'months');
-const periodCount = computed(() => parseInt(periodValue.value.slice(1)));
+const periodType = computed(() => periodFrequency.value.startsWith('w') ? 'weeks' : 'months');
+const periodCount = computed(() => periodCountInput.value);
 const startDate = computed(() => new Date(startDateStr.value + 'T00:00:00'));
 const planningDate = computed(() => planningDateStr.value ? new Date(planningDateStr.value + 'T00:00:00') : null);
 
@@ -670,12 +757,12 @@ const periodHeaders = computed(() => {
         const daysToSun = dow === 0 ? 0 : 7 - dow;
         const fwe = new Date(start); fwe.setDate(fwe.getDate() + daysToSun);
         const days = Math.max(Math.round((fwe - start) / 86400000) + 1, 1);
-        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: days / 7 });
+        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(fwe)}`, ratio: days / 7, startDate: new Date(start) });
         firstFullMonday = new Date(fwe); firstFullMonday.setDate(firstFullMonday.getDate() + 1);
       } else {
         // Сегодня понедельник — текущая неделя полная
         const we = new Date(start); we.setDate(we.getDate() + 6);
-        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(we)}`, ratio: 1 });
+        headers.push({ label: 'Тек. нед', sublabel: `${_fmt(start)}–${_fmt(we)}`, ratio: 1, startDate: new Date(start) });
         firstFullMonday = new Date(start); firstFullMonday.setDate(firstFullMonday.getDate() + 7);
       }
     } else {
@@ -685,10 +772,13 @@ const periodHeaders = computed(() => {
         firstFullMonday.setDate(firstFullMonday.getDate() + shift);
       }
     }
+    const freqWeeks = periodFrequency.value === 'w2' ? 2 : 1;
+    const freqDays = freqWeeks * 7;
     for (let i = 0; i < periodCount.value; i++) {
-      const ws = new Date(firstFullMonday); ws.setDate(ws.getDate() + i * 7);
-      const we = new Date(ws); we.setDate(we.getDate() + 6);
-      headers.push({ label: `Нед ${i+1}`, sublabel: `${_fmt(ws)}–${_fmt(we)}`, ratio: 1 });
+      const ws = new Date(firstFullMonday); ws.setDate(ws.getDate() + i * freqDays);
+      const we = new Date(ws); we.setDate(we.getDate() + freqDays - 1);
+      const lbl = freqWeeks === 1 ? `Нед ${i+1}` : `Пер ${i+1}`;
+      headers.push({ label: lbl, sublabel: `${_fmt(ws)}–${_fmt(we)}`, ratio: freqWeeks, startDate: new Date(ws) });
     }
   } else {
     if (!hasPlanningDate) {
@@ -696,11 +786,11 @@ const periodHeaders = computed(() => {
       const dim = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
       const dl = dim - start.getDate() + 1;
       const isFirstDay = start.getDate() === 1;
-      headers.push({ label: _mn[start.getMonth()], sublabel: isFirstDay ? String(start.getFullYear()) : `ост. ${dl} дн.`, ratio: dl / dim });
+      headers.push({ label: _mn[start.getMonth()], sublabel: isFirstDay ? String(start.getFullYear()) : `ост. ${dl} дн.`, ratio: dl / dim, startDate: new Date(start) });
       // periodCount полных месяцев ПОСЛЕ текущего
       for (let i = 0; i < periodCount.value; i++) {
         const d = new Date(start.getFullYear(), start.getMonth() + 1 + i, 1);
-        headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
+        headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1, startDate: new Date(d) });
       }
     } else {
       // С датой планирования — только полные месяцы, без текущего
@@ -708,7 +798,7 @@ const periodHeaders = computed(() => {
       const startMonth = isFirstDay ? start.getMonth() : start.getMonth() + 1;
       for (let i = 0; i < periodCount.value; i++) {
         const d = new Date(start.getFullYear(), startMonth + i, 1);
-        headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1 });
+        headers.push({ label: _mn[d.getMonth()], sublabel: String(d.getFullYear()), ratio: 1, startDate: new Date(d) });
       }
     }
   }
@@ -719,6 +809,14 @@ const planningDateDisplay = computed(() => {
   if (!planningDateStr.value) return '—';
   const d = new Date(planningDateStr.value + 'T00:00:00');
   return !isNaN(d) ? d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+});
+
+const editablePeriodIndices = computed(() => {
+  const start = planningDateStr.value ? 0 : 1;
+  const count = periodHeaders.value.length;
+  const arr = [];
+  for (let i = start; i < count; i++) arr.push(i);
+  return arr;
 });
 
 function toggleCompactPlan() {
@@ -790,6 +888,16 @@ function recalcItem(idx, fromMonth = 0) {
   const item = items.value[idx];
   const cwHeaders = currentWeekHeaders.value;
   const headers = periodHeaders.value;
+  // Исключённые позиции — обнуляем расчёт
+  if (item._excluded) {
+    if (!item.plan.length || item.plan.length !== headers.length) {
+      item.plan = headers.map((_, m) => ({ month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }));
+    } else {
+      item.plan.forEach(p => { if (!p.locked) { p.orderBoxes = 0; p.orderUnits = 0; p.need = 0; p.deficit = 0; } });
+    }
+    item._cwData = cwHeaders.map(() => ({ daysRemaining: null, stockAfter: 0 }));
+    return;
+  }
   const qpb = getQpb(item); const mult = getMultiplicity(item); const pbu = qpb;
   const toBase = (v) => inputUnit.value === 'boxes' ? v * qpb : v;
   const periodDays = consumptionPeriodDays.value || 30;
@@ -843,13 +951,46 @@ function startEdit(idx, m, event) {
 }
 function applyEdit(idx, m, val) {
   if (!editingCell.value || editingCell.value.idx !== idx || editingCell.value.m !== m) return;
-  const newVal = parseInt(val) || 0;
+  const raw = String(val).trim();
+  const newVal = /^[\d\s+\-*/().]+$/.test(raw) && raw ? Math.round(_safeCalc(raw)) || 0 : parseInt(val) || 0;
   const item = items.value[idx]; const p = item.plan[m]; if (!p) { editingCell.value = null; return; }
   p.orderBoxes = newVal; p.orderUnits = newVal * getQpb(item); p.locked = true;
   editingCell.value = null;
   recalcItem(idx, m + 1); _savePlanDraft();
 }
 function cancelEdit() { editingCell.value = null; }
+
+function toggleExclude(idx) {
+  snapshot();
+  const item = items.value[idx]; if (!item) return;
+  item._excluded = !item._excluded;
+  if (item._excluded) {
+    // Обнуляем все незалоченные периоды
+    item.plan.forEach(p => { if (!p.locked) { p.orderBoxes = 0; p.orderUnits = 0; } });
+  }
+  recalcItem(idx, 0);
+  _savePlanDraft();
+}
+
+function onPeriodKeydown(e, idx, m) {
+  _activeCalcIdx = idx; _activeCalcField = { type: 'period', m };
+  if (planCalc.hasPendingOp()) {
+    if (['+', '-', '*', '/'].includes(e.key) || /[0-9.]/.test(e.key) || e.key === 'Enter' || e.key === 'Escape' || e.key === '%') {
+      planCalc.onKeydown(e);
+      return;
+    }
+  } else if (['+', '-', '*', '/'].includes(e.key)) {
+    planCalc.onKeydown(e);
+    return;
+  }
+  if (e.key === 'Enter') { e.preventDefault(); applyEdit(idx, m, e.target.value); }
+  else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+}
+
+function onPeriodFocus(e, idx, m) {
+  _activeCalcIdx = idx; _activeCalcField = { type: 'period', m };
+  planCalc.onFocus(e);
+}
 
 function onTransitInput(idx, weekIdx, rawValue) {
   snapshot();
@@ -923,11 +1064,89 @@ function reserveDaysClass(item) {
   return 'reserve-ok';
 }
 
+// ─── Загрузка машин ──────────────────────────────────────────────────────
+function periodPallets(m) {
+  let total = 0;
+  for (const item of items.value) {
+    if (item._excluded) continue;
+    const ob = item.plan[m]?.orderBoxes || 0;
+    if (ob <= 0 || !item.boxesPerPallet) continue;
+    const mult = getMultiplicity(item);
+    const physBoxes = Math.ceil(ob / mult);
+    total += Math.ceil(physBoxes / item.boxesPerPallet);
+  }
+  return total;
+}
+
+function periodTruckInfo(m) {
+  const tp = truckPallets.value || 32;
+  const totalPallets = periodPallets(m);
+  if (totalPallets === 0) return null;
+  const truckCount = Math.ceil(totalPallets / tp);
+  const trucks = [];
+  let remaining = totalPallets;
+  for (let i = 0; i < truckCount; i++) {
+    const p = Math.min(remaining, tp);
+    trucks.push({ number: i + 1, pallets: p, percent: Math.round(p / tp * 100) });
+    remaining -= p;
+  }
+  return { totalPallets, truckCount, trucks };
+}
+
+// ─── Создать заказ из периода ─────────────────────────────────────────────
+async function createOrderFromPeriod(pi) {
+  const header = periodHeaders.value[pi];
+  if (!header) return;
+  const planItems = items.value.filter(i => !i._excluded && i.plan[pi]?.orderBoxes > 0);
+  if (!planItems.length) { toast.error('Нет данных', 'В этом периоде нет позиций с заказом'); return; }
+
+  // Загрузить полные карточки товаров из БД
+  const skus = planItems.map(i => i.sku).filter(Boolean);
+  let productMap = {};
+  if (skus.length) {
+    let prodQuery = db.from('products').select('*').in('sku', skus);
+    prodQuery = applyEntityFilter(prodQuery, orderStore.settings.legalEntity);
+    const { data: products } = await prodQuery;
+    if (products) productMap = Object.fromEntries(products.map(p => [p.sku, p]));
+  }
+
+  orderStore.resetOrder();
+  orderStore.settings.supplier = supplier.value;
+  orderStore.settings.periodDays = consumptionPeriodDays.value;
+  orderStore.settings.unit = inputUnit.value;
+  orderStore.settings.today = new Date();
+  if (header.startDate) orderStore.settings.deliveryDate = header.startDate;
+
+  let count = 0;
+  for (const item of planItems) {
+    const fullProduct = productMap[item.sku] || {
+      sku: item.sku, name: item.name,
+      qty_per_box: item.qtyPerBox,
+      boxes_per_pallet: item.boxesPerPallet,
+      multiplicity: item.multiplicity,
+      unit_of_measure: item.unitOfMeasure,
+    };
+    const added = orderStore.addItem(fullProduct, true);
+    if (!added) continue;
+    added.consumptionPeriod = item.monthlyConsumption;
+    // Stock: use stockOnHand (always stored in pieces internally)
+    const qpb = getQpb(item);
+    added.stock = inputUnit.value === 'boxes' ? Math.round(item.stockOnHand / qpb) : item.stockOnHand;
+    added.finalOrder = item.plan[pi].orderBoxes;
+    added._manualOrder = true;
+    count++;
+  }
+
+  draftStore.saveNow();
+  router.push({ name: 'order' });
+  toast.success('Заказ создан из планирования', `${count} поз. — ${header.label}`);
+}
+
 function itemHasOrder(item) { return item.plan.some(p => p.orderBoxes > 0); }
 function itemTotalBoxes(item) { return item.plan.reduce((s, p) => s + (p.orderBoxes || 0), 0); }
 function itemTotalUnits(item) { return item.plan.reduce((s, p) => s + (p.orderUnits || 0), 0); }
-function periodTotalBoxes(m) { return items.value.reduce((s, i) => s + (i.plan[m]?.orderBoxes || 0), 0); }
-const itemsWithPlan = computed(() => items.value.filter(i => i.plan.some(p => p.orderBoxes > 0)));
+function periodTotalBoxes(m) { return items.value.reduce((s, i) => i._excluded ? s : s + (i.plan[m]?.orderBoxes || 0), 0); }
+const itemsWithPlan = computed(() => items.value.filter(i => !i._excluded && i.plan.some(p => p.orderBoxes > 0)));
 const planSummaryTotalBoxes = computed(() => itemsWithPlan.value.reduce((s, i) => s + itemTotalBoxes(i), 0));
 
 // ─── Цены ─────────────────────────────────────────────────────────────────────
@@ -1454,7 +1673,7 @@ async function exportExcel() {
 }
 
 function _savePlanDraft() {
-  draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
+  draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, periodFrequency: periodFrequency.value, periodCountInput: periodCountInput.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, truckEnabled: truckEnabled.value, truckPallets: truckPallets.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
 }
 
 // ─── Загрузка товаров (#3 — порядок из item_order) ────────────────────────
@@ -1473,7 +1692,7 @@ async function loadProducts() {
       productId: p.id, sku: p.sku || '', name: p.name, qtyPerBox: p.qty_per_box || 1,
       boxesPerPallet: p.boxes_per_pallet || null, unitOfMeasure: p.unit_of_measure || 'шт',
       multiplicity: p.multiplicity || 1, monthlyConsumption: 0,
-      stockOnHand: 0, stockAtSupplier: 0, transit: [], plan: [], _cw: false, _ct: '',
+      stockOnHand: 0, stockAtSupplier: 0, transit: [], plan: [], _cw: false, _ct: '', _excluded: false,
     }));
     // (#3) Применяем порядок товаров из item_order (как в заказе)
     await restoreItemOrder();
@@ -1497,6 +1716,28 @@ async function restoreItemOrder() {
 function onParamsChange() { supplierStore.loadSuppliers(orderStore.settings.legalEntity); recalcAll(); _savePlanDraft(); }
 function onPlanningDateChange() { items.value.forEach(i => { i.plan = []; i.transit = []; }); recalcAll(); _savePlanDraft(); }
 function onPeriodChange() { items.value.forEach(i => { i.plan = []; }); recalcAll(); triggerValidation(); _savePlanDraft(); }
+function onFrequencyChange() { onPeriodChange(); }
+function onPeriodCountChange() { const v = periodCountInput.value; if (v < 1) periodCountInput.value = 1; if (v > 12) periodCountInput.value = 12; onPeriodChange(); }
+
+// Restore old periodValue format (w4, m3) into new frequency + count
+function _restorePeriodValue(pv, freq, count) {
+  if (freq && count) {
+    periodFrequency.value = freq;
+    periodCountInput.value = count;
+    return;
+  }
+  // Legacy format: w1, w2, w4, w6, w8, w12, m1, m2, m3
+  const type = pv.charAt(0);
+  const num = parseInt(pv.slice(1)) || 1;
+  if (type === 'm') {
+    periodFrequency.value = 'm1';
+    periodCountInput.value = num;
+  } else {
+    // w1=1week, w2=2weeks, w4/w6/w8/w12 = N weeks at 1/week frequency
+    if (num <= 2) { periodFrequency.value = 'w' + num; periodCountInput.value = 4; }
+    else { periodFrequency.value = 'w1'; periodCountInput.value = num; }
+  }
+}
 function onConsumptionPeriodChange() {
   _validationCache = null;
   items.value.forEach(i => { i.plan = []; });
@@ -1518,7 +1759,9 @@ async function confirmSave() {
   try {
   const planData = {
     legal_entity: orderStore.settings.legalEntity, supplier: supplier.value,
-    period_type: periodType.value, period_count: periodCount.value, start_date: startDateStr.value,
+    period_type: periodType.value, period_count: periodCount.value, period_frequency: periodFrequency.value,
+    truck_pallets: truckEnabled.value ? truckPallets.value : null,
+    start_date: startDateStr.value,
     planning_date: planningDateStr.value || null,
     consumption_period_days: consumptionPeriodDays.value || 30,
     input_unit: inputUnit.value,
@@ -1646,13 +1889,26 @@ async function loadPlanFromHistory(planId) {
   }
   orderStore.settings.legalEntity = planEntity;
   supplier.value = plan.supplier || '';
-  periodValue.value = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
+  // Restore frequency and count from saved plan
+  const savedPV = (plan.period_type === 'weeks' ? 'w' : 'm') + plan.period_count;
+  // Map old format to new frequency + count
+  if (plan.period_type === 'weeks') {
+    // Detect frequency: if period_count was from old w2/w4 format, the frequency was always w1
+    // For new format, we store frequency separately
+    periodFrequency.value = plan.period_frequency || 'w1';
+    periodCountInput.value = plan.period_count || 4;
+  } else {
+    periodFrequency.value = plan.period_frequency || 'm1';
+    periodCountInput.value = plan.period_count || 3;
+  }
   startDateStr.value = plan.start_date || toLocalDateStr(new Date());
   planningDateStr.value = plan.planning_date || '';
   consumptionPeriodDays.value = plan.consumption_period_days || 30;
   showFullPlan.value = false;
   expandedSummaryPeriods.value = {};
   inputUnit.value = plan.input_unit || 'boxes';
+  truckEnabled.value = !!plan.truck_pallets;
+  truckPallets.value = plan.truck_pallets || 32;
   editingPlanId.value = plan.id;
   _loadedCreatedBy.value = plan.created_by || null;
   _loadedNote.value = plan.note || '';
@@ -1709,7 +1965,7 @@ onMounted(async () => {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
       const ok = await confirmAction('Восстановить черновик?', `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`);
-      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; periodValue.value = d.periodValue || 'm3'; startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); loadPlanPrices(); toast.info('Черновик загружен', ''); } }
+      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; _restorePeriodValue(d.periodValue || 'm3', d.periodFrequency, d.periodCountInput); startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; truckEnabled.value = d.truckEnabled || false; truckPallets.value = d.truckPallets || 32; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); loadPlanPrices(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }
@@ -1725,7 +1981,7 @@ onBeforeUnmount(() => {
 onBeforeRouteLeave(async () => {
   if (hasPlanUnsavedData()) {
     window.removeEventListener('beforeunload', onPlanBeforeUnload);
-    draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
+    draftStore.savePlan({ supplier: supplier.value, periodValue: periodValue.value, periodFrequency: periodFrequency.value, periodCountInput: periodCountInput.value, startDateStr: startDateStr.value, planningDateStr: planningDateStr.value, inputUnit: inputUnit.value, consumptionPeriodDays: consumptionPeriodDays.value, truckEnabled: truckEnabled.value, truckPallets: truckPallets.value, items: items.value, viewOnly: viewOnly.value, editingPlanId: editingPlanId.value });
     const ok = await confirmAction('Несохранённые данные', 'Вы не сохранили план. Уйти со страницы?');
     if (!ok) { window.addEventListener('beforeunload', onPlanBeforeUnload); return false; }
   }
@@ -1990,4 +2246,29 @@ watch(() => route.query.planId, async (newId) => {
   .osc-item { padding: 6px 14px; }
   .osc-actions { padding: 12px 14px; }
 }
+
+/* ─── Truck capacity ──────────────────────────────────────────────────────── */
+.plan-truck-row td { padding: 4px 6px; font-size: 11px; text-align: center; border-top: 1px solid var(--border-light); }
+.plan-truck-label { text-align: right !important; font-weight: 600; color: var(--text-muted); white-space: nowrap; padding-right: 10px !important; }
+.plan-truck-cell { vertical-align: top; }
+.plan-truck-pallets { font-weight: 700; color: var(--bk-brown); }
+.plan-truck-item { display: flex; gap: 2px; align-items: center; justify-content: center; font-size: 11px; line-height: 1.3; }
+.plan-truck-num { color: var(--text-muted); font-weight: 600; }
+.plan-truck-val { font-weight: 700; }
+.plan-truck-pct { color: var(--text-muted); font-size: 10px; }
+.plan-truck-full .plan-truck-val { color: var(--bk-green, #2E7D32); }
+.plan-truck-low .plan-truck-val { color: var(--bk-orange, #E65100); }
+.plan-truck-row-detail td { border-top: none; }
+.plan-order-btn-row td { border-top: none; padding: 2px 4px; }
+.plan-create-order-btn { font-size: 10px !important; padding: 2px 6px !important; white-space: nowrap; }
+.pf-group-truck { display: flex; align-items: center; gap: 6px; }
+.pf-group-truck label { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+
+/* ─── Exclude items ───────────────────────────────────────────────────────── */
+.item-excluded { opacity: 0.45; }
+.item-excluded td { background: var(--surface-alt, #f5f5f5) !important; }
+.plan-exclude-btn { border: none; background: none; cursor: pointer; padding: 1px 3px; border-radius: 3px; color: var(--bk-green, #2E7D32); font-size: 12px; line-height: 1; }
+.plan-exclude-btn:hover { background: rgba(0,0,0,0.06); }
+.plan-exclude-btn.is-excluded { color: var(--text-muted, #999); }
+.excluded-badge { font-size: 10px; color: var(--text-muted, #999); background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; margin-left: 4px; white-space: nowrap; }
 </style>

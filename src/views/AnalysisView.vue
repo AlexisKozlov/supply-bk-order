@@ -8,6 +8,7 @@
           <button class="anv-mode-btn" :class="{ active: viewMode === 'stock' }" @click="viewMode = 'stock'">Запасы</button>
           <button v-if="userStore.hasAccess('restaurant-sales', 'view')" class="anv-mode-btn" :class="{ active: viewMode === 'sales' }" @click="viewMode = 'sales'">Реализация</button>
           <button class="anv-mode-btn" :class="{ active: viewMode === 'report' }" @click="viewMode = 'report'">Отчёт</button>
+          <button class="anv-mode-btn" :class="{ active: viewMode === 'forecast' }" @click="viewMode = 'forecast'">Прогноз</button>
         </div>
       </div>
       <div v-if="viewMode === 'stock'" class="anv-header-controls">
@@ -31,6 +32,9 @@
 
     <!-- Отчёт: сравнение расхода склада и реализации -->
     <ConsumptionReportPanel v-if="viewMode === 'report'" />
+
+    <!-- Прогноз: на сколько дней хватит остатков -->
+    <StockForecastPanel v-if="viewMode === 'forecast'" />
 
     <!-- ═══ Запасы ═══ -->
     <template v-if="viewMode === 'stock'">
@@ -338,6 +342,7 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { defineAsyncComponent } from 'vue';
 const RestaurantSalesPanel = defineAsyncComponent(() => import('@/views/RestaurantSalesView.vue'));
 const ConsumptionReportPanel = defineAsyncComponent(() => import('@/views/ConsumptionReportView.vue'));
+const StockForecastPanel = defineAsyncComponent(() => import('@/views/StockForecastView.vue'));
 
 const router = useRouter();
 const orderStore = useOrderStore();
