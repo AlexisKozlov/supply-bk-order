@@ -57,6 +57,47 @@
         </div>
       </div>
 
+      <!-- Этапы подготовки -->
+      <div class="td-card">
+        <div class="mktd-card-title" style="justify-content:space-between;">
+          <span>Этапы подготовки</span>
+          <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:4px 12px;" @click="addStage">+ Этап</button>
+        </div>
+        <div v-if="!activity.stages?.length" class="mktd-muted" style="text-align:center;padding:8px 0;font-size:12px;">
+          Нет этапов.
+          <a v-if="!isViewer" href="#" @click.prevent="initDefaultStages" style="color:var(--bk-orange);">Создать шаблон</a>
+        </div>
+        <div v-else class="mktd-stages">
+          <div v-for="(stage, si) in activity.stages" :key="si" class="mktd-stage" :class="'st-' + stage.status">
+            <div class="mktd-stage-status">
+              <button v-if="!isViewer" class="mktd-stage-check" :class="{ done: stage.status === 'done', active: stage.status === 'in_progress' }"
+                @click="cycleStageStatus(si)" :title="stageStatusLabel(stage.status)">
+                <template v-if="stage.status === 'done'">✓</template>
+                <template v-else-if="stage.status === 'in_progress'">●</template>
+                <template v-else>○</template>
+              </button>
+              <span v-else class="mktd-stage-check" :class="{ done: stage.status === 'done', active: stage.status === 'in_progress' }">
+                {{ stage.status === 'done' ? '✓' : stage.status === 'in_progress' ? '●' : '○' }}
+              </span>
+            </div>
+            <div class="mktd-stage-body">
+              <input v-if="!isViewer" class="mktd-stage-name" v-model="stage.name" placeholder="Название этапа" />
+              <span v-else class="mktd-stage-name-ro">{{ stage.name }}</span>
+            </div>
+            <div class="mktd-stage-date">
+              <input v-if="!isViewer" type="date" class="mktd-input mktd-input-sm" v-model="stage.deadline" style="width:130px;" />
+              <span v-else style="font-size:12px;color:var(--text-muted);">{{ stage.deadline || '—' }}</span>
+              <span v-if="stage.deadline && !stage.status !== 'done'" class="mktd-stage-days" :class="stageDaysClass(stage)">{{ stageDaysLabel(stage) }}</span>
+            </div>
+            <div class="mktd-stage-comment">
+              <input v-if="!isViewer" class="mktd-input mktd-input-sm" v-model="stage.comment" placeholder="Комментарий..." style="flex:1;" />
+              <span v-else style="font-size:11px;color:var(--text-muted);">{{ stage.comment || '' }}</span>
+            </div>
+            <button v-if="!isViewer" class="mktd-remove-btn" @click="activity.stages.splice(si, 1)" title="Удалить"><BkIcon name="close" size="xs" /></button>
+          </div>
+        </div>
+      </div>
+
       <!-- Блюда / Ингредиенты -->
       <div class="mktd-card">
         <div class="mktd-card-title" style="justify-content:space-between;">
@@ -299,7 +340,7 @@ const activity = ref({
   id: null, name: '', type: 'promo', status: 'active',
   date_from: '', date_to: '', restaurant_count: null,
   legal_entity: '', note: '',
-  items: [], files: [],
+  items: [], files: [], stages: [],
 });
 
 const activityDays = computed(() => {
@@ -364,6 +405,60 @@ const grandTotal = computed(() => activity.value.items.reduce((s, i) => s + item
 function formatNum(v) {
   if (!v) return '—';
   return Number(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+
+// ─── Этапы подготовки ────────────────────────────────────────────────────────
+function addStage() {
+  if (!activity.value.stages) activity.value.stages = [];
+  activity.value.stages.push({ name: '', deadline: '', status: 'pending', comment: '' });
+}
+
+function initDefaultStages() {
+  const startDate = activity.value.date_from ? new Date(activity.value.date_from + 'T00:00:00') : null;
+  function offsetDate(days) {
+    if (!startDate) return '';
+    const d = new Date(startDate); d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  }
+  activity.value.stages = [
+    { name: 'Информация от маркетинга получена', deadline: '', status: 'done', comment: '' },
+    { name: 'Поставщик определён / согласован', deadline: offsetDate(30), status: 'pending', comment: '' },
+    { name: 'Заказ размещён у поставщика', deadline: offsetDate(21), status: 'pending', comment: '' },
+    { name: 'Товар пришёл на склад', deadline: offsetDate(7), status: 'pending', comment: '' },
+    { name: 'Распределено по ресторанам', deadline: offsetDate(3), status: 'pending', comment: '' },
+    { name: 'Старт промо', deadline: activity.value.date_from || '', status: 'pending', comment: '' },
+  ];
+}
+
+function cycleStageStatus(si) {
+  const s = activity.value.stages[si];
+  if (s.status === 'pending') s.status = 'in_progress';
+  else if (s.status === 'in_progress') s.status = 'done';
+  else s.status = 'pending';
+}
+
+function stageStatusLabel(st) {
+  return st === 'done' ? 'Готово' : st === 'in_progress' ? 'В работе' : 'Не начат';
+}
+
+function stageDaysLabel(stage) {
+  if (!stage.deadline || stage.status === 'done') return '';
+  const d = new Date(stage.deadline + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0) return `${Math.abs(diff)} дн назад`;
+  if (diff === 0) return 'сегодня';
+  return `через ${diff} дн`;
+}
+
+function stageDaysClass(stage) {
+  if (!stage.deadline || stage.status === 'done') return '';
+  const d = new Date(stage.deadline + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0) return 'overdue';
+  if (diff <= 3) return 'soon';
+  return '';
 }
 
 // ─── Ингредиенты (расклад по рецептурам) ────────────────────────────────────
@@ -557,6 +652,7 @@ async function save() {
       legal_entity: activity.value.legal_entity || legalEntity.value,
       restaurant_count: activity.value.restaurant_count || null,
       note: activity.value.note || null,
+      stages: activity.value.stages || null,
       items: activity.value.items.map((it, i) => ({
         product_id: it.product_id, sku: it.sku, name: it.name,
         calc_method: it.calc_method, auv: it.auv, auv_periods: it.auv_periods || null, total_volume: it.total_volume,
@@ -584,6 +680,7 @@ async function loadActivity(id) {
       date_from: data.date_from || '', date_to: data.date_to || '',
       legal_entity: data.legal_entity, restaurant_count: data.restaurant_count,
       note: data.note || '',
+      stages: data.stages ? (typeof data.stages === 'string' ? JSON.parse(data.stages) : data.stages) : [],
       items: (data.items || []).map(it => ({
         product_id: it.product_id, sku: it.sku, name: it.name,
         calc_method: it.calc_method || 'auv',
@@ -724,6 +821,26 @@ select.mktd-input, select.mktd-input-sm { background: #fff; color: var(--text); 
 .mktd-month-th { font-size: 10px !important; line-height: 1.3; }
 .mktd-month-days { font-size: 9px; font-weight: 500; opacity: 0.6; }
 .mktd-input-month { width: 65px; text-align: center; font-weight: 600; }
+/* ─── Этапы ───────────────────────────────────────────────────────────── */
+.mktd-stages { display: flex; flex-direction: column; gap: 2px; }
+.mktd-stage { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-radius: 8px; transition: background 0.1s; }
+.mktd-stage:hover { background: rgba(0,0,0,0.02); }
+.mktd-stage.st-done { opacity: 0.5; }
+.mktd-stage-status { flex-shrink: 0; width: 28px; text-align: center; }
+.mktd-stage-check { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #D4C4B0; background: white; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; transition: all 0.15s; color: #D4C4B0; }
+.mktd-stage-check.done { background: #4CAF50; border-color: #4CAF50; color: white; }
+.mktd-stage-check.active { background: #FFF3E0; border-color: var(--bk-orange); color: var(--bk-orange); }
+button.mktd-stage-check:hover { transform: scale(1.1); }
+.mktd-stage-body { flex: 1; min-width: 0; }
+.mktd-stage-name { border: none; background: transparent; font-size: 13px; font-weight: 600; color: var(--text); font-family: inherit; padding: 2px 0; width: 100%; outline: none; }
+.mktd-stage-name:focus { border-bottom: 1px solid var(--bk-orange); }
+.mktd-stage-name-ro { font-size: 13px; font-weight: 600; color: var(--text); }
+.mktd-stage-date { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.mktd-stage-days { font-size: 10px; font-weight: 600; white-space: nowrap; }
+.mktd-stage-days.overdue { color: #D62300; }
+.mktd-stage-days.soon { color: #D97706; }
+.mktd-stage-comment { flex: 1; min-width: 100px; }
+
 .mktd-supplier-cell { cursor: pointer; }
 .mktd-supplier-cell:hover { background: rgba(214,35,0,0.03); }
 .mktd-ing-group td { background: #FFFBF5 !important; }

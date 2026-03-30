@@ -1870,6 +1870,7 @@ if ($endpoint === 'rpc') {
         $le = $body['legal_entity'] ?? '';
         $restaurantCount = isset($body['restaurant_count']) ? intval($body['restaurant_count']) : null;
         $note = $body['note'] ?? null;
+        $stages = isset($body['stages']) && is_array($body['stages']) ? json_encode($body['stages'], JSON_UNESCAPED_UNICODE) : null;
         $items = $body['items'] ?? [];
 
         if (!$name) respond(['error' => 'Укажите название'], 400);
@@ -1879,11 +1880,11 @@ if ($endpoint === 'rpc') {
         $pdo->beginTransaction();
         try {
             if ($actId) {
-                $pdo->prepare("UPDATE marketing_activities SET name=?, type=?, status=?, date_from=?, date_to=?, restaurant_count=?, note=?, updated_at=NOW() WHERE id=? AND legal_entity=?")
-                    ->execute([$name, $type, $status, $dateFrom, $dateTo, $restaurantCount, $note, $actId, $le]);
+                $pdo->prepare("UPDATE marketing_activities SET name=?, type=?, status=?, date_from=?, date_to=?, restaurant_count=?, note=?, stages=?, updated_at=NOW() WHERE id=? AND legal_entity=?")
+                    ->execute([$name, $type, $status, $dateFrom, $dateTo, $restaurantCount, $note, $stages, $actId, $le]);
             } else {
-                $pdo->prepare("INSERT INTO marketing_activities (name, type, status, date_from, date_to, legal_entity, restaurant_count, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    ->execute([$name, $type, $status, $dateFrom, $dateTo, $le, $restaurantCount, $note, $caller['name'] ?? '']);
+                $pdo->prepare("INSERT INTO marketing_activities (name, type, status, date_from, date_to, legal_entity, restaurant_count, note, stages, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([$name, $type, $status, $dateFrom, $dateTo, $le, $restaurantCount, $note, $stages, $caller['name'] ?? '']);
                 $actId = $pdo->lastInsertId();
             }
 
