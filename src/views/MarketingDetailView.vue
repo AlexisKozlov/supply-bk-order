@@ -98,130 +98,109 @@
         </div>
       </div>
 
-      <!-- Блюда — табы -->
+      <!-- Блюда / Ингредиенты -->
       <div class="mktd-card">
-        <div class="mktd-dish-tabs">
-          <div class="mktd-dish-tabs-scroll">
-            <button class="mktd-dish-tab" :class="{ active: itemsTab === 'all-ing' }" @click="itemsTab = 'all-ing'; loadIngredients()">
-              Все ингредиенты <span v-if="ingredientsList.length" class="mktd-card-count">{{ ingredientsList.length }}</span>
-            </button>
-            <button v-for="(item, ii) in activity.items" :key="ii"
-              class="mktd-dish-tab" :class="{ active: itemsTab === 'dish-' + ii }"
-              @click="itemsTab = 'dish-' + ii; loadIngredients()">
-              {{ item.name || 'Блюдо ' + (ii + 1) }}
-            </button>
+        <div class="mktd-card-title" style="justify-content:space-between;">
+          <div class="mktd-tabs">
+            <button class="mktd-tab" :class="{ active: itemsTab === 'dishes' }" @click="itemsTab = 'dishes'">Блюда <span v-if="activity.items.length" class="mktd-card-count">{{ activity.items.length }}</span></button>
+            <button class="mktd-tab" :class="{ active: itemsTab === 'ingredients' }" @click="itemsTab = 'ingredients'; loadIngredients()">Ингредиенты <span v-if="ingredientsList.length" class="mktd-card-count">{{ ingredientsList.length }}</span></button>
           </div>
-          <div style="display:flex;gap:4px;flex-shrink:0;">
+          <div v-if="itemsTab === 'dishes'" style="display:flex;gap:4px;">
             <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:4px 10px;" @click="addItem">+ Блюдо</button>
             <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:4px 10px;" @click="addCategoryItem">+ Категория</button>
           </div>
         </div>
 
-        <!-- Конкретное блюдо — редактирование -->
-        <div v-if="itemsTab.startsWith('dish-')" class="mktd-dish-edit">
-          <template v-if="currentDish">
-            <div class="mktd-dish-form">
-              <div class="td-params-row">
-                <div class="mktd-field" style="flex:2;">
-                  <label>Название</label>
-                  <input class="mktd-input" v-model="currentDish.name" :disabled="isViewer" placeholder="Поиск блюда..."
-                    @input="onItemSearch(currentDishIdx, $event.target.value)"
-                    @focus="onItemSearch(currentDishIdx, currentDish.name)"
-                    @blur="closeSearch()"
-                    :ref="el => setItemRef(el, currentDishIdx)" />
-                </div>
-                <div class="mktd-field" style="flex:0 0 110px;">
-                  <label>Метод</label>
-                  <select v-model="currentDish.calc_method" :disabled="isViewer" class="mktd-input">
-                    <option value="auv">AUV</option>
-                    <option value="category">Категория</option>
-                    <option value="total_volume">Объём</option>
-                    <option value="fixed_qty">Фикс. кол-во</option>
+        <!-- Таб: Блюда (таблица) -->
+        <div v-if="itemsTab === 'dishes'" class="mktd-items-wrap">
+          <table class="mktd-items-table" v-if="activity.items.length">
+            <thead>
+              <tr>
+                <th style="text-align:left;">Блюдо</th>
+                <th style="width:100px;">Метод</th>
+                <th v-if="!hasMultipleMonths" style="width:90px;">AUV / кол-во</th>
+                <th v-for="m in activityMonths" v-else :key="m.key" style="width:80px;" class="mktd-month-th">{{ m.label }}<div class="mktd-month-days">{{ m.days }} дн</div></th>
+                <th style="width:70px;">Ед.</th>
+                <th style="width:90px;">Итого</th>
+                <th style="min-width:200px;">Заметка</th>
+                <th style="width:60px;" v-if="!isViewer"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="(item, ii) in activity.items" :key="ii">
+              <tr>
+                <td style="text-align:left;position:relative;">
+                  <input class="mktd-input mktd-input-sm mktd-item-name" v-model="item.name" :disabled="isViewer"
+                    placeholder="Поиск блюда..." @input="onItemSearch(ii, $event.target.value)"
+                    @focus="onItemSearch(ii, item.name)" @blur="closeSearch(ii)" :ref="el => setItemRef(el, ii)" />
+                  <span v-if="item.sku" class="mktd-item-sku">{{ item.sku }}</span>
+                </td>
+                <td>
+                  <select v-model="item.calc_method" :disabled="isViewer" class="mktd-input mktd-input-sm">
+                    <option value="auv">AUV</option><option value="category">Категор.</option><option value="total_volume">Объём</option><option value="fixed_qty">Фикс.</option>
                   </select>
-                </div>
-                <div v-if="currentDish.calc_method === 'auv' || currentDish.calc_method === 'category'" class="mktd-field" style="flex:0 0 120px;">
-                  <label>AUV (шт/рест/день)</label>
-                  <input type="number" v-model.number="currentDish.auv" :disabled="isViewer" class="mktd-input" step="0.01" />
-                </div>
-                <div v-else-if="currentDish.calc_method === 'total_volume'" class="mktd-field" style="flex:0 0 120px;">
-                  <label>Общий объём</label>
-                  <input type="number" v-model.number="currentDish.total_volume" :disabled="isViewer" class="mktd-input" />
-                </div>
-                <div v-else class="mktd-field" style="flex:0 0 120px;">
-                  <label>Кол-во</label>
-                  <input type="number" v-model.number="currentDish.fixed_qty" :disabled="isViewer" class="mktd-input" />
-                </div>
-                <div class="mktd-field" style="flex:0 0 70px;">
-                  <label>Ед.</label>
-                  <select v-model="currentDish.unit" :disabled="isViewer" class="mktd-input">
-                    <option value="шт">шт</option><option value="кг">кг</option><option value="л">л</option><option value="кор">кор</option><option value="уп">уп</option>
-                  </select>
-                </div>
-                <div class="mktd-field" style="flex:0 0 80px;">
-                  <label>Итого</label>
-                  <div class="mktd-info">{{ itemTotal(currentDish) > 0 ? formatNum(itemTotal(currentDish)) : '—' }}</div>
-                </div>
-              </div>
-              <div class="td-params-row" v-if="currentDish.calc_method !== 'total_volume' && currentDish.calc_method !== 'fixed_qty'">
-                <div class="mktd-field" style="flex:3;">
-                  <label>Заметка</label>
-                  <input v-model="currentDish.note" :disabled="isViewer" class="mktd-input" placeholder="Комментарий к блюду..." />
-                </div>
-                <div class="mktd-field" style="flex:0 0 auto;">
-                  <label>&nbsp;</label>
-                  <div style="display:flex;gap:4px;">
-                    <button v-if="currentDishIdx > 0" class="td-btn td-btn-outline" style="font-size:10px;padding:4px 8px;" @click="moveItem(currentDishIdx, -1)">◀</button>
-                    <button v-if="currentDishIdx < activity.items.length - 1" class="td-btn td-btn-outline" style="font-size:10px;padding:4px 8px;" @click="moveItem(currentDishIdx, 1)">▶</button>
-                    <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:4px 8px;color:#D62300;" @click="removeItem(currentDishIdx); itemsTab = 'all-ing'">Удалить</button>
+                </td>
+                <td v-if="!hasMultipleMonths">
+                  <input v-if="item.calc_method === 'auv' || item.calc_method === 'category'" type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="AUV" step="0.01" />
+                  <input v-else-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
+                  <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
+                </td>
+                <template v-else>
+                  <template v-if="item.calc_method === 'auv' || item.calc_method === 'category'">
+                    <td v-for="m in activityMonths" :key="m.key">
+                      <input type="number" :value="getItemAuvForMonth(item, m.key)" @change="setItemAuvForMonth(item, m.key, $event.target.value)" :disabled="isViewer" class="mktd-input mktd-input-sm mktd-input-month" placeholder="AUV" step="0.01" />
+                    </td>
+                  </template>
+                  <td v-else :colspan="activityMonths.length">
+                    <input v-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
+                    <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
+                  </td>
+                </template>
+                <td><select v-model="item.unit" :disabled="isViewer" class="mktd-input mktd-input-sm"><option value="шт">шт</option><option value="кг">кг</option><option value="л">л</option><option value="кор">кор</option><option value="уп">уп</option></select></td>
+                <td class="mktd-total-cell"><strong v-if="itemTotal(item) > 0">{{ formatNum(itemTotal(item)) }}</strong><span v-else class="mktd-muted">—</span></td>
+                <td><input v-model="item.note" :disabled="isViewer" class="mktd-input mktd-input-sm" /></td>
+                <td v-if="!isViewer" style="white-space:nowrap;">
+                  <button v-if="ii > 0" class="mktd-move-btn" @click="moveItem(ii, -1)">▲</button>
+                  <button v-if="ii < activity.items.length - 1" class="mktd-move-btn" @click="moveItem(ii, 1)">▼</button>
+                  <button class="mktd-remove-btn" @click="removeItem(ii)"><BkIcon name="close" size="xs" /></button>
+                </td>
+              </tr>
+              <tr v-if="item.calc_method === 'category'" class="mktd-sub-row">
+                <td :colspan="colspanDishes" style="padding:4px 10px;">
+                  <div class="mktd-sub-chips">
+                    <span v-for="(sub, si) in (item.sub_items || [])" :key="si" class="mktd-sub-chip">
+                      <span class="mktd-sub-chip-name">{{ sub.name }}</span>
+                      <span class="mktd-sub-chip-share">{{ Math.round((sub.share || 0) * 100) }}%</span>
+                      <button v-if="!isViewer" class="mktd-sub-chip-x" @click="item.sub_items.splice(si, 1)">×</button>
+                    </span>
+                    <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:9px;padding:2px 8px;" @click="openSubModal(ii)">Выбрать</button>
+                    <button v-if="!isViewer && (item.sub_items || []).length >= 2" class="td-btn td-btn-outline" style="font-size:9px;padding:2px 8px;" @click="calcShares(ii)">Доли</button>
                   </div>
-                </div>
-              </div>
-            </div>
-            <!-- Категория: подблюда -->
-            <div v-if="currentDish.calc_method === 'category'" class="mktd-sub-panel" style="margin-top:12px;">
-              <div class="mktd-sub-header">
-                <span style="font-size:12px;font-weight:600;">Блюда в категории</span>
-                <div style="display:flex;gap:4px;">
-                  <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:3px 10px;" @click="openSubModal(currentDishIdx)">Выбрать блюда</button>
-                  <button v-if="!isViewer && (currentDish.sub_items || []).length >= 2" class="td-btn td-btn-outline" style="font-size:10px;padding:3px 10px;" @click="calcShares(currentDishIdx)">Доли</button>
-                </div>
-              </div>
-              <div class="mktd-sub-chips" style="margin-top:6px;">
-                <span v-for="(sub, si) in (currentDish.sub_items || [])" :key="si" class="mktd-sub-chip">
-                  <span class="mktd-sub-chip-name">{{ sub.name }}</span>
-                  <span class="mktd-sub-chip-share">{{ Math.round((sub.share || 0) * 100) }}%</span>
-                  <button v-if="!isViewer" class="mktd-sub-chip-x" @click="currentDish.sub_items.splice(si, 1)">×</button>
-                </span>
-                <span v-if="!(currentDish.sub_items || []).length" class="mktd-muted" style="font-size:11px;">Нет блюд</span>
-              </div>
-            </div>
-            <!-- Ингредиенты этого блюда -->
-            <div style="margin-top:14px;">
-              <div style="font-size:12px;font-weight:600;color:var(--bk-brown);margin-bottom:8px;">Ингредиенты блюда</div>
-              <div class="mktd-ing-list">
-                <div v-for="ing in dishIngredients(currentDishIdx)" :key="ing.analogGroup || ing.name" class="mktd-ing-row">
-                  <div class="mktd-ing-main">
-                    <div class="mktd-ing-name">{{ ing.name }}</div>
-                    <div class="mktd-ing-nums">
-                      <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
-                      <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
-                      <span v-if="ingCases(ing)" class="mktd-ing-cases">{{ ingCases(ing) }} <small>кейс.</small></span>
-                    </div>
-                    <div class="mktd-ing-sup" v-if="ing.supplier">{{ ing.supplier }}</div>
-                  </div>
-                </div>
-                <div v-if="!dishIngredients(currentDishIdx).length" class="mktd-muted" style="padding:12px;text-align:center;font-size:12px;">Рецептура не найдена</div>
-              </div>
-            </div>
-          </template>
+                </td>
+              </tr>
+              </template>
+            </tbody>
+          </table>
+          <div v-if="!activity.items.length" class="mktd-muted" style="padding:20px;text-align:center;">Добавьте блюда</div>
         </div>
 
-        <!-- Все ингредиенты (таб all-ing) -->
-        <div v-if="itemsTab === 'all-ing'">
+        <!-- Таб: Ингредиенты -->
+        <div v-if="itemsTab === 'ingredients'">
           <div v-if="ingredientsLoading" style="text-align:center;padding:20px;"><BurgerSpinner text="Загрузка рецептур..." /></div>
-          <div v-else-if="!activity.items.length" class="mktd-muted" style="padding:20px;text-align:center;font-size:13px;">Добавьте блюда через кнопку «+ Блюдо»</div>
-          <div v-else-if="!ingredientsList.length" class="mktd-muted" style="padding:20px;text-align:center;font-size:13px;">Рецептуры не найдены. Импортируйте справочник рецептур.</div>
+          <div v-else-if="!activity.items.length" class="mktd-muted" style="padding:20px;text-align:center;">Сначала добавьте блюда</div>
+          <div v-else-if="!ingredientsList.length" class="mktd-muted" style="padding:20px;text-align:center;">Рецептуры не найдены</div>
           <div v-else class="mktd-items-wrap">
+            <!-- Табы блюд внутри ингредиентов -->
+            <div class="mktd-dish-tabs" style="margin-bottom:12px;">
+              <div class="mktd-dish-tabs-scroll">
+                <button class="mktd-dish-tab" :class="{ active: ingDishFilter === 'all' }" @click="ingDishFilter = 'all'">Все</button>
+                <button v-for="(item, ii) in activity.items" :key="ii"
+                  class="mktd-dish-tab" :class="{ active: ingDishFilter === ii }"
+                  @click="ingDishFilter = ii">
+                  {{ item.name || 'Блюдо ' + (ii + 1) }}
+                </button>
+              </div>
+            </div>
             <div class="mktd-ing-toolbar">
               <div class="mktd-ing-info">
                 Расклад: {{ matchedDishes }} из {{ activity.items.length }} блюд · {{ ingredientsList.length }} ингр.
@@ -239,7 +218,30 @@
             </div>
 
             <div class="mktd-ing-list">
-              <template v-for="([groupName, ings], gi) in ingredientsGrouped" :key="groupName">
+              <template v-if="ingDishFilter !== 'all'">
+                <div v-for="ing in filterIngs(dishIngredients(ingDishFilter))" :key="ing.analogGroup || ing.name"
+                  class="mktd-ing-row" :class="{ expanded: expandedIng === ingKey(ing) }"
+                  @click="expandedIng = expandedIng === ingKey(ing) ? null : ingKey(ing)">
+                  <div class="mktd-ing-main">
+                    <div class="mktd-ing-name">{{ ing.name }}</div>
+                    <div class="mktd-ing-nums">
+                      <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
+                      <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
+                      <span v-if="ingCases(ing)" class="mktd-ing-cases">{{ ingCases(ing) }} <small>кейс.</small></span>
+                    </div>
+                    <div class="mktd-ing-sup" v-if="ing.supplier">{{ ing.supplier }}</div>
+                    <BkIcon :name="expandedIng === ingKey(ing) ? 'chevronUp' : 'chevronDown'" size="xs" style="color:var(--text-muted);flex-shrink:0;" />
+                  </div>
+                  <div v-if="expandedIng === ingKey(ing)" class="mktd-ing-detail" @click.stop>
+                    <div class="mktd-ing-detail-grid">
+                      <div><span class="mktd-ing-dlabel">Артикулы:</span> {{ ing.skus?.join(', ') || '—' }}</div>
+                      <div><span class="mktd-ing-dlabel">Поставщик:</span> {{ ing.supplier || '—' }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="!dishIngredients(ingDishFilter).length" class="mktd-muted" style="padding:16px;text-align:center;">Рецептура не найдена</div>
+              </template>
+              <template v-else v-for="([groupName, ings], gi) in ingredientsGrouped" :key="groupName">
                 <div v-if="ingredientsGrouped.length > 1" class="mktd-ing-grp-title">{{ groupName }} <span>{{ ings.length }}</span></div>
                 <div v-for="ing in filterIngs(ings)" :key="ing.analogGroup || ing.name"
                   class="mktd-ing-row" :class="{ expanded: expandedIng === ingKey(ing) }"
@@ -374,7 +376,8 @@ const saving = ref(false);
 const uploading = ref(false);
 const editingName = ref(false);
 const nameInput = ref(null);
-const itemsTab = ref('all-ing');
+const itemsTab = ref('dishes');
+const ingDishFilter = ref('all');
 const ingredientsLoading = ref(false);
 const ingredientsData = ref([]); // raw recipe data from API
 const editingSupplier = ref(null);
