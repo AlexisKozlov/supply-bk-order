@@ -82,7 +82,7 @@
                 <th style="width:100px;">Метод</th>
                 <th v-if="!hasMultipleMonths" style="width:90px;">AUV / кол-во</th>
                 <th v-for="m in activityMonths" v-else :key="m.key" style="width:80px;" class="mktd-month-th">{{ m.label }}<div class="mktd-month-days">{{ m.days }} дн</div></th>
-                <th style="width:50px;">Ед.</th>
+                <th style="width:70px;">Ед.</th>
                 <th style="width:100px;">Итого</th>
                 <th style="width:120px;">Заметка</th>
                 <th style="width:36px;" v-if="!isViewer"></th>
