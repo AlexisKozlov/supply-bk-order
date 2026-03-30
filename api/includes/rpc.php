@@ -2026,7 +2026,10 @@ if ($endpoint === 'rpc') {
 
         $result = [];
         foreach ($recipes as $r) {
-            $s = $pdo->prepare("SELECT * FROM recipe_ingredients WHERE recipe_id=? ORDER BY sort_order");
+            $s = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit
+                FROM recipe_ingredients ri
+                LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci
+                WHERE ri.recipe_id=? ORDER BY ri.sort_order");
             $s->execute([$r['id']]);
             $r['ingredients'] = $s->fetchAll();
             $result[] = $r;

@@ -153,21 +153,31 @@
             <table class="mktd-items-table">
               <thead>
                 <tr>
-                  <th style="text-align:left;">Ингредиент</th>
-                  <th style="width:80px;">SKU</th>
-                  <th style="width:120px;">Итого, г</th>
-                  <th style="width:120px;">Итого, кг</th>
-                  <th style="width:120px;">Итого, шт</th>
-                  <th style="width:180px;">Из блюд</th>
+                  <th style="text-align:left;">Ингредиент / группа</th>
+                  <th style="width:100px;">Артикулы</th>
+                  <th style="width:100px;">Итого, кг</th>
+                  <th style="width:100px;">Итого, шт</th>
+                  <th style="width:100px;">Кейсы</th>
+                  <th style="width:160px;">Из блюд</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="ing in ingredientsList" :key="ing.sku || ing.name">
-                  <td style="text-align:left;font-weight:500;">{{ ing.name }}</td>
-                  <td><span v-if="ing.sku" class="mktd-item-sku" style="position:static;">{{ ing.sku }}</span></td>
-                  <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams) : '—' }}</td>
+                <tr v-for="ing in ingredientsList" :key="ing.analogGroup || ing.name" :class="{ 'mktd-ing-group': ing.analogGroup }">
+                  <td style="text-align:left;">
+                    <div style="font-weight:600;">{{ ing.name }}</div>
+                    <div v-if="ing.analogGroup && ing.skus.length > 1" style="font-size:10px;color:var(--text-muted);">группа аналогов</div>
+                  </td>
+                  <td style="font-size:10px;">
+                    <span v-for="s in ing.skus.slice(0,3)" :key="s" class="mktd-item-sku" style="position:static;display:inline-block;margin:1px;">{{ s }}</span>
+                    <span v-if="ing.skus.length > 3" style="font-size:9px;color:var(--text-muted);">+{{ ing.skus.length - 3 }}</span>
+                  </td>
                   <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams / 1000) : '—' }}</td>
                   <td class="mktd-total-cell">{{ ing.totalQty > 0 ? formatNum(ing.totalQty) : '—' }}</td>
+                  <td class="mktd-total-cell">
+                    <template v-if="ing.qtyPerBox > 0 && ing.totalQty > 0">{{ formatNum(Math.ceil(ing.totalQty / ing.qtyPerBox)) }}</template>
+                    <template v-else-if="ing.qtyPerBox === -1">—<div style="font-size:9px;color:var(--text-muted);">разн. кейс.</div></template>
+                    <template v-else>—</template>
+                  </td>
                   <td style="font-size:11px;color:var(--text-muted);">{{ ing.fromDishes.join(', ') }}</td>
                 </tr>
               </tbody>
@@ -288,26 +298,46 @@ const unmatchedDishes = computed(() => {
 });
 
 const ingredientsList = computed(() => {
-  const map = {}; // key = sku||name → { name, sku, totalGrams, totalQty, fromDishes }
+  const map = {}; // key → { name, skus, analogGroup, totalGrams, totalQty, qtyPerBox, fromDishes }
   const recipeMap = {};
   for (const r of ingredientsData.value) recipeMap[r.name] = r;
 
   for (const dish of activity.value.items) {
     const recipe = recipeMap[dish.name];
     if (!recipe || !recipe.ingredients) continue;
-    const portions = itemTotal(dish); // total portions for this dish
+    const portions = itemTotal(dish);
     if (portions <= 0) continue;
 
     for (const ing of recipe.ingredients) {
-      const key = ing.sku || ing.name;
-      if (!map[key]) map[key] = { name: ing.name, sku: ing.sku, totalGrams: 0, totalQty: 0, fromDishes: [] };
+      // Группируем по analog_group, если есть; иначе по SKU/имени
+      const key = ing.analog_group || ing.sku || ing.name;
+      if (!map[key]) {
+        map[key] = {
+          name: ing.analog_group || ing.name,
+          analogGroup: ing.analog_group || null,
+          skus: new Set(),
+          totalGrams: 0, totalQty: 0,
+          qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null,
+          productUnit: ing.product_unit || null,
+          fromDishes: [],
+        };
+      }
+      if (ing.sku) map[key].skus.add(ing.sku);
       if (ing.brutto) map[key].totalGrams += parseFloat(ing.brutto) * portions;
       if (ing.qty) map[key].totalQty += parseFloat(ing.qty) * portions;
+      // Если кейсовка отличается от уже записанной — обнуляем (неоднозначно)
+      if (ing.qty_per_box) {
+        const qpb = parseFloat(ing.qty_per_box);
+        if (map[key].qtyPerBox === null) map[key].qtyPerBox = qpb;
+        else if (map[key].qtyPerBox !== qpb) map[key].qtyPerBox = -1; // разная кейсовка
+      }
       if (!map[key].fromDishes.includes(dish.name)) map[key].fromDishes.push(dish.name);
     }
   }
 
-  return Object.values(map).sort((a, b) => (b.totalGrams + b.totalQty) - (a.totalGrams + a.totalQty));
+  return Object.values(map)
+    .map(v => ({ ...v, skus: [...v.skus] }))
+    .sort((a, b) => (b.totalGrams + b.totalQty) - (a.totalGrams + a.totalQty));
 });
 
 async function loadIngredients() {
@@ -558,6 +588,7 @@ onMounted(() => {
 .mktd-tab.active .mktd-card-count { background: rgba(255,255,255,0.3); }
 
 /* Ingredients info */
+.mktd-ing-group td { background: #FFFBF5 !important; }
 .mktd-ing-info { font-size: 12px; color: var(--text-muted); padding: 8px 0 12px; }
 .mktd-ing-warn { color: #D97706; font-weight: 600; }
 
