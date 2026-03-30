@@ -1,60 +1,58 @@
 <template>
   <div class="mktd-view">
-    <!-- Header -->
-    <div class="mktd-top">
-      <router-link :to="{ name: 'marketing' }" class="mktd-back"><BkIcon name="chevronLeft" size="sm" /> Маркетинг</router-link>
-      <div class="mktd-top-right">
-        <button v-if="!isViewer" class="btn primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
-        <button v-if="!isViewer && activity.id" class="btn danger small" @click="confirmDelete">Удалить</button>
+    <!-- Шапка — как в тендерах -->
+    <div class="td-header">
+      <div class="td-header-left">
+        <a class="td-back-link" @click.prevent="$router.push({ name: 'marketing' })"><BkIcon name="back" size="sm" /> Маркетинг</a>
+        <h1 v-if="!editingName" class="td-title" @click="!isViewer && (editingName = true)">{{ activity.name || 'Без названия' }}</h1>
+        <input v-else v-model="activity.name" class="td-title-input" @blur="editingName = false" @keydown.enter="editingName = false" ref="nameInput" />
+        <span class="td-badge" :class="'type-' + activity.type">{{ typeLabel(activity.type) }}</span>
+        <span class="td-badge" :class="activity.status === 'active' ? 'st-active' : 'st-completed'">{{ activity.status === 'active' ? 'Активная' : 'Завершённая' }}</span>
+      </div>
+      <div class="td-header-right">
+        <button v-if="!isViewer && activity.id" class="td-btn td-btn-outline" @click="confirmDelete">Удалить</button>
+        <button v-if="!isViewer" class="td-btn td-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
       </div>
     </div>
 
     <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
 
     <template v-else>
-      <!-- Основное — компактная полоса -->
-      <div class="mktd-card">
-        <div class="mktd-form">
-          <div class="mktd-row">
-            <div class="mktd-field" style="flex:3;">
-              <label>Название</label>
-              <input v-model="activity.name" :disabled="isViewer" class="mktd-input" placeholder="Название активности" />
-            </div>
-            <div class="mktd-field" style="flex:0 0 120px;">
-              <label>Тип</label>
-              <select v-model="activity.type" :disabled="isViewer" class="mktd-input">
-                <option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option>
-              </select>
-            </div>
-            <div class="mktd-field" style="flex:0 0 110px;">
-              <label>Статус</label>
-              <select v-model="activity.status" :disabled="isViewer" class="mktd-input">
-                <option value="active">Активная</option>
-                <option value="completed">Завершённая</option>
-              </select>
-            </div>
-            <div class="mktd-field" style="flex:0 0 130px;">
-              <label>Дата начала</label>
-              <input type="date" v-model="activity.date_from" :disabled="isViewer" class="mktd-input" />
-            </div>
-            <div class="mktd-field" style="flex:0 0 130px;">
-              <label>Дата окончания</label>
-              <input type="date" v-model="activity.date_to" :disabled="isViewer" class="mktd-input" />
-            </div>
-            <div class="mktd-field" style="flex:0 0 80px;">
-              <label>Рестораны</label>
-              <input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-input" placeholder="0" min="1" />
-            </div>
-            <div class="mktd-field" v-if="activityDays" style="flex:0 0 60px;">
-              <label>Дней</label>
-              <div class="mktd-info">{{ activityDays }}</div>
-            </div>
+      <!-- Параметры — компактная полоса -->
+      <div class="td-card">
+        <div class="td-params-row">
+          <div class="mktd-field">
+            <label>Тип</label>
+            <select v-model="activity.type" :disabled="isViewer" class="mktd-input">
+              <option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option>
+            </select>
           </div>
-          <div v-if="activity.note || !isViewer" class="mktd-row">
-            <div class="mktd-field" style="flex:1;">
-              <label>Заметки</label>
-              <textarea v-model="activity.note" :disabled="isViewer" class="mktd-input mktd-textarea" placeholder="Комментарии, ссылки..." rows="1"></textarea>
-            </div>
+          <div class="mktd-field">
+            <label>Статус</label>
+            <select v-model="activity.status" :disabled="isViewer" class="mktd-input">
+              <option value="active">Активная</option>
+              <option value="completed">Завершённая</option>
+            </select>
+          </div>
+          <div class="mktd-field">
+            <label>Дата начала</label>
+            <input type="date" v-model="activity.date_from" :disabled="isViewer" class="mktd-input" />
+          </div>
+          <div class="mktd-field">
+            <label>Дата окончания</label>
+            <input type="date" v-model="activity.date_to" :disabled="isViewer" class="mktd-input" />
+          </div>
+          <div class="mktd-field" style="flex:0 0 80px;">
+            <label>Рестораны</label>
+            <input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-input" placeholder="0" min="1" />
+          </div>
+          <div class="mktd-field" v-if="activityDays" style="flex:0 0 60px;">
+            <label>Дней</label>
+            <div class="mktd-info">{{ activityDays }}</div>
+          </div>
+          <div class="mktd-field" style="flex:2;">
+            <label>Заметки</label>
+            <input v-model="activity.note" :disabled="isViewer" class="mktd-input" placeholder="Комментарии..." />
           </div>
         </div>
       </div>
@@ -279,6 +277,8 @@ const legalEntity = computed(() => orderStore.settings.legalEntity);
 const loading = ref(false);
 const saving = ref(false);
 const uploading = ref(false);
+const editingName = ref(false);
+const nameInput = ref(null);
 const itemsTab = ref('dishes');
 const ingredientsLoading = ref(false);
 const ingredientsData = ref([]); // raw recipe data from API
@@ -292,6 +292,8 @@ const types = [
   { value: 'seasonal', label: 'Сезонное меню' },
   { value: 'coupon', label: 'Купон' },
 ];
+
+function typeLabel(v) { return types.find(t => t.value === v)?.label || v; }
 
 const activity = ref({
   id: null, name: '', type: 'promo', status: 'active',
@@ -640,26 +642,45 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mktd-view { padding: 0; }
-.mktd-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
-.mktd-back { font-size: 13px; color: var(--text-muted); text-decoration: none; display: flex; align-items: center; gap: 4px; font-weight: 500; }
-.mktd-back:hover { color: var(--bk-brown); }
-.mktd-top-right { display: flex; gap: 8px; }
 
-/* Cards */
-.mktd-card { background: white; border-radius: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); padding: 20px 24px; margin-bottom: 16px; }
-.mktd-card-title { font-weight: 700; font-size: 15px; color: var(--bk-brown, #502314); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 2px solid #E8E0D8; }
-.mktd-card-count { font-size: 11px; background: var(--bk-orange); color: #fff; padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+/* ─── Шапка — стиль тендеров ──────────────────────────────────────────── */
+.td-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.td-header-left { display:flex; align-items:center; gap:12px; flex:1; min-width:0; flex-wrap:wrap; }
+.td-header-right { display:flex; gap:8px; flex-shrink:0; }
+.td-back-link { display:inline-flex; align-items:center; gap:5px; font-size:13px; color:var(--text-muted); text-decoration:none; font-weight:500; cursor:pointer; transition:color .15s; }
+.td-back-link:hover { color:var(--bk-brown); }
+.td-title { font-size:22px; font-weight:800; color:var(--bk-brown); margin:0; cursor:pointer; transition:color .15s; }
+.td-title:hover { color:var(--bk-orange); }
+.td-title-input { font-size:22px; font-weight:800; color:var(--bk-brown); border:none; border-bottom:2px solid var(--bk-orange); outline:none; background:transparent; padding:0; font-family:inherit; width:300px; }
+.td-badge { display:inline-block; padding:4px 12px; border-radius:20px; font-size:10px; font-weight:700; letter-spacing:0.3px; }
+.td-badge.st-active { background:rgba(76,175,80,0.15); color:#2E7D32; }
+.td-badge.st-completed { background:rgba(158,158,158,0.15); color:#757575; }
+.td-badge.type-promo { background:#DBEAFE; color:#1D4ED8; }
+.td-badge.type-new_product { background:#D1FAE5; color:#059669; }
+.td-badge.type-discontinue { background:#FEE2E2; color:#DC2626; }
+.td-badge.type-seasonal { background:#FEF3C7; color:#D97706; }
+.td-badge.type-coupon { background:#EDE9FE; color:#7C3AED; }
+.td-btn { padding:8px 20px; border-radius:8px; font-size:13px; font-weight:600; border:none; cursor:pointer; font-family:inherit; transition:all .15s; }
+.td-btn-primary { background:#D62300; color:white; }
+.td-btn-primary:hover { background:#B91D00; }
+.td-btn-primary:disabled { opacity:0.5; cursor:default; }
+.td-btn-outline { background:white; border:1.5px solid #D4C4B0; color:var(--bk-brown); }
+.td-btn-outline:hover { border-color:#8B7355; background:#FEFBF7; }
 
-/* Form */
-.mktd-form { display: flex; flex-direction: column; gap: 14px; }
-.mktd-row { display: flex; gap: 14px; flex-wrap: wrap; }
-.mktd-field { flex: 1; min-width: 140px; }
-.mktd-field label { display: block; font-size: 11px; font-weight: 700; color: var(--bk-brown, #502314); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.4px; opacity: 0.6; }
-.mktd-input { width: 100%; padding: 8px 12px; border: 1.5px solid #E8E0D8; border-radius: 8px; font-size: 13px; font-family: inherit; background: #FAFAF8; color: var(--text); box-sizing: border-box; transition: border-color 0.15s, box-shadow 0.15s; }
-.mktd-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(214,35,0,0.08); background: #fff; }
-.mktd-input:disabled { opacity: 0.6; background: #F5F0EB; }
-.mktd-textarea { resize: vertical; min-height: 48px; line-height: 1.5; }
-.mktd-info { font-size: 15px; font-weight: 700; padding: 8px 0; color: var(--bk-brown, #502314); }
+/* ─── Карточки ────────────────────────────────────────────────────────── */
+.td-card { background:white; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); padding:16px 20px; margin-bottom:16px; }
+.td-params-row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+.mktd-card { background:white; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); padding:20px 24px; margin-bottom:16px; }
+.mktd-card-title { font-weight:700; font-size:14px; color:var(--bk-brown, #502314); margin-bottom:14px; display:flex; align-items:center; gap:8px; padding-bottom:10px; border-bottom:2px solid #E8E0D8; }
+.mktd-card-count { font-size:11px; background:var(--bk-orange); color:#fff; padding:2px 8px; border-radius:10px; font-weight:700; }
+
+/* ─── Форма ───────────────────────────────────────────────────────────── */
+.mktd-field { flex:1; min-width:100px; }
+.mktd-field label { display:block; font-size:10px; font-weight:700; color:var(--bk-brown, #502314); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.4px; opacity:0.5; }
+.mktd-input { width:100%; padding:7px 10px; border:1.5px solid #D4C4B0; border-radius:8px; font-size:13px; font-family:inherit; background:white; color:var(--text); box-sizing:border-box; transition:border-color .15s; }
+.mktd-input:focus { border-color:var(--bk-orange); outline:none; box-shadow:0 0 0 3px rgba(214,35,0,0.08); }
+.mktd-input:disabled { opacity:0.6; background:#F5F0EB; }
+.mktd-info { font-size:15px; font-weight:700; padding:7px 0; color:var(--bk-brown, #502314); }
 
 /* Items table */
 .mktd-items-wrap { overflow-x: auto; margin: 0 -8px; padding: 0 8px; }
