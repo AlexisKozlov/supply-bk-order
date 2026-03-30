@@ -2026,14 +2026,109 @@ if ($endpoint === 'rpc') {
             $recipes = $s->fetchAll();
         }
 
-        $result = [];
+        // Собрать все SKU ингредиентов для массового поиска аналогов
+        $allSkus = [];
+        $recipeIngs = [];
         foreach ($recipes as $r) {
             $s = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit
                 FROM recipe_ingredients ri
                 LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci
                 WHERE ri.recipe_id=? ORDER BY ri.sort_order");
             $s->execute([$r['id']]);
-            $r['ingredients'] = $s->fetchAll();
+            $ings = $s->fetchAll();
+            $recipeIngs[$r['id']] = $ings;
+            foreach ($ings as $ing) {
+                if ($ing['sku'] && !$ing['analog_group']) $allSkus[] = $ing['sku'];
+            }
+        }
+
+        // Для SKU без совпадения в products — искать через cards
+        $cardAnalogMap = []; // sku → { analog_group, qty_per_box, product_unit, resolved_name }
+        if (!empty($allSkus)) {
+            $allSkus = array_values(array_unique($allSkus));
+            // 1) Прямой поиск по cards.id
+            $ph = implode(',', array_fill(0, count($allSkus), '?'));
+            $s = $pdo->prepare("SELECT id, name, analogs FROM cards WHERE id COLLATE utf8mb4_unicode_ci IN ($ph)");
+            $s->execute($allSkus);
+            $cardRows = $s->fetchAll();
+            $foundDirectly = [];
+            foreach ($cardRows as $cr) {
+                $foundDirectly[$cr['id']] = $cr;
+            }
+            // 2) Поиск через analogs JSON (SKU упомянут в массиве аналогов другой карточки)
+            $notFound = array_diff($allSkus, array_keys($foundDirectly));
+            $foundViaAnalogs = [];
+            if (!empty($notFound)) {
+                $s = $pdo->prepare("SELECT id, name, analogs FROM cards WHERE analogs IS NOT NULL");
+                $s->execute();
+                while ($cr = $s->fetch()) {
+                    $analogs = json_decode($cr['analogs'], true);
+                    if (!is_array($analogs)) continue;
+                    foreach ($notFound as $sku) {
+                        if (in_array($sku, $analogs) || in_array((string)$sku, $analogs)) {
+                            $foundViaAnalogs[$sku] = $cr;
+                        }
+                    }
+                }
+            }
+            // 3) Для найденных карточек — найти аналоги в products
+            $allCardSkus = [];
+            foreach (array_merge($foundDirectly, $foundViaAnalogs) as $sku => $cr) {
+                $analogs = json_decode($cr['analogs'], true) ?: [];
+                $analogs[] = $cr['id']; // сама карточка тоже может быть в products
+                foreach ($analogs as $a) $allCardSkus[] = (string)$a;
+            }
+            $allCardSkus = array_values(array_unique($allCardSkus));
+            $productByCardSku = [];
+            if (!empty($allCardSkus)) {
+                $ph2 = implode(',', array_fill(0, count($allCardSkus), '?'));
+                $s = $pdo->prepare("SELECT sku, analog_group, qty_per_box, unit_of_measure FROM products WHERE sku COLLATE utf8mb4_unicode_ci IN ($ph2)");
+                $s->execute($allCardSkus);
+                while ($pr = $s->fetch()) $productByCardSku[$pr['sku']] = $pr;
+            }
+            // 4) Связать: recipe_sku → card → analog_skus → product
+            foreach (array_merge($foundDirectly, $foundViaAnalogs) as $origSku => $cr) {
+                $analogs = json_decode($cr['analogs'], true) ?: [];
+                $analogs[] = $cr['id'];
+                foreach ($analogs as $a) {
+                    if (isset($productByCardSku[(string)$a])) {
+                        $pr = $productByCardSku[(string)$a];
+                        $cardAnalogMap[$origSku] = [
+                            'analog_group' => $pr['analog_group'],
+                            'qty_per_box' => $pr['qty_per_box'],
+                            'product_unit' => $pr['unit_of_measure'],
+                            'resolved_sku' => $pr['sku'],
+                        ];
+                        break;
+                    }
+                }
+                // Если не нашли в products — хотя бы имя карточки как группу
+                if (!isset($cardAnalogMap[$origSku])) {
+                    $cardAnalogMap[$origSku] = [
+                        'analog_group' => $cr['name'],
+                        'qty_per_box' => null,
+                        'product_unit' => null,
+                        'resolved_sku' => null,
+                    ];
+                }
+            }
+        }
+
+        // Применить найденные аналоги к ингредиентам
+        $result = [];
+        foreach ($recipes as $r) {
+            $ings = $recipeIngs[$r['id']] ?? [];
+            foreach ($ings as &$ing) {
+                if ($ing['sku'] && !$ing['analog_group'] && isset($cardAnalogMap[$ing['sku']])) {
+                    $resolved = $cardAnalogMap[$ing['sku']];
+                    $ing['analog_group'] = $resolved['analog_group'];
+                    if (!$ing['qty_per_box'] && $resolved['qty_per_box']) $ing['qty_per_box'] = $resolved['qty_per_box'];
+                    if (!$ing['product_unit'] && $resolved['product_unit']) $ing['product_unit'] = $resolved['product_unit'];
+                    if ($resolved['resolved_sku']) $ing['resolved_sku'] = $resolved['resolved_sku'];
+                }
+            }
+            unset($ing);
+            $r['ingredients'] = $ings;
             $result[] = $r;
         }
 
