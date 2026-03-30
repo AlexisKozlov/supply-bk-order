@@ -2124,7 +2124,10 @@ if ($endpoint === 'rpc') {
                     $ing['analog_group'] = $resolved['analog_group'];
                     if (!$ing['qty_per_box'] && $resolved['qty_per_box']) $ing['qty_per_box'] = $resolved['qty_per_box'];
                     if (!$ing['product_unit'] && $resolved['product_unit']) $ing['product_unit'] = $resolved['product_unit'];
-                    if ($resolved['resolved_sku']) $ing['resolved_sku'] = $resolved['resolved_sku'];
+                    if ($resolved['resolved_sku']) {
+                        $ing['original_sku'] = $ing['sku'];
+                        $ing['sku'] = $resolved['resolved_sku'];
+                    }
                 }
             }
             unset($ing);

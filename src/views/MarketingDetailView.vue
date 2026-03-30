@@ -187,6 +187,7 @@
                   <td style="font-size:10px;">
                     <span v-for="s in ing.skus.slice(0,3)" :key="s" class="mktd-item-sku" style="position:static;display:inline-block;margin:1px;">{{ s }}</span>
                     <span v-if="ing.skus.length > 3" style="font-size:9px;color:var(--text-muted);">+{{ ing.skus.length - 3 }}</span>
+                    <div v-if="ing.originalSkus.length" style="font-size:9px;color:var(--text-muted);margin-top:2px;" :title="'Было: ' + ing.originalSkus.join(', ')">было: {{ ing.originalSkus.slice(0,2).join(', ') }}{{ ing.originalSkus.length > 2 ? '...' : '' }}</div>
                   </td>
                   <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams / 1000) : '—' }}</td>
                   <td class="mktd-total-cell">{{ ing.totalQty > 0 ? formatNum(ing.totalQty) : '—' }}</td>
@@ -376,6 +377,7 @@ const ingredientsList = computed(() => {
           name: ing.analog_group || ing.name,
           analogGroup: ing.analog_group || null,
           skus: new Set(),
+          originalSkus: new Set(),
           totalGrams: 0, totalQty: 0,
           qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null,
           productUnit: ing.product_unit || null,
@@ -383,6 +385,7 @@ const ingredientsList = computed(() => {
         };
       }
       if (ing.sku) map[key].skus.add(ing.sku);
+      if (ing.original_sku) map[key].originalSkus.add(ing.original_sku);
       if (ing.brutto) map[key].totalGrams += parseFloat(ing.brutto) * portions;
       if (ing.qty) map[key].totalQty += parseFloat(ing.qty) * portions;
       // Запоминаем единицу измерения товара (кг, шт и т.д.)
@@ -398,7 +401,7 @@ const ingredientsList = computed(() => {
   }
 
   return Object.values(map)
-    .map(v => ({ ...v, skus: [...v.skus] }))
+    .map(v => ({ ...v, skus: [...v.skus], originalSkus: [...v.originalSkus] }))
     .sort((a, b) => (b.totalGrams + b.totalQty) - (a.totalGrams + a.totalQty));
 });
 
