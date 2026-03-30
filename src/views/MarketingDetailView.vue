@@ -835,7 +835,7 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-stage-name { border: none; background: transparent; font-size: 13px; font-weight: 600; color: var(--text); font-family: inherit; padding: 2px 0; width: 100%; outline: none; }
 .mktd-stage-name:focus { border-bottom: 1px solid var(--bk-orange); }
 .mktd-stage-name-ro { font-size: 13px; font-weight: 600; color: var(--text); }
-.mktd-stage-date { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.mktd-stage-date { display: flex; align-items: center; gap: 6px; flex: 0 0 220px; }
 .mktd-stage-days { font-size: 10px; font-weight: 600; white-space: nowrap; }
 .mktd-stage-days.overdue { color: #D62300; }
 .mktd-stage-days.soon { color: #D97706; }
