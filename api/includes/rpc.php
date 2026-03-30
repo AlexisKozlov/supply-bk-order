@@ -2030,7 +2030,7 @@ if ($endpoint === 'rpc') {
         $allSkus = [];
         $recipeIngs = [];
         foreach ($recipes as $r) {
-            $s = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit
+            $s = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit, p.supplier as product_supplier
                 FROM recipe_ingredients ri
                 LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci
                 WHERE ri.recipe_id=? ORDER BY ri.sort_order");
@@ -2082,7 +2082,7 @@ if ($endpoint === 'rpc') {
             $productByCardSku = [];
             if (!empty($allCardSkus)) {
                 $ph2 = implode(',', array_fill(0, count($allCardSkus), '?'));
-                $s = $pdo->prepare("SELECT sku, analog_group, qty_per_box, unit_of_measure FROM products WHERE sku COLLATE utf8mb4_unicode_ci IN ($ph2)");
+                $s = $pdo->prepare("SELECT sku, analog_group, qty_per_box, unit_of_measure, supplier FROM products WHERE sku COLLATE utf8mb4_unicode_ci IN ($ph2)");
                 $s->execute($allCardSkus);
                 while ($pr = $s->fetch()) $productByCardSku[$pr['sku']] = $pr;
             }
@@ -2098,6 +2098,7 @@ if ($endpoint === 'rpc') {
                             'qty_per_box' => $pr['qty_per_box'],
                             'product_unit' => $pr['unit_of_measure'],
                             'resolved_sku' => $pr['sku'],
+                            'supplier' => $pr['supplier'],
                         ];
                         break;
                     }
@@ -2128,6 +2129,7 @@ if ($endpoint === 'rpc') {
                         $ing['original_sku'] = $ing['sku'];
                         $ing['sku'] = $resolved['resolved_sku'];
                     }
+                    if (!empty($resolved['supplier'])) $ing['product_supplier'] = $resolved['supplier'];
                 }
             }
             unset($ing);

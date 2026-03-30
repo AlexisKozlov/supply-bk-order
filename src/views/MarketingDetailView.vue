@@ -169,10 +169,12 @@
                 <tr>
                   <th style="text-align:left;">Ингредиент / группа</th>
                   <th style="width:100px;">Артикулы</th>
-                  <th style="width:100px;">Итого, кг</th>
-                  <th style="width:100px;">Итого, шт</th>
-                  <th style="width:100px;">Кейсы</th>
-                  <th style="width:160px;">Из блюд</th>
+                  <th style="width:120px;">Поставщик</th>
+                  <th style="width:90px;">Итого, кг</th>
+                  <th style="width:90px;">Итого, шт</th>
+                  <th style="width:80px;">Кейсы</th>
+                  <th style="width:140px;">Из блюд</th>
+                  <th style="width:140px;">Комментарий</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,6 +188,15 @@
                     <span v-if="ing.skus.length > 3" style="font-size:9px;color:var(--text-muted);">+{{ ing.skus.length - 3 }}</span>
                     <div v-if="ing.originalSkus.length" style="font-size:9px;color:var(--text-muted);margin-top:2px;" :title="'Было: ' + ing.originalSkus.join(', ')">было: {{ ing.originalSkus.slice(0,2).join(', ') }}{{ ing.originalSkus.length > 2 ? '...' : '' }}</div>
                   </td>
+                  <td class="mktd-supplier-cell" @dblclick="startEditSupplier(ing)">
+                    <template v-if="editingSupplier === (ing.analogGroup || ing.name)">
+                      <input class="mktd-input mktd-input-sm" v-model="ing.supplierOverride" @blur="editingSupplier = null" @keydown.enter="editingSupplier = null" ref="supplierInput" style="width:100%;" />
+                    </template>
+                    <template v-else>
+                      <span v-if="ing.supplierOverride || ing.supplier" style="font-size:11px;">{{ ing.supplierOverride || ing.supplier }}</span>
+                      <span v-else class="mktd-muted" style="font-size:10px;">—</span>
+                    </template>
+                  </td>
                   <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams / 1000) : '—' }}</td>
                   <td class="mktd-total-cell">{{ ing.totalQty > 0 ? formatNum(ing.totalQty) : '—' }}</td>
                   <td class="mktd-total-cell">
@@ -195,6 +206,15 @@
                     <template v-else>—</template>
                   </td>
                   <td style="font-size:11px;color:var(--text-muted);">{{ ing.fromDishes.join(', ') }}</td>
+                  <td @dblclick="startEditComment(ing)">
+                    <template v-if="editingComment === (ing.analogGroup || ing.name)">
+                      <input class="mktd-input mktd-input-sm" v-model="ing.comment" @blur="editingComment = null" @keydown.enter="editingComment = null" style="width:100%;" />
+                    </template>
+                    <template v-else>
+                      <span v-if="ing.comment" style="font-size:11px;">{{ ing.comment }}</span>
+                      <span v-else class="mktd-muted" style="font-size:10px;">—</span>
+                    </template>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -236,7 +256,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter } from '@/lib/utils.js';
@@ -262,6 +282,8 @@ const uploading = ref(false);
 const itemsTab = ref('dishes');
 const ingredientsLoading = ref(false);
 const ingredientsData = ref([]); // raw recipe data from API
+const editingSupplier = ref(null);
+const editingComment = ref(null);
 
 const types = [
   { value: 'promo', label: 'Промо' },
@@ -375,9 +397,13 @@ const ingredientsList = computed(() => {
           totalGrams: 0, totalQty: 0,
           qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null,
           productUnit: ing.product_unit || null,
+          supplier: ing.product_supplier || null,
+          supplierOverride: null,
+          comment: '',
           fromDishes: [],
         };
       }
+      if (ing.product_supplier && !map[key].supplier) map[key].supplier = ing.product_supplier;
       if (ing.sku) map[key].skus.add(ing.sku);
       if (ing.original_sku) map[key].originalSkus.add(ing.original_sku);
       if (ing.brutto) map[key].totalGrams += parseFloat(ing.brutto) * portions;
@@ -398,6 +424,18 @@ const ingredientsList = computed(() => {
     .map(v => ({ ...v, skus: [...v.skus], originalSkus: [...v.originalSkus] }))
     .sort((a, b) => (b.totalGrams + b.totalQty) - (a.totalGrams + a.totalQty));
 });
+
+function startEditSupplier(ing) {
+  if (isViewer.value) return;
+  editingSupplier.value = ing.analogGroup || ing.name;
+  if (!ing.supplierOverride) ing.supplierOverride = ing.supplier || '';
+  nextTick(() => { const el = document.querySelector('.mktd-supplier-cell input'); if (el) { el.focus(); el.select(); } });
+}
+function startEditComment(ing) {
+  if (isViewer.value) return;
+  editingComment.value = ing.analogGroup || ing.name;
+  nextTick(() => { const el = document.querySelector('.mktd-items-table td:last-child input'); if (el) { el.focus(); } });
+}
 
 async function loadIngredients() {
   const names = activity.value.items.map(i => i.name).filter(Boolean);
@@ -665,6 +703,8 @@ select.mktd-input, select.mktd-input-sm { background: #fff; color: var(--text); 
 .mktd-month-th { font-size: 10px !important; line-height: 1.3; }
 .mktd-month-days { font-size: 9px; font-weight: 500; opacity: 0.6; }
 .mktd-input-month { width: 65px; text-align: center; font-weight: 600; }
+.mktd-supplier-cell { cursor: pointer; }
+.mktd-supplier-cell:hover { background: rgba(214,35,0,0.03); }
 .mktd-ing-group td { background: #FFFBF5 !important; }
 .mktd-ing-info { font-size: 12px; color: var(--text-muted); padding: 8px 0 12px; }
 .mktd-ing-warn { color: #D97706; font-weight: 600; }
