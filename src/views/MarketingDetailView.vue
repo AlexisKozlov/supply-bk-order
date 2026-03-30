@@ -422,6 +422,7 @@ function setItemAuvForMonth(item, monthKey, val) {
 }
 
 function itemTotal(item) {
+  if (!item) return 0;
   const rests = activity.value.restaurant_count || 0;
   if (item.calc_method === 'auv' || item.calc_method === 'category') {
     if (hasMultipleMonths.value && item.auv_periods?.length) {
@@ -437,7 +438,7 @@ function itemTotal(item) {
   return item.fixed_qty || 0;
 }
 
-const grandTotal = computed(() => activity.value.items.reduce((s, i) => s + itemTotal(i), 0));
+const grandTotal = computed(() => activity.value.items.reduce((s, i) => i ? s + itemTotal(i) : s, 0));
 
 function formatNum(v) {
   if (!v) return '—';
