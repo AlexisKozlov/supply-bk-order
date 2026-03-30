@@ -141,19 +141,20 @@
                 <td>
                   <select v-model="item.calc_method" :disabled="isViewer" class="mktd-input mktd-input-sm">
                     <option value="auv">AUV</option>
+                    <option value="category">Категория</option>
                     <option value="total_volume">Объём</option>
                     <option value="fixed_qty">Фикс.</option>
                   </select>
                 </td>
                 <!-- Один период или не AUV -->
                 <td v-if="!hasMultipleMonths">
-                  <input v-if="item.calc_method === 'auv'" type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="шт/рест/день" step="0.01" />
+                  <input v-if="item.calc_method === 'auv' || item.calc_method === 'category'" type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="шт/рест/день" step="0.01" />
                   <input v-else-if="item.calc_method === 'total_volume'" type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Объём" />
                   <input v-else type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="Кол-во" />
                 </td>
                 <!-- Несколько месяцев — колонка на каждый (только для AUV) -->
                 <template v-else>
-                  <template v-if="item.calc_method === 'auv'">
+                  <template v-if="item.calc_method === 'auv' || item.calc_method === 'category'">
                     <td v-for="m in activityMonths" :key="m.key">
                       <input type="number"
                         :value="getItemAuvForMonth(item, m.key)"
@@ -184,12 +185,48 @@
                 <td>
                   <input v-model="item.note" :disabled="isViewer" class="mktd-input mktd-input-sm" placeholder="" />
                 </td>
-                <td v-if="!isViewer">
+                <td v-if="!isViewer" style="white-space:nowrap;">
+                  <button v-if="ii > 0" class="mktd-move-btn" @click="moveItem(ii, -1)" title="Вверх">▲</button>
+                  <button v-if="ii < activity.items.length - 1" class="mktd-move-btn" @click="moveItem(ii, 1)" title="Вниз">▼</button>
                   <button class="mktd-remove-btn" @click="removeItem(ii)" title="Удалить"><BkIcon name="close" size="xs" /></button>
+                </td>
+              </tr>
+              <!-- Подблюда категории -->
+              <tr v-if="item.calc_method === 'category'" class="mktd-sub-row">
+                <td :colspan="colspanDishes" style="padding:4px 8px 10px;">
+                  <div class="mktd-sub-panel">
+                    <div class="mktd-sub-header">
+                      <span style="font-size:11px;font-weight:600;color:var(--text-muted);">Блюда в категории ({{ (item.sub_items || []).length }})</span>
+                      <div style="display:flex;gap:4px;">
+                        <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:2px 8px;" @click="addSubItem(ii)">+ Блюдо</button>
+                        <button v-if="!isViewer && (item.sub_items || []).length >= 2" class="td-btn td-btn-outline" style="font-size:10px;padding:2px 8px;" @click="calcShares(ii)">Доли по реализации</button>
+                      </div>
+                    </div>
+                    <div v-for="(sub, si) in (item.sub_items || [])" :key="si" class="mktd-sub-item" style="position:relative;">
+                      <input class="mktd-input mktd-input-sm" v-model="sub.name" :disabled="isViewer" placeholder="Поиск блюда..."
+                        @input="onSubSearch(ii, si, sub.name)" @blur="closeSubSearch()" style="flex:2;" />
+                      <div v-if="subSearch.itemIdx === ii && subSearch.subIdx === si && subSearch.results.length" class="mktd-sub-dropdown">
+                        <div v-for="r in subSearch.results" :key="r.id" class="mktd-dropdown-item" @mousedown.prevent="pickSubRecipe(ii, si, r)">
+                          <span class="mktd-dropdown-sku">{{ r.code }}</span> {{ r.name }}
+                        </div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:4px;flex:0 0 80px;">
+                        <input type="number" class="mktd-input mktd-input-sm" :value="Math.round((sub.share || 0) * 100)" @change="sub.share = (parseFloat($event.target.value) || 0) / 100" :disabled="isViewer" style="width:50px;text-align:center;" />
+                        <span style="font-size:11px;color:var(--text-muted);">%</span>
+                      </div>
+                      <span v-if="sub.code" class="mktd-item-sku" style="position:static;">{{ sub.code }}</span>
+                      <button v-if="!isViewer" class="mktd-remove-btn" @click="item.sub_items.splice(si, 1)"><BkIcon name="close" size="xs" /></button>
+                    </div>
+                    <div v-if="!(item.sub_items || []).length" class="mktd-muted" style="font-size:11px;padding:4px 0;">Добавьте блюда в категорию</div>
+                  </div>
                 </td>
               </tr>
             </tbody>
           </table>
+          <div class="mktd-add-btns">
+            <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="addItem">+ Блюдо</button>
+            <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="addCategoryItem">+ Категория</button>
+          </div>
           <div v-if="!activity.items.length" class="mktd-muted" style="padding:16px 0;text-align:center;font-size:13px;">Добавьте блюда, по которым маркетинг планирует активность</div>
         </div>
 
@@ -386,7 +423,7 @@ function setItemAuvForMonth(item, monthKey, val) {
 
 function itemTotal(item) {
   const rests = activity.value.restaurant_count || 0;
-  if (item.calc_method === 'auv') {
+  if (item.calc_method === 'auv' || item.calc_method === 'category') {
     if (hasMultipleMonths.value && item.auv_periods?.length) {
       // Сумма по месяцам: AUV_месяц × рестораны × дней_в_месяце
       return activityMonths.value.reduce((sum, m) => {
@@ -477,6 +514,29 @@ const ingredientsList = computed(() => {
   for (const r of ingredientsData.value) recipeMap[r.name] = r;
 
   for (const dish of activity.value.items) {
+    // Категория — раскладываем по sub_items
+    if (dish.calc_method === 'category' && dish.sub_items?.length) {
+      const totalPortions = itemTotal(dish);
+      if (totalPortions <= 0) continue;
+      for (const sub of dish.sub_items) {
+        const recipe = recipeMap[sub.name];
+        if (!recipe?.ingredients) continue;
+        const subPortions = totalPortions * (sub.share || 0);
+        if (subPortions <= 0) continue;
+        for (const ing of recipe.ingredients) {
+          const key = ing.analog_group || ing.sku || ing.name;
+          if (!map[key]) { map[key] = { name: ing.analog_group || ing.name, analogGroup: ing.analog_group || null, skus: new Set(), originalSkus: new Set(), totalGrams: 0, totalQty: 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit || null, supplier: ing.product_supplier || null, supplierOverride: null, comment: '', fromDishes: [] }; }
+          if (ing.sku) map[key].skus.add(ing.sku);
+          if (ing.original_sku) map[key].originalSkus.add(ing.original_sku);
+          if (ing.brutto) map[key].totalGrams += parseFloat(ing.brutto) * subPortions;
+          if (ing.qty) map[key].totalQty += parseFloat(ing.qty) * subPortions;
+          if (ing.product_supplier && !map[key].supplier) map[key].supplier = ing.product_supplier;
+          if (ing.qty_per_box) { const qpb = parseFloat(ing.qty_per_box); if (map[key].qtyPerBox === null) map[key].qtyPerBox = qpb; else if (map[key].qtyPerBox !== qpb) map[key].qtyPerBox = -1; }
+          if (!map[key].fromDishes.includes(dish.name + ' → ' + sub.name)) map[key].fromDishes.push(dish.name + ' → ' + sub.name);
+        }
+      }
+      continue;
+    }
     const recipe = recipeMap[dish.name];
     if (!recipe || !recipe.ingredients) continue;
     const portions = itemTotal(dish);
@@ -535,7 +595,13 @@ function startEditComment(ing) {
 }
 
 async function loadIngredients() {
-  const names = activity.value.items.map(i => i.name).filter(Boolean);
+  // Собрать имена: обычные блюда + sub_items категорий
+  const names = [];
+  for (const item of activity.value.items) {
+    if (item.calc_method === 'category' && item.sub_items?.length) {
+      for (const sub of item.sub_items) { if (sub.name) names.push(sub.name); }
+    } else { if (item.name) names.push(item.name); }
+  }
   if (!names.length) return;
   // Only reload if dish names changed
   const cached = ingredientsData.value.map(r => r.name).sort().join(',');
@@ -549,14 +615,81 @@ async function loadIngredients() {
 }
 
 // ─── Items ──────────────────────────────────────────────────────────────────
+const colspanDishes = computed(() => {
+  const base = 6; // name + method + unit + total + note + remove
+  if (hasMultipleMonths.value) return base + activityMonths.value.length;
+  return base + 1; // + value column
+});
+
 function addItem() {
   activity.value.items.push({
     product_id: null, sku: null, name: '',
-    calc_method: 'auv', auv: null, total_volume: null, fixed_qty: null,
-    unit: 'шт', note: '',
+    calc_method: 'auv', auv: null, auv_periods: null, sub_items: null,
+    total_volume: null, fixed_qty: null, unit: 'шт', note: '',
+  });
+}
+function addCategoryItem() {
+  activity.value.items.push({
+    product_id: null, sku: null, name: '',
+    calc_method: 'category', auv: null, auv_periods: null, sub_items: [],
+    total_volume: null, fixed_qty: null, unit: 'шт', note: '',
   });
 }
 function removeItem(ii) { activity.value.items.splice(ii, 1); }
+function moveItem(ii, dir) {
+  const items = activity.value.items;
+  const ni = ii + dir;
+  if (ni < 0 || ni >= items.length) return;
+  [items[ii], items[ni]] = [items[ni], items[ii]];
+}
+
+function addSubItem(ii) {
+  const item = activity.value.items[ii];
+  if (!item.sub_items) item.sub_items = [];
+  item.sub_items.push({ recipe_id: null, name: '', code: '', share: 0 });
+}
+
+async function calcShares(ii) {
+  const item = activity.value.items[ii];
+  if (!item.sub_items?.length) return;
+  const recipeIds = item.sub_items.filter(s => s.recipe_id).map(s => s.recipe_id);
+  if (recipeIds.length < 2) {
+    // Если нет recipe_id — поровну
+    const share = 1 / item.sub_items.length;
+    item.sub_items.forEach(s => s.share = Math.round(share * 10000) / 10000);
+    return;
+  }
+  const { data, error } = await db.rpc('calc_dish_shares', { recipe_ids: recipeIds });
+  if (error) { toast.error('Ошибка', error); return; }
+  const sharesMap = {};
+  for (const s of (data?.shares || [])) sharesMap[s.recipe_id] = s.share;
+  for (const sub of item.sub_items) {
+    if (sub.recipe_id && sharesMap[sub.recipe_id] !== undefined) sub.share = sharesMap[sub.recipe_id];
+  }
+  toast.success('Доли рассчитаны', data?.total_sales > 0 ? 'По реализации' : 'Поровну (нет данных)');
+}
+
+// Sub-item search
+const subSearch = reactive({ itemIdx: -1, subIdx: -1, results: [], timer: null });
+function onSubSearch(ii, si, val) {
+  subSearch.itemIdx = ii; subSearch.subIdx = si;
+  clearTimeout(subSearch.timer);
+  const q = (val || '').trim();
+  if (q.length < 2) { subSearch.results = []; return; }
+  subSearch.timer = setTimeout(async () => {
+    const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(30);
+    if (subSearch.itemIdx === ii && subSearch.subIdx === si) subSearch.results = data || [];
+  }, 250);
+}
+function closeSubSearch() { setTimeout(() => { subSearch.results = []; subSearch.itemIdx = -1; }, 200); }
+function pickSubRecipe(ii, si, recipe) {
+  const item = activity.value.items[ii];
+  if (!item.sub_items?.[si]) return;
+  item.sub_items[si].recipe_id = recipe.id;
+  item.sub_items[si].name = recipe.name;
+  item.sub_items[si].code = recipe.code;
+  subSearch.results = []; subSearch.itemIdx = -1;
+}
 
 // ─── Product search ─────────────────────────────────────────────────────────
 const search = reactive({ index: -1, results: [], timer: null });
@@ -655,7 +788,7 @@ async function save() {
       stages: activity.value.stages || null,
       items: activity.value.items.map((it, i) => ({
         product_id: it.product_id, sku: it.sku, name: it.name,
-        calc_method: it.calc_method, auv: it.auv, auv_periods: it.auv_periods || null, total_volume: it.total_volume,
+        calc_method: it.calc_method, auv: it.auv, auv_periods: it.auv_periods || null, sub_items: it.sub_items || null, total_volume: it.total_volume,
         fixed_qty: it.fixed_qty, unit: it.unit, note: it.note,
       })),
     };
@@ -686,6 +819,7 @@ async function loadActivity(id) {
         calc_method: it.calc_method || 'auv',
         auv: it.auv ? parseFloat(it.auv) : null,
         auv_periods: it.auv_periods ? (typeof it.auv_periods === 'string' ? JSON.parse(it.auv_periods) : it.auv_periods) : null,
+        sub_items: it.sub_items ? (typeof it.sub_items === 'string' ? JSON.parse(it.sub_items) : it.sub_items) : null,
         total_volume: it.total_volume ? parseFloat(it.total_volume) : null,
         fixed_qty: it.fixed_qty ? parseFloat(it.fixed_qty) : null,
         unit: it.unit || 'шт', note: it.note || '',
@@ -840,6 +974,16 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-stage-days.overdue { color: #D62300; }
 .mktd-stage-days.soon { color: #D97706; }
 .mktd-stage-comment { flex: 1; min-width: 100px; }
+
+/* ─── Категории / sub-items ────────────────────────────────────────────── */
+.mktd-sub-row td { background: #FAFAF8 !important; }
+.mktd-sub-panel { padding: 4px 0; }
+.mktd-sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.mktd-sub-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.mktd-sub-dropdown { position: absolute; top: 100%; left: 0; z-index: 100; background: white; border: 1px solid #E8E0D8; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-height: 180px; overflow-y: auto; width: 300px; }
+.mktd-add-btns { display: flex; gap: 6px; margin-top: 8px; }
+.mktd-move-btn { background: none; border: none; cursor: pointer; color: #ccc; font-size: 10px; padding: 1px 3px; line-height: 1; }
+.mktd-move-btn:hover { color: var(--bk-brown); }
 
 .mktd-supplier-cell { cursor: pointer; }
 .mktd-supplier-cell:hover { background: rgba(214,35,0,0.03); }

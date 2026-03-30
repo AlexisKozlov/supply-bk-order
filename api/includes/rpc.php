@@ -1891,7 +1891,8 @@ if ($endpoint === 'rpc') {
             $pdo->prepare("DELETE FROM marketing_activity_items WHERE activity_id=?")->execute([$actId]);
             foreach ($items as $i => $item) {
                 $auvPeriods = isset($item['auv_periods']) && is_array($item['auv_periods']) ? json_encode($item['auv_periods']) : null;
-                $pdo->prepare("INSERT INTO marketing_activity_items (activity_id, product_id, sku, name, calc_method, auv, auv_periods, total_volume, fixed_qty, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                $subItems = isset($item['sub_items']) && is_array($item['sub_items']) ? json_encode($item['sub_items'], JSON_UNESCAPED_UNICODE) : null;
+                $pdo->prepare("INSERT INTO marketing_activity_items (activity_id, product_id, sku, name, calc_method, auv, auv_periods, sub_items, total_volume, fixed_qty, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     ->execute([
                         $actId,
                         $item['product_id'] ?? null,
@@ -1900,6 +1901,7 @@ if ($endpoint === 'rpc') {
                         $item['calc_method'] ?? 'auv',
                         $item['auv'] ?? null,
                         $auvPeriods,
+                        $subItems,
                         $item['total_volume'] ?? null,
                         $item['fixed_qty'] ?? null,
                         $item['unit'] ?? 'шт',
@@ -2139,6 +2141,47 @@ if ($endpoint === 'rpc') {
         }
 
         respond(['recipes' => $result]);
+    }
+
+    // ═══ Маркетинг: рассчитать доли блюд по реализации ═══
+    if ($fn === 'calc_dish_shares') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $recipeIds = $body['recipe_ids'] ?? [];
+        if (empty($recipeIds)) respond(['error' => 'Не указаны блюда'], 400);
+        $ph = implode(',', array_fill(0, count($recipeIds), '?'));
+        // Получить названия рецептов
+        $s = $pdo->prepare("SELECT id, name FROM recipes WHERE id IN ($ph)");
+        $s->execute($recipeIds);
+        $recipes = $s->fetchAll();
+        // Поиск реализации по названию блюда в restaurant_sales.analog_group
+        $shares = [];
+        $totalSales = 0;
+        foreach ($recipes as $r) {
+            // Сначала точное совпадение по analog_group
+            $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group = ?");
+            $s->execute([$r['name']]);
+            $qty = floatval($s->fetchColumn() ?: 0);
+            if ($qty <= 0) {
+                // Поиск по analysis_data через recipes → recipe_ingredients → products → analog_group
+                $s = $pdo->prepare("SELECT DISTINCT p.analog_group FROM recipe_ingredients ri JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci WHERE ri.recipe_id = ? AND p.analog_group IS NOT NULL LIMIT 1");
+                $s->execute([$r['id']]);
+                $ag = $s->fetchColumn();
+                if ($ag) {
+                    $s = $pdo->prepare("SELECT SUM(consumption) as qty FROM analysis_data WHERE sku IN (SELECT sku FROM products WHERE analog_group = ?)");
+                    $s->execute([$ag]);
+                    $qty = floatval($s->fetchColumn() ?: 0);
+                }
+            }
+            $shares[] = ['recipe_id' => intval($r['id']), 'name' => $r['name'], 'sales' => $qty];
+            $totalSales += $qty;
+        }
+        // Рассчитать доли
+        foreach ($shares as &$sh) {
+            $sh['share'] = $totalSales > 0 ? round($sh['sales'] / $totalSales, 4) : round(1 / count($shares), 4);
+        }
+        unset($sh);
+        respond(['shares' => $shares, 'total_sales' => $totalSales]);
     }
 
     // ═══ Баг-репорты: создать ═══
