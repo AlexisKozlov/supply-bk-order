@@ -500,12 +500,12 @@ function stageDaysClass(stage) {
 
 // ─── Ингредиенты (расклад по рецептурам) ────────────────────────────────────
 const matchedDishes = computed(() => {
-  const names = activity.value.items.map(i => i.name);
+  const names = activity.value.items.filter(Boolean).map(i => i.name);
   return ingredientsData.value.filter(r => names.includes(r.name)).length;
 });
 const unmatchedDishes = computed(() => {
   const matched = new Set(ingredientsData.value.map(r => r.name));
-  return activity.value.items.map(i => i.name).filter(n => n && !matched.has(n));
+  return activity.value.items.filter(Boolean).map(i => i.name).filter(n => n && !matched.has(n));
 });
 
 const ingredientsList = computed(() => {
@@ -514,6 +514,7 @@ const ingredientsList = computed(() => {
   for (const r of ingredientsData.value) recipeMap[r.name] = r;
 
   for (const dish of activity.value.items) {
+    if (!dish) continue;
     // Категория — раскладываем по sub_items
     if (dish.calc_method === 'category' && dish.sub_items?.length) {
       const totalPortions = itemTotal(dish);
@@ -598,6 +599,7 @@ async function loadIngredients() {
   // Собрать имена: обычные блюда + sub_items категорий
   const names = [];
   for (const item of activity.value.items) {
+    if (!item) continue;
     if (item.calc_method === 'category' && item.sub_items?.length) {
       for (const sub of item.sub_items) { if (sub.name) names.push(sub.name); }
     } else { if (item.name) names.push(item.name); }
@@ -616,7 +618,7 @@ async function loadIngredients() {
 
 // ─── Items ──────────────────────────────────────────────────────────────────
 const colspanDishes = computed(() => {
-  const base = 6; // name + method + unit + total + note + remove
+  const base = 7; // name + method + unit + total + note + move+remove
   if (hasMultipleMonths.value) return base + activityMonths.value.length;
   return base + 1; // + value column
 });
@@ -640,7 +642,8 @@ function moveItem(ii, dir) {
   const items = activity.value.items;
   const ni = ii + dir;
   if (ni < 0 || ni >= items.length) return;
-  [items[ii], items[ni]] = [items[ni], items[ii]];
+  const moved = items.splice(ii, 1)[0];
+  items.splice(ni, 0, moved);
 }
 
 function addSubItem(ii) {
