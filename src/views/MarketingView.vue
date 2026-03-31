@@ -9,10 +9,6 @@
           <button class="db-sort-btn" :class="{ active: viewMode === 'recipes' }" @click="viewMode = 'recipes'; loadRecipes()">Рецептуры</button>
         </div>
         <button v-if="!isViewer && viewMode !== 'recipes'" class="btn primary" @click="createActivity">+ Новая активность</button>
-        <label v-if="!isViewer && viewMode !== 'recipes'" class="btn primary" style="cursor:pointer;">
-          <BkIcon name="import" size="sm" /> Импорт купонов
-          <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importCoupons" />
-        </label>
         <label v-if="!isViewer && viewMode === 'recipes'" class="btn primary" style="cursor:pointer;">
           <BkIcon name="import" size="sm" /> Импорт рецептур
           <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importRecipes" />

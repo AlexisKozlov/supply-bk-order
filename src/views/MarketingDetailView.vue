@@ -142,9 +142,13 @@
           </div>
         </div>
         <!-- Кнопки добавления -->
-        <div style="margin-top:10px;display:flex;gap:6px;">
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
           <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:6px 16px;" @click="addItem">+ Блюдо</button>
           <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:6px 16px;" @click="addCategoryItem">+ Категория</button>
+          <label v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:6px 16px;cursor:pointer;">
+            <BkIcon name="import" size="sm" /> Импорт из Excel
+            <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importDishesFromFile" />
+          </label>
           <button v-if="activity.items.length" class="td-btn td-btn-outline" style="font-size:11px;padding:6px 16px;margin-left:auto;" @click="showIngSummary = true; loadIngredients()">Сводка ингредиентов</button>
         </div>
       </div>
@@ -412,6 +416,122 @@ const grandTotal = computed(() => activity.value.items.reduce((s, i) => i ? s + 
 function formatNum(v) {
   if (!v) return '—';
   return Number(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+
+// ─── Импорт блюд из Excel ────────────────────────────────────────────────────
+async function importDishesFromFile(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const XLSX = (await import('xlsx-js-style')).default;
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (data.length < 2) { toast.error('Пустой файл', ''); return; }
+
+    const headers = data[0].map(h => String(h).toLowerCase().trim());
+    const newItems = [];
+
+    // Определяем формат: купоны (Номер|Состав|AUV) или промо (Блюдо|Цена|...|AUV месяцы)
+    const isCouponFormat = headers.some(h => h.includes('состав'));
+    const isPromoFormat = headers.some(h => h.includes('блюдо'));
+
+    if (isCouponFormat) {
+      // Купоны: Номер | Состав (блюда через запятую) | AUV
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const couponId = String(row[0] || '').trim();
+        const composition = String(row[1] || '').trim();
+        const auv = parseFloat(row[2]) || 0;
+        if (!composition) continue;
+        const parts = composition.split(/,\s*/);
+        const subItems = [];
+        for (let part of parts) {
+          part = part.replace(/\(.*?\)/g, '').trim();
+          if (!part || part.toLowerCase().includes('на выбор')) continue;
+          const qm = part.match(/^(\d+)\s+(.+)/);
+          const qty = qm ? parseInt(qm[1]) : 1;
+          const dishName = (qm ? qm[2] : part).replace(/мал\.$/, 'малый').replace(/газ\.\s*/, 'газ. ').trim();
+          subItems.push({ recipe_id: null, name: dishName, code: '', share: 0, qty });
+        }
+        const totalQty = subItems.reduce((s, si) => s + si.qty, 0);
+        subItems.forEach(si => { si.share = totalQty > 0 ? Math.round(si.qty / totalQty * 10000) / 10000 : 0; });
+        newItems.push({
+          product_id: null, sku: couponId || null, name: couponId ? `${couponId}: ${composition}` : composition,
+          calc_method: 'category', auv, auv_periods: null, sub_items: subItems,
+          total_volume: null, fixed_qty: null, unit: 'шт', note: '',
+        });
+      }
+    } else if (isPromoFormat) {
+      // Промо 3-4-5: Блюдо | Цена | ... | AUV по месяцам
+      // Найти колонки AUV (содержат "auv" или "план")
+      const auvCols = [];
+      const monthLabels = [];
+      headers.forEach((h, ci) => {
+        if (h.includes('auv') || h.includes('план')) { auvCols.push(ci); monthLabels.push(String(data[0][ci]).trim()); }
+      });
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const dishName = String(row[0] || '').trim();
+        if (!dishName || dishName.toUpperCase() === 'TOTAL') continue;
+        // AUV: если несколько колонок — по месяцам
+        let auv = 0;
+        let auvPeriods = null;
+        if (auvCols.length > 1) {
+          auvPeriods = [];
+          const months = activityMonths.value;
+          auvCols.forEach((ci, mi) => {
+            const val = parseFloat(row[ci]) || 0;
+            const mKey = months[mi]?.key || `m${mi}`;
+            auvPeriods.push({ month: mKey, auv: val });
+            if (!auv) auv = val;
+          });
+        } else if (auvCols.length === 1) {
+          auv = parseFloat(row[auvCols[0]]) || 0;
+        }
+        const price = row[1] ? String(row[1]).trim() : '';
+        newItems.push({
+          product_id: null, sku: null, name: dishName,
+          calc_method: 'auv', auv, auv_periods: auvPeriods, sub_items: null,
+          total_volume: null, fixed_qty: null, unit: 'шт', note: price ? `Цена: ${price}` : '',
+        });
+      }
+    } else {
+      toast.error('Неизвестный формат', 'Ожидается: Блюдо|...|AUV или Номер|Состав|AUV');
+      return;
+    }
+
+    if (!newItems.length) { toast.error('Не найдено блюд', ''); return; }
+
+    // Привязка к рецептурам
+    const allNames = [...new Set(newItems.flatMap(it => {
+      if (it.sub_items?.length) return it.sub_items.map(s => s.name);
+      return [it.name];
+    }))];
+    if (allNames.length) {
+      const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allNames });
+      const recipeMap = recipeData?.recipes || {};
+      for (const item of newItems) {
+        if (item.sub_items?.length) {
+          for (const sub of item.sub_items) {
+            const found = recipeMap[sub.name];
+            if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
+          }
+        } else {
+          const found = recipeMap[item.name];
+          if (found) { item.sku = found.code; item.name = found.name; }
+        }
+      }
+    }
+
+    activity.value.items.push(...newItems);
+    toast.success('Импортировано', `${newItems.length} блюд/купонов`);
+    loadIngredients();
+  } catch (err) {
+    console.error(err);
+    toast.error('Ошибка', 'Не удалось обработать файл');
+  } finally { e.target.value = ''; }
 }
 
 // ─── Этапы подготовки ────────────────────────────────────────────────────────
