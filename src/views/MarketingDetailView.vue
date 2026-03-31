@@ -10,6 +10,11 @@
         <span class="td-badge" :class="activity.status === 'active' ? 'st-active' : 'st-completed'">{{ activity.status === 'active' ? 'Активная' : 'Завершённая' }}</span>
       </div>
       <div class="td-header-right">
+        <select v-model="layoutMode" class="mktd-layout-select" title="Вариант layout">
+          <option value="A">Вариант А</option>
+          <option value="B">Вариант Б</option>
+          <option value="C">Вариант В</option>
+        </select>
         <button v-if="!isViewer && activity.id" class="td-btn td-btn-outline" @click="confirmDelete">Удалить</button>
         <button v-if="!isViewer" class="td-btn td-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
       </div>
@@ -18,6 +23,9 @@
     <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
 
     <template v-else>
+
+      <!-- ════════ ВАРИАНТ А: Табы (текущий) ════════ -->
+      <template v-if="layoutMode === 'A'">
       <!-- Параметры — компактная полоса -->
       <div class="td-card">
         <div class="td-params-row">
@@ -300,6 +308,137 @@
           <span v-if="uploading" style="font-size:11px;color:var(--text-muted);margin-left:4px;">Загрузка...</span>
         </div>
       </div>
+      </template>
+
+      <!-- ════════ ВАРИАНТ Б: Две колонки ════════ -->
+      <template v-if="layoutMode === 'B'">
+        <!-- Параметры сверху -->
+        <div class="td-card">
+          <div class="td-params-row">
+            <div class="mktd-field" style="flex:0 0 110px;"><label>Тип</label><select v-model="activity.type" :disabled="isViewer" class="mktd-input"><option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option></select></div>
+            <div class="mktd-field" style="flex:0 0 100px;"><label>Статус</label><select v-model="activity.status" :disabled="isViewer" class="mktd-input"><option value="active">Активная</option><option value="completed">Завершённая</option></select></div>
+            <div class="mktd-field"><label>Начало</label><input type="date" v-model="activity.date_from" :disabled="isViewer" class="mktd-input" /></div>
+            <div class="mktd-field"><label>Конец</label><input type="date" v-model="activity.date_to" :disabled="isViewer" class="mktd-input" /></div>
+            <div class="mktd-field" style="flex:0 0 70px;"><label>Рест.</label><input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-input" min="1" /></div>
+            <div class="mktd-field" v-if="activityDays" style="flex:0 0 50px;"><label>Дней</label><div class="mktd-info">{{ activityDays }}</div></div>
+            <div class="mktd-field" style="flex:2;"><label>Заметки</label><input v-model="activity.note" :disabled="isViewer" class="mktd-input" placeholder="..." /></div>
+          </div>
+        </div>
+        <!-- Две колонки -->
+        <div class="mktd-two-col">
+          <!-- Левая: блюда -->
+          <div class="mktd-col">
+            <div class="mktd-col-header">
+              <span>Блюда ({{ activity.items.length }})</span>
+              <div style="display:flex;gap:4px;">
+                <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:3px 8px;" @click="addItem">+ Блюдо</button>
+                <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:10px;padding:3px 8px;" @click="addCategoryItem">+ Категория</button>
+              </div>
+            </div>
+            <div class="mktd-dish-list-b">
+              <div v-for="(item, ii) in activity.items" :key="ii" class="mktd-dish-card-b" :class="{ active: selectedDishB === ii }" @click="selectedDishB = selectedDishB === ii ? -1 : ii">
+                <div class="mktd-dish-card-b-top">
+                  <span class="mktd-dish-card-b-name">{{ item.name || 'Без названия' }}</span>
+                  <span class="mktd-dish-card-b-total">{{ itemTotal(item) > 0 ? formatNum(itemTotal(item)) + ' ' + item.unit : '—' }}</span>
+                </div>
+                <div class="mktd-dish-card-b-meta">
+                  <span>{{ item.calc_method === 'category' ? 'Категория' : item.calc_method === 'auv' ? 'AUV ' + (item.auv || 0) : item.calc_method === 'total_volume' ? 'Объём' : 'Фикс.' }}</span>
+                </div>
+                <!-- Inline edit при клике -->
+                <div v-if="selectedDishB === ii" class="mktd-dish-card-b-edit" @click.stop>
+                  <div class="td-params-row" style="margin-top:8px;">
+                    <div class="mktd-field"><label>Название</label><input class="mktd-input mktd-input-sm" v-model="item.name" :disabled="isViewer" @input="onItemSearch(ii, $event.target.value)" @blur="closeSearch()" :ref="el => setItemRef(el, ii)" /></div>
+                    <div class="mktd-field" style="flex:0 0 80px;"><label>Метод</label><select v-model="item.calc_method" :disabled="isViewer" class="mktd-input mktd-input-sm"><option value="auv">AUV</option><option value="category">Кат.</option><option value="total_volume">Объём</option><option value="fixed_qty">Фикс.</option></select></div>
+                    <div class="mktd-field" style="flex:0 0 70px;"><label>Значение</label><input type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" step="0.01" /></div>
+                    <div class="mktd-field" style="flex:0 0 50px;"><label>Ед.</label><select v-model="item.unit" :disabled="isViewer" class="mktd-input mktd-input-sm"><option value="шт">шт</option><option value="кг">кг</option><option value="л">л</option></select></div>
+                  </div>
+                  <div style="display:flex;gap:4px;margin-top:6px;">
+                    <button v-if="ii > 0" class="td-btn td-btn-outline" style="font-size:9px;padding:2px 6px;" @click="moveItem(ii,-1)">▲</button>
+                    <button v-if="ii < activity.items.length-1" class="td-btn td-btn-outline" style="font-size:9px;padding:2px 6px;" @click="moveItem(ii,1)">▼</button>
+                    <button class="td-btn td-btn-outline" style="font-size:9px;padding:2px 6px;color:#D62300;" @click="removeItem(ii); selectedDishB=-1">Удалить</button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="!activity.items.length" class="mktd-muted" style="padding:20px;text-align:center;">Добавьте блюда</div>
+            </div>
+          </div>
+          <!-- Правая: ингредиенты -->
+          <div class="mktd-col">
+            <div class="mktd-col-header">
+              <span>Ингредиенты ({{ ingredientsList.length }})</span>
+              <input v-model="ingFilter" class="mktd-input mktd-input-sm" style="width:150px;" placeholder="Фильтр..." />
+            </div>
+            <div class="mktd-ing-list" v-if="ingredientsList.length" style="max-height:500px;overflow-y:auto;">
+              <div v-for="ing in filterIngs(ingredientsList)" :key="ing.analogGroup || ing.name" class="mktd-ing-row">
+                <div class="mktd-ing-main">
+                  <div class="mktd-ing-name">{{ ing.name }}</div>
+                  <div class="mktd-ing-nums">
+                    <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
+                    <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
+                    <span v-if="ingCases(ing)" class="mktd-ing-cases">{{ ingCases(ing) }} <small>кейс.</small></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="mktd-muted" style="padding:20px;text-align:center;">
+              <button class="td-btn td-btn-outline" style="font-size:11px;" @click="loadIngredients()">Загрузить ингредиенты</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ════════ ВАРИАНТ В: Карточки-минимализм ════════ -->
+      <template v-if="layoutMode === 'C'">
+        <!-- Параметры как теги -->
+        <div class="mktd-c-params">
+          <select v-model="activity.type" :disabled="isViewer" class="mktd-c-tag"><option v-for="t in types" :key="t.value" :value="t.value">{{ t.label }}</option></select>
+          <input type="date" v-model="activity.date_from" :disabled="isViewer" class="mktd-c-tag" />
+          <span class="mktd-c-sep">—</span>
+          <input type="date" v-model="activity.date_to" :disabled="isViewer" class="mktd-c-tag" />
+          <input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-c-tag" style="width:50px;" placeholder="рест." />
+          <span v-if="activityDays" class="mktd-c-tag mktd-c-tag-ro">{{ activityDays }} дн</span>
+          <input v-model="activity.note" :disabled="isViewer" class="mktd-c-tag" style="flex:1;min-width:100px;" placeholder="Заметки..." />
+        </div>
+
+        <!-- Блюда как карточки -->
+        <div class="mktd-c-dishes">
+          <div v-for="(item, ii) in activity.items" :key="ii" class="mktd-c-dish" @click="expandedDishC = expandedDishC === ii ? -1 : ii">
+            <div class="mktd-c-dish-head">
+              <div>
+                <div class="mktd-c-dish-name">{{ item.name || 'Блюдо ' + (ii+1) }}</div>
+                <div class="mktd-c-dish-sub">{{ item.calc_method === 'auv' ? 'AUV ' + (item.auv || 0) : item.calc_method }} · {{ itemTotal(item) > 0 ? formatNum(itemTotal(item)) + ' ' + item.unit : '—' }}</div>
+              </div>
+              <BkIcon :name="expandedDishC === ii ? 'chevronUp' : 'chevronDown'" size="xs" style="color:var(--text-muted);" />
+            </div>
+            <!-- Раскрытие: параметры + ингредиенты -->
+            <div v-if="expandedDishC === ii" class="mktd-c-dish-body" @click.stop>
+              <div class="td-params-row" style="margin-bottom:10px;">
+                <div class="mktd-field"><label>Название</label><input class="mktd-input mktd-input-sm" v-model="item.name" :disabled="isViewer" @input="onItemSearch(ii, $event.target.value)" @blur="closeSearch()" :ref="el => setItemRef(el, ii)" /></div>
+                <div class="mktd-field" style="flex:0 0 90px;"><label>Метод</label><select v-model="item.calc_method" :disabled="isViewer" class="mktd-input mktd-input-sm"><option value="auv">AUV</option><option value="category">Кат.</option><option value="total_volume">Объём</option><option value="fixed_qty">Фикс.</option></select></div>
+                <div class="mktd-field" style="flex:0 0 80px;"><label>Значение</label><input type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" step="0.01" /></div>
+                <div class="mktd-field" style="flex:0 0 50px;"><label>Ед.</label><select v-model="item.unit" :disabled="isViewer" class="mktd-input mktd-input-sm"><option value="шт">шт</option><option value="кг">кг</option><option value="л">л</option></select></div>
+                <div class="mktd-field" style="flex:0 0 auto;"><label>&nbsp;</label><button class="td-btn td-btn-outline" style="font-size:9px;padding:3px 8px;color:#D62300;" @click="removeItem(ii); expandedDishC=-1">Удалить</button></div>
+              </div>
+              <div class="mktd-c-dish-ings">
+                <div v-for="ing in dishIngredients(ii)" :key="ing.name" class="mktd-c-dish-ing">
+                  <span>{{ ing.name }}</span>
+                  <span class="mktd-ing-nums">
+                    <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
+                    <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
+                    <span v-if="ingCases(ing)" class="mktd-ing-cases">{{ ingCases(ing) }} <small>кейс.</small></span>
+                  </span>
+                </div>
+                <div v-if="!dishIngredients(ii).length" class="mktd-muted" style="font-size:11px;padding:4px;">Рецептура не найдена</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:4px;">
+            <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="addItem">+ Блюдо</button>
+            <button v-if="!isViewer" class="td-btn td-btn-outline" style="font-size:11px;padding:5px 14px;" @click="addCategoryItem">+ Категория</button>
+          </div>
+        </div>
+      </template>
+
     </template>
 
     <!-- Product search dropdown -->
@@ -376,6 +515,9 @@ const saving = ref(false);
 const uploading = ref(false);
 const editingName = ref(false);
 const nameInput = ref(null);
+const layoutMode = ref('A');
+const selectedDishB = ref(-1);
+const expandedDishC = ref(-1);
 const itemsTab = ref('dishes');
 const ingDishFilter = ref('all');
 const ingredientsLoading = ref(false);
@@ -1197,6 +1339,42 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-ing-group td { background: #FFFBF5 !important; }
 .mktd-ing-info { font-size: 12px; color: var(--text-muted); padding: 8px 0 12px; }
 .mktd-ing-warn { color: #D97706; font-weight: 600; }
+
+/* Layout selector */
+.mktd-layout-select { padding: 4px 8px; border: 1.5px solid #D4C4B0; border-radius: 6px; font-size: 11px; font-weight: 600; font-family: inherit; background: white; color: var(--bk-brown); cursor: pointer; }
+
+/* ═══ Вариант Б: Две колонки ═══ */
+.mktd-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.mktd-col { background: white; border-radius: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden; }
+.mktd-col-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--bk-brown, #502314); color: white; font-weight: 700; font-size: 13px; }
+.mktd-col-header .mktd-input-sm { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.2); color: white; }
+.mktd-col-header .mktd-input-sm::placeholder { color: rgba(255,255,255,0.5); }
+.mktd-dish-list-b { padding: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 500px; overflow-y: auto; }
+.mktd-dish-card-b { padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: all 0.1s; border: 1.5px solid transparent; }
+.mktd-dish-card-b:hover { background: #FEFCF9; border-color: #E8E0D8; }
+.mktd-dish-card-b.active { background: #FFF8F0; border-color: var(--bk-orange); }
+.mktd-dish-card-b-top { display: flex; justify-content: space-between; align-items: center; }
+.mktd-dish-card-b-name { font-weight: 600; font-size: 13px; }
+.mktd-dish-card-b-total { font-weight: 700; font-size: 13px; color: var(--bk-brown); }
+.mktd-dish-card-b-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.mktd-dish-card-b-edit { border-top: 1px solid #E8E0D8; padding-top: 8px; margin-top: 8px; }
+
+/* ═══ Вариант В: Карточки ═══ */
+.mktd-c-params { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.mktd-c-tag { padding: 5px 10px; border: 1.5px solid #D4C4B0; border-radius: 20px; font-size: 12px; font-family: inherit; background: white; color: var(--text); }
+.mktd-c-tag:focus { border-color: var(--bk-orange); outline: none; }
+.mktd-c-tag-ro { background: #F5F0EB; cursor: default; }
+.mktd-c-sep { color: var(--text-muted); font-size: 12px; }
+.mktd-c-dishes { display: flex; flex-direction: column; gap: 8px; }
+.mktd-c-dish { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; transition: all 0.15s; overflow: hidden; }
+.mktd-c-dish:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.mktd-c-dish-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; }
+.mktd-c-dish-name { font-weight: 700; font-size: 15px; color: var(--bk-brown); }
+.mktd-c-dish-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.mktd-c-dish-body { padding: 0 18px 16px; border-top: 1px solid #F0EBE5; }
+.mktd-c-dish-ings { display: flex; flex-direction: column; gap: 2px; }
+.mktd-c-dish-ing { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #F5F0EB; font-size: 12px; }
+.mktd-c-dish-ing:last-child { border-bottom: none; }
 
 @media (max-width: 600px) {
   .mktd-card { padding: 16px; border-radius: 10px; }
