@@ -34,13 +34,9 @@
       <div class="mktd-c-dishes">
         <div v-for="(item, ii) in activity.items" :key="ii" class="mktd-c-dish" :class="{ open: expandedDishC === ii }">
           <div class="mktd-c-dish-head" @click="expandedDishC = expandedDishC === ii ? -1 : ii; if (expandedDishC === ii) loadIngredients()">
-            <div style="flex:1;min-width:0;">
-              <div class="mktd-c-dish-name">{{ item.name || 'Блюдо ' + (ii+1) }}</div>
-              <div class="mktd-c-dish-sub">
-                {{ item.calc_method === 'category' ? 'Категория' : item.calc_method === 'auv' ? 'AUV ' + (item.auv || 0) : item.calc_method === 'total_volume' ? 'Объём' : 'Фикс.' }}
-                <template v-if="itemTotal(item) > 0"> · <strong>{{ formatNum(itemTotal(item)) }} {{ item.unit }}</strong></template>
-              </div>
-            </div>
+            <span class="mktd-c-dish-name">{{ item.name || 'Блюдо ' + (ii+1) }}</span>
+            <span class="mktd-c-dish-meta">{{ item.calc_method === 'category' ? 'Категория' : item.calc_method === 'auv' ? 'AUV ' + (item.auv || 0) : item.calc_method === 'total_volume' ? 'Объём' : 'Фикс.' }}</span>
+            <span v-if="itemTotal(item) > 0" class="mktd-c-dish-total">{{ formatNum(itemTotal(item)) }} {{ item.unit }}</span>
             <BkIcon :name="expandedDishC === ii ? 'chevronUp' : 'chevronDown'" size="xs" style="color:var(--text-muted);flex-shrink:0;" />
           </div>
           <!-- Раскрытие: параметры + ингредиенты -->
@@ -57,9 +53,23 @@
                   <option value="auv">AUV</option><option value="category">Категория</option><option value="total_volume">Объём</option><option value="fixed_qty">Фикс.</option>
                 </select>
               </div>
-              <div class="mktd-field" style="flex:0 0 90px;">
-                <label>{{ item.calc_method === 'auv' || item.calc_method === 'category' ? 'AUV' : 'Кол-во' }}</label>
-                <input type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" step="0.01" />
+              <template v-if="item.calc_method === 'auv' || item.calc_method === 'category'">
+                <div v-if="!hasMultipleMonths" class="mktd-field" style="flex:0 0 90px;">
+                  <label>AUV</label>
+                  <input type="number" v-model.number="item.auv" :disabled="isViewer" class="mktd-input mktd-input-sm" step="0.01" placeholder="шт/рест/день" />
+                </div>
+                <div v-else v-for="m in activityMonths" :key="m.key" class="mktd-field" style="flex:0 0 80px;">
+                  <label>{{ m.label }}</label>
+                  <input type="number" :value="getItemAuvForMonth(item, m.key)" @change="setItemAuvForMonth(item, m.key, $event.target.value)" :disabled="isViewer" class="mktd-input mktd-input-sm" step="0.01" placeholder="AUV" />
+                </div>
+              </template>
+              <div v-else-if="item.calc_method === 'total_volume'" class="mktd-field" style="flex:0 0 90px;">
+                <label>Объём</label>
+                <input type="number" v-model.number="item.total_volume" :disabled="isViewer" class="mktd-input mktd-input-sm" />
+              </div>
+              <div v-else class="mktd-field" style="flex:0 0 90px;">
+                <label>Кол-во</label>
+                <input type="number" v-model.number="item.fixed_qty" :disabled="isViewer" class="mktd-input mktd-input-sm" />
               </div>
               <div class="mktd-field" style="flex:0 0 60px;">
                 <label>Ед.</label>
@@ -1130,9 +1140,10 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-c-dishes { display: flex; flex-direction: column; gap: 8px; }
 .mktd-c-dish { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; transition: all 0.15s; overflow: hidden; }
 .mktd-c-dish:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-.mktd-c-dish-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; }
-.mktd-c-dish-name { font-weight: 700; font-size: 15px; color: var(--bk-brown); }
-.mktd-c-dish-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.mktd-c-dish-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; }
+.mktd-c-dish-name { font-weight: 700; font-size: 13px; color: var(--bk-brown); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mktd-c-dish-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.mktd-c-dish-total { font-size: 13px; font-weight: 700; color: var(--bk-brown); white-space: nowrap; }
 .mktd-c-dish-body { padding: 0 18px 16px; border-top: 1px solid #F0EBE5; }
 .mktd-c-dish-ings { display: flex; flex-direction: column; gap: 2px; }
 .mktd-c-dish-ing { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #F5F0EB; font-size: 12px; }
