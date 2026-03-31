@@ -344,7 +344,7 @@ async function importCoupons(e) {
       const totalQty = subItems.reduce((s, si) => s + si.qty, 0);
       subItems.forEach(si => { si.share = totalQty > 0 ? Math.round(si.qty / totalQty * 10000) / 10000 : 0; });
 
-      const label = couponId ? `${couponId}: ${composition.substring(0, 50)}` : composition.substring(0, 60);
+      const label = couponId ? `${couponId}: ${composition}` : composition;
       items.push({
         product_id: null, sku: couponId || null, name: label,
         calc_method: 'category', auv, auv_periods: null, sub_items: subItems,

@@ -1178,7 +1178,7 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-c-dish { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; transition: all 0.15s; overflow: hidden; }
 .mktd-c-dish:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 .mktd-c-dish-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; cursor: pointer; }
-.mktd-c-dish-name { font-weight: 700; font-size: 13px; color: var(--bk-brown); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mktd-c-dish-name { font-weight: 700; font-size: 13px; color: var(--bk-brown); flex: 1; min-width: 0; }
 .mktd-c-dish-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .mktd-c-dish-total { font-size: 13px; font-weight: 700; color: var(--bk-brown); white-space: nowrap; }
 .mktd-c-dish-body { padding: 0 18px 16px; border-top: 1px solid #F0EBE5; }
