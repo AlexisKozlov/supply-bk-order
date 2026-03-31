@@ -9,6 +9,10 @@
           <button class="db-sort-btn" :class="{ active: viewMode === 'recipes' }" @click="viewMode = 'recipes'; loadRecipes()">Рецептуры</button>
         </div>
         <button v-if="!isViewer && viewMode !== 'recipes'" class="btn primary" @click="createActivity">+ Новая активность</button>
+        <label v-if="!isViewer && viewMode !== 'recipes'" class="btn primary" style="cursor:pointer;">
+          <BkIcon name="import" size="sm" /> Импорт купонов
+          <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importCoupons" />
+        </label>
         <label v-if="!isViewer && viewMode === 'recipes'" class="btn primary" style="cursor:pointer;">
           <BkIcon name="import" size="sm" /> Импорт рецептур
           <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importRecipes" />
@@ -282,6 +286,87 @@ async function importRecipes(e) {
     toast.success('Импортировано', `${data.imported} блюд`);
     recipes.value = []; // force reload
     loadRecipes();
+  } catch (err) {
+    console.error(err);
+    toast.error('Ошибка', 'Не удалось обработать файл');
+  } finally { e.target.value = ''; }
+}
+
+async function importCoupons(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const XLSX = (await import('xlsx-js-style')).default;
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (data.length < 3) { toast.error('Пустой файл', ''); return; }
+
+    // Строка 1: период
+    const periodRaw = String(data[0][1] || '').replace(/ПЕРИОД:\s*/i, '').trim();
+    const actName = 'Купоны ' + periodRaw;
+
+    // Парсим даты из периода (формат DD.MM-DD.MM или DD.MM.YY-DD.MM.YY)
+    let dateFrom = '', dateTo = '';
+    const pm = periodRaw.match(/(\d{2}\.\d{2}(?:\.\d{2,4})?)\s*[-–]\s*(\d{2}\.\d{2}(?:\.\d{2,4})?)/);
+    if (pm) {
+      const parseD = (s) => { const p = s.split('.'); const y = p[2] ? (p[2].length === 2 ? '20' + p[2] : p[2]) : new Date().getFullYear(); return `${y}-${p[1]}-${p[0]}`; };
+      dateFrom = parseD(pm[1]);
+      dateTo = parseD(pm[2]);
+    }
+
+    // Строки 3+: купоны
+    const items = [];
+    for (let i = 2; i < data.length; i++) {
+      const row = data[i];
+      const couponId = String(row[0] || '').trim();
+      const composition = String(row[1] || '').trim();
+      const auv = parseFloat(row[2]) || 0;
+      if (!composition) continue;
+
+      // Парсим состав: разделяем по запятым, обрабатываем множители
+      const parts = composition.split(/,\s*/);
+      const subItems = [];
+      for (let part of parts) {
+        part = part.replace(/\(.*?\)/g, '').trim(); // убираем (лимит) и т.п.
+        if (!part || part.toLowerCase().includes('на выбор')) continue;
+        // Множитель: "2 Кинг Фри малый" или "3 Соуса"
+        const qm = part.match(/^(\d+)\s+(.+)/);
+        const qty = qm ? parseInt(qm[1]) : 1;
+        const dishName = qm ? qm[2].trim() : part.trim();
+        // Нормализация сокращений
+        const normalized = dishName.replace(/мал\.$/, 'малый').replace(/газ\.\s*/, 'газ. ');
+        subItems.push({ recipe_id: null, name: normalized, code: '', share: 0, qty });
+      }
+
+      // Доли: пропорционально кол-ву (каждое блюдо = qty порций)
+      const totalQty = subItems.reduce((s, si) => s + si.qty, 0);
+      subItems.forEach(si => { si.share = totalQty > 0 ? Math.round(si.qty / totalQty * 10000) / 10000 : 0; });
+
+      const label = couponId ? `${couponId}: ${composition.substring(0, 50)}` : composition.substring(0, 60);
+      items.push({
+        product_id: null, sku: couponId || null, name: label,
+        calc_method: 'category', auv, auv_periods: null, sub_items: subItems,
+        total_volume: null, fixed_qty: null, unit: 'шт', note: '',
+      });
+    }
+
+    if (!items.length) { toast.error('Не найдено купонов', ''); return; }
+
+    // Создаём активность
+    const { data: result, error } = await db.rpc('save_marketing_activity', {
+      name: actName,
+      legal_entity: legalEntity.value,
+      type: 'coupon',
+      status: 'active',
+      date_from: dateFrom || null,
+      date_to: dateTo || null,
+      items,
+    });
+    if (error) { toast.error('Ошибка', error); return; }
+    toast.success('Купоны импортированы', `${items.length} купонов`);
+    router.push({ name: 'marketing-detail', params: { id: result.id } });
   } catch (err) {
     console.error(err);
     toast.error('Ошибка', 'Не удалось обработать файл');

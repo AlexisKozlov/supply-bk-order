@@ -100,7 +100,7 @@
               <div class="mktd-sub-chips" style="margin-top:4px;">
                 <span v-for="(sub, si) in (item.sub_items || [])" :key="si" class="mktd-sub-chip">
                   <span class="mktd-sub-chip-name">{{ sub.name }}</span>
-                  <span class="mktd-sub-chip-share">{{ Math.round((sub.share||0)*100) }}%</span>
+                  <span class="mktd-sub-chip-share">{{ sub.qty > 1 ? '×' + sub.qty : Math.round((sub.share||0)*100) + '%' }}</span>
                   <button v-if="!isViewer" class="mktd-sub-chip-x" @click="item.sub_items.splice(si,1)">×</button>
                 </span>
               </div>
@@ -492,7 +492,7 @@ const ingredientsList = computed(() => {
       for (const sub of dish.sub_items) {
         const recipe = recipeMap[sub.name];
         if (!recipe?.ingredients) continue;
-        const subPortions = totalPortions * (sub.share || 0);
+        const subPortions = sub.qty ? totalPortions * sub.qty : totalPortions * (sub.share || 0);
         if (subPortions <= 0) continue;
         for (const ing of recipe.ingredients) {
           const key = ing.analog_group || ing.sku || ing.name;
@@ -607,7 +607,7 @@ function dishIngredients(ii) {
     for (const sub of dish.sub_items) {
       const recipe = recipeMap[sub.name];
       if (!recipe?.ingredients) continue;
-      const subPortions = totalPortions * (sub.share || 0);
+      const subPortions = sub.qty ? totalPortions * sub.qty : totalPortions * (sub.share || 0);
       for (const ing of recipe.ingredients) {
         const key = ing.analog_group || ing.sku || ing.name;
         let existing = result.find(r => (r.analogGroup || r.name) === key);
