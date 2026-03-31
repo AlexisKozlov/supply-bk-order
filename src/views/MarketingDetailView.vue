@@ -313,7 +313,7 @@ const layoutMode = ref('A');
 const selectedDishB = ref(-1);
 const expandedDishC = ref(-1);
 const showIngSummary = ref(false);
-const defaultRestCount = ref(56);
+const defaultRestCount = ref(56); // обновляется из БД на mount
 const itemsTab = ref('dishes');
 const ingDishFilter = ref('all');
 const ingredientsLoading = ref(false);
@@ -956,7 +956,7 @@ function onKeydown(e) {
 // ─── Mount ──────────────────────────────────────────────────────────────────
 onMounted(() => {
   // Загрузить кол-во ресторанов по умолчанию
-  db.from('restaurants').select('id').then(({ data }) => { if (data?.length) defaultRestCount.value = data.length; });
+  db.from('restaurants').select('number').then(({ data }) => { if (data?.length) defaultRestCount.value = new Set(data.map(r => r.number)).size; });
   const id = route.params.id;
   if (id) {
     loadActivity(id);
