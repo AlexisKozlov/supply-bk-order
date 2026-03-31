@@ -263,7 +263,7 @@ async function importRecipes(e) {
       const cellD = ws[XLSX.utils.encode_cell({ r, c: 3 })];
       if (!cellA?.v) continue;
       const name = String(cellA.v).trim();
-      const hasRecipe = cellB?.v && String(cellB.v).includes('ТХК');
+      const hasRecipe = cellB?.v && /ТХК|ТК\s|ТК\s*№/.test(String(cellB.v));
       if (hasRecipe) {
         const pm = name.match(/^(\d+)\.\s+(.+)/) || name.match(/^(\d+)\.([^\d\s].+)/) || name.match(/^(\d+\.\d+)\s+(.+)/);
         const code = pm ? pm[1] : null;
