@@ -2215,6 +2215,37 @@ if ($endpoint === 'rpc') {
         respond(['shares' => $shares, 'total_sales' => $totalSales]);
     }
 
+    // ═══ Рецептуры: поиск по именам (для автопривязки) ═══
+    if ($fn === 'find_recipes_by_names') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $names = $body['names'] ?? [];
+        if (empty($names)) respond(['error' => 'Не указаны имена'], 400);
+        $result = [];
+        foreach ($names as $name) {
+            $name = trim($name);
+            if (!$name) continue;
+            // Точное совпадение
+            $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name = ? LIMIT 1");
+            $s->execute([$name]);
+            $r = $s->fetch();
+            if (!$r) {
+                // С точкой на конце или без
+                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name = ? OR name = ? LIMIT 1");
+                $s->execute([rtrim($name, '.'), $name . '.']);
+                $r = $s->fetch();
+            }
+            if (!$r) {
+                // LIKE поиск
+                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name LIKE ? LIMIT 1");
+                $s->execute([$name . '%']);
+                $r = $s->fetch();
+            }
+            $result[$name] = $r ?: null;
+        }
+        respond(['recipes' => $result]);
+    }
+
     // ═══ Баг-репорты: создать ═══
     if ($fn === 'create_bug_report') {
         $caller = getSessionUser($pdo);

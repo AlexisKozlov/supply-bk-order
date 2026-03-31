@@ -354,6 +354,19 @@ async function importCoupons(e) {
 
     if (!items.length) { toast.error('Не найдено купонов', ''); return; }
 
+    // Привязка к рецептурам
+    const allDishNames = [...new Set(items.flatMap(it => (it.sub_items || []).map(s => s.name)))];
+    if (allDishNames.length) {
+      const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allDishNames });
+      const recipeMap = recipeData?.recipes || {};
+      for (const item of items) {
+        for (const sub of (item.sub_items || [])) {
+          const found = recipeMap[sub.name];
+          if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
+        }
+      }
+    }
+
     // Создаём активность
     const { data: result, error } = await db.rpc('save_marketing_activity', {
       name: actName,
