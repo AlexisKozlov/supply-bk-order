@@ -611,7 +611,8 @@ function dishIngredients(ii) {
       for (const ing of recipe.ingredients) {
         const key = ing.analog_group || ing.sku || ing.name;
         let existing = result.find(r => (r.analogGroup || r.name) === key);
-        if (!existing) { existing = { name: ing.analog_group || ing.name, analogGroup: ing.analog_group, skus: [], totalGrams: 0, totalQty: 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit, supplier: ing.product_supplier }; result.push(existing); }
+        if (!existing) { existing = { name: ing.analog_group || ing.name, analogGroup: ing.analog_group, skus: [], originalSku: ing.original_sku || null, totalGrams: 0, totalQty: 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit, supplier: ing.product_supplier, _comment: '' }; result.push(existing); }
+        if (ing.sku && !existing.skus.includes(ing.sku)) existing.skus.push(ing.sku);
         if (ing.brutto) existing.totalGrams += parseFloat(ing.brutto) * subPortions;
         if (ing.qty) existing.totalQty += parseFloat(ing.qty) * subPortions;
       }
