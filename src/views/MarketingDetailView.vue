@@ -392,10 +392,9 @@ function dishAuvDisplay(item) {
 
 function itemTotal(item) {
   if (!item) return 0;
-  const rests = activity.value.restaurant_count || 0;
+  const rests = activity.value.restaurant_count || 1; // если не задано — AUV на всю сеть
   if (item.calc_method === 'auv' || item.calc_method === 'category') {
     if (hasMultipleMonths.value && item.auv_periods?.length) {
-      // Сумма по месяцам: AUV_месяц × рестораны × дней_в_месяце
       return activityMonths.value.reduce((sum, m) => {
         const auv = getItemAuvForMonth(item, m.key);
         return sum + auv * rests * m.days;
