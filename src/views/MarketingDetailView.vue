@@ -107,7 +107,11 @@
             <!-- Ингредиенты блюда -->
             <div class="mktd-c-dish-ings">
               <div v-for="ing in dishIngredients(ii)" :key="ing.name" class="mktd-c-dish-ing">
-                <span class="mktd-c-dish-ing-name">{{ ing.name }}</span>
+                <span class="mktd-c-dish-ing-name">
+                  {{ ing.name }}
+                  <span v-if="ing.skus?.length" class="mktd-c-dish-ing-sku">{{ ing.skus[0] }}</span>
+                  <span v-if="ing.originalSku" class="mktd-c-dish-ing-old">{{ ing.originalSku }}</span>
+                </span>
                 <span class="mktd-ing-nums">
                   <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
                   <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
@@ -587,7 +591,7 @@ function dishIngredients(ii) {
     if (!recipe?.ingredients) return [];
     const portions = itemTotal(dish);
     for (const ing of recipe.ingredients) {
-      result.push({ name: ing.analog_group || ing.name, analogGroup: ing.analog_group, skus: ing.sku ? [ing.sku] : [], totalGrams: ing.brutto ? parseFloat(ing.brutto) * portions : 0, totalQty: ing.qty ? parseFloat(ing.qty) * portions : 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit, supplier: ing.product_supplier });
+      result.push({ name: ing.analog_group || ing.name, analogGroup: ing.analog_group, skus: ing.sku ? [ing.sku] : [], originalSku: ing.original_sku || null, totalGrams: ing.brutto ? parseFloat(ing.brutto) * portions : 0, totalQty: ing.qty ? parseFloat(ing.qty) * portions : 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit, supplier: ing.product_supplier });
     }
   }
   return result;
@@ -1148,7 +1152,9 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-c-dish-ings { display: flex; flex-direction: column; gap: 2px; }
 .mktd-c-dish-ing { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #F5F0EB; font-size: 12px; }
 .mktd-c-dish-ing:last-child { border-bottom: none; }
-.mktd-c-dish-ing-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.mktd-c-dish-ing-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; display: flex; align-items: center; gap: 4px; }
+.mktd-c-dish-ing-sku { font-size: 9px; font-weight: 700; color: var(--bk-orange); background: rgba(214,35,0,0.06); padding: 1px 4px; border-radius: 3px; flex-shrink: 0; }
+.mktd-c-dish-ing-old { font-size: 8px; color: var(--text-muted); text-decoration: line-through; flex-shrink: 0; }
 .mktd-c-dish.open { box-shadow: 0 2px 12px rgba(0,0,0,0.1); border-left: 3px solid var(--bk-orange); }
 
 @media (max-width: 600px) {

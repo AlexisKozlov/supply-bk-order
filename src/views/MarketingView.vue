@@ -271,7 +271,7 @@ async function importRecipes(e) {
         current = { code, name: dishName, thk: String(cellB.v).trim(), brutto: cellC?.v || null, qty: cellD?.v || null, ingredients: [] };
         parsed.push(current);
       } else if (current) {
-        const m = name.match(/^(\d+)\s+(.+)/);
+        const m = name.match(/^(\d[\dA-Za-z_-]*)\s+(.+)/) || name.match(/^([A-Za-z][\dA-Za-z_-]*\d[\dA-Za-z_-]*)\s+(.+)/);
         current.ingredients.push({ sku: m ? m[1] : null, name: m ? m[2].trim() : name.trim(), brutto: cellC?.v || null, qty: cellD?.v || null });
       }
     }
