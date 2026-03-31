@@ -239,6 +239,41 @@
       </div>
     </Teleport>
 
+    <!-- Модалка привязки после импорта -->
+    <Teleport to="body">
+      <div v-if="importMatchModal" class="mktd-modal-overlay" @click.self>
+        <div class="mktd-modal" style="width:650px;">
+          <div class="mktd-modal-header">
+            <h3>Привязка блюд к рецептурам</h3>
+            <span style="font-size:12px;color:var(--text-muted);">{{ importUnmatched.filter(u => !u.matched && !u.skipped).length }} не найдено</span>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:12px 20px;max-height:400px;">
+            <div v-for="(um, ui) in importUnmatched" :key="ui" class="mktd-match-row" :class="{ done: um.matched, skip: um.skipped }">
+              <div class="mktd-match-name">
+                <span style="font-weight:600;">{{ um.originalName }}</span>
+                <span v-if="um.matched" style="color:#4CAF50;font-size:11px;margin-left:6px;">→ {{ um.ref.name }}</span>
+                <span v-if="um.skipped" style="color:var(--text-muted);font-size:11px;margin-left:6px;">пропущено</span>
+              </div>
+              <div v-if="!um.matched && !um.skipped" class="mktd-match-actions">
+                <input class="mktd-input mktd-input-sm" style="width:200px;" placeholder="Поиск рецептуры..."
+                  @input="searchImportRecipe($event.target.value)" @focus="searchImportRecipe(um.originalName)" />
+                <button class="td-btn td-btn-outline" style="font-size:10px;padding:3px 8px;" @click="skipImportMatch(um)">Пропустить</button>
+              </div>
+              <div v-if="!um.matched && !um.skipped && importSearchResults.length" class="mktd-match-results">
+                <div v-for="r in importSearchResults" :key="r.id" class="mktd-dropdown-item" @click="pickImportMatch(um, r)">
+                  <span class="mktd-dropdown-sku">{{ r.code }}</span> {{ r.name }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mktd-modal-footer">
+            <button class="td-btn td-btn-outline" @click="importMatchModal = false; importPendingItems = [];">Отмена</button>
+            <button class="td-btn td-btn-primary" @click="applyImportMatches">Применить</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Product search dropdown -->
     <Teleport to="body">
       <div v-if="search.index >= 0 && search.results.length" class="mktd-dropdown" :style="dropdownStyle" @mousedown.prevent>
@@ -317,6 +352,12 @@ const layoutMode = ref('A');
 const selectedDishB = ref(-1);
 const expandedDishC = ref(-1);
 const showIngSummary = ref(false);
+const importMatchModal = ref(false);
+const importUnmatched = ref([]);
+const importPendingItems = ref([]);
+const importSearchQuery = ref('');
+const importSearchResults = ref([]);
+let _importSearchTimer = null;
 const defaultRestCount = ref(56); // обновляется из БД на mount
 const itemsTab = ref('dishes');
 const ingDishFilter = ref('all');
@@ -418,6 +459,39 @@ function formatNum(v) {
   return Number(v).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
+// ─── Модалка привязки после импорта ──────────────────────────────────────────
+function searchImportRecipe(q) {
+  clearTimeout(_importSearchTimer);
+  importSearchQuery.value = q;
+  if (q.length < 2) { importSearchResults.value = []; return; }
+  _importSearchTimer = setTimeout(async () => {
+    const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(20);
+    importSearchResults.value = data || [];
+  }, 200);
+}
+function pickImportMatch(unmatchedItem, recipe) {
+  if (unmatchedItem.type === 'sub') {
+    unmatchedItem.ref.recipe_id = recipe.id;
+    unmatchedItem.ref.code = recipe.code;
+    unmatchedItem.ref.name = recipe.name;
+  } else {
+    unmatchedItem.ref.sku = recipe.code;
+    unmatchedItem.ref.name = recipe.name;
+  }
+  unmatchedItem.matched = true;
+  importSearchResults.value = [];
+  importSearchQuery.value = '';
+}
+function skipImportMatch(unmatchedItem) { unmatchedItem.skipped = true; }
+function applyImportMatches() {
+  activity.value.items.push(...importPendingItems.value);
+  importMatchModal.value = false;
+  importUnmatched.value = [];
+  importPendingItems.value = [];
+  toast.success('Импортировано', '');
+  loadIngredients();
+}
+
 // ─── Импорт блюд из Excel ────────────────────────────────────────────────────
 async function importDishesFromFile(e) {
   const file = e.target.files?.[0];
@@ -445,7 +519,8 @@ async function importDishesFromFile(e) {
         const composition = String(row[1] || '').trim();
         const auv = parseFloat(row[2]) || 0;
         if (!composition) continue;
-        const parts = composition.split(/,\s*/);
+        // Разделяем по запятой, но не внутри чисел (0,5 л → не разделять)
+        const parts = composition.split(/,\s*(?!\d)/).map(s => s.trim()).filter(Boolean);
         const subItems = [];
         for (let part of parts) {
           part = part.replace(/\(.*?\)/g, '').trim();
@@ -509,25 +584,39 @@ async function importDishesFromFile(e) {
       if (it.sub_items?.length) return it.sub_items.map(s => s.name);
       return [it.name];
     }))];
+    let recipeMap = {};
     if (allNames.length) {
       const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allNames });
-      const recipeMap = recipeData?.recipes || {};
-      for (const item of newItems) {
-        if (item.sub_items?.length) {
-          for (const sub of item.sub_items) {
-            const found = recipeMap[sub.name];
-            if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
-          }
-        } else {
-          const found = recipeMap[item.name];
-          if (found) { item.sku = found.code; item.name = found.name; }
+      recipeMap = recipeData?.recipes || {};
+    }
+
+    // Собрать ненайденные для модалки
+    const unmatched = [];
+    for (const item of newItems) {
+      if (item.sub_items?.length) {
+        for (const sub of item.sub_items) {
+          const found = recipeMap[sub.name];
+          if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
+          else { unmatched.push({ ref: sub, originalName: sub.name, type: 'sub' }); }
         }
+      } else {
+        const found = recipeMap[item.name];
+        if (found) { item.sku = found.code; item.name = found.name; }
+        else { unmatched.push({ ref: item, originalName: item.name, type: 'item' }); }
       }
     }
 
-    activity.value.items.push(...newItems);
-    toast.success('Импортировано', `${newItems.length} блюд/купонов`);
-    loadIngredients();
+    importPendingItems.value = newItems;
+
+    if (unmatched.length) {
+      // Открыть модалку для ручной привязки
+      importUnmatched.value = unmatched;
+      importMatchModal.value = true;
+    } else {
+      activity.value.items.push(...newItems);
+      toast.success('Импортировано', `${newItems.length} блюд`);
+      loadIngredients();
+    }
   } catch (err) {
     console.error(err);
     toast.error('Ошибка', 'Не удалось обработать файл');
@@ -1310,6 +1399,14 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-dish-ing-table th { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #E8E0D8; text-align: center; }
 .mktd-dish-ing-table td { padding: 4px 6px; border-bottom: 1px solid #F5F0EB; text-align: center; }
 .mktd-dish-ing-table tbody tr:hover { background: #FEFCF9; }
+
+/* Import match modal */
+.mktd-match-row { padding: 8px 0; border-bottom: 1px solid #F0EBE5; }
+.mktd-match-row.done { opacity: 0.5; }
+.mktd-match-row.skip { opacity: 0.3; }
+.mktd-match-name { margin-bottom: 4px; }
+.mktd-match-actions { display: flex; gap: 6px; align-items: center; }
+.mktd-match-results { margin-top: 4px; background: #FAFAF8; border: 1px solid #E8E0D8; border-radius: 6px; max-height: 120px; overflow-y: auto; }
 .mktd-c-dish-ing-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; display: flex; align-items: center; gap: 4px; }
 .mktd-c-dish-ing-sku { font-size: 9px; font-weight: 700; color: var(--bk-orange); background: rgba(214,35,0,0.06); padding: 1px 4px; border-radius: 3px; flex-shrink: 0; }
 .mktd-c-dish-ing-old { font-size: 8px; color: var(--text-muted); text-decoration: line-through; flex-shrink: 0; }
