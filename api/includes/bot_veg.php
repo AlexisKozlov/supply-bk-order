@@ -1304,6 +1304,18 @@ function corrGetBatchPendingIds($pdo, $oneId) {
     return $st->fetchAll(PDO::FETCH_COLUMN);
 }
 
+function corrGetBatchAllIds($pdo, $oneId) {
+    $c = $pdo->prepare("SELECT notify_messages, restaurant_number, delivery_date, restaurant_chat_id FROM order_corrections WHERE id = ?");
+    $c->execute([$oneId]);
+    $row = $c->fetch();
+    if (!$row) return [];
+    $nm = json_decode($row['notify_messages'] ?? '{}', true);
+    if (!empty($nm['batch_ids'])) return $nm['batch_ids'];
+    $st = $pdo->prepare("SELECT id FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ?");
+    $st->execute([$row['restaurant_number'], $row['delivery_date'], $row['restaurant_chat_id']]);
+    return $st->fetchAll(PDO::FETCH_COLUMN);
+}
+
 // Панель корректировок для закупщиков
 function cmdCorrections($chatId, $msgId) {
     global $pdo;
@@ -1655,6 +1667,18 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
         @file_put_contents($dataFile, json_encode($state));
         return;
     }
+
+    if ($step === 'final_comment') {
+        $state['final_comment'] = trim($text);
+        $reviewText = "💬 Комментарий: «{$state['final_comment']}»\n\nОтправить результат ресторану?";
+        $btns = ['inline_keyboard' => [
+            [['text' => '📩 Отправить', 'callback_data' => 'corr_fc_send']],
+            [['text' => '◂ Отмена', 'callback_data' => 'corr_rev_cancel']],
+        ]];
+        corrReplace($chatId, $userMsgId, $state, $reviewText, $btns);
+        @file_put_contents($dataFile, json_encode($state));
+        return;
+    }
 }
 
 // Отправка пакета корректировок
@@ -1834,6 +1858,21 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
         $keyboard['inline_keyboard'][] = [
             ['text' => '🔄 Взять в работу', 'callback_data' => "corr_take_{$firstId}"],
         ];
+    } else {
+        // Все обработаны — проверяем, отправлен ли результат
+        $nm = json_decode($items[0]['notify_messages'] ?? '{}', true);
+        if (!empty($nm['result_sent'])) {
+            $text .= "\n✅ <i>Результат отправлен ресторану</i>";
+        } else {
+            $firstId = $items[0]['id'];
+            $keyboard['inline_keyboard'][] = [
+                ['text' => '📩 Отправить результат', 'callback_data' => "corr_send_{$firstId}"],
+            ];
+            $keyboard['inline_keyboard'][] = [
+                ['text' => '💬 Добавить комментарий', 'callback_data' => "corr_fc_{$firstId}"],
+            ];
+            $text .= "\n⏳ <i>Ожидает отправки ресторану</i>";
+        }
     }
 
     return ['text' => $text, 'keyboard' => $keyboard];
@@ -1856,8 +1895,15 @@ function corrUpdateAllReviewMessages($pdo, $batchIds) {
     }
 }
 
-// Проверить, все ли позиции батча обработаны — если да, отправить сводку ресторану
+// Проверить, все ли позиции батча обработаны — если да, обновить сообщения (кнопка «Отправить»)
 function corrCheckBatchComplete($pdo, $batchIds, $reviewerName) {
+    if (empty($batchIds)) return;
+    // Просто обновляем сообщения — corrBuildReviewMessage покажет кнопки «Отправить» / «Добавить комментарий»
+    corrUpdateAllReviewMessages($pdo, $batchIds);
+}
+
+// Отправить итоговое уведомление ресторану
+function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalComment = null) {
     if (empty($batchIds)) return;
     $ph = implode(',', array_fill(0, count($batchIds), '?'));
     $st = $pdo->prepare("SELECT * FROM order_corrections WHERE id IN ({$ph}) ORDER BY id");
@@ -1866,11 +1912,10 @@ function corrCheckBatchComplete($pdo, $batchIds, $reviewerName) {
     $restChatId = null;
     foreach ($items as $c) {
         if (!$restChatId) $restChatId = $c['restaurant_chat_id'];
-        if ($c['status'] === 'pending') return; // ещё не все
+        if ($c['status'] === 'pending' || $c['status'] === 'in_progress') return; // ещё не все
     }
     if (!$items || !$restChatId) return;
 
-    // Все обработаны — отправляем сводку ресторану
     $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
     $first = $items[0];
     $dow = (int)(new DateTime($first['delivery_date']))->format('N');
@@ -1892,10 +1937,25 @@ function corrCheckBatchComplete($pdo, $batchIds, $reviewerName) {
             if ($c['review_comment']) $text .= "    Причина: {$c['review_comment']}\n";
         }
     }
+    if ($finalComment) {
+        $text .= "\n💬 <b>Комментарий:</b> {$finalComment}\n";
+    }
     $text .= "─────────────────────\n";
     $text .= "Обработал: {$reviewerName}";
 
     sendMessage($restChatId, $text);
+
+    // Помечаем result_sent в notify_messages
+    $nmSt = $pdo->prepare("SELECT notify_messages FROM order_corrections WHERE id = ?");
+    $nmSt->execute([$batchIds[0]]);
+    $nmRow = $nmSt->fetch();
+    $nm = json_decode($nmRow['notify_messages'] ?? '{}', true);
+    $nm['result_sent'] = true;
+    $ph2 = implode(',', array_fill(0, count($batchIds), '?'));
+    $pdo->prepare("UPDATE order_corrections SET notify_messages = ? WHERE id IN ({$ph2})")->execute(array_merge([json_encode($nm)], $batchIds));
+
+    // Обновляем сообщения закупщиков — убираем кнопки, добавляем отметку «отправлено»
+    corrUpdateAllReviewMessages($pdo, $batchIds);
 }
 
 // Принять / Отклонить корректировку (одну или несколько)

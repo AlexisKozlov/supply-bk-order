@@ -729,6 +729,7 @@ const tabs = [
 
 // ---- Prices loading ----
 async function loadPrices() {
+  if (!userStore.hasAccess('pricing', 'view')) { prices.value = null; return; }
   const entity = orderStore.settings.legalEntity;
   let q = db.from('product_prices').select('sku,price,vat_rate,unit_type,legal_entity');
   if (entity) q = q.eq('legal_entity', entity);

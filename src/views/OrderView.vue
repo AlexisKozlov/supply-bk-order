@@ -918,6 +918,7 @@ async function onCdaModeChange(e) {
 // ─── Загрузка цен ────────────────────────────────────────────────────────────
 let _loadPricesGen = 0;
 async function loadPrices() {
+  if (!userStore.hasAccess('pricing', 'view')) { priceMap.value = {}; return; }
   const le = orderStore.settings.legalEntity;
   const supplier = orderStore.settings.supplier;
   if (!le || !supplier) { priceMap.value = {}; return; }

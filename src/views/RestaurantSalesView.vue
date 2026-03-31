@@ -516,15 +516,22 @@ async function onFileSelected(e) {
   e.target.value = '';
   importing.value = true;
   try {
-    const items = await parseSalesFile(file);
+    // Загружаем карту артикул→группа аналогов из базы товаров
+    const { data: prods } = await db.from('products').select('sku, analog_group').neq('analog_group', '');
+    const skuToGroup = {};
+    if (prods) prods.forEach(p => { if (p.sku && p.analog_group) skuToGroup[p.sku] = p.analog_group; });
+
+    const result = await parseSalesFile(file, skuToGroup);
+    const items = result.items || result;
+    const skuMapped = result.skuMapped || 0;
     if (!items.length) { toast.error('Ошибка', 'Не удалось распознать данные'); return; }
-    toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…`);
+    toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…` + (skuMapped ? ` (${skuMapped} по артикулу)` : ''));
     for (let i = 0; i < items.length; i += 10000) {
       const isLast = i + 10000 >= items.length;
       const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast });
       if (error) { toast.error('Ошибка', error); return; }
     }
-    toast.success('Готово', `Загружено ${items.length.toLocaleString('ru')} записей`);
+    toast.success('Готово', `Загружено ${items.length.toLocaleString('ru')} записей` + (skuMapped ? `, ${skuMapped} привязано по артикулу` : ''));
     await loadData();
   } catch (err) { toast.error('Ошибка', err.message); }
   finally { importing.value = false; }

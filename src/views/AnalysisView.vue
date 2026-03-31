@@ -398,6 +398,7 @@ const isBoxes = computed(() => unit.value === 'boxes');
 const priceMap = ref(new Map());
 
 async function loadPrices() {
+  if (!userStore.hasAccess('pricing', 'view')) { priceMap.value = new Map(); return; }
   const le = orderStore.settings.legalEntity;
   if (!le) return;
   try {

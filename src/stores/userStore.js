@@ -49,8 +49,16 @@ export const useUserStore = defineStore('user', () => {
   const isAdmin = computed(() => currentUser.value?.role === 'admin');
   const isViewer = computed(() => currentUser.value?.role === 'viewer');
 
+  // Модули с ограниченным доступом: только указанные пользователи
+  const RESTRICTED_MODULES = {
+    pricing: ['Инна Ерома'],
+  };
+
   function getAccess(module) {
     if (!currentUser.value) return 'none';
+    // Проверка ограничения по пользователю
+    const allowed = RESTRICTED_MODULES[module];
+    if (allowed && currentUser.value.role !== 'admin' && !allowed.includes(currentUser.value.name)) return 'none';
     if (currentUser.value.role === 'admin') return 'full';
     const role = currentUser.value.role || 'user';
     const base = ROLE_TEMPLATES[role] || ROLE_TEMPLATES.user;

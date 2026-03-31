@@ -2,7 +2,13 @@
   <div class="sl-view">
     <!-- Header -->
     <div class="sl-header">
-      <h1 class="page-title">Сроки годности</h1>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <h1 class="page-title" style="margin:0;">{{ slTab === 'shelf' ? 'Сроки годности' : 'Загрузка склада' }}</h1>
+        <div class="sl-mode-tabs">
+          <button class="sl-mode-tab" :class="{ active: slTab === 'shelf' }" @click="slTab = 'shelf'">Сроки</button>
+          <button class="sl-mode-tab" :class="{ active: slTab === 'cells' }" @click="slTab = 'cells'; loadCellStats()">Ячейки</button>
+        </div>
+      </div>
       <div class="sl-header-right">
         <!-- Тоггл юрлиц -->
         <div v-if="!loading && uniqueCustomers.length > 1" class="sl-tabs">
@@ -28,10 +34,78 @@
       </div>
     </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="sl-loader">Загрузка...</div>
+    <!-- ═══ Вкладка «Ячейки» ═══ -->
+    <div v-if="slTab === 'cells'" class="sl-cells-section">
+      <div v-if="cellsLoading" class="sl-loader">Загрузка...</div>
+      <template v-else-if="cellStats.length">
+        <!-- Фильтр юрлица -->
+        <div class="sl-filter-bar" style="margin-bottom:10px;">
+          <select v-model="cellFilterEntity" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:12px;">
+            <option value="">Все юр. лица</option>
+            <option v-for="e in cellEntities" :key="e" :value="e">{{ e }}</option>
+          </select>
+          <select v-model="cellPeriod" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:12px;">
+            <option :value="30">30 дней</option>
+            <option :value="60">60 дней</option>
+            <option :value="90">90 дней</option>
+          </select>
+        </div>
 
-    <template v-if="!loading && allData.length">
+        <!-- Таблица -->
+        <div style="overflow-x:auto;">
+          <table class="sl-cells-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th v-for="e in cellTableEntities" :key="e" colspan="5" class="cell-entity-header">{{ e }}</th>
+              </tr>
+              <tr>
+                <th></th>
+                <template v-for="e in cellTableEntities" :key="'h'+e">
+                  <th class="cell-border-left">Холод</th><th>Мороз</th><th>Сухой</th><th>Шабаны</th><th class="cell-total">Итого</th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(day, di) in cellTableRows" :key="day.date" :style="di === 0 ? 'font-weight:600;background:rgba(245,166,35,.06);' : ''">
+                <td>{{ fmtCellDate(day.date) }}</td>
+                <template v-for="e in cellTableEntities" :key="day.date+e">
+                  <td class="cell-border-left">{{ day.data[e]?.cold || '—' }}<span v-if="day.delta[e]?.cold" :class="day.delta[e].cold > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].cold > 0 ? '+' : '' }}{{ day.delta[e].cold }}</span></td>
+                  <td>{{ day.data[e]?.frozen || '—' }}<span v-if="day.delta[e]?.frozen" :class="day.delta[e].frozen > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].frozen > 0 ? '+' : '' }}{{ day.delta[e].frozen }}</span></td>
+                  <td>{{ day.data[e]?.dry || '—' }}<span v-if="day.delta[e]?.dry" :class="day.delta[e].dry > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].dry > 0 ? '+' : '' }}{{ day.delta[e].dry }}</span></td>
+                  <td>{{ day.data[e]?.shabany || '—' }}<span v-if="day.delta[e]?.shabany" :class="day.delta[e].shabany > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].shabany > 0 ? '+' : '' }}{{ day.delta[e].shabany }}</span></td>
+                  <td class="cell-total">{{ day.data[e]?.total || '—' }}<span v-if="day.delta[e]?.total" :class="day.delta[e].total > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].total > 0 ? '+' : '' }}{{ day.delta[e].total }}</span></td>
+                </template>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- График -->
+        <div class="sl-cells-chart-section" style="margin-top:20px;">
+          <h3 style="font-size:14px;margin-bottom:10px;color:var(--text-muted);">Динамика ячеек</h3>
+          <div class="sl-cells-chart">
+            <svg :viewBox="'0 0 ' + chartW + ' ' + chartH" style="width:100%;height:200px;">
+              <line v-for="(y, i) in chartGridY" :key="'g'+i" :x1="chartPad" :x2="chartW" :y1="y" :y2="y" stroke="var(--border-light)" stroke-width="0.5"/>
+              <text v-for="(y, i) in chartGridY" :key="'gl'+i" :x="chartPad - 4" :y="y + 3" fill="var(--text-muted)" font-size="9" text-anchor="end">{{ chartGridLabels[i] }}</text>
+              <path v-for="(line, li) in chartLines" :key="li" :d="line.path" :stroke="line.color" fill="none" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+            <div class="sl-cells-legend">
+              <span v-for="(line, li) in chartLines" :key="li" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);margin-right:12px;">
+                <span :style="'width:12px;height:3px;border-radius:1px;background:' + line.color"></span>{{ line.label }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </template>
+      <div v-else class="sl-empty">Нет данных. Загрузите файл остатков склада.</div>
+    </div>
+
+    <!-- ═══ Вкладка «Сроки годности» ═══ -->
+    <!-- Loading -->
+    <div v-if="slTab === 'shelf' && loading" class="sl-loader">Загрузка...</div>
+
+    <template v-if="slTab === 'shelf' && !loading && allData.length">
       <!-- KPI row -->
       <div class="sl-kpi-row">
         <button class="sl-kpi" :class="['sl-kpi-red', { active: activeFilter === 'expired' }]" @click="toggleFilter('expired')">
@@ -115,7 +189,7 @@
     </template>
 
     <!-- Empty state -->
-    <div v-if="!loading && !allData.length" class="sl-empty">
+    <div v-if="slTab === 'shelf' && !loading && !allData.length" class="sl-empty">
       <BkIcon name="shelfLife" size="lg"/>
       <p>Данные о сроках годности ещё не загружены</p>
       <button
@@ -130,7 +204,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { normalizeCustomer, normalizeWarehouse, parseStockMalling } from '@/lib/shelfLifeImport.js';
+import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats } from '@/lib/shelfLifeImport.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -148,6 +222,110 @@ const filterCustomer = ref('');
 const filterWarehouse = ref('');
 const searchQuery = ref('');
 const activeFilter = ref('');
+const slTab = ref('shelf');
+
+// ═══ Ячейки склада ═══
+const cellStats = ref([]);
+const cellsLoading = ref(false);
+const cellFilterEntity = ref('');
+const cellPeriod = ref(30);
+
+const STOCK_TYPE_LABELS = { cold: 'Холод', frozen: 'Мороз', dry: 'Сухой', shabany: 'Шабаны' };
+const STOCK_TYPES = ['cold', 'frozen', 'dry', 'shabany'];
+
+async function loadCellStats() {
+  cellsLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_warehouse_cells', { days: cellPeriod.value });
+    cellStats.value = data || [];
+  } catch { cellStats.value = []; }
+  finally { cellsLoading.value = false; }
+}
+
+watch(cellPeriod, () => { if (slTab.value === 'cells') loadCellStats(); });
+
+const cellEntities = computed(() => [...new Set(cellStats.value.map(c => c.legal_entity))].sort());
+const cellTableEntities = computed(() => cellFilterEntity.value ? [cellFilterEntity.value] : cellEntities.value);
+
+const cellTableRows = computed(() => {
+  const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort().reverse();
+  const entities = cellTableEntities.value;
+  return dates.map((date, di) => {
+    const data = {};
+    for (const e of entities) {
+      data[e] = { cold: 0, frozen: 0, dry: 0, shabany: 0, total: 0 };
+      for (const c of cellStats.value) {
+        if (c.report_date === date && c.legal_entity === e) {
+          data[e][c.stock_type] = c.cell_count;
+          data[e].total += c.cell_count;
+        }
+      }
+    }
+    // Дельта к предыдущему дню
+    const delta = {};
+    const prevDate = dates[di + 1];
+    if (prevDate) {
+      for (const e of entities) {
+        delta[e] = {};
+        for (const t of [...STOCK_TYPES, 'total']) {
+          const prev = t === 'total'
+            ? cellStats.value.filter(c => c.report_date === prevDate && c.legal_entity === e).reduce((s, c) => s + c.cell_count, 0)
+            : (cellStats.value.find(c => c.report_date === prevDate && c.legal_entity === e && c.stock_type === t)?.cell_count || 0);
+          const cur = data[e]?.[t] || 0;
+          const d = cur - prev;
+          if (d !== 0) delta[e][t] = d;
+        }
+      }
+    }
+    return { date, data, delta };
+  });
+});
+
+function fmtCellDate(d) {
+  const days = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  const dt = new Date(d + 'T00:00:00');
+  return days[dt.getDay()] + ' ' + d.slice(8) + '.' + d.slice(5, 7);
+}
+
+// Chart
+const chartW = 800, chartH = 180, chartPad = 40;
+const chartLines = computed(() => {
+  const entities = cellTableEntities.value;
+  const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
+  if (dates.length < 2) return [];
+  const colors = ['#F5A623', '#4CAF50', '#2196F3', '#E57373', '#9C27B0', '#00BCD4'];
+  const lines = [];
+  let maxVal = 1;
+  // Build series
+  const series = [];
+  for (const e of entities) {
+    const points = dates.map(d => cellStats.value.filter(c => c.report_date === d && c.legal_entity === e).reduce((s, c) => s + c.cell_count, 0));
+    series.push({ label: e.replace(/ООО\s*"([^"]+)"/, '$1'), points });
+    maxVal = Math.max(maxVal, ...points);
+  }
+  const xStep = (chartW - chartPad - 10) / Math.max(dates.length - 1, 1);
+  for (let si = 0; si < series.length; si++) {
+    const pts = series[si].points.map((v, i) => `${chartPad + i * xStep},${chartH - 20 - (v / maxVal) * (chartH - 40)}`);
+    lines.push({ path: 'M' + pts.join('L'), color: colors[si % colors.length], label: series[si].label });
+  }
+  return lines;
+});
+const chartGridY = computed(() => {
+  const count = 4;
+  return Array.from({ length: count + 1 }, (_, i) => chartH - 20 - (i / count) * (chartH - 40));
+});
+const chartGridLabels = computed(() => {
+  const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
+  const entities = cellTableEntities.value;
+  let maxVal = 1;
+  for (const e of entities) {
+    for (const d of dates) {
+      const v = cellStats.value.filter(c => c.report_date === d && c.legal_entity === e).reduce((s, c) => s + c.cell_count, 0);
+      if (v > maxVal) maxVal = v;
+    }
+  }
+  return Array.from({ length: 5 }, (_, i) => Math.round(maxVal * (1 - i / 4)));
+});
 
 const sortField = ref('days_left');
 const sortAsc = ref(true);
@@ -360,9 +538,20 @@ async function handleUpload() {
       const pad = n => String(n).padStart(2, '0');
       const now = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
       const payload = items.map(item => ({ ...item, uploaded_at: now, uploaded_by: userName }));
-      const { data, error } = await db.rpc('replace_stock_malling', { items: payload });
+      const [{ data, error }, cellResult] = await Promise.all([
+        db.rpc('replace_stock_malling', { items: payload }),
+        parseCellStats(file),
+      ]);
       if (error) throw error;
-      toastStore.success(`Загружено ${data?.count || items.length} позиций`);
+      // Сохраняем статистику ячеек если распознана
+      let cellMsg = '';
+      if (cellResult.cells.length) {
+        const cellItems = cellResult.cells.map(c => ({ ...c, report_date: cellResult.reportDate }));
+        await db.rpc('save_warehouse_cells', { items: cellItems });
+        const total = cellResult.cells.reduce((s, c) => s + c.cell_count, 0);
+        cellMsg = `, ${total} ячеек за ${cellResult.reportDate}`;
+      }
+      toastStore.success(`Загружено ${data?.count || items.length} позиций${cellMsg}`);
       await loadData();
     } catch (err) {
       console.error('[ShelfLife]', err);
@@ -562,4 +751,27 @@ onMounted(loadData);
   .sl-kpi-val { font-size: 18px; }
   .sl-kpi-label { font-size: 9px; }
 }
+
+/* Mode tabs */
+.sl-mode-tabs { display: flex; gap: 0; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; }
+.sl-mode-tab { padding: 5px 14px; font-size: 12px; font-weight: 600; background: none; border: none; cursor: pointer; color: var(--text-muted); transition: all .15s; }
+.sl-mode-tab.active { background: var(--bk-brown); color: #fff; }
+.sl-mode-tab:hover:not(.active) { background: rgba(139,115,85,.08); }
+
+/* Cells table */
+.sl-cells-section { flex: 1; overflow: auto; padding: 0 2px; }
+.sl-cells-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--card); border-radius: 8px; overflow: hidden; border: 1px solid var(--border-light); }
+.sl-cells-table th { padding: 8px 10px; text-align: right; font-weight: 700; font-size: 12px; color: var(--text); background: var(--bg); border-bottom: 2px solid var(--border); white-space: nowrap; }
+.sl-cells-table th:first-child { text-align: left; position: sticky; left: 0; background: var(--bg); z-index: 1; }
+.sl-cells-table td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--border-light); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sl-cells-table td:first-child { text-align: left; font-weight: 600; color: var(--text); font-size: 12px; position: sticky; left: 0; background: var(--card); z-index: 1; }
+.sl-cells-table tbody tr:hover td { background: rgba(245,166,35,.06); }
+.sl-cells-table tbody tr:first-child td { background: rgba(245,166,35,.08); font-weight: 700; }
+.cell-up { color: #E57373; font-size: 10px; margin-left: 3px; font-weight: 600; }
+.cell-down { color: #4CAF50; font-size: 10px; margin-left: 3px; font-weight: 600; }
+.sl-cells-legend { text-align: center; margin-top: 10px; }
+.sl-cells-chart-section { background: var(--card); border-radius: 8px; padding: 16px; border: 1px solid var(--border-light); }
+.cell-border-left { border-left: 2px solid var(--border) !important; }
+.cell-entity-header { text-align: center !important; border-left: 2px solid var(--border) !important; font-size: 13px !important; color: var(--bk-brown) !important; background: rgba(139,115,85,.06) !important; }
+.cell-total { font-weight: 700 !important; background: rgba(139,115,85,.03); }
 </style>

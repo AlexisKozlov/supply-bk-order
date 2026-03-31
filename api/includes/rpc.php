@@ -1143,6 +1143,31 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    if ($fn === 'save_warehouse_cells') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $items = $body['items'] ?? [];
+        if (!is_array($items) || empty($items)) respond(['error' => 'Нет данных'], 400);
+        try {
+            $st = $pdo->prepare("INSERT INTO warehouse_cells (report_date, legal_entity, stock_type, cell_count) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE cell_count = VALUES(cell_count)");
+            foreach ($items as $item) {
+                $st->execute([$item['report_date'], $item['legal_entity'], $item['stock_type'], intval($item['cell_count'])]);
+            }
+            respond(['success' => true, 'count' => count($items)]);
+        } catch (PDOException $e) {
+            error_log("save_warehouse_cells error: " . $e->getMessage());
+            respond(['error' => 'Ошибка сохранения'], 500);
+        }
+    }
+
+    if ($fn === 'get_warehouse_cells') {
+        $days = intval($body['days'] ?? 90);
+        if ($days > 365) $days = 365;
+        $st = $pdo->prepare("SELECT report_date, legal_entity, stock_type, cell_count FROM warehouse_cells WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) ORDER BY report_date DESC, legal_entity, stock_type");
+        $st->execute([$days]);
+        respond($st->fetchAll(PDO::FETCH_ASSOC));
+    }
+
     if ($fn === 'replace_order_items') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
@@ -3296,9 +3321,9 @@ if ($endpoint === 'rpc') {
         $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
         $batchItems = $batchSt->fetchAll();
 
-        // Проверяем остались ли pending
+        // Проверяем остались ли необработанные (pending или in_progress)
         $hasPending = false;
-        foreach ($batchItems as $bi) { if ($bi['status'] === 'pending') { $hasPending = true; break; } }
+        foreach ($batchItems as $bi) { if ($bi['status'] === 'pending' || $bi['status'] === 'in_progress') { $hasPending = true; break; } }
 
         // Если все обработаны — отправляем сводку ресторану
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';

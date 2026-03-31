@@ -270,7 +270,7 @@ $TABLE_TO_MODULE = [
     'products'=>'database','suppliers'=>'database','restaurants'=>'database','cards'=>'cards',
     'delivery_schedule'=>'delivery-schedule',
     'analysis_data'=>'analysis','stock_1c'=>'analysis','restaurant_sales'=>'restaurant-sales',
-    'stock_malling'=>'shelf-life',
+    'stock_malling'=>'shelf-life','warehouse_cells'=>'shelf-life',
     'audit_log'=>'history','notifications'=>'history',
     'settings'=>'database','item_order'=>'order',
     'deficit_sessions'=>'deficit','deficit_results'=>'deficit','deficit_tokens'=>'deficit','deficit_restaurant_stock'=>'deficit',

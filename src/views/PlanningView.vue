@@ -1166,6 +1166,7 @@ const planSummaryTotalBoxes = computed(() => itemsWithPlan.value.reduce((s, i) =
 const planPriceMap = ref({}); // sku -> {price, unit_type, currency, origPrice}
 
 async function loadPlanPrices() {
+  if (!userStore.hasAccess('pricing', 'view')) { planPriceMap.value = {}; return; }
   const le = orderStore.settings.legalEntity;
   const sup = supplier.value;
   if (!le || !sup) { planPriceMap.value = {}; return; }

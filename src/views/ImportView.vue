@@ -104,8 +104,13 @@ async function uploadFile(type, file) {
       toast.success('Загружено', `${items.length} позиций для «${le}»`)
 
     } else if (type === 'sales') {
-      // Идентично RestaurantSalesView: parseSalesFile → replace_restaurant_sales
-      const items = await parseSalesFile(file)
+      // Загружаем карту артикул→группа аналогов
+      const { data: prods } = await db.from('products').select('sku, analog_group').neq('analog_group', '')
+      const skuToGroup = {}
+      if (prods) prods.forEach(p => { if (p.sku && p.analog_group) skuToGroup[p.sku] = p.analog_group })
+      const result = await parseSalesFile(file, skuToGroup)
+      const items = result.items || result
+      const skuMapped = result.skuMapped || 0
       if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные'); return }
       toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…`)
       for (let i = 0; i < items.length; i += 10000) {
@@ -113,7 +118,7 @@ async function uploadFile(type, file) {
         const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast })
         if (error) { toast.error('Ошибка', error); return }
       }
-      toast.success('Загружено', `${items.length.toLocaleString('ru')} записей реализации`)
+      toast.success('Загружено', `${items.length.toLocaleString('ru')} записей реализации` + (skuMapped ? `, ${skuMapped} по артикулу` : ''))
 
     } else if (type === 'shelf') {
       // Идентично ShelfLifeView: parseStockMalling → replace_stock_malling

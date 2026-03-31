@@ -6,26 +6,28 @@
 /**
  * Парсинг файла реализации из Excel.
  * @param {File} file — файл .xlsx/.xls
- * @returns {Promise<Array>} — массив записей { sale_date, analog_group, quantity, restaurant_count }
+ * @param {Object} [skuToGroup] — карта артикул→группа аналогов (если передана, маппит по артикулу)
+ * @returns {Promise<{items: Array, skuMapped: number}>} — массив записей + кол-во замапленных по артикулу
  */
-export async function parseSalesFile(file) {
+export async function parseSalesFile(file, skuToGroup) {
   const mod = await import('xlsx-js-style');
   const XLSX = mod.default || mod;
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
-  return parseQlik(rows) || parse1cUT(rows) || [];
+  const result = parseQlik(rows, skuToGroup) || parse1cUT(rows) || { items: [], skuMapped: 0 };
+  return result;
 }
 
 // ═══ Qlik: колонки ГруппаАналогов, Дата, Расход/Продажи, Количество мест хранения ═══
-function parseQlik(rows) {
+function parseQlik(rows, skuToGroup) {
   let colGroup = -1, colDate = -1, colRc = -1, headerIdx = -1;
-  let colSales = -1, colConsumption = -1;
+  let colSales = -1, colConsumption = -1, colSku = -1;
   for (let i = 0; i < Math.min(rows.length, 20); i++) {
     const row = rows[i];
     if (!row) continue;
-    colGroup = -1; colDate = -1; colRc = -1; colSales = -1; colConsumption = -1;
+    colGroup = -1; colDate = -1; colRc = -1; colSales = -1; colConsumption = -1; colSku = -1;
     for (let j = 0; j < row.length; j++) {
       const h = String(row[j] || '').trim().toLowerCase();
       if (h.includes('группааналогов') || h.includes('группа аналогов')) colGroup = j;
@@ -33,16 +35,35 @@ function parseQlik(rows) {
       else if (h.includes('продажи')) colSales = j;
       else if (h.includes('расход')) colConsumption = j;
       else if (h.includes('мест хранения') || h.includes('количество мест')) colRc = j;
+      else if (h === 'артикул' || h === 'sku' || h === 'код' || h === 'код номенклатуры') colSku = j;
     }
-    if (colGroup >= 0 && colDate >= 0 && (colSales >= 0 || colConsumption >= 0)) { headerIdx = i; break; }
+    // Группа аналогов не обязательна, если есть артикул и карта маппинга
+    const hasGroup = colGroup >= 0 || (colSku >= 0 && skuToGroup);
+    if (hasGroup && colDate >= 0 && (colSales >= 0 || colConsumption >= 0)) { headerIdx = i; break; }
   }
   if (headerIdx < 0) return null;
 
   const items = [];
+  let skuMapped = 0;
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
-    const group = String(row[colGroup] || '').trim();
+    let group = colGroup >= 0 ? String(row[colGroup] || '').trim() : '';
+    // Если есть артикул и карта маппинга — подставляем группу аналогов по артикулу
+    if (colSku >= 0 && skuToGroup) {
+      const sku = String(row[colSku] || '').trim();
+      if (sku) {
+        // Пробуем точное совпадение, потом с/без префикса BK_
+        const match = skuToGroup[sku]
+          || skuToGroup['BK_' + sku]
+          || (sku.startsWith('BK_') && skuToGroup[sku.slice(3)])
+          || null;
+        if (match) {
+          group = match;
+          skuMapped++;
+        }
+      }
+    }
     if (!group || group === 'н.опр') continue;
     const qtyCol = colSales >= 0 ? colSales : colConsumption;
     const qty = Math.round(parseNum(row[qtyCol]) * 100) / 100;
@@ -52,7 +73,20 @@ function parseQlik(rows) {
     const rc = colRc >= 0 ? (parseNum(row[colRc]) | 0) : 0;
     items.push({ sale_date: saleDate, analog_group: group, quantity: qty, restaurant_count: rc });
   }
-  return items.length ? items : null;
+  if (!items.length) return null;
+  // Агрегация: суммируем quantity по (date + group), берём max restaurant_count
+  const agg = new Map();
+  for (const it of items) {
+    const key = it.sale_date + '||' + it.analog_group;
+    if (agg.has(key)) {
+      const ex = agg.get(key);
+      ex.quantity = Math.round((ex.quantity + it.quantity) * 100) / 100;
+      if (it.restaurant_count > ex.restaurant_count) ex.restaurant_count = it.restaurant_count;
+    } else {
+      agg.set(key, { ...it });
+    }
+  }
+  return { items: Array.from(agg.values()), skuMapped };
 }
 
 // ═══ 1С УТ: сложная вложенная структура ═══
@@ -73,7 +107,7 @@ function parse1cUT(rows) {
       cur = s.replace(/^[\s"]+|[\s"]+$/g, '');
     }
   }
-  return items.length ? items : null;
+  return items.length ? { items, skuMapped: 0 } : null;
 }
 
 function parseNum(v) {

@@ -128,3 +128,102 @@ export async function parseStockMalling(file) {
   }
   return Array.from(agg.values());
 }
+
+// Маппинг склада → тип стока для warehouse_cells
+const STOCK_TYPE_MAP = [
+  { match: 'шабаны', type: 'shabany' },
+  { match: 'прилесье 6', type: 'dry' },
+  { match: 'прилесье 1 охлажд', type: 'cold' },
+  { match: 'прилесье 1 заморож', type: 'frozen' },
+  { match: 'прилесье 1', type: 'cold' },
+];
+
+function warehouseToStockType(raw) {
+  const lower = (raw || '').toLowerCase();
+  for (const w of STOCK_TYPE_MAP) {
+    if (lower.includes(w.match)) return w.type;
+  }
+  return null;
+}
+
+/**
+ * Извлечение статистики ячеек/паллет из файла остатков склада.
+ * @param {File} file — тот же файл, что грузится в сроки годности
+ * @returns {Promise<{cells: Array, reportDate: string|null}>}
+ *   cells: [{legal_entity, stock_type, cell_count}]
+ *   reportDate: дата из названия файла или null
+ */
+export async function parseCellStats(file) {
+  // Дата из названия файла, fallback — сегодня
+  let reportDate = null;
+  const nameMatch = file.name.match(/(\d{2})[.\-_](\d{2})[.\-_](\d{2,4})/);
+  if (nameMatch) {
+    const y = nameMatch[3].length === 2 ? '20' + nameMatch[3] : nameMatch[3];
+    reportDate = `${y}-${nameMatch[2]}-${nameMatch[1]}`;
+  }
+  if (!reportDate) {
+    const d = new Date();
+    reportDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  const XLSX = await import('xlsx-js-style');
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+
+  let maxRow = 0, maxCol = 0;
+  for (const key of Object.keys(ws).filter(k => !k.startsWith('!'))) {
+    const cell = XLSX.utils.decode_cell(key);
+    if (cell.r > maxRow) maxRow = cell.r;
+    if (cell.c > maxCol) maxCol = cell.c;
+  }
+
+  const rows = [];
+  for (let r = 0; r <= maxRow; r++) {
+    const row = [];
+    for (let c = 0; c <= maxCol; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      row.push(cell ? (cell.v !== undefined ? cell.v : '') : '');
+    }
+    rows.push(row);
+  }
+
+  // Ищем заголовки
+  let headerIdx = -1;
+  let colCell = -1, colWarehouse = -1, colCustomer = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const cells = rows[i].map(c => String(c ?? '').toLowerCase().trim());
+    const ci = cells.findIndex(h => h.includes('ячейк'));
+    const wi = cells.findIndex(h => h.includes('склад'));
+    const ui = cells.findIndex(h => h.includes('заказчик'));
+    if (ci >= 0 && wi >= 0) {
+      headerIdx = i; colCell = ci; colWarehouse = wi; colCustomer = ui;
+      break;
+    }
+  }
+  if (headerIdx < 0) return { cells: [], reportDate };
+
+  // Считаем уникальные ячейки по юрлицу + тип стока
+  const counts = {}; // key: "entity||type" -> Set of cell numbers
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const cellNum = String(row[colCell] || '').trim();
+    if (!cellNum) continue;
+    const rawWarehouse = String(row[colWarehouse] || '').trim();
+    const stockType = warehouseToStockType(rawWarehouse);
+    if (!stockType) continue;
+    const rawCustomer = colCustomer >= 0 ? String(row[colCustomer] || '').trim() : '';
+    const entity = normalizeCustomer(rawCustomer);
+    if (!entity) continue;
+    const key = entity + '||' + stockType;
+    if (!counts[key]) counts[key] = new Set();
+    counts[key].add(cellNum);
+  }
+
+  const result = Object.entries(counts).map(([key, set]) => {
+    const [legal_entity, stock_type] = key.split('||');
+    return { legal_entity, stock_type, cell_count: set.size };
+  });
+
+  return { cells: result, reportDate };
+}

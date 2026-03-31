@@ -36,7 +36,7 @@
         <!-- Левая колонка -->
         <div class="dash-col">
           <!-- Топ поставщиков -->
-          <div class="dash-card" v-if="data.topSuppliers?.length">
+          <div class="dash-card" v-if="data.topSuppliers?.length && userStore.hasAccess('pricing', 'view')">
             <div class="dash-card-title">Топ поставщиков по сумме</div>
             <div class="dash-top-list">
               <div v-for="(s, i) in data.topSuppliers" :key="i" class="dash-top-item">
@@ -109,9 +109,10 @@ const entities = computed(() => userStore.getAllowedEntities() || [])
 
 const topKpis = computed(() => {
   const d = data.value
+  const showPricing = userStore.hasAccess('pricing', 'view')
   return [
     { icon: '📦', value: d.ordersCount || 0, label: 'Заказов', delta: d.ordersDelta },
-    { icon: '💰', value: fmtK(d.totalAmount), label: 'Сумма закупок (BYN)', delta: d.amountDelta },
+    ...(showPricing ? [{ icon: '💰', value: fmtK(d.totalAmount), label: 'Сумма закупок (BYN)', delta: d.amountDelta }] : []),
     { icon: '🚚', value: (d.deliveredPct || 0) + '%', label: 'Выполнение поставок', delta: null },
     { icon: '⚠️', value: d.overdueCount || 0, label: 'Просроченные', delta: null },
     { icon: '📉', value: d.lowStockCount || 0, label: 'Низкий запас', delta: null },
