@@ -251,16 +251,26 @@
             <div v-for="(um, ui) in importUnmatched" :key="ui" class="mktd-match-row" :class="{ done: um.matched, skip: um.skipped }">
               <div class="mktd-match-name">
                 <span style="font-weight:600;">{{ um.originalName }}</span>
-                <span v-if="um.matched" style="color:#4CAF50;font-size:11px;margin-left:6px;">→ {{ um.ref.name }}</span>
+                <span v-if="um.isChoice && !um.matched && !um.skipped" style="background:#FFF3E0;color:#E65100;font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;">на выбор — выберите все варианты</span>
+                <span v-if="um.matched && um.picks?.length === 1" style="color:#4CAF50;font-size:11px;margin-left:6px;">→ {{ um.picks[0].name }}</span>
+                <span v-if="um.matched && um.picks?.length > 1" style="color:#4CAF50;font-size:11px;margin-left:6px;">→ {{ um.picks.length }} вариантов</span>
                 <span v-if="um.skipped" style="color:var(--text-muted);font-size:11px;margin-left:6px;">пропущено</span>
               </div>
-              <div v-if="!um.matched && !um.skipped" class="mktd-match-actions">
+              <!-- Выбранные рецептуры -->
+              <div v-if="um.picks?.length && !um.matched" style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;">
+                <span v-for="(p, pi) in um.picks" :key="p.id" style="display:inline-flex;align-items:center;gap:3px;background:#E8F5E9;color:#2E7D32;padding:2px 8px;border-radius:10px;font-size:11px;">
+                  {{ p.name }}
+                  <span style="cursor:pointer;font-size:14px;line-height:1;" @click="removeImportPick(um, pi)">×</span>
+                </span>
+              </div>
+              <div v-if="!um.skipped && !um.matched" class="mktd-match-actions">
                 <input class="mktd-input mktd-input-sm" style="width:200px;" placeholder="Поиск рецептуры..."
-                  @input="searchImportRecipe($event.target.value)" @focus="searchImportRecipe(um.originalName)" />
+                  @input="searchImportRecipe($event.target.value, ui)" @focus="searchImportRecipe(um.originalName, ui)" />
+                <button v-if="um.picks?.length" class="td-btn td-btn-primary" style="font-size:10px;padding:3px 8px;" @click="confirmImportPick(um)">✓</button>
                 <button class="td-btn td-btn-outline" style="font-size:10px;padding:3px 8px;" @click="skipImportMatch(um)">Пропустить</button>
               </div>
-              <div v-if="!um.matched && !um.skipped && importSearchResults.length" class="mktd-match-results">
-                <div v-for="r in importSearchResults" :key="r.id" class="mktd-dropdown-item" @click="pickImportMatch(um, r)">
+              <div v-if="!um.matched && !um.skipped && importSearchResults.length && activeMatchRow === ui" class="mktd-match-results">
+                <div v-for="r in importSearchResults" :key="r.id" class="mktd-dropdown-item" :class="{ selected: um.picks?.some(p => p.id === r.id) }" @click="pickImportMatch(um, r)">
                   <span class="mktd-dropdown-sku">{{ r.code }}</span> {{ r.name }}
                 </div>
               </div>
@@ -460,30 +470,83 @@ function formatNum(v) {
 }
 
 // ─── Модалка привязки после импорта ──────────────────────────────────────────
-function searchImportRecipe(q) {
+function searchImportRecipe(q, rowIndex) {
   clearTimeout(_importSearchTimer);
   importSearchQuery.value = q;
+  activeMatchRow.value = rowIndex ?? -1;
   if (q.length < 2) { importSearchResults.value = []; return; }
   _importSearchTimer = setTimeout(async () => {
     const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(20);
     importSearchResults.value = data || [];
   }, 200);
 }
+const activeMatchRow = ref(-1);
 function pickImportMatch(unmatchedItem, recipe) {
+  if (!unmatchedItem.picks) unmatchedItem.picks = [];
+  // Если уже выбран — убрать
+  const idx = unmatchedItem.picks.findIndex(p => p.id === recipe.id);
+  if (idx >= 0) { unmatchedItem.picks.splice(idx, 1); return; }
+  unmatchedItem.picks.push({ id: recipe.id, code: recipe.code, name: recipe.name });
+}
+function confirmImportPick(unmatchedItem) {
+  if (!unmatchedItem.picks?.length) return;
+  const p = unmatchedItem.picks[0];
   if (unmatchedItem.type === 'sub') {
-    unmatchedItem.ref.recipe_id = recipe.id;
-    unmatchedItem.ref.code = recipe.code;
-    unmatchedItem.ref.name = recipe.name;
+    unmatchedItem.ref.recipe_id = p.id;
+    unmatchedItem.ref.code = p.code;
+    unmatchedItem.ref.name = p.name;
   } else {
-    unmatchedItem.ref.sku = recipe.code;
-    unmatchedItem.ref.name = recipe.name;
+    unmatchedItem.ref.sku = p.code;
+    unmatchedItem.ref.name = p.name;
   }
   unmatchedItem.matched = true;
   importSearchResults.value = [];
-  importSearchQuery.value = '';
+  activeMatchRow.value = -1;
 }
-function skipImportMatch(unmatchedItem) { unmatchedItem.skipped = true; }
+function removeImportPick(unmatchedItem, pickIndex) {
+  unmatchedItem.picks.splice(pickIndex, 1);
+  unmatchedItem.matched = false;
+  if (unmatchedItem.picks.length === 1) {
+    const p = unmatchedItem.picks[0];
+    if (unmatchedItem.type === 'sub') { unmatchedItem.ref.recipe_id = p.id; unmatchedItem.ref.code = p.code; unmatchedItem.ref.name = p.name; }
+    else { unmatchedItem.ref.sku = p.code; unmatchedItem.ref.name = p.name; }
+    unmatchedItem.matched = true;
+  } else if (!unmatchedItem.picks.length) {
+    if (unmatchedItem.type === 'sub') { unmatchedItem.ref.recipe_id = null; unmatchedItem.ref.code = ''; unmatchedItem.ref.name = unmatchedItem.originalName; }
+    else { unmatchedItem.ref.sku = null; unmatchedItem.ref.name = unmatchedItem.originalName; }
+  }
+}
+function skipImportMatch(unmatchedItem) { unmatchedItem.skipped = true; importSearchResults.value = []; activeMatchRow.value = -1; }
 function applyImportMatches() {
+  // Раскрыть множественные выборы в отдельные sub_items/items
+  for (const um of importUnmatched.value) {
+    if (!um.picks || um.picks.length <= 1) continue;
+    if (um.type === 'sub') {
+      // Найти item, содержащий этот sub_item, и заменить на несколько
+      const parentItem = importPendingItems.value.find(it => it.sub_items?.includes(um.ref));
+      if (parentItem) {
+        const si = parentItem.sub_items;
+        const idx = si.indexOf(um.ref);
+        const origQty = um.ref.qty;
+        // «На выбор»: каждый вариант получает долю qty, делённую на кол-во вариантов
+        // (гость выбирает 1 из N → расход каждого = 1/N)
+        const qtyPerVariant = um.isChoice ? origQty / um.picks.length : origQty;
+        const newSubs = um.picks.map(p => ({ recipe_id: p.id, name: p.name, code: p.code, share: 0, qty: qtyPerVariant }));
+        si.splice(idx, 1, ...newSubs);
+        // Пересчитать доли
+        const totalQty = si.reduce((s, sub) => s + sub.qty, 0);
+        si.forEach(sub => { sub.share = totalQty > 0 ? Math.round(sub.qty / totalQty * 10000) / 10000 : 0; });
+      }
+    } else {
+      // Для обычных items — дублировать item для каждого выбранного
+      const itemIdx = importPendingItems.value.indexOf(um.ref);
+      if (itemIdx >= 0) {
+        const orig = um.ref;
+        const newItems = um.picks.map(p => ({ ...orig, sku: p.code, name: p.name }));
+        importPendingItems.value.splice(itemIdx, 1, ...newItems);
+      }
+    }
+  }
   activity.value.items.push(...importPendingItems.value);
   importMatchModal.value = false;
   importUnmatched.value = [];
@@ -504,16 +567,22 @@ async function importDishesFromFile(e) {
     const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     if (data.length < 2) { toast.error('Пустой файл', ''); return; }
 
-    const headers = data[0].map(h => String(h).toLowerCase().trim());
+    const headers0 = data[0].map(h => String(h).toLowerCase().trim());
+    const headers1 = data.length > 1 ? data[1].map(h => String(h).toLowerCase().trim()) : [];
     const newItems = [];
 
     // Определяем формат: купоны (Номер|Состав|AUV) или промо (Блюдо|Цена|...|AUV месяцы)
-    const isCouponFormat = headers.some(h => h.includes('состав'));
-    const isPromoFormat = headers.some(h => h.includes('блюдо'));
+    // Купонный файл может иметь строку периода в row 0 и заголовки в row 1
+    const couponInRow0 = headers0.some(h => h.includes('состав'));
+    const couponInRow1 = headers1.some(h => h.includes('состав'));
+    const isCouponFormat = couponInRow0 || couponInRow1;
+    const couponDataStart = couponInRow0 ? 1 : couponInRow1 ? 2 : 1;
+    const headers = couponInRow1 && !couponInRow0 ? headers1 : headers0;
+    const isPromoFormat = !isCouponFormat && headers0.some(h => h.includes('блюдо'));
 
     if (isCouponFormat) {
       // Купоны: Номер | Состав (блюда через запятую) | AUV
-      for (let i = 1; i < data.length; i++) {
+      for (let i = couponDataStart; i < data.length; i++) {
         const row = data[i];
         const couponId = String(row[0] || '').trim();
         const composition = String(row[1] || '').trim();
@@ -524,11 +593,15 @@ async function importDishesFromFile(e) {
         const subItems = [];
         for (let part of parts) {
           part = part.replace(/\(.*?\)/g, '').trim();
-          if (!part || part.toLowerCase().includes('на выбор')) continue;
-          const qm = part.match(/^(\d+)\s+(.+)/);
+          if (!part) continue;
+          // «на выбор» — позиция, где гость выбирает один вариант из нескольких
+          const isChoice = part.toLowerCase().includes('на выбор');
+          const cleanPart = part.replace(/на выбор/gi, '').trim();
+          if (!cleanPart) continue;
+          const qm = cleanPart.match(/^(\d+)\s+(.+)/);
           const qty = qm ? parseInt(qm[1]) : 1;
-          const dishName = (qm ? qm[2] : part).replace(/мал\.$/, 'малый').replace(/газ\.\s*/, 'газ. ').trim();
-          subItems.push({ recipe_id: null, name: dishName, code: '', share: 0, qty });
+          const dishName = (qm ? qm[2] : cleanPart).replace(/мал\.$/, 'малый').replace(/газ\.\s*/, 'газ. ').trim();
+          subItems.push({ recipe_id: null, name: dishName, code: '', share: 0, qty, _choice: isChoice });
         }
         const totalQty = subItems.reduce((s, si) => s + si.qty, 0);
         subItems.forEach(si => { si.share = totalQty > 0 ? Math.round(si.qty / totalQty * 10000) / 10000 : 0; });
@@ -591,13 +664,20 @@ async function importDishesFromFile(e) {
     }
 
     // Собрать ненайденные для модалки
+    // Позиции «на выбор» всегда попадают в модалку для множественного выбора
     const unmatched = [];
     for (const item of newItems) {
       if (item.sub_items?.length) {
         for (const sub of item.sub_items) {
-          const found = recipeMap[sub.name];
-          if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
-          else { unmatched.push({ ref: sub, originalName: sub.name, type: 'sub' }); }
+          if (sub._choice) {
+            // «На выбор» — всегда в модалку, даже если нашлась одна рецептура
+            unmatched.push({ ref: sub, originalName: sub.name, type: 'sub', isChoice: true });
+          } else {
+            const found = recipeMap[sub.name];
+            if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
+            else { unmatched.push({ ref: sub, originalName: sub.name, type: 'sub' }); }
+          }
+          delete sub._choice;
         }
       } else {
         const found = recipeMap[item.name];
@@ -1252,6 +1332,7 @@ select.mktd-input, select.mktd-input-sm { background: #fff; color: var(--text); 
 .mktd-dropdown-item { padding: 10px 14px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #F5F0EB; transition: background 0.1s; }
 .mktd-dropdown-item:last-child { border-bottom: none; }
 .mktd-dropdown-item:hover { background: #FFF3E0; }
+.mktd-dropdown-item.selected { background: #E8F5E9; color: #2E7D32; }
 .mktd-dropdown-sku { font-weight: 800; color: var(--bk-orange); margin-right: 6px; }
 
 /* Dish tabs */

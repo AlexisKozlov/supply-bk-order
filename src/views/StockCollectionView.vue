@@ -38,9 +38,6 @@
           </span>
         </div>
         <div class="sc-detail-actions">
-          <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="openTokenModal">
-            Ссылка для ресторанов
-          </button>
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying">
             {{ notifying ? 'Отправка...' : '🔔 Напомнить в Telegram' }}
           </button>
@@ -48,13 +45,14 @@
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline red-text" @click="askCloseCollection">
             Закрыть сбор
           </button>
+          <button class="sc-btn outline" @click="duplicateCollection">Копировать сбор</button>
           <button class="sc-btn outline red-text" @click="askDeleteCollection">Удалить</button>
         </div>
       </div>
 
-      <!-- Token (inline, shown after generating) -->
-      <div v-if="tokenLink && !showTokenModal" class="sc-token">
-        <div class="sc-token-label">Ссылка для ресторанов (48ч)</div>
+      <!-- Token (inline) -->
+      <div v-if="tokenLink" class="sc-token">
+        <div class="sc-token-label">Ссылка для ресторанов</div>
         <div class="sc-token-row">
           <input :value="tokenLink" readonly class="sc-token-input" @focus="$event.target.select()"/>
           <button class="sc-btn sm fill" @click="copyToken">{{ copied ? '✓ Скопировано' : 'Копировать' }}</button>
@@ -595,6 +593,22 @@ function openCreateModal() {
   showCreate.value = true;
 }
 
+function duplicateCollection() {
+  const products = collectionData.value?.products || [];
+  if (!products.length) { toastStore.error('Нет товаров для копирования'); return; }
+  newName.value = (activeCollection.value?.name || 'Сбор') + ' (копия)';
+  newProducts.value = products.map(p => ({
+    ...makeProductRow(),
+    name: p.product_name || '',
+    sku: p.product_sku || '',
+    unit: p.unit || 'pieces',
+    note: p.note || '',
+    fromDb: true,
+  }));
+  activeCollection.value = null;
+  showCreate.value = true;
+}
+
 function isCreateDirty() {
   if (newName.value.trim()) return true;
   return newProducts.value.some(p => p.name.trim() || p.fromDb || p.searchQuery.trim());
@@ -630,7 +644,13 @@ async function createCollection() {
       showCreate.value = false;
       await loadCollections();
       const coll = collections.value.find(c => c.id === data.id);
-      if (coll) openCollection(coll);
+      if (coll) {
+        await openCollection(coll);
+        // Токен создаётся автоматически — подхватываем из ответа
+        if (data.token) {
+          tokenLink.value = `${window.location.origin}/stock-form/${data.token}`;
+        }
+      }
     }
   } catch { toastStore.error('Ошибка', 'Не удалось создать'); } finally { creating.value = false; }
 }

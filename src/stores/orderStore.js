@@ -116,7 +116,7 @@ export const useOrderStore = defineStore('order', () => {
     // FIX баг 3: сохраняем начальное состояние ДО изменения
     if (!skipSnapshot) _ensureInitialState();
     const item = {
-      id: Date.now() + Math.random(),
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       productId: product.id || null,
       sku: product.sku || '',
       name: product.name || '',

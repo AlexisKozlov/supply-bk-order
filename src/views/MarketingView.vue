@@ -326,14 +326,17 @@ async function importCoupons(e) {
       const subItems = [];
       for (let part of parts) {
         part = part.replace(/\(.*?\)/g, '').trim(); // убираем (лимит) и т.п.
-        if (!part || part.toLowerCase().includes('на выбор')) continue;
+        if (!part) continue;
+        const isChoice = part.toLowerCase().includes('на выбор');
+        const cleanPart = part.replace(/на выбор/gi, '').trim();
+        if (!cleanPart) continue;
         // Множитель: "2 Кинг Фри малый" или "3 Соуса"
-        const qm = part.match(/^(\d+)\s+(.+)/);
+        const qm = cleanPart.match(/^(\d+)\s+(.+)/);
         const qty = qm ? parseInt(qm[1]) : 1;
-        const dishName = qm ? qm[2].trim() : part.trim();
+        const dishName = qm ? qm[2].trim() : cleanPart.trim();
         // Нормализация сокращений
         const normalized = dishName.replace(/мал\.$/, 'малый').replace(/газ\.\s*/, 'газ. ');
-        subItems.push({ recipe_id: null, name: normalized, code: '', share: 0, qty });
+        subItems.push({ recipe_id: null, name: normalized, code: '', share: 0, qty, _choice: isChoice });
       }
 
       // Доли: пропорционально кол-ву (каждое блюдо = qty порций)
@@ -361,6 +364,11 @@ async function importCoupons(e) {
           if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
         }
       }
+    }
+
+    // Очистка служебных полей перед сохранением
+    for (const item of items) {
+      for (const sub of (item.sub_items || [])) { delete sub._choice; }
     }
 
     // Создаём активность

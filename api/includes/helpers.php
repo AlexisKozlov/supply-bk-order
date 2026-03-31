@@ -221,16 +221,24 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $subs = $st->fetchAll();
     if (!$subs) return 0;
 
+    // Ищем активный токен для WebApp-кнопки
+    $tokenStmt = $pdo->prepare("SELECT token FROM stock_collection_tokens WHERE collection_id = ? AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1");
+    $tokenStmt->execute([$collectionId]);
+    $tok = $tokenStmt->fetchColumn();
+
     $text = "📋 <b>Новый сбор остатков</b>\n";
     $text .= "─────────────────────\n";
     $text .= "📝 {$collectionName}\n";
     $text .= "📦 Товаров: {$productsCount}\n\n";
-    $text .= "Заполните остатки по вашему ресторану через бот:\n";
-    $text .= "Меню → Основные поставки → Сбор остатков";
+    $text .= "Заполните остатки по вашему ресторану:";
 
-    $keyboard = json_encode(['inline_keyboard' => [
-        [['text' => '📋 Заполнить остатки', 'callback_data' => 'rest_sc_start']],
-    ]]);
+    $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+    $btns = [];
+    if ($tok) {
+        $btns[] = [['text' => '📋 Заполнить остатки', 'web_app' => ['url' => "{$siteUrl}/stock-form/{$tok}"]]];
+    }
+    $btns[] = [['text' => '📋 Заполнить в боте', 'callback_data' => 'rest_sc_start']];
+    $keyboard = json_encode(['inline_keyboard' => $btns]);
 
     $sent = 0;
     foreach ($subs as $sub) {

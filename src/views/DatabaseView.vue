@@ -33,13 +33,16 @@
       <button class="db-tab" :class="{ active: activeTab==='restaurants' }" @click="switchToRestaurants">
         <BkIcon name="schedule" size="sm"/> Рестораны <span class="db-tab-count">{{ restaurantStore.restaurants.length }}</span>
       </button>
+      <button class="db-tab" :class="{ active: activeTab==='recipes' }" @click="switchToRecipes">
+        <BkIcon name="plan" size="sm"/> Рецептуры <span class="db-tab-count">{{ recipes.length }}</span>
+      </button>
     </div>
 
     <!-- Поиск -->
     <div style="position:relative;margin-bottom:14px;">
       <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none;opacity:0.5;"><BkIcon name="search" size="sm"/></span>
       <input v-model="searchQuery" style="width:100%;padding:9px 36px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--card);box-sizing:border-box;transition:border-color .15s,box-shadow .15s;"
-        :placeholder="activeTab === 'products' ? 'Поиск по названию, артикулу, поставщику...' : activeTab === 'suppliers' ? 'Поиск по названию поставщика...' : activeTab === 'restaurants' ? 'Поиск по номеру или адресу...' : 'Поиск по названию группы или товара...'"
+        :placeholder="activeTab === 'products' ? 'Поиск по названию, артикулу, поставщику...' : activeTab === 'suppliers' ? 'Поиск по названию поставщика...' : activeTab === 'restaurants' ? 'Поиск по номеру или адресу...' : activeTab === 'recipes' ? 'Поиск по названию или коду рецептуры...' : 'Поиск по названию группы или товара...'"
         @focus="$event.target.style.borderColor='var(--bk-orange)';$event.target.style.boxShadow='0 0 0 3px rgba(245,166,35,0.12)'"
         @blur="$event.target.style.borderColor='var(--border)';$event.target.style.boxShadow='none'" />
       <button v-if="searchQuery" @click="searchQuery=''" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;"><BkIcon name="close" size="xs"/></button>
@@ -155,6 +158,63 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Рецептуры -->
+    <div v-if="activeTab==='recipes'">
+      <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!filteredRecipes.length" style="text-align:center;padding:40px;color:var(--text-muted);">Рецептуры не найдены</div>
+      <div v-else class="db-grid">
+        <div v-for="r in filteredRecipes" :key="r.id" class="db-card" style="cursor:pointer;" @click="toggleRecipeExpand(r.id)">
+          <div class="db-card-top">
+            <span class="db-card-sku">{{ r.code }}</span>
+            <div class="db-card-title">
+              <span class="db-card-name">{{ r.name }}</span>
+            </div>
+          </div>
+          <div class="db-card-meta">
+            <span v-if="r.thk">ТХК: {{ r.thk }}</span>
+            <span v-if="r.ingredients_count">{{ r.ingredients_count }} ингр.</span>
+          </div>
+        </div>
+      </div>
+      <!-- Раскрытый рецепт с ингредиентами -->
+      <Teleport to="body">
+        <div v-if="recipeDetail.show" class="modal" @click.self="recipeDetail.show = false">
+          <div class="modal-box" style="width:520px;">
+            <div class="modal-header">
+              <h2>{{ recipeDetail.recipe?.name }}</h2>
+              <button class="modal-close" @click="recipeDetail.show = false"><BkIcon name="close" size="sm"/></button>
+            </div>
+            <div style="padding:12px 20px;font-size:12px;color:var(--text-muted);">
+              <span v-if="recipeDetail.recipe?.code" style="margin-right:12px;">Код: <b>{{ recipeDetail.recipe.code }}</b></span>
+              <span v-if="recipeDetail.recipe?.thk">ТХК: <b>{{ recipeDetail.recipe.thk }}</b></span>
+            </div>
+            <div v-if="recipeDetail.loading" style="text-align:center;padding:20px;"><BurgerSpinner text="Загрузка..." /></div>
+            <div v-else-if="recipeDetail.ingredients.length" style="padding:0 20px 16px;">
+              <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead>
+                  <tr style="text-align:left;border-bottom:2px solid var(--border-light);">
+                    <th style="padding:6px 4px;">Артикул</th>
+                    <th style="padding:6px 4px;">Ингредиент</th>
+                    <th style="padding:6px 4px;text-align:right;">Брутто</th>
+                    <th style="padding:6px 4px;text-align:right;">Кол-во</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="ing in recipeDetail.ingredients" :key="ing.id" style="border-bottom:1px solid var(--border-light);">
+                    <td style="padding:5px 4px;color:var(--bk-orange);font-weight:600;">{{ ing.sku }}</td>
+                    <td style="padding:5px 4px;">{{ ing.name }}</td>
+                    <td style="padding:5px 4px;text-align:right;">{{ ing.brutto }}</td>
+                    <td style="padding:5px 4px;text-align:right;">{{ ing.qty }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else style="padding:12px 20px 20px;color:var(--text-muted);font-size:12px;">Нет ингредиентов</div>
+          </div>
+        </div>
+      </Teleport>
     </div>
 
     <!-- Переименование группы -->
@@ -283,6 +343,9 @@ const renameModal = ref({ show: false, oldName: '', newName: '' });
 let _renameInitial = '';
 const restModal = ref({ show: false, data: {}, saving: false });
 let _restModalSnapshot = '';
+const recipes = ref([]);
+let _recLoadId = 0;
+const recipeDetail = ref({ show: false, recipe: null, ingredients: [], loading: false });
 
 function tryCloseRename() {
   if (renameModal.value.newName.trim() !== _renameInitial.trim()) {
@@ -394,6 +457,12 @@ const filteredRestaurants = computed(() => {
   );
 });
 
+const filteredRecipes = computed(() => {
+  const q = searchQuery.value.toLowerCase();
+  if (!q) return recipes.value;
+  return recipes.value.filter(r => (r.name||'').toLowerCase().includes(q) || (r.code||'').toLowerCase().includes(q));
+});
+
 // Watch route query — handles sidebar "Новый товар" click when already on this page
 watch(() => route.query, (q) => {
   if (q?.action === 'new-product') {
@@ -408,6 +477,9 @@ watch(() => route.query, (q) => {
   if (q?.tab === 'restaurants') {
     switchToRestaurants();
   }
+  if (q?.tab === 'recipes') {
+    switchToRecipes();
+  }
 });
 
 watch(() => orderStore.settings.legalEntity, () => {
@@ -421,6 +493,7 @@ onMounted(() => {
   loadSuppliers();
   if (route.query.tab === 'suppliers') activeTab.value = 'suppliers';
   if (route.query.tab === 'restaurants') switchToRestaurants();
+  if (route.query.tab === 'recipes') switchToRecipes();
   if (route.query.action === 'new-product') {
     activeTab.value = 'products';
     editCardModal.value = { show: true, product: null };
@@ -521,6 +594,37 @@ async function switchToAnalogs() { activeTab.value = 'analogs'; if (!products.va
 async function switchToRestaurants() {
   activeTab.value = 'restaurants';
   await restaurantStore.load(orderStore.settings.legalEntity);
+}
+
+async function switchToRecipes() {
+  activeTab.value = 'recipes';
+  if (!recipes.value.length) await loadRecipes();
+}
+
+async function loadRecipes() {
+  const myId = ++_recLoadId;
+  loading.value = true;
+  try {
+    const { data, error } = await db.from('recipes').select('id, code, name, thk').order('name');
+    if (myId !== _recLoadId) return;
+    if (error) { toast.error('Ошибка загрузки рецептур', ''); return; }
+    // Подсчёт ингредиентов
+    const { data: counts } = await db.from('recipe_ingredients').select('recipe_id');
+    if (myId !== _recLoadId) return;
+    const countMap = {};
+    if (counts) counts.forEach(c => { countMap[c.recipe_id] = (countMap[c.recipe_id] || 0) + 1; });
+    recipes.value = (data || []).map(r => ({ ...r, ingredients_count: countMap[r.id] || 0 }));
+  } finally { if (myId === _recLoadId) loading.value = false; }
+}
+
+async function toggleRecipeExpand(id) {
+  const recipe = recipes.value.find(r => r.id === id);
+  if (!recipe) return;
+  recipeDetail.value = { show: true, recipe, ingredients: [], loading: true };
+  try {
+    const { data } = await db.from('recipe_ingredients').select('*').eq('recipe_id', id).order('sort_order');
+    recipeDetail.value.ingredients = data || [];
+  } finally { recipeDetail.value.loading = false; }
 }
 
 function openRestaurantModal(r) {

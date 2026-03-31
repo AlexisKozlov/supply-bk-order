@@ -931,6 +931,7 @@ async function loadFrom1c() {
 }
 
 watch(() => orderStore.settings.legalEntity, () => {
+  clearTimeout(_saveTimer);
   expandedSections.clear();
   expandedSections.add('Сухой'); expandedSections.add('Холод'); expandedSections.add('Мороз'); expandedSections.add('');
   loadProducts();

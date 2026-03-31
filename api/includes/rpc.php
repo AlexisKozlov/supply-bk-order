@@ -695,10 +695,16 @@ if ($endpoint === 'rpc') {
             error_log('sc_create_collection error: ' . $e->getMessage());
             respond(['error' => 'Ошибка создания сбора'], 500);
         }
+        // Автоматически создаём токен (7 дней)
+        $token = bin2hex(random_bytes(32));
+        $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
+        $tokenStmt = $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)");
+        $tokenStmt->execute([$collId, $token, $uname, $expires]);
+
         // Уведомляем рестораны о новом сборе
         scNotifyRestaurants($pdo, $collId, $name, count($products));
 
-        respond(['id' => $collId]);
+        respond(['id' => $collId, 'token' => $token, 'expires_at' => $expires]);
     }
 
     // Повторная отправка уведомлений ресторанам о сборе
@@ -743,6 +749,8 @@ if ($endpoint === 'rpc') {
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
         if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $pdo->prepare("UPDATE stock_collections SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$collId]);
+        // Инвалидируем все токены этого сбора
+        $pdo->prepare("UPDATE stock_collection_tokens SET expires_at = NOW() WHERE collection_id = ? AND expires_at > NOW()")->execute([$collId]);
         respond(['success' => true]);
     }
     if ($fn === 'sc_get_collection_data') {

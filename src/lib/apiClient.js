@@ -118,18 +118,18 @@ class QueryBuilder {
     }
     const url = `${API_BASE}/${this._t}${qs ? '?' + qs : ''}`;
 
-    // Дедупликация GET-запросов: если точно такой же запрос уже летит — ждём его результат
+    // Дедупликация GET-запросов: ключ включает модификаторы результата
     if (this._method === 'GET') {
-      const existing = _inflightGets.get(url);
+      const dedupKey = url + (this._single ? '|s' : '') + (this._maybe ? '|m' : '') + (this._head ? '|h' : '');
+      const existing = _inflightGets.get(dedupKey);
       if (existing) return existing;
+      const promise = this._exec(url);
+      _inflightGets.set(dedupKey, promise);
+      promise.finally(() => _inflightGets.delete(dedupKey));
+      return promise;
     }
 
     const promise = this._exec(url);
-
-    if (this._method === 'GET') {
-      _inflightGets.set(url, promise);
-      promise.finally(() => _inflightGets.delete(url));
-    }
 
     return promise;
   }

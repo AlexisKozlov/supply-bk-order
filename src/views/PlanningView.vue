@@ -2054,7 +2054,7 @@ watch(supplier, (v) => { if (v && settingsExpanded.value) { showCollapseHint.val
 
 function hasPlanUnsavedData() {
   if (viewOnly.value || !items.value.length) return false;
-  return items.value.some(i => i.consumption > 0 || i.stock > 0 || i.transit > 0 || i.order > 0);
+  return items.value.some(i => i.monthlyConsumption > 0 || i.stockOnHand > 0 || i.stockAtSupplier > 0 || i.plan?.some(p => p.orderBoxes > 0 || p.orderUnits > 0));
 }
 
 function onPlanBeforeUnload(e) {

@@ -225,8 +225,12 @@ export const useDraftStore = defineStore('draft', () => {
         items: JSON.parse(JSON.stringify(toRaw(planState.items))),
         timestamp: new Date().toISOString(),
       };
-      localStorage.setItem(getPlanDraftKey(), JSON.stringify(draft));
-      lastPlanSaved.value = new Date();
+      try {
+        localStorage.setItem(getPlanDraftKey(), JSON.stringify(draft));
+        lastPlanSaved.value = new Date();
+      } catch (e) {
+        console.warn('Plan draft save failed (quota?):', e);
+      }
     }, 500);
   }
 
