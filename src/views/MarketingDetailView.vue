@@ -35,8 +35,9 @@
         <div v-for="(item, ii) in activity.items" :key="ii" class="mktd-c-dish" :class="{ open: expandedDishC === ii }">
           <div class="mktd-c-dish-head" @click="expandedDishC = expandedDishC === ii ? -1 : ii; if (expandedDishC === ii) loadIngredients()">
             <span class="mktd-c-dish-name">{{ item.name || 'Блюдо ' + (ii+1) }}</span>
-            <span class="mktd-c-dish-meta">{{ item.calc_method === 'category' ? 'Категория' : item.calc_method === 'auv' ? 'AUV ' + (item.auv || 0) : item.calc_method === 'total_volume' ? 'Объём' : 'Фикс.' }}</span>
+            <span class="mktd-c-dish-meta">{{ item.calc_method === 'category' ? 'Категория' : item.calc_method === 'auv' ? 'AUV ' + dishAuvDisplay(item) : item.calc_method === 'total_volume' ? 'Объём' : 'Фикс.' }}</span>
             <span v-if="itemTotal(item) > 0" class="mktd-c-dish-total">{{ formatNum(itemTotal(item)) }} {{ item.unit }}</span>
+            <span v-if="item.note" class="mktd-c-dish-note">{{ item.note }}</span>
             <BkIcon :name="expandedDishC === ii ? 'chevronUp' : 'chevronDown'" size="xs" style="color:var(--text-muted);flex-shrink:0;" />
           </div>
           <!-- Раскрытие: параметры + ингредиенты -->
@@ -105,21 +106,39 @@
               </div>
             </div>
             <!-- Ингредиенты блюда -->
-            <div class="mktd-c-dish-ings">
-              <div v-for="ing in dishIngredients(ii)" :key="ing.name" class="mktd-c-dish-ing">
-                <span class="mktd-c-dish-ing-name">
-                  {{ ing.name }}
-                  <span v-if="ing.skus?.length" class="mktd-c-dish-ing-sku">{{ ing.skus[0] }}</span>
-                  <span v-if="ing.originalSku" class="mktd-c-dish-ing-old">{{ ing.originalSku }}</span>
-                </span>
-                <span class="mktd-ing-nums">
-                  <span v-if="ing.totalGrams > 0" class="mktd-ing-val">{{ formatNum(ing.totalGrams / 1000) }} <small>кг</small></span>
-                  <span v-if="ing.totalQty > 0" class="mktd-ing-val">{{ formatNum(ing.totalQty) }} <small>шт</small></span>
-                  <span v-if="ingCases(ing)" class="mktd-ing-cases">{{ ingCases(ing) }} <small>кейс.</small></span>
-                </span>
-              </div>
-              <div v-if="!dishIngredients(ii).length" class="mktd-muted" style="font-size:11px;padding:6px;">Рецептура не найдена</div>
-            </div>
+            <table class="mktd-dish-ing-table" v-if="dishIngredients(ii).length">
+              <thead>
+                <tr>
+                  <th style="text-align:left;">Ингредиент</th>
+                  <th style="width:70px;">Арт.</th>
+                  <th style="width:80px;">Кг/Л</th>
+                  <th style="width:70px;">Шт</th>
+                  <th style="width:60px;">Кейсы</th>
+                  <th style="width:100px;">Поставщик</th>
+                  <th style="width:120px;">Заметка</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="ing in dishIngredients(ii)" :key="ing.name">
+                  <td style="text-align:left;font-weight:500;">
+                    {{ ing.name }}
+                    <span v-if="ing.originalSku" class="mktd-c-dish-ing-old">{{ ing.originalSku }}</span>
+                  </td>
+                  <td><span v-if="ing.skus?.length" class="mktd-c-dish-ing-sku">{{ ing.skus[0] }}</span></td>
+                  <td class="mktd-total-cell">{{ ing.totalGrams > 0 ? formatNum(ing.totalGrams / 1000) : '—' }}</td>
+                  <td class="mktd-total-cell">{{ ing.totalQty > 0 ? formatNum(ing.totalQty) : '—' }}</td>
+                  <td class="mktd-total-cell">{{ ingCases(ing) || '—' }}</td>
+                  <td style="font-size:10px;color:var(--text-muted);">{{ ing.supplier || '—' }}</td>
+                  <td @dblclick="startIngComment(ing)">
+                    <template v-if="editIngComment === (ing.analogGroup || ing.name)">
+                      <input class="mktd-input mktd-input-sm" v-model="ing._comment" @blur="editIngComment = null" @keydown.enter="editIngComment = null" style="width:100%;" />
+                    </template>
+                    <span v-else style="font-size:10px;color:var(--text-muted);cursor:pointer;">{{ ing._comment || '—' }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="mktd-muted" style="font-size:11px;padding:6px;">Рецептура не найдена</div>
           </div>
         </div>
         <!-- Кнопки добавления -->
@@ -300,6 +319,8 @@ const ingredientsLoading = ref(false);
 const ingredientsData = ref([]); // raw recipe data from API
 const editingSupplier = ref(null);
 const editingComment = ref(null);
+const editIngComment = ref(null);
+function startIngComment(ing) { editIngComment.value = ing.analogGroup || ing.name; if (!ing._comment) ing._comment = ''; }
 const ingGroupBy = ref('supplier'); // 'supplier' | 'dish' | 'all'
 
 const types = [
@@ -358,6 +379,15 @@ function setItemAuvForMonth(item, monthKey, val) {
   const found = item.auv_periods.find(p => p.month === monthKey);
   if (found) found.auv = parseFloat(val) || 0;
   else item.auv_periods.push({ month: monthKey, auv: parseFloat(val) || 0 });
+}
+
+function dishAuvDisplay(item) {
+  if (item.auv) return item.auv;
+  if (item.auv_periods?.length) {
+    const vals = item.auv_periods.map(p => p.auv || 0).filter(v => v > 0);
+    if (vals.length) return vals.length === 1 ? vals[0] : vals.join('/');
+  }
+  return 0;
 }
 
 function itemTotal(item) {
@@ -591,7 +621,7 @@ function dishIngredients(ii) {
     if (!recipe?.ingredients) return [];
     const portions = itemTotal(dish);
     for (const ing of recipe.ingredients) {
-      result.push({ name: ing.analog_group || ing.name, analogGroup: ing.analog_group, skus: ing.sku ? [ing.sku] : [], originalSku: ing.original_sku || null, totalGrams: ing.brutto ? parseFloat(ing.brutto) * portions : 0, totalQty: ing.qty ? parseFloat(ing.qty) * portions : 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit, supplier: ing.product_supplier });
+      result.push({ name: ing.analog_group || ing.name, analogGroup: ing.analog_group, skus: ing.sku ? [ing.sku] : [], originalSku: ing.original_sku || null, totalGrams: ing.brutto ? parseFloat(ing.brutto) * portions : 0, totalQty: ing.qty ? parseFloat(ing.qty) * portions : 0, qtyPerBox: ing.qty_per_box ? parseFloat(ing.qty_per_box) : null, productUnit: ing.product_unit, supplier: ing.product_supplier, _comment: '' });
     }
   }
   return result;
@@ -1152,6 +1182,11 @@ button.mktd-stage-check:hover { transform: scale(1.1); }
 .mktd-c-dish-ings { display: flex; flex-direction: column; gap: 2px; }
 .mktd-c-dish-ing { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #F5F0EB; font-size: 12px; }
 .mktd-c-dish-ing:last-child { border-bottom: none; }
+.mktd-c-dish-note { font-size: 11px; color: var(--text-muted); font-style: italic; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.mktd-dish-ing-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mktd-dish-ing-table th { font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); font-weight: 600; padding: 4px 6px; border-bottom: 1px solid #E8E0D8; text-align: center; }
+.mktd-dish-ing-table td { padding: 4px 6px; border-bottom: 1px solid #F5F0EB; text-align: center; }
+.mktd-dish-ing-table tbody tr:hover { background: #FEFCF9; }
 .mktd-c-dish-ing-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; display: flex; align-items: center; gap: 4px; }
 .mktd-c-dish-ing-sku { font-size: 9px; font-weight: 700; color: var(--bk-orange); background: rgba(214,35,0,0.06); padding: 1px 4px; border-radius: 3px; flex-shrink: 0; }
 .mktd-c-dish-ing-old { font-size: 8px; color: var(--text-muted); text-decoration: line-through; flex-shrink: 0; }
