@@ -25,7 +25,7 @@
         <input type="date" v-model="activity.date_from" :disabled="isViewer" class="mktd-c-tag" />
         <span class="mktd-c-sep">—</span>
         <input type="date" v-model="activity.date_to" :disabled="isViewer" class="mktd-c-tag" />
-        <input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-c-tag" style="width:55px;" placeholder="рест." min="1" />
+        <input type="number" v-model.number="activity.restaurant_count" :disabled="isViewer" class="mktd-c-tag" style="width:55px;" :placeholder="defaultRestCount" min="1" :title="'По умолчанию: ' + defaultRestCount" />
         <span v-if="activityDays" class="mktd-c-tag mktd-c-tag-ro">{{ activityDays }} дн</span>
         <input v-model="activity.note" :disabled="isViewer" class="mktd-c-tag" style="flex:1;min-width:120px;" placeholder="Заметки..." />
       </div>
@@ -313,6 +313,7 @@ const layoutMode = ref('A');
 const selectedDishB = ref(-1);
 const expandedDishC = ref(-1);
 const showIngSummary = ref(false);
+const defaultRestCount = ref(56);
 const itemsTab = ref('dishes');
 const ingDishFilter = ref('all');
 const ingredientsLoading = ref(false);
@@ -392,7 +393,7 @@ function dishAuvDisplay(item) {
 
 function itemTotal(item) {
   if (!item) return 0;
-  const rests = activity.value.restaurant_count || 1; // если не задано — AUV на всю сеть
+  const rests = activity.value.restaurant_count || defaultRestCount.value;
   if (item.calc_method === 'auv' || item.calc_method === 'category') {
     if (hasMultipleMonths.value && item.auv_periods?.length) {
       return activityMonths.value.reduce((sum, m) => {
@@ -954,6 +955,8 @@ function onKeydown(e) {
 
 // ─── Mount ──────────────────────────────────────────────────────────────────
 onMounted(() => {
+  // Загрузить кол-во ресторанов по умолчанию
+  db.from('restaurants').select('id').then(({ data }) => { if (data?.length) defaultRestCount.value = data.length; });
   const id = route.params.id;
   if (id) {
     loadActivity(id);
