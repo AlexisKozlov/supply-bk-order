@@ -292,70 +292,70 @@ if ($endpoint === 'rpc') {
             if ($tr) { $dateFrom = $tr['date_from']; $dateTo = $tr['date_to']; }
         }
 
-        $deliveries = [];
-        if (!empty($days)) {
-            if ($dateFrom && $dateTo) {
-                // Перебираем все дни в диапазоне сессии
-                $cursor = new DateTime($dateFrom, $tz);
-                $end = new DateTime($dateTo, $tz);
-                while ($cursor <= $end) {
-                    $dow = (int)$cursor->format('N');
-                    if (in_array($dow, $days)) {
-                        $deadline = null;
-                        $deadlineStr = null;
-                        if (isset($deadlineRules[$dow])) {
-                            $rule = $deadlineRules[$dow];
-                            $deadlineDow = (int)$rule['deadline_dow'];
-                            $deadline = clone $cursor;
-                            $diff = $dow - $deadlineDow;
-                            if ($diff <= 0) $diff += 7;
-                            $deadline->modify("-{$diff} days");
-                            $timeParts = explode(':', $rule['deadline_time']);
-                            $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
-                            $deadlineStr = $deadline->format('Y-m-d H:i:s');
-                        }
-                        $expired = $deadline && $now >= $deadline;
-                        $deliveries[] = [
-                            'date' => $cursor->format('Y-m-d'),
-                            'day_of_week' => $dow,
-                            'deadline' => $deadlineStr,
-                            'expired' => $expired,
-                        ];
-                    }
-                    $cursor->modify('+1 day');
+        // Проверяем per-session конфиг дней (veg_session_day_config)
+        $sessionId = null;
+        $dayConfig = []; // date → [restNums]
+        $hasConfig = false;
+        if ($tokenVal && preg_match('/^[a-f0-9]{64}$/', $tokenVal)) {
+            $sq = $pdo->prepare("SELECT t.session_id FROM veg_tokens t WHERE t.token = ?");
+            $sq->execute([$tokenVal]);
+            $sessionId = $sq->fetchColumn();
+            if ($sessionId) {
+                $cfgSt = $pdo->prepare("SELECT delivery_date, restaurant_number FROM veg_session_day_config WHERE session_id = ?");
+                $cfgSt->execute([$sessionId]);
+                foreach ($cfgSt->fetchAll() as $c) {
+                    $dayConfig[$c['delivery_date']][] = $c['restaurant_number'];
                 }
-            } else {
-                // Обратная совместимость: если диапазон не задан — старая логика
-                $currentDow = (int)$now->format('N');
-                $daysUntilSaturday = 6 - $currentDow;
-                if ($daysUntilSaturday < 0) $daysUntilSaturday = 0;
-                for ($offset = 0; $offset <= $daysUntilSaturday && count($deliveries) < 2; $offset++) {
-                    $date = clone $now;
-                    $date->modify("+{$offset} days");
-                    $dow = (int)$date->format('N');
-                    if (in_array($dow, $days)) {
-                        $deadline = null;
-                        $deadlineStr = null;
-                        if (isset($deadlineRules[$dow])) {
-                            $rule = $deadlineRules[$dow];
-                            $deadlineDow = (int)$rule['deadline_dow'];
-                            $deadline = clone $date;
-                            $diff = $dow - $deadlineDow;
-                            if ($diff <= 0) $diff += 7;
-                            $deadline->modify("-{$diff} days");
-                            $timeParts = explode(':', $rule['deadline_time']);
-                            $deadline->setTime((int)$timeParts[0], (int)($timeParts[1] ?? 0), 0);
-                            $deadlineStr = $deadline->format('Y-m-d H:i:s');
-                        }
-                        $expired = $deadline && $now >= $deadline;
-                        if ($offset === 0 && $expired) continue;
-                        $deliveries[] = [
-                            'date' => $date->format('Y-m-d'),
-                            'day_of_week' => $dow,
-                            'deadline' => $deadlineStr,
-                            'expired' => $expired,
-                        ];
-                    }
+                $hasConfig = !empty($dayConfig);
+            }
+        }
+
+        // Функция расчёта дедлайна
+        $calcDeadline = function($dateObj, $dow) use ($deadlineRules, $now) {
+            $deadline = null; $deadlineStr = null; $expired = false;
+            if (isset($deadlineRules[$dow])) {
+                $rule = $deadlineRules[$dow];
+                $deadline = clone $dateObj;
+                $diff = $dow - (int)$rule['deadline_dow'];
+                if ($diff <= 0) $diff += 7;
+                $deadline->modify("-{$diff} days");
+                $tp = explode(':', $rule['deadline_time']);
+                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0), 0);
+                $deadlineStr = $deadline->format('Y-m-d H:i:s');
+            }
+            $expired = $deadline && $now >= $deadline;
+            return [$deadlineStr, $expired];
+        };
+
+        $deliveries = [];
+        if ($dateFrom && $dateTo) {
+            $cursor = new DateTime($dateFrom, $tz);
+            $end = new DateTime($dateTo, $tz);
+            while ($cursor <= $end) {
+                $dow = (int)$cursor->format('N');
+                $dateStr = $cursor->format('Y-m-d');
+                // Определяем доступ: per-session конфиг или глобальное расписание
+                $canOrder = isset($dayConfig[$dateStr])
+                    ? in_array($restNum, $dayConfig[$dateStr])
+                    : in_array($dow, $days);
+                if ($canOrder) {
+                    [$deadlineStr, $expired] = $calcDeadline($cursor, $dow);
+                    $deliveries[] = ['date' => $dateStr, 'day_of_week' => $dow, 'deadline' => $deadlineStr, 'expired' => $expired];
+                }
+                $cursor->modify('+1 day');
+            }
+        } elseif (!empty($days)) {
+            // Обратная совместимость: без диапазона дат
+            $currentDow = (int)$now->format('N');
+            $daysUntilSaturday = max(0, 6 - $currentDow);
+            for ($offset = 0; $offset <= $daysUntilSaturday && count($deliveries) < 2; $offset++) {
+                $date = clone $now;
+                $date->modify("+{$offset} days");
+                $dow = (int)$date->format('N');
+                if (in_array($dow, $days)) {
+                    [$deadlineStr, $expired] = $calcDeadline($date, $dow);
+                    if ($offset === 0 && $expired) continue;
+                    $deliveries[] = ['date' => $date->format('Y-m-d'), 'day_of_week' => $dow, 'deadline' => $deadlineStr, 'expired' => $expired];
                 }
             }
         }
@@ -1149,23 +1149,79 @@ if ($endpoint === 'rpc') {
         $items = $body['items'] ?? [];
         if (!is_array($items) || empty($items)) respond(['error' => 'Нет данных'], 400);
         try {
+            // Определяем дату загружаемого файла
+            $uploadDate = $items[0]['report_date'] ?? '';
+            if (!$uploadDate) respond(['error' => 'Нет даты в данных'], 400);
+
+            // Для каждого юрлица проверяем: не старше ли загружаемая дата максимальной в базе
+            $entities = array_unique(array_column($items, 'legal_entity'));
+            $skippedEntities = [];
+            foreach ($entities as $entity) {
+                $maxSt = $pdo->prepare("SELECT MAX(report_date) FROM warehouse_cells WHERE legal_entity = ?");
+                $maxSt->execute([$entity]);
+                $maxDate = $maxSt->fetchColumn();
+                if ($maxDate && $uploadDate < $maxDate) {
+                    $skippedEntities[] = $entity;
+                }
+            }
+
+            // Записываем только данные для юрлиц, где загружаемая дата >= максимальной
+            $inserted = 0;
             $st = $pdo->prepare("INSERT INTO warehouse_cells (report_date, legal_entity, stock_type, cell_count) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE cell_count = VALUES(cell_count)");
             foreach ($items as $item) {
+                if (in_array($item['legal_entity'], $skippedEntities)) continue;
                 $st->execute([$item['report_date'], $item['legal_entity'], $item['stock_type'], intval($item['cell_count'])]);
+                $inserted++;
             }
-            respond(['success' => true, 'count' => count($items)]);
+            $msg = $inserted > 0 ? 'success' : 'skipped';
+            respond(['success' => true, 'count' => $inserted, 'skipped' => count($skippedEntities) > 0 ? $skippedEntities : null]);
         } catch (PDOException $e) {
             error_log("save_warehouse_cells error: " . $e->getMessage());
             respond(['error' => 'Ошибка сохранения'], 500);
         }
     }
 
+    if ($fn === 'get_warehouse_cells_range') {
+        $entity = $body['entity'] ?? '';
+        $from = $body['date_from'] ?? '';
+        $to = $body['date_to'] ?? '';
+        if (!$entity || !$from || !$to) respond(['error' => 'Не указаны обязательные параметры'], 400);
+        // Расширяем диапазон на +3 дня чтобы захватить понедельник для последних выходных месяца
+        $st = $pdo->prepare("SELECT report_date, stock_type, cell_count, is_manual FROM warehouse_cells WHERE legal_entity=? AND report_date >= ? AND report_date <= DATE_ADD(?, INTERVAL 3 DAY) AND stock_type IN ('cold','frozen') ORDER BY report_date, stock_type");
+        $st->execute([$entity, $from, $to]);
+        respond($st->fetchAll(PDO::FETCH_ASSOC));
+    }
+
     if ($fn === 'get_warehouse_cells') {
         $days = intval($body['days'] ?? 90);
         if ($days > 365) $days = 365;
-        $st = $pdo->prepare("SELECT report_date, legal_entity, stock_type, cell_count FROM warehouse_cells WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) ORDER BY report_date DESC, legal_entity, stock_type");
+        $st = $pdo->prepare("SELECT report_date, legal_entity, stock_type, cell_count, is_manual FROM warehouse_cells WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) ORDER BY report_date DESC, legal_entity, stock_type");
         $st->execute([$days]);
         respond($st->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    if ($fn === 'upsert_warehouse_cell') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['shelf-life'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+        $date = $body['report_date'] ?? '';
+        $entity = $body['legal_entity'] ?? '';
+        $type = $body['stock_type'] ?? '';
+        $count = intval($body['cell_count'] ?? 0);
+        if (!$date || !$entity || !$type) respond(['error' => 'Не указаны обязательные поля'], 400);
+        if (!in_array($type, ['cold','frozen','dry','shabany'])) respond(['error' => 'Неверный тип хранения'], 400);
+        $existing = $pdo->prepare("SELECT id FROM warehouse_cells WHERE report_date=? AND legal_entity=? AND stock_type=?");
+        $existing->execute([$date, $entity, $type]);
+        $row = $existing->fetch();
+        if ($row) {
+            $pdo->prepare("UPDATE warehouse_cells SET cell_count=?, is_manual=1, updated_by=? WHERE id=?")->execute([$count, $caller['name'], $row['id']]);
+        } else {
+            $pdo->prepare("INSERT INTO warehouse_cells (report_date, legal_entity, stock_type, cell_count, is_manual, updated_by) VALUES (?,?,?,?,1,?)")->execute([$date, $entity, $type, $count, $caller['name']]);
+        }
+        respond(['ok' => true]);
     }
 
     if ($fn === 'replace_order_items') {
@@ -2248,33 +2304,353 @@ if ($endpoint === 'rpc') {
         respond(['shares' => $shares, 'total_sales' => $totalSales]);
     }
 
+    // ═══ Рецептуры: группы по категориям (сначала ручные, потом по префиксу) ═══
+    if ($fn === 'get_recipe_groups') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $prefixes = $body['prefixes'] ?? [];
+        if (empty($prefixes)) respond(['error' => 'Не указаны префиксы'], 400);
+
+        // Загрузить все ручные группы с ключевыми словами
+        $allGroups = $pdo->query("SELECT id, name, keywords FROM recipe_groups")->fetchAll(PDO::FETCH_ASSOC);
+
+        // Нормализация для сравнения: lowercase, убрать лишние пробелы, пробелы вокруг точек/запятых
+        function normGroupKey($s) {
+            $s = mb_strtolower(trim($s));
+            $s = preg_replace('/\s+/', ' ', $s);           // множественные пробелы → один
+            $s = preg_replace('/\s*([.,])\s*/', '$1', $s); // убрать пробелы вокруг . и ,
+            return $s;
+        }
+
+        $result = [];
+        foreach ($prefixes as $prefix) {
+            $prefix = trim($prefix);
+            if (!$prefix) continue;
+            $prefixNorm = normGroupKey($prefix);
+
+            // 1. Ищем ручную группу: имя или ключевые слова (нормализованное сравнение)
+            $matchedGroup = null;
+            foreach ($allGroups as $g) {
+                if (normGroupKey($g['name']) === $prefixNorm) { $matchedGroup = $g; break; }
+                $kw = json_decode($g['keywords'] ?: '[]', true);
+                if (is_array($kw)) {
+                    foreach ($kw as $k) {
+                        if (normGroupKey($k) === $prefixNorm) { $matchedGroup = $g; break 2; }
+                    }
+                }
+            }
+
+            if ($matchedGroup) {
+                // Вернуть рецептуры из ручной группы
+                $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? ORDER BY r.name");
+                $s->execute([$matchedGroup['id']]);
+                $result[$prefix] = $s->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                // Автоматический подбор по префиксу
+                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name LIKE ? ORDER BY name");
+                $s->execute([$prefix . '%']);
+                $result[$prefix] = $s->fetchAll(PDO::FETCH_ASSOC);
+            }
+        }
+        respond($result);
+    }
+
+    // ═══ Рецептуры: управление ручными группами ═══
+    if ($fn === 'save_recipe_group') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = $body['id'] ?? null;
+        $name = trim($body['name'] ?? '');
+        $keywords = $body['keywords'] ?? [];
+        $recipeIds = $body['recipe_ids'] ?? [];
+        if (!$name) respond(['error' => 'Укажите название группы'], 400);
+
+        $pdo->beginTransaction();
+        try {
+            if ($id) {
+                $pdo->prepare("UPDATE recipe_groups SET name=?, keywords=? WHERE id=?")->execute([$name, json_encode($keywords, JSON_UNESCAPED_UNICODE), $id]);
+                $pdo->prepare("DELETE FROM recipe_group_items WHERE group_id=?")->execute([$id]);
+            } else {
+                $pdo->prepare("INSERT INTO recipe_groups (name, keywords) VALUES (?, ?)")->execute([$name, json_encode($keywords, JSON_UNESCAPED_UNICODE)]);
+                $id = $pdo->lastInsertId();
+            }
+            if (!empty($recipeIds)) {
+                $ins = $pdo->prepare("INSERT INTO recipe_group_items (group_id, recipe_id) VALUES (?, ?)");
+                foreach ($recipeIds as $rid) { $ins->execute([$id, $rid]); }
+            }
+            $pdo->commit();
+            respond(['ok' => true, 'id' => intval($id)]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            respond(['error' => 'Ошибка сохранения группы'], 500);
+        }
+    }
+
+    if ($fn === 'delete_recipe_group') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = $body['id'] ?? null;
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $pdo->prepare("DELETE FROM recipe_groups WHERE id=?")->execute([$id]);
+        respond(['ok' => true]);
+    }
+
+    if ($fn === 'get_recipe_groups_list') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $groups = $pdo->query("SELECT g.id, g.name, g.keywords, COUNT(gi.id) as recipe_count FROM recipe_groups g LEFT JOIN recipe_group_items gi ON gi.group_id = g.id GROUP BY g.id ORDER BY g.name")->fetchAll(PDO::FETCH_ASSOC);
+        // Для каждой группы загрузить рецептуры
+        foreach ($groups as &$g) {
+            $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? ORDER BY r.name");
+            $s->execute([$g['id']]);
+            $g['recipes'] = $s->fetchAll(PDO::FETCH_ASSOC);
+            $g['keywords'] = json_decode($g['keywords'] ?: '[]', true);
+        }
+        respond($groups);
+    }
+
+    // ═══ Паллетовка: импорт справочника ═══
+    if ($fn === 'import_pallet_reference') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $items = $body['items'] ?? [];
+        if (empty($items)) respond(['error' => 'Нет данных'], 400);
+        $pdo->beginTransaction();
+        try {
+            $st = $pdo->prepare("INSERT INTO pallet_reference (name, storage_category, sku, pieces_per_block, blocks_per_box, boxes_per_pallet, pieces_per_pallet, box_length_mm, box_height_mm, box_width_mm, pallet_height_m, cell_coefficient)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE storage_category=VALUES(storage_category), sku=VALUES(sku), pieces_per_block=VALUES(pieces_per_block), blocks_per_box=VALUES(blocks_per_box), boxes_per_pallet=VALUES(boxes_per_pallet), pieces_per_pallet=VALUES(pieces_per_pallet), box_length_mm=VALUES(box_length_mm), box_height_mm=VALUES(box_height_mm), box_width_mm=VALUES(box_width_mm), pallet_height_m=VALUES(pallet_height_m), cell_coefficient=VALUES(cell_coefficient)");
+            $count = 0;
+            foreach ($items as $it) {
+                $name = trim($it['name'] ?? '');
+                if (!$name) continue;
+                $L = intval($it['box_length_mm'] ?? 0);
+                $H = intval($it['box_height_mm'] ?? 0);
+                $W = intval($it['box_width_mm'] ?? 0);
+                $bpp = intval($it['boxes_per_pallet'] ?? 0);
+                $ppb = intval($it['pieces_per_block'] ?? 0);
+                $bpb = intval($it['blocks_per_box'] ?? 1) ?: 1;
+                $ppp = intval($it['pieces_per_pallet'] ?? 0);
+                // Высота паллеты: (коробов_на_паллете × Д × В × Ш) / 10^9 / 0.96
+                $palletH = ($bpp > 0 && $L > 0 && $H > 0 && $W > 0)
+                    ? ($bpp * $L * $H * $W) / 1e9 / 0.96
+                    : null;
+                // Коэффициент ячейки
+                $coeff = null;
+                if ($palletH !== null) {
+                    if ($palletH <= 0.30) $coeff = 0.25;
+                    elseif ($palletH <= 0.85) $coeff = 0.5;
+                    else $coeff = 1.0;
+                }
+                $st->execute([
+                    $name, $it['storage_category'] ?? null, $it['sku'] ?? null,
+                    $ppb ?: null, $bpb, $bpp ?: null, $ppp ?: null,
+                    $L ?: null, $H ?: null, $W ?: null,
+                    $palletH !== null ? round($palletH, 4) : null,
+                    $coeff,
+                ]);
+                $count++;
+            }
+            $pdo->commit();
+            respond(['ok' => true, 'count' => $count]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("import_pallet_reference error: " . $e->getMessage());
+            respond(['error' => 'Ошибка импорта'], 500);
+        }
+    }
+
+    // ═══ Паллетовка: загрузка справочника ═══
+    if ($fn === 'get_pallet_reference') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $st = $pdo->query("SELECT * FROM pallet_reference ORDER BY storage_category, name");
+        respond($st->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    // ═══ Паллетовка: обновить поле (частота, кол-во коробок) ═══
+    if ($fn === 'update_pallet_field') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        $field = $body['field'] ?? '';
+        $value = $body['value'] ?? null;
+        if (!$id) respond(['error' => 'Не указан ID'], 400);
+        $allowed = ['delivery_frequency', 'incoming_boxes', 'input_unit'];
+        if (!in_array($field, $allowed)) respond(['error' => 'Недопустимое поле'], 400);
+        $pdo->prepare("UPDATE pallet_reference SET `$field` = ? WHERE id = ?")->execute([$value, $id]);
+        respond(['ok' => true]);
+    }
+
+    // ═══ Паллетовка: расчёт заполненности ═══
+    if ($fn === 'calc_pallet_occupancy') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        // Справочник
+        $ref = $pdo->query("SELECT * FROM pallet_reference ORDER BY storage_category, name")->fetchAll(PDO::FETCH_ASSOC);
+
+        // Расчёт: справочник + ручной ввод коробок
+        // Высота неполной паллеты пропорциональна заполнению
+        function calcCoeff($h) {
+            if ($h <= 0) return 0;
+            if ($h <= 0.30) return 0.25;
+            if ($h <= 0.85) return 0.5;
+            return 1.0;
+        }
+
+        $results = [];
+        foreach ($ref as $r) {
+            $bpp = intval($r['boxes_per_pallet'] ?? 0) ?: intval($r['pieces_per_pallet'] ?? 0);
+            $fullH = floatval($r['pallet_height_m'] ?? 0);
+            $incomingBoxes = intval($r['incoming_boxes'] ?? 0);
+
+            $freq = intval($r['delivery_frequency'] ?? 0);
+            $inputUnit = $r['input_unit'] ?? 'boxes';
+            $ppb = intval($r['pieces_per_block'] ?? 0);
+            // Если ввод в штуках — пересчитать в коробки
+            $totalBoxes = $incomingBoxes;
+            if ($inputUnit === 'pieces' && $ppb > 0) {
+                $totalBoxes = ceil($incomingBoxes / $ppb);
+            }
+            // Коробок за одну поставку: если указана частота — делим
+            $boxesPerDelivery = ($freq > 1) ? ceil($totalBoxes / $freq) : $totalBoxes;
+
+            $cells = 0;
+            $actualH = 0;
+            $actualCoeff = 0;
+
+            if ($bpp > 0 && $boxesPerDelivery > 0) {
+                $fullPallets = floor($boxesPerDelivery / $bpp);
+                $remainder = $boxesPerDelivery % $bpp;
+
+                if ($fullPallets > 0) {
+                    // Есть полные паллеты → коэфф. 1 за каждую + неполная
+                    $cells = $fullPallets * 1.0;
+                    $actualH = $fullH;
+                    $actualCoeff = 1.0;
+                    if ($remainder > 0) {
+                        $lastH = ($fullH > 0) ? $fullH * ($remainder / $bpp) : 0;
+                        $cells += calcCoeff($lastH);
+                    }
+                } else {
+                    // Только неполная паллета
+                    $actualH = ($fullH > 0) ? $fullH * ($boxesPerDelivery / $bpp) : 0;
+                    $actualCoeff = calcCoeff($actualH);
+                    $cells = $actualCoeff;
+                }
+            }
+            $totalPallets = ($bpp > 0 && $boxesPerDelivery > 0) ? $boxesPerDelivery / $bpp : 0;
+
+            $results[] = [
+                'ref_id' => intval($r['id']),
+                'name' => $r['name'],
+                'storage_category' => $r['storage_category'],
+                'pieces_per_block' => intval($r['pieces_per_block'] ?? 0),
+                'blocks_per_box' => intval($r['blocks_per_box'] ?? 1),
+                'boxes_per_pallet' => $bpp,
+                'box_length_mm' => intval($r['box_length_mm'] ?? 0),
+                'box_height_mm' => intval($r['box_height_mm'] ?? 0),
+                'box_width_mm' => intval($r['box_width_mm'] ?? 0),
+                'incoming_boxes' => $incomingBoxes,
+                'input_unit' => $inputUnit,
+                'delivery_frequency' => $freq ?: null,
+                'boxes_per_delivery' => $boxesPerDelivery,
+                'pallets' => round($totalPallets, 2),
+                'actual_height' => round($actualH, 4),
+                'cell_coefficient' => $actualCoeff,
+                'cells' => round($cells, 2),
+                'delivery_frequency' => $r['delivery_frequency'],
+            ];
+        }
+        respond($results);
+    }
+
     // ═══ Рецептуры: поиск по именам (для автопривязки) ═══
     if ($fn === 'find_recipes_by_names') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $names = $body['names'] ?? [];
         if (empty($names)) respond(['error' => 'Не указаны имена'], 400);
+
+        // Загрузить все рецептуры разом (обычно ~500 шт) вместо запроса на каждое имя
+        $allRecipes = $pdo->query("SELECT id, code, name FROM recipes")->fetchAll(PDO::FETCH_ASSOC);
+
+        // Построить индексы для быстрого поиска
+        $byExact = [];       // точное совпадение (нижний регистр)
+        $byNormalized = [];  // нормализованное (без точек, лишних пробелов, скобок)
+        $allEntries = [];    // для нечёткого поиска
+
+        function normalizeRecipeName($n) {
+            $n = mb_strtolower(trim($n));
+            $n = rtrim($n, '.');
+            $n = preg_replace('/\s*\(.*?\)\s*/', ' ', $n); // убрать скобки
+            $n = preg_replace('/\s+/', ' ', trim($n));      // лишние пробелы
+            // Сокращения
+            $n = str_replace(['мал.', 'бол.', 'газ.'], ['малый', 'большой', 'газированный'], $n);
+            return $n;
+        }
+
+        foreach ($allRecipes as $r) {
+            $lower = mb_strtolower(trim($r['name']));
+            $norm = normalizeRecipeName($r['name']);
+            $byExact[$lower] = $r;
+            if (!isset($byNormalized[$norm])) $byNormalized[$norm] = $r;
+            $allEntries[] = ['norm' => $norm, 'words' => preg_split('/\s+/', $norm), 'rec' => $r];
+        }
+
         $result = [];
         foreach ($names as $name) {
             $name = trim($name);
             if (!$name) continue;
-            // Точное совпадение
-            $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name = ? LIMIT 1");
-            $s->execute([$name]);
-            $r = $s->fetch();
-            if (!$r) {
-                // С точкой на конце или без
-                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name = ? OR name = ? LIMIT 1");
-                $s->execute([rtrim($name, '.'), $name . '.']);
-                $r = $s->fetch();
+            $lower = mb_strtolower($name);
+            $norm = normalizeRecipeName($name);
+
+            // 1. Точное совпадение (без учёта регистра)
+            if (isset($byExact[$lower])) { $result[$name] = $byExact[$lower]; continue; }
+
+            // 2. Нормализованное совпадение
+            if (isset($byNormalized[$norm])) { $result[$name] = $byNormalized[$norm]; continue; }
+
+            // 3. Без точки / с точкой
+            $noTrail = rtrim($lower, '.');
+            if (isset($byExact[$noTrail])) { $result[$name] = $byExact[$noTrail]; continue; }
+            if (isset($byExact[$noTrail . '.'])) { $result[$name] = $byExact[$noTrail . '.']; continue; }
+
+            // 4. Поиск по вхождению (рецептура содержит запрос или наоборот)
+            $found = null;
+            $bestLen = PHP_INT_MAX;
+            foreach ($allEntries as $e) {
+                if (strpos($e['norm'], $norm) === 0) {
+                    // Рецептура начинается с запроса — берём самую короткую (наиболее точную)
+                    $len = mb_strlen($e['norm']);
+                    if ($len < $bestLen) { $found = $e['rec']; $bestLen = $len; }
+                }
             }
-            if (!$r) {
-                // LIKE поиск
-                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name LIKE ? LIMIT 1");
-                $s->execute([$name . '%']);
-                $r = $s->fetch();
+            if ($found) { $result[$name] = $found; continue; }
+
+            // 5. Поиск по ключевым словам (все слова запроса содержатся в рецептуре)
+            $queryWords = preg_split('/\s+/', $norm);
+            $bestScore = 0;
+            $bestMatch = null;
+            foreach ($allEntries as $e) {
+                $matched = 0;
+                foreach ($queryWords as $qw) {
+                    if (mb_strlen($qw) < 2) continue;
+                    foreach ($e['words'] as $rw) {
+                        if (strpos($rw, $qw) === 0 || strpos($qw, $rw) === 0) { $matched++; break; }
+                    }
+                }
+                if ($matched === 0) continue;
+                // Оценка: доля совпавших слов × штраф за лишние слова в рецептуре
+                $score = $matched / max(count($queryWords), 1);
+                $penalty = abs(count($e['words']) - count($queryWords));
+                $score -= $penalty * 0.1;
+                if ($score > $bestScore && $score >= 0.5) {
+                    $bestScore = $score;
+                    $bestMatch = $e['rec'];
+                }
             }
-            $result[$name] = $r ?: null;
+            $result[$name] = $bestMatch;
         }
         respond(['recipes' => $result]);
     }
@@ -2526,6 +2902,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'veg_create_session') {
         $name = mb_substr($body['name'] ?? '', 0, 255);
         $products = $body['products'] ?? []; // [{name, unit}]
+        $dayConfig = $body['day_config'] ?? []; // [{date, restaurants: [nums]}]
         $uname = $authUserName ?: ($body['user_name'] ?? '');
         $dateFrom = $body['date_from'] ?? null;
         $dateTo = $body['date_to'] ?? null;
@@ -2546,13 +2923,32 @@ if ($endpoint === 'rpc') {
                 $pmult = isset($p['multiplicity']) && $p['multiplicity'] !== '' && $p['multiplicity'] !== null ? floatval($p['multiplicity']) : null;
                 $ins->execute([$sessId, $pname, $punit, $pmult, $i]);
             }
+            // Per-session конфиг дней (какие рестораны на какие дни)
+            if (!empty($dayConfig)) {
+                $dcIns = $pdo->prepare("INSERT INTO veg_session_day_config (session_id, delivery_date, restaurant_number) VALUES (?, ?, ?)");
+                foreach ($dayConfig as $dc) {
+                    $dcDate = $dc['date'] ?? '';
+                    $dcRests = $dc['restaurants'] ?? [];
+                    if (!$dcDate || empty($dcRests)) continue;
+                    foreach ($dcRests as $rn) {
+                        $dcIns->execute([$sessId, $dcDate, $rn]);
+                    }
+                }
+            }
+
             $pdo->commit();
 
-            // Уведомление подписчикам в Telegram о новой сессии
+            // Автоматически создать токен со сроком до конца периода
+            $autoToken = bin2hex(random_bytes(32));
+            $tokenExpires = $dateTo ? ($dateTo . ' 23:59:59') : date('Y-m-d H:i:s', strtotime('+14 days'));
+            $pdo->prepare("INSERT INTO veg_tokens (session_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)")
+                ->execute([$sessId, $autoToken, $uname, $tokenExpires]);
+
+            // Уведомление подписчикам в Telegram с кнопками
             try {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+                $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
                 if ($botToken) {
-                    // Все уникальные chat_id подписчиков
                     $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs")->fetchAll(PDO::FETCH_COLUMN);
                     if ($allSubs) {
                         $dateRange = '';
@@ -2567,14 +2963,25 @@ if ($endpoint === 'rpc') {
                             if ($pname) $prodList[] = $pname;
                         }
                         $prodLine = $prodList ? "\n📦 Товары: " . implode(', ', $prodList) : '';
+                        $webLink = "{$siteUrl}/veg-order/{$autoToken}";
                         $msgText = "📢 <b>Открыт сбор заявок на овощи</b>\n\n";
                         $msgText .= "🗂 Сессия: <b>" . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "</b>";
                         $msgText .= $dateRange;
                         $msgText .= $prodLine;
-                        $msgText .= "\n\nПодайте заявку, когда получите ссылку.";
+                        $msgText .= "\n\n👇 Подайте заявку:";
+
+                        $keyboard = json_encode(['inline_keyboard' => [
+                            [['text' => '📝 Заполнить на сайте', 'url' => $webLink]],
+                            [['text' => '🤖 Заполнить в боте', 'callback_data' => 'veg_order_' . $sessId . '_' . $autoToken]],
+                        ]]);
 
                         foreach ($allSubs as $cid) {
-                            $payload = json_encode(['chat_id' => $cid, 'text' => $msgText, 'parse_mode' => 'HTML']);
+                            $payload = json_encode([
+                                'chat_id' => $cid,
+                                'text' => $msgText,
+                                'parse_mode' => 'HTML',
+                                'reply_markup' => json_decode($keyboard),
+                            ]);
                             $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
                             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
                             curl_exec($ch); curl_close($ch);
@@ -2590,7 +2997,7 @@ if ($endpoint === 'rpc') {
             error_log('veg_create_session error: ' . $e->getMessage());
             respond(['error' => 'Ошибка создания сессии'], 500);
         }
-        respond(['id' => $sessId]);
+        respond(['id' => $sessId, 'token' => $autoToken]);
     }
     if ($fn === 'veg_create_token') {
         $sessId = intval($body['session_id'] ?? 0);

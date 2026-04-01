@@ -20,7 +20,7 @@ $allowed = [
     'dist_sessions', 'dist_session_products', 'dist_entries', 'dist_notes',
     'plt_products', 'plt_deliveries', 'plt_delivery_items', 'plt_daily_stock', 'plt_summary',
     'marketing_activities', 'marketing_activity_items', 'marketing_activity_files',
-    'recipes', 'recipe_ingredients',
+    'recipes', 'recipe_ingredients', 'recipe_groups', 'recipe_group_items', 'pallet_reference',
 ];
 // Защита: только чтение через REST, запись — через RPC
 $readOnly = ['search_logs', 'users', 'error_logs', 'api_keys', 'price_history', 'stock_malling', 'deficit_tokens', 'deficit_restaurant_stock', 'bug_reports', 'bug_report_replies', 'tender_files', 'veg_tokens', 'marketing_activity_files'];

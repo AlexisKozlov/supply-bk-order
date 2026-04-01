@@ -375,7 +375,7 @@ export async function getForecastData(legalEntity) {
   const start365 = new Date(now); start365.setDate(start365.getDate() - 365);
   let salesQuery = db.from('restaurant_sales')
     .select('sale_date, analog_group, quantity, restaurant_count')
-    .gte('sale_date', start365.toISOString().slice(0, 10))
+    .gte('sale_date', toLocalDateStr(start365))
     .order('sale_date', { ascending: true })
     .limit(500000);
 

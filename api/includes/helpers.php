@@ -311,7 +311,19 @@ function checkLegalEntityAccess($sessionUser, $legalEntity) {
         $userEntities = json_decode($userEntities, true);
     }
     if (!is_array($userEntities) || empty($userEntities)) return false;
-    return in_array($legalEntity, $userEntities);
+    // Точное совпадение
+    if (in_array($legalEntity, $userEntities)) return true;
+    // Нечёткое: короткое имя (Бургер БК) → полное (ООО "Бургер БК")
+    $leLower = mb_strtolower(trim($legalEntity));
+    foreach ($userEntities as $ue) {
+        if (mb_strtolower(trim($ue)) === $leLower) return true;
+        // Извлечь имя из кавычек: ООО "Бургер БК" → бургер бк
+        if (preg_match('/«([^»]+)»|"([^"]+)"/', $ue, $m)) {
+            $short = mb_strtolower(trim($m[1] ?: $m[2]));
+            if ($short === $leLower) return true;
+        }
+    }
+    return false;
 }
 
 // ═══ Утилиты ═══

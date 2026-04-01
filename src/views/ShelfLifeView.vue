@@ -10,16 +10,16 @@
         </div>
       </div>
       <div class="sl-header-right">
-        <!-- Тоггл юрлиц -->
-        <div v-if="!loading && uniqueCustomers.length > 1" class="sl-tabs">
-          <button class="sl-tab" :class="{ active: !filterCustomer }" @click="filterCustomer = ''">
+        <!-- Табы юрлиц -->
+        <div v-if="entityTabs.length > 1" class="sl-tabs">
+          <button class="sl-tab" :class="{ active: !filterCustomer }" @click="setEntity('')">
             Все
           </button>
           <button
-            v-for="c in uniqueCustomers" :key="c"
+            v-for="c in entityTabs" :key="c"
             class="sl-tab"
             :class="{ active: filterCustomer === c }"
-            @click="filterCustomer = filterCustomer === c ? '' : c"
+            @click="setEntity(c)"
           >{{ shortName(c) }}</button>
         </div>
         <button
@@ -38,12 +38,7 @@
     <div v-if="slTab === 'cells'" class="sl-cells-section">
       <div v-if="cellsLoading" class="sl-loader">Загрузка...</div>
       <template v-else-if="cellStats.length">
-        <!-- Фильтр юрлица -->
         <div class="sl-filter-bar" style="margin-bottom:10px;">
-          <select v-model="cellFilterEntity" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:12px;">
-            <option value="">Все юр. лица</option>
-            <option v-for="e in cellEntities" :key="e" :value="e">{{ e }}</option>
-          </select>
           <select v-model="cellPeriod" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:12px;">
             <option :value="30">30 дней</option>
             <option :value="60">60 дней</option>
@@ -57,12 +52,13 @@
             <thead>
               <tr>
                 <th>Дата</th>
-                <th v-for="e in cellTableEntities" :key="e" colspan="5" class="cell-entity-header">{{ e }}</th>
+                <th v-for="e in cellTableEntities" :key="e" :colspan="stockTypesFor(e).length + 1" class="cell-entity-header">{{ e }}</th>
               </tr>
               <tr>
                 <th></th>
                 <template v-for="e in cellTableEntities" :key="'h'+e">
-                  <th class="cell-border-left">Холод</th><th>Мороз</th><th>Сухой</th><th>Шабаны</th><th class="cell-total">Итого</th>
+                  <th v-for="(st, si) in stockTypesFor(e)" :key="st" :class="{ 'cell-border-left': si === 0 }">{{ STOCK_TYPE_LABELS[st] }}</th>
+                  <th class="cell-total">Итого</th>
                 </template>
               </tr>
             </thead>
@@ -70,10 +66,15 @@
               <tr v-for="(day, di) in cellTableRows" :key="day.date" :style="di === 0 ? 'font-weight:600;background:rgba(245,166,35,.06);' : ''">
                 <td>{{ fmtCellDate(day.date) }}</td>
                 <template v-for="e in cellTableEntities" :key="day.date+e">
-                  <td class="cell-border-left">{{ day.data[e]?.cold || '—' }}<span v-if="day.delta[e]?.cold" :class="day.delta[e].cold > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].cold > 0 ? '+' : '' }}{{ day.delta[e].cold }}</span></td>
-                  <td>{{ day.data[e]?.frozen || '—' }}<span v-if="day.delta[e]?.frozen" :class="day.delta[e].frozen > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].frozen > 0 ? '+' : '' }}{{ day.delta[e].frozen }}</span></td>
-                  <td>{{ day.data[e]?.dry || '—' }}<span v-if="day.delta[e]?.dry" :class="day.delta[e].dry > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].dry > 0 ? '+' : '' }}{{ day.delta[e].dry }}</span></td>
-                  <td>{{ day.data[e]?.shabany || '—' }}<span v-if="day.delta[e]?.shabany" :class="day.delta[e].shabany > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].shabany > 0 ? '+' : '' }}{{ day.delta[e].shabany }}</span></td>
+                  <td v-for="(st, si) in stockTypesFor(e)" :key="st" :class="[si === 0 ? 'cell-border-left' : '', { 'cell-manual': day.manual[e]?.[st] }]" @dblclick="canEditCells && startCellEdit(day.date, e, st, day.data[e]?.[st] || 0)">
+                    <template v-if="cellEditing?.date === day.date && cellEditing?.entity === e && cellEditing?.type === st">
+                      <input type="number" v-model.number="cellEditing.value" class="cell-edit-input" min="0"
+                        @keyup.enter="saveCellEdit" @keyup.escape="cellEditing = null" @blur="saveCellEdit" />
+                    </template>
+                    <template v-else>
+                      {{ day.data[e]?.[st] || '—' }}<span v-if="day.delta[e]?.[st]" :class="day.delta[e][st] > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e][st] > 0 ? '+' : '' }}{{ day.delta[e][st] }}</span>
+                    </template>
+                  </td>
                   <td class="cell-total">{{ day.data[e]?.total || '—' }}<span v-if="day.delta[e]?.total" :class="day.delta[e].total > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].total > 0 ? '+' : '' }}{{ day.delta[e].total }}</span></td>
                 </template>
               </tr>
@@ -202,7 +203,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats } from '@/lib/shelfLifeImport.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -227,8 +228,19 @@ const slTab = ref('shelf');
 // ═══ Ячейки склада ═══
 const cellStats = ref([]);
 const cellsLoading = ref(false);
-const cellFilterEntity = ref('');
 const cellPeriod = ref(30);
+// cellFilterEntity синхронизирован с filterCustomer
+const cellFilterEntity = computed(() => filterCustomer.value);
+
+function setEntity(val) {
+  filterCustomer.value = filterCustomer.value === val ? '' : val;
+}
+
+// Шабаны только для Пицца Стар
+const PS_ENTITY = 'Пицца Стар';
+function stockTypesFor(entity) {
+  return entity === PS_ENTITY ? STOCK_TYPES : STOCK_TYPES.filter(t => t !== 'shabany');
+}
 
 const STOCK_TYPE_LABELS = { cold: 'Холод', frozen: 'Мороз', dry: 'Сухой', shabany: 'Шабаны' };
 const STOCK_TYPES = ['cold', 'frozen', 'dry', 'shabany'];
@@ -252,12 +264,15 @@ const cellTableRows = computed(() => {
   const entities = cellTableEntities.value;
   return dates.map((date, di) => {
     const data = {};
+    const manual = {};
     for (const e of entities) {
       data[e] = { cold: 0, frozen: 0, dry: 0, shabany: 0, total: 0 };
+      manual[e] = {};
       for (const c of cellStats.value) {
         if (c.report_date === date && c.legal_entity === e) {
           data[e][c.stock_type] = c.cell_count;
           data[e].total += c.cell_count;
+          if (c.is_manual) manual[e][c.stock_type] = true;
         }
       }
     }
@@ -277,9 +292,40 @@ const cellTableRows = computed(() => {
         }
       }
     }
-    return { date, data, delta };
+    return { date, data, delta, manual };
   });
 });
+
+// ═══ Редактирование ячеек ═══
+const canEditCells = computed(() => userStore.hasAccess('shelf-life', 'edit'));
+const cellEditing = ref(null);
+
+function startCellEdit(date, entity, type, currentValue) {
+  cellEditing.value = { date, entity, type, value: currentValue };
+  nextTick(() => document.querySelector('.cell-edit-input')?.focus());
+}
+
+async function saveCellEdit() {
+  if (!cellEditing.value) return;
+  const { date, entity, type, value } = cellEditing.value;
+  cellEditing.value = null;
+  try {
+    const { error } = await db.rpc('upsert_warehouse_cell', {
+      report_date: date, legal_entity: entity, stock_type: type, cell_count: value || 0,
+    });
+    if (error) throw error;
+    // Обновляем локально
+    const idx = cellStats.value.findIndex(c => c.report_date === date && c.legal_entity === entity && c.stock_type === type);
+    if (idx >= 0) {
+      cellStats.value[idx].cell_count = value || 0;
+      cellStats.value[idx].is_manual = 1;
+    } else {
+      cellStats.value.push({ report_date: date, legal_entity: entity, stock_type: type, cell_count: value || 0, is_manual: 1 });
+    }
+  } catch {
+    toastStore.error('Ошибка сохранения');
+  }
+}
 
 function fmtCellDate(d) {
   const days = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
@@ -287,43 +333,48 @@ function fmtCellDate(d) {
   return days[dt.getDay()] + ' ' + d.slice(8) + '.' + d.slice(5, 7);
 }
 
-// Chart
+// Chart — по типам хранения для каждого юрлица
 const chartW = 800, chartH = 180, chartPad = 40;
-const chartLines = computed(() => {
+
+const STOCK_TYPE_COLORS = { cold: '#2196F3', frozen: '#9C27B0', dry: '#F5A623', shabany: '#4CAF50' };
+
+function buildChartData() {
   const entities = cellTableEntities.value;
   const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
-  if (dates.length < 2) return [];
-  const colors = ['#F5A623', '#4CAF50', '#2196F3', '#E57373', '#9C27B0', '#00BCD4'];
-  const lines = [];
-  let maxVal = 1;
-  // Build series
+  if (dates.length < 2) return { series: [], dates, maxVal: 1 };
   const series = [];
+  let maxVal = 1;
   for (const e of entities) {
-    const points = dates.map(d => cellStats.value.filter(c => c.report_date === d && c.legal_entity === e).reduce((s, c) => s + c.cell_count, 0));
-    series.push({ label: e.replace(/ООО\s*"([^"]+)"/, '$1'), points });
-    maxVal = Math.max(maxVal, ...points);
+    const eName = e.replace(/ООО\s*"([^"]+)"/, '$1');
+    for (const st of stockTypesFor(e)) {
+      const points = dates.map(d => {
+        const row = cellStats.value.find(c => c.report_date === d && c.legal_entity === e && c.stock_type === st);
+        return row ? row.cell_count : 0;
+      });
+      if (points.every(v => v === 0)) continue;
+      const prefix = entities.length > 1 ? `${eName} · ` : '';
+      series.push({ label: `${prefix}${STOCK_TYPE_LABELS[st]}`, points, color: STOCK_TYPE_COLORS[st] });
+      maxVal = Math.max(maxVal, ...points);
+    }
   }
+  return { series, dates, maxVal };
+}
+
+const chartLines = computed(() => {
+  const { series, dates, maxVal } = buildChartData();
+  if (!series.length) return [];
   const xStep = (chartW - chartPad - 10) / Math.max(dates.length - 1, 1);
-  for (let si = 0; si < series.length; si++) {
-    const pts = series[si].points.map((v, i) => `${chartPad + i * xStep},${chartH - 20 - (v / maxVal) * (chartH - 40)}`);
-    lines.push({ path: 'M' + pts.join('L'), color: colors[si % colors.length], label: series[si].label });
-  }
-  return lines;
+  return series.map(s => {
+    const pts = s.points.map((v, i) => `${chartPad + i * xStep},${chartH - 20 - (v / maxVal) * (chartH - 40)}`);
+    return { path: 'M' + pts.join('L'), color: s.color, label: s.label };
+  });
 });
 const chartGridY = computed(() => {
   const count = 4;
   return Array.from({ length: count + 1 }, (_, i) => chartH - 20 - (i / count) * (chartH - 40));
 });
 const chartGridLabels = computed(() => {
-  const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
-  const entities = cellTableEntities.value;
-  let maxVal = 1;
-  for (const e of entities) {
-    for (const d of dates) {
-      const v = cellStats.value.filter(c => c.report_date === d && c.legal_entity === e).reduce((s, c) => s + c.cell_count, 0);
-      if (v > maxVal) maxVal = v;
-    }
-  }
+  const { maxVal } = buildChartData();
   return Array.from({ length: 5 }, (_, i) => Math.round(maxVal * (1 - i / 4)));
 });
 
@@ -376,6 +427,15 @@ const counts = computed(() => {
 
 const uniqueCustomers = computed(() => {
   const set = new Set(enrichedData.value.map(r => r.customer).filter(Boolean));
+  return [...set].sort();
+});
+
+// Объединённый список юрлиц из обоих источников (сроки + ячейки)
+const entityTabs = computed(() => {
+  const set = new Set([
+    ...enrichedData.value.map(r => r.customer).filter(Boolean),
+    ...cellStats.value.map(c => c.legal_entity).filter(Boolean),
+  ]);
   return [...set].sort();
 });
 
@@ -547,9 +607,13 @@ async function handleUpload() {
       let cellMsg = '';
       if (cellResult.cells.length) {
         const cellItems = cellResult.cells.map(c => ({ ...c, report_date: cellResult.reportDate }));
-        await db.rpc('save_warehouse_cells', { items: cellItems });
-        const total = cellResult.cells.reduce((s, c) => s + c.cell_count, 0);
-        cellMsg = `, ${total} ячеек за ${cellResult.reportDate}`;
+        const cellRes = await db.rpc('save_warehouse_cells', { items: cellItems });
+        if (cellRes.data?.count > 0) {
+          const total = cellResult.cells.reduce((s, c) => s + c.cell_count, 0);
+          cellMsg = `, ${total} ячеек за ${cellResult.reportDate}`;
+        } else if (cellRes.data?.skipped) {
+          cellMsg = ` (ячейки за ${cellResult.reportDate} пропущены — есть более свежие данные)`;
+        }
       }
       toastStore.success(`Загружено ${data?.count || items.length} позиций${cellMsg}`);
       await loadData();
@@ -774,4 +838,25 @@ onMounted(loadData);
 .cell-border-left { border-left: 2px solid var(--border) !important; }
 .cell-entity-header { text-align: center !important; border-left: 2px solid var(--border) !important; font-size: 13px !important; color: var(--bk-brown) !important; background: rgba(139,115,85,.06) !important; }
 .cell-total { font-weight: 700 !important; background: rgba(139,115,85,.03); }
+
+/* Ручные значения */
+.cell-manual { position: relative; }
+.cell-manual::after {
+  content: '';
+  position: absolute; top: 3px; right: 3px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #F5A623;
+}
+
+/* Инпут редактирования */
+.cell-edit-input {
+  width: 56px; padding: 2px 4px; font-size: 12px; font-weight: 600;
+  border: 1.5px solid #F5A623; border-radius: 4px;
+  background: rgba(245,166,35,.06); color: var(--text);
+  text-align: center; outline: none;
+}
+.cell-edit-input:focus { border-color: #D62700; box-shadow: 0 0 0 2px rgba(214,35,0,.12); }
+
+/* Ячейки с данными — курсор при наведении */
+.sl-cells-table td:not(.cell-total):not(:first-child) { cursor: default; position: relative; }
 </style>

@@ -92,7 +92,7 @@
 
     <!-- Модалка отклонения -->
     <Teleport to="body">
-      <div v-if="rejectModal.show" class="modal" @click.self="rejectModal.show = false">
+      <div v-if="rejectModal.show" class="modal">
         <div class="modal-box" style="max-width:400px;">
           <h3 style="margin-bottom:12px;">Отклонить заявку</h3>
           <textarea v-model="rejectModal.comment" class="corr-textarea" placeholder="Комментарий (необязательно)" rows="3"></textarea>

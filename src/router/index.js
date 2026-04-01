@@ -40,6 +40,7 @@ const routes = [
       { path: 'veg-admin', name: 'veg-admin', component: () => import('@/views/VegOrderAdminView.vue'), meta: { title: 'Овощи', module: 'veg' } },
       { path: 'distribution', name: 'distribution', component: () => import('@/views/DistributionView.vue'), meta: { title: 'Распределение', module: 'distribution' } },
       { path: 'pallet-calc', name: 'pallet-calc', component: () => import('@/views/PalletCalcView.vue'), meta: { title: 'Калькулятор паллет', module: 'pallet-calc' } },
+      { path: 'pallet-storage', name: 'pallet-storage', component: () => import('@/views/PalletStorageView.vue'), meta: { title: 'Паллетовка склада', module: 'pallet-storage' } },
       { path: 'payments', name: 'payments', component: () => import('@/views/PaymentsView.vue'), meta: { title: 'Оплаты', module: 'plan-fact' } },
       { path: 'dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: 'Дашборд', module: 'analytics' } },
       { path: 'settings', name: 'user-settings', component: () => import('@/views/UserSettingsView.vue'), meta: { title: 'Настройки' } },

@@ -20,8 +20,11 @@
   <!-- Модалка -->
   <Teleport to="body">
     <Transition name="bug-modal">
-      <div v-if="showForm" class="bug-overlay" @click.self="showForm = false">
+      <div v-if="showForm" class="bug-overlay">
         <div class="bug-modal">
+          <button class="bug-close-btn" @click="showForm = false" title="Закрыть">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
           <!-- Режим чата (когда открыто конкретное обращение) -->
           <template v-if="viewingReport">
             <div class="chat-header">
@@ -44,8 +47,8 @@
                   <div v-else class="chat-bubble-text" style="opacity:0.6">{{ viewingReport.title }}</div>
                   <div v-if="viewingReport.screenshots?.length" class="chat-bubble-imgs">
                     <img v-for="(s, i) in viewingReport.screenshots" :key="i"
-                      :src="apiBase + '/' + s + '?token=' + sessionToken"
-                      @click="previewImage = apiBase + '/' + s + '?token=' + sessionToken" />
+                      :src="apiBase + '/' + s + '?token=' + getToken()"
+                      @click="previewImage = apiBase + '/' + s + '?token=' + getToken()" />
                   </div>
                 </div>
                 <div class="chat-bubble-time">{{ formatDate(viewingReport.created_at) }}</div>
@@ -55,7 +58,12 @@
               <div v-for="r in viewingReplies" :key="r.id" class="chat-bubble" :class="r.is_admin ? 'them' : 'me'">
                 <div v-if="r.is_admin" class="chat-bubble-name">Поддержка</div>
                 <div class="chat-bubble-body">
-                  <div class="chat-bubble-text" v-html="renderMsgContent(r.message)"></div>
+                  <template v-for="(part, pi) in parseMsgParts(r.message)" :key="pi">
+                    <span v-if="part.type === 'text'" class="chat-bubble-text">{{ part.text }}</span>
+                    <div v-else-if="part.type === 'img'" class="chat-bubble-imgs">
+                      <img :src="apiBase + '/' + part.path + '?token=' + getToken()" @click="previewImage = apiBase + '/' + part.path + '?token=' + getToken()" />
+                    </div>
+                  </template>
                 </div>
                 <div class="chat-bubble-time">{{ formatDate(r.created_at) }}</div>
               </div>
@@ -197,7 +205,7 @@ const userStore = useUserStore();
 const orderStore = useOrderStore();
 
 const apiBase = import.meta.env.VITE_API_URL || '/api';
-const sessionToken = localStorage.getItem('bk_session_token') || '';
+function getToken() { return localStorage.getItem('bk_session_token') || ''; }
 
 const showForm = ref(false);
 const tab = ref('new');
@@ -410,13 +418,19 @@ function autoResize(e) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
-function renderMsgContent(msg) {
-  if (!msg) return '';
-  const escaped = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return escaped.replace(/\[img:(.*?)\]/g, (_, path) => {
-    const src = apiBase + '/' + path + '?token=' + sessionToken;
-    return '<img src="' + src + '" class="bug-reply-img" onclick="window.open(this.src)" />';
-  });
+function parseMsgParts(msg) {
+  if (!msg) return [];
+  const parts = [];
+  let last = 0;
+  const re = /\[img:(.*?)\]/g;
+  let m;
+  while ((m = re.exec(msg)) !== null) {
+    if (m.index > last) parts.push({ type: 'text', text: msg.slice(last, m.index) });
+    parts.push({ type: 'img', path: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < msg.length) parts.push({ type: 'text', text: msg.slice(last) });
+  return parts;
 }
 
 async function uploadReplyImage(file) {
@@ -430,7 +444,7 @@ async function uploadReplyImage(file) {
     const res = await fetch(apiBase + '/upload/bug-screenshot', {
       method: 'POST',
       body: fd,
-      headers: { 'X-Session-Token': sessionToken },
+      headers: { 'X-Session-Token': getToken() },
     });
     const data = await res.json();
     if (data.path) item.path = data.path;
@@ -610,6 +624,7 @@ function statusLabel(s) {
   padding: 24px;
 }
 .bug-modal {
+  position: relative;
   background: #fff;
   border-radius: 16px;
   width: 420px;
@@ -622,6 +637,14 @@ function statusLabel(s) {
   box-shadow: 0 20px 60px rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.05);
   animation: bug-slide-up 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+.bug-close-btn {
+  position: absolute; top: 10px; right: 10px; z-index: 10;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: none; background: rgba(0,0,0,0.06); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #666; transition: all .15s;
+}
+.bug-close-btn:hover { background: rgba(0,0,0,0.12); color: #333; }
 @keyframes bug-slide-up {
   from { opacity: 0; transform: translateY(20px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }

@@ -7,12 +7,14 @@
           <button class="db-sort-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">Список</button>
           <button class="db-sort-btn" :class="{ active: viewMode === 'gantt' }" @click="viewMode = 'gantt'">Гант</button>
           <button class="db-sort-btn" :class="{ active: viewMode === 'recipes' }" @click="viewMode = 'recipes'; loadRecipes()">Рецептуры</button>
+          <button class="db-sort-btn" :class="{ active: viewMode === 'groups' }" @click="viewMode = 'groups'; loadGroups()">Группы</button>
         </div>
-        <button v-if="!isViewer && viewMode !== 'recipes'" class="btn primary" @click="createActivity">+ Новая активность</button>
+        <button v-if="!isViewer && viewMode !== 'recipes' && viewMode !== 'groups'" class="btn primary" @click="createActivity">+ Новая активность</button>
         <label v-if="!isViewer && viewMode === 'recipes'" class="btn primary" style="cursor:pointer;">
           <BkIcon name="import" size="sm" /> Импорт рецептур
           <input type="file" style="display:none;" accept=".xlsx,.xls" @change="importRecipes" />
         </label>
+        <button v-if="!isViewer && viewMode === 'groups'" class="btn primary" @click="openGroupModal(null)">+ Новая группа</button>
       </div>
     </div>
 
@@ -115,6 +117,71 @@
         </div>
       </template>
     </template>
+
+    <!-- Группы рецептур -->
+    <template v-if="viewMode === 'groups'">
+      <div v-if="groupsLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!groups.length" class="mkt-empty">
+        <div class="mkt-empty-text">Групп пока нет. Создайте первую — например «Соусы» или «Напитки 0,3 л».</div>
+        <div class="mkt-empty-text mkt-muted" style="margin-top:6px;font-size:12px;">При импорте купонов «2 Соуса на выбор» автоматически подставятся рецептуры из группы.</div>
+      </div>
+      <div v-else class="mkt-groups-list">
+        <div v-for="g in groups" :key="g.id" class="mkt-group-card">
+          <div class="mkt-group-header" @click="openGroupModal(g)">
+            <div>
+              <strong>{{ g.name }}</strong>
+              <span class="mkt-muted" style="margin-left:8px;">{{ g.recipe_count }} рецептур</span>
+            </div>
+            <div class="mkt-group-kw">
+              <span v-for="k in (g.keywords || [])" :key="k" class="mkt-kw-tag">{{ k }}</span>
+            </div>
+          </div>
+          <div class="mkt-group-recipes">
+            <span v-for="r in g.recipes.slice(0, 10)" :key="r.id" class="mkt-group-recipe">{{ r.name }}</span>
+            <span v-if="g.recipes.length > 10" class="mkt-muted">+{{ g.recipes.length - 10 }}</span>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Модалка группы -->
+    <Teleport to="body">
+      <div v-if="groupModal.show" class="modal">
+        <div class="modal-box" style="max-width:600px;">
+          <h3 style="margin-bottom:12px;">{{ groupModal.id ? 'Редактировать группу' : 'Новая группа' }}</h3>
+          <div class="mkt-field">
+            <label>Название</label>
+            <input v-model="groupModal.name" class="mkt-input" placeholder="Например: Соусы" />
+          </div>
+          <div class="mkt-field" style="margin-top:8px;">
+            <label>Ключевые слова <span class="mkt-muted">(по ним группа находится при импорте)</span></label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+              <span v-for="(k, ki) in groupModal.keywords" :key="ki" class="mkt-kw-tag" style="cursor:pointer;" @click="groupModal.keywords.splice(ki, 1)">{{ k }} ×</span>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <input v-model="groupModal.newKeyword" class="mkt-input" placeholder="Соус, Соуса, Соусы..." @keydown.enter.prevent="addKeyword" style="flex:1;" />
+              <button class="btn" @click="addKeyword">Добавить</button>
+            </div>
+          </div>
+          <div class="mkt-field" style="margin-top:12px;">
+            <label>Рецептуры ({{ groupModal.selectedRecipes.length }})</label>
+            <input v-model="groupModal.recipeSearch" class="mkt-input" placeholder="Поиск рецептуры..." style="margin-bottom:6px;" />
+            <div class="mkt-group-recipe-list">
+              <label v-for="r in groupRecipeOptions" :key="r.id" class="mkt-group-recipe-option">
+                <input type="checkbox" :checked="groupModal.selectedRecipes.includes(r.id)" @change="toggleGroupRecipe(r.id)" />
+                <span class="mkt-recipe-code" v-if="r.code" style="margin-right:4px;">{{ r.code }}</span>
+                {{ r.name }}
+              </label>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+            <button v-if="groupModal.id" class="btn" style="color:var(--error);margin-right:auto;" @click="deleteGroup">Удалить</button>
+            <button class="btn" @click="groupModal.show = false">Отмена</button>
+            <button class="btn primary" @click="saveGroup" :disabled="!groupModal.name.trim()">Сохранить</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -242,6 +309,70 @@ async function loadRecipes() {
     }
     recipes.value = recs.map(r => ({ ...r, ingredients: ingMap[r.id] || [] }));
   } finally { recipesLoading.value = false; }
+}
+
+// ═══ Группы рецептур ═══
+const groups = ref([]);
+const groupsLoading = ref(false);
+const groupModal = ref({ show: false, id: null, name: '', keywords: [], newKeyword: '', selectedRecipes: [], recipeSearch: '' });
+
+async function loadGroups() {
+  groupsLoading.value = true;
+  try {
+    const { data } = await db.rpc('get_recipe_groups_list');
+    groups.value = data || [];
+  } finally { groupsLoading.value = false; }
+}
+
+function openGroupModal(g) {
+  if (!recipes.value.length) loadRecipes();
+  if (g) {
+    groupModal.value = { show: true, id: g.id, name: g.name, keywords: [...(g.keywords || [])], newKeyword: '', selectedRecipes: g.recipes.map(r => r.id), recipeSearch: '' };
+  } else {
+    groupModal.value = { show: true, id: null, name: '', keywords: [], newKeyword: '', selectedRecipes: [], recipeSearch: '' };
+  }
+}
+
+function addKeyword() {
+  const kw = groupModal.value.newKeyword.trim();
+  if (kw && !groupModal.value.keywords.includes(kw)) groupModal.value.keywords.push(kw);
+  groupModal.value.newKeyword = '';
+}
+
+function toggleGroupRecipe(id) {
+  const idx = groupModal.value.selectedRecipes.indexOf(id);
+  if (idx >= 0) groupModal.value.selectedRecipes.splice(idx, 1);
+  else groupModal.value.selectedRecipes.push(id);
+}
+
+const groupRecipeOptions = computed(() => {
+  const q = groupModal.value.recipeSearch.toLowerCase().trim();
+  let list = recipes.value;
+  if (q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.code && r.code.includes(q)));
+  // Выбранные сверху
+  const sel = new Set(groupModal.value.selectedRecipes);
+  return [...list].sort((a, b) => (sel.has(b.id) ? 1 : 0) - (sel.has(a.id) ? 1 : 0) || a.name.localeCompare(b.name));
+});
+
+async function saveGroup() {
+  const { id, name, keywords, selectedRecipes } = groupModal.value;
+  try {
+    const { error } = await db.rpc('save_recipe_group', { id, name: name.trim(), keywords, recipe_ids: selectedRecipes });
+    if (error) throw error;
+    groupModal.value.show = false;
+    toast.success('Сохранено');
+    await loadGroups();
+  } catch { toast.error('Ошибка сохранения'); }
+}
+
+async function deleteGroup() {
+  if (!confirm('Удалить группу?')) return;
+  try {
+    await db.rpc('delete_recipe_group', { id: groupModal.value.id });
+    groupModal.value.show = false;
+    toast.success('Удалено');
+    await loadGroups();
+  } catch { toast.error('Ошибка удаления'); }
 }
 
 async function importRecipes(e) {
@@ -464,4 +595,20 @@ watch(legalEntity, () => { activities.value = []; loadActivities(); });
   .mkt-card { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 16px; border-radius: 10px; }
   .mkt-card-days { text-align: left; padding-left: 0; }
 }
+
+/* Группы рецептур */
+.mkt-groups-list { display: flex; flex-direction: column; gap: 10px; }
+.mkt-group-card { background: var(--card); border: 1px solid var(--border-light); border-radius: 10px; padding: 14px 18px; }
+.mkt-group-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; gap: 12px; }
+.mkt-group-header:hover { color: var(--bk-red); }
+.mkt-group-kw { display: flex; gap: 4px; flex-wrap: wrap; }
+.mkt-kw-tag { display: inline-block; padding: 2px 8px; background: rgba(245,166,35,.1); color: var(--bk-orange); border-radius: 4px; font-size: 11px; font-weight: 600; }
+.mkt-group-recipes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.mkt-group-recipe { font-size: 12px; padding: 2px 8px; background: var(--bg); border-radius: 4px; color: var(--text-muted); }
+.mkt-field { display: flex; flex-direction: column; gap: 4px; }
+.mkt-field label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.mkt-group-recipe-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 8px; padding: 6px; }
+.mkt-group-recipe-option { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 5px 8px; border-radius: 6px; cursor: pointer; line-height: 1.3; }
+.mkt-group-recipe-option:hover { background: rgba(245,166,35,.06); }
+.mkt-group-recipe-option input[type=checkbox] { flex: 0 0 14px; width: 14px; height: 14px; min-width: 14px; max-width: 14px; margin: 0; accent-color: var(--bk-red); cursor: pointer; -webkit-appearance: checkbox; appearance: checkbox; }
 </style>

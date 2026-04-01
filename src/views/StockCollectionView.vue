@@ -174,7 +174,7 @@
     <!-- Modals -->
     <Teleport to="body">
       <!-- Confirm modal -->
-      <div v-if="confirmModal.show" class="modal modal-confirm" @click.self="confirmModal.show = false">
+      <div v-if="confirmModal.show" class="modal modal-confirm">
         <div class="modal-box" style="max-width: 420px;">
           <div class="sc-modal-head">
             <h3>{{ confirmModal.title }}</h3>
@@ -191,7 +191,7 @@
       </div>
 
       <!-- Rename modal -->
-      <div v-if="showRename" class="modal" @click.self="showRename = false">
+      <div v-if="showRename" class="modal">
         <div class="modal-box" style="max-width: 420px;">
           <div class="sc-modal-head">
             <h3>Переименовать сбор</h3>
@@ -209,7 +209,7 @@
       </div>
 
       <!-- Token modal -->
-      <div v-if="showTokenModal" class="modal" @click.self="showTokenModal = false">
+      <div v-if="showTokenModal" class="modal">
         <div class="modal-box" style="max-width: 500px;">
           <div class="sc-modal-head">
             <h3>Ссылка для ресторанов</h3>
@@ -331,7 +331,7 @@
         </div>
       </div>
       <!-- Edit products modal -->
-      <div v-if="showEditProducts" class="modal" @click.self="showEditProducts = false">
+      <div v-if="showEditProducts" class="modal">
         <div class="modal-box" style="max-width: 600px;">
           <div class="sc-modal-head">
             <h3>Редактирование товаров</h3>
@@ -756,7 +756,7 @@ async function doDeleteCollection() {
       () => db.from('stock_collection_data').delete().eq('collection_id', id),
       () => db.from('stock_collection_tokens').delete().eq('collection_id', id),
       () => db.from('stock_collection_products').delete().eq('collection_id', id),
-      () => db.from('stock_collections').delete().eq('id', id),
+      () => db.from('stock_collections').delete().eq('id', id).eq('legal_entity', orderStore.settings.legalEntity),
     ];
     for (const step of steps) {
       const { error } = await step();
@@ -777,7 +777,7 @@ function openRename() {
 async function saveRename() {
   if (!renameName.value.trim()) return;
   try {
-    const { error } = await db.from('stock_collections').update({ name: renameName.value.trim() }).eq('id', activeCollection.value.id);
+    const { error } = await db.from('stock_collections').update({ name: renameName.value.trim() }).eq('id', activeCollection.value.id).eq('legal_entity', orderStore.settings.legalEntity);
     if (error) { toastStore.error('Ошибка', 'Не удалось переименовать'); return; }
     activeCollection.value.name = renameName.value.trim();
     showRename.value = false;

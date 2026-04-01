@@ -202,7 +202,7 @@
 
     <!-- Модалка сводки ингредиентов -->
     <Teleport to="body">
-      <div v-if="showIngSummary" class="mktd-modal-overlay" @click.self="showIngSummary = false">
+      <div v-if="showIngSummary" class="mktd-modal-overlay">
         <div class="mktd-modal" style="width:700px;max-height:85vh;">
           <div class="mktd-modal-header">
             <h3>Сводка ингредиентов ({{ ingredientsList.length }})</h3>
@@ -297,7 +297,7 @@
 
     <!-- Модалка выбора блюд для категории -->
     <Teleport to="body">
-      <div v-if="subModal.show" class="mktd-modal-overlay" @click.self="subModal.show = false">
+      <div v-if="subModal.show" class="mktd-modal-overlay">
         <div class="mktd-modal">
           <div class="mktd-modal-header">
             <h3>Выбрать блюда в категорию</h3>
@@ -333,10 +333,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter } from '@/lib/utils.js';
+import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -555,6 +555,33 @@ function applyImportMatches() {
   loadIngredients();
 }
 
+// Нормализация названия блюда для лучшего подбора рецептур
+function normalizeDishName(name) {
+  let n = name.trim();
+  // Убрать размерность в конце: «0,4 л», «400 мл», «0,5 л» и т.д.
+  n = n.replace(/\s+\d+[.,]\d*\s*(л|мл|гр|г|кг)\.?$/i, '');
+  n = n.replace(/\s+\d+\s*(л|мл|гр|г|кг)\.?$/i, '');
+  // Раскрыть сокращения
+  n = n.replace(/\bмал\.\s*$/i, 'малый');
+  n = n.replace(/\bбол\.\s*$/i, 'большой');
+  n = n.replace(/\bгаз\.\s*/i, 'газированный ');
+  n = n.replace(/\bнегаз\.\s*/i, 'негазированный ');
+  // Убрать лишние пробелы и точку в конце
+  n = n.replace(/\s+/g, ' ').trim().replace(/\.$/, '');
+  return n;
+}
+
+// Умное разделение состава купона по запятой
+// Не разделяет: «0,5 л», «Кинг Фри, малый», «ж/б 0,4»
+// Разделяет: «Воппер, Кинг Фри малый, Кола 0,5 л»
+function smartSplitComposition(text) {
+  // 1. Защищаем десятичные числа: «0,5» → «0⌀5», чтобы запятая не разделила
+  const protected_ = text.replace(/(\d),(\d)/g, '$1⌀$2');
+  // 2. Разделяем по запятой
+  const parts = protected_.split(',').map(s => s.replace(/⌀/g, ',').trim()).filter(Boolean);
+  return parts;
+}
+
 // ─── Импорт блюд из Excel ────────────────────────────────────────────────────
 async function importDishesFromFile(e) {
   const file = e.target.files?.[0];
@@ -580,6 +607,21 @@ async function importDishesFromFile(e) {
     const headers = couponInRow1 && !couponInRow0 ? headers1 : headers0;
     const isPromoFormat = !isCouponFormat && headers0.some(h => h.includes('блюдо'));
 
+    // Обобщённые категории (используются и в купонах, и в промо)
+    const GENERIC_CATEGORIES = [
+      { pattern: /^(\d+)\s+соус[аов]*/i, category: 'Соус' },
+      { pattern: /^(\d+)\s+напит[коа]*/i, category: 'Напиток' },
+      { pattern: /^(\d+)\s+десерт[аов]*/i, category: 'Десерт' },
+      { pattern: /^(\d+)\s+гарнир[аов]*/i, category: 'Гарнир' },
+      { pattern: /^(\d+)\s+салат[аов]*/i, category: 'Салат' },
+      // Без числа
+      { pattern: /^соус[аов]*(?=\s|$|[^а-яёА-ЯЁ])/i, category: 'Соус', qty: 1 },
+      { pattern: /^напит[коа]*(?=\s|$|[^а-яёА-ЯЁ])/i, category: 'Напиток', qty: 1 },
+      { pattern: /^десерт[аов]*(?=\s|$|[^а-яёА-ЯЁ])/i, category: 'Десерт', qty: 1 },
+      { pattern: /^гарнир[аов]*(?=\s|$|[^а-яёА-ЯЁ])/i, category: 'Гарнир', qty: 1 },
+      { pattern: /^салат[аов]*(?=\s|$|[^а-яёА-ЯЁ])/i, category: 'Салат', qty: 1 },
+    ];
+
     if (isCouponFormat) {
       // Купоны: Номер | Состав (блюда через запятую) | AUV
       for (let i = couponDataStart; i < data.length; i++) {
@@ -588,19 +630,42 @@ async function importDishesFromFile(e) {
         const composition = String(row[1] || '').trim();
         const auv = parseFloat(row[2]) || 0;
         if (!composition) continue;
-        // Разделяем по запятой, но не внутри чисел (0,5 л → не разделять)
-        const parts = composition.split(/,\s*(?!\d)/).map(s => s.trim()).filter(Boolean);
+        // Умное разделение купонного состава
+        // Не разделять: «0,5 л», «Кинг Фри, малый», «тёмное, ж/б 0,4»
+        // Разделять: «Воппер, Кинг Фри, Кола»
+        const parts = smartSplitComposition(composition);
         const subItems = [];
         for (let part of parts) {
           part = part.replace(/\(.*?\)/g, '').trim();
           if (!part) continue;
-          // «на выбор» — позиция, где гость выбирает один вариант из нескольких
-          const isChoice = part.toLowerCase().includes('на выбор');
+          // «на выбор» — явное указание
+          const hasChoiceLabel = /на выбор/i.test(part);
           const cleanPart = part.replace(/на выбор/gi, '').trim();
           if (!cleanPart) continue;
+
+          // Проверяем обобщённые категории: «2 Соуса», «2 Напитка газ. 0,5 л»
+          let isGeneric = false;
+          for (const gc of GENERIC_CATEGORIES) {
+            const gm = cleanPart.match(gc.pattern);
+            if (gm) {
+              const qty = gm[1] ? parseInt(gm[1]) : (gc.qty || 1);
+              // Остаток после категории (например «газ. 0,3 л» в «2 Напитка газ. 0,3 л»)
+              // Не нормализуем — размер и сокращения важны для поиска группы
+              const suffix = cleanPart.slice(gm[0].length).trim();
+              const name = suffix ? `${gc.category} ${suffix}` : gc.category;
+              subItems.push({ recipe_id: null, name, code: '', share: 0, qty, _choice: true });
+              isGeneric = true;
+              break;
+            }
+          }
+          if (isGeneric) continue;
+
           const qm = cleanPart.match(/^(\d+)\s+(.+)/);
           const qty = qm ? parseInt(qm[1]) : 1;
-          const dishName = (qm ? qm[2] : cleanPart).replace(/мал\.$/, 'малый').replace(/газ\.\s*/, 'газ. ').trim();
+          const rawName = (qm ? qm[2] : cleanPart).trim();
+          const dishName = normalizeDishName(rawName);
+          // Если qty > 1 и есть «на выбор» — категория
+          const isChoice = hasChoiceLabel || (qty > 1 && !qm?.[2]?.match(/^(шт|штук)/i));
           subItems.push({ recipe_id: null, name: dishName, code: '', share: 0, qty, _choice: isChoice });
         }
         const totalQty = subItems.reduce((s, si) => s + si.qty, 0);
@@ -621,8 +686,9 @@ async function importDishesFromFile(e) {
       });
       for (let i = 1; i < data.length; i++) {
         const row = data[i];
-        const dishName = String(row[0] || '').trim();
-        if (!dishName || dishName.toUpperCase() === 'TOTAL') continue;
+        const rawDishName = String(row[0] || '').trim();
+        if (!rawDishName || rawDishName.toUpperCase() === 'TOTAL') continue;
+        const dishName = normalizeDishName(rawDishName);
         // AUV: если несколько колонок — по месяцам
         let auv = 0;
         let auvPeriods = null;
@@ -639,11 +705,31 @@ async function importDishesFromFile(e) {
           auv = parseFloat(row[auvCols[0]]) || 0;
         }
         const price = row[1] ? String(row[1]).trim() : '';
-        newItems.push({
-          product_id: null, sku: null, name: dishName,
-          calc_method: 'auv', auv, auv_periods: auvPeriods, sub_items: null,
-          total_volume: null, fixed_qty: null, unit: 'шт', note: price ? `Цена: ${price}` : '',
-        });
+        // Проверяем обобщённые категории (Напиток Газ 0,8 → группа)
+        let isGenericPromo = false;
+        for (const gc of GENERIC_CATEGORIES) {
+          const gm = dishName.match(gc.pattern);
+          if (gm) {
+            const qty = gm[1] ? parseInt(gm[1]) : (gc.qty || 1);
+            const suffix = dishName.slice(gm[0].length).trim();
+            const catName = suffix ? `${gc.category} ${suffix}` : gc.category;
+            newItems.push({
+              product_id: null, sku: null, name: catName,
+              calc_method: 'category', auv, auv_periods: auvPeriods,
+              sub_items: [{ recipe_id: null, name: catName, code: '', share: 1, qty, _choice: true }],
+              total_volume: null, fixed_qty: null, unit: 'шт', note: price ? `Цена: ${price}` : '',
+            });
+            isGenericPromo = true;
+            break;
+          }
+        }
+        if (!isGenericPromo) {
+          newItems.push({
+            product_id: null, sku: null, name: dishName,
+            calc_method: 'auv', auv, auv_periods: auvPeriods, sub_items: null,
+            total_volume: null, fixed_qty: null, unit: 'шт', note: price ? `Цена: ${price}` : '',
+          });
+        }
       }
     } else {
       toast.error('Неизвестный формат', 'Ожидается: Блюдо|...|AUV или Номер|Состав|AUV');
@@ -653,31 +739,66 @@ async function importDishesFromFile(e) {
     if (!newItems.length) { toast.error('Не найдено блюд', ''); return; }
 
     // Привязка к рецептурам
-    const allNames = [...new Set(newItems.flatMap(it => {
-      if (it.sub_items?.length) return it.sub_items.map(s => s.name);
-      return [it.name];
-    }))];
+    // 1. Собрать обобщённые категории (с _choice) и обычные имена
+    const choiceSubs = []; // { sub, parentItem }
+    const regularNames = [];
+    for (const item of newItems) {
+      if (item.sub_items?.length) {
+        for (const sub of item.sub_items) {
+          if (sub._choice) choiceSubs.push({ sub, parentItem: item });
+          else regularNames.push(sub.name);
+        }
+      } else {
+        regularNames.push(item.name);
+      }
+    }
+
+    // 2. Загрузить группы рецептур для обобщённых категорий
+    const prefixes = [...new Set(choiceSubs.map(c => c.sub.name))];
+    let groupsMap = {};
+    if (prefixes.length) {
+      const { data: gd } = await db.rpc('get_recipe_groups', { prefixes });
+      groupsMap = gd || {};
+    }
+
+    // 3. Заменить обобщённые подблюда на конкретные рецептуры
+    for (const { sub, parentItem } of choiceSubs) {
+      const recipes = groupsMap[sub.name] || [];
+      if (recipes.length) {
+        // Заменяем одно обобщённое подблюдо на список конкретных
+        const idx = parentItem.sub_items.indexOf(sub);
+        const newSubs = recipes.map(r => ({
+          recipe_id: r.id, name: r.name, code: r.code, share: 0, qty: sub.qty, _choice: false,
+        }));
+        // Равномерные доли между вариантами (гость выбирает, средняя доля)
+        const shareEach = newSubs.length > 0 ? Math.round(1 / newSubs.length * 10000) / 10000 : 0;
+        newSubs.forEach(s => { s.share = shareEach; });
+        parentItem.sub_items.splice(idx, 1, ...newSubs);
+      }
+      delete sub._choice;
+    }
+    // Очистить _choice у всех
+    for (const item of newItems) {
+      if (item.sub_items) item.sub_items.forEach(s => delete s._choice);
+    }
+
+    // 4. Привязка обычных имён к рецептурам
+    const allNames = [...new Set(regularNames)];
     let recipeMap = {};
     if (allNames.length) {
       const { data: recipeData } = await db.rpc('find_recipes_by_names', { names: allNames });
       recipeMap = recipeData?.recipes || {};
     }
 
-    // Собрать ненайденные для модалки
-    // Позиции «на выбор» всегда попадают в модалку для множественного выбора
+    // 5. Применить найденные рецептуры и собрать ненайденные для модалки
     const unmatched = [];
     for (const item of newItems) {
       if (item.sub_items?.length) {
         for (const sub of item.sub_items) {
-          if (sub._choice) {
-            // «На выбор» — всегда в модалку, даже если нашлась одна рецептура
-            unmatched.push({ ref: sub, originalName: sub.name, type: 'sub', isChoice: true });
-          } else {
-            const found = recipeMap[sub.name];
-            if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
-            else { unmatched.push({ ref: sub, originalName: sub.name, type: 'sub' }); }
-          }
-          delete sub._choice;
+          if (sub.recipe_id) continue; // уже привязан из группы
+          const found = recipeMap[sub.name];
+          if (found) { sub.recipe_id = found.id; sub.code = found.code; sub.name = found.name; }
+          else { unmatched.push({ ref: sub, originalName: sub.name, type: 'sub' }); }
         }
       } else {
         const found = recipeMap[item.name];
@@ -714,7 +835,7 @@ function initDefaultStages() {
   function offsetDate(days) {
     if (!startDate) return '';
     const d = new Date(startDate); d.setDate(d.getDate() - days);
-    return d.toISOString().slice(0, 10);
+    return toLocalDateStr(d);
   }
   activity.value.stages = [
     { name: 'Информация от маркетинга получена', deadline: '', status: 'done', comment: '' },
@@ -1185,6 +1306,7 @@ async function save() {
       activity.value.id = data.id;
       activity.value.legal_entity = legalEntity.value;
       router.replace({ name: 'marketing-detail', params: { id: data.id } });
+      nextTick(() => { autoSaveEnabled.value = true; });
     }
     toast.success('Сохранено', '');
   } finally { saving.value = false; }
@@ -1213,6 +1335,7 @@ async function loadActivity(id) {
       })),
       files: data.files || [],
     };
+    nextTick(() => { autoSaveEnabled.value = true; });
   } finally { loading.value = false; }
 }
 
@@ -1243,6 +1366,21 @@ function onKeydown(e) {
   }
 }
 
+// ─── Автосохранение ─────────────────────────────────────────────────────────
+let autoSaveTimer = null;
+const autoSaveEnabled = ref(false); // включается после первой загрузки
+
+watch(activity, () => {
+  if (!autoSaveEnabled.value || isViewer.value || saving.value || loading.value) return;
+  if (!activity.value.id || !activity.value.name.trim()) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    if (!saving.value && activity.value.id && activity.value.name.trim()) {
+      save();
+    }
+  }, 3000);
+}, { deep: true });
+
 // ─── Mount ──────────────────────────────────────────────────────────────────
 onMounted(() => {
   // Загрузить кол-во ресторанов по умолчанию
@@ -1257,6 +1395,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown);
+  clearTimeout(autoSaveTimer);
 });
 </script>
 

@@ -114,6 +114,7 @@ import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import { toLocalDateStr } from '@/lib/utils.js';
 
 const orderStore = useOrderStore();
 const toast = useToastStore();
@@ -204,7 +205,7 @@ async function loadData() {
     if (dataSource.value === 'orders' || dataSource.value === 'both') {
       const dateFrom = new Date();
       dateFrom.setDate(dateFrom.getDate() - parseInt(period.value));
-      const dateStr = dateFrom.toISOString().slice(0, 10);
+      const dateStr = toLocalDateStr(dateFrom);
 
       const { data: orders } = await db.from('orders').select('id,delivery_date').eq('legal_entity', le).gte('delivery_date', dateStr);
       if (gen !== _loadGen) return;

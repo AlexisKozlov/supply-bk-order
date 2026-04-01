@@ -292,7 +292,7 @@
 
     <!-- Unmatched items modal -->
     <Teleport to="body">
-      <div v-if="showUnmatched" class="anv-modal-overlay" @click.self="showUnmatched = false">
+      <div v-if="showUnmatched" class="anv-modal-overlay">
         <div class="anv-modal">
           <div class="anv-modal-header">
             <span class="anv-modal-title">Не сопоставлено: {{ unmatchedItems.length }}</span>

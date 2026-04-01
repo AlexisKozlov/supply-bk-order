@@ -322,7 +322,7 @@
 
     <!-- Create Session Modal -->
     <Teleport to="body">
-      <div v-if="showCreate" class="modal" @click.self="showCreate = false">
+      <div v-if="showCreate" class="modal">
         <div class="modal-box" style="max-width: 480px;">
           <h3 style="margin-bottom: 14px;">Новая сессия</h3>
           <div style="display:flex;flex-direction:column;gap:10px;">
@@ -333,6 +333,19 @@
               <span style="align-self:center;color:#999;">—</span>
               <input v-model="createDateTo" type="date" class="veg-input" style="flex:1;" />
             </div>
+            <!-- Настройка дней -->
+            <div v-if="createDateFrom && createDateTo && createDayList.length" style="margin-top:4px;">
+              <div style="font-size:13px;font-weight:600;color:#555;">Настройка дней:</div>
+              <div style="font-size:11px;color:#999;margin-bottom:6px;">По умолчанию — обычное расписание. Нажмите на день, чтобы указать конкретные рестораны.</div>
+              <div class="veg-day-config-list">
+                <div v-for="d in createDayList" :key="d.date" class="veg-day-config-item" :class="{ customized: d.restaurants.length }" @click="openDayConfig(d)">
+                  <span class="veg-day-config-date">{{ d.label }}</span>
+                  <span v-if="d.restaurants.length" class="veg-day-config-badge">{{ d.restaurants.length }} рест.</span>
+                  <span v-else class="veg-day-config-default">по расписанию</span>
+                </div>
+              </div>
+            </div>
+
             <div style="font-size:13px;font-weight:600;color:#555;margin-top:4px;">Товары:</div>
             <div v-for="(p, idx) in createProducts" :key="idx" class="veg-product-block">
               <div class="veg-product-row">
@@ -361,7 +374,7 @@
 
     <!-- Token Modal -->
     <Teleport to="body">
-      <div v-if="showTokenModal" class="modal" @click.self="showTokenModal = false">
+      <div v-if="showTokenModal" class="modal">
         <div class="modal-box" style="max-width: 480px;">
           <h3 style="margin-bottom: 14px;">Ссылка для ресторанов</h3>
           <div v-if="activeTokens.length" style="margin-bottom:12px;">
@@ -390,6 +403,32 @@
       </div>
     </Teleport>
 
+    <!-- Day Config Modal -->
+    <Teleport to="body">
+      <div v-if="dayConfigModal.show" class="modal">
+        <div class="modal-box" style="max-width:480px;">
+          <h3 style="margin-bottom:8px;">{{ dayConfigModal.label }}</h3>
+          <p style="font-size:12px;color:#888;margin-bottom:10px;">Выберите рестораны, которые могут заказать на этот день. Если ничего не выбрано — работает обычное расписание.</p>
+          <div style="display:flex;gap:6px;margin-bottom:8px;">
+            <input v-model="dayConfigSearch" class="veg-input" placeholder="Поиск ресторана..." style="flex:1;" />
+            <button class="veg-btn outline sm" @click="dayConfigSelectAll">Все</button>
+            <button class="veg-btn outline sm" @click="dayConfigSelectNone">Сбросить</button>
+          </div>
+          <div class="veg-day-config-rests">
+            <label v-for="r in dayConfigFilteredRests" :key="r.number" class="veg-day-config-rest-item">
+              <input type="checkbox" :checked="dayConfigModal.selected.includes(String(r.number))" @change="toggleDayConfigRest(String(r.number))" />
+              <span>{{ r.number }}</span>
+              <span class="veg-day-config-rest-name">{{ r.name || r.address || '' }}</span>
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+            <button class="btn" @click="dayConfigModal.show = false">Отмена</button>
+            <button class="btn primary" @click="applyDayConfig">Применить ({{ dayConfigModal.selected.length }})</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Confirm Modal -->
     <Teleport to="body">
       <div v-if="confirmModal" class="modal" @click.self="confirmModal = null">
@@ -413,6 +452,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
+import { toLocalDateStr } from '@/lib/utils.js';
 
 const userStore = useUserStore();
 const toastStore = useToastStore();
@@ -434,6 +474,79 @@ const createProducts = ref([
   { name: 'Салат айсберг', unit: 'pcs', multiplicity: '' },
 ]);
 const creating = ref(false);
+const createDayConfig = ref([]); // [{date, label, restaurants: [nums]}]
+
+// Дни в диапазоне создания
+const DAYS_SHORT = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const createDayList = computed(() => {
+  if (!createDateFrom.value || !createDateTo.value) return [];
+  const from = new Date(createDateFrom.value + 'T00:00:00');
+  const to = new Date(createDateTo.value + 'T00:00:00');
+  const days = [];
+  const cursor = new Date(from);
+  while (cursor <= to) {
+    const y = cursor.getFullYear(), m = String(cursor.getMonth()+1).padStart(2,'0'), d = String(cursor.getDate()).padStart(2,'0');
+    const dateStr = `${y}-${m}-${d}`;
+    const dow = cursor.getDay() || 7; // 1=пн...7=вс
+    const existing = createDayConfig.value.find(c => c.date === dateStr);
+    days.push({
+      date: dateStr,
+      label: `${DAYS_SHORT[dow]} ${d}.${m}`,
+      dow,
+      restaurants: existing?.restaurants || [],
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+});
+
+// Модалка настройки дня
+const dayConfigModal = ref({ show: false, date: '', label: '', selected: [] });
+const dayConfigSearch = ref('');
+const dayConfigRests = ref([]); // все рестораны
+
+async function openDayConfig(day) {
+  // Загрузить рестораны если ещё нет
+  if (!dayConfigRests.value.length) {
+    const { data } = await db.rpc('veg_get_restaurants', {});
+    dayConfigRests.value = data || [];
+  }
+  dayConfigModal.value = { show: true, date: day.date, label: day.label, selected: [...day.restaurants] };
+  dayConfigSearch.value = '';
+}
+
+const dayConfigFilteredRests = computed(() => {
+  const q = dayConfigSearch.value.toLowerCase().trim();
+  if (!q) return dayConfigRests.value;
+  return dayConfigRests.value.filter(r => String(r.number).includes(q) || (r.name && r.name.toLowerCase().includes(q)) || (r.address && r.address.toLowerCase().includes(q)));
+});
+
+function toggleDayConfigRest(num) {
+  const idx = dayConfigModal.value.selected.indexOf(num);
+  if (idx >= 0) dayConfigModal.value.selected.splice(idx, 1);
+  else dayConfigModal.value.selected.push(num);
+}
+
+function dayConfigSelectAll() {
+  dayConfigModal.value.selected = dayConfigFilteredRests.value.map(r => String(r.number));
+}
+
+function dayConfigSelectNone() {
+  dayConfigModal.value.selected = [];
+}
+
+function applyDayConfig() {
+  const date = dayConfigModal.value.date;
+  const rests = dayConfigModal.value.selected;
+  const idx = createDayConfig.value.findIndex(c => c.date === date);
+  if (rests.length) {
+    if (idx >= 0) createDayConfig.value[idx].restaurants = rests;
+    else createDayConfig.value.push({ date, restaurants: rests });
+  } else {
+    if (idx >= 0) createDayConfig.value.splice(idx, 1);
+  }
+  dayConfigModal.value.show = false;
+}
 
 // Автозаполнение дат: ближайший пн–сб
 function initCreateDates() {
@@ -445,7 +558,7 @@ function initCreateDates() {
   mon.setDate(mon.getDate() + (8 - dow));
   const sat = new Date(mon);
   sat.setDate(sat.getDate() + 5);
-  const fmt = d => d.toISOString().slice(0, 10);
+  const fmt = d => toLocalDateStr(d);
   createDateFrom.value = fmt(mon);
   createDateTo.value = fmt(sat);
 }
@@ -559,18 +672,27 @@ async function createSession() {
       date_from: createDateFrom.value || null,
       date_to: createDateTo.value || null,
       products: prods.map(p => ({ name: p.name.trim(), unit: p.unit, multiplicity: p.multiplicity ? parseFloat(String(p.multiplicity).replace(',', '.')) : null })),
+      day_config: createDayConfig.value.filter(c => c.restaurants.length),
       user_name: userStore.currentUser?.name,
     });
     if (data?.id) {
       showCreate.value = false;
       createName.value = '';
+      createDayConfig.value = [];
       createProducts.value = [
         { name: 'Томат', unit: 'kg', multiplicity: 6 },
         { name: 'Лук репчатый', unit: 'kg', multiplicity: 1 },
         { name: 'Салат айсберг', unit: 'pcs', multiplicity: '' },
       ];
       await loadSessions();
-      toastStore.show('Сессия создана');
+      // Показать ссылку сразу
+      if (data.token) {
+        tokenLink.value = buildTokenLink(data.token);
+        showTokenModal.value = true;
+        // Обновить список токенов для сессии
+        activeSession.value = sessions.value.find(s => s.id === data.id) || null;
+      }
+      toastStore.show('Сессия создана, ссылка отправлена в Telegram');
     }
   } catch (e) { toastStore.show('Ошибка создания', 'error'); }
   finally { creating.value = false; }
@@ -636,7 +758,7 @@ function openTokenModal() {
   // По умолчанию — через 7 дней
   const d = new Date();
   d.setDate(d.getDate() + 7);
-  tokenExpiresDate.value = d.toISOString().slice(0, 10);
+  tokenExpiresDate.value = toLocalDateStr(d);
   showTokenModal.value = true;
 }
 
@@ -1544,6 +1666,20 @@ async function saveScheduleAll() {
   .veg-detail-actions { margin-left: 0; }
   .veg-summary { gap: 12px; }
 }
+
+/* Day config */
+.veg-day-config-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.veg-day-config-item { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1.5px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 13px; transition: all .15s; background: var(--card); }
+.veg-day-config-item:hover { border-color: var(--bk-orange); }
+.veg-day-config-item.customized { border-color: #4CAF50; background: rgba(76,175,80,.06); }
+.veg-day-config-date { font-weight: 700; }
+.veg-day-config-badge { font-size: 11px; color: #4CAF50; font-weight: 600; }
+.veg-day-config-default { font-size: 11px; color: var(--text-muted); }
+.veg-day-config-rests { max-height: 300px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 8px; padding: 6px; }
+.veg-day-config-rest-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 13px; cursor: pointer; border-radius: 4px; }
+.veg-day-config-rest-item:hover { background: rgba(245,166,35,.06); }
+.veg-day-config-rest-item input[type=checkbox] { flex: 0 0 14px; width: 14px; height: 14px; accent-color: #4CAF50; cursor: pointer; }
+.veg-day-config-rest-name { color: var(--text-muted); font-size: 12px; }
 </style>
 
 <!-- Global styles for Teleport modals -->

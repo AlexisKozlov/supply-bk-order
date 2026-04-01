@@ -275,7 +275,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { db } from '@/lib/apiClient.js'
-import { applyEntityFilter } from '@/lib/utils.js'
+import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
@@ -350,7 +350,7 @@ async function loadData() {
     lastSaleDate.value = ld
     const cutoff = new Date(ld + 'T12:00:00')
     cutoff.setDate(cutoff.getDate() - 29)
-    const cutoffStr = cutoff.toISOString().slice(0, 10)
+    const cutoffStr = toLocalDateStr(cutoff)
 
     const { data: sales } = await db
       .from('restaurant_sales')
@@ -451,7 +451,7 @@ const forecastRows = computed(() => {
   // Cutoff for selected period
   const cutoffDate = new Date(ldDate)
   cutoffDate.setDate(cutoffDate.getDate() - (p - 1))
-  const cutoffStr = cutoffDate.toISOString().slice(0, 10)
+  const cutoffStr = toLocalDateStr(cutoffDate)
 
   const allGroups = new Set([...Object.keys(groupStock), ...Object.keys(groupSales)])
   const rows = []

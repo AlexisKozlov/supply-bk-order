@@ -512,7 +512,7 @@ async function deletePlan(plan) {
   const ok = await confirmAction('Удалить план?', plan.supplier);
   if (!ok) return;
   try {
-    const { error } = await db.from('plans').delete().eq('id', plan.id);
+    const { error } = await db.from('plans').delete().eq('id', plan.id).eq('legal_entity', orderStore.settings.legalEntity);
     if (error) { toast.error('Ошибка', 'Не удалось удалить план'); return; }
     // Запись об удалении в аудит
     try { await db.from('audit_log').insert({ action: 'plan_deleted', entity_type: 'plan', entity_id: plan.id, user_name: userStore.currentUser?.name || null, details: { supplier: plan.supplier } }); } catch (e) { console.warn('[history] audit log:', e); }

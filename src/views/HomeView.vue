@@ -99,7 +99,7 @@
 
     <!-- Footer -->
     <footer class="p-footer">
-      <span class="p-footer-ver">Supply Department Portal v1.0.0</span>
+      <span class="p-footer-ver">Supply Department Portal v2.0.0</span>
       <button v-if="userStore.isAuthenticated" class="p-footer-btn" @click="showLogoutConfirm = true">Выйти из аккаунта</button>
     </footer>
 
@@ -122,7 +122,7 @@
 
     <!-- ═══ LOGIN MODAL ═══ -->
     <Teleport to="body">
-      <div v-if="showLoginModal" class="login-overlay" @click.self="showLoginModal = false">
+      <div v-if="showLoginModal" class="login-overlay">
         <div class="login-card">
           <div class="login-left">
             <div class="login-brand">
@@ -175,7 +175,7 @@
 
     <!-- Logout confirm -->
     <Teleport to="body">
-      <div v-if="showLogoutConfirm" class="modal" @click.self="showLogoutConfirm = false">
+      <div v-if="showLogoutConfirm" class="modal">
         <div class="modal-box" style="max-width:380px;">
           <h3 style="margin-bottom:8px;">Выйти из аккаунта?</h3>
           <p style="color:var(--text-muted);font-size:14px;margin-bottom:20px;">Вы уверены, что хотите выйти?</p>
@@ -256,9 +256,11 @@ function actionText(item) {
     order_created: 'создал заказ',
     order_updated: 'изменил заказ',
     order_deleted: 'удалил заказ',
+    orders_deleted: 'удалил заказ',
     plan_created: 'создал план',
     plan_updated: 'изменил план',
     plan_deleted: 'удалил план',
+    plans_deleted: 'удалил план',
     received: 'принял поставку',
     reception_reverted: 'отменил приёмку',
     delivery_date_changed: 'перенёс доставку',
@@ -266,6 +268,17 @@ function actionText(item) {
     restaurant_updated: 'обновил ресторан',
     product_created: 'добавил товар',
     product_updated: 'изменил товар',
+    products_deleted: 'удалил товар',
+    marketing_created: 'создал активность',
+    marketing_updated: 'изменил активность',
+    tender_created: 'создал тендер',
+    tender_updated: 'изменил тендер',
+    price_agreement_created: 'создал протокол цен',
+    stock_collection_created: 'создал сбор остатков',
+    distribution_created: 'создал распределение',
+    correction_created: 'создал корректировку',
+    correction_approved: 'подтвердил корректировку',
+    correction_rejected: 'отклонил корректировку',
   };
   return map[item.action] || item.action;
 }
@@ -331,19 +344,27 @@ const dockModules = [
   { key: 'plan-fact',  name: 'Поставки',       svg: svgIcons.planFact },
   { key: 'history',    name: 'История',        svg: svgIcons.history },
   { key: 'database',   name: 'База данных',    svg: svgIcons.database },
-  { key: 'pricing',    name: 'Цены и ПСЦ',     svg: svgIcons.pricing },
   { key: 'calendar',   name: 'Календарь',      svg: svgIcons.calendar },
+  { key: 'marketing',  name: 'Маркетинг',      svg: svgIcons.marketing },
   { key: 'tools',      name: 'Инструменты',    svg: svgIcons.tools, isFolder: true },
 ];
 
 const toolsFolderItems = [
+  { key: 'dashboard',          name: 'Дашборд',                svg: svgIcons.dashboard },
   { key: 'analytics',          name: 'Аналитика',              svg: svgIcons.analytics },
   { key: 'analysis',           name: 'Анализ запасов',         svg: svgIcons.analysis },
+  { key: 'restaurant-sales',   name: 'Реализация',             svg: svgIcons.restaurantSales },
   { key: 'shelf-life',         name: 'Сроки годности',         svg: svgIcons.shelfLife },
   { key: 'delivery-schedule',  name: 'График доставки',        svg: svgIcons.delivery },
   { key: 'stock-collection',   name: 'Сбор остатков',          svg: svgIcons.stockCollection },
   { key: 'deficit',            name: 'Дефицит',                svg: svgIcons.deficit },
+  { key: 'distribution',       name: 'Распределение',          svg: svgIcons.distribution },
+  { key: 'veg-admin',          name: 'Овощи',                  svg: svgIcons.veg },
   { key: 'tenders',            name: 'Тендеры',                svg: svgIcons.tenders },
+  { key: 'pallet-calc',        name: 'Паллеты',                svg: svgIcons.palletCalc },
+  { key: 'payments',           name: 'Оплаты',                 svg: svgIcons.payments },
+  { key: 'corrections',        name: 'Корректировки',          svg: svgIcons.corrections },
+  { key: 'chat',               name: 'Чат',                    svg: svgIcons.chat },
   { key: 'search',             name: 'Поиск карточек',         svg: svgIcons.search, public: true },
 ];
 

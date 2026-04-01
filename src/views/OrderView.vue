@@ -213,7 +213,7 @@
     <AnalogMergeModal v-if="analogMergeModal.show" :merges="analogMergeModal.merges" @apply="onAnalogApply" @skip="onAnalogSkip"/>
     <AuditLogModal :show="logModal.show" :loading="logModal.loading" :entries="logModal.entries" @close="logModal.show = false" />
     <Teleport to="body">
-      <div v-if="orderResultModal.show" class="modal" @click.self="orderResultModal.show = false">
+      <div v-if="orderResultModal.show" class="modal">
         <div class="modal-box order-result-modal">
           <div class="modal-header">
             <h2><BkIcon name="planning" size="sm"/> Результат заказа</h2>
@@ -966,7 +966,7 @@ async function loadTrends() {
     // 2) Реализация за 28 дней
     const now = new Date();
     const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
-    const dateFrom = d28.toISOString().slice(0, 10);
+    const dateFrom = toLocalDateStr(d28);
     const groupList = [...groups];
     console.log('[Trends] Запрос реализации, дата от:', dateFrom, ', групп:', groupList.length, ', первые 3:', groupList.slice(0, 3));
     // Загружаем пачками по 50 групп (чтобы URL не был слишком длинным)
@@ -986,7 +986,7 @@ async function loadTrends() {
 
     // 3) Считаем тренд: последние 14 дней vs предыдущие 14 дней
     const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
-    const d14str = d14.toISOString().slice(0, 10);
+    const d14str = toLocalDateStr(d14);
     const groupStats = {}; // group → { cur, prev }
     for (const s of allSales) {
       const g = s.analog_group;

@@ -71,9 +71,11 @@ function editMessage($chatId, $messageId, $text, $replyMarkup = null) {
     @file_get_contents($url, false, stream_context_create($opts));
 }
 
-function answerCallback($callbackId, $text = '') {
+function answerCallback($callbackId, $text = '', $showAlert = false) {
     global $BOT_TOKEN;
-    file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/answerCallbackQuery?" . http_build_query(['callback_query_id' => $callbackId, 'text' => $text]));
+    $params = ['callback_query_id' => $callbackId, 'text' => $text];
+    if ($showAlert) $params['show_alert'] = true;
+    file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/answerCallbackQuery?" . http_build_query($params));
 }
 
 function sendMessageAndGetId($chatId, $text) {
@@ -1885,39 +1887,83 @@ if (isset($input['callback_query'])) {
         $oneId = intval(substr($data, 10));
         $user = getUser($chatId);
         if (!$user) { editMessage($chatId, $msgId, "Нужен привязанный аккаунт."); exit; }
+        // Проверяем, не взял ли уже кто-то другой
+        $chk = $pdo->prepare("SELECT reviewer_name, reviewer_chat_id, status FROM order_corrections WHERE id = ?");
+        $chk->execute([$oneId]);
+        $chkRow = $chk->fetch();
+        if ($chkRow && $chkRow['status'] === 'in_progress' && $chkRow['reviewer_chat_id'] && (string)$chkRow['reviewer_chat_id'] !== (string)$chatId) {
+            answerCallback($cb['id'], "⚠️ Уже в работе у {$chkRow['reviewer_name']}", true);
+            exit;
+        }
         $ids = corrGetBatchPendingIds($pdo, $oneId);
-        if (empty($ids)) { editMessage($chatId, $msgId, "⚠️ Заявка уже обработана."); exit; }
+        if (empty($ids)) {
+            // Может уже все in_progress — проверим
+            $nmRow2 = $pdo->prepare("SELECT notify_messages FROM order_corrections WHERE id = ?");
+            $nmRow2->execute([$oneId]);
+            $nmData2 = json_decode($nmRow2->fetchColumn() ?: '{}', true);
+            corrUpdateAllReviewMessages($pdo, $nmData2['batch_ids'] ?? [$oneId]);
+            exit;
+        }
         $ph = implode(',', array_fill(0, count($ids), '?'));
-        $pdo->prepare("UPDATE order_corrections SET status = 'in_progress', reviewer_name = ?, reviewer_chat_id = ? WHERE id IN ({$ph}) AND status = 'pending'")->execute(array_merge([$user['name'], $chatId], $ids));
+        $upd = $pdo->prepare("UPDATE order_corrections SET status = 'in_progress', reviewer_name = ?, reviewer_chat_id = ? WHERE id IN ({$ph}) AND status = 'pending'");
+        $upd->execute(array_merge([$user['name'], $chatId], $ids));
+        if ($upd->rowCount() === 0) {
+            // Кто-то успел раньше
+            $who = $pdo->prepare("SELECT reviewer_name FROM order_corrections WHERE id = ?");
+            $who->execute([$oneId]);
+            $whoName = $who->fetchColumn() ?: 'другой сотрудник';
+            answerCallback($cb['id'], "⚠️ Уже в работе у {$whoName}", true);
+            exit;
+        }
         $nmRow = $pdo->prepare("SELECT notify_messages FROM order_corrections WHERE id = ?");
         $nmRow->execute([$oneId]);
         $nmData = json_decode($nmRow->fetchColumn() ?: '{}', true);
         corrUpdateAllReviewMessages($pdo, $nmData['batch_ids'] ?? $ids);
         exit;
     }
+    // Проверка: только взявший может рецензировать
+    function corrCheckReviewer($pdo, $corrId, $chatId, $cbId) {
+        $chk = $pdo->prepare("SELECT reviewer_chat_id, reviewer_name FROM order_corrections WHERE id = ?");
+        $chk->execute([$corrId]);
+        $r = $chk->fetch();
+        if ($r && $r['reviewer_chat_id'] && (string)$r['reviewer_chat_id'] !== (string)$chatId) {
+            answerCallback($cbId, "⚠️ В работе у {$r['reviewer_name']}", true);
+            return false;
+        }
+        return true;
+    }
+
     // Закупщик: принять одну позицию (corr_a_{id})
     if (str_starts_with($data, 'corr_a_')) {
+        $corrId = intval(substr($data, 7));
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
-        corrReview($pdo, $chatId, $msgId, [intval(substr($data, 7))], 'approve');
+        corrReview($pdo, $chatId, $msgId, [$corrId], 'approve');
         exit;
     }
     // Закупщик: отклонить одну позицию (corr_r_{id})
     if (str_starts_with($data, 'corr_r_')) {
+        $corrId = intval(substr($data, 7));
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
-        corrReview($pdo, $chatId, $msgId, [intval(substr($data, 7))], 'reject');
+        corrReview($pdo, $chatId, $msgId, [$corrId], 'reject');
         exit;
     }
     // Принять все pending в батче (по одному ID)
     if (str_starts_with($data, 'corr_aa_')) {
+        $corrId = intval(substr($data, 8));
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
-        $ids = corrGetBatchPendingIds($pdo, intval(substr($data, 8)));
+        $ids = corrGetBatchPendingIds($pdo, $corrId);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'approve');
         exit;
     }
     // Отклонить все pending в батче
     if (str_starts_with($data, 'corr_ra_')) {
+        $corrId = intval(substr($data, 8));
+        if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
         answerCallback($cb['id']);
-        $ids = corrGetBatchPendingIds($pdo, intval(substr($data, 8)));
+        $ids = corrGetBatchPendingIds($pdo, $corrId);
         if ($ids) corrReview($pdo, $chatId, $msgId, $ids, 'reject');
         exit;
     }

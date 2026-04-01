@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div class="modal" @click.self="$emit('close')">
+    <div class="modal">
       <div class="modal-box compare-modal">
         <div class="modal-header">
           <h2>Сравнение заказов</h2>

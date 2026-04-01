@@ -87,7 +87,7 @@
         </div>
 
         <!-- OCR results modal -->
-        <div v-if="showOcrResults" class="plt-overlay" @click.self="showOcrResults = false">
+        <div v-if="showOcrResults" class="plt-overlay">
           <div class="plt-modal" style="max-width:700px;">
             <div class="plt-modal-head">
               <span>Распознанные товары</span>
@@ -119,7 +119,7 @@
         </div>
 
         <!-- Bulk paste modal -->
-        <div v-if="showBulkPaste" class="plt-overlay" @click.self="showBulkPaste = false">
+        <div v-if="showBulkPaste" class="plt-overlay">
           <div class="plt-modal" style="max-width:600px;">
             <div class="plt-modal-head">
               <span>Вставить список товаров</span>
@@ -264,14 +264,14 @@
               <tr v-for="row in sumRows" :key="row.date" :class="{ weekend: row.isWeekend, today: row.isToday }">
                 <td class="col-date">{{ row.dateStr }}</td>
                 <td class="col-day">{{ row.dayName }}</td>
-                <td class="col-stock bg-stock" @dblclick="editStock(row, 'cold')">
+                <td class="col-stock bg-stock" :class="{ 'stock-manual': row.coldManual, 'stock-weekend': row.coldFromMonday }" @dblclick="editStock(row, 'cold')">
                   <template v-if="editingStock?.date === row.date && editingStock?.type === 'cold'">
                     <input type="number" v-model.number="editingStock.value" class="plt-input-num stock-input"
                       @keyup.enter="saveStock" @keyup.escape="editingStock = null" @blur="saveStock" />
                   </template>
                   <span v-else class="stock-val" :class="{ empty: row.coldStock == null }">{{ row.coldStock ?? '—' }}</span>
                 </td>
-                <td class="col-stock bg-stock" @dblclick="editStock(row, 'frozen')">
+                <td class="col-stock bg-stock" :class="{ 'stock-manual': row.frozenManual, 'stock-weekend': row.frozenFromMonday }" @dblclick="editStock(row, 'frozen')">
                   <template v-if="editingStock?.date === row.date && editingStock?.type === 'frozen'">
                     <input type="number" v-model.number="editingStock.value" class="plt-input-num stock-input"
                       @keyup.enter="saveStock" @keyup.escape="editingStock = null" @blur="saveStock" />
@@ -383,7 +383,7 @@
     </div>
 
     <!-- ═══ MODAL: Manual Entry ═══ -->
-    <div v-if="showEntryModal" class="plt-overlay" @click.self="showEntryModal = false">
+    <div v-if="showEntryModal" class="plt-overlay">
       <div class="plt-modal">
         <div class="plt-modal-head">
           <span>{{ entryModalEdit ? 'Редактировать запись' : 'Новая запись' }}</span>
@@ -460,6 +460,7 @@ import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { toLocalDateStr } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const userStore = useUserStore();
@@ -476,6 +477,14 @@ const tabs = [
 
 const canEdit = computed(() => userStore.hasAccess('pallet-calc', 'edit'));
 const shortName = (e) => ENTITY_SHORT_NAMES[e] || e;
+
+// Маппинг полных юрлиц → коротких (как в warehouse_cells)
+const CELL_ENTITY_MAP = {
+  'ООО "Бургер БК"': 'Бургер БК',
+  'ООО "Воглия Матта"': 'Воглия Матта',
+  'ООО "Пицца Стар"': 'Пицца Стар',
+};
+const cellEntityName = computed(() => CELL_ENTITY_MAP[legalEntity.value] || legalEntity.value);
 
 function entityGroup(entity) {
   return entity === 'ООО "Пицца Стар"' ? 'ps' : 'bk_vm';
@@ -516,7 +525,7 @@ async function loadAllProducts() {
 }
 
 // ═══ CALCULATOR ═══
-const calcDate = ref(new Date().toISOString().slice(0, 10));
+const calcDate = ref(toLocalDateStr(new Date()));
 const calcSupplierName = ref('');
 const calcOrderNumber = ref('');
 const calcItems = ref([]);
@@ -997,7 +1006,7 @@ async function saveDelivery() {
         order_number: calcOrderNumber.value.trim() || null,
         total_cold: calcTotalCold.value,
         total_frozen: calcTotalFrozen.value,
-      }).eq('id', deliveryId);
+      }).eq('id', deliveryId).eq('legal_entity', legalEntity.value);
       if (updErr) throw updErr;
 
       // Delete old items and re-insert
@@ -1010,7 +1019,7 @@ async function saveDelivery() {
           supplier_name: supplierName,
           cold_pallets: calcTotalCold.value,
           frozen_pallets: calcTotalFrozen.value,
-        }).eq('id', existingSum.id);
+        }).eq('id', existingSum.id).eq('legal_entity', legalEntity.value);
       }
     } else {
       // === CREATE new ===
@@ -1110,8 +1119,8 @@ async function deleteDelivery(d) {
   const ok = await showConfirm('Удалить поставку?', `Поставка «${d.supplier_name}» будет удалена из калькулятора и сводки.`, { btn: 'Удалить', danger: true });
   if (!ok) return;
   try {
-    await db.from('plt_summary').delete().eq('delivery_id', d.id);
-    const { error } = await db.from('plt_deliveries').delete().eq('id', d.id);
+    await db.from('plt_summary').delete().eq('delivery_id', d.id).eq('legal_entity', legalEntity.value);
+    const { error } = await db.from('plt_deliveries').delete().eq('id', d.id).eq('legal_entity', legalEntity.value);
     if (error) throw error;
     toastStore.success('Удалено');
     await loadDateDeliveries();
@@ -1132,28 +1141,55 @@ function formatTime(dateStr) {
 }
 
 // ═══ SUMMARY ═══
-const sumMonth = ref(new Date().toISOString().slice(0, 7));
+const sumMonth = ref(toLocalDateStr(new Date()).slice(0, 7));
 const sumLoading = ref(false);
 const sumData = ref({ stock: [], entries: [] });
 const editingStock = ref(null);
 
 const DAYS_RU = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 
+// Найти ближайший понедельник для даты (для сб/вс)
+function nextMonday(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = d.getDay();
+  if (dow === 6) d.setDate(d.getDate() + 2); // сб → пн
+  else if (dow === 0) d.setDate(d.getDate() + 1); // вс → пн
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function findStockRow(date, type) {
+  return sumData.value.stock.find(s => s.report_date === date && s.stock_type === type);
+}
+
 const sumRows = computed(() => {
   const [year, month] = sumMonth.value.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const rows = [];
   for (let day = 1; day <= daysInMonth; day++) {
     const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const d = new Date(date + 'T00:00:00');
     const dow = d.getDay();
-    const stockRow = sumData.value.stock.find(s => s.stock_date === date);
+    const isWeekend = dow === 0 || dow === 6;
+
+    // Для сб/вс берём данные понедельника (если нет собственных)
+    const coldOwn = findStockRow(date, 'cold');
+    const frozenOwn = findStockRow(date, 'frozen');
+    const mondayDate = isWeekend ? nextMonday(date) : null;
+    const coldRow = coldOwn || (mondayDate ? findStockRow(mondayDate, 'cold') : null);
+    const frozenRow = frozenOwn || (mondayDate ? findStockRow(mondayDate, 'frozen') : null);
+
     const dayEntries = sumData.value.entries.filter(e => e.entry_date === date);
     rows.push({
       date, dateStr: `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}`,
-      dayName: DAYS_RU[dow], isWeekend: dow === 0 || dow === 6, isToday: date === today,
-      coldStock: stockRow?.cold_pallets ?? null, frozenStock: stockRow?.frozen_pallets ?? null,
+      dayName: DAYS_RU[dow], isWeekend, isToday: date === today,
+      coldStock: coldRow?.cell_count ?? null,
+      frozenStock: frozenRow?.cell_count ?? null,
+      coldManual: !!coldRow?.is_manual,
+      frozenManual: !!frozenRow?.is_manual,
+      coldFromMonday: isWeekend && !coldOwn && !!coldRow,
+      frozenFromMonday: isWeekend && !frozenOwn && !!frozenRow,
       coldEntries: dayEntries.filter(e => e.cold_pallets > 0),
       frozenEntries: dayEntries.filter(e => e.frozen_pallets > 0),
       totalCold: dayEntries.reduce((s, e) => s + (e.cold_pallets || 0), 0),
@@ -1172,13 +1208,14 @@ async function loadSummary() {
     const [year, month] = sumMonth.value.split('-').map(Number);
     const from = `${year}-${String(month).padStart(2, '0')}-01`;
     const to = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
-    const [stockRes, entriesRes] = await Promise.all([
-      db.from('plt_daily_stock').select('*').eq('legal_entity', legalEntity.value).gte('stock_date', from).lte('stock_date', to),
+    // Загружаем данные ячеек из warehouse_cells (cold + frozen) + записи поставок
+    const [cellsRes, entriesRes] = await Promise.all([
+      db.rpc('get_warehouse_cells_range', { entity: cellEntityName.value, date_from: from, date_to: to }),
       db.from('plt_summary').select('*').eq('legal_entity', legalEntity.value).gte('entry_date', from).lte('entry_date', to).order('supplier_name'),
     ]);
-    if (stockRes.error) throw stockRes.error;
+    if (cellsRes.error) throw cellsRes.error;
     if (entriesRes.error) throw entriesRes.error;
-    sumData.value = { stock: stockRes.data || [], entries: entriesRes.data || [] };
+    sumData.value = { stock: cellsRes.data || [], entries: entriesRes.data || [] };
   } catch (e) {
     console.error('[PalletCalc]', e);
     toastStore.error('Ошибка загрузки сводки');
@@ -1198,17 +1235,13 @@ async function saveStock() {
   const { date, type, value } = editingStock.value;
   editingStock.value = null;
   try {
-    const { data: existing } = await db.from('plt_daily_stock').select('id,cold_pallets,frozen_pallets').eq('legal_entity', legalEntity.value).eq('stock_date', date).maybeSingle();
-    if (existing) {
-      const upd = type === 'cold' ? { cold_pallets: value || 0 } : { frozen_pallets: value || 0 };
-      await db.from('plt_daily_stock').update(upd).eq('id', existing.id);
-    } else {
-      await db.from('plt_daily_stock').insert({
-        legal_entity: legalEntity.value, stock_date: date,
-        cold_pallets: type === 'cold' ? (value || 0) : 0,
-        frozen_pallets: type === 'frozen' ? (value || 0) : 0,
-      });
-    }
+    const { error } = await db.rpc('upsert_warehouse_cell', {
+      report_date: date,
+      legal_entity: cellEntityName.value,
+      stock_type: type,
+      cell_count: value || 0,
+    });
+    if (error) throw error;
     await loadSummary();
   } catch (e) {
     toastStore.error('Ошибка сохранения остатков');
@@ -1222,7 +1255,7 @@ const entryForm = ref({ id: null, entry_date: '', supplier_name: '', cold_pallet
 
 function addManualEntry() {
   entryModalEdit.value = false;
-  entryForm.value = { id: null, entry_date: new Date().toISOString().slice(0, 10), supplier_name: '', cold_pallets: 0, frozen_pallets: 0 };
+  entryForm.value = { id: null, entry_date: toLocalDateStr(new Date()), supplier_name: '', cold_pallets: 0, frozen_pallets: 0 };
   showEntryModal.value = true;
 }
 
@@ -1237,7 +1270,7 @@ async function saveEntryModal() {
   if (!f.entry_date || !f.supplier_name?.trim()) { toastStore.error('Заполните дату и поставщика'); return; }
   try {
     if (f.id) {
-      await db.from('plt_summary').update({ entry_date: f.entry_date, supplier_name: f.supplier_name.trim(), cold_pallets: f.cold_pallets || 0, frozen_pallets: f.frozen_pallets || 0, is_manual: 1 }).eq('id', f.id);
+      await db.from('plt_summary').update({ entry_date: f.entry_date, supplier_name: f.supplier_name.trim(), cold_pallets: f.cold_pallets || 0, frozen_pallets: f.frozen_pallets || 0, is_manual: 1 }).eq('id', f.id).eq('legal_entity', legalEntity.value);
     } else {
       await db.from('plt_summary').insert({ legal_entity: legalEntity.value, entry_date: f.entry_date, supplier_name: f.supplier_name.trim(), cold_pallets: f.cold_pallets || 0, frozen_pallets: f.frozen_pallets || 0, is_manual: 1 });
     }
@@ -1251,7 +1284,7 @@ async function deleteSummaryEntry() {
   const ok = await showConfirm('Удалить запись?', 'Эта запись будет удалена из сводки.', { btn: 'Удалить', danger: true });
   if (!entryForm.value.id || !ok) return;
   try {
-    await db.from('plt_summary').delete().eq('id', entryForm.value.id);
+    await db.from('plt_summary').delete().eq('id', entryForm.value.id).eq('legal_entity', legalEntity.value);
     showEntryModal.value = false;
     toastStore.success('Удалено');
     await loadSummary();
@@ -1262,18 +1295,25 @@ async function deleteSummaryEntry() {
 function buildSummaryRows(stockData, entriesData) {
   const [year, month] = sumMonth.value.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const rows = [];
+  const findCell = (date, type) => stockData.find(s => s.report_date === date && s.stock_type === type);
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(year, month - 1, day);
     const dow = d.getDay();
-    const date = d.toISOString().slice(0, 10);
-    const stockRow = stockData.find(s => s.stock_date === date);
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const isWeekend = dow === 0 || dow === 6;
+    const coldOwn = findCell(date, 'cold');
+    const frozenOwn = findCell(date, 'frozen');
+    const mondayDate = isWeekend ? nextMonday(date) : null;
+    const coldRow = coldOwn || (mondayDate ? findCell(mondayDate, 'cold') : null);
+    const frozenRow = frozenOwn || (mondayDate ? findCell(mondayDate, 'frozen') : null);
     const dayEntries = entriesData.filter(e => e.entry_date === date);
     rows.push({
       date, dateStr: `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}`,
-      dayName: DAYS_RU[dow], isWeekend: dow === 0 || dow === 6, isToday: date === today,
-      coldStock: stockRow?.cold_pallets ?? null, frozenStock: stockRow?.frozen_pallets ?? null,
+      dayName: DAYS_RU[dow], isWeekend, isToday: date === today,
+      coldStock: coldRow?.cell_count ?? null, frozenStock: frozenRow?.cell_count ?? null,
       coldEntries: dayEntries.filter(e => e.cold_pallets > 0),
       frozenEntries: dayEntries.filter(e => e.frozen_pallets > 0),
       totalCold: dayEntries.reduce((s, e) => s + (e.cold_pallets || 0), 0),
@@ -1383,13 +1423,14 @@ async function exportSummaryExcel() {
 
     // Загружаем данные всех юрлиц параллельно
     const allData = await Promise.all(entities.map(async (entity) => {
-      const [stockRes, entriesRes] = await Promise.all([
-        db.from('plt_daily_stock').select('*').eq('legal_entity', entity).gte('stock_date', from).lte('stock_date', to),
+      const cellName = CELL_ENTITY_MAP[entity] || entity;
+      const [cellsRes, entriesRes] = await Promise.all([
+        db.rpc('get_warehouse_cells_range', { entity: cellName, date_from: from, date_to: to }),
         db.from('plt_summary').select('*').eq('legal_entity', entity).gte('entry_date', from).lte('entry_date', to).order('supplier_name'),
       ]);
-      if (stockRes.error) throw stockRes.error;
+      if (cellsRes.error) throw cellsRes.error;
       if (entriesRes.error) throw entriesRes.error;
-      return { entity, stock: stockRes.data || [], entries: entriesRes.data || [] };
+      return { entity, stock: cellsRes.data || [], entries: entriesRes.data || [] };
     }));
 
     for (const { entity, stock, entries } of allData) {
@@ -1797,6 +1838,17 @@ onMounted(async () => {
 .stock-val { font-weight: 600; color: #502314; }
 .stock-val.empty { color: #ddd; font-weight: 400; }
 .stock-input { width: 70px; }
+
+/* Ручные значения остатков */
+.stock-manual { position: relative; }
+.stock-manual::after {
+  content: '';
+  position: absolute; top: 3px; right: 3px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #F5A623;
+}
+/* Выходные с данными понедельника */
+.stock-weekend .stock-val { font-style: italic; opacity: .65; }
 .plt-entries { display: flex; flex-wrap: wrap; gap: 4px; }
 .plt-entry { display: inline-block; padding: 3px 10px; background: #FFF3E0; border-radius: 6px; font-size: 12px; font-weight: 500; color: #502314; cursor: pointer; transition: all .15s; white-space: nowrap; }
 .plt-entry:hover { background: #FFE0B2; }

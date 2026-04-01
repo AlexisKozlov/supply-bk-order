@@ -70,7 +70,7 @@
 
     <!-- Модалка просмотра заказа -->
     <Teleport to="body">
-      <div v-if="preview.show" class="modal" @click.self="preview.show = false">
+      <div v-if="preview.show" class="modal">
         <div class="modal-box" style="max-width:440px;">
           <div class="modal-header">
             <h2>{{ preview.supplier }}</h2>

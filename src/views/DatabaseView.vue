@@ -180,7 +180,7 @@
       </div>
       <!-- Раскрытый рецепт с ингредиентами -->
       <Teleport to="body">
-        <div v-if="recipeDetail.show" class="modal" @click.self="recipeDetail.show = false">
+        <div v-if="recipeDetail.show" class="modal">
           <div class="modal-box" style="width:520px;">
             <div class="modal-header">
               <h2>{{ recipeDetail.recipe?.name }}</h2>

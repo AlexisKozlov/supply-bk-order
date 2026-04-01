@@ -4,6 +4,7 @@
  */
 
 import { CUSTOMER_MAP } from '@/lib/legalEntities.js';
+import { toLocalDateStr } from '@/lib/utils.js';
 
 // Маппинг складов на понятные названия
 const WAREHOUSE_MAP = [
@@ -86,7 +87,7 @@ export async function parseStockMalling(file) {
 
   const parseDate = (val) => {
     if (!val) return null;
-    if (val instanceof Date) return isNaN(val.getTime()) ? null : val.toISOString().slice(0, 10);
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : toLocalDateStr(val);
     const s = String(val).trim();
     const m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
     if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;

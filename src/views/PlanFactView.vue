@@ -103,7 +103,7 @@
     <!-- Drawer -->
     <Teleport to="body">
       <Transition name="pf-drawer">
-        <div v-if="drawerOpen" class="pf-drawer-overlay" @click.self="closeDrawer">
+        <div v-if="drawerOpen" class="pf-drawer-overlay">
           <div class="pf-drawer">
             <div class="pf-drawer-header">
               <div>
@@ -593,7 +593,7 @@ async function onDeliveryDateChange(e) {
 
   saving.value = true
   try {
-    await db.from('orders').update({ delivery_date: newDate }).eq('id', selectedOrder.value.id)
+    await db.from('orders').update({ delivery_date: newDate }).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
     const userName = userStore.currentUser?.name || 'Неизвестно'
     const now = nowLocal()
     await db.from('audit_log').insert({
@@ -696,7 +696,7 @@ async function acceptAsOrdered() {
       updateData2.delivery_date = editDeliveryDate.value
     }
     if (editTtnDate.value) updateData2.ttn_date = editTtnDate.value
-    await db.from('orders').update(updateData2).eq('id', selectedOrder.value.id)
+    await db.from('orders').update(updateData2).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
     const paymentDate2 = editTtnDate.value || editDeliveryDate.value || selectedOrder.value.delivery_date
     await db.rpc('create_payment_if_needed', {
       order_id: selectedOrder.value.id,
@@ -742,7 +742,7 @@ async function saveReceived() {
       updateData.delivery_date = editDeliveryDate.value
     }
     if (editTtnDate.value) updateData.ttn_date = editTtnDate.value
-    await db.from('orders').update(updateData).eq('id', selectedOrder.value.id)
+    await db.from('orders').update(updateData).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
     // Создаём запись оплаты для российских поставщиков (отсрочка от даты ТТН)
     const paymentDate = editTtnDate.value || editDeliveryDate.value || selectedOrder.value.delivery_date
     await db.rpc('create_payment_if_needed', {
@@ -776,7 +776,7 @@ async function revertToTransit() {
     await db.rpc('batch_update_received_qty', {
       items: drawerItems.value.map(i => ({ id: i.id, received_qty: null }))
     })
-    await db.from('orders').update({ received_at: null, received_by: null }).eq('id', orderId)
+    await db.from('orders').update({ received_at: null, received_by: null }).eq('id', orderId).eq('legal_entity', legalEntity.value)
     const now = nowLocal()
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: orderId, action: 'reception_reverted', user_name: userName,

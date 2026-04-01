@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="show" class="modal" @click.self="$emit('close')">
+    <div v-if="show" class="modal">
       <div class="modal-box audit-log-modal-box">
         <div class="modal-header">
           <h2><BkIcon name="note" size="sm"/> История изменений</h2>

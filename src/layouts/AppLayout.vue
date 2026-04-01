@@ -173,7 +173,7 @@
 
     <!-- Change Password Modal -->
     <Teleport to="body">
-      <div v-if="showChangePassword" class="modal" @click.self="showChangePassword = false">
+      <div v-if="showChangePassword" class="modal">
         <div class="modal-box" style="max-width: 380px;">
           <h3 style="margin-bottom: 16px;">Сменить пароль</h3>
           <div style="display:flex;flex-direction:column;gap:10px;">
@@ -195,7 +195,7 @@
 
     <!-- Logout Confirm Modal -->
     <Teleport to="body">
-      <div v-if="showLogoutConfirm" class="modal" @click.self="showLogoutConfirm = false">
+      <div v-if="showLogoutConfirm" class="modal">
         <div class="modal-box" style="max-width: 380px;">
           <h3 style="margin-bottom: 8px;">Выйти из аккаунта?</h3>
           <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Вы уверены, что хотите выйти?</p>
@@ -228,7 +228,7 @@
 
     <!-- Notifications Modal -->
     <Teleport to="body">
-      <div v-if="showNotifications" class="modal" @click.self="showNotifications = false">
+      <div v-if="showNotifications" class="modal">
         <div class="modal-box" style="max-width: 480px;">
           <div class="modal-header">
             <h2><BkIcon name="bell" size="sm"/> {{ notifTab === 'changelog' ? 'Что нового' : 'Уведомления' }}</h2>
@@ -392,6 +392,7 @@ const toolsItems = [
   { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
   { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
   { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
+  { module: 'pallet-storage', route: 'pallet-storage', icon: 'warehouse', label: 'Паллетовка склада' },
   { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
   { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },

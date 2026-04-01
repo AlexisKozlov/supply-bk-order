@@ -422,7 +422,7 @@
 
     <!-- Log Modal -->
     <Teleport to="body">
-      <div v-if="logModal.show" class="modal" @click.self="logModal.show = false">
+      <div v-if="logModal.show" class="modal">
         <div class="modal-box" style="max-width:560px;">
           <div class="modal-header">
             <h2><BkIcon name="note" size="sm"/> История изменений</h2>
@@ -1887,7 +1887,7 @@ async function confirmSave() {
   let newPlanId = null;
   if (editingPlanId.value) {
     planData.updated_by = userStore.currentUser?.name || null;
-    ({ error } = await db.from('plans').update(planData).eq('id', editingPlanId.value));
+    ({ error } = await db.from('plans').update(planData).eq('id', editingPlanId.value).eq('legal_entity', orderStore.settings.legalEntity));
   } else {
     planData.created_by = userStore.currentUser?.name || null;
     const res = await db.from('plans').insert([planData]);
@@ -2074,7 +2074,7 @@ onMounted(async () => {
     const draft = draftStore.hasPlanDraft();
     if (draft) {
       const ok = await confirmAction('Восстановить черновик?', `от ${draft.date} (${draft.supplier}, ${draft.itemsCount} поз.)`);
-      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; _restorePeriodValue(d.periodValue || 'm3', d.periodFrequency, d.periodCountInput); startDateStr.value = d.startDateStr || new Date().toISOString().slice(0,10); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; truckEnabled.value = d.truckEnabled || false; truckPallets.value = d.truckPallets || 32; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); loadPlanPrices(); toast.info('Черновик загружен', ''); } }
+      if (ok) { const d = draftStore.loadPlanDraft(); if (d) { supplier.value = d.supplier || ''; _restorePeriodValue(d.periodValue || 'm3', d.periodFrequency, d.periodCountInput); startDateStr.value = d.startDateStr || toLocalDateStr(new Date()); planningDateStr.value = d.planningDateStr || ''; inputUnit.value = d.inputUnit || 'boxes'; consumptionPeriodDays.value = d.consumptionPeriodDays || 30; editingPlanId.value = d.editingPlanId || null; truckEnabled.value = d.truckEnabled || false; truckPallets.value = d.truckPallets || 32; items.value = (d.items || []).map(i => ({ ...i, _cw: false, _ct: '' })); recalcAll(); loadPlanPrices(); toast.info('Черновик загружен', ''); } }
       else { draftStore.clearPlanDraft(); }
     }
   }

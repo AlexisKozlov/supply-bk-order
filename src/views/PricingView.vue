@@ -237,7 +237,7 @@
     </div>
 
     <!-- Модалка: Редактирование/создание цены -->
-    <div v-if="showPriceModal" class="modal-overlay" @click.self="showPriceModal = false">
+    <div v-if="showPriceModal" class="modal-overlay">
       <div class="modal-card" style="max-width:420px;">
         <h3 style="margin:0 0 16px;">{{ editingPrice ? 'Редактировать цену' : 'Новая цена' }}</h3>
         <div class="form-group">
@@ -408,7 +408,7 @@
     </div>
 
     <!-- Модалка: Импорт цен из файла -->
-    <div v-if="showImportModal" class="modal-overlay" @click.self="showImportModal = false">
+    <div v-if="showImportModal" class="modal-overlay">
       <div class="modal-card" style="max-width:520px;">
         <h3 style="margin:0 0 16px;">Импорт цен из файла</h3>
         <div class="form-group">
@@ -465,7 +465,7 @@
       </div>
     </div>
     <!-- Модалка: История цены -->
-    <div v-if="showHistoryModal" class="modal-overlay" @click.self="showHistoryModal = false">
+    <div v-if="showHistoryModal" class="modal-overlay">
       <div class="modal-card" style="max-width:560px;">
         <h3 style="margin:0 0 16px;">История цены — {{ historyItem?.sku }}</h3>
         <div v-if="historyItem" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
@@ -516,7 +516,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter, formatDate, formatDateTimeFull as formatDateTime } from '@/lib/utils.js';
+import { applyEntityFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -965,7 +965,7 @@ async function saveAgreement() {
     };
     let newId = null;
     if (editingAgreement.value) {
-      const { error } = await db.from('price_agreements').update(payload).eq('id', editingAgreement.value.id);
+      const { error } = await db.from('price_agreements').update(payload).eq('id', editingAgreement.value.id).eq('legal_entity', le);
       if (error) { toast.error('Ошибка', error); return; }
     } else {
       payload.created_by = userStore.currentUser?.name || '';
@@ -977,7 +977,7 @@ async function saveAgreement() {
         await uploadPscFile(newId);
         // Обновить запись протокола с путём к файлу
         if (agForm.value.file_name) {
-          const { error: fileErr } = await db.from('price_agreements').update({ file_name: agForm.value.file_name, file_path: agForm.value.file_path }).eq('id', newId);
+          const { error: fileErr } = await db.from('price_agreements').update({ file_name: agForm.value.file_name, file_path: agForm.value.file_path }).eq('id', newId).eq('legal_entity', le);
           if (fileErr) toast.error('Предупреждение', 'Файл загружен, но не привязан к протоколу');
         }
       }
@@ -1270,7 +1270,7 @@ async function exportPriceList() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Прайс-лист');
     const le = orderStore.settings.legalEntity || '';
-    XLSX.writeFile(wb, `Прайс-лист_${le.replace(/[^\wа-яА-Я]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `Прайс-лист_${le.replace(/[^\wа-яА-Я]/g, '_')}_${toLocalDateStr(new Date())}.xlsx`);
   } catch (err) {
     toast.error('Ошибка экспорта', err.message);
   }
@@ -1394,7 +1394,7 @@ async function loadDynamics() {
     const le = orderStore.settings.legalEntity;
     const since = new Date();
     since.setDate(since.getDate() - parseInt(dynamicsPeriod.value));
-    const sinceStr = since.toISOString().slice(0, 10);
+    const sinceStr = toLocalDateStr(since);
     const { data, error } = await db.from('price_history')
       .select('*')
       .eq('legal_entity', le)

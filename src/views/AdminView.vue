@@ -842,7 +842,7 @@
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
-import { formatMoscowDateTime, formatMoscowRelative } from '@/lib/utils.js';
+import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
@@ -997,16 +997,30 @@ const auditCategories = [
   { value: 'plan', label: 'Планы' },
   { value: 'product', label: 'Товары' },
   { value: 'delivery_schedule', label: 'Расписание' },
+  { value: 'marketing', label: 'Маркетинг' },
+  { value: 'tender', label: 'Тендеры' },
+  { value: 'correction', label: 'Корректировки' },
+  { value: 'distribution', label: 'Распределение' },
+  { value: 'price_agreement', label: 'Цены и ПСЦ' },
 ];
 
 const AUDIT_ACTION_LABELS = {
-  order_created: 'Создан', order_updated: 'Изменён', order_deleted: 'Удалён',
-  plan_created: 'Создан', plan_updated: 'Изменён', plan_deleted: 'Удалён',
-  product_created: 'Создана', product_updated: 'Изменена',
+  order_created: 'Создан', order_updated: 'Изменён', order_deleted: 'Удалён', orders_deleted: 'Удалён',
+  plan_created: 'Создан', plan_updated: 'Изменён', plan_deleted: 'Удалён', plans_deleted: 'Удалён',
+  product_created: 'Создана', product_updated: 'Изменена', products_deleted: 'Удалена',
   delivery_date_changed: 'Дата доставки', received: 'Принят', reception_reverted: 'Отмена приёмки',
   schedule_updated: 'График', restaurant_updated: 'Ресторан',
+  marketing_created: 'Создана', marketing_updated: 'Изменена',
+  tender_created: 'Создан', tender_updated: 'Изменён',
+  price_agreement_created: 'Создан', price_agreement_updated: 'Изменён',
+  correction_created: 'Создана', correction_approved: 'Подтверждена', correction_rejected: 'Отклонена',
+  stock_collection_created: 'Создан', distribution_created: 'Создано',
 };
-const AUDIT_ENTITY_LABELS = { order: 'Заказ', plan: 'План', product: 'Товар', delivery_schedule: 'Расписание' };
+const AUDIT_ENTITY_LABELS = {
+  order: 'Заказ', plan: 'План', product: 'Товар', delivery_schedule: 'Расписание',
+  marketing: 'Маркетинг', tender: 'Тендер', price_agreement: 'Протокол цен',
+  correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
+};
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }
 function auditEntityLabel(et) { return AUDIT_ENTITY_LABELS[et] || et; }
@@ -1291,7 +1305,7 @@ async function exportBackup() {
       }
     }
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = toLocalDateStr(new Date());
     const suffix = backupEntity.value ? '_' + backupEntity.value.replace(/[^\wа-яА-Я]/g, '') : '';
     XLSX.writeFile(wb, `backup_${date}${suffix}.xlsx`);
     toast.success('Готово', 'Файл скачан');

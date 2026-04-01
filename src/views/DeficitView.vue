@@ -303,7 +303,7 @@
 
     <!-- Sheet picker -->
     <Teleport to="body">
-      <div v-if="showSheetPicker" class="modal" @click.self="showSheetPicker = false">
+      <div v-if="showSheetPicker" class="modal">
         <div class="modal-box" style="max-width: 480px;">
           <h3 style="margin-bottom:12px;">Выберите лист</h3>
           <div class="dfc-pick-list">
@@ -316,7 +316,7 @@
 
     <!-- Column picker -->
     <Teleport to="body">
-      <div v-if="showColumnPicker" class="modal" @click.self="showColumnPicker = false">
+      <div v-if="showColumnPicker" class="modal">
         <div class="modal-box" style="max-width: 520px;">
           <h3 style="margin-bottom:12px;">Выберите товар</h3>
           <div class="dfc-pick-list">

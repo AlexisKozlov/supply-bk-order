@@ -1767,7 +1767,7 @@ function corrNotifyPurchasersBatch($pdo, $corrIds, $state, $submitterName) {
 }
 
 // Построить текст + кнопки для сообщения закупщику
-function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, $submitterName = null) {
+function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, $submitterName = null, $viewerChatId = null) {
     $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
 
     // Загружаем все позиции батча одним запросом
@@ -1826,32 +1826,40 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
     $keyboard = ['inline_keyboard' => []];
 
     if ($hasInProgress) {
-        // В работе — показываем кнопки принять/отклонить только тому кто взял
-        $workIds = [];
-        foreach ($items as $c) { if ($c['status'] === 'in_progress') $workIds[] = $c['id']; }
-        foreach ($workIds as $pid) {
-            $c = null;
-            foreach ($items as $item) { if ($item['id'] == $pid) { $c = $item; break; } }
-            if (!$c) continue;
-            $short = mb_substr($c['product_name'], 0, 25);
-            $qty = corrFmtQty($c['quantity']);
-            $uom = $c['unit_of_measure'] === 'шт.' ? 'шт' : 'кор';
-            $keyboard['inline_keyboard'][] = [
-                ['text' => "✅ {$short} {$qty}{$uom}", 'callback_data' => "corr_a_{$pid}"],
-                ['text' => "❌", 'callback_data' => "corr_r_{$pid}"],
-            ];
-        }
-        if (count($workIds) > 1) {
+        // В работе — определяем кто взял
+        $reviewerChatId = null;
+        foreach ($items as $c) { if ($c['status'] === 'in_progress' && $c['reviewer_chat_id']) { $reviewerChatId = $c['reviewer_chat_id']; break; } }
+        $isReviewer = $viewerChatId && $reviewerChatId && (string)$viewerChatId === (string)$reviewerChatId;
+
+        if ($isReviewer) {
+            // Кнопки только для того, кто взял в работу
+            $workIds = [];
+            foreach ($items as $c) { if ($c['status'] === 'in_progress') $workIds[] = $c['id']; }
+            foreach ($workIds as $pid) {
+                $c = null;
+                foreach ($items as $item) { if ($item['id'] == $pid) { $c = $item; break; } }
+                if (!$c) continue;
+                $short = mb_substr($c['product_name'], 0, 25);
+                $qty = corrFmtQty($c['quantity']);
+                $uom = $c['unit_of_measure'] === 'шт.' ? 'шт' : 'кор';
+                $keyboard['inline_keyboard'][] = [
+                    ['text' => "✅ {$short} {$qty}{$uom}", 'callback_data' => "corr_a_{$pid}"],
+                    ['text' => "❌", 'callback_data' => "corr_r_{$pid}"],
+                ];
+            }
+            if (count($workIds) > 1) {
+                $firstId = $workIds[0];
+                $keyboard['inline_keyboard'][] = [
+                    ['text' => '✅ Всё принять', 'callback_data' => "corr_aa_{$firstId}"],
+                    ['text' => '❌ Всё отклонить', 'callback_data' => "corr_ra_{$firstId}"],
+                ];
+            }
             $firstId = $workIds[0];
             $keyboard['inline_keyboard'][] = [
-                ['text' => '✅ Всё принять', 'callback_data' => "corr_aa_{$firstId}"],
-                ['text' => '❌ Всё отклонить', 'callback_data' => "corr_ra_{$firstId}"],
+                ['text' => '💬 С комментарием', 'callback_data' => "corr_cm_{$firstId}"],
             ];
         }
-        $firstId = $workIds[0];
-        $keyboard['inline_keyboard'][] = [
-            ['text' => '💬 С комментарием', 'callback_data' => "corr_cm_{$firstId}"],
-        ];
+        // Для остальных — никаких кнопок, только текст «в работе у ...» (уже есть в строке выше)
     } elseif (!empty($pendingIds)) {
         // Ещё не взяли — показываем кнопку "Взять в работу"
         $firstId = $pendingIds[0];
@@ -1889,8 +1897,9 @@ function corrUpdateAllReviewMessages($pdo, $batchIds) {
     $messages = $nm['messages'] ?? [];
     if (!$messages) return;
 
-    $msgData = corrBuildReviewMessage($pdo, $batchIds);
+    // Каждому получателю — своё сообщение (с кнопками только для того кто взял)
     foreach ($messages as $m) {
+        $msgData = corrBuildReviewMessage($pdo, $batchIds, null, null, null, $m['chat_id']);
         editMessage($m['chat_id'], $m['message_id'], $msgData['text'], $msgData['keyboard']);
     }
 }

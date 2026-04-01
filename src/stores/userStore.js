@@ -52,6 +52,7 @@ export const useUserStore = defineStore('user', () => {
   // Модули с ограниченным доступом: только указанные пользователи
   const RESTRICTED_MODULES = {
     pricing: ['Инна Ерома'],
+    'pallet-storage': ['Козлов Алексей'],
   };
 
   function getAccess(module) {
