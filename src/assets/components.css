@@ -1911,3 +1911,30 @@ td.stock-high::before {
   text-align: center;
   margin-top: 1px;
 }
+
+/* ===== CROSS-MODULE NAVIGATION LINKS ===== */
+.pf-cross-link {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  color: inherit;
+  transition: color .15s;
+}
+.pf-cross-link:hover {
+  color: var(--primary, #e64626);
+}
+.pf-cross-link-icon {
+  cursor: pointer;
+  opacity: 0;
+  margin-left: 4px;
+  color: var(--text-muted);
+  transition: opacity .15s, color .15s;
+  vertical-align: middle;
+}
+.pf-cross-link-icon:hover {
+  color: var(--primary, #e64626);
+}
+tr:hover .pf-cross-link-icon,
+.pf-mrow:hover .pf-cross-link-icon {
+  opacity: 1;
+}

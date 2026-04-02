@@ -79,7 +79,10 @@
                   <span class="sfv-group-meta">{{ r.supplier || '' }}{{ r.supplier && r.category ? ' · ' : '' }}{{ r.category || '' }}</span>
                 </td>
                 <td class="sfv-td-num">{{ fmtNum(r.stock) }}</td>
-                <td class="sfv-td-num">{{ fmtNum(r.avg) }}</td>
+                <td class="sfv-td-num">
+                  {{ fmtNum(r.avg) }}
+                  <span v-if="r.dataSource === 'analysis'" class="sfv-src-hint" title="По расходу со склада (нет данных реализации)">склад</span>
+                </td>
                 <td class="sfv-td-days">
                   <span class="sfv-badge" :class="badgeClass(r.daysLeft)">{{ fmtDays(r.daysLeft) }}</span>
                 </td>
@@ -378,7 +381,7 @@ watch(() => orderStore.settings.legalEntity, loadData)
 // ═══ Build forecast rows ═══
 
 const forecastRows = computed(() => {
-  if (!productsData.value.length || !salesData.value.length) return []
+  if (!productsData.value.length) return []
 
   const skuProduct = new Map()
   for (const p of productsData.value) {
@@ -390,13 +393,17 @@ const forecastRows = computed(() => {
   const groupSkus = {}     // group → [{ sku, name, stock }]
   const groupSupplier = {}
   const groupCategory = {}
+  const groupConsumption = {} // group → daily consumption from analysis_data (fallback)
 
   for (const a of analysisData.value) {
     const p = skuProduct.get(a.sku)
     if (!p || !p.analog_group) continue
     const g = p.analog_group
     const st = parseFloat(a.stock) || 0
+    const cons = parseFloat(a.consumption) || 0
+    const pDays = parseInt(a.period_days) || 30
     groupStock[g] = (groupStock[g] || 0) + st
+    if (cons > 0) groupConsumption[g] = (groupConsumption[g] || 0) + cons / pDays
 
     if (!groupSkus[g]) groupSkus[g] = []
     groupSkus[g].push({ sku: a.sku, name: p.name || a.sku, stock: st })
@@ -466,10 +473,12 @@ const forecastRows = computed(() => {
     const periodDates = allDates.filter(d => d >= cutoffStr)
     const periodValues = periodDates.map(d => dailySales[d])
 
-    // Average
+    // Average: предпочитаем реализацию, fallback на расход из analysis_data
     const totalQty = periodValues.reduce((a, b) => a + b, 0)
     const daysWithData = periodValues.length
-    const avg = daysWithData > 0 ? totalQty / daysWithData : 0
+    const hasSales = daysWithData > 0 && totalQty > 0
+    const avg = hasSales ? totalQty / daysWithData : (groupConsumption[g] || 0)
+    const dataSource = hasSales ? 'sales' : (groupConsumption[g] ? 'analysis' : 'none')
 
     // Min / Max
     const maxDaily = periodValues.length ? Math.max(...periodValues) : 0
@@ -486,15 +495,15 @@ const forecastRows = computed(() => {
       zeroDate = `${String(zd.getDate()).padStart(2,'0')}.${String(zd.getMonth()+1).padStart(2,'0')}.${zd.getFullYear()}`
     }
 
-    // Trend: compare first half vs second half of period
+    // Trend: последние 7 дней vs предыдущие 7 дней (от lastSaleDate)
     let trendPct = 0
-    if (periodValues.length >= 4) {
-      const mid = Math.floor(periodValues.length / 2)
-      const firstHalf = periodValues.slice(0, mid)
-      const secondHalf = periodValues.slice(mid)
-      const avgFirst = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length
-      const avgSecond = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length
-      if (avgFirst > 0) trendPct = ((avgSecond - avgFirst) / avgFirst) * 100
+    if (allDates.length >= 7) {
+      const last7 = allDates.slice(-7).reduce((a, d) => a + (dailySales[d] || 0), 0) / 7
+      const prev7start = Math.max(0, allDates.length - 14)
+      const prev7end = Math.max(0, allDates.length - 7)
+      const prev7dates = allDates.slice(prev7start, prev7end)
+      const prev7 = prev7dates.length > 0 ? prev7dates.reduce((a, d) => a + (dailySales[d] || 0), 0) / prev7dates.length : 0
+      if (prev7 > 0) trendPct = ((last7 - prev7) / prev7) * 100
     }
 
     // Depletion sparkline (mini, for table)
@@ -565,7 +574,7 @@ const forecastRows = computed(() => {
 
     rows.push({
       group: g, stock, avg, maxDaily, minDaily,
-      daysLeft, zeroDate, trendPct,
+      daysLeft, zeroDate, trendPct, dataSource,
       depletionData, chartBars, chartDates, chartValues, chartMax,
       skuBreakdown, supplier, category,
       periodDates, periodValues,
@@ -842,6 +851,7 @@ function sparkColor(r) {
 .sfv-td-name { display: flex; flex-direction: column; gap: 1px; }
 .sfv-group-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
 .sfv-group-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+.sfv-src-hint { display: inline-block; font-size: 9px; color: #E65100; background: #FFF3E0; padding: 1px 5px; border-radius: 4px; margin-left: 4px; font-weight: 600; vertical-align: middle; }
 
 /* Badges */
 .sfv-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 12px; min-width: 32px; text-align: center; }

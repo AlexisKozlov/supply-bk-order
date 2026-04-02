@@ -396,6 +396,7 @@ const toolsItems = [
   { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
   { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
+  { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
 ];
 
 const showToolsMenu = ref(false); // legacy, не используется

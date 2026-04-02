@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
+import { useOrderStore } from './orderStore.js';
 
 const PAGE_SIZE = 50;
 
@@ -122,7 +123,7 @@ export const useHistoryStore = defineStore('history', () => {
     const { error } = await db.rpc('delete_order', { order_id: orderId });
     if (error) return { error: 'Не удалось удалить заказ: ' + error };
     orders.value = orders.value.filter(o => o.id !== orderId);
-    try { await db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, details: {} }); } catch (e) { /* ignore */ }
+    try { const orderStore = useOrderStore(); await db.from('audit_log').insert({ action: 'order_deleted', entity_type: 'order', entity_id: orderId, user_name: userStore.currentUser?.name || null, legal_entity: orderStore.settings?.legalEntity || null, details: {} }); } catch (e) { /* ignore */ }
     return { success: true };
   }
 

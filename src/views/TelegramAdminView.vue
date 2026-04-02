@@ -134,7 +134,7 @@
             </div>
             <div class="tga-stat-card">
               <div class="tga-stat-val">{{ vegUniqueChatIds.length }}</div>
-              <div class="tga-stat-label">Ресторанов</div>
+              <div class="tga-stat-label">Подписчиков рест.</div>
             </div>
             <div class="tga-stat-card">
               <div class="tga-stat-val">{{ allUniqueChatIds.length }}</div>
@@ -144,6 +144,52 @@
               <div class="tga-stat-val">{{ reminderLog.length }}</div>
               <div class="tga-stat-label">Напоминаний</div>
             </div>
+          </div>
+        </div>
+
+        <!-- Корректировки (7 дней) -->
+        <div class="tga-section-card" v-if="corrStats">
+          <h3 class="tga-subtitle">Корректировки (7 дней)</h3>
+          <div class="tga-stats-row">
+            <div class="tga-stat-card">
+              <div class="tga-stat-val" :style="corrStats.pending > 0 ? 'color:#e65100' : ''">{{ corrStats.pending || 0 }}</div>
+              <div class="tga-stat-label">Ожидают</div>
+            </div>
+            <div class="tga-stat-card">
+              <div class="tga-stat-val" style="color:#1565c0">{{ corrStats.in_progress || 0 }}</div>
+              <div class="tga-stat-label">В работе</div>
+            </div>
+            <div class="tga-stat-card">
+              <div class="tga-stat-val" style="color:#2e7d32">{{ corrStats.approved || 0 }}</div>
+              <div class="tga-stat-label">Одобрено</div>
+            </div>
+            <div class="tga-stat-card">
+              <div class="tga-stat-val" style="color:#c62828">{{ corrStats.rejected || 0 }}</div>
+              <div class="tga-stat-label">Отклонено</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Текущая сессия овощей -->
+        <div class="tga-section-card" v-if="activeSession">
+          <h3 class="tga-subtitle">Текущая сессия: {{ activeSession.name }}</h3>
+          <div class="tga-stats-row">
+            <div class="tga-stat-card">
+              <div class="tga-stat-val tga-cell-ok">{{ vegSubmittedRests.length }}</div>
+              <div class="tga-stat-label">Подали заявку</div>
+            </div>
+            <div class="tga-stat-card">
+              <div class="tga-stat-val" :style="vegMissingRests.length ? 'color:#e65100' : ''">{{ vegMissingRests.length }}</div>
+              <div class="tga-stat-label">Не подали</div>
+            </div>
+          </div>
+          <div v-if="vegMissingRests.length" style="margin-top:12px;">
+            <details class="tga-details" style="border:none;padding:0;margin:0;">
+              <summary>Не подавшие рестораны ({{ vegMissingRests.length }})</summary>
+              <div class="tga-details-body" style="font-size:13px;color:var(--text-muted);">
+                {{ vegMissingRests.map(r => r.number).join(', ') }}
+              </div>
+            </details>
           </div>
         </div>
       </template>
@@ -281,52 +327,114 @@
         </div>
       </div>
 
-      <!-- Фильтр -->
-      <div class="tga-filter-row">
-        <select v-model="vegFilter" class="tga-select">
-          <option value="all">Все</option>
-          <option value="subscribed">С подпиской</option>
-          <option value="unsubscribed">Без подписки</option>
-        </select>
-        <input v-model="vegSearch" class="tga-input" placeholder="Поиск по номеру или адресу..."/>
+      <!-- Подтабы: Рестораны / Уведомления -->
+      <div class="tga-subtabs">
+        <button class="tga-subtab" :class="{ active: vegSubTab === 'rests' }" @click="vegSubTab = 'rests'">Рестораны</button>
+        <button class="tga-subtab" :class="{ active: vegSubTab === 'notif' }" @click="vegSubTab = 'notif'">Уведомления подписчиков</button>
       </div>
 
-      <div class="tga-table-wrap">
-        <table class="tga-table">
-          <thead>
-            <tr>
-              <th style="width:80px">Ресторан</th>
-              <th>Адрес</th>
-              <th>Город</th>
-              <th>Подписчики</th>
-              <th>Дата подписки</th>
-              <th style="width:50px"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in filteredVegRests" :key="r.number" :class="{ 'tga-row-muted': !r.subCount }">
-              <td><b>{{ r.number }}</b></td>
-              <td>{{ r.address || '—' }}</td>
-              <td>{{ r.city || '—' }}</td>
-              <td :class="r.subCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
-                <template v-if="r.subscribers.length">
-                  <span class="tga-sub-count-link" @click="toggleSubsList(r.number)">{{ r.subCount }}</span>
-                  <div v-if="expandedRest === r.number" class="tga-sub-list">
-                    <div v-for="(sub, si) in r.subscribers" :key="si" class="tga-sub-person">
-                      {{ sub.first_name || 'Без имени' }}<span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
+      <!-- Рестораны -->
+      <template v-if="vegSubTab === 'rests'">
+        <div class="tga-filter-row">
+          <select v-model="vegFilter" class="tga-select">
+            <option value="all">Все</option>
+            <option value="subscribed">С подпиской</option>
+            <option value="unsubscribed">Без подписки</option>
+          </select>
+          <input v-model="vegSearch" class="tga-input" placeholder="Поиск по номеру или адресу..."/>
+        </div>
+
+        <div class="tga-table-wrap">
+          <table class="tga-table">
+            <thead>
+              <tr>
+                <th style="width:80px">Ресторан</th>
+                <th>Адрес</th>
+                <th>Город</th>
+                <th>Подписчики</th>
+                <th v-if="activeSession">Заявка</th>
+                <th>Дата подписки</th>
+                <th style="width:50px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in filteredVegRests" :key="r.number" :class="{ 'tga-row-muted': !r.subCount }">
+                <td><b>{{ r.number }}</b></td>
+                <td>{{ r.address || '—' }}</td>
+                <td>{{ r.city || '—' }}</td>
+                <td :class="r.subCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
+                  <template v-if="r.subscribers.length">
+                    <span class="tga-sub-count-link" @click="toggleSubsList(r.number)">{{ r.subCount }}</span>
+                    <div v-if="expandedRest === r.number" class="tga-sub-list">
+                      <div v-for="(sub, si) in r.subscribers" :key="si" class="tga-sub-person">
+                        {{ sub.first_name || 'Без имени' }}<span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
+                      </div>
                     </div>
-                  </div>
-                </template>
-                <template v-else>—</template>
-              </td>
-              <td>{{ r.firstSub ? formatDate(r.firstSub) : '—' }}</td>
-              <td>
-                <button v-if="r.subCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание">📨</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                  </template>
+                  <template v-else>—</template>
+                </td>
+                <td v-if="activeSession" style="text-align:center;">
+                  <template v-if="vegOrderStatusMap[r.number]">
+                    <span class="tga-badge tga-badge-submitted" :title="'Подана ' + formatDate(vegOrderStatusMap[r.number].last_submitted)">
+                      ✅ {{ vegOrderStatusMap[r.number].dates_count }}д.
+                      <span v-if="vegOrderStatusMap[r.number].admin_edited > 0" title="Есть правки админа"> ✏️</span>
+                    </span>
+                  </template>
+                  <template v-else-if="r.subCount">
+                    <span class="tga-badge tga-badge-expired">не подана</span>
+                  </template>
+                  <template v-else>—</template>
+                </td>
+                <td>{{ r.firstSub ? formatDate(r.firstSub) : '—' }}</td>
+                <td>
+                  <button v-if="r.subCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание">📨</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <!-- Уведомления подписчиков -->
+      <template v-if="vegSubTab === 'notif'">
+        <p class="tga-hint">Настройки уведомлений ресторанных подписчиков. Нажмите, чтобы переключить.</p>
+        <div class="tga-table-wrap">
+          <table class="tga-table tga-table-compact">
+            <thead>
+              <tr>
+                <th style="text-align:left">Подписчик</th>
+                <th style="text-align:left">Рестораны</th>
+                <th title="Напоминания об овощах">🥬</th>
+                <th title="Новые сессии овощей">📢</th>
+                <th title="Подтверждения заявок">✅</th>
+                <th title="Напоминания об остатках">📋</th>
+                <th title="Новые сборы остатков">📦</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="sub in vegUniqueSubscribers" :key="sub.chat_id">
+                <td style="text-align:left">
+                  <b>{{ sub.first_name || 'Без имени' }}</b>
+                  <span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
+                </td>
+                <td style="text-align:left" class="tga-sub-text">{{ sub.restaurants.join(', ') }}</td>
+                <td :class="cellClass(sub.notify_veg_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_veg_reminders')">{{ sub.notify_veg_reminders ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_veg_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_veg_sessions')">{{ sub.notify_veg_sessions ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_confirmations)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_confirmations')">{{ sub.notify_confirmations ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_stock_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_reminders')">{{ sub.notify_stock_reminders ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_stock_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_sessions')">{{ sub.notify_stock_sessions ? '✓' : '✕' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tga-legend">
+          <span>🥬 Напоминания об овощах</span>
+          <span>📢 Новые сессии овощей</span>
+          <span>✅ Подтверждения заявок</span>
+          <span>📋 Напоминания об остатках</span>
+          <span>📦 Новые сборы остатков</span>
+        </div>
+      </template>
     </div>
 
     <!-- ═══ Лог напоминаний ═══ -->
@@ -510,6 +618,12 @@ const questionsLoading = ref(false)
 const vegFilter = ref('all')
 const vegSearch = ref('')
 const expandedRest = ref(null)
+const vegSubTab = ref('rests')
+
+// Session & corrections
+const activeSession = ref(null)
+const vegOrderStatus = ref([])
+const corrStats = ref(null)
 
 // Reminder log filters
 const logDateFrom = ref('')
@@ -534,6 +648,9 @@ async function loadData() {
     vegSubs.value = data.veg_subs || []
     allRestaurants.value = data.all_restaurants || []
     reminderLog.value = data.reminder_log || []
+    activeSession.value = data.active_session || null
+    vegOrderStatus.value = data.veg_order_status || []
+    corrStats.value = data.correction_stats || null
   } catch (e) {
     console.error('tg_admin_stats error:', e)
   } finally {
@@ -688,6 +805,43 @@ const filteredReminderLog = computed(() => {
   return list
 })
 
+const vegOrderStatusMap = computed(() => {
+  const map = {}
+  for (const o of vegOrderStatus.value) {
+    map[o.restaurant_number] = o
+  }
+  return map
+})
+
+const vegSubmittedRests = computed(() => {
+  return subscribedRests.value.filter(r => vegOrderStatusMap.value[r.number])
+})
+
+const vegMissingRests = computed(() => {
+  return subscribedRests.value.filter(r => !vegOrderStatusMap.value[r.number])
+})
+
+const vegUniqueSubscribers = computed(() => {
+  const map = {}
+  for (const s of vegSubs.value) {
+    if (!map[s.chat_id]) {
+      map[s.chat_id] = {
+        chat_id: s.chat_id,
+        first_name: s.first_name,
+        username: s.username,
+        restaurants: [],
+        notify_veg_reminders: s.notify_veg_reminders,
+        notify_veg_sessions: s.notify_veg_sessions,
+        notify_confirmations: s.notify_confirmations,
+        notify_stock_reminders: s.notify_stock_reminders,
+        notify_stock_sessions: s.notify_stock_sessions,
+      }
+    }
+    map[s.chat_id].restaurants.push(s.restaurant_number)
+  }
+  return Object.values(map)
+})
+
 const allUniqueChatIds = computed(() => {
   const ids = new Set()
   linkedUsers.value.forEach(u => { if (u.telegram_chat_id) ids.add(String(u.telegram_chat_id)) })
@@ -740,6 +894,19 @@ async function sendVegReminder(rest) {
   try {
     const { data } = await db.rpc('tg_admin_send_veg_reminder', { restaurant_number: rest.number, message: msg })
     alert(`Отправлено: ${data.sent} из ${data.total}`)
+  } catch (e) {
+    alert('Ошибка: ' + (e.message || e))
+  }
+}
+
+async function toggleRestNotif(sub, field) {
+  try {
+    const { data } = await db.rpc('tg_admin_toggle_rest_notif', { chat_id: String(sub.chat_id), field })
+    sub[field] = data.value ? 1 : 0
+    // Обновить и в vegSubs
+    for (const s of vegSubs.value) {
+      if (String(s.chat_id) === String(sub.chat_id)) s[field] = sub[field]
+    }
   } catch (e) {
     alert('Ошибка: ' + (e.message || e))
   }
@@ -953,6 +1120,18 @@ async function sendBroadcast() {
 .tga-btn-chip.active { background: #2AABEE; color: white; border-color: #2AABEE; }
 
 .tga-broadcast-result { font-size: 13px; color: #2e7d32; font-weight: 500; }
+
+/* ═══ Подтабы ═══ */
+.tga-subtabs { display: flex; gap: 0; margin-bottom: 16px; }
+.tga-subtab {
+  padding: 7px 18px; font-size: 13px; font-weight: 600; font-family: inherit;
+  color: var(--text-muted, #999); background: var(--bg, #fafafa);
+  border: 1px solid var(--border, #e0e0e0); cursor: pointer; transition: all .15s;
+}
+.tga-subtab:first-child { border-radius: 8px 0 0 8px; }
+.tga-subtab:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+.tga-subtab.active { background: var(--bk-brown, #8B7355); color: #fff; border-color: var(--bk-brown, #8B7355); }
+.tga-subtab:hover:not(.active) { background: rgba(139,115,85,.06); }
 
 /* ═══ Легенда ═══ */
 .tga-legend {

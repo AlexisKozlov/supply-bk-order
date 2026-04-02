@@ -2,6 +2,7 @@
   <div class="dash">
     <div class="dash-header">
       <h1 class="page-title">Дашборд</h1>
+      <!-- freshness badge removed -->
       <div class="dash-controls">
         <select v-model="entityFilter" class="dash-select" @change="load">
           <option value="">Все юрлица</option>
@@ -104,6 +105,7 @@ const period = ref('week')
 const entityFilter = ref('')
 const loading = ref(false)
 const data = ref({})
+const lastLoadedAt = ref(null)
 
 const entities = computed(() => userStore.getAllowedEntities() || [])
 
@@ -125,6 +127,7 @@ async function load() {
   try {
     const { data: d } = await db.rpc('dashboard_kpi', { period: period.value, legal_entity: entityFilter.value || null })
     data.value = d || {}
+    lastLoadedAt.value = new Date()
   } catch { data.value = {} }
   finally { loading.value = false }
 }
@@ -142,6 +145,15 @@ function fmtDate(d) {
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 function barWidth(v, max) { return max > 0 ? (v / max * 100) + '%' : '0%' }
+
+function formatTimeAgo(date) {
+  if (!date) return ''
+  const sec = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (sec < 60) return 'только что'
+  if (sec < 3600) return Math.floor(sec / 60) + ' мин. назад'
+  if (sec < 86400) return Math.floor(sec / 3600) + ' ч. назад'
+  return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 onMounted(load)
 </script>
@@ -204,4 +216,7 @@ onMounted(load)
 .dash-stats { display: flex; flex-direction: column; gap: 4px; }
 .dash-stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-light); font-size: 13px; }
 .dash-stat-row:last-child { border-bottom: none; }
+
+.data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
+.data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
 </style>

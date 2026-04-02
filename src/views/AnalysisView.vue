@@ -4,6 +4,7 @@
     <div class="anv-header">
       <div class="anv-header-left">
         <h1 class="page-title" style="margin-bottom:0">Анализ</h1>
+        <!-- freshness badge removed: confusing (shows page open time, not data import time) -->
         <div class="anv-mode-toggle">
           <button class="anv-mode-btn" :class="{ active: viewMode === 'stock' }" @click="viewMode = 'stock'">Запасы</button>
           <button v-if="userStore.hasAccess('restaurant-sales', 'view')" class="anv-mode-btn" :class="{ active: viewMode === 'sales' }" @click="viewMode = 'sales'">Реализация</button>
@@ -38,6 +39,12 @@
 
     <!-- ═══ Запасы ═══ -->
     <template v-if="viewMode === 'stock'">
+
+    <!-- Retry banner -->
+    <div v-if="loadError" class="retry-banner">
+      <span>Не удалось загрузить данные</span>
+      <button class="btn secondary small" @click="loadProducts">Повторить</button>
+    </div>
 
     <!-- Alert banner for critical groups -->
     <div
@@ -354,6 +361,7 @@ const viewMode = ref('stock');
 const periodDays = ref(30);
 const unit = ref('pieces');
 const loading = ref(false);
+const loadError = ref(false);
 const importLoading = ref(false);
 const load1cLoading = ref(false);
 const savingData = ref(false);
@@ -361,6 +369,7 @@ const items = ref([]);
 let _loadRequestId = 0;
 const expandedGroups = reactive(new Set());
 const lastUpdate = reactive({ by: '', at: null, label: '' });
+const lastLoadedAt = ref(null);
 
 const searchQuery = ref('');
 const filterSupplier = ref('');
@@ -446,6 +455,7 @@ function formatTimeAgo(date) {
 async function loadProducts() {
   const myRequestId = ++_loadRequestId;
   loading.value = true;
+  loadError.value = false;
   items.value = [];
   expandedGroups.clear();
   lastUpdate.by = '';
@@ -457,7 +467,7 @@ async function loadProducts() {
     q = applyEntityFilter(q, orderStore.settings.legalEntity);
     const { data, error } = await q;
     if (myRequestId !== _loadRequestId) return;
-    if (error) { toast.error('Ошибка', 'Не удалось загрузить товары'); return; }
+    if (error) { toast.error('Ошибка', 'Не удалось загрузить товары'); loadError.value = true; return; }
     const ignoredSkus = new Set([
       '70432','70433','70452','70453','70573','70583',
       '70599','70601','70682','70686','71695','91041','91428',
@@ -476,9 +486,11 @@ async function loadProducts() {
         consumption: 0,
       }));
     await Promise.all([loadSavedData(myRequestId), loadPrices()]);
+    if (myRequestId === _loadRequestId) lastLoadedAt.value = new Date();
   } catch {
     if (myRequestId !== _loadRequestId) return;
     toast.error('Ошибка', 'Не удалось загрузить товары');
+    loadError.value = true;
   } finally {
     if (myRequestId === _loadRequestId) loading.value = false;
   }
@@ -942,6 +954,12 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
 </script>
 
 <style scoped>
+.retry-banner {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px;
+  color: #E65100; font-size: 13px; margin-bottom: 16px;
+}
+.retry-banner .btn { flex-shrink: 0; }
 .analysis-view {
   display: flex;
   flex-direction: column;
@@ -1740,4 +1758,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   display: flex;
   justify-content: flex-end;
 }
+
+.data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
+.data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
 </style>

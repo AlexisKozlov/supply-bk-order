@@ -4,6 +4,16 @@
  * Запуск каждые 5 минут: php /var/www/bk-calc/api/cron_telegram.php
  */
 
+// Защита от параллельного запуска (flock)
+$lockFile = __DIR__ . '/cron_telegram.lock';
+$lockFp = fopen($lockFile, 'w');
+if (!flock($lockFp, LOCK_EX | LOCK_NB)) {
+    echo "Already running, skipping\n";
+    exit;
+}
+// Ограничение времени выполнения — 4 минуты (крон каждые 5 мин)
+set_time_limit(240);
+
 $envFile = __DIR__ . '/.env';
 if (!file_exists($envFile)) exit;
 foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
@@ -23,7 +33,9 @@ $dsn = 'mysql:host=' . ($_ENV['DB_HOST'] ?? 'localhost') . ';dbname=' . ($_ENV['
 $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_TIMEOUT => 5,
 ]);
+$pdo->exec("SET SESSION max_statement_time = 30");
 
 function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
     global $BOT_TOKEN;
@@ -143,7 +155,13 @@ function logNotification($pdo, $type, $legalEntity, $chatId) {
 
 $sent = 0;
 
+// Проверка выходных (секции 1-9 отправляются только в рабочие дни)
+$tz = new DateTimeZone('Europe/Minsk');
+$nowMinsk = new DateTime('now', $tz);
+$isWeekend = ((int)$nowMinsk->format('N') >= 6);
+
 // ═══ 1. Уведомления типа agreement_expiry → пользователям с psc_expiry=1 ═══
+if (!$isWeekend):
 $notifications = $pdo->query("
     SELECT n.id, n.title, n.message, n.target_user, n.type
     FROM notifications n
@@ -424,7 +442,10 @@ if (!empty($expiringItems)) {
                 }
                 if (!$match) continue;
             }
+            $notifKey = $customer ?: 'all';
+            if (wasNotified($pdo, 'expiring_items', $notifKey, $user['telegram_chat_id'], 3600)) continue;
             tgSend($user['telegram_chat_id'], $text);
+            logNotification($pdo, 'expiring_items', $notifKey, $user['telegram_chat_id']);
             $sent++;
         }
     }
@@ -573,6 +594,8 @@ if ($dow === 5 && $hour === 17 && $minute < 5) {
     }
 }
 
+endif; // !$isWeekend — конец блока уведомлений для рабочих дней
+
 // ═══ Оплаты российских поставщиков ═══
 try {
     // За 7 дней до оплаты + за день до дедлайна заявки
@@ -649,10 +672,11 @@ try {
         $filled->execute([$sc['id']]);
         $filledSet = array_flip($filled->fetchAll(PDO::FETCH_COLUMN));
 
-        // Все подписанные рестораны
-        $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number FROM veg_telegram_subs")->fetchAll();
+        // Все подписанные рестораны (с учётом настроек уведомлений)
+        $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number, notify_stock_reminders FROM veg_telegram_subs")->fetchAll();
         foreach ($subs as $sub) {
             if (isset($filledSet[$sub['restaurant_number']])) continue;
+            if (!$sub['notify_stock_reminders']) continue;
             // Проверяем не отправляли ли уже напоминание (раз в 12 часов)
             if (wasNotified($pdo, 'stock_collection_reminder', "sc_{$sc['id']}_{$sub['restaurant_number']}", $sub['chat_id'], 43200)) continue;
 
@@ -696,12 +720,13 @@ try {
         $deadlineRules = [];
         foreach ($dlRows as $r) $deadlineRules[(int)$r['delivery_dow']] = $r;
 
-        // Все подписки
-        $allSubs = $pdo->query("SELECT chat_id, restaurant_number FROM veg_telegram_subs")->fetchAll();
+        // Все подписки (с учётом настроек уведомлений)
+        $allSubs = $pdo->query("SELECT chat_id, restaurant_number, notify_veg_reminders FROM veg_telegram_subs")->fetchAll();
         if ($allSubs) {
-            // Группировка подписок по ресторану
+            // Группировка подписок по ресторану (только с включёнными напоминаниями)
             $subsByRest = [];
             foreach ($allSubs as $sub) {
+                if (!$sub['notify_veg_reminders']) continue;
                 $subsByRest[$sub['restaurant_number']][] = $sub['chat_id'];
             }
 
@@ -893,9 +918,46 @@ try {
     error_log('[cron_telegram] veg reminders error: ' . $e->getMessage());
 }
 
+// ═══ ПРОТОКОЛЫ: напоминания о дедлайнах решений ═══
+try {
+    // Автоматически ставим "просрочено" если дедлайн прошёл
+    $pdo->exec("UPDATE protocol_decisions SET status = 'overdue' WHERE status = 'pending' AND deadline IS NOT NULL AND deadline < CURDATE()");
+
+    // Напоминания: дедлайн через 1 день или сегодня
+    $decStmt = $pdo->query("SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, p.topic, p.meeting_date FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.status = 'pending' AND d.deadline IS NOT NULL AND d.deadline BETWEEN CURDATE() AND CURDATE() + INTERVAL 1 DAY AND d.responsible_person != ''");
+    $decisions = $decStmt->fetchAll();
+    foreach ($decisions as $dec) {
+        // Проверяем что не отправляли сегодня
+        if (wasNotified($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', 86400)) continue;
+        // Ищем chat_id ответственного
+        $uStmt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
+        $uStmt->execute([$dec['responsible_person']]);
+        $chatId = $uStmt->fetchColumn();
+        if (!$chatId) continue;
+        $deadlineDate = date('d.m', strtotime($dec['deadline']));
+        $isToday = $dec['deadline'] === date('Y-m-d');
+        $urgency = $isToday ? '🔴 Сегодня' : '🟡 Завтра';
+        $text = "{$urgency} <b>Дедлайн по решению</b>\n";
+        $text .= "─────────────────────\n";
+        $text .= "📋 Совещание: {$dec['topic']}\n";
+        $text .= "📝 {$dec['text']}\n";
+        $text .= "📅 Срок: {$deadlineDate}\n";
+        sendTelegramMessage($BOT_TOKEN, $chatId, $text, 'HTML');
+        logNotification($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', $chatId);
+        $sent++;
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] protocol deadline reminders error: ' . $e->getMessage());
+}
+
 // Очистка старых записей дедупликации (старше 7 дней)
 try {
     $pdo->exec("DELETE FROM tg_notification_log WHERE sent_at < NOW() - INTERVAL 7 DAY");
+} catch (Exception $e) {}
+
+// Очистка истёкших сессий
+try {
+    $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()");
 } catch (Exception $e) {}
 
 echo "Отправлено: {$sent}\n";

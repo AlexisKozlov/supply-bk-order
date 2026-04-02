@@ -5,10 +5,16 @@
       <button class="sc-btn fill" @click="openCreateModal">+ Новый сбор</button>
     </div>
 
+    <!-- Retry banner -->
+    <div v-if="loadError && !activeCollection" class="retry-banner">
+      <span>Не удалось загрузить данные</span>
+      <button class="btn secondary small" @click="loadCollections">Повторить</button>
+    </div>
+
     <!-- Collections list -->
     <div v-if="!activeCollection" class="sc-list">
       <div v-if="loading" class="sc-empty">Загрузка...</div>
-      <div v-else-if="!collections.length" class="sc-empty">Нет сессий сбора. Создайте первую.</div>
+      <div v-else-if="!collections.length && !loadError" class="sc-empty">Нет сессий сбора. Создайте первую.</div>
       <div
         v-for="c in collections" :key="c.id"
         class="sc-card"
@@ -451,6 +457,7 @@ const toastStore = useToastStore();
 const restaurantStore = useRestaurantStore();
 
 const loading = ref(true);
+const loadError = ref(false);
 const collections = ref([]);
 const activeCollection = ref(null);
 const collectionData = ref(null);
@@ -577,6 +584,7 @@ function pickProduct(i, product) {
 // Collections CRUD
 async function loadCollections() {
   loading.value = true;
+  loadError.value = false;
   try {
     const { data } = await db.from('stock_collections')
       .select('*')
@@ -584,7 +592,10 @@ async function loadCollections() {
       .order('created_at', { ascending: false })
       .limit(50);
     collections.value = data || [];
-  } catch {} finally { loading.value = false; }
+  } catch {
+    loadError.value = true;
+    toastStore.error('Ошибка', 'Не удалось загрузить сессии сбора');
+  } finally { loading.value = false; }
 }
 
 function openCreateModal() {
@@ -751,17 +762,8 @@ function askDeleteCollection() {
 }
 async function doDeleteCollection() {
   try {
-    const id = activeCollection.value.id;
-    const steps = [
-      () => db.from('stock_collection_data').delete().eq('collection_id', id),
-      () => db.from('stock_collection_tokens').delete().eq('collection_id', id),
-      () => db.from('stock_collection_products').delete().eq('collection_id', id),
-      () => db.from('stock_collections').delete().eq('id', id).eq('legal_entity', orderStore.settings.legalEntity),
-    ];
-    for (const step of steps) {
-      const { error } = await step();
-      if (error) { toastStore.error('Ошибка', 'Не удалось удалить сбор'); return; }
-    }
+    const { data, error } = await db.rpc('sc_delete_collection', { collection_id: activeCollection.value.id });
+    if (error) { toastStore.error('Ошибка', 'Не удалось удалить сбор'); return; }
     activeCollection.value = null;
     collectionData.value = null;
     toastStore.success('Удалено', 'Сбор удалён');
@@ -1199,6 +1201,12 @@ function fmtTime(s) {
 </script>
 
 <style scoped>
+.retry-banner {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px;
+  color: #E65100; font-size: 13px; margin-bottom: 16px;
+}
+.retry-banner .btn { flex-shrink: 0; }
 .sc { --brown: #502314; --orange: #FF8732; --red: #D62700; --green: #2E7D32; --border: #EDE7DF; --muted: #8C7B6E; --bg2: #F9F6F2; }
 .modal-confirm { z-index: 10001; }
 

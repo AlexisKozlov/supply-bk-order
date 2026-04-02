@@ -1113,6 +1113,13 @@ async function createOrderFromPeriod(pi) {
   const planItems = items.value.filter(i => !i._excluded && i.plan[pi]?.orderBoxes > 0);
   if (!planItems.length) { toast.error('Нет данных', 'В этом периоде нет позиций с заказом'); return; }
 
+  // Проверяем, есть ли незавершённый заказ
+  const hasExisting = orderStore.items.some(i => i.consumptionPeriod > 0 || i.stock > 0 || i.finalOrder > 0);
+  if (hasExisting) {
+    const ok = await confirmAction('Создать заказ из плана?', 'Текущий незавершённый заказ будет сброшен. Продолжить?');
+    if (!ok) return;
+  }
+
   // Загрузить полные карточки товаров из БД
   const skus = planItems.map(i => i.sku).filter(Boolean);
   let productMap = {};
@@ -1910,7 +1917,7 @@ async function confirmSave() {
       });
       if (ch.length) ld.changes = ch;
     }
-    await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || newPlanId || null, user_name: userStore.currentUser?.name || null, details: ld });
+    await db.from('audit_log').insert({ action: editingPlanId.value ? 'plan_updated' : 'plan_created', entity_type: 'plan', entity_id: editingPlanId.value || newPlanId || null, user_name: userStore.currentUser?.name || null, legal_entity: orderStore.settings?.legalEntity || null, details: ld });
   } catch (e) { console.warn('[planning] audit log:', e); }
   // Уведомление только при редактировании чужого плана
   if (editingPlanId.value && _loadedCreatedBy.value && _loadedCreatedBy.value !== userStore.currentUser?.name) {

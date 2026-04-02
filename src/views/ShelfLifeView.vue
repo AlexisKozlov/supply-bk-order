@@ -4,6 +4,7 @@
     <div class="sl-header">
       <div style="display:flex;align-items:center;gap:16px;">
         <h1 class="page-title" style="margin:0;">{{ slTab === 'shelf' ? 'Сроки годности' : 'Загрузка склада' }}</h1>
+        <!-- freshness badge removed: confusing (shows page open time, not data import time) -->
         <div class="sl-mode-tabs">
           <button class="sl-mode-tab" :class="{ active: slTab === 'shelf' }" @click="slTab = 'shelf'">Сроки</button>
           <button class="sl-mode-tab" :class="{ active: slTab === 'cells' }" @click="slTab = 'cells'; loadCellStats()">Ячейки</button>
@@ -215,6 +216,7 @@ const toastStore = useToastStore();
 
 const allData = ref([]);
 const loading = ref(true);
+const lastLoadedAt = ref(null);
 const uploading = ref(false);
 const uploadedAt = ref(null);
 const uploadedBy = ref('');
@@ -558,6 +560,15 @@ function fmtQty(v) {
   return isNaN(n) ? '\u2014' : n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
+function formatTimeAgo(date) {
+  if (!date) return '';
+  const sec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (sec < 60) return 'только что';
+  if (sec < 3600) return Math.floor(sec / 60) + ' мин. назад';
+  if (sec < 86400) return Math.floor(sec / 3600) + ' ч. назад';
+  return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
 // ═══ Data loading ═══
 
 async function loadData() {
@@ -573,6 +584,7 @@ async function loadData() {
       }
       if (latest) { uploadedAt.value = latest.uploaded_at; uploadedBy.value = latest.uploaded_by || ''; }
     }
+    lastLoadedAt.value = new Date();
   } catch (e) {
     console.error('[ShelfLife]', e);
     toastStore.error('Не удалось загрузить данные');
@@ -859,4 +871,7 @@ onMounted(loadData);
 
 /* Ячейки с данными — курсор при наведении */
 .sl-cells-table td:not(.cell-total):not(:first-child) { cursor: default; position: relative; }
+
+.data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
+.data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
 </style>

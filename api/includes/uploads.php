@@ -284,6 +284,72 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'tenders' && isset($parts[2
     exit;
 }
 
+// ═══ UPLOAD/DELETE PROTOCOL FILE ═══
+if ($endpoint === 'upload' && $subpoint === 'protocol-file') {
+    if ($method === 'DELETE') {
+        if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+        $su = getSessionUser($pdo);
+        if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+        $fileId = intval($_GET['file_id'] ?? 0);
+        if (!$fileId) respond(['error' => 'Не указан ID файла'], 400);
+        $frow = $pdo->prepare("SELECT * FROM meeting_protocol_files WHERE id=?");
+        $frow->execute([$fileId]); $frow = $frow->fetch();
+        if (!$frow) respond(['error' => 'Файл не найден'], 404);
+        // Удалять может создатель протокола или админ
+        $proto = $pdo->prepare("SELECT created_by FROM meeting_protocols WHERE id=?");
+        $proto->execute([$frow['protocol_id']]); $proto = $proto->fetch();
+        if ($proto && $proto['created_by'] !== $su['name'] && $su['role'] !== 'admin') respond(['error' => 'Нет прав на удаление'], 403);
+        $filepath = __DIR__ . '/../uploads/protocols/' . basename($frow['file_path']);
+        if (file_exists($filepath)) unlink($filepath);
+        $pdo->prepare("DELETE FROM meeting_protocol_files WHERE id=?")->execute([$fileId]);
+        respond(['success' => true]);
+    }
+    if ($method !== 'POST') respond(['error' => 'Метод не поддерживается'], 405);
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    $su = getSessionUser($pdo);
+    if (!$su) respond(['error' => 'Требуется авторизация'], 401);
+    $p = resolvePermissions($su['role'], $su['permissions'] ?? null, $ROLE_TEMPLATES);
+    if (($ACCESS_LEVELS[$p['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+    $protocolId = intval($_POST['protocol_id'] ?? 0);
+    if (!$protocolId) respond(['error' => 'Не указан ID протокола'], 400);
+    $chk = $pdo->prepare("SELECT id FROM meeting_protocols WHERE id=?"); $chk->execute([$protocolId]);
+    if (!$chk->fetch()) respond(['error' => 'Протокол не найден'], 404);
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) respond(['error' => 'Ошибка загрузки файла'], 400);
+    $file = $_FILES['file'];
+    if ($file['size'] > 10 * 1024 * 1024) respond(['error' => 'Файл слишком большой (макс 10МБ)'], 400);
+    $allowedMime = ['application/pdf','image/jpeg','image/png','image/webp','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/msword','text/plain'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE); $mime = finfo_file($finfo, $file['tmp_name']); finfo_close($finfo);
+    if (!in_array($mime, $allowedMime)) respond(['error' => 'Допустимые форматы: PDF, JPEG, PNG, WebP, Excel, Word, TXT'], 400);
+    $ext = match($mime) { 'application/pdf'=>'pdf','image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>'xlsx','application/vnd.ms-excel'=>'xls','application/vnd.openxmlformats-officedocument.wordprocessingml.document'=>'docx','application/msword'=>'doc','text/plain'=>'txt',default=>'bin' };
+    $filename = 'proto_' . $protocolId . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $uploadDir = __DIR__ . '/../uploads/protocols/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
+    if (!move_uploaded_file($file['tmp_name'], $uploadDir . $filename)) respond(['error' => 'Ошибка сохранения файла'], 500);
+    $origName = mb_substr($file['name'], 0, 255);
+    $pdo->prepare("INSERT INTO meeting_protocol_files (protocol_id, file_name, file_path, uploaded_by) VALUES (?, ?, ?, ?)")
+        ->execute([$protocolId, $origName, $filename, $su['name']]);
+    respond(['success' => true, 'id' => intval($pdo->lastInsertId()), 'file_name' => $origName, 'file_path' => $filename, 'uploaded_by' => $su['name']]);
+}
+
+// ═══ DOWNLOAD PROTOCOL FILE ═══
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'protocols' && isset($parts[2])) {
+    // Поддержка токена через query-параметр (для открытия в новой вкладке)
+    if (isset($_GET['token'])) $_SERVER['HTTP_X_SESSION_TOKEN'] = $_GET['token'];
+    if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/../uploads/protocols/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $finfo = finfo_open(FILEINFO_MIME_TYPE); $mime = finfo_file($finfo, $filepath); finfo_close($finfo);
+    $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
+    $origName = $filename;
+    if (isset($_GET['download'])) { $nm = $pdo->prepare("SELECT file_name FROM meeting_protocol_files WHERE file_path=?"); $nm->execute([$filename]); $origName = $nm->fetchColumn() ?: $filename; }
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $origName) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
 // ═══ UPLOAD MARKETING FILE ═══
 if ($endpoint === 'upload' && $subpoint === 'marketing-file') {
     if ($method === 'DELETE') {

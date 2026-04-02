@@ -52,8 +52,14 @@ $DB_USER = $_ENV['DB_USER'] ?? 'siteuser';
 $DB_PASS = $_ENV['DB_PASS'] ?? '';
 
 try {
-    $pdo = new PDO("mysql:host=$DB_HOST;dbname=$DB_NAME;charset=utf8mb4", $DB_USER, $DB_PASS,
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    $pdoOpts = [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_TIMEOUT => 5,
+    ];
+    $pdo = new PDO("mysql:host=$DB_HOST;dbname=$DB_NAME;charset=utf8mb4", $DB_USER, $DB_PASS, $pdoOpts);
+    // Ограничиваем время выполнения запросов на стороне MySQL (30 сек)
+    $pdo->exec("SET SESSION max_statement_time = 30");
 } catch (PDOException $e) {
     http_response_code(500);
     error_log('DB connection error: ' . $e->getMessage());

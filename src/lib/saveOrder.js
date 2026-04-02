@@ -159,6 +159,7 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
       entity_type: 'order',
       entity_id:   orderId,
       user_name:   userName || null,
+      legal_entity: settings.legalEntity || null,
       details:     auditDetails,
     });
   } catch(e) { console.warn('[saveOrder] audit log:', e); }

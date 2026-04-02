@@ -997,29 +997,59 @@ const auditCategories = [
   { value: 'plan', label: 'Планы' },
   { value: 'product', label: 'Товары' },
   { value: 'delivery_schedule', label: 'Расписание' },
-  { value: 'marketing', label: 'Маркетинг' },
-  { value: 'tender', label: 'Тендеры' },
-  { value: 'correction', label: 'Корректировки' },
-  { value: 'distribution', label: 'Распределение' },
+  { value: 'user', label: 'Пользователи' },
   { value: 'price_agreement', label: 'Цены и ПСЦ' },
+  { value: 'tender', label: 'Тендеры' },
+  { value: 'marketing', label: 'Маркетинг' },
+  { value: 'correction', label: 'Корректировки' },
+  { value: 'import', label: 'Импорт данных' },
+  { value: 'veg', label: 'Овощи' },
+  { value: 'stock_collection', label: 'Сбор остатков' },
+  { value: 'distribution', label: 'Распределение' },
+  { value: 'system', label: 'Система' },
 ];
 
 const AUDIT_ACTION_LABELS = {
+  // Заказы
   order_created: 'Создан', order_updated: 'Изменён', order_deleted: 'Удалён', orders_deleted: 'Удалён',
-  plan_created: 'Создан', plan_updated: 'Изменён', plan_deleted: 'Удалён', plans_deleted: 'Удалён',
-  product_created: 'Создана', product_updated: 'Изменена', products_deleted: 'Удалена',
   delivery_date_changed: 'Дата доставки', received: 'Принят', reception_reverted: 'Отмена приёмки',
+  // Планы
+  plan_created: 'Создан', plan_updated: 'Изменён', plan_deleted: 'Удалён', plans_deleted: 'Удалён',
+  // Товары
+  product_created: 'Создана', product_updated: 'Изменена', products_deleted: 'Удалена',
+  // Расписание
   schedule_updated: 'График', restaurant_updated: 'Ресторан',
-  marketing_created: 'Создана', marketing_updated: 'Изменена',
-  tender_created: 'Создан', tender_updated: 'Изменён',
+  // Пользователи
+  user_created: 'Создан', user_updated: 'Изменён', user_deleted: 'Удалён', password_changed: 'Пароль изменён',
+  // Цены и ПСЦ
   price_agreement_created: 'Создан', price_agreement_updated: 'Изменён',
+  agreement_approved: 'Согласован', agreement_archived: 'Архивирован', agreement_restored: 'Восстановлен',
+  agreement_deleted: 'Удалён', price_imported: 'Импорт цен', price_deleted: 'Цена удалена',
+  exchange_rate_updated: 'Курс обновлён',
+  // Тендеры
+  tender_created: 'Создан', tender_updated: 'Изменён', tender_deleted: 'Удалён',
+  // Маркетинг
+  marketing_created: 'Создана', marketing_updated: 'Изменена', marketing_deleted: 'Удалена',
+  // Корректировки
   correction_created: 'Создана', correction_approved: 'Подтверждена', correction_rejected: 'Отклонена',
-  stock_collection_created: 'Создан', distribution_created: 'Создано',
+  correction_reviewed: 'Рассмотрена',
+  // Импорт
+  data_imported: 'Импорт', recipe_imported: 'Импорт рецептур',
+  // Овощи
+  veg_session_created: 'Сессия создана', veg_order_updated: 'Заявка изменена', veg_order_submitted: 'Заявка подана',
+  // Сбор остатков
+  stock_collection_created: 'Создан', collection_created: 'Создан', collection_closed: 'Закрыт',
+  // Распределение
+  distribution_created: 'Создано',
+  // Система
+  broadcast_sent: 'Рассылка', session_terminated: 'Сессия завершена', maintenance_toggled: 'Тех. работы',
 };
 const AUDIT_ENTITY_LABELS = {
   order: 'Заказ', plan: 'План', product: 'Товар', delivery_schedule: 'Расписание',
-  marketing: 'Маркетинг', tender: 'Тендер', price_agreement: 'Протокол цен',
+  user: 'Пользователь', price_agreement: 'Протокол цен',
+  marketing: 'Маркетинг', tender: 'Тендер',
   correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
+  import: 'Импорт', veg: 'Овощи', system: 'Система',
 };
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }
@@ -1029,9 +1059,13 @@ function auditBadgeClass(action) {
   if (action === 'reception_reverted') return 'adm-audit-b-reverted';
   if (action === 'delivery_date_changed') return 'adm-audit-b-delivery';
   if (action === 'schedule_updated' || action === 'restaurant_updated') return 'adm-audit-b-schedule';
+  if (action.includes('imported') || action === 'data_imported') return 'adm-audit-b-schedule';
+  if (action.includes('approved') || action.includes('restored') || action === 'broadcast_sent') return 'adm-audit-b-received';
+  if (action.includes('archived') || action === 'session_terminated' || action === 'password_changed') return 'adm-audit-b-reverted';
+  if (action.includes('rejected')) return 'adm-audit-b-deleted';
   if (action.includes('created')) return 'adm-audit-b-created';
-  if (action.includes('updated')) return 'adm-audit-b-updated';
-  if (action.includes('deleted')) return 'adm-audit-b-deleted';
+  if (action.includes('updated') || action.includes('changed') || action.includes('reviewed')) return 'adm-audit-b-updated';
+  if (action.includes('deleted') || action.includes('closed')) return 'adm-audit-b-deleted';
   return '';
 }
 

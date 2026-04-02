@@ -67,6 +67,7 @@
               <td :colspan="colCount">
                 <span class="ds-group-name">{{ group.label }}</span>
                 <span class="ds-group-count">{{ group.items.length }}</span>
+                <span class="ds-group-avg">(сред. {{ group.avg }} дост./нед.)</span>
               </td>
             </tr>
             <tr
@@ -363,12 +364,19 @@ const filteredRestaurants = computed(() => {
   return list;
 });
 
+function groupAvgDeliveries(items) {
+  if (!items.length) return 0;
+  let total = 0;
+  for (const r of items) total += deliveryCount(r);
+  return (total / items.length).toFixed(1).replace(/\.0$/, '');
+}
+
 const filteredGroups = computed(() => {
   const groups = [];
   const minsk = filteredRestaurants.value.filter(r => r.region === 'Минск');
   const regions = filteredRestaurants.value.filter(r => r.region !== 'Минск');
-  if (minsk.length) groups.push({ label: 'Минск', items: minsk });
-  if (regions.length) groups.push({ label: 'Регионы', items: regions });
+  if (minsk.length) groups.push({ label: 'Минск', items: minsk, avg: groupAvgDeliveries(minsk) });
+  if (regions.length) groups.push({ label: 'Регионы', items: regions, avg: groupAvgDeliveries(regions) });
   return groups;
 });
 
@@ -641,7 +649,6 @@ async function openLogModal() {
     const { data, error } = await db.from('audit_log')
       .select('*')
       .eq('entity_type', 'delivery_schedule')
-      .eq('legal_entity', orderStore.settings.legalEntity)
       .order('created_at', { ascending: false })
       .limit(100);
     if (error) throw new Error(error);
@@ -834,6 +841,10 @@ function formatLastUpdate(upd) {
   min-width: 18px; height: 16px; border-radius: 8px;
   background: var(--bk-brown); color: #fff;
   font-size: 10px; font-weight: 700; padding: 0 5px;
+}
+.ds-group-avg {
+  margin-left: 8px; font-size: 11px; font-weight: 400;
+  color: var(--text-muted, #999);
 }
 
 /* ═══ Table cells ═══ */

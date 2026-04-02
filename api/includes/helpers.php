@@ -29,39 +29,44 @@ function sendTelegramMessage($botToken, $chatId, $text, $parseMode = 'HTML') {
     return $code === 200;
 }
 
-function sendTelegramBulk($botToken, $chatIds, $text, $parseMode = 'HTML') {
+function sendTelegramBulk($botToken, $chatIds, $text, $parseMode = 'HTML', $replyMarkup = null) {
     if (!$botToken || empty($chatIds)) return 0;
-    $mh = curl_multi_init();
-    $handles = [];
-    foreach ($chatIds as $chatId) {
-        $payload = json_encode([
-            'chat_id' => $chatId,
-            'text' => $text,
-            'parse_mode' => $parseMode,
-            'disable_notification' => false,
-        ]);
-        $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $payload,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_CONNECTTIMEOUT => 3,
-        ]);
-        curl_multi_add_handle($mh, $ch);
-        $handles[] = $ch;
-    }
-    // Выполняем все запросы параллельно
-    $running = null;
-    do { curl_multi_exec($mh, $running); if ($running) curl_multi_select($mh); } while ($running > 0);
     $sent = 0;
-    foreach ($handles as $ch) {
-        if (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) $sent++;
-        curl_multi_remove_handle($mh, $ch);
-        curl_close($ch);
+    // Батчи по 25 — Telegram лимит ~30 msg/sec
+    $batches = array_chunk($chatIds, 25);
+    foreach ($batches as $batch) {
+        $mh = curl_multi_init();
+        $handles = [];
+        foreach ($batch as $chatId) {
+            $msgData = [
+                'chat_id' => $chatId,
+                'text' => $text,
+                'parse_mode' => $parseMode,
+                'disable_notification' => false,
+            ];
+            if ($replyMarkup) $msgData['reply_markup'] = $replyMarkup;
+            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($msgData),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_TIMEOUT => 10,
+                CURLOPT_CONNECTTIMEOUT => 3,
+            ]);
+            curl_multi_add_handle($mh, $ch);
+            $handles[] = $ch;
+        }
+        $running = null;
+        do { curl_multi_exec($mh, $running); if ($running) curl_multi_select($mh); } while ($running > 0);
+        foreach ($handles as $ch) {
+            if (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200) $sent++;
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+        }
+        curl_multi_close($mh);
+        if (count($batches) > 1) usleep(100000); // 100ms пауза между батчами
     }
-    curl_multi_close($mh);
     return $sent;
 }
 
@@ -211,13 +216,54 @@ function notifyTelegramRestaurantSales($pdo, $userName, $items, $count) {
     }
 }
 
+// Уведомление участников протокола совещания
+function notifyProtocolParticipants($pdo, $protocolId, $topic, $date, $participants, $createdBy) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    if (!$botToken || empty($participants)) return;
+    try {
+        $fmtDate = date('d.m.Y', strtotime($date));
+        // Получаем решения
+        $d = $pdo->prepare("SELECT text, responsible_person, deadline FROM protocol_decisions WHERE protocol_id = ? ORDER BY id");
+        $d->execute([$protocolId]);
+        $decisions = $d->fetchAll();
+
+        $text = "📋 <b>Протокол совещания</b>\n";
+        $text .= "─────────────────────\n";
+        $text .= "📅 {$fmtDate}\n";
+        $text .= "📝 {$topic}\n";
+        $text .= "✍️ Составил: {$createdBy}\n";
+        if ($decisions) {
+            $text .= "\n<b>Задачи:</b>\n";
+            foreach ($decisions as $i => $dec) {
+                $num = $i + 1;
+                $text .= "{$num}. {$dec['text']}";
+                if ($dec['responsible_person']) $text .= " — {$dec['responsible_person']}";
+                if ($dec['deadline']) $text .= " (до " . date('d.m', strtotime($dec['deadline'])) . ")";
+                $text .= "\n";
+            }
+        }
+
+        $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+        $keyboard = json_encode(['inline_keyboard' => [[['text' => '📋 Открыть протокол', 'url' => "{$siteUrl}/protocols/{$protocolId}"]]]]);
+
+        // Находим chat_id участников
+        $ph = implode(',', array_fill(0, count($participants), '?'));
+        $s = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name IN ({$ph}) AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
+        $s->execute($participants);
+        $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
+        if ($chatIds) sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
+    } catch (Exception $e) {
+        error_log("notifyProtocolParticipants error: " . $e->getMessage());
+    }
+}
+
 // Уведомление ресторанов о новом сборе остатков
 function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCount) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return 0;
 
-    // Все подписанные рестораны (chat_id уникальные)
-    $st = $pdo->query("SELECT DISTINCT chat_id, GROUP_CONCAT(DISTINCT restaurant_number ORDER BY CAST(restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests FROM veg_telegram_subs GROUP BY chat_id");
+    // Все подписанные рестораны с включёнными уведомлениями о новых сборах (chat_id уникальные)
+    $st = $pdo->query("SELECT DISTINCT chat_id, GROUP_CONCAT(DISTINCT restaurant_number ORDER BY CAST(restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests FROM veg_telegram_subs WHERE notify_stock_sessions = 1 GROUP BY chat_id");
     $subs = $st->fetchAll();
     if (!$subs) return 0;
 
@@ -240,28 +286,15 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $btns[] = [['text' => '📋 Заполнить в боте', 'callback_data' => 'rest_sc_start']];
     $keyboard = json_encode(['inline_keyboard' => $btns]);
 
-    $sent = 0;
-    foreach ($subs as $sub) {
-        $payload = json_encode([
-            'chat_id' => $sub['chat_id'],
-            'text' => $text,
-            'parse_mode' => 'HTML',
-            'reply_markup' => $keyboard,
-        ]);
-        $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
-        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-        $resp = curl_exec($ch); curl_close($ch);
-        $respData = json_decode($resp, true);
-        if (!empty($respData['ok'])) $sent++;
-    }
-    return $sent;
+    $chatIds = array_column($subs, 'chat_id');
+    return sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
 }
 
 // ═══ ROLE TEMPLATES & PERMISSIONS ═══
 $ROLE_TEMPLATES = [
-    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full'],
-    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','cards'=>'view','corrections'=>'edit','chat'=>'edit','marketing'=>'edit'],
-    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view'],
+    'admin' => ['order'=>'full','planning'=>'full','history'=>'full','plan-fact'=>'full','database'=>'full','delivery-schedule'=>'full','analytics'=>'full','calendar'=>'full','analysis'=>'full','restaurant-sales'=>'full','shelf-life'=>'full','pricing'=>'full','tenders'=>'full','veg'=>'full','stock-collection'=>'full','deficit'=>'full','distribution'=>'full','telegram'=>'full','pallet-calc'=>'full','cards'=>'full','corrections'=>'full','chat'=>'full','marketing'=>'full','protocols'=>'full'],
+    'user'  => ['order'=>'edit','planning'=>'edit','history'=>'edit','plan-fact'=>'edit','database'=>'edit','delivery-schedule'=>'edit','analytics'=>'view','calendar'=>'view','analysis'=>'edit','restaurant-sales'=>'edit','shelf-life'=>'edit','pricing'=>'edit','tenders'=>'edit','veg'=>'edit','stock-collection'=>'edit','deficit'=>'edit','distribution'=>'edit','telegram'=>'none','pallet-calc'=>'edit','cards'=>'view','corrections'=>'edit','chat'=>'edit','marketing'=>'edit','protocols'=>'edit'],
+    'viewer' => ['order'=>'view','planning'=>'view','history'=>'view','plan-fact'=>'view','database'=>'view','delivery-schedule'=>'view','analytics'=>'view','calendar'=>'view','analysis'=>'view','restaurant-sales'=>'view','shelf-life'=>'view','pricing'=>'view','tenders'=>'view','veg'=>'view','stock-collection'=>'view','deficit'=>'view','distribution'=>'view','telegram'=>'none','pallet-calc'=>'view','cards'=>'view','corrections'=>'view','chat'=>'view','marketing'=>'view','protocols'=>'view'],
 ];
 $ACCESS_LEVELS = ['none'=>0,'view'=>1,'edit'=>2,'full'=>3];
 $TABLE_TO_MODULE = [
@@ -271,7 +304,7 @@ $TABLE_TO_MODULE = [
     'delivery_schedule'=>'delivery-schedule',
     'analysis_data'=>'analysis','stock_1c'=>'analysis','restaurant_sales'=>'restaurant-sales',
     'stock_malling'=>'shelf-life','warehouse_cells'=>'shelf-life',
-    'audit_log'=>'history','notifications'=>'history',
+    'notifications'=>'history',
     'settings'=>'database','item_order'=>'order',
     'deficit_sessions'=>'deficit','deficit_results'=>'deficit','deficit_tokens'=>'deficit','deficit_restaurant_stock'=>'deficit',
     'stock_collections'=>'stock-collection','stock_collection_products'=>'stock-collection','stock_collection_data'=>'stock-collection','stock_collection_tokens'=>'stock-collection',
@@ -286,7 +319,25 @@ $TABLE_TO_MODULE = [
     'supplier_payments'=>'plan-fact',
     'marketing_activities'=>'marketing','marketing_activity_items'=>'marketing','marketing_activity_files'=>'marketing',
     'recipes'=>'marketing','recipe_ingredients'=>'marketing',
+    'meeting_protocols'=>'protocols','meeting_protocol_series'=>'protocols','protocol_decisions'=>'protocols',
 ];
+
+// ═══ Аудит-лог (хелпер для бэкенда) ═══
+function auditLog($pdo, $action, $entityType, $entityId, $userName, $details = null, $changes = null) {
+    try {
+        $pdo->prepare("INSERT INTO audit_log (action, entity_type, entity_id, user_name, details, changes) VALUES (?, ?, ?, ?, ?, ?)")
+            ->execute([
+                $action,
+                $entityType,
+                $entityId,
+                $userName,
+                $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null,
+                $changes ? json_encode($changes, JSON_UNESCAPED_UNICODE) : null,
+            ]);
+    } catch (Exception $e) {
+        error_log('auditLog error: ' . $e->getMessage());
+    }
+}
 
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
 // Таблицы с колонкой legal_entity — для автоматической фильтрации по юрлицу
@@ -380,9 +431,7 @@ function getSessionUser($pdo) {
         }
     }
     if (!$token) { $_sessionUserCache['result'] = null; return null; }
-    if (mt_rand(1, 100) <= 5) {
-        try { $pdo->exec("DELETE FROM user_sessions WHERE expires_at < NOW()"); } catch (PDOException $e) { /* не критично */ }
-    }
+    // Очистка сессий перенесена в cron_telegram.php
     $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at, u.telegram_chat_id, u.hidden_modules FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
     $s->execute([$token]);
     $row = $s->fetch();

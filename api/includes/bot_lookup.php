@@ -563,8 +563,8 @@ function lookupOrders($question, $entity) {
 
     // Определяем кол-во заказов для показа
     $limit = 3;
-    if (preg_match('/последни[еймх]/u', $q)) $limit = 5; // "последние заказы" — несколько
-    elseif (preg_match('/последн[иеяй]/u', $q)) $limit = 1; // "последний заказ" — один
+    if (preg_match('/последни[й]/u', $q)) $limit = 1; // "последний заказ" — один
+    elseif (preg_match('/последни[еымх]/u', $q)) $limit = 5; // "последние заказы" — несколько
 
     // Загружаем заказы
     $sql = "SELECT o.id, o.supplier, o.created_by, o.created_at, o.delivery_date
@@ -589,7 +589,9 @@ function lookupOrders($question, $entity) {
 
         $s2 = $pdo->prepare("SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, oi.consumption_period, oi.stock, oi.transit,
                 COALESCE(p.unit_of_measure, 'шт') as uom
-                FROM order_items oi LEFT JOIN products p ON p.sku = oi.sku
+                FROM order_items oi
+                LEFT JOIN orders ord ON ord.id = oi.order_id
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
                 WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
@@ -622,7 +624,13 @@ function lookupStockDays($question, $entity) {
     if (!$isDaysQuestion) return '';
 
     // Извлечь число дней из вопроса (по умолчанию 7)
-    $maxDays = extractNumber($question) ?? 7;
+    // Ищем число перед словом "дн" (дней/дня/день), чтобы не спутать с артикулом
+    $maxDays = 7;
+    if (preg_match('/(\d+)\s*(?:дн|день)/ui', $question, $dm)) {
+        $maxDays = intval($dm[1]);
+    } elseif (preg_match('/(?:на|менее|меньше|до)\s+(\d{1,3})\b/ui', $question, $dm)) {
+        $maxDays = intval($dm[1]);
+    }
 
     $sql = "SELECT a.sku, p.name, a.stock, a.consumption, a.period_days, p.supplier,
                    COALESCE(p.unit_of_measure, 'шт') as uom,
@@ -873,7 +881,7 @@ function lookupSchedule($question, $entity) {
     }
     if (!$isSchedQ) return '';
 
-    $dayNames = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота'];
+    $dayNames = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
     $context = "\n== ГРАФИК ДОСТАВОК ==\n";
 
     // Ищем номер ресторана
@@ -1032,7 +1040,9 @@ function lookupDeliveries($question, $entity) {
         $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
         $s2 = $pdo->prepare("SELECT oi.order_id, oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box,
                                     COALESCE(p.unit_of_measure, 'шт') as uom
-                             FROM order_items oi LEFT JOIN products p ON p.sku = oi.sku
+                             FROM order_items oi
+                             LEFT JOIN orders ord ON ord.id = oi.order_id
+                             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
                              WHERE oi.order_id IN ({$placeholders})");
         $s2->execute($orderIds);
         $allItems = $s2->fetchAll();
@@ -1401,7 +1411,7 @@ function lookupCards($question, $entity) {
     // Поиск по артикулу
     foreach ($searchTerms as $article) {
         foreach ($allCards as $c) {
-            if ($c['id'] === $article) {
+            if ((string)$c['id'] === $article) {
                 $results[$c['id']] = ['card' => $c, 'reason' => 'найдено по артикулу'];
                 break;
             }

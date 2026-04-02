@@ -161,8 +161,9 @@ function vegShowMySubs($chatId, $msgId = null) {
     if ($subs) {
         $btns[] = [
             ['text' => '🔔 Подписки', 'callback_data' => 'veg_my_subs_manage'],
-            ['text' => '➕ Добавить', 'callback_data' => 'veg_pick_rest'],
+            ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
         ];
+        $btns[] = [['text' => '➕ Добавить ресторан', 'callback_data' => 'veg_pick_rest']];
     } else {
         $btns[] = [['text' => '➕ Подписаться на ресторан', 'callback_data' => 'veg_pick_rest']];
     }
@@ -225,7 +226,7 @@ function restShowSchedule($chatId, $msgId) {
         return;
     }
 
-    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
+    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
     $ph = implode(',', array_fill(0, count($restNums), '?'));
     $st = $pdo->prepare("SELECT r.number, ds.day_of_week, ds.delivery_time
         FROM delivery_schedule ds
@@ -644,6 +645,63 @@ function vegShowSubsManage($chatId, $msgId) {
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
+// ═══ Настройки уведомлений ресторана ═══
+
+function restNotifSettings($chatId, $msgId) {
+    global $pdo;
+    $s = $pdo->prepare("SELECT notify_veg_reminders, notify_veg_sessions, notify_confirmations, notify_stock_reminders, notify_stock_sessions FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+    $s->execute([$chatId]);
+    $row = $s->fetch();
+    if (!$row) {
+        editMessage($chatId, $msgId, "Сначала подпишитесь на ресторан.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
+
+    $on = '✅'; $off = '❌';
+    $settings = [
+        ['field' => 'veg_reminders',   'label' => 'Напоминания об овощах',  'val' => $row['notify_veg_reminders']],
+        ['field' => 'veg_sessions',    'label' => 'Новые сессии овощей',    'val' => $row['notify_veg_sessions']],
+        ['field' => 'confirmations',   'label' => 'Подтверждения заявок',   'val' => $row['notify_confirmations']],
+        ['field' => 'stock_reminders', 'label' => 'Напоминания об остатках','val' => $row['notify_stock_reminders']],
+        ['field' => 'stock_sessions',  'label' => 'Новые сборы остатков',   'val' => $row['notify_stock_sessions']],
+    ];
+
+    $text = "⚙️ <b>Настройки уведомлений</b>\n";
+    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    $text .= "Нажмите, чтобы включить или выключить:\n\n";
+
+    $btns = [];
+    foreach ($settings as $s) {
+        $icon = $s['val'] ? $on : $off;
+        $text .= "{$icon} {$s['label']}\n";
+        $btns[] = [['text' => "{$icon} {$s['label']}", 'callback_data' => "rest_notif_toggle_{$s['field']}"]];
+    }
+
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+function restNotifToggle($chatId, $msgId, $field) {
+    global $pdo;
+    $map = [
+        'veg_reminders'   => 'notify_veg_reminders',
+        'veg_sessions'    => 'notify_veg_sessions',
+        'confirmations'   => 'notify_confirmations',
+        'stock_reminders' => 'notify_stock_reminders',
+        'stock_sessions'  => 'notify_stock_sessions',
+    ];
+    $col = $map[$field] ?? null;
+    if (!$col) return;
+
+    $s = $pdo->prepare("SELECT {$col} FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+    $s->execute([$chatId]);
+    $current = $s->fetchColumn();
+    $newVal = $current ? 0 : 1;
+
+    $pdo->prepare("UPDATE veg_telegram_subs SET {$col} = ? WHERE chat_id = ?")->execute([$newVal, $chatId]);
+    restNotifSettings($chatId, $msgId);
+}
+
 // Получить ссылку на форму заявки (активный токен)
 function vegGetFormLink() {
     global $pdo, $SITE_URL;
@@ -671,6 +729,12 @@ function vegShowMyOrders($chatId, $msgId) {
         return;
     }
 
+    // Если подписан на один ресторан — сразу показываем заявки
+    if (count($subs) === 1) {
+        vegShowRestOrders($chatId, $msgId, $subs[0]['restaurant_number']);
+        return;
+    }
+
     $text = "📋 <b>Мои заявки</b>\n\nВыберите ресторан:";
     $btns = [];
     foreach ($subs as $sub) {
@@ -681,68 +745,149 @@ function vegShowMyOrders($chatId, $msgId) {
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
+// Форматирование заявок по дням
+function vegFormatOrders($orders) {
+    $text = '';
+    $byDate = [];
+    foreach ($orders as $o) {
+        $byDate[$o['delivery_date']][] = $o;
+    }
+    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+    foreach ($byDate as $date => $items) {
+        $dow = (int)(new DateTime($date))->format('N');
+        $dayName = $dayNames[$dow] ?? '';
+        $dateFmt = (new DateTime($date))->format('d.m');
+        $text .= "📅 <b>{$dayName} {$dateFmt}</b>\n";
+        $allZero = true;
+        foreach ($items as $item) {
+            $q = ($item['admin_qty'] !== null && $item['admin_qty'] !== '') ? floatval($item['admin_qty']) : floatval($item['quantity']);
+            if ($q > 0) $allZero = false;
+        }
+        if ($allZero) {
+            $text .= "  <i>Поставка не нужна</i>\n";
+        } else {
+            foreach ($items as $item) {
+                $q = ($item['admin_qty'] !== null && $item['admin_qty'] !== '') ? floatval($item['admin_qty']) : floatval($item['quantity']);
+                if ($q > 0) {
+                    $unit = $item['unit'] === 'pcs' ? 'шт' : 'кг';
+                    $qFmt = rtrim(rtrim(number_format($q, 2, '.', ''), '0'), '.');
+                    $text .= "  • {$item['product_name']}: <b>{$qFmt}</b> {$unit}\n";
+                }
+            }
+        }
+        $text .= "\n";
+    }
+    return $text;
+}
+
 // Показать заявки конкретного ресторана
 function vegShowRestOrders($chatId, $msgId, $restNum) {
     global $pdo;
 
     // Активная сессия
     $session = $pdo->query("SELECT id, name FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
-    if (!$session) {
-        editMessage($chatId, $msgId, "📋 <b>Заявки ресторана {$restNum}</b>\n\nНет активной сессии.", ['inline_keyboard' => [
-            [['text' => '◂ Назад', 'callback_data' => 'veg_my_orders']],
+
+    $btns = [];
+    if ($session) {
+        $s = $pdo->prepare("SELECT vo.delivery_date, sp.product_name, sp.unit, vo.quantity, vo.admin_qty
+            FROM veg_orders vo
+            JOIN veg_session_products sp ON sp.id = vo.product_id AND sp.session_id = vo.session_id
+            WHERE vo.session_id = ? AND vo.restaurant_number = ?
+            ORDER BY vo.delivery_date, sp.sort_order, sp.product_name");
+        $s->execute([$session['id'], $restNum]);
+        $orders = $s->fetchAll();
+
+        $text = "📋 <b>Заявки ресторана {$restNum}</b>\n";
+        $text .= "📝 Сессия: {$session['name']}\n\n";
+
+        if (!$orders) {
+            $text .= "<i>Заявок пока нет.</i>\n";
+        } else {
+            $text .= vegFormatOrders($orders);
+        }
+
+        $formLink = vegGetFormLink();
+        if ($formLink) {
+            $btns[] = [['text' => '📝 Заполнить/изменить заявку', 'url' => $formLink]];
+        }
+    } else {
+        $text = "📋 <b>Заявки ресторана {$restNum}</b>\n\n";
+        $text .= "<i>Нет активной сессии.</i>\n";
+    }
+
+    // Кнопка «История» — если есть прошлые сессии
+    $prevCount = $pdo->prepare("SELECT COUNT(*) FROM veg_sessions WHERE status != 'active' AND id IN (SELECT DISTINCT session_id FROM veg_orders WHERE restaurant_number = ?)");
+    $prevCount->execute([$restNum]);
+    if ($prevCount->fetchColumn() > 0) {
+        $btns[] = [['text' => '📜 История прошлых сессий', 'callback_data' => "veg_history_{$restNum}"]];
+    }
+
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_orders']];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Показать список прошлых сессий
+function vegShowHistory($chatId, $msgId, $restNum) {
+    global $pdo;
+    $s = $pdo->prepare("SELECT DISTINCT vs.id, vs.name, vs.date_from, vs.date_to
+        FROM veg_sessions vs
+        JOIN veg_orders vo ON vo.session_id = vs.id AND vo.restaurant_number = ?
+        WHERE vs.status != 'active'
+        ORDER BY vs.id DESC LIMIT 5");
+    $s->execute([$restNum]);
+    $sessions = $s->fetchAll();
+
+    if (!$sessions) {
+        editMessage($chatId, $msgId, "📜 <b>История — рест. {$restNum}</b>\n\n<i>Нет прошлых заявок.</i>", ['inline_keyboard' => [
+            [['text' => '◂ Назад', 'callback_data' => "veg_orders_rest_{$restNum}"]],
         ]]);
         return;
     }
 
-    // Заявки
-    $s = $pdo->prepare("SELECT vo.delivery_date, sp.product_name, sp.unit, vo.quantity
+    $text = "📜 <b>История — рест. {$restNum}</b>\n\n";
+    $text .= "Последние сессии:\n";
+    $btns = [];
+    foreach ($sessions as $sess) {
+        $dateRange = '';
+        if ($sess['date_from'] && $sess['date_to']) {
+            $dateRange = ' (' . date('d.m', strtotime($sess['date_from'])) . '–' . date('d.m', strtotime($sess['date_to'])) . ')';
+        }
+        $btns[] = [['text' => "📋 {$sess['name']}{$dateRange}", 'callback_data' => "veg_hist_{$restNum}_{$sess['id']}"]];
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => "veg_orders_rest_{$restNum}"]];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Показать заявки из конкретной прошлой сессии
+function vegShowHistorySession($chatId, $msgId, $restNum, $sessId) {
+    global $pdo;
+    $session = $pdo->prepare("SELECT id, name FROM veg_sessions WHERE id = ?");
+    $session->execute([$sessId]);
+    $session = $session->fetch();
+    if (!$session) {
+        editMessage($chatId, $msgId, "Сессия не найдена.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "veg_history_{$restNum}"]]]]);
+        return;
+    }
+
+    $s = $pdo->prepare("SELECT vo.delivery_date, sp.product_name, sp.unit, vo.quantity, vo.admin_qty
         FROM veg_orders vo
         JOIN veg_session_products sp ON sp.id = vo.product_id AND sp.session_id = vo.session_id
         WHERE vo.session_id = ? AND vo.restaurant_number = ?
         ORDER BY vo.delivery_date, sp.sort_order, sp.product_name");
-    $s->execute([$session['id'], $restNum]);
+    $s->execute([$sessId, $restNum]);
     $orders = $s->fetchAll();
 
-    $text = "📋 <b>Заявки ресторана {$restNum}</b>\n";
-    $text .= "📝 Сессия: {$session['name']}\n\n";
-
+    $text = "📜 <b>Рест. {$restNum} — {$session['name']}</b>\n\n";
     if (!$orders) {
-        $text .= "<i>Заявок пока нет.</i>\n";
+        $text .= "<i>Заявок не было.</i>\n";
     } else {
-        $byDate = [];
-        foreach ($orders as $o) {
-            $byDate[$o['delivery_date']][] = $o;
-        }
-        $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
-        foreach ($byDate as $date => $items) {
-            $dow = (int)(new DateTime($date))->format('N');
-            $dayName = $dayNames[$dow] ?? '';
-            $dateFmt = (new DateTime($date))->format('d.m');
-            $text .= "📅 <b>{$dayName} {$dateFmt}</b>\n";
-            $allZero = true;
-            foreach ($items as $item) {
-                if (floatval($item['quantity']) > 0) $allZero = false;
-            }
-            if ($allZero) {
-                $text .= "  <i>Поставка не нужна</i>\n";
-            } else {
-                foreach ($items as $item) {
-                    if (floatval($item['quantity']) > 0) {
-                        $text .= "  • {$item['product_name']}: <b>{$item['quantity']}</b> {$item['unit']}\n";
-                    }
-                }
-            }
-            $text .= "\n";
-        }
+        $text .= vegFormatOrders($orders);
     }
 
-    $btns = [];
-    $formLink = vegGetFormLink();
-    if ($formLink) {
-        $btns[] = [['text' => '📝 Заполнить/изменить заявку', 'url' => $formLink]];
-    }
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_orders']];
-    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => [
+        [['text' => '◂ К списку сессий', 'callback_data' => "veg_history_{$restNum}"]],
+        [['text' => '◂ Назад', 'callback_data' => "veg_orders_rest_{$restNum}"]],
+    ]]);
 }
 
 // ═══ Подача заявки на овощи через бота ═══
@@ -769,6 +914,12 @@ function vegStartOrder($chatId, $msgId = null) {
         $btns = [[['text' => '➕ Подписаться', 'callback_data' => 'veg_pick_rest']], [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]];
         if ($msgId) editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
         else sendMessage($chatId, $text, ['inline_keyboard' => $btns]);
+        return;
+    }
+
+    // Если подписан на один ресторан — сразу к выбору дня
+    if (count($subs) === 1) {
+        vegOrderSelectDay($chatId, $msgId, $subs[0]['restaurant_number']);
         return;
     }
 
@@ -946,10 +1097,12 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     $products = $s->fetchAll();
 
     // Существующие количества
-    $s = $pdo->prepare("SELECT product_id, quantity FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date=?");
+    $s = $pdo->prepare("SELECT product_id, quantity, admin_qty FROM veg_orders WHERE session_id=? AND restaurant_number=? AND delivery_date=?");
     $s->execute([$session['id'], $restNum, $deliveryDate]);
     $existing = [];
-    foreach ($s->fetchAll() as $r) $existing[$r['product_id']] = $r['quantity'];
+    foreach ($s->fetchAll() as $r) {
+        $existing[$r['product_id']] = ($r['admin_qty'] !== null && $r['admin_qty'] !== '') ? floatval($r['admin_qty']) : floatval($r['quantity']);
+    }
 
     // Предыдущая заявка: сначала из текущей сессии (другие даты), потом из предыдущих сессий
     $prevByProduct = [];
@@ -1112,7 +1265,7 @@ function vegOrderSkipDay($chatId, $msgId, $restNum, $deliveryDate) {
 
     $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at)
         VALUES (?, ?, ?, ?, 0, NOW())
-        ON DUPLICATE KEY UPDATE quantity = 0, submitted_at = NOW()");
+        ON DUPLICATE KEY UPDATE quantity = 0, admin_qty = NULL, submitted_at = NOW()");
     foreach ($products as $p) {
         $ins->execute([$session['id'], $p['id'], $restNum, $deliveryDate]);
     }
@@ -1173,12 +1326,14 @@ function vegOrderProcessInput($chatId, $text, $mode) {
 
     // Сопоставляем с товарами, проверяем кратность и сохраняем
     $saved = 0;
-    $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at) VALUES (?, ?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), submitted_at = NOW()");
+    $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at) VALUES (?, ?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), admin_qty = NULL, submitted_at = NOW()");
     $resultLines = [];
     $roundedLines = [];
 
+    $usedNames = [];
     foreach ($products as $p) {
         foreach ($quantities as $name => $qty) {
+            if (isset($usedNames[$name])) continue;
             if (mb_strtolower($name) === mb_strtolower($p['product_name']) || mb_strpos(mb_strtolower($p['product_name']), mb_strtolower($name)) !== false) {
                 $unit = $p['unit'] === 'pcs' ? 'шт' : 'кг';
                 $mult = floatval($p['multiplicity'] ?? 0);
@@ -1198,6 +1353,7 @@ function vegOrderProcessInput($chatId, $text, $mode) {
                     $resultLines[] = "• {$p['product_name']}: <b>{$qtyFmt}</b> {$unit}";
                 }
                 $saved++;
+                $usedNames[$name] = true;
                 break;
             }
         }
@@ -1462,6 +1618,12 @@ function corrStart($chatId, $msgId) {
         ]]);
         return;
     }
+    // Если подписан на один ресторан — сразу к выбору даты
+    if (count($subs) === 1) {
+        corrShowDelivery($chatId, $msgId, $subs[0]['restaurant_number']);
+        return;
+    }
+
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);

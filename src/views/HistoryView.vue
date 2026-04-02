@@ -83,7 +83,7 @@
               </td>
               <td class="ht-td ht-td-supplier">
                 <span class="ht-supplier-dot" :style="{ background: supplierColor(order.supplier) }"></span>
-                {{ order.supplier }}
+                <a class="pf-cross-link" @click.stop="router.push({ name: 'pricing', query: { supplier: order.supplier } })" :title="'Цены: ' + order.supplier">{{ order.supplier }}</a>
               </td>
               <td class="ht-td ht-td-note"><span v-if="order.note" :title="order.note">{{ order.note }}</span></td>
               <td class="ht-td ht-td-center">{{ order.created_by || '—' }}</td>
@@ -244,7 +244,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useHistoryStore } from '@/stores/historyStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -268,6 +268,7 @@ const draftStore    = useDraftStore();
 const toast         = useToastStore();
 const userStore     = useUserStore();
 const router        = useRouter();
+const route         = useRoute();
 
 const canEdit = computed(() => userStore.hasAccess('history', 'edit'));
 const canDelete = computed(() => userStore.hasAccess('history', 'full'));
@@ -396,6 +397,8 @@ onUnmounted(() => { document.removeEventListener('keydown', onKey); clearTimeout
 // --- Data ---
 onMounted(async () => {
   document.addEventListener('keydown', onKey);
+  // Применить фильтр из query-параметра (переход из другого модуля)
+  if (route.query.supplier) filterSupplier.value = route.query.supplier;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   await load();
 });
@@ -515,7 +518,7 @@ async function deletePlan(plan) {
     const { error } = await db.from('plans').delete().eq('id', plan.id).eq('legal_entity', orderStore.settings.legalEntity);
     if (error) { toast.error('Ошибка', 'Не удалось удалить план'); return; }
     // Запись об удалении в аудит
-    try { await db.from('audit_log').insert({ action: 'plan_deleted', entity_type: 'plan', entity_id: plan.id, user_name: userStore.currentUser?.name || null, details: { supplier: plan.supplier } }); } catch (e) { console.warn('[history] audit log:', e); }
+    try { await db.from('audit_log').insert({ action: 'plan_deleted', entity_type: 'plan', entity_id: plan.id, user_name: userStore.currentUser?.name || null, legal_entity: orderStore.settings?.legalEntity || null, details: { supplier: plan.supplier } }); } catch (e) { console.warn('[history] audit log:', e); }
     toast.success('Удалён', ''); await load();
   } catch (e) {
     toast.error('Ошибка', 'Не удалось удалить план');

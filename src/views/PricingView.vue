@@ -57,6 +57,12 @@
       </button>
     </div>
 
+    <!-- Retry banner -->
+    <div v-if="loadError" class="retry-banner">
+      <span>Не удалось загрузить данные</span>
+      <button class="btn secondary small" @click="loadPrices">Повторить</button>
+    </div>
+
     <!-- ПРАЙС-ЛИСТ -->
     <div v-if="activeTab === 'prices'">
       <div v-if="loading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
@@ -83,7 +89,9 @@
                 <span class="mono" style="font-weight:600;">{{ p.sku }}</span>
                 <span class="product-name-sub">{{ productNames[p.sku] || '—' }}</span>
               </td>
-              <td class="col-supplier ellipsis" data-label="Поставщик">{{ p.supplier }}</td>
+              <td class="col-supplier ellipsis" data-label="Поставщик">
+                <a class="pf-cross-link" @click.stop="router.push({ name: 'history', query: { supplier: p.supplier } })" :title="'История заказов: ' + p.supplier">{{ p.supplier }}</a>
+              </td>
               <td class="col-price mono" data-label="Цена">{{ formatPrice(p.price) }}</td>
               <td class="col-unit" data-label="За">{{ unitLabel(p.unit_type) }}</td>
               <td class="col-cur" data-label="Вал."><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
@@ -515,6 +523,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -527,6 +536,9 @@ import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
 const { confirmModal, confirm, onConfirm, onCancel } = useConfirm();
+
+const router = useRouter();
+const route = useRoute();
 
 const orderStore = useOrderStore();
 const userStore = useUserStore();
@@ -541,6 +553,7 @@ const isViewer = computed(() => !userStore.hasAccess('pricing', 'edit'));
 const hasFullAccess = computed(() => userStore.hasAccess('pricing', 'full'));
 
 const activeTab = ref('prices');
+const loadError = ref(false);
 const rubToBynRate = ref(0.0375);
 const searchQuery = ref('');
 const filterSupplier = ref('');
@@ -589,13 +602,16 @@ async function loadPrices() {
   if (!le) return;
   const gen = ++_loadPricesGen;
   loading.value = true;
+  loadError.value = false;
   try {
     const { data, error } = await db.rpc('get_current_prices', { legal_entity: le });
     if (gen !== _loadPricesGen) return; // устаревший запрос
-    if (error) { toast.error('Ошибка', error); return; }
+    if (error) { toast.error('Ошибка', error); loadError.value = true; return; }
     prices.value = (data?.prices || []).map(p => ({ ...p, vat_rate: parseFloat(p.vat_rate) || 20 }));
     if (data?.rub_to_byn_rate) rubToBynRate.value = parseFloat(data.rub_to_byn_rate);
     await loadProductNames();
+  } catch {
+    if (gen === _loadPricesGen) { toast.error('Ошибка', 'Не удалось загрузить цены'); loadError.value = true; }
   } finally {
     if (gen === _loadPricesGen) loading.value = false;
   }
@@ -1320,6 +1336,8 @@ function agreementExpiry(a) {
 
 // Инициализация
 onMounted(async () => {
+  // Применить фильтр из query-параметра (переход из другого модуля)
+  if (route.query.supplier) filterSupplier.value = route.query.supplier;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   await loadPrices();
   // Подгрузить протоколы в фоне для отображения бейджей
@@ -1412,6 +1430,12 @@ async function loadDynamics() {
 </script>
 
 <style scoped>
+.retry-banner {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px;
+  color: #E65100; font-size: 13px; margin-bottom: 16px;
+}
+.retry-banner .btn { flex-shrink: 0; }
 .pricing-view { padding: 0; }
 
 /* ═══ Tabs (из DatabaseView) ═══ */

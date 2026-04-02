@@ -1,7 +1,35 @@
 // REST API клиент для PHP + MariaDB бэкенда.
 // Интерфейс .from().select()/.insert()/.update()/.delete()
 
+import { ref } from 'vue';
+
 const API_BASE = '/api';
+
+// Глобальный флаг доступности сервера
+export const serverDown = ref(false);
+let _consecutiveErrors = 0;
+let _recoveryTimer = null;
+
+function trackServerStatus(ok) {
+  if (ok) {
+    if (_consecutiveErrors > 0) _consecutiveErrors = 0;
+    if (serverDown.value) serverDown.value = false;
+  } else {
+    _consecutiveErrors++;
+    if (_consecutiveErrors >= 3 && !serverDown.value) {
+      serverDown.value = true;
+      // Периодически пробуем восстановить
+      if (!_recoveryTimer) {
+        _recoveryTimer = setInterval(async () => {
+          try {
+            const r = await fetch(`${API_BASE}/rpc/health_check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            if (r.ok) { serverDown.value = false; _consecutiveErrors = 0; clearInterval(_recoveryTimer); _recoveryTimer = null; }
+          } catch (e) { /* всё ещё недоступен */ }
+        }, 15000);
+      }
+    }
+  }
+}
 function getSessionToken() { return localStorage.getItem('bk_session_token') || ''; }
 function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
@@ -149,8 +177,13 @@ class QueryBuilder {
       }
 
       const r = await fetchWithRetry(url, opts);
+      trackServerStatus(true);
       if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
-      if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+      if (!r.ok) {
+        if (r.status >= 500) trackServerStatus(false);
+        const e = await r.json().catch(() => ({}));
+        return { data: null, error: e.error || r.statusText };
+      }
 
       let d = await r.json().catch(() => null);
       if (d && typeof d === 'object') d = Array.isArray(d) ? d.map(parseJsonFields) : parseJsonFields(d);
@@ -162,7 +195,7 @@ class QueryBuilder {
       }
       if (this._method === 'PATCH' && d && !Array.isArray(d)) d = [d];
       return { data: d, error: null };
-    } catch (e) { return { data: null, error: e.message }; }
+    } catch (e) { trackServerStatus(false); return { data: null, error: e.message }; }
   }
 }
 
@@ -183,10 +216,15 @@ function parseJsonFields(row) {
 async function rpc(fn, params = {}) {
   try {
     const r = await fetchWithRetry(`${API_BASE}/rpc/${fn}`, { method: 'POST', headers: buildHeaders(), body: JSON.stringify(params) });
+    trackServerStatus(true);
     if (r.status === 401) { handleAuthError(); return { data: null, error: 'Session expired' }; }
-    if (!r.ok) { const e = await r.json().catch(() => ({})); return { data: null, error: e.error || r.statusText }; }
+    if (!r.ok) {
+      if (r.status >= 500) trackServerStatus(false);
+      const e = await r.json().catch(() => ({}));
+      return { data: null, error: e.error || r.statusText };
+    }
     return { data: await r.json(), error: null };
-  } catch (e) { return { data: null, error: e.message }; }
+  } catch (e) { trackServerStatus(false); return { data: null, error: e.message }; }
 }
 
 export const db = {

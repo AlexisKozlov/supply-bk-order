@@ -333,7 +333,10 @@ function cmdPrices($chatId, $user, $editMsgId = null) {
     }
 
     $upCnt = 0; $downCnt = 0;
-    foreach ($changes as $c) { $c['new_price'] > $c['old_price'] ? $upCnt++ : $downCnt++; }
+    foreach ($changes as $c) {
+        if ($c['new_price'] > $c['old_price']) $upCnt++;
+        elseif ($c['new_price'] < $c['old_price']) $downCnt++;
+    }
     $text = "💰 <b>Изменения цен</b>{$es}\n";
     $text .= "<i>↑{$upCnt} повышений · ↓{$downCnt} снижений</i>\n";
     $text .= "─────────────────────\n";
@@ -342,7 +345,7 @@ function cmdPrices($chatId, $user, $editMsgId = null) {
         $name = $c['product_name'] ? mb_substr($c['product_name'], 0, 25) : $c['sku'];
         $pctRaw = $c['old_price'] > 0 ? round(($c['new_price'] - $c['old_price']) / $c['old_price'] * 100) : 0;
         $pct = $pctRaw > 0 ? "+{$pctRaw}%" : "{$pctRaw}%";
-        $arrow = $c['new_price'] > $c['old_price'] ? '▲' : '▼';
+        $arrow = $c['new_price'] > $c['old_price'] ? '▲' : ($c['new_price'] < $c['old_price'] ? '▼' : '•');
         $text .= "{$arrow} <b>{$name}</b>\n";
         $text .= "  {$c['old_price']} → <b>{$c['new_price']}</b> ({$pct}) · {$date}\n";
     }
@@ -1108,8 +1111,8 @@ function searchCardDirect($chatId, $query, $userMsgId = null, $botMsgId = null) 
 function cmdSchedule($chatId, $user, $editMsgId = null, $dayNum = null) {
     global $pdo, $SITE_URL;
 
-    $dayNames = ['', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
-    $dayShort = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    $dayNames = ['', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+    $dayShort = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
     $today = (int) date('N'); // 1=Пн, 7=Вс
 
     $entity = getUserEntity($user);
@@ -1883,7 +1886,6 @@ if (isset($input['callback_query'])) {
     }
     // Взять в работу
     if (str_starts_with($data, 'corr_take_')) {
-        answerCallback($cb['id']);
         $oneId = intval(substr($data, 10));
         $user = getUser($chatId);
         if (!$user) { editMessage($chatId, $msgId, "Нужен привязанный аккаунт."); exit; }
@@ -1897,6 +1899,7 @@ if (isset($input['callback_query'])) {
         }
         $ids = corrGetBatchPendingIds($pdo, $oneId);
         if (empty($ids)) {
+            answerCallback($cb['id']);
             // Может уже все in_progress — проверим
             $nmRow2 = $pdo->prepare("SELECT notify_messages FROM order_corrections WHERE id = ?");
             $nmRow2->execute([$oneId]);
@@ -1915,6 +1918,7 @@ if (isset($input['callback_query'])) {
             answerCallback($cb['id'], "⚠️ Уже в работе у {$whoName}", true);
             exit;
         }
+        answerCallback($cb['id']);
         $nmRow = $pdo->prepare("SELECT notify_messages FROM order_corrections WHERE id = ?");
         $nmRow->execute([$oneId]);
         $nmData = json_decode($nmRow->fetchColumn() ?: '{}', true);
@@ -2063,6 +2067,23 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
+    if (str_starts_with($data, 'veg_history_')) {
+        answerCallback($cb['id']);
+        $restNum = substr($data, 12);
+        vegShowHistory($chatId, $msgId, $restNum);
+        exit;
+    }
+
+    if (str_starts_with($data, 'veg_hist_')) {
+        answerCallback($cb['id']);
+        // формат: veg_hist_{restNum}_{sessId}
+        $parts = explode('_', substr($data, 9), 2);
+        if (count($parts) === 2) {
+            vegShowHistorySession($chatId, $msgId, $parts[0], intval($parts[1]));
+        }
+        exit;
+    }
+
     // ═══ Овощи: выбор ресторана для подписки ═══
     if (str_starts_with($data, 'veg_sub_')) {
         $restNum = substr($data, 8);
@@ -2094,6 +2115,19 @@ if (isset($input['callback_query'])) {
     if ($data === 'veg_my_subs_manage') {
         answerCallback($cb['id']);
         vegShowSubsManage($chatId, $msgId);
+        exit;
+    }
+
+    if ($data === 'rest_notif_settings') {
+        answerCallback($cb['id']);
+        restNotifSettings($chatId, $msgId);
+        exit;
+    }
+
+    if (str_starts_with($data, 'rest_notif_toggle_')) {
+        $field = substr($data, 18); // veg_reminders, veg_sessions, confirmations, stock_reminders, stock_sessions
+        answerCallback($cb['id']);
+        restNotifToggle($chatId, $msgId, $field);
         exit;
     }
 
@@ -2206,7 +2240,27 @@ if (file_exists($importModeFile) && isset($msg['document'])) {
         if ($fileId) {
             $pdo->prepare("INSERT INTO order_file (file_name, file_path, telegram_file_id, uploaded_by) VALUES (?, '', ?, ?)")
                 ->execute([$fileName, $fileId, $user['name']]);
-            sendMessage($chatId, "✅ <b>Файл заказа обновлён</b>\n📄 {$fileName}\n\nРестораны теперь могут скачать его через бот.", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
+
+            // Уведомляем подписчиков ресторанов о новом файле
+            $restSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs")->fetchAll(PDO::FETCH_COLUMN);
+            $notifSent = 0;
+            foreach ($restSubs as $subCid) {
+                if ((string)$subCid === (string)$chatId) continue; // не отправляем загрузившему
+                $notifText = "📄 <b>Новый файл заказа</b>\n\nЗагружен: " . date('d.m.Y H:i') . "\nОт: {$user['name']}";
+                $notifPayload = json_encode([
+                    'chat_id' => $subCid,
+                    'document' => $fileId,
+                    'caption' => $notifText,
+                    'parse_mode' => 'HTML',
+                ]);
+                $nch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendDocument");
+                curl_setopt_array($nch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $notifPayload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+                $nres = json_decode(curl_exec($nch), true); curl_close($nch);
+                if (!empty($nres['ok'])) $notifSent++;
+            }
+
+            $notifInfo = $restSubs ? " Отправлено ресторанам: {$notifSent}." : "";
+            sendMessage($chatId, "✅ <b>Файл заказа обновлён</b>\n📄 {$fileName}\n\nРестораны теперь могут скачать его через бот.{$notifInfo}", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
             exit;
         }
     }

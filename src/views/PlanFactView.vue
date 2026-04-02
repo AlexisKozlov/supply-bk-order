@@ -2,7 +2,10 @@
   <div class="planfact-view">
     <!-- Header -->
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-      <h1 class="page-title">Поставки</h1>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <h1 class="page-title">Поставки</h1>
+        <!-- freshness badge removed -->
+      </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <div class="pf-tabs">
           <button class="pf-tab" :class="{ active: tab === 'pending' }" @click="tab = 'pending'; loadOrders()">
@@ -24,6 +27,12 @@
           </select>
         </div>
       </div>
+    </div>
+
+    <!-- Retry banner -->
+    <div v-if="loadError" class="retry-banner">
+      <span>Не удалось загрузить данные</span>
+      <button class="btn secondary small" @click="loadOrders">Повторить</button>
     </div>
 
     <!-- Loading -->
@@ -71,7 +80,10 @@
             </td>
             <td class="pf-mtd pf-mtd-supplier">
               <span class="pf-supplier-dot" :style="{ background: supplierColor(order.supplier) }"></span>
-              {{ order.supplier }}
+              <a class="pf-cross-link" @click.stop="router.push({ name: 'pricing', query: { supplier: order.supplier } })" :title="'Цены: ' + order.supplier">{{ order.supplier }}</a>
+              <a class="pf-cross-link-icon" @click.stop="router.push({ name: 'order', query: { orderId: order.id, mode: 'view' } })" title="Открыть заказ">
+                <BkIcon name="eye" size="xs"/>
+              </a>
             </td>
             <td class="pf-mtd pf-mtd-center">{{ (order.order_items || []).length }}</td>
             <td class="pf-mtd pf-mtd-center pf-mtd-boxes">{{ nf(sumOrderBoxes(order)) }}</td>
@@ -292,6 +304,8 @@ const canEditPF = computed(() => userStore.hasAccess('plan-fact', 'edit'))
 
 const tab = ref('pending')
 const loading = ref(false)
+const lastLoadedAt = ref(null)
+const loadError = ref(false)
 const saving = ref(false)
 const orders = ref([])
 const transitCount = ref(0)
@@ -389,6 +403,15 @@ const receivedDiscrepancies = computed(() =>
 const formatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 function nf(v) { return formatter.format(v || 0) }
 
+function formatTimeAgo(date) {
+  if (!date) return ''
+  const sec = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (sec < 60) return 'только что'
+  if (sec < 3600) return Math.floor(sec / 60) + ' мин. назад'
+  if (sec < 86400) return Math.floor(sec / 3600) + ' ч. назад'
+  return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 function pluralOrders(n) {
   const mod = n % 10, mod100 = n % 100
   if (mod === 1 && mod100 !== 11) return 'заказ'
@@ -438,6 +461,7 @@ function datePlusDays(dateStr, n) {
 async function loadOrders() {
   const myRequestId = ++_loadRequestId
   loading.value = true
+  loadError.value = false
   try {
     const today = todayStr()
     let query = db.from('orders')
@@ -460,13 +484,18 @@ async function loadOrders() {
 
     const { data, error } = await query
     if (myRequestId !== _loadRequestId) return
-    if (error) { toast.error('Ошибка', 'Не удалось загрузить заказы'); return }
+    if (error) { toast.error('Ошибка', 'Не удалось загрузить заказы'); loadError.value = true; return }
     orders.value = data || []
+    lastLoadedAt.value = new Date()
 
     // Reset sort direction based on tab
     mainSortAsc.value = tab.value !== 'received'
 
     await loadCounts(myRequestId)
+  } catch {
+    if (myRequestId !== _loadRequestId) return
+    toast.error('Ошибка', 'Не удалось загрузить заказы')
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -598,7 +627,7 @@ async function onDeliveryDateChange(e) {
     const now = nowLocal()
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'delivery_date_changed',
-      user_name: userName,
+      user_name: userName, legal_entity: legalEntity.value || null,
       details: { supplier: selectedOrder.value.supplier, old_date: editDeliveryDate.value, new_date: newDate },
       created_at: now,
     })
@@ -685,6 +714,14 @@ async function acceptAsOrdered() {
 
   saving.value = true
   try {
+    // Проверяем, не принял ли кто-то другой
+    const { data: freshOrder } = await db.from('orders').select('received_at, received_by').eq('id', selectedOrder.value.id).single()
+    if (freshOrder?.received_at) {
+      toast.error('Уже принят', `Заказ уже принял ${freshOrder.received_by || 'другой сотрудник'}`)
+      closeDrawer()
+      await loadOrders()
+      return
+    }
     const items = drawerItems.value
     const userName = userStore.currentUser?.name || 'Неизвестно'
     await db.rpc('batch_update_received_qty', {
@@ -705,6 +742,7 @@ async function acceptAsOrdered() {
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
+      legal_entity: legalEntity.value || null,
       details: { supplier: selectedOrder.value.supplier, items_count: items.length, discrepancies: 0 },
       created_at: now,
     })
@@ -728,6 +766,14 @@ async function saveReceived() {
 
   saving.value = true
   try {
+    // Проверяем, не принял ли кто-то другой
+    const { data: freshOrder } = await db.from('orders').select('received_at, received_by').eq('id', selectedOrder.value.id).single()
+    if (freshOrder?.received_at) {
+      toast.error('Уже принят', `Заказ уже принял ${freshOrder.received_by || 'другой сотрудник'}`)
+      closeDrawer()
+      await loadOrders()
+      return
+    }
     const userName = userStore.currentUser?.name || 'Неизвестно'
     // received_qty теперь в учётных коробках — записываем напрямую
     const allItems = drawerItems.value.map(i => ({
@@ -752,6 +798,7 @@ async function saveReceived() {
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
+      legal_entity: legalEntity.value || null,
       details: {
         supplier: selectedOrder.value.supplier, items_count: drawerItems.value.length, discrepancies,
         items_with_discrepancy: itemsWithFact.filter(i => i._delta !== 0).map(i => ({ name: i.name, ordered: toAccountingBoxes(i), received: i._factValue, delta: i._delta })),
@@ -780,6 +827,7 @@ async function revertToTransit() {
     const now = nowLocal()
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: orderId, action: 'reception_reverted', user_name: userName,
+      legal_entity: legalEntity.value || null,
       details: { supplier: selectedOrder.value.supplier, reverted_from: selectedOrder.value.received_by },
       created_at: now,
     })
@@ -793,6 +841,12 @@ async function revertToTransit() {
 </script>
 
 <style scoped>
+.retry-banner {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px;
+  color: #E65100; font-size: 13px; margin-bottom: 16px;
+}
+.retry-banner .btn { flex-shrink: 0; }
 /* ═══ Tabs toggle ═══ */
 .pf-tabs {
   display: inline-flex; border: 1.5px solid var(--border); border-radius: 8px;
@@ -1050,4 +1104,7 @@ async function revertToTransit() {
   .pf-fact-input { font-size: 16px; width: 60px; }
   .pf-th-coverage, .pf-td-coverage { display: none; }
 }
+
+.data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
+.data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
 </style>

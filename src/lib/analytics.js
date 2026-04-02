@@ -6,6 +6,7 @@
 import { db } from './apiClient.js';
 import { toLocalDateStr, applyEntityFilter } from './utils.js';
 
+export const ANALYTICS_VERSION = 2;
 const PALETTE = [
   '#F5A623','#4CAF50','#2196F3','#9C27B0',
   '#F44336','#00BCD4','#FF5722','#607D8B',
@@ -584,12 +585,23 @@ export async function getForecastData(legalEntity) {
       // Делим на кол-во SKU в группе: реализация — это итого по всей группе
       salesAvgPerDay = (sAvg7 * 0.5 + sAvgMid * 0.3 + sAvgOld * 0.2) / skusInGroup;
       // Тренд по реализации (тренд общий, не делим)
-      const sPrev7 = salesDates90.slice(-14, -7).reduce((s, d) => s + (salesData.days[d] || 0), 0);
+      // Находим последнюю дату с данными (данные приходят с задержкой)
+      let salesLastDate = null;
+      for (let i = salesDates90.length - 1; i >= 0; i--) {
+        if (salesData.days[salesDates90[i]]) { salesLastDate = i; break; }
+      }
+      // Если данные отстают — сдвигаем окно к последней дате с данными
+      const trendEnd = salesLastDate !== null ? salesLastDate + 1 : salesDates90.length;
+      const trendStart7 = Math.max(0, trendEnd - 7);
+      const trendStartPrev = Math.max(0, trendEnd - 14);
+      const sLast7trend = salesDates90.slice(trendStart7, trendEnd).reduce((s, d) => s + (salesData.days[d] || 0), 0);
+      const sPrev7 = salesDates90.slice(trendStartPrev, trendStart7).reduce((s, d) => s + (salesData.days[d] || 0), 0);
+      const sAvg7trend = sLast7trend / 7;
       const sPrevAvg = sPrev7 / 7;
       if (sPrevAvg > 0) {
-        const ch = (sAvg7 - sPrevAvg) / sPrevAvg;
+        const ch = (sAvg7trend - sPrevAvg) / sPrevAvg;
         salesTrend = ch > 0.15 ? 'up' : ch < -0.15 ? 'down' : 'stable';
-      } else if (sAvg7 > 0) {
+      } else if (sAvg7trend > 0) {
         salesTrend = 'up';
       }
     }
@@ -623,8 +635,9 @@ export async function getForecastData(legalEntity) {
 
     // Пропускаем товары без данных (ни реализации, ни расхода, ни остатков)
     if (!hasSalesData && !analysisData && !prod) continue;
-    // Пропускаем группы аналогов без актуальной реализации (за последние 3 дня)
-    if (group && !recentSalesGroups.has(group)) continue;
+    // Пропускаем группы с реализацией, но без актуальных данных (>3 дней)
+    // НЕ пропускаем товары с расходом из analysis_data или заказов — у них может не быть реализации
+    if (group && !recentSalesGroups.has(group) && !analysisData && !prod) continue;
 
     forecastItems.push({
       sku: sku,

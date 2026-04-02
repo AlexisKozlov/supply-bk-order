@@ -190,8 +190,10 @@ async function loadCorrections() {
 
 async function reviewBatch(ids, action, comment = '') {
   try {
-    for (const id of ids) {
-      await db.rpc('correction_review', { id, action, comment })
+    if (ids.length === 1) {
+      await db.rpc('correction_review', { id: ids[0], action, comment })
+    } else {
+      await db.rpc('correction_review_batch', { ids, action, comment })
     }
     toastStore.show(action === 'approve' ? 'Принято' : 'Отклонено')
     await loadCorrections()
@@ -215,10 +217,14 @@ async function deleteGroup(g) {
 }
 
 async function clearAll() {
-  if (!confirm('Удалить все заявки? Это действие необратимо.')) return
+  const pending = corrections.value.filter(c => c.status === 'pending' || c.status === 'in_progress').length
+  const processed = corrections.value.filter(c => c.status === 'approved' || c.status === 'rejected').length
+  const msg = `Будет удалено ${processed} обработанных заявок.\n${pending} необработанных останутся.\n\nПродолжить?`
+  if (!confirm(msg)) return
+  if (!confirm('Точно удалить? Это действие необратимо.')) return
   try {
-    await db.rpc('correction_clear_all')
-    toastStore.show('Заявки удалены')
+    await db.rpc('correction_clear_processed')
+    toastStore.show('Обработанные заявки удалены')
     await loadCorrections()
   } catch (e) { toastStore.show('Ошибка: ' + (e.message || e), 'error') }
 }

@@ -282,6 +282,7 @@ function askDeepSeek($question, $context, $apiKey) {
             'Authorization: Bearer ' . $apiKey,
         ],
         CURLOPT_TIMEOUT => 20,
+        CURLOPT_CONNECTTIMEOUT => 3,
     ]);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -310,6 +311,8 @@ function askGroq($question, $context, $apiKey, $model = 'llama-3.3-70b-versatile
     $blocked = [];
     if (file_exists($cacheFile)) {
         $blocked = json_decode(file_get_contents($cacheFile), true) ?: [];
+        // Очистка устаревших записей (макс. 30 минут)
+        $blocked = array_filter($blocked, fn($ts) => time() < $ts && $ts - time() < 1800);
     }
     if (isset($blocked[$model]) && time() < $blocked[$model]) {
         error_log("Groq: {$model} rate-limited until " . date('H:i:s', $blocked[$model]));

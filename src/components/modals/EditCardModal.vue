@@ -302,6 +302,7 @@ async function save() {
           entity_type: 'product',
           entity_id: entityId ? String(entityId) : null,
           user_name: userStore.currentUser?.name || null,
+          legal_entity: orderStore.settings?.legalEntity || null,
           details: JSON.stringify(isEdit ? { param_changes } : { name: cur.name, sku: cur.sku }),
         }]);
       }

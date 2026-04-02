@@ -315,7 +315,7 @@ export const useOrderStore = defineStore('order', () => {
     try {
       await db.from('audit_log').insert({
         action, entity_type: entityType, entity_id: entityId,
-        user_name: userStore.currentUser?.name || null, details,
+        user_name: userStore.currentUser?.name || null, legal_entity: settings.legalEntity || null, details,
       });
     } catch (e) { /* не блокируем */ }
   }

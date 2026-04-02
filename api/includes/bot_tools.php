@@ -306,7 +306,9 @@ function toolGetOrders($supplier, $days, $limit, $entity) {
         $result .= "\nЗаказ #{$o['id']} — {$o['supplier']}, создан {$date}, приход {$delivery}, {$status}, автор: {$o['created_by']}\nСостав:\n";
 
         $s2 = $pdo->prepare("SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, COALESCE(p.unit_of_measure, 'шт') as uom
-                FROM order_items oi LEFT JOIN products p ON p.sku = oi.sku
+                FROM order_items oi
+                LEFT JOIN orders ord ON ord.id = oi.order_id
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
                 WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
@@ -341,7 +343,10 @@ function toolGetDeliveries($supplier, $product, $entity) {
         $result .= "\n{$o['supplier']} — приход {$dd}{$overdue}\n";
 
         $itemSql = "SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, COALESCE(p.unit_of_measure, 'шт') as uom
-                FROM order_items oi LEFT JOIN products p ON p.sku = oi.sku WHERE oi.order_id = ?";
+                FROM order_items oi
+                LEFT JOIN orders ord ON ord.id = oi.order_id
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
+                WHERE oi.order_id = ?";
         $itemParams = [$o['id']];
         if ($product) {
             $itemSql .= " AND (oi.name LIKE ? OR oi.sku LIKE ?)";
@@ -651,15 +656,22 @@ function toolRunSql($sql, $params, $entity) {
     // Безопасность: только SELECT
     $sqlClean = trim($sql);
     if (!preg_match('/^SELECT\b/i', $sqlClean)) return "Разрешены только SELECT-запросы.";
-    if (preg_match('/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)\b/i', $sqlClean)) return "Запрещённая операция.";
+    if (preg_match('/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|CALL|SET)\b/i', $sqlClean)) return "Запрещённая операция.";
+    if (preg_match('/INTO\s+(OUTFILE|DUMPFILE)\b|LOAD_FILE\s*\(/i', $sqlClean)) return "Запрещённая операция.";
+    // Защита от функций, которые могут повесить сервер
+    if (preg_match('/\b(SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK|WAIT_FOR_EXECUTED_GTID_SET)\s*\(/i', $sqlClean)) return "Запрещённая функция.";
 
     // Добавляем LIMIT если нет
     if (!preg_match('/\bLIMIT\b/i', $sqlClean)) $sqlClean .= ' LIMIT 50';
 
     try {
+        // Ограничение времени запроса — 10 секунд
+        $pdo->exec("SET SESSION max_statement_time = 10");
         $s = $pdo->prepare($sqlClean);
         $s->execute($params ?: []);
         $rows = $s->fetchAll();
+        // Восстанавливаем общий таймаут
+        $pdo->exec("SET SESSION max_statement_time = 30");
         if (!$rows) return "Запрос не вернул результатов.";
         // Форматируем как текст
         $result = '';
@@ -670,7 +682,9 @@ function toolRunSql($sql, $params, $entity) {
         }
         return $result;
     } catch (Exception $e) {
-        return "Ошибка SQL: " . $e->getMessage();
+        $pdo->exec("SET SESSION max_statement_time = 30");
+        error_log("toolRunSql error: " . $e->getMessage());
+        return "Ошибка выполнения запроса.";
     }
 }
 

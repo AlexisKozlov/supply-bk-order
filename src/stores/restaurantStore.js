@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { getEntityGroup } from '@/lib/legalEntities.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 
 const DAY_NAMES = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота' };
@@ -124,11 +125,13 @@ export const useRestaurantStore = defineStore('restaurant', () => {
   async function _auditLog(entityId, action, restaurantNumber, paramChanges, extra = {}) {
     try {
       const meta = _meta();
+      const orderStore = useOrderStore();
       await db.from('audit_log').insert({
         entity_type: 'delivery_schedule',
         entity_id: Number(entityId),
         action,
         user_name: meta.updated_by,
+        legal_entity: orderStore.settings?.legalEntity || null,
         details: JSON.stringify({
           restaurant_number: restaurantNumber,
           param_changes: paramChanges,

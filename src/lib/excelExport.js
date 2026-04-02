@@ -668,11 +668,22 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
   headers.forEach((h, c) => setCell(row, c, h, sHeader));
   row++;
 
+  // Среднее количество доставок по группе
+  function groupAvg(items) {
+    if (!items.length) return 0;
+    let total = 0;
+    for (const r of items) {
+      const rSched = scheduleByRestaurant.get(String(r.id));
+      total += rSched ? rSched.size : 0;
+    }
+    return (total / items.length).toFixed(1).replace(/\.0$/, '');
+  }
+
   // Данные с группами
   function writeGroup(label, items) {
     // Строка группы
     for (let c = 0; c < colCount; c++) {
-      setCell(row, c, c === 0 ? `${label} (${items.length})` : '', sGroup);
+      setCell(row, c, c === 0 ? `${label} (${items.length}) — сред. ${groupAvg(items)} дост./нед.` : '', sGroup);
     }
     row++;
 
@@ -744,8 +755,121 @@ export async function exportScheduleToExcel(restaurants, scheduleByRestaurant, l
     ws['!merges'].push({ s: { r: groupRow, c: 0 }, e: { r: groupRow, c: colCount - 1 } });
   }
 
+  // ═══ Лист 2: Списочная часть по дням (3 сверху + 3 снизу, альбомная) ═══
+  const ws2 = {};
+  const colsPerDay = 3; // №, Адрес, Время
+  const gapCols = 1;    // разделитель между днями
+  const daysPerRow = 3; // 3 дня в ряду
+  const totalCols2 = daysPerRow * colsPerDay + (daysPerRow - 1) * gapCols; // 11
+
+  function setCell2(r, c, val, style) {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    ws2[ref] = { v: val, t: typeof val === 'number' ? 'n' : 's', s: style };
+  }
+
+  // Собираем рестораны по дням
+  const dayData = [];
+  for (let d = 1; d <= 6; d++) {
+    const dayRests = [];
+    for (const r of restaurants) {
+      const time = scheduleByRestaurant.get(String(r.id))?.get(d)?.delivery_time;
+      if (time) dayRests.push({ ...r, delivery_time: time });
+    }
+    dayData.push(dayRests);
+  }
+
+  const ws2Merges = [];
+
+  const sDayHeader = {
+    font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brown } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+  const sSubHeader = {
+    font: { bold: true, sz: 10, color: { rgb: '666666' }, name: 'Calibri' },
+    fill: { fgColor: { rgb: brownBg } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borders,
+  };
+
+  // Строка 0: общий заголовок
+  setCell2(0, 0, `Списочная часть графика — ${date}`, {
+    font: { bold: true, sz: 16, color: { rgb: brown }, name: 'Calibri' },
+  });
+  ws2Merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols2 - 1 } });
+
+  let curRow = 2; // начинаем после заголовка + пустой строки
+
+  // Два ряда: дни 0-2 (ПН-СР) и дни 3-5 (ЧТ-СБ)
+  for (let band = 0; band < 2; band++) {
+    const bandDays = [band * 3, band * 3 + 1, band * 3 + 2]; // индексы в dayData
+    const maxInBand = Math.max(...bandDays.map(di => dayData[di].length));
+
+    // Заголовки дней
+    for (let col = 0; col < daysPerRow; col++) {
+      const di = bandDays[col];
+      const startCol = col * (colsPerDay + gapCols);
+      const label = `${dayNames[di]} (${dayData[di].length})`;
+      setCell2(curRow, startCol, label, sDayHeader);
+      setCell2(curRow, startCol + 1, '', sDayHeader);
+      setCell2(curRow, startCol + 2, '', sDayHeader);
+      ws2Merges.push({ s: { r: curRow, c: startCol }, e: { r: curRow, c: startCol + 2 } });
+    }
+    curRow++;
+
+    // Подзаголовки
+    for (let col = 0; col < daysPerRow; col++) {
+      const startCol = col * (colsPerDay + gapCols);
+      setCell2(curRow, startCol, '№', sSubHeader);
+      setCell2(curRow, startCol + 1, 'Адрес', sSubHeader);
+      setCell2(curRow, startCol + 2, 'Время', sSubHeader);
+    }
+    curRow++;
+
+    // Данные
+    for (let i = 0; i < maxInBand; i++) {
+      const stripe = i % 2 === 1;
+      for (let col = 0; col < daysPerRow; col++) {
+        const di = bandDays[col];
+        const startCol = col * (colsPerDay + gapCols);
+        const r = dayData[di][i];
+        if (r) {
+          setCell2(curRow, startCol, r.number || '', sNum(stripe));
+          setCell2(curRow, startCol + 1, r.address || '', { ...sAddr(stripe), font: { ...sAddr(stripe).font, sz: 11 } });
+          setCell2(curRow, startCol + 2, r.delivery_time || '', sDay(true, stripe));
+        } else {
+          setCell2(curRow, startCol, '', sEmpty(stripe));
+          setCell2(curRow, startCol + 1, '', sEmpty(stripe));
+          setCell2(curRow, startCol + 2, '', sEmpty(stripe));
+        }
+      }
+      curRow++;
+    }
+
+    curRow += 2; // отступ между верхним и нижним рядом
+  }
+
+  ws2['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(curRow - 1, 2), c: totalCols2 - 1 } });
+  ws2['!merges'] = ws2Merges;
+
+  // Ширины колонок
+  const cols2 = [];
+  for (let d = 0; d < daysPerRow; d++) {
+    cols2.push({ wch: 5 });   // №
+    cols2.push({ wch: 45 });  // Адрес
+    cols2.push({ wch: 16 });  // Время
+    if (d < daysPerRow - 1) cols2.push({ wch: 2 }); // разделитель
+  }
+  ws2['!cols'] = cols2;
+
+  // Альбомная ориентация
+  ws2['!pageSetup'] = { orientation: 'landscape', paperSize: 9, fitToWidth: 1, fitToHeight: 0 };
+  ws2['!printOptions'] = { horizontalCentered: true };
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'График доставки');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Списочная часть');
   XLSX.writeFile(wb, `График_доставки_${date}.xlsx`);
 }
 

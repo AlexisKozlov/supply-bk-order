@@ -51,6 +51,35 @@ if ($endpoint === 'rpc') {
         }
         respond(['success'=>false]);
     }
+    if ($fn === 'health_check') {
+        $status = 'ok';
+        $checks = [];
+        // Проверка БД
+        try {
+            $pdo->query("SELECT 1");
+            $checks['database'] = 'ok';
+        } catch (Exception $e) {
+            $checks['database'] = 'error';
+            $status = 'error';
+        }
+        // Проверка памяти
+        $memFree = @file_get_contents('/proc/meminfo');
+        if ($memFree && preg_match('/MemAvailable:\s+(\d+)/', $memFree, $m)) {
+            $availMb = intval($m[1]) / 1024;
+            $checks['memory_available_mb'] = round($availMb);
+            if ($availMb < 100) { $checks['memory'] = 'warning'; $status = 'warning'; }
+            else $checks['memory'] = 'ok';
+        }
+        // Проверка диска
+        $diskFree = @disk_free_space('/');
+        if ($diskFree !== false) {
+            $diskFreeMb = round($diskFree / 1024 / 1024);
+            $checks['disk_free_mb'] = $diskFreeMb;
+            if ($diskFreeMb < 500) { $checks['disk'] = 'warning'; $status = 'warning'; }
+            else $checks['disk'] = 'ok';
+        }
+        respond(['status' => $status, 'checks' => $checks, 'timestamp' => date('c')]);
+    }
     if ($fn === 'check_maintenance') {
         $s = $pdo->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message','maintenance_end_time')"); $s->execute();
         $rows = $s->fetchAll(); $mm = 'false'; $msg = ''; $endTime = null;
@@ -110,7 +139,7 @@ if ($endpoint === 'rpc') {
 
     // Артикулы на остатках (для поиска карточек)
     if ($fn === 'get_stock_skus') {
-        $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = a.sku COLLATE utf8mb4_unicode_ci AND p.legal_entity COLLATE utf8mb4_unicode_ci = a.legal_entity COLLATE utf8mb4_unicode_ci WHERE a.legal_entity = ? AND a.stock > 0");
+        $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity WHERE a.legal_entity = ? AND a.stock > 0");
         $s->execute(['ООО "Бургер БК"']);
         $rows = $s->fetchAll();
         $result = [];
@@ -432,7 +461,7 @@ if ($endpoint === 'rpc') {
 
         $ins = $pdo->prepare("INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, submitted_at)
             VALUES (?, ?, ?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), submitted_at = NOW()");
+            ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), admin_qty = NULL, submitted_at = NOW()");
         $pdo->beginTransaction();
         try {
             // Даты, по которым ресторан отправляет форму (включая полностью пустые дни)
@@ -480,7 +509,7 @@ if ($endpoint === 'rpc') {
             try {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
                 if ($botToken && $restNum) {
-                    $subs = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number=?");
+                    $subs = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
                     $subs->execute([$restNum]);
                     $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
                     if ($chatIds) {
@@ -704,6 +733,7 @@ if ($endpoint === 'rpc') {
         // Уведомляем рестораны о новом сборе
         scNotifyRestaurants($pdo, $collId, $name, count($products));
 
+        auditLog($pdo, 'collection_created', 'stock_collection', $collId, $uname, ['legal_entity' => $le, 'name' => $name, 'products_count' => count($products)]);
         respond(['id' => $collId, 'token' => $token, 'expires_at' => $expires]);
     }
 
@@ -751,8 +781,32 @@ if ($endpoint === 'rpc') {
         $pdo->prepare("UPDATE stock_collections SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$collId]);
         // Инвалидируем все токены этого сбора
         $pdo->prepare("UPDATE stock_collection_tokens SET expires_at = NOW() WHERE collection_id = ? AND expires_at > NOW()")->execute([$collId]);
+        auditLog($pdo, 'collection_closed', 'stock_collection', $collId, $authUserName, ['legal_entity' => $collRow['legal_entity']]);
         respond(['success' => true]);
     }
+    if ($fn === 'sc_delete_collection') {
+        $collId = intval($body['collection_id'] ?? 0);
+        if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
+        $collCheck = $pdo->prepare("SELECT id, name, legal_entity FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
+        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ?")->execute([$collId]);
+            $pdo->prepare("DELETE FROM stock_collection_tokens WHERE collection_id = ?")->execute([$collId]);
+            $pdo->prepare("DELETE FROM stock_collection_products WHERE collection_id = ?")->execute([$collId]);
+            $pdo->prepare("DELETE FROM stock_collections WHERE id = ?")->execute([$collId]);
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            respond(['error' => 'Ошибка удаления'], 500);
+        }
+        auditLog($pdo, 'collection_deleted', 'stock_collection', $collId, $authUserName, ['name' => $collRow['name']]);
+        respond(['success' => true]);
+    }
+
     if ($fn === 'sc_get_collection_data') {
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
@@ -795,6 +849,7 @@ if ($endpoint === 'rpc') {
         if (!verifyAndMigratePassword($pdo, $name, $oldPwd, $u['password'])) { recordFailedLogin($pdo, $clientIp, $name); respond(['success'=>false,'error'=>'wrong_password']); }
         $pdo->prepare("UPDATE users SET password=? WHERE name=?")->execute([password_hash($newPwd, PASSWORD_BCRYPT), $name]);
         $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$name]);
+        auditLog($pdo, 'password_changed', 'user', $name, $name);
         respond(['success'=>true]);
     }
     // ─── Управление пользователями (только admin) ───
@@ -822,6 +877,7 @@ if ($endpoint === 'rpc') {
         } catch (PDOException $e) {
             respond(['success' => false, 'error' => 'Пользователь уже существует или ошибка базы данных'], 400);
         }
+        auditLog($pdo, 'user_created', 'user', $name, $caller['name'], ['role' => $role, 'display_role' => $displayRole]);
         respond(['success' => true, 'user' => ['id' => $id, 'name' => $name, 'email' => $email ?: null, 'role' => $role, 'display_role' => $displayRole]]);
     }
     if ($fn === 'update_user') {
@@ -858,6 +914,13 @@ if ($endpoint === 'rpc') {
             $s = $pdo->prepare("SELECT name FROM users WHERE id=?"); $s->execute([$userId]); $target = $s->fetch();
             if ($target) $pdo->prepare("DELETE FROM user_sessions WHERE user_name=?")->execute([$target['name']]);
         }
+        $changedFields = [];
+        if (isset($body['role'])) $changedFields['role'] = $body['role'];
+        if (array_key_exists('permissions', $body)) $changedFields['permissions'] = $body['permissions'];
+        if (array_key_exists('legal_entities', $body)) $changedFields['legal_entities'] = $body['legal_entities'];
+        if (array_key_exists('display_role', $body)) $changedFields['display_role'] = $body['display_role'];
+        if ($passwordChanged) $changedFields['password'] = 'changed';
+        auditLog($pdo, 'user_updated', 'user', $userId, $caller['name'], null, $changedFields);
         respond(['success' => true]);
     }
     if ($fn === 'delete_user') {
@@ -875,6 +938,7 @@ if ($endpoint === 'rpc') {
             $pdo->prepare("DELETE FROM user_presence WHERE user_name=?")->execute([$target['name']]);
         }
         $pdo->prepare("DELETE FROM users WHERE id=?")->execute([$userId]);
+        auditLog($pdo, 'user_deleted', 'user', $target ? $target['name'] : $userId, $caller['name']);
         respond(['success' => true]);
     }
 
@@ -943,6 +1007,7 @@ if ($endpoint === 'rpc') {
             }
         }
 
+        auditLog($pdo, 'broadcast_sent', 'system', $id, $sessionUser['name'], ['title' => $title, 'telegram_sent' => $tgSent]);
         respond(['success' => true, 'id' => $id, 'telegram_sent' => $tgSent]);
     }
     if ($fn === 'delete_notification_for_user') {
@@ -1039,15 +1104,19 @@ if ($endpoint === 'rpc') {
         try {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `analysis_data` WHERE `legal_entity`=?")->execute([$legalEntity]);
+            // Готовим один statement для всех записей
+            $firstItem = array_intersect_key($items[0], array_flip($allowed));
+            $cols = array_keys($firstItem);
+            $ph = implode(',', array_fill(0, count($cols), '?'));
+            $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
+            $stmt = $pdo->prepare("INSERT INTO `analysis_data` ($cn) VALUES ($ph)");
             foreach ($items as $item) {
                 $item = array_intersect_key($item, array_flip($allowed));
                 if (empty($item)) continue;
-                $cols = array_keys($item);
-                $ph = implode(',', array_fill(0, count($cols), '?'));
-                $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
-                $pdo->prepare("INSERT INTO `analysis_data` ($cn) VALUES ($ph)")->execute(array_values($item));
+                $stmt->execute(array_values($item));
             }
             $pdo->commit();
+            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'analysis_data', 'legal_entity' => $legalEntity, 'count' => count($items)]);
             notifyTelegramDataUpdate($pdo, 'analysis', $caller['name'], $legalEntity, count($items));
             respond(['success' => true, 'count' => count($items)]);
         } catch (PDOException $e) {
@@ -1084,6 +1153,7 @@ if ($endpoint === 'rpc') {
                 $inserted++;
             }
             $pdo->commit();
+            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted]);
             // TODO: уведомление в Telegram временно отключено
             // if (!empty($body['notify'])) {
             //     notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
@@ -1124,15 +1194,19 @@ if ($endpoint === 'rpc') {
                 $ph = implode(',', array_fill(0, count($uploadedEntities), '?'));
                 $pdo->prepare("DELETE FROM `stock_malling` WHERE `customer` IN($ph)")->execute(array_values($uploadedEntities));
             }
+            // Готовим один statement для всех записей
+            $firstItem = array_intersect_key($items[0], array_flip($allowed));
+            $smCols = array_keys($firstItem);
+            $smPh = implode(',', array_fill(0, count($smCols), '?'));
+            $smCn = implode(',', array_map(fn($c) => "`$c`", $smCols));
+            $smStmt = $pdo->prepare("INSERT INTO `stock_malling` ($smCn) VALUES ($smPh)");
             foreach ($items as $item) {
                 $item = array_intersect_key($item, array_flip($allowed));
                 if (empty($item)) continue;
-                $cols = array_keys($item);
-                $ph = implode(',', array_fill(0, count($cols), '?'));
-                $cn = implode(',', array_map(fn($c) => "`$c`", $cols));
-                $pdo->prepare("INSERT INTO `stock_malling` ($cn) VALUES ($ph)")->execute(array_values($item));
+                $smStmt->execute(array_values($item));
             }
             $pdo->commit();
+            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'stock_malling', 'count' => count($items)]);
             notifyTelegramDataUpdate($pdo, 'shelf_life', $caller['name'], '', count($items));
             notifyTelegramExpiringItems($pdo, $caller['name']);
             respond(['success' => true, 'count' => count($items)]);
@@ -1458,6 +1532,7 @@ if ($endpoint === 'rpc') {
         $sessionId = $body['session_id'] ?? '';
         if (!$sessionId) respond(['success' => false, 'error' => 'Не указан ID сессии'], 400);
         $pdo->prepare("DELETE FROM user_sessions WHERE id = ?")->execute([$sessionId]);
+        auditLog($pdo, 'session_terminated', 'system', $sessionId, $caller['name']);
         respond(['success' => true]);
     }
 
@@ -1559,6 +1634,7 @@ if ($endpoint === 'rpc') {
                 $imported++;
             }
             $pdo->commit();
+            auditLog($pdo, 'price_imported', 'price_agreement', $agreementId, $caller['name'], ['legal_entity' => $le, 'supplier' => $supplier, 'count' => $imported]);
             respond(['success' => true, 'imported' => $imported]);
         } catch (PDOException $e) {
             $pdo->rollBack();
@@ -1592,6 +1668,7 @@ if ($endpoint === 'rpc') {
             error_log('approve_agreement error: ' . $e->getMessage());
             respond(['error' => 'Ошибка согласования'], 500);
         }
+        auditLog($pdo, 'agreement_approved', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity']]);
         respond(['success' => true]);
     }
 
@@ -1607,6 +1684,7 @@ if ($endpoint === 'rpc') {
         if (!checkLegalEntityAccess($caller, $ag['legal_entity'])) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         if ($ag['status'] === 'archived') respond(['error' => 'Протокол уже в архиве'], 400);
         $pdo->prepare("UPDATE price_agreements SET status='archived' WHERE id=?")->execute([$id]);
+        auditLog($pdo, 'agreement_archived', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity']]);
         respond(['success' => true]);
     }
 
@@ -1634,6 +1712,7 @@ if ($endpoint === 'rpc') {
             $pdo->rollBack();
             respond(['error' => 'Ошибка восстановления'], 500);
         }
+        auditLog($pdo, 'agreement_approved', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity'], 'action' => 'restore']);
         respond(['success' => true]);
     }
 
@@ -1664,6 +1743,7 @@ if ($endpoint === 'rpc') {
         $rate = floatval($body['rate'] ?? 0);
         if ($rate <= 0 || $rate > 1) respond(['error' => 'Некорректный курс (ожидается число от 0 до 1)'], 400);
         $pdo->prepare("INSERT INTO settings (`key`, value) VALUES ('rub_to_byn_rate', ?) ON DUPLICATE KEY UPDATE value=?")->execute([(string)$rate, (string)$rate]);
+        auditLog($pdo, 'exchange_rate_updated', 'system', 'rub_to_byn_rate', $caller['name'], ['rate' => $rate]);
         respond(['success' => true, 'rate' => $rate]);
     }
 
@@ -1696,6 +1776,7 @@ if ($endpoint === 'rpc') {
             error_log('delete_agreement error: ' . $e->getMessage());
             respond(['error' => 'Ошибка удаления'], 500);
         }
+        auditLog($pdo, 'agreement_deleted', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity']]);
         respond(['success' => true]);
     }
 
@@ -1710,6 +1791,7 @@ if ($endpoint === 'rpc') {
         $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
         if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
         $pdo->prepare("DELETE FROM product_prices WHERE id=?")->execute([$id]);
+        auditLog($pdo, 'price_deleted', 'price_agreement', $id, $caller['name'], ['sku' => $row['sku'], 'supplier' => $row['supplier'], 'legal_entity' => $row['legal_entity']]);
         respond(['success' => true]);
     }
 
@@ -1814,6 +1896,8 @@ if ($endpoint === 'rpc') {
             }
 
             $pdo->commit();
+            $isNew = !intval($body['id'] ?? 0);
+            auditLog($pdo, $isNew ? 'tender_created' : 'tender_updated', 'tender', $tenderId, $caller['name'], ['name' => $name, 'legal_entity' => $le, 'status' => $status]);
             respond(['success' => true, 'id' => intval($tenderId)]);
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -1940,6 +2024,7 @@ if ($endpoint === 'rpc') {
         }
         // CASCADE удалит items, offers, offer_prices, files
         $pdo->prepare("DELETE FROM tenders WHERE id=?")->execute([$id]);
+        auditLog($pdo, 'tender_deleted', 'tender', $id, $caller['name'], ['legal_entity' => $le]);
         respond(['success' => true]);
     }
 
@@ -2000,6 +2085,8 @@ if ($endpoint === 'rpc') {
             }
 
             $pdo->commit();
+            $isNew = !intval($body['id'] ?? 0);
+            auditLog($pdo, $isNew ? 'marketing_created' : 'marketing_updated', 'marketing', $actId, $caller['name'], ['name' => $name, 'legal_entity' => $le, 'type' => $type]);
             respond(['success' => true, 'id' => intval($actId)]);
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -2048,6 +2135,7 @@ if ($endpoint === 'rpc') {
             if (file_exists($fpath)) unlink($fpath);
         }
         $pdo->prepare("DELETE FROM marketing_activities WHERE id=?")->execute([$id]);
+        auditLog($pdo, 'marketing_deleted', 'marketing', $id, $caller['name'], ['legal_entity' => $le]);
         respond(['success' => true]);
     }
 
@@ -2088,6 +2176,7 @@ if ($endpoint === 'rpc') {
             }
 
             $pdo->commit();
+            auditLog($pdo, 'recipe_imported', 'import', null, $caller['name'], ['count' => $imported]);
             respond(['success' => true, 'imported' => $imported]);
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -2949,7 +3038,7 @@ if ($endpoint === 'rpc') {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
                 $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
                 if ($botToken) {
-                    $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs")->fetchAll(PDO::FETCH_COLUMN);
+                    $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE notify_veg_sessions = 1")->fetchAll(PDO::FETCH_COLUMN);
                     if ($allSubs) {
                         $dateRange = '';
                         if ($dateFrom && $dateTo) {
@@ -2997,6 +3086,7 @@ if ($endpoint === 'rpc') {
             error_log('veg_create_session error: ' . $e->getMessage());
             respond(['error' => 'Ошибка создания сессии'], 500);
         }
+        auditLog($pdo, 'veg_session_created', 'veg', $sessId, $uname, ['name' => $name, 'products_count' => count($products)]);
         respond(['id' => $sessId, 'token' => $autoToken]);
     }
     if ($fn === 'veg_create_token') {
@@ -3179,6 +3269,8 @@ if ($endpoint === 'rpc') {
             if (empty($sets)) respond(['error' => 'Нет данных'], 400);
             $params[] = $orderId;
             $pdo->prepare("UPDATE veg_orders SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+
+            auditLog($pdo, 'veg_order_updated', 'veg', $orderId, $authUserName, ['restaurant' => $oldData['restaurant_number'] ?? '', 'product' => $oldData['product_name'] ?? '', 'admin_qty' => $adminQty]);
 
             // Уведомление в Telegram при изменении количества
             if ($oldData && $adminQty !== 'skip') {
@@ -3597,9 +3689,11 @@ if ($endpoint === 'rpc') {
         // Все пользователи без Telegram
         $unlinked = $pdo->query("SELECT name, email, role, display_role FROM users WHERE telegram_chat_id IS NULL ORDER BY name")->fetchAll();
 
-        // Подписки ресторанов на овощи
+        // Подписки ресторанов на овощи (с настройками уведомлений)
         $vegSubs = $pdo->query("SELECT vs.chat_id, vs.restaurant_number, vs.created_at,
             vs.first_name, vs.username,
+            vs.notify_veg_reminders, vs.notify_veg_sessions, vs.notify_confirmations,
+            vs.notify_stock_reminders, vs.notify_stock_sessions,
             r.address, r.city, r.region
             FROM veg_telegram_subs vs
             LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
@@ -3615,12 +3709,40 @@ if ($endpoint === 'rpc') {
             LEFT JOIN restaurants r ON r.number = vrl.restaurant_number AND r.legal_entity_group = 'BK_VM'
             ORDER BY vrl.sent_at DESC LIMIT 100")->fetchAll();
 
+        // Текущая сессия овощей + статус заявок по ресторанам
+        $activeSession = null;
+        $vegOrderStatus = [];
+        $sess = $pdo->query("SELECT id, name, date_from, date_to FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
+        if ($sess) {
+            $activeSession = $sess;
+            $ordSt = $pdo->prepare("SELECT restaurant_number,
+                COUNT(DISTINCT delivery_date) as dates_count,
+                MAX(submitted_at) as last_submitted,
+                SUM(CASE WHEN admin_qty IS NOT NULL THEN 1 ELSE 0 END) as admin_edited
+                FROM veg_orders WHERE session_id = ?
+                GROUP BY restaurant_number");
+            $ordSt->execute([$sess['id']]);
+            $vegOrderStatus = $ordSt->fetchAll();
+        }
+
+        // Корректировки (за последние 7 дней)
+        $corrStats = $pdo->query("SELECT
+            SUM(status = 'pending') as pending,
+            SUM(status = 'in_progress') as in_progress,
+            SUM(status = 'approved') as approved,
+            SUM(status = 'rejected') as rejected
+            FROM order_corrections
+            WHERE created_at > NOW() - INTERVAL 7 DAY")->fetch();
+
         respond([
             'linked_users' => $linked,
             'unlinked_users' => $unlinked,
             'veg_subs' => $vegSubs,
             'all_restaurants' => $allRests,
             'reminder_log' => $reminders,
+            'active_session' => $activeSession,
+            'veg_order_status' => $vegOrderStatus,
+            'correction_stats' => $corrStats ?: ['pending' => 0, 'in_progress' => 0, 'approved' => 0, 'rejected' => 0],
         ]);
     }
 
@@ -3690,6 +3812,18 @@ if ($endpoint === 'rpc') {
         $pdo->prepare("UPDATE telegram_settings SET `$field` = NOT `$field` WHERE user_name = ?")->execute([$userName]);
         $newVal = $pdo->prepare("SELECT `$field` FROM telegram_settings WHERE user_name = ?");
         $newVal->execute([$userName]);
+        $val = $newVal->fetchColumn();
+        respond(['success' => true, 'value' => (bool)$val]);
+    }
+
+    if ($fn === 'tg_admin_toggle_rest_notif') {
+        $chatId = $body['chat_id'] ?? '';
+        $field = $body['field'] ?? '';
+        $allowed = ['notify_veg_reminders', 'notify_veg_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions'];
+        if (!$chatId || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
+        $pdo->prepare("UPDATE veg_telegram_subs SET `$field` = NOT `$field` WHERE chat_id = ?")->execute([$chatId]);
+        $newVal = $pdo->prepare("SELECT `$field` FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+        $newVal->execute([$chatId]);
         $val = $newVal->fetchColumn();
         respond(['success' => true, 'value' => (bool)$val]);
     }
@@ -3779,7 +3913,75 @@ if ($endpoint === 'rpc') {
             }
         }
 
+        auditLog($pdo, 'correction_reviewed', 'correction', $id, $callerName, ['action' => $action, 'restaurant' => $c['restaurant_number'], 'product' => $c['product_name']]);
         respond(['success' => true]);
+    }
+
+    if ($fn === 'correction_review_batch') {
+        $ids = $body['ids'] ?? [];
+        $action = $body['action'] ?? '';
+        $comment = trim($body['comment'] ?? '');
+        if (empty($ids) || !is_array($ids) || !in_array($action, ['approve', 'reject'])) respond(['error' => 'Неверные параметры'], 400);
+
+        $caller = getSessionUser($pdo);
+        $callerName = $caller['name'] ?? 'unknown';
+        $callerChatId = $caller['telegram_chat_id'] ?? null;
+        $newStatus = $action === 'approve' ? 'approved' : 'rejected';
+
+        $pdo->beginTransaction();
+        try {
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $upd = $pdo->prepare("UPDATE order_corrections SET status = ?, reviewer_chat_id = ?, reviewer_name = ?, review_comment = ?, reviewed_at = NOW() WHERE id IN ({$ph}) AND status IN ('pending', 'in_progress')");
+            $upd->execute(array_merge([$newStatus, $callerChatId, $callerName, $comment ?: null], array_map('intval', $ids)));
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            respond(['error' => 'Ошибка обновления'], 500);
+        }
+
+        // Берём первую корректировку для определения батча и отправки уведомления
+        $first = $pdo->prepare("SELECT * FROM order_corrections WHERE id = ?");
+        $first->execute([intval($ids[0])]);
+        $c = $first->fetch();
+        if ($c) {
+            // Проверяем батч
+            $batchSt = $pdo->prepare("SELECT * FROM order_corrections WHERE restaurant_number = ? AND delivery_date = ? AND restaurant_chat_id = ? ORDER BY id");
+            $batchSt->execute([$c['restaurant_number'], $c['delivery_date'], $c['restaurant_chat_id']]);
+            $batchItems = $batchSt->fetchAll();
+            $hasPending = false;
+            foreach ($batchItems as $bi) { if ($bi['status'] === 'pending' || $bi['status'] === 'in_progress') { $hasPending = true; break; } }
+
+            $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+            if (!$hasPending && $botToken && $c['restaurant_chat_id']) {
+                $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+                $dow = (int)(new DateTime($c['delivery_date']))->format('N');
+                $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($c['delivery_date']));
+                $text = "📋 <b>Результат корректировки заказа</b>\n";
+                $text .= "🏪 Ресторан <b>{$c['restaurant_number']}</b> | Доставка: {$dateFmt}\n";
+                $text .= "─────────────────────\n";
+                foreach ($batchItems as $bi) {
+                    $uom = $bi['unit_of_measure'] ?: 'кор.';
+                    $qty = rtrim(rtrim(number_format(floatval($bi['quantity']), 2, '.', ''), '0'), '.') . " {$uom}";
+                    if ($bi['status'] === 'approved') {
+                        $label = $bi['action'] === 'add' ? 'Добавлено' : 'Убрано';
+                        $text .= "✅ <b>{$label}:</b> {$bi['product_name']} — {$qty}\n";
+                    } else {
+                        $label = $bi['action'] === 'add' ? 'Добавить' : 'Убрать';
+                        $text .= "❌ <b>Отклонено</b> ({$label}): {$bi['product_name']} — {$qty}\n";
+                        if ($bi['review_comment']) $text .= "    Причина: {$bi['review_comment']}\n";
+                    }
+                }
+                $text .= "─────────────────────\n";
+                $text .= "Обработал: {$callerName}";
+                $payload = json_encode(['chat_id' => $c['restaurant_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);
+                $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+                curl_exec($ch); curl_close($ch);
+            }
+        }
+
+        auditLog($pdo, 'correction_reviewed', 'correction', implode(',', $ids), $callerName, ['action' => $action, 'count' => count($ids)]);
+        respond(['success' => true, 'updated' => count($ids)]);
     }
 
     if ($fn === 'correction_delete') {
@@ -3796,7 +3998,15 @@ if ($endpoint === 'rpc') {
     if ($fn === 'correction_clear_all') {
         if (($authUser['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
         $pdo->exec("DELETE FROM order_corrections");
+        auditLog($pdo, 'corrections_cleared', 'correction', null, $authUserName, ['scope' => 'all']);
         respond(['success' => true]);
+    }
+
+    if ($fn === 'correction_clear_processed') {
+        if (($authUser['role'] ?? '') !== 'admin') respond(['error' => 'Только для администратора'], 403);
+        $cnt = $pdo->exec("DELETE FROM order_corrections WHERE status IN ('approved', 'rejected')");
+        auditLog($pdo, 'corrections_cleared', 'correction', null, $authUserName, ['scope' => 'processed', 'count' => $cnt]);
+        respond(['success' => true, 'deleted' => $cnt]);
     }
 
     if ($fn === 'correction_get_settings') {
@@ -4129,6 +4339,192 @@ if ($endpoint === 'rpc') {
         $filePath = $data['result']['file_path'] ?? null;
         if (!$filePath) respond(['error' => 'File not found'], 404);
         respond(['url' => "https://api.telegram.org/file/bot{$botToken}/{$filePath}"]);
+    }
+
+    // ═══ ПРОТОКОЛЫ СОВЕЩАНИЙ ═══
+
+    if ($fn === 'get_protocols') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $s = $pdo->query("SELECT p.*, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id) as decisions_count, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id AND d.status = 'done') as decisions_done, s.name as series_name FROM meeting_protocols p LEFT JOIN meeting_protocol_series s ON s.id = p.series_id ORDER BY p.meeting_date DESC, p.created_at DESC LIMIT 500");
+        respond($s->fetchAll());
+    }
+
+    if ($fn === 'get_protocol') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+        $s = $pdo->prepare("SELECT p.*, s.name as series_name, s.recurrence, s.agenda_template FROM meeting_protocols p LEFT JOIN meeting_protocol_series s ON s.id = p.series_id WHERE p.id = ?");
+        $s->execute([$id]);
+        $proto = $s->fetch();
+        if (!$proto) respond(['error' => 'Протокол не найден'], 404);
+        // Решения
+        $d = $pdo->prepare("SELECT * FROM protocol_decisions WHERE protocol_id = ? ORDER BY id");
+        $d->execute([$id]);
+        $proto['decisions'] = $d->fetchAll();
+        // Файлы
+        $f = $pdo->prepare("SELECT id, file_name, file_path, uploaded_by, uploaded_at FROM meeting_protocol_files WHERE protocol_id = ? ORDER BY uploaded_at");
+        $f->execute([$id]);
+        $proto['files'] = $f->fetchAll();
+        respond($proto);
+    }
+
+    if ($fn === 'save_protocol') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        $id = intval($body['id'] ?? 0);
+        // Проверяем права: редактировать может создатель или админ
+        if ($id) {
+            $existing = $pdo->prepare("SELECT created_by FROM meeting_protocols WHERE id = ?");
+            $existing->execute([$id]);
+            $row = $existing->fetch();
+            if (!$row) respond(['error' => 'Протокол не найден'], 404);
+            if ($row['created_by'] !== $caller['name'] && $caller['role'] !== 'admin') {
+                if (($ACCESS_LEVELS[$perms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) {
+                    respond(['error' => 'Редактировать может только создатель или админ'], 403);
+                }
+            }
+        } else {
+            if (($ACCESS_LEVELS[$perms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+                respond(['error' => 'Недостаточно прав'], 403);
+            }
+        }
+        $meetingDate = $body['meeting_date'] ?? date('Y-m-d');
+        $topic = trim($body['topic'] ?? '');
+        $participants = $body['participants'] ?? [];
+        $questions = trim($body['questions'] ?? '');
+        $notes = trim($body['notes'] ?? '');
+        $seriesId = $body['series_id'] ?: null;
+        $status = $body['status'] ?? 'draft';
+        $decisions = $body['decisions'] ?? [];
+        if (!$topic) respond(['error' => 'Укажите тему совещания'], 400);
+
+        try {
+            $pdo->beginTransaction();
+            if ($id) {
+                $pdo->prepare("UPDATE meeting_protocols SET series_id=?, meeting_date=?, topic=?, participants=?, questions=?, notes=?, status=?, updated_at=NOW() WHERE id=?")
+                    ->execute([$seriesId, $meetingDate, $topic, json_encode($participants, JSON_UNESCAPED_UNICODE), $questions, $notes, $status, $id]);
+            } else {
+                $pdo->prepare("INSERT INTO meeting_protocols (series_id, meeting_date, topic, participants, questions, notes, status, created_by) VALUES (?,?,?,?,?,?,?,?)")
+                    ->execute([$seriesId, $meetingDate, $topic, json_encode($participants, JSON_UNESCAPED_UNICODE), $questions, $notes, $status, $caller['name']]);
+                $id = $pdo->lastInsertId();
+            }
+            // Синхронизируем решения
+            $existingIds = [];
+            foreach ($decisions as $dec) {
+                $decId = intval($dec['id'] ?? 0);
+                $decText = trim($dec['text'] ?? '');
+                $responsible = trim($dec['responsible_person'] ?? '');
+                $deadline = $dec['deadline'] ?: null;
+                $decStatus = $dec['status'] ?? 'pending';
+                $completedAt = $decStatus === 'done' ? ($dec['completed_at'] ?? date('Y-m-d H:i:s')) : null;
+                if (!$decText) continue;
+                if ($decId) {
+                    $pdo->prepare("UPDATE protocol_decisions SET text=?, responsible_person=?, deadline=?, status=?, completed_at=? WHERE id=? AND protocol_id=?")
+                        ->execute([$decText, $responsible, $deadline, $decStatus, $completedAt, $decId, $id]);
+                    $existingIds[] = $decId;
+                } else {
+                    $pdo->prepare("INSERT INTO protocol_decisions (protocol_id, text, responsible_person, deadline, status, completed_at) VALUES (?,?,?,?,?,?)")
+                        ->execute([$id, $decText, $responsible, $deadline, $decStatus, $completedAt]);
+                    $existingIds[] = $pdo->lastInsertId();
+                }
+            }
+            // Удаляем решения, которых больше нет
+            if ($existingIds) {
+                $ph = implode(',', array_fill(0, count($existingIds), '?'));
+                $pdo->prepare("DELETE FROM protocol_decisions WHERE protocol_id = ? AND id NOT IN ($ph)")->execute(array_merge([$id], $existingIds));
+            } else {
+                $pdo->prepare("DELETE FROM protocol_decisions WHERE protocol_id = ?")->execute([$id]);
+            }
+            $pdo->commit();
+
+            // Telegram-уведомление участникам при финализации
+            if ($status === 'final') {
+                notifyProtocolParticipants($pdo, $id, $topic, $meetingDate, $participants, $caller['name']);
+            }
+
+            respond(['success' => true, 'id' => $id]);
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log("save_protocol error: " . $e->getMessage());
+            respond(['error' => 'Ошибка сохранения'], 500);
+        }
+    }
+
+    if ($fn === 'delete_protocol') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+        $existing = $pdo->prepare("SELECT created_by FROM meeting_protocols WHERE id = ?");
+        $existing->execute([$id]);
+        $row = $existing->fetch();
+        if (!$row) respond(['error' => 'Не найден'], 404);
+        if ($row['created_by'] !== $caller['name'] && $caller['role'] !== 'admin') {
+            respond(['error' => 'Удалить может только создатель или админ'], 403);
+        }
+        $pdo->prepare("DELETE FROM meeting_protocols WHERE id = ?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'update_decision_status') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $decId = intval($body['id'] ?? 0);
+        $newStatus = $body['status'] ?? '';
+        if (!$decId || !in_array($newStatus, ['pending', 'done', 'overdue'])) respond(['error' => 'Некорректные параметры'], 400);
+        $completedAt = $newStatus === 'done' ? date('Y-m-d H:i:s') : null;
+        $pdo->prepare("UPDATE protocol_decisions SET status = ?, completed_at = ? WHERE id = ?")->execute([$newStatus, $completedAt, $decId]);
+        respond(['success' => true]);
+    }
+
+    // Серии совещаний
+    if ($fn === 'get_protocol_series') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $s = $pdo->query("SELECT s.*, (SELECT COUNT(*) FROM meeting_protocols p WHERE p.series_id = s.id) as protocols_count FROM meeting_protocol_series s ORDER BY s.name");
+        respond($s->fetchAll());
+    }
+
+    if ($fn === 'save_protocol_series') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'], $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) {
+            respond(['error' => 'Недостаточно прав'], 403);
+        }
+        $id = intval($body['id'] ?? 0);
+        $name = trim($body['name'] ?? '');
+        $recurrence = $body['recurrence'] ?? 'weekly';
+        $agendaTemplate = $body['agenda_template'] ?? [];
+        if (!$name) respond(['error' => 'Укажите название серии'], 400);
+        $agendaJson = json_encode($agendaTemplate, JSON_UNESCAPED_UNICODE);
+        if ($id) {
+            $pdo->prepare("UPDATE meeting_protocol_series SET name=?, recurrence=?, agenda_template=? WHERE id=?")->execute([$name, $recurrence, $agendaJson, $id]);
+        } else {
+            $pdo->prepare("INSERT INTO meeting_protocol_series (name, recurrence, agenda_template, created_by) VALUES (?,?,?,?)")->execute([$name, $recurrence, $agendaJson, $caller['name']]);
+            $id = $pdo->lastInsertId();
+        }
+        respond(['success' => true, 'id' => $id]);
+    }
+
+    if ($fn === 'delete_protocol_series') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        if ($caller['role'] !== 'admin') respond(['error' => 'Только для админов'], 403);
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+        $pdo->prepare("DELETE FROM meeting_protocol_series WHERE id = ?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'get_users_list_short') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $s = $pdo->query("SELECT name, display_role, telegram_chat_id FROM users ORDER BY name");
+        respond($s->fetchAll());
     }
 
     respond(['error'=>'Not found'], 404);

@@ -308,6 +308,7 @@ let _orderLoadId = 0;
 const orderVisible          = ref(true);
 const settingsExpanded      = ref(false);
 const supplierLoading       = ref(false);
+let _supplierLoadGen = 0;
 const showShareDropdown     = ref(false);
 
 const showManualModal       = ref(false);
@@ -640,10 +641,12 @@ async function onSupplierChange(e) {
   draftStore.save();
   if (!newSupplier) return;
   supplierLoading.value = true;
+  const myGen = ++_supplierLoadGen;
   try {
     let pq2 = db.from('products').select('*').eq('supplier', newSupplier).eq('is_active', 1);
     pq2 = applyEntityFilter(pq2, orderStore.settings.legalEntity);
     const { data } = await pq2;
+    if (myGen !== _supplierLoadGen) return; // пользователь уже сменил поставщика
     (data || []).forEach(p => orderStore.addItem(p, true));
     await orderStore.restoreItemOrder();
     // Автоподстановка DLT → дата прихода, DOC → запас
