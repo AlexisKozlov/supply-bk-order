@@ -6,8 +6,10 @@
         <span v-if="dirty" class="mpd-unsaved">Не сохранено</span>
       </div>
       <div class="mpd-top-actions">
-        <button v-if="canEdit && protocol.id" class="mpd-btn mpd-btn-export" @click="exportExcel">Excel</button>
-        <button v-if="canEdit && protocol.id" class="mpd-btn mpd-btn-export" @click="exportPdf">PDF</button>
+        <button v-if="canEdit" class="mpd-btn mpd-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
+        <button v-if="canEdit && protocol.status === 'draft'" class="mpd-btn mpd-btn-finalize" @click="finalize">Финализировать</button>
+        <button v-if="protocol.id" class="mpd-btn mpd-btn-export" @click="exportExcel">Excel</button>
+        <button v-if="protocol.id" class="mpd-btn mpd-btn-export" @click="exportPdf">PDF</button>
         <button v-if="canDelete" class="mpd-btn mpd-btn-danger" @click="deleteProtocol">Удалить</button>
       </div>
     </div>
@@ -66,7 +68,38 @@
       <!-- Обсуждённые вопросы -->
       <div class="mpd-section">
         <h3>Обсуждённые вопросы</h3>
-        <textarea v-model="protocol.questions" :disabled="!canEdit" class="mpd-textarea" rows="6" placeholder="Что обсуждалось на совещании..."></textarea>
+        <textarea v-model="protocol.questions" :disabled="!canEdit" class="mpd-textarea mpd-auto-grow" rows="3" placeholder="Что обсуждалось на совещании..." @input="autoResize($event)" ref="questionsRef"></textarea>
+      </div>
+
+      <!-- Перенесённые задачи из предыдущих протоколов -->
+      <div v-if="carryoverTasks.length" class="mpd-section mpd-section-carryover">
+        <h3 class="mpd-carryover-title">Незакрытые задачи из предыдущих совещаний <span class="mpd-count">({{ carryoverTasks.length }})</span></h3>
+        <table class="mpd-tasks-table">
+          <thead>
+            <tr>
+              <th class="mpd-th-num">№</th>
+              <th>Задача</th>
+              <th class="mpd-th-resp">Ответственный</th>
+              <th class="mpd-th-date">Срок</th>
+              <th class="mpd-th-status">Статус</th>
+              <th class="mpd-th-source">Из протокола</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(t, i) in carryoverTasks" :key="'co-' + t.id" :class="['mpd-tr-' + t.status, { 'mpd-tr-mine': t.responsible_person === userStore.currentUser?.name }]">
+              <td class="mpd-td-num">{{ i + 1 }}</td>
+              <td class="mpd-td-text">{{ t.text }}</td>
+              <td>{{ t.responsible_person }}</td>
+              <td>{{ fmtShortDate(t.deadline) }}</td>
+              <td><select v-model="t.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + t.status" @change="onCarryoverStatusChange(t)">
+                <option value="pending">В работе</option>
+                <option value="done">Выполнено</option>
+                <option value="overdue">Просрочено</option>
+              </select></td>
+              <td class="mpd-td-source">{{ fmtShortDate(t.meeting_date) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Задачи -->
@@ -84,7 +117,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(dec, i) in protocol.decisions" :key="dec.id || ('new-' + i)" :class="'mpd-tr-' + dec.status">
+            <tr v-for="(dec, i) in protocol.decisions" :key="dec.id || ('new-' + i)" :class="['mpd-tr-' + dec.status, { 'mpd-tr-mine': isMyTask(dec) }]">
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td><textarea v-model="dec.text" :disabled="!canEdit" class="mpd-cell-input mpd-cell-text" rows="1" placeholder="Текст задачи" @input="autoResize($event)"></textarea></td>
               <td><select v-model="dec.responsible_person" :disabled="!canEdit" class="mpd-cell-input">
@@ -92,7 +125,7 @@
                 <option v-for="u in allUsers" :key="u.name" :value="u.name">{{ u.name }}</option>
               </select></td>
               <td><input type="date" v-model="dec.deadline" :disabled="!canEdit" class="mpd-cell-input"></td>
-              <td><select v-model="dec.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + dec.status" @change="onDecisionStatusChange(dec)">
+              <td><select v-model="dec.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + dec.status" :disabled="!canEdit && !isMyTask(dec)" @change="onDecisionStatusChange(dec)">
                 <option value="pending">В работе</option>
                 <option value="done">Выполнено</option>
                 <option value="overdue">Просрочено</option>
@@ -124,14 +157,10 @@
       <!-- Заметки -->
       <div class="mpd-section">
         <h3>Заметки</h3>
-        <textarea v-model="protocol.notes" :disabled="!canEdit" class="mpd-textarea" rows="3" placeholder="Дополнительные заметки..."></textarea>
+        <textarea v-model="protocol.notes" :disabled="!canEdit" class="mpd-textarea mpd-auto-grow" rows="2" placeholder="Дополнительные заметки..." @input="autoResize($event)" ref="notesRef"></textarea>
       </div>
 
-      <!-- Кнопки -->
-      <div v-if="canEdit" class="mpd-actions">
-        <button class="mpd-btn mpd-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
-        <button v-if="protocol.status === 'draft'" class="mpd-btn mpd-btn-finalize" @click="finalize">Финализировать и уведомить</button>
-      </div>
+      <!-- Кнопки убраны снизу — они теперь в шапке -->
     </div>
     <ConfirmModal v-if="confirmModal.show" :title="confirmModal.title" :message="confirmModal.message"
       @confirm="onConfirm" @cancel="onCancel" />
@@ -139,7 +168,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -157,6 +186,9 @@ const saving = ref(false);
 const dirty = ref(false);
 const savedSnapshot = ref('');
 const files = ref([]);
+const carryoverTasks = ref([]);
+const questionsRef = ref(null);
+const notesRef = ref(null);
 const uploading = ref(false);
 const sessionToken = computed(() => localStorage.getItem('bk_session_token') || '');
 const allUsers = ref([]);
@@ -178,18 +210,20 @@ const protocol = ref({
   decisions: [],
 });
 
+const isAdminOrManager = computed(() => ['admin', 'manager'].includes(userStore.currentUser?.role));
+
 const canEdit = computed(() => {
   if (!userStore.hasAccess('protocols', 'edit')) return false;
-  if (!protocol.value.id) return true; // новый
-  if (userStore.isAdmin) return true;
-  if (protocol.value.created_by === userStore.userName) return true;
+  if (!protocol.value.id) return true;
+  if (isAdminOrManager.value) return true;
+  if (protocol.value.created_by === userStore.currentUser?.name) return true;
   return false;
 });
 
 const canDelete = computed(() => {
   if (!protocol.value.id) return false;
-  if (userStore.isAdmin) return true;
-  return protocol.value.created_by === userStore.userName;
+  if (isAdminOrManager.value) return true;
+  return protocol.value.created_by === userStore.currentUser?.name;
 });
 
 const availableUsers = computed(() =>
@@ -208,6 +242,34 @@ function pickUser(name) {
     protocol.value.participants.push(name);
   }
   showUserPicker.value = false;
+}
+
+function fmtShortDate(d) {
+  if (!d) return '';
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
+async function loadCarryoverTasks() {
+  if (!protocol.value.series_id) { carryoverTasks.value = []; return; }
+  const { data } = await db.rpc('get_carryover_tasks', {
+    series_id: protocol.value.series_id,
+    exclude_protocol_id: protocol.value.id || 0,
+  });
+  carryoverTasks.value = data || [];
+}
+
+function onCarryoverStatusChange(t) {
+  const completedAt = t.status === 'done' ? new Date().toISOString() : null;
+  db.rpc('update_decision_status', { id: t.id, status: t.status });
+  if (t.status === 'done') {
+    // Убираем из списка через секунду
+    setTimeout(() => { carryoverTasks.value = carryoverTasks.value.filter(x => x.id !== t.id); }, 800);
+  }
+}
+
+function isMyTask(dec) {
+  return dec.responsible_person === userStore.currentUser?.name;
 }
 
 function addDecision() {
@@ -237,6 +299,7 @@ function onSeriesChange() {
       protocol.value.questions = tmpl.map((q, i) => `${i + 1}. ${q}`).join('\n');
     }
   }
+  loadCarryoverTasks();
 }
 
 async function save() {
@@ -348,6 +411,11 @@ async function loadProtocol(id) {
   protocol.value = data;
   loading.value = false;
   takeSnapshot();
+  loadCarryoverTasks();
+  nextTick(() => {
+    if (questionsRef.value) { questionsRef.value.style.height = 'auto'; questionsRef.value.style.height = questionsRef.value.scrollHeight + 'px'; }
+    if (notesRef.value) { notesRef.value.style.height = 'auto'; notesRef.value.style.height = notesRef.value.scrollHeight + 'px'; }
+  });
 }
 
 watch(protocol, () => {
@@ -367,7 +435,12 @@ onMounted(async () => {
 
   const id = route.params.id;
   if (id && id !== 'new') await loadProtocol(id);
-  else { protocol.value.created_by = userStore.userName; takeSnapshot(); }
+  else {
+    protocol.value.created_by = userStore.currentUser?.name;
+    // Если есть series_id из query (напр. создание из списка с фильтром)
+    if (route.query.series_id) { protocol.value.series_id = Number(route.query.series_id); onSeriesChange(); }
+    takeSnapshot();
+  }
 });
 
 onBeforeUnmount(() => {
@@ -395,6 +468,7 @@ onBeforeUnmount(() => {
 .mpd-input:disabled { background: #f8f8f8; color: #555; }
 .mpd-textarea { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 100%; box-sizing: border-box; resize: vertical; font-family: inherit; }
 .mpd-textarea:disabled { background: #f8f8f8; }
+.mpd-auto-grow { overflow: hidden; resize: none; }
 
 /* Participants — tags + plus button */
 .mpd-participants { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
@@ -428,11 +502,23 @@ onBeforeUnmount(() => {
 .mpd-st-pending { color: #e65100; }
 .mpd-st-done { color: #2e7d32; }
 .mpd-st-overdue { color: #c62828; }
-.mpd-tr-done { background: #f6fbf6; }
-.mpd-tr-overdue { background: #fef6f6; }
+.mpd-tr-pending { background: #fff8e1; }
+.mpd-tr-done { background: #e8f5e9; }
+.mpd-tr-overdue { background: #fce4ec; }
+.mpd-tr-mine { box-shadow: inset 3px 0 0 #D62700; }
+.mpd-tr-mine.mpd-tr-pending { background: #fff3e0; }
+.mpd-tr-mine.mpd-tr-done { background: #c8e6c9; }
+.mpd-tr-mine.mpd-tr-overdue { background: #f8bbd0; }
 .mpd-td-del { text-align: center; }
 .mpd-row-del { border: none; background: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 0 4px; }
 .mpd-row-del:hover { color: #D62700; }
+
+/* Carryover tasks */
+.mpd-section-carryover { border-color: #ffe0b2; background: #fffaf0; }
+.mpd-carryover-title { color: #e65100; }
+.mpd-td-text { font-size: 13px; padding: 5px 8px; }
+.mpd-td-source { font-size: 11px; color: #999; white-space: nowrap; }
+.mpd-th-source { width: 90px; }
 
 /* Buttons */
 .mpd-btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; white-space: nowrap; }

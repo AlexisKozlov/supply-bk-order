@@ -4377,11 +4377,11 @@ if ($endpoint === 'rpc') {
         $id = intval($body['id'] ?? 0);
         // Проверяем права: редактировать может создатель или админ
         if ($id) {
-            $existing = $pdo->prepare("SELECT created_by FROM meeting_protocols WHERE id = ?");
+            $existing = $pdo->prepare("SELECT created_by, status as old_status FROM meeting_protocols WHERE id = ?");
             $existing->execute([$id]);
             $row = $existing->fetch();
             if (!$row) respond(['error' => 'Протокол не найден'], 404);
-            if ($row['created_by'] !== $caller['name'] && $caller['role'] !== 'admin') {
+            if ($row['created_by'] !== $caller['name'] && !in_array($caller['role'], ['admin', 'manager'])) {
                 if (($ACCESS_LEVELS[$perms['protocols'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['full']) {
                     respond(['error' => 'Редактировать может только создатель или админ'], 403);
                 }
@@ -4440,8 +4440,9 @@ if ($endpoint === 'rpc') {
             }
             $pdo->commit();
 
-            // Telegram-уведомление участникам при финализации
-            if ($status === 'final') {
+            // Telegram-уведомление участникам только при смене статуса на final
+            $wasAlreadyFinal = isset($row) && ($row['old_status'] ?? '') === 'final';
+            if ($status === 'final' && !$wasAlreadyFinal) {
                 notifyProtocolParticipants($pdo, $id, $topic, $meetingDate, $participants, $caller['name']);
             }
 
@@ -4462,7 +4463,7 @@ if ($endpoint === 'rpc') {
         $existing->execute([$id]);
         $row = $existing->fetch();
         if (!$row) respond(['error' => 'Не найден'], 404);
-        if ($row['created_by'] !== $caller['name'] && $caller['role'] !== 'admin') {
+        if ($row['created_by'] !== $caller['name'] && !in_array($caller['role'], ['admin', 'manager'])) {
             respond(['error' => 'Удалить может только создатель или админ'], 403);
         }
         $pdo->prepare("DELETE FROM meeting_protocols WHERE id = ?")->execute([$id]);
@@ -4481,6 +4482,25 @@ if ($endpoint === 'rpc') {
     }
 
     // Серии совещаний
+    if ($fn === 'get_carryover_tasks') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $seriesId = intval($body['series_id'] ?? 0);
+        $excludeProtocolId = intval($body['exclude_protocol_id'] ?? 0);
+        if (!$seriesId) respond([]);
+        // Находим незакрытые задачи из всех протоколов этой серии
+        $sql = "SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, d.protocol_id, p.meeting_date, p.topic
+                FROM protocol_decisions d
+                JOIN meeting_protocols p ON p.id = d.protocol_id
+                WHERE p.series_id = ? AND d.status IN ('pending','overdue')";
+        $params = [$seriesId];
+        if ($excludeProtocolId) { $sql .= " AND d.protocol_id != ?"; $params[] = $excludeProtocolId; }
+        $sql .= " ORDER BY p.meeting_date DESC, d.id";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        respond($s->fetchAll());
+    }
+
     if ($fn === 'get_protocol_series') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);

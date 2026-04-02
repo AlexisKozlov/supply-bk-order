@@ -62,7 +62,7 @@
             </div>
             <div v-if="u.email" class="adm-user-email">{{ u.email }}</div>
             <div class="adm-user-meta">
-              {{ u.display_role || (u.role === 'admin' ? 'Администратор' : 'Сотрудник') }}
+              {{ u.display_role || ({ admin: 'Администратор', manager: 'Руководитель', viewer: 'Читатель' }[u.role] || 'Сотрудник') }}
             </div>
           </div>
 
@@ -771,6 +771,7 @@
                 <span class="modal-field-label">Роль</span>
                 <select v-model="form.role">
                   <option value="user">Пользователь</option>
+                  <option value="manager">Руководитель</option>
                   <option value="viewer">Читатель</option>
                   <option value="admin">Администратор</option>
                 </select>
