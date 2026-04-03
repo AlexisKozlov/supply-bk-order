@@ -93,6 +93,7 @@
         <button class="btn small" :disabled="!canRedo || viewOnly" @click="redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
         <button class="compact-toggle" :class="{ active: compactPlan }" @click="toggleCompactPlan" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
+        <button class="compact-toggle" :class="{ active: showSales }" @click="showSales = !showSales" title="Показать реализацию ресторанов">📊 Реализация</button>
         <button v-if="excludedCount > 0" class="compact-toggle" :class="{ active: hideExcluded }" @click="hideExcluded = !hideExcluded" :title="hideExcluded ? 'Показать исключённые' : 'Скрыть исключённые'">
           <BkIcon name="eye" size="sm"/> {{ hideExcluded ? 'Показать' : 'Скрыть' }} искл. ({{ excludedCount }})
         </button>
@@ -167,8 +168,10 @@
           <tr>
             <th class="plan-th-name">Товар</th>
             <th>{{ compactPlan ? 'Расх.' : consumptionColumnLabel }} ({{ unitLabel }})</th>
+            <th v-if="showSales" class="plan-th-sales">{{ compactPlan ? 'Реал.' : 'Реализация' }}<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">({{ unitLabel }})</small></th>
             <th>{{ compactPlan ? 'Склад' : 'Склад' }} ({{ unitLabel }})</th>
             <th>{{ compactPlan ? 'Пост.' : 'У постав.' }} ({{ unitLabel }})</th>
+            <th class="plan-th-trend">Тренд</th>
             <th v-if="!currentWeekHeaders.length" class="plan-th-reserve">Запас<br v-if="!compactPlan"><small v-if="!compactPlan" style="font-weight:400;opacity:0.7;">дней</small></th>
             <!-- Текущие недели -->
             <th v-for="h in currentWeekHeaders" :key="'cw-' + h.label" class="plan-th-current" :title="h.sublabel">
@@ -194,8 +197,20 @@
               <div v-if="!compactPlan" style="font-size:11px;color:var(--text-muted);font-weight:500;">{{ item.qtyPerBox }} {{ item.unitOfMeasure || 'шт' }}/кор{{ item.boxesPerPallet ? ' · ' + item.boxesPerPallet + ' кор/пал' : '' }}{{ item.multiplicity > 1 ? ' · кратн.' + item.multiplicity : '' }}</div>
             </td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="item.monthlyConsumption || ''" :class="{ 'consumption-warning': item._cw }" :title="item._ct || ''" @change="e => onInput(idx, 'consumption', e.target.value)" @focus="e => onCalcFocus(e, idx, 'consumption')" @keydown="e => onCalcKeydown(e, idx, 'consumption')" :disabled="viewOnly" placeholder="0"/></td>
+            <td v-if="showSales" class="plan-td-sales" :title="salesMap[item.sku] ? salesMap[item.sku].group + ': ' + nf.format(salesMap[item.sku].total) + ' шт за ' + salesMap[item.sku].days + ' дн' : ''">
+              <span v-if="salesMap[item.sku]">{{ displaySales(item, salesMap[item.sku].total) }}</span>
+              <span v-else class="plan-result-zero">—</span>
+            </td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockOnHand')" @change="e => onInput(idx, 'stock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'stock')" @keydown="e => onCalcKeydown(e, idx, 'stock')" :disabled="viewOnly" placeholder="0"/></td>
             <td class="plan-td-input"><input type="number" class="plan-calc-input" :value="displayStock(item, 'stockAtSupplier')" @change="e => onInput(idx, 'supplierStock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'supplierStock')" @keydown="e => onCalcKeydown(e, idx, 'supplierStock')" :disabled="viewOnly" placeholder="0"/></td>
+            <td class="plan-td-trend">
+              <button v-if="trendMap[item.sku]" class="trend-btn" :class="trendMap[item.sku].pct > 0 ? 'trend-up' : 'trend-down'"
+                :title="(trendMap[item.sku].group || '') + ': ' + trendMap[item.sku].cur + ' vs ' + trendMap[item.sku].prev + ' (14д к 14д)'"
+                @click.stop="openTrendPopup(idx, item.sku, $event)">
+                {{ trendMap[item.sku].pct > 0 ? '↑' : '↓' }}{{ Math.abs(trendMap[item.sku].pct) }}%
+              </button>
+              <span v-else class="plan-result-zero">—</span>
+            </td>
             <td v-if="!currentWeekHeaders.length" class="plan-td-reserve" :class="reserveDaysClass(item)">{{ reserveDaysText(item) }}</td>
             <!-- Текущие недели: транзит + дни запаса -->
             <td v-for="(cw, wi) in (item._cwData || [])" :key="'cw-' + wi" class="plan-td-current" :class="cwDaysClass(cw.daysRemaining)">
@@ -217,7 +232,7 @@
             </td>
             <!-- Редактируемые периоды: с даты планирования — все (0+), без неё — с 1-го -->
             <td v-for="m in editablePeriodIndices" :key="m" class="plan-td-result"
-              :class="{ 'plan-has-value': item.plan[m]?.orderBoxes > 0, 'plan-cell-locked': item.plan[m]?.locked }"
+              :class="{ 'plan-has-value': item.plan[m]?.orderBoxes > 0, 'plan-cell-locked': item.plan[m]?.locked, 'plan-cell-trend': item.plan[m]?.trendPct }"
               :title="compactPlan && item.plan[m]?.orderBoxes > 0 ? nf.format(item.plan[m].orderUnits) + ' ' + item.unitOfMeasure : ''"
               @dblclick="startEdit(idx, m, $event)">
               <template v-if="!editingCell || editingCell.idx !== idx || editingCell.m !== m">
@@ -227,7 +242,7 @@
                     <span v-if="!viewOnly && item.boxesPerPallet && item.plan[m].orderBoxes % (item.boxesPerPallet * (item.multiplicity || 1)) !== 0" class="plan-pallet-period"
                       :title="`До ${Math.ceil(item.plan[m].orderBoxes / (item.boxesPerPallet * (item.multiplicity || 1)))} пал (${Math.ceil(item.plan[m].orderBoxes / (item.boxesPerPallet * (item.multiplicity || 1))) * item.boxesPerPallet * (item.multiplicity || 1)} кор)`"
                       @click.stop="roundToPallet(idx, m)">⬆</span>
-                    <span v-if="!viewOnly && item.plan[m]?.locked" class="plan-reset-cell" title="Сбросить" @click.stop="resetCell(idx, m)"><BkIcon name="close" size="sm"/></span>
+                    <span v-if="!viewOnly && (item.plan[m]?.locked || item.plan[m]?.trendPct)" class="plan-reset-cell" title="Сбросить" @click.stop="resetCell(idx, m)"><BkIcon name="close" size="sm"/></span>
                   </span>
                   <span v-if="!compactPlan" class="plan-result-sub">{{ (item.multiplicity || 1) > 1 ? Math.ceil(item.plan[m].orderBoxes / item.multiplicity) + ' физ · ' : '' }}{{ nf.format(item.plan[m].orderUnits) }} {{ item.unitOfMeasure }}</span>
                 </template>
@@ -254,7 +269,7 @@
           </tr>
           <!-- Строка добавления товара -->
           <tr v-if="showAddRow" class="add-product-row">
-            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
+            <td :colspan="(currentWeekHeaders.length ? 5 : 6) + (showSales ? 1 : 0) + currentWeekHeaders.length + periodHeaders.length + 1" style="padding:2px 8px;text-align:left;">
               <select class="add-product-select" @change="addProduct">
                 <option value="">+ Добавить товар…</option>
                 <option v-for="p in availableToAdd" :key="p.sku" :value="p.sku">{{ p.sku }} — {{ p.name }}{{ p.is_active === 0 ? ' (скрыта)' : '' }}</option>
@@ -265,7 +280,7 @@
         <tfoot v-if="truckEnabled && items.length">
           <!-- Итого паллет -->
           <tr class="plan-truck-row">
-            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label">Паллеты</td>
+            <td :colspan="(currentWeekHeaders.length ? 5 : 6) + (showSales ? 1 : 0) + currentWeekHeaders.length" class="plan-truck-label">Паллеты</td>
             <td v-for="(h, pi) in periodHeaders" :key="'pal-' + pi" class="plan-truck-cell">
               <span v-if="periodPallets(pi) > 0" class="plan-truck-pallets">{{ periodPallets(pi) }} пал</span>
               <span v-else class="plan-result-zero">—</span>
@@ -274,7 +289,7 @@
           </tr>
           <!-- Загрузка машин -->
           <tr class="plan-truck-row plan-truck-row-detail">
-            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label">
+            <td :colspan="(currentWeekHeaders.length ? 5 : 6) + (showSales ? 1 : 0) + currentWeekHeaders.length" class="plan-truck-label">
               Машина ({{ truckPallets }} пал)
             </td>
             <td v-for="(h, pi) in periodHeaders" :key="'truck-' + pi" class="plan-truck-cell">
@@ -292,7 +307,7 @@
           </tr>
           <!-- Кнопка "Создать заказ" -->
           <tr class="plan-truck-row plan-order-btn-row">
-            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label"></td>
+            <td :colspan="(currentWeekHeaders.length ? 5 : 6) + (showSales ? 1 : 0) + currentWeekHeaders.length" class="plan-truck-label"></td>
             <td v-for="(h, pi) in periodHeaders" :key="'ord-' + pi" class="plan-truck-cell">
               <button v-if="(planningDateStr || pi > 0) && periodTotalBoxes(pi) > 0 && !viewOnly" class="btn small plan-create-order-btn" @click="createOrderFromPeriod(pi)" title="Создать заказ из этого периода">
                 <BkIcon name="order" size="sm"/> Заказ
@@ -303,7 +318,7 @@
         </tfoot>
         <tfoot v-else-if="items.length && !viewOnly">
           <tr class="plan-order-btn-row">
-            <td :colspan="(currentWeekHeaders.length ? 4 : 5) + currentWeekHeaders.length" class="plan-truck-label"></td>
+            <td :colspan="(currentWeekHeaders.length ? 5 : 6) + (showSales ? 1 : 0) + currentWeekHeaders.length" class="plan-truck-label"></td>
             <td v-for="(h, pi) in periodHeaders" :key="'ord2-' + pi" class="plan-truck-cell">
               <button v-if="(planningDateStr || pi > 0) && periodTotalBoxes(pi) > 0" class="btn small plan-create-order-btn" @click="createOrderFromPeriod(pi)" title="Создать заказ из этого периода">
                 <BkIcon name="order" size="sm"/> Заказ
@@ -343,6 +358,13 @@
           <div class="plan-mob-field">
             <span class="plan-mob-label">У пост.</span>
             <input type="number" class="plan-calc-input" :value="displayStock(item, 'stockAtSupplier')" @change="e => onInput(idx, 'supplierStock', e.target.value)" @focus="e => onCalcFocus(e, idx, 'supplierStock')" @keydown="e => onCalcKeydown(e, idx, 'supplierStock')" :disabled="viewOnly" placeholder="0"/>
+          </div>
+          <div v-if="trendMap[item.sku]" class="plan-mob-field plan-mob-field-ro">
+            <span class="plan-mob-label">Тренд</span>
+            <span class="trend-btn" :class="trendMap[item.sku].pct > 0 ? 'trend-up' : 'trend-down'"
+              :title="trendMap[item.sku].group + ': ' + trendMap[item.sku].cur + ' vs ' + trendMap[item.sku].prev">
+              {{ trendMap[item.sku].pct > 0 ? '↑' : '↓' }}{{ Math.abs(trendMap[item.sku].pct) }}%
+            </span>
           </div>
           <div class="plan-mob-field plan-mob-field-ro">
             <span class="plan-mob-label">Запас</span>
@@ -453,6 +475,17 @@
         </div>
       </div>
     </Teleport>
+    <Teleport to="body">
+      <div v-if="trendPopup && trendMap[items[trendPopup.idx]?.sku]" class="plan-trend-popup" :style="trendPopupStyle" @click.stop>
+        <div class="plan-trend-popup-title">Применить тренд {{ trendMap[items[trendPopup.idx].sku].pct > 0 ? '+' : '' }}{{ trendMap[items[trendPopup.idx].sku].pct }}%</div>
+        <div class="plan-trend-popup-info">{{ trendMap[items[trendPopup.idx].sku].group }}: {{ trendMap[items[trendPopup.idx].sku].cur }} vs {{ trendMap[items[trendPopup.idx].sku].prev }} (14д к 14д)</div>
+        <div class="plan-trend-popup-btns">
+          <button v-for="n in trendPeriodOptions" :key="n" class="plan-trend-apply-btn" @click="applyTrendToPeriods(trendPopup.idx, n)">
+            {{ n === editablePeriodIndices.length ? 'Все' : n }} {{ n === 1 ? 'период' : n < 5 ? 'периода' : 'периодов' }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -498,6 +531,9 @@ const planningDateStr = ref('');
 const inputUnit = ref('boxes');
 const consumptionPeriodDays = ref(30);
 const items = ref([]);
+const trendMap = ref({});
+const salesMap = ref({}); // sku -> { total, daily, group }
+const showSales = ref(false);
 const suppLoading = ref(false);
 const settingsExpanded = ref(false);
 const load1cLoading = ref(false);
@@ -845,6 +881,13 @@ function displayStock(item, field) {
   return boxes % 1 === 0 ? boxes : +boxes.toFixed(1);
 }
 
+function displaySales(item, total) {
+  if (inputUnit.value !== 'boxes') return nf.format(Math.round(total));
+  const qpb = getQpb(item);
+  const boxes = total / qpb;
+  return boxes % 1 === 0 ? nf.format(boxes) : boxes.toFixed(1);
+}
+
 // Безопасный вычислитель арифметических выражений (без new Function)
 function _safeCalc(expr) {
   const tokens = expr.match(/(\d+\.?\d*|[+\-*/()])/g);
@@ -926,7 +969,7 @@ function recalcItem(idx, fromMonth = 0) {
   // ─── Фаза 2: будущие периоды (планирование заказов) ───
   if (!item.plan.length || item.plan.length !== headers.length) {
     const old = item.plan || [];
-    item.plan = headers.map((_, m) => { const o = old[m]; if (o && o.locked) return { ...o, month: m }; return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false }; });
+    item.plan = headers.map((_, m) => { const o = old[m]; if (o && (o.locked || o.trendPct)) return { ...o, month: m }; return { month: m, need: 0, deficit: 0, orderBoxes: 0, orderUnits: 0, locked: false, trendPct: null }; });
   }
   const mu = daily * 30; const wu = daily * 7;
   // Существующие заказы в пути для этого SKU
@@ -944,7 +987,19 @@ function recalcItem(idx, fromMonth = 0) {
     const available = co + existingUnits;
     const deficit = need - Math.min(available, need);
     if (item.plan[m].locked) { item.plan[m].need = Math.round(need); item.plan[m].deficit = Math.round(deficit); item.plan[m].orderUnits = item.plan[m].orderBoxes * pbu; item.plan[m].existingBoxes = skuOrders[m] || 0; co = available - need + item.plan[m].orderUnits; }
-    else { let ob = 0, ou = 0; if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); if (mult > 1) ob = Math.ceil(ob / mult) * mult; ou = ob * pbu; } item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false, existingBoxes: skuOrders[m] || 0 }; co = available - need + ou; }
+    else {
+      let ob = 0, ou = 0;
+      if (deficit > 0 && pbu > 0) { ob = Math.ceil(deficit / pbu); if (mult > 1) ob = Math.ceil(ob / mult) * mult; ou = ob * pbu; }
+      const savedTrend = item.plan[m].trendPct;
+      if (savedTrend && ob > 0) {
+        ob = Math.round(ob * (1 + savedTrend / 100));
+        if (ob < 0) ob = 0;
+        if (mult > 1 && ob > 0) ob = Math.ceil(ob / mult) * mult;
+        ou = ob * pbu;
+      }
+      item.plan[m] = { month: m, need: Math.round(need), deficit: Math.round(deficit), orderBoxes: ob, orderUnits: ou, locked: false, trendPct: savedTrend || null, existingBoxes: skuOrders[m] || 0 };
+      co = available - need + ou;
+    }
     if (co < 0) co = 0;
     item.plan[m].daysRemaining = daily > 0 ? Math.round(co / daily) : null;
   }
@@ -967,7 +1022,7 @@ function applyEdit(idx, m, val) {
   const raw = String(val).trim();
   const newVal = /^[\d\s+\-*/().]+$/.test(raw) && raw ? Math.round(_safeCalc(raw)) || 0 : parseInt(val) || 0;
   const item = items.value[idx]; const p = item.plan[m]; if (!p) { editingCell.value = null; return; }
-  p.orderBoxes = newVal; p.orderUnits = newVal * getQpb(item); p.locked = true;
+  p.orderBoxes = newVal; p.orderUnits = newVal * getQpb(item); p.locked = true; p.trendPct = null;
   editingCell.value = null;
   recalcItem(idx, m + 1); _savePlanDraft();
 }
@@ -1052,7 +1107,7 @@ function roundToPallet(idx, m) {
   p.orderUnits = p.orderBoxes * getQpb(item); p.locked = true;
   recalcItem(idx, m + 1); _savePlanDraft();
 }
-function resetCell(idx, m) { snapshot(); const item = items.value[idx]; if (!item?.plan[m]) return; item.plan[m].locked = false; recalcItem(idx, m); _savePlanDraft(); }
+function resetCell(idx, m) { snapshot(); const item = items.value[idx]; if (!item?.plan[m]) return; item.plan[m].locked = false; item.plan[m].trendPct = null; recalcItem(idx, m); _savePlanDraft(); }
 
 function reserveDays(item) {
   const qpb = getQpb(item);
@@ -1807,7 +1862,7 @@ async function loadProducts() {
     items.value = (data || []).filter(p => group.includes(p.legal_entity)).map(p => ({
       productId: p.id, sku: p.sku || '', name: p.name, qtyPerBox: p.qty_per_box || 1,
       boxesPerPallet: p.boxes_per_pallet || null, unitOfMeasure: p.unit_of_measure || 'шт',
-      multiplicity: p.multiplicity || 1, monthlyConsumption: 0,
+      multiplicity: p.multiplicity || 1, analogGroup: p.analog_group || '', monthlyConsumption: 0,
       stockOnHand: 0, stockAtSupplier: 0, transit: [], plan: [], _cw: false, _ct: '', _excluded: false,
     }));
     // (#3) Применяем порядок товаров из item_order (как в заказе)
@@ -1817,8 +1872,146 @@ async function loadProducts() {
     undoStack.value = []; redoStack.value = [];
     recalcAll(); triggerValidation(); _savePlanDraft();
     loadPlanPrices();
+    loadTrends();
   } finally { suppLoading.value = false; }
 }
+
+// ─── Тренды реализации ресторанов (14к14) ──────────────────────────────────────
+let _loadTrendsGen = 0;
+async function loadTrends() {
+  const skus = items.value.map(i => String(i.sku)).filter(Boolean);
+  if (!skus.length) { trendMap.value = {}; salesMap.value = {}; return; }
+  const gen = ++_loadTrendsGen;
+  try {
+    const skuToGroup = {};
+    const groups = new Set();
+    for (const item of items.value) {
+      if (item.analogGroup) { skuToGroup[String(item.sku)] = item.analogGroup; groups.add(item.analogGroup); }
+    }
+    if (!groups.size) { trendMap.value = {}; salesMap.value = {}; return; }
+
+    const now = new Date();
+    const cpd = consumptionPeriodDays.value || 30;
+    const loadDays = Math.max(cpd, 28);
+    const dLoad = new Date(now); dLoad.setDate(dLoad.getDate() - loadDays);
+    const dateFrom = toLocalDateStr(dLoad);
+    const groupList = [...groups];
+    let allSales = [];
+    for (let i = 0; i < groupList.length; i += 50) {
+      const batch = groupList.slice(i, i + 50);
+      const { data: sales } = await db.from('restaurant_sales')
+        .select('sale_date, analog_group, quantity')
+        .gte('sale_date', dateFrom)
+        .in('analog_group', batch)
+        .limit(500000);
+      if (gen !== _loadTrendsGen) return;
+      if (sales) allSales = allSales.concat(sales);
+    }
+
+    // Тренд: 14 к 14 (из последних 28 дней)
+    const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
+    const d14str = toLocalDateStr(d14);
+    const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
+    const d28str = toLocalDateStr(d28);
+    const dCpd = new Date(now); dCpd.setDate(dCpd.getDate() - cpd);
+    const dCpdStr = toLocalDateStr(dCpd);
+    const groupStats = {};
+    const groupTotals = {};
+    for (const s of allSales) {
+      const g = s.analog_group;
+      const qty = parseFloat(s.quantity) || 0;
+      // Тренд — только последние 28 дней
+      if (s.sale_date >= d28str) {
+        if (!groupStats[g]) groupStats[g] = { cur: 0, prev: 0 };
+        if (s.sale_date >= d14str) groupStats[g].cur += qty;
+        else groupStats[g].prev += qty;
+      }
+      // Реализация — за период расхода
+      if (s.sale_date >= dCpdStr) {
+        if (!groupTotals[g]) groupTotals[g] = 0;
+        groupTotals[g] += qty;
+      }
+    }
+
+    const map = {};
+    const sMap = {};
+    for (const sku of skus) {
+      const g = skuToGroup[sku];
+      if (!g) continue;
+      // Тренд
+      if (groupStats[g]) {
+        const { cur, prev } = groupStats[g];
+        if (prev > 0) {
+          const pct = Math.round((cur - prev) / prev * 100);
+          if (pct !== 0) map[sku] = { pct, cur: Math.round(cur), prev: Math.round(prev), group: g };
+        }
+      }
+      // Реализация
+      if (groupTotals[g] > 0) {
+        sMap[sku] = { total: Math.round(groupTotals[g]), group: g, days: cpd };
+      }
+    }
+    trendMap.value = map;
+    salesMap.value = sMap;
+  } catch (e) {
+    console.error('loadTrends error:', e);
+    if (gen === _loadTrendsGen) trendMap.value = {};
+  }
+}
+
+// ─── Применение тренда к периодам ──────────────────────────────────────────
+const trendPopup = ref(null);
+
+const trendPeriodOptions = computed(() => {
+  const total = editablePeriodIndices.value.length;
+  if (total <= 1) return [1];
+  const opts = [1];
+  if (total >= 3) opts.push(Math.ceil(total / 2));
+  opts.push(total);
+  return [...new Set(opts)];
+});
+
+const trendPopupStyle = ref({});
+
+function openTrendPopup(idx, sku, e) {
+  if (viewOnly.value) return;
+  if (trendPopup.value && trendPopup.value.idx === idx) { trendPopup.value = null; return; }
+  const rect = e.currentTarget.getBoundingClientRect();
+  trendPopupStyle.value = {
+    position: 'fixed',
+    top: (rect.bottom + 4) + 'px',
+    left: (rect.left + rect.width / 2) + 'px',
+    transform: 'translateX(-50%)',
+  };
+  trendPopup.value = { idx, sku };
+}
+
+function closeTrendPopup(e) {
+  if (trendPopup.value && !e.target.closest('.plan-trend-wrap')) trendPopup.value = null;
+}
+
+function applyTrendToPeriods(idx, count) {
+  const item = items.value[idx];
+  const trend = trendMap.value[item.sku];
+  if (!item || !trend) return;
+  snapshot();
+  const periods = editablePeriodIndices.value;
+  const applyCount = Math.min(count, periods.length);
+  for (let i = 0; i < applyCount; i++) {
+    const m = periods[i];
+    const p = item.plan[m];
+    if (!p) continue;
+    p.trendPct = trend.pct;
+    p.locked = false; // не фиксируем — пусть пересчитывается с трендом
+  }
+  recalcItem(idx, 0);
+  _savePlanDraft();
+  trendPopup.value = null;
+  toast.success('Тренд применён', `${trend.pct > 0 ? '+' : ''}${trend.pct}% к ${applyCount} ${applyCount === 1 ? 'периоду' : 'периодам'}`);
+}
+
+onMounted(() => { document.addEventListener('click', closeTrendPopup); });
+onBeforeUnmount(() => { document.removeEventListener('click', closeTrendPopup); });
 
 async function restoreItemOrder() {
   const le = orderStore.settings.legalEntity;
@@ -2033,15 +2226,26 @@ async function loadPlanFromHistory(planId) {
   items.value = (plan.items || []).map(i => ({
     productId: null, sku: i.sku || '', name: i.name || '', qtyPerBox: i.qty_per_box || 1,
     boxesPerPallet: i.boxes_per_pallet || null, unitOfMeasure: i.unit_of_measure || 'шт',
-    multiplicity: i.multiplicity || 1, monthlyConsumption: i.monthly_consumption || 0,
+    multiplicity: i.multiplicity || 1, analogGroup: '', monthlyConsumption: i.monthly_consumption || 0,
     stockOnHand: i.stock_on_hand || 0, stockAtSupplier: i.stock_at_supplier || 0, _cw: false, _ct: '',
     transit: (i.transit || []).map(t => ({ qty: t.qty || 0 })),
     plan: (i.plan || []).map(p => ({ month: p.month, need: 0, deficit: 0, orderBoxes: p.order_boxes || 0, orderUnits: p.order_units || 0, locked: p.locked || false }))
   }));
+  // Подгружаем analog_group для трендов
+  const planSkus = items.value.map(i => i.sku).filter(Boolean);
+  if (planSkus.length) {
+    const { data: prods } = await db.from('products').select('sku, analog_group').in('sku', planSkus);
+    if (prods) {
+      const agMap = {};
+      for (const p of prods) if (p.analog_group) agMap[String(p.sku)] = p.analog_group;
+      items.value.forEach(i => { if (agMap[i.sku]) i.analogGroup = agMap[i.sku]; });
+    }
+  }
   undoStack.value = []; redoStack.value = [];
   items.value.forEach((_, idx) => recalcItem(idx, 0));
   triggerValidation();
   loadPlanPrices();
+  loadTrends();
   toast.success('План загружен', `${plan.supplier} — ${items.value.length} позиций`);
 }
 
@@ -2148,6 +2352,7 @@ watch(() => route.query.planId, async (newId) => {
 .plan-result-zero { color: var(--text-muted); font-size: 10px; }
 .plan-cell-locked { background: #fff8e1 !important; border: 1px dashed var(--bk-orange) !important; }
 .plan-result-value.plan-cell-locked { color: #e65100; }
+.plan-cell-trend { background: #FFF3E0 !important; border: 1px solid #FFB74D !important; }
 .plan-pallet-period, .plan-reset-cell { display: inline-block; font-size: 10px; cursor: pointer; margin-left: 2px; opacity: 0.5; transition: opacity 0.15s; vertical-align: middle; }
 .plan-pallet-period:hover, .plan-reset-cell:hover { opacity: 1; }
 .plan-reset-cell { color: #d32f2f; font-weight: 700; }
@@ -2160,6 +2365,10 @@ watch(() => route.query.planId, async (newId) => {
 .consumption-warning { color: #d32f2f !important; font-weight: 700 !important; border-color: #d32f2f !important; background: #ffebee !important; }
 
 /* Колонка запаса (дней) */
+.plan-th-sales { min-width: 55px; text-align: center; width: 65px; }
+.plan-td-sales { text-align: center; padding: 2px 4px; font-size: 12px; color: #555; font-variant-numeric: tabular-nums; }
+.plan-th-trend { min-width: 50px; text-align: center; width: 55px; }
+.plan-td-trend { text-align: center; padding: 2px 4px; }
 .plan-th-reserve { min-width: 50px; text-align: center; }
 .plan-td-reserve { text-align: center; font-weight: 700; font-size: 13px; color: var(--text-muted); border-right: 2px solid var(--border-light); }
 .plan-td-reserve.reserve-danger { color: #d32f2f; background: #ffebee; }
@@ -2388,4 +2597,12 @@ watch(() => route.query.planId, async (newId) => {
 .plan-exclude-btn.is-excluded { color: var(--text-muted, #999); }
 .plan-existing-order { font-size: 10px; color: #1565C0; background: #E3F2FD; border-radius: 3px; padding: 0 4px; margin-top: 2px; white-space: nowrap; line-height: 1.4; }
 .excluded-badge { font-size: 10px; color: var(--text-muted, #999); background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; margin-left: 4px; white-space: nowrap; }
+</style>
+<style>
+.plan-trend-popup { position: fixed; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.2); z-index: 9999; padding: 8px 10px; min-width: 140px; white-space: nowrap; }
+.plan-trend-popup-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+.plan-trend-popup-info { font-size: 10px; color: #888; margin-bottom: 6px; }
+.plan-trend-popup-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.plan-trend-apply-btn { padding: 4px 8px; font-size: 11px; font-weight: 600; border: 1px solid #ddd; border-radius: 4px; background: #f8f8f8; cursor: pointer; white-space: nowrap; }
+.plan-trend-apply-btn:hover { background: #FFF3E0; border-color: #E65100; color: #E65100; }
 </style>

@@ -52,6 +52,12 @@
       <div v-if="aduValue > 0 && !compact" class="adu-hint">ADU: {{ aduValue.toFixed(1) }}</div>
     </td>
 
+    <!-- Реализация -->
+    <td v-if="showSales" class="sales-cell" :title="sales ? sales.group + ': ' + nf.format(sales.total) + ' шт за ' + sales.days + ' дн' : ''">
+      <span v-if="sales">{{ displaySalesValue }}</span>
+      <span v-else class="text-muted">—</span>
+    </td>
+
     <!-- Остаток -->
     <td data-label="Остаток">
       <input
@@ -192,6 +198,8 @@ const props = defineProps({
   priceInfo: { type: Object, default: null },
   hasPrices: { type: Boolean, default: false },
   trend: { type: Object, default: null },
+  sales: { type: Object, default: null },
+  showSales: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['remove', 'edit-product', 'drag-start', 'drag-over', 'drop', 'drag-end', 'nav']);
@@ -319,6 +327,17 @@ function updateField(field, value) {
   orderStore.updateItemField(props.item.id, field, value);
   draftStore.save();
 }
+
+const displaySalesValue = computed(() => {
+  if (!props.sales) return '—';
+  const total = props.sales.total;
+  if (props.settings.unit === 'boxes') {
+    const qpb = getQpb(props.item);
+    const boxes = total / qpb;
+    return boxes % 1 === 0 ? nf.format(boxes) : boxes.toFixed(1);
+  }
+  return nf.format(Math.round(total));
+});
 
 // ─── Расчёт ───────────────────────────────────────────────────────────────────
 const calc = computed(() => {

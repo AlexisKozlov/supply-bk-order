@@ -86,6 +86,7 @@
         <button class="btn small" :disabled="!orderStore.canUndo || orderStore.viewOnlyMode" @click="orderStore.undo" title="Отменить"><BkIcon name="undo" size="sm"/></button>
         <button class="btn small" :disabled="!orderStore.canRedo || orderStore.viewOnlyMode" @click="orderStore.redo" title="Повторить"><BkIcon name="redo" size="sm"/></button>
         <button class="compact-toggle" :class="{ active: compactMode }" @click="toggleCompact" title="Компактный режим"><BkIcon name="menu" size="sm"/> Компакт</button>
+        <button class="compact-toggle" :class="{ active: showSales }" @click="showSales = !showSales" title="Показать реализацию ресторанов">📊 Реализация</button>
         <button class="btn small fullscreen-toggle-btn" @click="isFullscreen = !isFullscreen"><BkIcon :name="isFullscreen ? 'close' : 'eye'" size="sm"/> {{ isFullscreen ? 'Свернуть' : 'Развернуть' }}</button>
         <button class="btn small" :disabled="orderStore.viewOnlyMode" @click="orderStore.applyAllCalculated" title="Все рассчитанные → В заказ"><BkIcon name="add" size="sm"/> Все→Заказ</button>
         <button class="btn small" :disabled="fillLoading || orderStore.viewOnlyMode" @click="fillFromLastOrder" title="Загрузить расход и остаток из анализа запасов">
@@ -169,6 +170,8 @@
         :filter-query="filterQuery"
         :price-map="priceMap"
         :trend-map="trendMap"
+        :sales-map="salesMap"
+        :show-sales="showSales"
         @edit-product="openProductForEdit"/>
 
       <!-- Кнопки завершения — под таблицей справа -->
@@ -946,13 +949,15 @@ async function loadPrices() {
   } catch { if (gen === _loadPricesGen) priceMap.value = {}; }
 }
 
-// ─── Тренды реализации ресторанов ─────────────────────────────────────────────
+// ─── Тренды и реализация ресторанов ─────────────────────────────────────────────
 const trendMap = ref({}); // sku -> { pct, cur, prev }
+const salesMap = ref({}); // sku -> { total, daily, group }
+const showSales = ref(false);
 
 let _loadTrendsGen = 0;
 async function loadTrends() {
   const skus = orderStore.items.map(i => String(i.sku)).filter(Boolean);
-  if (!skus.length) { trendMap.value = {}; return; }
+  if (!skus.length) { trendMap.value = {}; salesMap.value = {}; return; }
   const gen = ++_loadTrendsGen;
   try {
     // 1) SKU → analog_group
@@ -963,16 +968,15 @@ async function loadTrends() {
     for (const p of (prods || [])) {
       if (p.analog_group) { skuToGroup[String(p.sku)] = p.analog_group; groups.add(p.analog_group); }
     }
-    console.log('[Trends] SKU с группами:', Object.keys(skuToGroup).length, '/', skus.length, ', уник. групп:', groups.size);
-    if (!groups.size) { trendMap.value = {}; return; }
+    if (!groups.size) { trendMap.value = {}; salesMap.value = {}; return; }
 
-    // 2) Реализация за 28 дней
+    // 2) Реализация за periodDays дней (минимум 28 для тренда)
     const now = new Date();
-    const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
-    const dateFrom = toLocalDateStr(d28);
+    const cpd = orderStore.settings.periodDays || 30;
+    const loadDays = Math.max(cpd, 28);
+    const dLoad = new Date(now); dLoad.setDate(dLoad.getDate() - loadDays);
+    const dateFrom = toLocalDateStr(dLoad);
     const groupList = [...groups];
-    console.log('[Trends] Запрос реализации, дата от:', dateFrom, ', групп:', groupList.length, ', первые 3:', groupList.slice(0, 3));
-    // Загружаем пачками по 50 групп (чтобы URL не был слишком длинным)
     let allSales = [];
     for (let i = 0; i < groupList.length; i += 50) {
       const batch = groupList.slice(i, i + 50);
@@ -985,33 +989,49 @@ async function loadTrends() {
       if (gen !== _loadTrendsGen) return;
       if (sales) allSales = allSales.concat(sales);
     }
-    console.log('[Trends] Записей реализации:', allSales.length);
 
-    // 3) Считаем тренд: последние 14 дней vs предыдущие 14 дней
+    // 3) Считаем тренд (14к14) и реализацию (за periodDays)
     const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
     const d14str = toLocalDateStr(d14);
-    const groupStats = {}; // group → { cur, prev }
+    const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
+    const d28str = toLocalDateStr(d28);
+    const dCpd = new Date(now); dCpd.setDate(dCpd.getDate() - cpd);
+    const dCpdStr = toLocalDateStr(dCpd);
+    const groupStats = {};
+    const groupTotals = {};
     for (const s of allSales) {
       const g = s.analog_group;
-      if (!groupStats[g]) groupStats[g] = { cur: 0, prev: 0 };
       const qty = parseFloat(s.quantity) || 0;
-      if (s.sale_date >= d14str) groupStats[g].cur += qty;
-      else groupStats[g].prev += qty;
+      if (s.sale_date >= d28str) {
+        if (!groupStats[g]) groupStats[g] = { cur: 0, prev: 0 };
+        if (s.sale_date >= d14str) groupStats[g].cur += qty;
+        else groupStats[g].prev += qty;
+      }
+      if (s.sale_date >= dCpdStr) {
+        if (!groupTotals[g]) groupTotals[g] = 0;
+        groupTotals[g] += qty;
+      }
     }
 
     // 4) Маппим на SKU
     const map = {};
+    const sMap = {};
     for (const sku of skus) {
       const g = skuToGroup[sku];
-      if (!g || !groupStats[g]) continue;
-      const { cur, prev } = groupStats[g];
-      if (prev <= 0) continue;
-      const pct = Math.round((cur - prev) / prev * 100);
-      if (pct === 0) continue;
-      map[sku] = { pct, cur: Math.round(cur), prev: Math.round(prev), group: g };
+      if (!g) continue;
+      if (groupStats[g]) {
+        const { cur, prev } = groupStats[g];
+        if (prev > 0) {
+          const pct = Math.round((cur - prev) / prev * 100);
+          if (pct !== 0) map[sku] = { pct, cur: Math.round(cur), prev: Math.round(prev), group: g };
+        }
+      }
+      if (groupTotals[g] > 0) {
+        sMap[sku] = { total: Math.round(groupTotals[g]), group: g, days: cpd };
+      }
     }
-    console.log('[Trends] Товаров с трендом:', Object.keys(map).length);
     trendMap.value = map;
+    salesMap.value = sMap;
   } catch (e) {
     console.error('loadTrends error:', e);
     if (gen === _loadTrendsGen) trendMap.value = {};

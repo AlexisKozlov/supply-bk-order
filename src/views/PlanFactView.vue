@@ -80,7 +80,7 @@
             </td>
             <td class="pf-mtd pf-mtd-supplier">
               <span class="pf-supplier-dot" :style="{ background: supplierColor(order.supplier) }"></span>
-              <a class="pf-cross-link" @click.stop="router.push({ name: 'pricing', query: { supplier: order.supplier } })" :title="'Цены: ' + order.supplier">{{ order.supplier }}</a>
+              <span>{{ order.supplier }}</span>
               <a class="pf-cross-link-icon" @click.stop="router.push({ name: 'order', query: { orderId: order.id, mode: 'view' } })" title="Открыть заказ">
                 <BkIcon name="eye" size="xs"/>
               </a>

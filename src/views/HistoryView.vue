@@ -83,7 +83,7 @@
               </td>
               <td class="ht-td ht-td-supplier">
                 <span class="ht-supplier-dot" :style="{ background: supplierColor(order.supplier) }"></span>
-                <a class="pf-cross-link" @click.stop="router.push({ name: 'pricing', query: { supplier: order.supplier } })" :title="'Цены: ' + order.supplier">{{ order.supplier }}</a>
+                <span>{{ order.supplier }}</span>
               </td>
               <td class="ht-td ht-td-note"><span v-if="order.note" :title="order.note">{{ order.note }}</span></td>
               <td class="ht-td ht-td-center">{{ order.created_by || '—' }}</td>

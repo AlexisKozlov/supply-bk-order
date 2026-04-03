@@ -6,6 +6,7 @@
           <th style="width:30px;"></th>
           <th>Наименование товара</th>
           <th>Расход<br><small>(за период)</small></th>
+          <th v-if="showSales" class="sales-col">Реализация<br><small>(за период)</small></th>
           <th>Остаток</th>
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
           <th class="stock-col">Запас</th>
@@ -24,6 +25,7 @@
           <th style="width:4px;"></th>
           <th>Товар</th>
           <th>Расход</th>
+          <th v-if="showSales" class="sales-col">Реализ.</th>
           <th>Остаток</th>
           <th v-if="settings.hasTransit" class="transit-col">Транзит</th>
           <th class="stock-col">Запас</th>
@@ -60,6 +62,8 @@
             :price-info="props.priceMap[orderStore.items[index]?.sku] || null"
             :has-prices="hasPrices"
             :trend="props.trendMap[orderStore.items[index]?.sku] || null"
+            :sales="props.showSales ? (props.salesMap[orderStore.items[index]?.sku] || null) : null"
+            :show-sales="props.showSales"
             :ref="el => { if (el) rowRefs[index] = el; }"
             @remove="orderStore.removeItem($event); draftStore.save();"
             @edit-product="$emit('edit-product', $event)"
@@ -121,6 +125,8 @@ const props = defineProps({
   filterQuery: { type: String, default: '' },
   priceMap: { type: Object, default: () => ({}) },
   trendMap: { type: Object, default: () => ({}) },
+  salesMap: { type: Object, default: () => ({}) },
+  showSales: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['edit-product']);
@@ -227,6 +233,7 @@ const colSpan = computed(() => {
   if (settings.value.hasTransit) c++;
   if (props.cdaMode) c++;
   if (hasPrices.value) c++;
+  if (props.showSales) c++;
   return c;
 });
 
