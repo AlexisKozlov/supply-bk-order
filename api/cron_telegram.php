@@ -929,22 +929,28 @@ try {
     foreach ($decisions as $dec) {
         // Проверяем что не отправляли сегодня
         if (wasNotified($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', 86400)) continue;
-        // Ищем chat_id ответственного
-        $uStmt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
-        $uStmt->execute([$dec['responsible_person']]);
-        $chatId = $uStmt->fetchColumn();
-        if (!$chatId) continue;
+        // responsible_person может содержать несколько имён через запятую
+        $responsibles = array_map('trim', explode(',', $dec['responsible_person']));
         $deadlineDate = date('d.m', strtotime($dec['deadline']));
         $isToday = $dec['deadline'] === date('Y-m-d');
         $urgency = $isToday ? '🔴 Сегодня' : '🟡 Завтра';
-        $text = "{$urgency} <b>Дедлайн по решению</b>\n";
-        $text .= "─────────────────────\n";
-        $text .= "📋 Совещание: {$dec['topic']}\n";
-        $text .= "📝 {$dec['text']}\n";
-        $text .= "📅 Срок: {$deadlineDate}\n";
-        sendTelegramMessage($BOT_TOKEN, $chatId, $text, 'HTML');
-        logNotification($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', $chatId);
-        $sent++;
+        $notified = false;
+        foreach ($responsibles as $respName) {
+            if (!$respName) continue;
+            $uStmt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE name = ? AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''");
+            $uStmt->execute([$respName]);
+            $chatId = $uStmt->fetchColumn();
+            if (!$chatId) continue;
+            $text = "{$urgency} <b>Дедлайн по решению</b>\n";
+            $text .= "─────────────────────\n";
+            $text .= "📋 Совещание: {$dec['topic']}\n";
+            $text .= "📝 {$dec['text']}\n";
+            $text .= "📅 Срок: {$deadlineDate}\n";
+            sendTelegramMessage($BOT_TOKEN, $chatId, $text, 'HTML');
+            $notified = true;
+            $sent++;
+        }
+        if ($notified) logNotification($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', '');
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] protocol deadline reminders error: ' . $e->getMessage());

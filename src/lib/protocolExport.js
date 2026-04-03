@@ -68,7 +68,7 @@ export async function exportProtocolExcel(proto) {
       rows.push([
         { v: i + 1, s: ss },
         { v: dec.text || '', s: ss },
-        { v: dec.responsible_person || '', s: ss },
+        { v: Array.isArray(dec.responsible_person) ? dec.responsible_person.join(', ') : (dec.responsible_person || ''), s: ss },
         { v: fmtDate(dec.deadline), s: ss },
         { v: statusLabel(dec.status), s: ss },
       ]);
@@ -105,7 +105,8 @@ export function exportProtocolPdf(proto) {
     decisionsHtml = `<h3>Задачи</h3><table><thead><tr><th style="width:30px">№</th><th>Задача</th><th style="width:140px">Ответственный</th><th style="width:90px">Срок</th><th style="width:100px">Статус</th></tr></thead><tbody>`;
     proto.decisions.forEach((dec, i) => {
       const bg = statusColors[dec.status] || '#fff';
-      decisionsHtml += `<tr style="background:${bg}"><td>${i + 1}</td><td>${esc(dec.text)}</td><td>${esc(dec.responsible_person)}</td><td>${fmtDate(dec.deadline)}</td><td>${statusLabel(dec.status)}</td></tr>`;
+      const respStr = Array.isArray(dec.responsible_person) ? dec.responsible_person.join(', ') : (dec.responsible_person || '');
+      decisionsHtml += `<tr style="background:${bg}"><td>${i + 1}</td><td>${esc(dec.text)}</td><td>${esc(respStr)}</td><td>${fmtDate(dec.deadline)}</td><td>${statusLabel(dec.status)}</td></tr>`;
     });
     decisionsHtml += '</tbody></table>';
   }

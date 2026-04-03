@@ -239,7 +239,8 @@
                     </td>
                     <td class="anv-td-name">
                       <span class="anv-group-name">{{ group.name }}</span>
-                      <button v-if="!isViewer && group.totalStock <= 0" class="anv-hide-btn-inline" @click.stop="hideAnalog(group.name)" title="Скрыть (товар выведен)">👁</button>
+                      <span v-if="hiddenAnalogs.includes(group.name) && !showHidden" class="anv-hidden-badge">скрыта</span>
+                      <button v-if="!isViewer && group.totalStock <= 0 && !hiddenAnalogs.includes(group.name)" class="anv-hide-btn-inline" @click.stop="hideAnalog(group.name)" title="Скрыть (товар выведен)">👁</button>
                       <span class="anv-group-cnt">{{ group.items.filter(i => !i._foreign).length }}{{ group.items.some(i => i._foreign) ? '+' + group.items.filter(i => i._foreign).length : '' }}</span>
                       <span v-if="group.totalStock === 0 && group.totalConsumption > 0" class="anv-no-stock">нет на складе</span>
                     </td>
@@ -701,9 +702,62 @@ const groupsWithData = computed(() => {
   return arr;
 });
 
+// Все группы (включая нулевые) — для поиска по скрытым
+const allGroups = computed(() => {
+  const map = new Map();
+  for (const item of items.value) {
+    if (!item.analog_group) continue;
+    const isForeign = !!(filterSupplier.value && item.supplier_name !== filterSupplier.value);
+    if (!map.has(item.analog_group)) {
+      map.set(item.analog_group, {
+        name: item.analog_group, items: [], rawTotalStock: 0, rawTotalConsumption: 0,
+        supplierCounts: {}, categoryCounts: {}, hasOwn: false,
+      });
+    }
+    const g = map.get(item.analog_group);
+    const d = calcDays(item.stock, item.consumption);
+    g.items.push({ ...item, _foreign: isForeign, daysOfStock: d, displayStock: toUnit(item.stock, item.qtyPerBox), displayConsumption: toUnit(item.consumption, item.qtyPerBox) });
+    g.rawTotalStock += item.stock;
+    g.rawTotalConsumption += item.consumption;
+    if (!isForeign) {
+      g.hasOwn = true;
+      if (item.supplier_name) g.supplierCounts[item.supplier_name] = (g.supplierCounts[item.supplier_name] || 0) + 1;
+      const cat = item.category || '';
+      g.categoryCounts[cat] = (g.categoryCounts[cat] || 0) + 1;
+    }
+  }
+  const arr = Array.from(map.values()).filter(g => !filterSupplier.value || g.hasOwn);
+  for (const g of arr) {
+    g.groupDays = calcDays(g.rawTotalStock, g.rawTotalConsumption);
+    g.totalStock = Math.round(g.items.reduce((s, i) => s + i.displayStock, 0) * 10) / 10;
+    g.totalConsumption = Math.round(g.items.reduce((s, i) => s + i.displayConsumption, 0) * 10) / 10;
+    g.items.sort((a, b) => (a._foreign ? 1 : 0) - (b._foreign ? 1 : 0) || a.daysOfStock - b.daysOfStock);
+    const sc = g.supplierCounts;
+    g.mainSupplier = Object.keys(sc).sort((a, b) => sc[b] - sc[a])[0] || '';
+    const cc = g.categoryCounts;
+    g.category = Object.keys(cc).sort((a, b) => cc[b] - cc[a])[0] || '';
+  }
+  arr.sort((a, b) => a.groupDays - b.groupDays);
+  return arr;
+});
+
 const filteredGroups = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim();
+
+  // При поиске — ищем по ВСЕМ группам (включая скрытые и нулевые)
+  if (q) {
+    return allGroups.value.filter(g => {
+      if (g.name.toLowerCase().includes(q)) return true;
+      return g.items.some(i =>
+        i.name.toLowerCase().includes(q) ||
+        i.sku.toLowerCase().includes(q)
+      );
+    });
+  }
+
+  // Без поиска — обычная логика
   let result = groupsWithData.value;
-  // Скрытые аналоги
+
   if (!showHidden.value && hiddenAnalogs.value.length) {
     result = result.filter(g => !hiddenAnalogs.value.includes(g.name));
   }
@@ -724,18 +778,6 @@ const filteredGroups = computed(() => {
   // Category filter
   if (filterCategory.value) {
     result = result.filter(g => g.category === filterCategory.value);
-  }
-
-  // Search filter
-  const q = searchQuery.value.toLowerCase().trim();
-  if (q) {
-    result = result.filter(g => {
-      if (g.name.toLowerCase().includes(q)) return true;
-      return g.items.some(i =>
-        i.name.toLowerCase().includes(q) ||
-        i.sku.toLowerCase().includes(q)
-      );
-    });
   }
 
   return result;
@@ -1526,6 +1568,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   border-color: var(--bk-orange);
   background: #FFF8ED;
 }
+.anv-hidden-badge { font-size: 10px; background: #f0ad4e; color: #fff; border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
 .anv-hide-btn-inline { background: none; border: none; cursor: pointer; opacity: 0.3; font-size: 12px; margin-left: 6px; transition: opacity 0.15s; padding: 0 2px; }
 .anv-hide-btn-inline:hover { opacity: 1; }
 .anv-hidden-list { padding: 8px 16px; background: #FFF8E1; border-radius: 8px; margin-bottom: 12px; }

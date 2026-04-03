@@ -86,10 +86,10 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(t, i) in carryoverTasks" :key="'co-' + t.id" :class="['mpd-tr-' + t.status, { 'mpd-tr-mine': t.responsible_person === userStore.currentUser?.name }]">
+            <tr v-for="(t, i) in carryoverTasks" :key="'co-' + t.id" :class="['mpd-tr-' + t.status, { 'mpd-tr-mine': isMyTask(t) }]">
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td class="mpd-td-text">{{ t.text }}</td>
-              <td>{{ t.responsible_person }}</td>
+              <td>{{ formatResponsible(t.responsible_person) }}</td>
               <td>{{ fmtShortDate(t.deadline) }}</td>
               <td><select v-model="t.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + t.status" @change="onCarryoverStatusChange(t)">
                 <option value="pending">В работе</option>
@@ -120,10 +120,21 @@
             <tr v-for="(dec, i) in protocol.decisions" :key="dec.id || ('new-' + i)" :class="['mpd-tr-' + dec.status, { 'mpd-tr-mine': isMyTask(dec) }]">
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td><textarea v-model="dec.text" :disabled="!canEdit" class="mpd-cell-input mpd-cell-text" rows="1" placeholder="Текст задачи" @input="autoResize($event)"></textarea></td>
-              <td><select v-model="dec.responsible_person" :disabled="!canEdit" class="mpd-cell-input">
-                <option value="">—</option>
-                <option v-for="u in allUsers" :key="u.name" :value="u.name">{{ u.name }}</option>
-              </select></td>
+              <td class="mpd-td-resp">
+                <div class="mpd-multi-select" v-if="canEdit">
+                  <div class="mpd-multi-tags" @click="toggleResponsiblePicker(dec)">
+                    <span v-for="name in dec.responsible_person" :key="name" class="mpd-resp-tag">{{ name }} <span class="mpd-resp-tag-x" @click.stop="removeResponsible(dec, name)">&times;</span></span>
+                    <span v-if="!dec.responsible_person.length" class="mpd-resp-placeholder">Выбрать...</span>
+                  </div>
+                  <div v-if="openResponsiblePicker === dec" class="mpd-resp-dropdown">
+                    <div v-for="name in protocol.participants" :key="name" class="mpd-resp-option" @click="toggleResponsible(dec, name)">
+                      <span class="mpd-resp-check">{{ dec.responsible_person.includes(name) ? '☑' : '☐' }}</span> {{ name }}
+                    </div>
+                    <div v-if="!protocol.participants.length" class="mpd-resp-empty">Нет участников</div>
+                  </div>
+                </div>
+                <span v-else>{{ dec.responsible_person.join(', ') }}</span>
+              </td>
               <td><input type="date" v-model="dec.deadline" :disabled="!canEdit" class="mpd-cell-input"></td>
               <td><select v-model="dec.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + dec.status" :disabled="!canEdit && !isMyTask(dec)" @change="onDecisionStatusChange(dec)">
                 <option value="pending">В работе</option>
@@ -256,7 +267,7 @@ async function loadCarryoverTasks() {
     series_id: protocol.value.series_id,
     exclude_protocol_id: protocol.value.id || 0,
   });
-  carryoverTasks.value = data || [];
+  carryoverTasks.value = (data || []).map(t => ({ ...t, responsible_person: normalizeResponsible(t.responsible_person) }));
 }
 
 function onCarryoverStatusChange(t) {
@@ -269,11 +280,36 @@ function onCarryoverStatusChange(t) {
 }
 
 function isMyTask(dec) {
-  return dec.responsible_person === userStore.currentUser?.name;
+  const me = userStore.currentUser?.name;
+  if (!me) return false;
+  const rp = dec.responsible_person;
+  if (Array.isArray(rp)) return rp.includes(me);
+  return rp === me;
+}
+
+function formatResponsible(rp) {
+  if (Array.isArray(rp)) return rp.join(', ');
+  return rp || '';
+}
+
+const openResponsiblePicker = ref(null);
+
+function toggleResponsiblePicker(dec) {
+  openResponsiblePicker.value = openResponsiblePicker.value === dec ? null : dec;
+}
+
+function toggleResponsible(dec, name) {
+  const idx = dec.responsible_person.indexOf(name);
+  if (idx >= 0) dec.responsible_person.splice(idx, 1);
+  else dec.responsible_person.push(name);
+}
+
+function removeResponsible(dec, name) {
+  dec.responsible_person = dec.responsible_person.filter(n => n !== name);
 }
 
 function addDecision() {
-  protocol.value.decisions.push({ id: null, text: '', responsible_person: '', deadline: '', status: 'pending' });
+  protocol.value.decisions.push({ id: null, text: '', responsible_person: [], deadline: '', status: 'pending' });
 }
 
 function autoResize(e) {
@@ -314,7 +350,7 @@ async function save() {
     questions: protocol.value.questions,
     notes: protocol.value.notes,
     status: protocol.value.status,
-    decisions: protocol.value.decisions,
+    decisions: protocol.value.decisions.map(d => ({ ...d, responsible_person: Array.isArray(d.responsible_person) ? d.responsible_person.join(', ') : (d.responsible_person || '') })),
   });
   saving.value = false;
   if (error) { toast.error(error); return; }
@@ -405,7 +441,7 @@ async function loadProtocol(id) {
   const { data, error } = await db.rpc('get_protocol', { id: Number(id) });
   if (error || !data) { toast.error('Протокол не найден'); router.push({ name: 'protocols' }); return; }
   data.participants = typeof data.participants === 'string' ? JSON.parse(data.participants) : (data.participants || []);
-  data.decisions = data.decisions || [];
+  data.decisions = (data.decisions || []).map(d => ({ ...d, responsible_person: normalizeResponsible(d.responsible_person) }));
   files.value = data.files || [];
   delete data.files;
   protocol.value = data;
@@ -424,8 +460,22 @@ watch(protocol, () => {
   }
 }, { deep: true });
 
+function closePickerOnOutsideClick(e) {
+  if (openResponsiblePicker.value && !e.target.closest('.mpd-multi-select')) {
+    openResponsiblePicker.value = null;
+  }
+}
+
+// Нормализация responsible_person: строка → массив (для совместимости со старыми данными)
+function normalizeResponsible(rp) {
+  if (Array.isArray(rp)) return rp;
+  if (!rp) return [];
+  return rp.split(',').map(s => s.trim()).filter(Boolean);
+}
+
 onMounted(async () => {
   window.addEventListener('beforeunload', beforeUnloadHandler);
+  document.addEventListener('click', closePickerOnOutsideClick);
   const [usersRes, seriesRes] = await Promise.all([
     db.rpc('get_users_list_short'),
     db.rpc('get_protocol_series'),
@@ -445,6 +495,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', beforeUnloadHandler);
+  document.removeEventListener('click', closePickerOnOutsideClick);
 });
 </script>
 
@@ -512,6 +563,21 @@ onBeforeUnmount(() => {
 .mpd-td-del { text-align: center; }
 .mpd-row-del { border: none; background: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 0 4px; }
 .mpd-row-del:hover { color: #D62700; }
+
+/* Multi-select ответственных */
+.mpd-td-resp { position: relative; }
+.mpd-multi-select { position: relative; }
+.mpd-multi-tags { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 5px; min-height: 28px; cursor: pointer; border: 1px solid transparent; border-radius: 4px; align-items: center; }
+.mpd-multi-tags:hover { border-color: #ddd; background: #fafafa; }
+.mpd-resp-tag { display: inline-flex; align-items: center; gap: 2px; background: #e3f2fd; color: #1565c0; font-size: 11px; padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
+.mpd-resp-tag-x { cursor: pointer; font-size: 13px; color: #90a4ae; margin-left: 2px; }
+.mpd-resp-tag-x:hover { color: #c62828; }
+.mpd-resp-placeholder { font-size: 12px; color: #aaa; }
+.mpd-resp-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); z-index: 30; max-height: 180px; overflow-y: auto; min-width: 180px; }
+.mpd-resp-option { padding: 6px 10px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.mpd-resp-option:hover { background: #f5f5f5; }
+.mpd-resp-check { font-size: 14px; flex-shrink: 0; }
+.mpd-resp-empty { padding: 10px; font-size: 12px; color: #999; text-align: center; }
 
 /* Carryover tasks */
 .mpd-section-carryover { border-color: #ffe0b2; background: #fffaf0; }
