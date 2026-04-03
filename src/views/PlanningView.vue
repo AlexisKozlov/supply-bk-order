@@ -490,7 +490,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, triggerRef } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, triggerRef, inject } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -523,6 +523,8 @@ const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
 const isViewer = computed(() => !userStore.hasAccess('planning', 'edit'));
 const supplier = ref('');
+const setTabTitle = inject('setTabTitle', () => {});
+watch(supplier, (s) => setTabTitle(s ? 'План: ' + s : 'Планирование'));
 const periodFrequency = ref('w1');
 const periodCountInput = ref(4);
 const periodValue = computed(() => periodFrequency.value.charAt(0) + periodCountInput.value);

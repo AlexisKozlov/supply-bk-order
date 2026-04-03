@@ -31,10 +31,11 @@
       </div>
 
       <!-- Правая панель: сообщения -->
-      <div class="chat-main">
+      <div class="chat-main" :class="{ 'mob-active': selectedConv }">
         <template v-if="selectedConv">
           <div class="chat-main-header">
-            <div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button class="chat-back-btn" @click="selectedConv = null; selectedId = null">←</button>
               <strong>🏪 Ресторан {{ selectedConv.restaurant_number }}</strong>
               <span v-if="selectedConv.restaurant_name" class="chat-header-name">· {{ selectedConv.restaurant_name }}</span>
               <span class="chat-status-badge" :class="selectedConv.status">{{ selectedConv.status === 'open' ? 'Открыт' : 'Закрыт' }}</span>
@@ -308,4 +309,17 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .chat-photo-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .chat-photo-full { max-width: 90vw; max-height: 90vh; border-radius: 8px; cursor: default; }
 .chat-photo-close { position: fixed; top: 16px; right: 16px; background: rgba(255,255,255,0.2); border: none; color: #fff; font-size: 24px; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; }
+.chat-back-btn { display: none; background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text); padding: 0; }
+
+@media (max-width: 700px) {
+  .chat-layout { flex-direction: column; }
+  .chat-sidebar { width: 100%; min-width: 0; border-right: none; flex: 1; }
+  .chat-main { position: absolute; inset: 0; z-index: 10; background: var(--card, #fff); display: none; flex-direction: column; }
+  .chat-main.mob-active { display: flex; }
+  .chat-layout { position: relative; }
+  .chat-back-btn { display: block; }
+  .chat-msg-bubble { max-width: 85%; }
+  .chat-msg-photo img { max-width: 200px; max-height: 200px; }
+  .chat-sidebar-header h2 { font-size: 14px; }
+}
 </style>

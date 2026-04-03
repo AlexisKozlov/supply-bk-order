@@ -333,7 +333,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
@@ -389,12 +389,15 @@ const types = [
 
 function typeLabel(v) { return types.find(t => t.value === v)?.label || v; }
 
+const setTabTitle = inject('setTabTitle', () => {});
+
 const activity = ref({
   id: null, name: '', type: 'promo', status: 'active',
   date_from: '', date_to: '', restaurant_count: null,
   legal_entity: '', note: '',
   items: [], files: [], stages: [],
 });
+watch(() => activity.value.name, (n) => { if (n) setTabTitle(n); });
 
 const activityDays = computed(() => {
   if (!activity.value.date_from || !activity.value.date_to) return 0;

@@ -23,14 +23,27 @@
       </button>
 
       <div class="sidebar-nav-scroll">
+      <!-- Избранное -->
+      <template v-if="pinnedItems.length">
+        <div class="sidebar-section" v-if="!sidebarCollapsed">⭐ Избранное</div>
+        <nav class="sidebar-nav">
+          <router-link v-for="item in pinnedItems" :key="'pin-' + item.route" :to="{ name: item.route }" class="sidebar-item sidebar-item-pinned" :class="{ active: currentRoute === item.route }">
+            <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
+            <span v-if="!sidebarCollapsed">{{ item.label }}</span>
+            <button v-if="!sidebarCollapsed" class="sidebar-unpin-btn" @click.prevent.stop="togglePin(item.route)" title="Убрать из избранного">✕</button>
+          </router-link>
+        </nav>
+      </template>
+
       <template v-for="section in sidebarSections" :key="section.title">
         <template v-if="section.items.some(i => userStore.hasAccess(i.module, 'view') && isModuleVisible(i.module))">
           <div class="sidebar-section" v-if="!sidebarCollapsed">{{ section.title }}</div>
           <nav class="sidebar-nav">
             <template v-for="item in section.items" :key="item.module">
-              <router-link v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module)" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }">
+              <router-link v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module)" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }" @contextmenu.prevent="togglePin(item.route)">
                 <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                 <span v-if="!sidebarCollapsed">{{ item.label }}</span>
+                <span v-if="!sidebarCollapsed && isPinned(item.route)" class="sidebar-pin-mark">⭐</span>
               </router-link>
             </template>
           </nav>
@@ -47,7 +60,8 @@
               :to="{ name: item.route }"
               class="sidebar-tool-icon"
               :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
-              :title="item.label"
+              :title="item.label + (isPinned(item.route) ? ' ⭐' : ' (ПКМ — закрепить)')"
+              @contextmenu.prevent="togglePin(item.route)"
             >
               <BkIcon :name="item.icon" size="sm" light/>
               <span v-if="badgeCounts[item.module]" class="sidebar-badge">{{ badgeCounts[item.module] }}</span>
@@ -143,12 +157,31 @@
         <BkIcon name="warning" size="sm"/> Нет подключения к интернету
       </div>
 
+      <!-- Вкладки -->
+      <div v-if="openTabs.length > 1" class="tabs-bar">
+        <div class="tabs-nav-btns">
+          <button class="tabs-nav-btn" @click="router.back()" title="Назад"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="tabs-nav-btn" @click="router.forward()" title="Вперёд"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div v-for="(tab, ti) in openTabs" :key="tab.route"
+          class="tabs-item" :class="{ active: tab.route === route.name, 'tabs-drag-over': tabDragOver === ti }"
+          draggable="true"
+          @click="router.push(tab.path || { name: tab.route })"
+          @dragstart="onTabDragStart(ti, $event)"
+          @dragover.prevent="onTabDragOver(ti)"
+          @drop="onTabDrop(ti)"
+          @dragend="tabDragFrom = null; tabDragOver = null">
+          <span class="tabs-label">{{ tab.label }}</span>
+          <button class="tabs-close" @click.stop="closeTab(tab.route)" title="Закрыть"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+        </div>
+      </div>
+
       <!-- PAGE CONTENT -->
-      <main class="content-area">
+      <main class="content-area" :class="{ 'has-tabs': openTabs.length > 1 }">
         <router-view v-slot="{ Component }">
-          <Transition name="page" mode="out-in">
-            <component :is="Component" :key="route.path" />
-          </Transition>
+          <KeepAlive :max="7">
+            <component :is="Component" :key="route.name" />
+          </KeepAlive>
         </router-view>
       </main>
     </div>
@@ -313,7 +346,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch, provide } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -399,7 +432,108 @@ const toolsItems = [
   { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
 ];
 
-const showToolsMenu = ref(false); // legacy, не используется
+// ═══ Вкладки (tabs) ═══
+const MAX_TABS = 7;
+const openTabs = ref(
+  (JSON.parse(sessionStorage.getItem('bk_open_tabs') || '[]'))
+    .filter(t => t && t.route)
+    .map(t => ({ ...t, path: t.path || '/' + (t.route || '') }))
+);
+
+// Маппинг route name → component name для KeepAlive include
+const ROUTE_COMPONENT_MAP = {};
+
+const cachedComponents = computed(() => openTabs.value.map(t => t.componentName).filter(Boolean));
+
+function addTab(routeName) {
+  if (!routeName) return;
+  const fullPath = route.fullPath;
+  // Обновляем путь если вкладка уже открыта
+  const existing = openTabs.value.find(t => t.route === routeName);
+  if (existing) { existing.path = fullPath; sessionStorage.setItem('bk_open_tabs', JSON.stringify(openTabs.value)); return; }
+  // Название: сначала из сайдбара, потом из meta.title роутера, потом routeName
+  const allItems = [...sidebarSections.flatMap(s => s.items), ...toolsItems];
+  const item = allItems.find(i => i.route === routeName);
+  const label = item?.label || route.meta?.title || routeName;
+  openTabs.value.push({ route: routeName, label, path: fullPath });
+  if (openTabs.value.length > MAX_TABS) {
+    const idx = openTabs.value.findIndex(t => t.route !== routeName);
+    if (idx >= 0) openTabs.value.splice(idx, 1);
+  }
+  sessionStorage.setItem('bk_open_tabs', JSON.stringify(openTabs.value));
+}
+
+function closeTab(routeName) {
+  const idx = openTabs.value.findIndex(t => t.route === routeName);
+  if (idx < 0) return;
+  openTabs.value.splice(idx, 1);
+  sessionStorage.setItem('bk_open_tabs', JSON.stringify(openTabs.value));
+  if (route.name === routeName && openTabs.value.length) {
+    const next = openTabs.value[Math.min(idx, openTabs.value.length - 1)];
+    router.push(next.path);
+  }
+}
+
+// Drag-and-drop вкладок
+const tabDragFrom = ref(null);
+const tabDragOver = ref(null);
+
+function onTabDragStart(idx, e) {
+  tabDragFrom.value = idx;
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onTabDragOver(idx) {
+  tabDragOver.value = idx;
+}
+function onTabDrop(idx) {
+  const from = tabDragFrom.value;
+  if (from === null || from === idx) { tabDragFrom.value = null; tabDragOver.value = null; return; }
+  const tab = openTabs.value.splice(from, 1)[0];
+  openTabs.value.splice(idx, 0, tab);
+  sessionStorage.setItem('bk_open_tabs', JSON.stringify(openTabs.value));
+  tabDragFrom.value = null;
+  tabDragOver.value = null;
+}
+
+// Динамическое название вкладки из компонента
+function setTabTitle(title) {
+  const tab = openTabs.value.find(t => t.route === route.name);
+  if (tab && title) {
+    tab.label = title;
+    sessionStorage.setItem('bk_open_tabs', JSON.stringify(openTabs.value));
+  }
+}
+provide('setTabTitle', setTabTitle);
+
+// Отслеживаем переходы — добавляем вкладку
+watch(() => route.name, (newRoute) => {
+  if (newRoute && route.matched.some(r => r.meta?.module)) {
+    addTab(newRoute);
+  }
+}, { immediate: true });
+
+// ═══ Избранные модули ═══
+const pinnedModules = ref(JSON.parse(localStorage.getItem('bk_pinned_modules') || '[]'));
+
+function togglePin(routeName) {
+  const idx = pinnedModules.value.indexOf(routeName);
+  if (idx >= 0) pinnedModules.value.splice(idx, 1);
+  else pinnedModules.value.push(routeName);
+  localStorage.setItem('bk_pinned_modules', JSON.stringify(pinnedModules.value));
+}
+
+function isPinned(routeName) { return pinnedModules.value.includes(routeName); }
+
+const pinnedItems = computed(() => {
+  const allItems = [
+    ...sidebarSections.flatMap(s => s.items),
+    ...toolsItems,
+  ];
+  return pinnedModules.value
+    .map(r => allItems.find(i => i.route === r))
+    .filter(i => i && userStore.hasAccess(i.module, 'view'));
+});
+const showToolsMenu = ref(false);
 const isToolsRouteActive = computed(() => toolsItems.some(t => route.name === t.route));
 
 const showUserMenu = ref(false);
@@ -512,6 +646,42 @@ function openCommandPalette() {
   if (cmdPalette.value) { cmdPalette.value.open = true }
 }
 
+// ═══ Горячие клавиши ═══
+const HOTKEY_ROUTES = [
+  { key: '1', route: 'order', label: 'Заказ' },
+  { key: '2', route: 'planning', label: 'Планирование' },
+  { key: '3', route: 'plan-fact', label: 'Поставки' },
+  { key: '4', route: 'history', label: 'История' },
+  { key: '5', route: 'analysis', label: 'Анализ' },
+  { key: '6', route: 'analytics', label: 'Аналитика' },
+  { key: '7', route: 'database', label: 'База данных' },
+  { key: '8', route: 'dashboard', label: 'Дашборд' },
+  { key: '9', route: 'protocols', label: 'Протоколы' },
+];
+
+function handleHotkeys(e) {
+  // Не обрабатываем если фокус в поле ввода
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+
+  // Ctrl+цифра — переход к модулю
+  if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+    const hk = HOTKEY_ROUTES.find(h => h.key === e.key);
+    if (hk) {
+      e.preventDefault();
+      router.push({ name: hk.route });
+      return;
+    }
+  }
+
+  // / — открыть палитру команд
+  if (e.key === '/' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    openCommandPalette();
+    return;
+  }
+}
+
 // Badges для непрочитанных
 const badgeCounts = ref({})
 async function loadBadges() {
@@ -590,6 +760,7 @@ onMounted(() => {
   }
 
   document.addEventListener('click', handleOutsideClick);
+  document.addEventListener('keydown', handleHotkeys);
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
 
@@ -630,6 +801,7 @@ function handleVisibilityChange() {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleOutsideClick);
+  document.removeEventListener('keydown', handleHotkeys);
   window.removeEventListener('online', handleOnline);
   window.removeEventListener('offline', handleOffline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);

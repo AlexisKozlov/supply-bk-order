@@ -218,4 +218,53 @@ onMounted(load)
 .pay-btn.approve { background: #E8F5E9; border-color: #4CAF50; }
 .pay-btn.requested { background: #E3F2FD; border-color: #1565C0; }
 .pay-btn.save { background: #E3F2FD; border-color: #1565C0; }
+
+/* Мобильная адаптация */
+@media (max-width: 700px) {
+  .pay { padding: 12px 10px; }
+  .pay-top { flex-direction: column; align-items: flex-start; }
+  .pay-input { font-size: 14px; width: 100%; }
+
+  .pay-table-wrap { overflow-x: visible; }
+  .pay-table { display: block; }
+  .pay-table thead { display: none; }
+  .pay-table tbody { display: flex; flex-direction: column; gap: 10px; }
+  .pay-table tr {
+    display: flex;
+    flex-direction: column;
+    background: var(--card, #fff);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 12px;
+    gap: 4px;
+  }
+  .pay-table td {
+    display: block;
+    padding: 2px 0;
+    border-bottom: none;
+    white-space: normal;
+  }
+
+  /* Подписи перед значениями */
+  .pay-table td:nth-child(1) { font-size: 15px; font-weight: 600; }
+  .pay-table td:nth-child(2)::before { content: 'Юрлицо: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+  .pay-table td:nth-child(3)::before { content: 'ТТН: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+  .pay-table td:nth-child(5)::before { content: 'Оплата: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+  .pay-table td:nth-child(7)::before { content: 'Сумма: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+
+  /* Скрываем менее важные колонки: отсрочка, дедлайн заявки, комментарий */
+  .pay-table td:nth-child(4),
+  .pay-table td:nth-child(6),
+  .pay-table td:nth-child(9) { display: none; }
+
+  /* Статус наверх */
+  .pay-table td:nth-child(8) { order: -1; }
+
+  /* Кнопки */
+  .pay-actions { justify-content: flex-end; margin-top: 4px; }
+
+  .pay-amount-input,
+  .pay-note-input,
+  .pay-date-input { width: 100%; box-sizing: border-box; }
+}
 </style>

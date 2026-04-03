@@ -73,10 +73,10 @@
                         @keyup.enter="saveCellEdit" @keyup.escape="cellEditing = null" @blur="saveCellEdit" />
                     </template>
                     <template v-else>
-                      {{ day.data[e]?.[st] || '—' }}<span v-if="day.delta[e]?.[st]" :class="day.delta[e][st] > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e][st] > 0 ? '+' : '' }}{{ day.delta[e][st] }}</span>
+                      <div class="cell-layout"><span class="cell-val">{{ day.data[e]?.[st] || '—' }}</span><span class="cell-delta" :class="day.delta[e]?.[st] ? (day.delta[e][st] > 0 ? 'cell-up' : 'cell-down') : ''">{{ day.delta[e]?.[st] ? (day.delta[e][st] > 0 ? '+' : '') + day.delta[e][st] : '' }}</span></div>
                     </template>
                   </td>
-                  <td class="cell-total">{{ day.data[e]?.total || '—' }}<span v-if="day.delta[e]?.total" :class="day.delta[e].total > 0 ? 'cell-up' : 'cell-down'">{{ day.delta[e].total > 0 ? '+' : '' }}{{ day.delta[e].total }}</span></td>
+                  <td class="cell-total"><div class="cell-layout"><span class="cell-val">{{ day.data[e]?.total || '—' }}</span><span class="cell-delta" :class="day.delta[e]?.total ? (day.delta[e].total > 0 ? 'cell-up' : 'cell-down') : ''">{{ day.delta[e]?.total ? (day.delta[e].total > 0 ? '+' : '') + day.delta[e].total : '' }}</span></div></td>
                 </template>
               </tr>
             </tbody>
@@ -86,15 +86,35 @@
         <!-- График -->
         <div class="sl-cells-chart-section" style="margin-top:20px;">
           <h3 style="font-size:14px;margin-bottom:10px;color:var(--text-muted);">Динамика ячеек</h3>
-          <div class="sl-cells-chart">
-            <svg :viewBox="'0 0 ' + chartW + ' ' + chartH" style="width:100%;height:200px;">
-              <line v-for="(y, i) in chartGridY" :key="'g'+i" :x1="chartPad" :x2="chartW" :y1="y" :y2="y" stroke="var(--border-light)" stroke-width="0.5"/>
+          <div class="sl-cells-chart" @mouseleave="chartHover = null">
+            <svg :viewBox="'0 0 ' + chartW + ' ' + chartH" style="width:100%;height:220px;">
+              <!-- Сетка -->
+              <line v-for="(y, i) in chartGridY" :key="'g'+i" :x1="chartPad" :x2="chartW - 10" :y1="y" :y2="y" stroke="var(--border-light)" stroke-width="0.5"/>
               <text v-for="(y, i) in chartGridY" :key="'gl'+i" :x="chartPad - 4" :y="y + 3" fill="var(--text-muted)" font-size="9" text-anchor="end">{{ chartGridLabels[i] }}</text>
-              <path v-for="(line, li) in chartLines" :key="li" :d="line.path" :stroke="line.color" fill="none" stroke-width="1.5" stroke-linejoin="round"/>
+              <!-- Даты по оси X -->
+              <text v-for="(d, i) in chartDates" :key="'xd'+i" :x="chartXPos(i)" :y="chartH - 2" fill="var(--text-muted)" font-size="8" text-anchor="middle">{{ chartDateLabel(d) }}</text>
+              <!-- Линии -->
+              <template v-for="(line, li) in chartLines" :key="'l'+li">
+                <path v-if="!chartHiddenSeries.has(li)" :d="line.path" :stroke="line.color" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" :opacity="chartHover !== null && chartHover !== li ? 0.2 : 1"/>
+              </template>
+              <!-- Точки -->
+              <template v-for="(line, li) in chartLines" :key="'p'+li">
+                <template v-if="!chartHiddenSeries.has(li)">
+                  <circle v-for="(pt, pi) in line.points" :key="pi" :cx="pt.x" :cy="pt.y" :r="chartHover === li ? 4 : 2.5" :fill="line.color" :opacity="chartHover !== null && chartHover !== li ? 0.2 : 1" style="cursor:pointer" @mouseenter="showChartTooltip(li, pi, $event)" @mouseleave="chartTooltip = null"/>
+                </template>
+              </template>
+              <!-- Вертикальная линия при наведении -->
+              <line v-if="chartTooltip" :x1="chartTooltip.x" :x2="chartTooltip.x" :y1="20" :y2="chartH - 20" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.5"/>
             </svg>
+            <!-- Тултип -->
+            <div v-if="chartTooltip" class="chart-tooltip" :style="{ left: chartTooltip.screenX + 'px', top: chartTooltip.screenY + 'px' }">
+              <div class="chart-tooltip-date">{{ chartTooltip.date }}</div>
+              <div class="chart-tooltip-val"><span class="chart-tooltip-dot" :style="{ background: chartTooltip.color }"></span>{{ chartTooltip.label }}: <b>{{ chartTooltip.value }}</b></div>
+            </div>
+            <!-- Легенда (кликабельная) -->
             <div class="sl-cells-legend">
-              <span v-for="(line, li) in chartLines" :key="li" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);margin-right:12px;">
-                <span :style="'width:12px;height:3px;border-radius:1px;background:' + line.color"></span>{{ line.label }}
+              <span v-for="(line, li) in chartLines" :key="li" class="chart-legend-item" :class="{ 'legend-hidden': chartHiddenSeries.has(li) }" @click="toggleChartSeries(li)" @mouseenter="chartHover = li" @mouseleave="chartHover = null">
+                <span class="chart-legend-dot" :style="{ background: chartHiddenSeries.has(li) ? '#ccc' : line.color }"></span>{{ line.label }}
               </span>
             </div>
           </div>
@@ -362,15 +382,65 @@ function buildChartData() {
   return { series, dates, maxVal };
 }
 
+const chartHiddenSeries = ref(new Set());
+const chartHover = ref(null);
+const chartTooltip = ref(null);
+
+function toggleChartSeries(idx) {
+  const s = new Set(chartHiddenSeries.value);
+  s.has(idx) ? s.delete(idx) : s.add(idx);
+  chartHiddenSeries.value = s;
+}
+
+const chartDates = computed(() => buildChartData().dates);
+
+function chartXPos(i) {
+  const dates = chartDates.value;
+  const xStep = (chartW - chartPad - 10) / Math.max(dates.length - 1, 1);
+  return chartPad + i * xStep;
+}
+
+function chartDateLabel(d) {
+  if (!d) return '';
+  const parts = d.split('-');
+  return parts[2] + '.' + parts[1];
+}
+
 const chartLines = computed(() => {
   const { series, dates, maxVal } = buildChartData();
   if (!series.length) return [];
   const xStep = (chartW - chartPad - 10) / Math.max(dates.length - 1, 1);
   return series.map(s => {
-    const pts = s.points.map((v, i) => `${chartPad + i * xStep},${chartH - 20 - (v / maxVal) * (chartH - 40)}`);
-    return { path: 'M' + pts.join('L'), color: s.color, label: s.label };
+    const points = s.points.map((v, i) => ({
+      x: chartPad + i * xStep,
+      y: chartH - 20 - (v / maxVal) * (chartH - 40),
+      value: v,
+      date: dates[i],
+    }));
+    const pts = points.map(p => `${p.x},${p.y}`);
+    return { path: 'M' + pts.join('L'), color: s.color, label: s.label, points };
   });
 });
+
+function showChartTooltip(lineIdx, pointIdx, event) {
+  const line = chartLines.value[lineIdx];
+  if (!line) return;
+  const pt = line.points[pointIdx];
+  const svg = event.target.closest('svg');
+  const rect = svg.getBoundingClientRect();
+  const scaleX = rect.width / chartW;
+  const scaleY = rect.height / chartH;
+  chartTooltip.value = {
+    x: pt.x,
+    label: line.label,
+    color: line.color,
+    value: pt.value,
+    date: chartDateLabel(pt.date),
+    screenX: pt.x * scaleX + 12,
+    screenY: pt.y * scaleY - 10,
+  };
+}
+
 const chartGridY = computed(() => {
   const count = 4;
   return Array.from({ length: count + 1 }, (_, i) => chartH - 20 - (i / count) * (chartH - 40));
@@ -837,15 +907,27 @@ onMounted(loadData);
 /* Cells table */
 .sl-cells-section { flex: 1; overflow: auto; padding: 0 2px; }
 .sl-cells-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--card); border-radius: 8px; overflow: hidden; border: 1px solid var(--border-light); }
-.sl-cells-table th { padding: 8px 10px; text-align: right; font-weight: 700; font-size: 12px; color: var(--text); background: var(--bg); border-bottom: 2px solid var(--border); white-space: nowrap; }
+.sl-cells-table th { padding: 8px 10px; text-align: center; font-weight: 700; font-size: 12px; color: var(--text); background: var(--bg); border-bottom: 2px solid var(--border); white-space: nowrap; }
 .sl-cells-table th:first-child { text-align: left; position: sticky; left: 0; background: var(--bg); z-index: 1; }
-.sl-cells-table td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--border-light); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sl-cells-table td { padding: 7px 4px 7px 6px; text-align: center; border-bottom: 1px solid var(--border-light); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sl-cells-table td:first-child { text-align: left; font-weight: 600; color: var(--text); font-size: 12px; position: sticky; left: 0; background: var(--card); z-index: 1; }
 .sl-cells-table tbody tr:hover td { background: rgba(245,166,35,.06); }
 .sl-cells-table tbody tr:first-child td { background: rgba(245,166,35,.08); font-weight: 700; }
-.cell-up { color: #E57373; font-size: 10px; margin-left: 3px; font-weight: 600; }
-.cell-down { color: #4CAF50; font-size: 10px; margin-left: 3px; font-weight: 600; }
-.sl-cells-legend { text-align: center; margin-top: 10px; }
+.cell-layout { display: inline-flex; align-items: baseline; justify-content: center; }
+.cell-val { text-align: center; }
+.cell-delta { width: 30px; text-align: left; font-size: 10px; font-weight: 600; margin-left: 2px; flex-shrink: 0; }
+.cell-up { color: #E57373; }
+.cell-down { color: #4CAF50; }
+.sl-cells-chart { position: relative; }
+.sl-cells-legend { text-align: center; margin-top: 10px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; }
+.chart-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); cursor: pointer; padding: 3px 8px; border-radius: 4px; transition: background 0.15s, opacity 0.15s; user-select: none; }
+.chart-legend-item:hover { background: rgba(0,0,0,.04); }
+.chart-legend-item.legend-hidden { opacity: 0.4; text-decoration: line-through; }
+.chart-legend-dot { width: 10px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+.chart-tooltip { position: absolute; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.12); padding: 6px 10px; font-size: 12px; pointer-events: none; z-index: 10; white-space: nowrap; }
+.chart-tooltip-date { font-size: 10px; color: #999; margin-bottom: 2px; }
+.chart-tooltip-val { display: flex; align-items: center; gap: 5px; }
+.chart-tooltip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .sl-cells-chart-section { background: var(--card); border-radius: 8px; padding: 16px; border: 1px solid var(--border-light); }
 .cell-border-left { border-left: 2px solid var(--border) !important; }
 .cell-entity-header { text-align: center !important; border-left: 2px solid var(--border) !important; font-size: 13px !important; color: var(--bk-brown) !important; background: rgba(139,115,85,.06) !important; }

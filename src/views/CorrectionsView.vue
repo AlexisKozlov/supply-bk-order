@@ -337,4 +337,46 @@ onMounted(loadCorrections)
 .corr-settings-row:hover { background: var(--bk-cream); }
 .corr-toggle { font-size: 16px; }
 .corr-textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; resize: vertical; box-sizing: border-box; }
+
+/* Мобильная адаптация */
+@media (max-width: 700px) {
+  .corr { padding: 12px 10px; }
+  .corr-top { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .corr-toolbar { flex-wrap: wrap; }
+  .corr-input { font-size: 14px; }
+
+  .corr-table-wrap { overflow-x: visible; }
+  .corr-table { display: block; }
+  .corr-table thead { display: none; }
+  .corr-table tbody { display: flex; flex-direction: column; gap: 10px; }
+  .corr-table tr {
+    display: flex;
+    flex-direction: column;
+    background: var(--card, #fff);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 12px;
+    gap: 6px;
+  }
+  .corr-table td {
+    display: block;
+    padding: 0;
+    border-bottom: none;
+  }
+  /* Скрываем менее важные колонки */
+  .col-comment,
+  .col-reviewer { display: none; }
+
+  .col-rest { font-size: 15px; }
+  .col-rest::before { content: 'Рест. '; font-weight: 400; color: var(--text-muted); font-size: 12px; }
+  .col-date::before { content: 'Доставка: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+  .col-who::before { content: 'Подал: '; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+  .col-status { order: -1; }
+  .col-actions { margin-top: 4px; }
+  .corr-action-btns { justify-content: flex-end; }
+
+  .corr-item-line { font-size: 13px; }
+  .corr-settings { padding: 0; }
+  .corr-settings-list { max-width: 100%; }
+}
 </style>

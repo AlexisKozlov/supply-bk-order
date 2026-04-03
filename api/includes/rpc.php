@@ -4203,6 +4203,39 @@ if ($endpoint === 'rpc') {
         ]);
     }
 
+    if ($fn === 'dashboard_critical_stock') {
+        $le = $body['legal_entity'] ?? null;
+        $leWhere = $le ? " AND a.legal_entity = " . $pdo->quote($le) : '';
+        $st = $pdo->query("SELECT a.sku, p.analog_group, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1)), 1) as days_of_stock
+            FROM analysis_data a
+            JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity
+            WHERE a.consumption > 0 AND a.stock > 0 AND a.stock / (a.consumption / GREATEST(a.period_days, 1)) <= 5 {$leWhere}
+            ORDER BY days_of_stock ASC LIMIT 30");
+        $rows = $st->fetchAll();
+        // Группируем по analog_group, берём минимум
+        $groups = [];
+        foreach ($rows as $r) {
+            $g = $r['analog_group'] ?: $r['sku'];
+            if (!isset($groups[$g]) || $r['days_of_stock'] < $groups[$g]) $groups[$g] = floatval($r['days_of_stock']);
+        }
+        $result = [];
+        foreach ($groups as $name => $days) {
+            $result[] = ['analog_group' => $name, 'days_of_stock' => $days];
+        }
+        usort($result, fn($a, $b) => $a['days_of_stock'] <=> $b['days_of_stock']);
+        respond(array_slice($result, 0, 20));
+    }
+
+    if ($fn === 'get_pending_tasks_all') {
+        $st = $pdo->query("SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, p.topic, p.meeting_date
+            FROM protocol_decisions d
+            JOIN meeting_protocols p ON p.id = d.protocol_id
+            WHERE d.status IN ('pending', 'overdue')
+            ORDER BY CASE WHEN d.deadline IS NULL THEN 1 ELSE 0 END, d.deadline ASC
+            LIMIT 20");
+        respond($st->fetchAll());
+    }
+
     if ($fn === 'get_user_tg_settings') {
         $userName = $body['user_name'] ?? '';
         if (!$userName) respond(['error' => 'user_name required'], 400);

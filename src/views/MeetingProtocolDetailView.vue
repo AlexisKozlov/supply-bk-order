@@ -179,7 +179,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -222,6 +222,8 @@ const protocol = ref({
 });
 
 const isAdminOrManager = computed(() => ['admin', 'manager'].includes(userStore.currentUser?.role));
+const setTabTitle = inject('setTabTitle', () => {});
+watch(() => protocol.value.topic, (t) => { if (t) setTabTitle('Протокол: ' + t); });
 
 const canEdit = computed(() => {
   if (!userStore.hasAccess('protocols', 'edit')) return false;

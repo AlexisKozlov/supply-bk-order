@@ -274,7 +274,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch, inject } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
@@ -307,6 +307,7 @@ const toast         = useToastStore();
 const userStore     = useUserStore();
 
 const isViewer = computed(() => !userStore.hasAccess('order', 'edit'));
+const setTabTitle = inject('setTabTitle', () => {});
 let _orderLoadId = 0;
 const orderVisible          = ref(true);
 const settingsExpanded      = ref(false);
@@ -458,8 +459,21 @@ watch(() => orderStore.settings.legalEntity, async (le) => {
   await supplierStore.loadSuppliers(le);
 });
 
+// Динамическое название вкладки
+function updateTabTitle() {
+  const sup = orderStore.settings.supplier;
+  if (orderStore.viewOnlyMode && sup) setTabTitle('Заказ: ' + sup);
+  else if (orderStore.editingOrderId && sup) setTabTitle('Ред.: ' + sup);
+  else if (sup) setTabTitle('Заказ: ' + sup);
+  else setTabTitle('Новый заказ');
+}
+watch(() => orderStore.settings.supplier, updateTabTitle);
+watch(() => orderStore.viewOnlyMode, updateTabTitle);
+watch(() => orderStore.editingOrderId, updateTabTitle);
+
 onMounted(async () => {
   if (!orderStore.settings.today) orderStore.settings.today = new Date();
+  updateTabTitle();
   // Авто-открытие параметров если обязательные поля не заполнены
   if (!paramsReady.value) settingsExpanded.value = true;
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);

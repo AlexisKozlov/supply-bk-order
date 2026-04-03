@@ -440,7 +440,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, onMounted, nextTick, inject, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatDate, applyEntityFilter } from '@/lib/utils.js';
@@ -544,6 +544,9 @@ const tender = ref({
   offers: [],
   files: [],
 });
+
+const setTabTitle = inject('setTabTitle', () => {});
+watch(() => tender.value.name, (n) => { if (n) setTabTitle('Тендер: ' + n); });
 
 // ═══ Поиск товара для позиции ═══
 const itemSearch = reactive({ index: -1, results: [], timer: null });

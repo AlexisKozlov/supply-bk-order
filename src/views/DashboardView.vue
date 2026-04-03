@@ -91,6 +91,58 @@
           </div>
         </div>
       </div>
+
+      <!-- Блок руководителя -->
+      <div class="dash-cols" style="margin-top:16px;">
+        <!-- Критичные запасы -->
+        <div class="dash-col">
+          <div class="dash-card">
+            <div class="dash-card-title">🔴 Критичные запасы (менее 5 дней)</div>
+            <div v-if="criticalStock.length" class="dash-crit-list">
+              <div v-for="s in criticalStock.slice(0, 10)" :key="s.analog_group" class="dash-crit-item">
+                <span class="dash-crit-name">{{ s.analog_group }}</span>
+                <span class="dash-crit-days" :class="s.days_of_stock <= 2 ? 'red' : 'orange'">{{ s.days_of_stock }} дн</span>
+              </div>
+              <div v-if="criticalStock.length > 10" class="dash-crit-more">и ещё {{ criticalStock.length - 10 }} позиций</div>
+            </div>
+            <div v-else class="dash-empty-block">Критичных позиций нет ✓</div>
+          </div>
+
+          <!-- Задачи из протоколов -->
+          <div class="dash-card">
+            <div class="dash-card-title">📋 Задачи из протоколов</div>
+            <div v-if="pendingTasks.length" class="dash-tasks-list">
+              <div v-for="t in pendingTasks.slice(0, 8)" :key="t.id" class="dash-task-item" :class="{ overdue: t.status === 'overdue' || (t.deadline && t.deadline < todayStr) }">
+                <div class="dash-task-text">{{ t.text }}</div>
+                <div class="dash-task-meta">
+                  <span>{{ t.responsible_person }}</span>
+                  <span v-if="t.deadline" class="dash-task-deadline">до {{ fmtDate(t.deadline) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-else class="dash-empty-block">Нет открытых задач ✓</div>
+          </div>
+        </div>
+
+        <!-- Активность команды -->
+        <div class="dash-col">
+          <div class="dash-card">
+            <div class="dash-card-title">👥 Активность команды</div>
+            <div v-if="teamActivity.length" class="dash-activity-list">
+              <div v-for="a in teamActivity" :key="a.created_at" class="dash-activity-item">
+                <div class="dash-activity-dot"></div>
+                <div class="dash-activity-body">
+                  <span class="dash-activity-user">{{ a.user_name }}</span>
+                  <span class="dash-activity-action">{{ formatAction(a.action) }}</span>
+                  <span v-if="a.details" class="dash-activity-details">{{ formatDetails(a.details) }}</span>
+                </div>
+                <span class="dash-activity-time">{{ formatTimeAgo(new Date(a.created_at)) }}</span>
+              </div>
+            </div>
+            <div v-else class="dash-empty-block">Нет активности</div>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -106,6 +158,9 @@ const entityFilter = ref('')
 const loading = ref(false)
 const data = ref({})
 const lastLoadedAt = ref(null)
+const teamActivity = ref([])
+const pendingTasks = ref([])
+const criticalStock = ref([])
 
 const entities = computed(() => userStore.getAllowedEntities() || [])
 
@@ -125,8 +180,17 @@ const topKpis = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const { data: d } = await db.rpc('dashboard_kpi', { period: period.value, legal_entity: entityFilter.value || null })
-    data.value = d || {}
+    const kpiRes = await db.rpc('dashboard_kpi', { period: period.value, legal_entity: entityFilter.value || null })
+    data.value = kpiRes.data || {}
+    // Дополнительные данные — грузим независимо, ошибки не ломают дашборд
+    const [actRes, tasksRes, stockRes] = await Promise.allSettled([
+      db.from('audit_log').select('action, user_name, created_at, details').order('created_at', { ascending: false }).limit(15),
+      db.rpc('get_pending_tasks_all'),
+      db.rpc('dashboard_critical_stock', { legal_entity: entityFilter.value || null }),
+    ])
+    teamActivity.value = actRes.status === 'fulfilled' ? (actRes.value?.data || []) : []
+    pendingTasks.value = tasksRes.status === 'fulfilled' ? (tasksRes.value?.data || []) : []
+    criticalStock.value = stockRes.status === 'fulfilled' ? (stockRes.value?.data || []) : []
     lastLoadedAt.value = new Date()
   } catch { data.value = {} }
   finally { loading.value = false }
@@ -145,6 +209,45 @@ function fmtDate(d) {
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 function barWidth(v, max) { return max > 0 ? (v / max * 100) + '%' : '0%' }
+function truncateStr(s, len) { return s && s.length > len ? s.slice(0, len) + '…' : (s || '') }
+const todayStr = new Date().toISOString().slice(0, 10)
+
+const ACTION_LABELS = {
+  order_created: 'создал заказ',
+  order_updated: 'обновил заказ',
+  order_deleted: 'удалил заказ',
+  plan_created: 'создал план',
+  plan_updated: 'обновил план',
+  plan_deleted: 'удалил план',
+  order_received: 'принял поставку',
+  login: 'вошёл в систему',
+  import_data: 'импортировал данные',
+  protocol_created: 'создал протокол',
+  protocol_finalized: 'финализировал протокол',
+}
+
+function formatAction(action) {
+  return ACTION_LABELS[action] || action.replace(/_/g, ' ')
+}
+
+function formatDetails(details) {
+  if (!details) return ''
+  try {
+    const d = typeof details === 'string' ? JSON.parse(details) : details
+    const parts = []
+    if (d.supplier) parts.push(d.supplier)
+    if (d.items_count) parts.push(d.items_count + ' поз.')
+    if (d.period) parts.push(d.period)
+    if (d.note) parts.push(d.note)
+    if (d.param_changes?.length) {
+      d.param_changes.forEach(c => parts.push(c.label + ': ' + c.from + ' → ' + c.to))
+    }
+    if (d.changes?.length) {
+      parts.push(d.changes.length + ' изменений')
+    }
+    return parts.join(' · ') || ''
+  } catch { return truncateStr(String(details), 50) }
+}
 
 function formatTimeAgo(date) {
   if (!date) return ''
@@ -216,6 +319,39 @@ onMounted(load)
 .dash-stats { display: flex; flex-direction: column; gap: 4px; }
 .dash-stat-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-light); font-size: 13px; }
 .dash-stat-row:last-child { border-bottom: none; }
+
+/* Critical stock */
+.dash-crit-list { display: flex; flex-direction: column; gap: 4px; }
+.dash-crit-item { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border-light); font-size: 13px; }
+.dash-crit-item:last-child { border-bottom: none; }
+.dash-crit-name { font-weight: 500; }
+.dash-crit-days { font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.dash-crit-days.red { background: #FFEBEE; color: #C62828; }
+.dash-crit-days.orange { background: #FFF3E0; color: #E65100; }
+.dash-crit-more { font-size: 12px; color: var(--text-muted); padding-top: 6px; }
+
+/* Tasks */
+.dash-tasks-list { display: flex; flex-direction: column; gap: 6px; }
+.dash-task-item { padding: 8px 10px; border-radius: 8px; background: #FFFBF5; border-left: 3px solid #F5A623; }
+.dash-task-item.overdue { background: #FFF5F5; border-left-color: #F44336; }
+.dash-task-text { font-size: 13px; font-weight: 500; }
+.dash-task-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px; }
+.dash-task-deadline { font-weight: 600; }
+.dash-task-item.overdue .dash-task-deadline { color: #F44336; }
+
+/* Activity */
+.dash-activity-list { display: flex; flex-direction: column; gap: 0; }
+.dash-activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
+.dash-activity-item:last-child { border-bottom: none; }
+.dash-activity-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bk-brown); margin-top: 5px; flex-shrink: 0; }
+.dash-activity-body { flex: 1; min-width: 0; font-size: 12px; }
+.dash-activity-user { font-weight: 700; }
+.dash-activity-action { color: var(--text-muted); margin-left: 4px; }
+.dash-activity-details { display: block; color: var(--text-muted); font-size: 11px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-activity-time { font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
+
+/* Empty */
+.dash-empty-block { padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
 .data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
 .data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
