@@ -430,6 +430,7 @@ const toolsItems = [
   { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
   { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
+  { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
 ];
 
 // ═══ Вкладки (tabs) ═══

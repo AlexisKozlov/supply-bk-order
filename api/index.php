@@ -97,6 +97,9 @@ require_once __DIR__ . '/includes/search.php';
 // RPC-эндпоинты
 require_once __DIR__ . '/includes/rpc.php';
 
+// Заказы ресторанов (временный модуль, своя авторизация)
+require_once __DIR__ . '/includes/restaurant_orders.php';
+
 // OCR (распознавание скриншотов)
 require_once __DIR__ . '/includes/ocr.php';
 

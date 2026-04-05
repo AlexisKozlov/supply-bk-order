@@ -129,11 +129,15 @@ function vegShowMySubs($chatId, $msgId = null) {
 
         // ── Разделы ──
         $text .= "📦 <b>Поставки</b> — график, корректировки, остатки\n";
+        $text .= "🛒 <b>Заказы</b> — подать заявку через сайт\n";
         $text .= "🥬 <b>Овощи</b> — заявки, мои заявки\n";
         if ($activeSc) $text .= "📋 <b>Сбор остатков</b> — {$activeSc['name']}\n";
 
         $btns[] = [
             ['text' => '📦 Поставки', 'callback_data' => 'rest_menu_main'],
+            ['text' => '🛒 Заказы', 'callback_data' => 'rest_ro_orders'],
+        ];
+        $btns[] = [
             ['text' => '🥬 Овощи', 'callback_data' => 'rest_menu_veg'],
         ];
         if ($activeSc) {
@@ -186,7 +190,10 @@ function restMenuMain($chatId, $msgId) {
             ['text' => '📅 График', 'callback_data' => 'rest_schedule'],
             ['text' => '✏️ Корректировка', 'callback_data' => 'corr_start'],
         ],
-        [['text' => '📦 Остатки склада', 'callback_data' => 'rest_stock']],
+        [
+            ['text' => '📦 Остатки склада', 'callback_data' => 'rest_stock'],
+            ['text' => '🛒 Мои заказы', 'callback_data' => 'rest_ro_orders'],
+        ],
         [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
     ];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -2167,4 +2174,207 @@ function corrReview($pdo, $chatId, $msgId, $corrIds, $action, $comment = null) {
 
     // Если все позиции батча обработаны — отбивка ресторану
     corrCheckBatchComplete($pdo, $batchIds, $user['name']);
+}
+
+// ═══ Заказы ресторанов (временный модуль ro_*) ═══
+
+function restRoOrders($chatId, $msgId) {
+    global $pdo;
+
+    // Получаем подписки ресторан��
+    $s = $pdo->prepare("SELECT vs.restaurant_number FROM veg_telegram_subs vs WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
+    $s->execute([$chatId]);
+    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+
+    if (empty($restNums)) {
+        editMessage($chatId, $msgId, "Нет подписок на рестораны.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
+
+    // Текущая сессия
+    $session = $pdo->query("SELECT * FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1")->fetch();
+
+    $text = "🛒 <b>Заказы ресторанов</b>\n";
+    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+
+    if (!$session) {
+        $text .= "❌ Сейчас нет активной сессии приёма заявок.\n";
+        $text .= "Обратитесь в отдел закупок.\n";
+        $btns = [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]];
+        editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+        return;
+    }
+
+    $text .= "📅 Сессия: <b>" . date('d.m', strtotime($session['week_start'])) . " — " . date('d.m', strtotime($session['week_end'])) . "</b>\n\n";
+
+    // Показываем заказы для каждого ресторана
+    $ph = implode(',', array_fill(0, count($restNums), '?'));
+    $orders = $pdo->prepare("
+        SELECT o.restaurant_number, o.delivery_date, o.status, o.submitted_at,
+               (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
+               (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
+        FROM ro_orders o
+        WHERE o.session_id = ? AND o.restaurant_number IN ({$ph})
+        ORDER BY o.restaurant_number, o.delivery_date
+    ");
+    $params = [$session['id'], ...$restNums];
+    $orders->execute($params);
+    $orderRows = $orders->fetchAll();
+
+    // Группируем по ресторану
+    $byRest = [];
+    foreach ($orderRows as $o) {
+        $byRest[$o['restaurant_number']][] = $o;
+    }
+
+    $dayNames = [1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб'];
+    $statusIcons = ['submitted' => '✅', 'edited' => '📝', 'draft' => '📋', 'locked' => '🔒'];
+
+    foreach ($restNums as $rn) {
+        $text .= "🏪 <b>Ресторан {$rn}:</b>\n";
+        if (isset($byRest[$rn])) {
+            foreach ($byRest[$rn] as $o) {
+                $dow = (int)(new DateTime($o['delivery_date']))->format('N');
+                $dayName = $dayNames[$dow] ?? '';
+                $dateStr = date('d.m', strtotime($o['delivery_date']));
+                $icon = $statusIcons[$o['status']] ?? '❓';
+                $qty = $o['total_qty'] ? round($o['total_qty']) : 0;
+                $text .= "  {$icon} {$dayName} {$dateStr} — {$o['item_count']} поз., {$qty} кор.\n";
+            }
+        } else {
+            $text .= "  ⚪ Заявок нет\n";
+        }
+        $text .= "\n";
+    }
+
+    $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+    $btns = [
+        [['text' => '🛒 Подать заявку', 'url' => "{$siteUrl}/ro"]],
+        [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+    ];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Статус заявок ресторанов (для закупщиков)
+function cmdRoStatus($chatId, $user, $msgId) {
+    global $pdo;
+
+    $session = $pdo->query("SELECT * FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1")->fetch();
+
+    $text = "🛒 <b>Заказы ресторанов</b>\n";
+    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+
+    if (!$session) {
+        $text .= "❌ Нет активной сессии.\n";
+        $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+        $btns = [
+            [['text' => '🌐 Открыть на сайте', 'url' => "{$siteUrl}/restaurant-orders"]],
+            [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']],
+        ];
+        editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+        return;
+    }
+
+    $text .= "📅 Сессия: " . date('d.m', strtotime($session['week_start'])) . " — " . date('d.m', strtotime($session['week_end'])) . "\n\n";
+
+    // Статистика по дням
+    $tz = new DateTimeZone('Europe/Minsk');
+    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
+
+    $weekStart = new DateTime($session['week_start']);
+    $weekEnd = new DateTime($session['week_end']);
+
+    for ($d = clone $weekStart; $d <= $weekEnd; $d->modify('+1 day')) {
+        $dow = (int)$d->format('N');
+        if ($dow > 6) continue;
+        $dateStr = $d->format('Y-m-d');
+        $dayName = $dayNames[$dow] ?? '';
+        $dateFmt = $d->format('d.m');
+
+        // Сколько ресторанов с доставкой в этот день
+        $totalRests = $pdo->prepare("SELECT COUNT(DISTINCT r.id) FROM restaurants r JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ? WHERE r.active = 1");
+        $totalRests->execute([$dow]);
+        $total = (int)$totalRests->fetchColumn();
+
+        // Сколько подали
+        $submitted = $pdo->prepare("SELECT COUNT(*) FROM ro_orders WHERE session_id = ? AND delivery_date = ? AND status != 'draft'");
+        $submitted->execute([$session['id'], $dateStr]);
+        $sub = (int)$submitted->fetchColumn();
+
+        $icon = $sub === $total && $total > 0 ? '✅' : ($sub > 0 ? '🟡' : '⚪');
+        $text .= "{$icon} {$dayName} {$dateFmt}: <b>{$sub}/{$total}</b>\n";
+    }
+
+    $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+    $btns = [
+        [['text' => '🌐 Панель на сайте', 'url' => "{$siteUrl}/restaurant-orders"]],
+        [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']],
+    ];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Рассылка логинов ресторанам (команда для закупщиков)
+function restRoSendLogins($chatId, $msgId) {
+    global $pdo;
+
+    // Все учётки ro_users с подписками в боте
+    $users = $pdo->query("
+        SELECT DISTINCT ru.restaurant_number, r.city, r.address
+        FROM ro_users ru
+        JOIN restaurants r ON r.number = ru.restaurant_number AND r.active = 1
+        WHERE ru.is_active = 1
+        ORDER BY ru.restaurant_number
+    ")->fetchAll();
+
+    if (empty($users)) {
+        editMessage($chatId, $msgId, "Нет активных учёток ресторанов. Создайте их в разделе «Заказы ресторанов» на сайте.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'cmd_menu']]]]);
+        return;
+    }
+
+    // Находим подписки
+    $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number FROM veg_telegram_subs")->fetchAll();
+    $subMap = [];
+    foreach ($subs as $s) {
+        $subMap[$s['restaurant_number']][] = $s['chat_id'];
+    }
+
+    $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    $sent = 0;
+    $notFound = 0;
+
+    foreach ($users as $u) {
+        $rn = $u['restaurant_number'];
+        $chatIds = $subMap[$rn] ?? [];
+        if (empty($chatIds)) {
+            $notFound++;
+            continue;
+        }
+
+        $addr = $u['city'] . ($u['address'] ? ', ' . $u['address'] : '');
+        $msgText = "🛒 <b>Заказы ресторанов — новая система</b>\n";
+        $msgText .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+        $msgText .= "Для подачи заявок используйте веб-форму:\n\n";
+        $msgText .= "🏪 Ресторан: <b>{$rn}</b> ({$addr})\n";
+        $msgText .= "🔗 Ссылка: {$siteUrl}/ro\n";
+        $msgText .= "👤 Логин: <b>{$rn}</b>\n";
+        $msgText .= "🔑 Пароль выдаёт отдел закупок\n\n";
+        $msgText .= "⏰ Дедлайн подачи заявки: <b>до 10:00</b> (день перед доставкой)\n";
+
+        $keyboard = json_encode(['inline_keyboard' => [
+            [['text' => '🛒 Открыть форму заказа', 'url' => "{$siteUrl}/ro"]],
+        ]]);
+
+        foreach ($chatIds as $cid) {
+            $result = sendTelegramMessage($botToken, $cid, $msgText, 'HTML');
+            if ($result) $sent++;
+        }
+    }
+
+    $text = "✅ Рассылка завершена\n\n";
+    $text .= "📨 Отправлено: {$sent}\n";
+    $text .= "❌ Без подписки в боте: {$notFound}\n";
+    $text .= "\n<i>Пароли не рассылаются автоматически. Сообщите их ресторанам отдельно.</i>";
+
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'cmd_menu']]]]);
 }

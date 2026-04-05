@@ -1,0 +1,435 @@
+<template>
+  <div class="ro-login-page">
+    <!-- Декоративный фон -->
+    <div class="ro-bg-circles">
+      <div class="ro-circle ro-circle-1"></div>
+      <div class="ro-circle ro-circle-2"></div>
+      <div class="ro-circle ro-circle-3"></div>
+      <div class="ro-circle ro-circle-4"></div>
+    </div>
+
+    <div class="ro-login-content">
+      <!-- Логотип -->
+      <div class="ro-brand">
+        <div class="ro-logo-wrap">
+          <svg width="48" height="48" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <circle cx="16" cy="16" r="10" fill="#D62300"/>
+            <circle cx="32" cy="16" r="10" fill="#F5A623"/>
+            <circle cx="16" cy="32" r="10" fill="#FF8733"/>
+            <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
+            <circle cx="24" cy="24" r="8.5" fill="#502314"/>
+            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
+          </svg>
+        </div>
+        <div>
+          <div class="ro-brand-title">Supply Department</div>
+          <div class="ro-brand-subtitle">Система заказов ресторанов</div>
+        </div>
+      </div>
+
+      <!-- Карточка входа -->
+      <div class="ro-login-card">
+        <div class="ro-card-header">
+          <div class="ro-card-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#D62300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+              <polyline points="10 17 15 12 10 7"/>
+              <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
+          </div>
+          <div>
+            <h1>Вход в систему</h1>
+            <p>Введите данные вашего ресторана</p>
+          </div>
+        </div>
+
+        <form @submit.prevent="handleLogin">
+          <div class="ro-field">
+            <label>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              Номер ресторана
+            </label>
+            <div class="ro-input-wrap">
+              <input
+                v-model="restaurantNumber"
+                type="number"
+                inputmode="numeric"
+                placeholder="Например: 24"
+                required
+                autofocus
+                :disabled="loading"
+              />
+              <span class="ro-input-icon">#</span>
+            </div>
+          </div>
+
+          <div class="ro-field">
+            <label>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Пароль
+            </label>
+            <div class="ro-input-wrap">
+              <input
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="Введите пароль"
+                required
+                :disabled="loading"
+              />
+              <button type="button" class="ro-toggle-pass" @click="showPassword = !showPassword" tabindex="-1">
+                {{ showPassword ? '🙈' : '👁' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="error" class="ro-error">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            {{ error }}
+          </div>
+
+          <button type="submit" class="ro-submit-btn" :disabled="loading || !restaurantNumber || !password">
+            <span v-if="loading" class="ro-spinner"></span>
+            <template v-else>
+              Войти
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </template>
+          </button>
+        </form>
+      </div>
+
+      <!-- Подсказки -->
+      <div class="ro-hints">
+        <div class="ro-hint">
+          <span class="ro-hint-icon">&#128337;</span>
+          <span>Заявки принимаются до <strong>10:00</strong> в день перед доставкой</span>
+        </div>
+        <div class="ro-hint">
+          <span class="ro-hint-icon">&#128230;</span>
+          <span>Количество указывается в учётных коробках</span>
+        </div>
+        <div class="ro-hint">
+          <span class="ro-hint-icon">&#128222;</span>
+          <span>Проблемы со входом? Обратитесь в отдел закупок</span>
+        </div>
+      </div>
+
+      <div class="ro-login-footer">
+        Supply Department &middot; Временная система заказов
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+
+const router = useRouter();
+const store = useRestaurantOrderStore();
+
+const restaurantNumber = ref('');
+const password = ref('');
+const loading = ref(false);
+const error = ref('');
+const showPassword = ref(false);
+
+onMounted(async () => {
+  if (store.isAuthenticated) {
+    const valid = await store.validate();
+    if (valid) {
+      router.replace({ name: 'restaurant-order-form' });
+      return;
+    }
+  }
+});
+
+async function handleLogin() {
+  error.value = '';
+  loading.value = true;
+  try {
+    const result = await store.login(parseInt(restaurantNumber.value), password.value);
+    if (result.success) {
+      router.push({ name: 'restaurant-order-form' });
+    } else {
+      error.value = result.error || 'Ошибка входа';
+    }
+  } catch (e) {
+    error.value = e.message || 'Ошибка соединения с сервером';
+  } finally {
+    loading.value = false;
+  }
+}
+</script>
+
+<style scoped>
+.ro-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #502314 0%, #7a3a1e 40%, #D62300 100%);
+  padding: 20px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Декоративные круги */
+.ro-bg-circles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.ro-circle {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.08;
+  background: white;
+}
+.ro-circle-1 { width: 400px; height: 400px; top: -100px; right: -100px; }
+.ro-circle-2 { width: 300px; height: 300px; bottom: -80px; left: -80px; }
+.ro-circle-3 { width: 200px; height: 200px; top: 40%; left: 10%; opacity: 0.04; }
+.ro-circle-4 { width: 150px; height: 150px; bottom: 20%; right: 15%; opacity: 0.06; }
+
+.ro-login-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 420px;
+}
+
+/* Логотип */
+.ro-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+  color: white;
+}
+.ro-logo-wrap {
+  background: rgba(255,255,255,0.15);
+  border-radius: 14px;
+  padding: 8px;
+  backdrop-filter: blur(10px);
+}
+.ro-brand-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.ro-brand-subtitle {
+  font-size: 13px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+/* Карточка */
+.ro-login-card {
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  width: 100%;
+  box-shadow:
+    0 20px 60px rgba(80, 35, 20, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.1);
+  animation: cardAppear 0.4s ease-out;
+}
+@keyframes cardAppear {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ro-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0ebe4;
+}
+.ro-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: #fff5f2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ro-card-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #502314;
+}
+.ro-card-header p {
+  margin: 2px 0 0;
+  color: #8b7355;
+  font-size: 13px;
+}
+
+/* Поля */
+.ro-field {
+  margin-bottom: 18px;
+}
+.ro-field label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #502314;
+  margin-bottom: 8px;
+}
+.ro-field label svg { color: #8b7355; }
+
+.ro-input-wrap {
+  position: relative;
+}
+.ro-input-wrap input {
+  width: 100%;
+  padding: 14px 16px;
+  padding-left: 42px;
+  border: 2px solid #e8e0d6;
+  border-radius: 12px;
+  font-size: 16px;
+  font-family: inherit;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  background: #faf8f5;
+}
+.ro-input-wrap input:focus {
+  outline: none;
+  border-color: #D62300;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(214, 35, 0, 0.08);
+}
+.ro-input-wrap input::placeholder { color: #c4b8a8; }
+
+.ro-input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #b0a090;
+  font-size: 16px;
+  font-weight: 700;
+}
+.ro-toggle-pass {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  opacity: 0.6;
+}
+.ro-toggle-pass:hover { opacity: 1; }
+
+/* Ошибка */
+.ro-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fef2f2;
+  color: #dc2626;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 18px;
+  border: 1px solid #fecaca;
+  animation: shake 0.4s ease;
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+.ro-error svg { flex-shrink: 0; color: #dc2626; }
+
+/* Кнопка входа */
+.ro-submit-btn {
+  width: 100%;
+  padding: 15px;
+  background: linear-gradient(135deg, #D62300 0%, #e83a1a 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(214, 35, 0, 0.3);
+}
+.ro-submit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b81e00 0%, #D62300 100%);
+  box-shadow: 0 6px 20px rgba(214, 35, 0, 0.4);
+  transform: translateY(-1px);
+}
+.ro-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(214, 35, 0, 0.3);
+}
+.ro-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.ro-spinner {
+  width: 20px; height: 20px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Подсказки */
+.ro-hints {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.ro-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,0.85);
+  font-size: 13px;
+  background: rgba(255,255,255,0.1);
+  padding: 10px 14px;
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+.ro-hint-icon { font-size: 16px; flex-shrink: 0; }
+.ro-hint strong { color: white; }
+
+/* Футер */
+.ro-login-footer {
+  margin-top: 20px;
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Мобильная адаптация */
+@media (max-width: 480px) {
+  .ro-login-page { padding: 16px; }
+  .ro-login-card { padding: 24px; border-radius: 16px; }
+  .ro-brand-title { font-size: 18px; }
+  .ro-card-header { flex-direction: column; text-align: center; gap: 10px; }
+}
+</style>

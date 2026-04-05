@@ -1445,6 +1445,10 @@ function getMenuButtons($user) {
             ['text' => '✏️ Корректировки', 'callback_data' => 'cmd_corrections'],
             ['text' => '🥬 Овощи', 'callback_data' => 'cmd_veg_stats'],
         ],
+        [
+            ['text' => '🛒 Заказы рестов', 'callback_data' => 'cmd_ro_status'],
+            ['text' => '📨 Рассылка логинов', 'callback_data' => 'cmd_ro_send_logins'],
+        ],
         // Файл заказа + ресторанное меню
         [
             ['text' => '📄 Файл заказа', 'callback_data' => 'cmd_upload_order_file'],
@@ -1624,6 +1628,8 @@ if (isset($input['callback_query'])) {
             // cards обрабатывается выше в отдельном блоке (доступен без аккаунта)
             case 'veg_stats': cmdVegStats($chatId, $msgId); break;
             case 'corrections': cmdCorrections($chatId, $msgId); break;
+            case 'ro_status': cmdRoStatus($chatId, $user, $msgId); break;
+            case 'ro_send_logins': restRoSendLogins($chatId, $msgId); break;
             case 'upload_order_file':
                 file_put_contents(sys_get_temp_dir() . "/import_{$chatId}.txt", 'order_file');
                 editMessage($chatId, $msgId, "📄 <b>Файл заказа</b>\n─────────────────────\nОтправьте файл Excel для ресторанов.\nОн будет доступен всем ресторанам через бот.", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
@@ -1826,6 +1832,11 @@ if (isset($input['callback_query'])) {
     if ($data === 'rest_menu_veg') {
         answerCallback($cb['id']);
         restMenuVeg($chatId, $msgId);
+        exit;
+    }
+    if ($data === 'rest_ro_orders') {
+        answerCallback($cb['id']);
+        restRoOrders($chatId, $msgId);
         exit;
     }
     if ($data === 'rest_schedule') {
