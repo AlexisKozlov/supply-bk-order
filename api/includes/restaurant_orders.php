@@ -664,10 +664,13 @@ if (strpos($roAction, 'admin') === 0) {
         $le = $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
         $category = $_GET['category'] ?? null;
 
-        $q = "SELECT * FROM ro_templates WHERE legal_entity = ?";
-        $params = [$le];
-        if ($category) { $q .= " AND category = ?"; $params[] = $category; }
-        $q .= " ORDER BY category, sort_order, product_name";
+        $q = "SELECT t.*, COALESCE(p.multiplicity, 1) as multiplicity
+            FROM ro_templates t
+            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ?
+            WHERE t.legal_entity = ?";
+        $params = [$le, $le];
+        if ($category) { $q .= " AND t.category = ?"; $params[] = $category; }
+        $q .= " ORDER BY t.category, t.sort_order, t.product_name";
         $s = $pdo->prepare($q);
         $s->execute($params);
         roRespond(['templates' => $s->fetchAll()]);
@@ -687,8 +690,14 @@ if (strpos($roAction, 'admin') === 0) {
             $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
 
             $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, sort_order) VALUES (?, ?, ?, ?, ?)");
+            $updateMult = $pdo->prepare("UPDATE products SET multiplicity = ? WHERE sku = ? AND legal_entity = ?");
             foreach ($items as $i => $item) {
                 $insert->execute([$le, $category, $item['sku'] ?? '', $item['product_name'] ?? '', $i]);
+                // Обновляем кратность в products если передана
+                $mult = intval($item['multiplicity'] ?? 0);
+                if ($mult > 0 && ($item['sku'] ?? '')) {
+                    $updateMult->execute([$mult, $item['sku'], $le]);
+                }
             }
             roRespond(['success' => true, 'count' => count($items)]);
         }

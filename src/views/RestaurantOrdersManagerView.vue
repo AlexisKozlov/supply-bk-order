@@ -474,15 +474,6 @@ async function saveFullTemplate() {
       const items = fullTemplateItems.value.filter(i => i.category === cat);
       await store.adminSaveTemplate(tplLegalEntity.value, cat, items);
     }
-    // Обновляем кратность в products
-    for (const item of fullTemplateItems.value) {
-      if (item.multiplicity > 1) {
-        try {
-          const { db } = await import('@/lib/apiClient.js');
-          await db.from('products').update({ multiplicity: item.multiplicity }).eq('sku', item.sku);
-        } catch {}
-      }
-    }
     tplMessage.value = `Шаблон сохранён (${fullTemplateItems.value.length} товаров)`;
     tplMessageOk.value = true;
     setTimeout(() => { tplMessage.value = ''; }, 3000);
