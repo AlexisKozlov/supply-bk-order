@@ -2249,7 +2249,7 @@ function restRoOrders($chatId, $msgId) {
 
     $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
     $btns = [
-        [['text' => '🛒 Подать заявку', 'url' => "{$siteUrl}/ro"]],
+        [['text' => '🛒 Подать заявку', 'url' => "{$siteUrl}/restaurant"]],
         [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
     ];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -2356,13 +2356,13 @@ function restRoSendLogins($chatId, $msgId) {
         $msgText .= "━━━━━━━━━━━━━━━━━━━━\n\n";
         $msgText .= "Для подачи заявок используйте веб-форму:\n\n";
         $msgText .= "🏪 Ресторан: <b>{$rn}</b> ({$addr})\n";
-        $msgText .= "🔗 Ссылка: {$siteUrl}/ro\n";
+        $msgText .= "🔗 Ссылка: {$siteUrl}/restaurant\n";
         $msgText .= "👤 Логин: <b>{$rn}</b>\n";
         $msgText .= "🔑 Пароль выдаёт отдел закупок\n\n";
         $msgText .= "⏰ Дедлайн подачи заявки: <b>до 10:00</b> (день перед доставкой)\n";
 
         $keyboard = json_encode(['inline_keyboard' => [
-            [['text' => '🛒 Открыть форму заказа', 'url' => "{$siteUrl}/ro"]],
+            [['text' => '🛒 Открыть форму заказа', 'url' => "{$siteUrl}/restaurant"]],
         ]]);
 
         foreach ($chatIds as $cid) {

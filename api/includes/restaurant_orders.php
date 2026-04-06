@@ -134,6 +134,65 @@ $roParts = explode('/', $uri);
 // uri = "ro/action/param" → roParts = ["ro", "action", "param"]
 $roParam = $roParts[2] ?? null;
 
+// --- Авторизация через Telegram ---
+if ($roAction === 'tg-auth' && $method === 'POST') {
+    $tgToken = $body['tg_token'] ?? '';
+    if (!$tgToken) {
+        roRespond(['success' => false, 'error' => 'Токен не указан'], 400);
+    }
+
+    // Ищем токен
+    $s = $pdo->prepare("SELECT id, telegram_chat_id FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    $s->execute([$tgToken]);
+    $tgAuth = $s->fetch();
+    if (!$tgAuth) {
+        roRespond(['success' => false, 'error' => 'Ссылка недействительна или истекла']);
+    }
+
+    // Помечаем токен использованным
+    $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ?")->execute([$tgAuth['id']]);
+
+    // Находим ресторан по подписке
+    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+    $s->execute([$tgAuth['telegram_chat_id']]);
+    $sub = $s->fetch();
+    if (!$sub) {
+        roRespond(['success' => false, 'error' => 'Вы не подписаны ни на один ресторан в боте']);
+    }
+
+    $restNum = $sub['restaurant_number'];
+
+    // Проверяем, есть ли учётка ресторана
+    $s = $pdo->prepare("SELECT id, restaurant_number, legal_entity FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
+    $s->execute([$restNum]);
+    $user = $s->fetch();
+    if (!$user) {
+        roRespond(['success' => false, 'error' => "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок."]);
+    }
+
+    // Создаём сессию — аналогично обычному логину
+    $token = bin2hex(random_bytes(32));
+    $activeUntil = date('Y-m-d H:i:s', strtotime('+24 hours'));
+    $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
+        ->execute([$token, $activeUntil, $user['id']]);
+
+    $r = $pdo->prepare("SELECT number, region, city, address FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+    $r->execute([$restNum]);
+    $rest = $r->fetch();
+
+    roRespond([
+        'success' => true,
+        'token' => $token,
+        'restaurant' => [
+            'number' => $restNum,
+            'legal_entity' => $user['legal_entity'],
+            'region' => $rest['region'] ?? '',
+            'city' => $rest['city'] ?? '',
+            'address' => $rest['address'] ?? '',
+        ],
+    ]);
+}
+
 // --- Логин ---
 if ($roAction === 'login' && $method === 'POST') {
     $restNum = intval($body['restaurant_number'] ?? 0);
@@ -599,7 +658,15 @@ if (strpos($roAction, 'admin') === 0) {
         roRespond(['success' => true]);
     }
 
-    // --- Управление сессией ---
+    // --- Удаление заказа закупщиком ---
+    if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
+        $orderId = (int)$adminParam;
+        $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?")->execute([$orderId]);
+        $pdo->prepare("DELETE FROM ro_orders WHERE id = ?")->execute([$orderId]);
+        roRespond(['success' => true]);
+    }
+
+    // --- Упр��вление сессией ---
     if ($adminAction === 'session' && $method === 'POST') {
         $action = $body['action'] ?? 'create';
 

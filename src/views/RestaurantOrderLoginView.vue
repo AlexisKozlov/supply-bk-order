@@ -99,18 +99,10 @@
 
       <!-- Подсказки -->
       <div class="ro-hints">
-        <div class="ro-hint">
-          <span class="ro-hint-icon">&#128337;</span>
-          <span>Заявки принимаются до <strong>10:00</strong> в день перед доставкой</span>
-        </div>
-        <div class="ro-hint">
-          <span class="ro-hint-icon">&#128230;</span>
-          <span>Количество указывается в учётных коробках</span>
-        </div>
-        <div class="ro-hint">
+        <a class="ro-hint" href="https://t.me/alexiskozlov" target="_blank">
           <span class="ro-hint-icon">&#128222;</span>
-          <span>Проблемы со входом? Обратитесь в отдел закупок</span>
-        </div>
+          <span>Проблемы со входом? Напишите <strong>@alexiskozlov</strong></span>
+        </a>
       </div>
 
       <div class="ro-login-footer">
@@ -307,6 +299,9 @@ async function handleLogin() {
   box-shadow: 0 0 0 4px rgba(214, 35, 0, 0.08);
 }
 .ro-input-wrap input::placeholder { color: #c4b8a8; }
+.ro-input-wrap input[type="number"] { text-align: left; -moz-appearance: textfield; }
+.ro-input-wrap input[type="number"]::-webkit-inner-spin-button,
+.ro-input-wrap input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
 .ro-input-icon {
   position: absolute;
@@ -415,6 +410,8 @@ async function handleLogin() {
   backdrop-filter: blur(4px);
 }
 .ro-hint-icon { font-size: 16px; flex-shrink: 0; }
+a.ro-hint { text-decoration: none; color: rgba(255,255,255,0.85); }
+a.ro-hint:hover { background: rgba(255,255,255,0.18); }
 .ro-hint strong { color: white; }
 
 /* Футер */

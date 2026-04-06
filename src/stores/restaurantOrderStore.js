@@ -33,6 +33,19 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   const deliveryDays = ref([]);
   const loading = ref(false);
 
+  async function loginByTelegram(tgToken) {
+    const data = await api('tg-auth', {
+      method: 'POST',
+      body: JSON.stringify({ tg_token: tgToken }),
+    });
+    if (data.success) {
+      localStorage.setItem(TOKEN_KEY, data.token);
+      localStorage.setItem(REST_KEY, JSON.stringify(data.restaurant));
+      restaurant.value = data.restaurant;
+    }
+    return data;
+  }
+
   async function login(restaurantNumber, password) {
     const data = await api('login', {
       method: 'POST',
@@ -213,6 +226,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  async function adminDeleteOrder(orderId) {
+    return await api(`admin/order/${orderId}`, { method: 'DELETE' });
+  }
+
   async function adminGetExportData(format, date) {
     return await api(`admin/export/${format}?date=${date}`);
   }
@@ -224,9 +241,9 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
 
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
-    login, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
+    login, loginByTelegram, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
-    adminCreateSession, adminAutoSession, adminCloseSession,
+    adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock,
     adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword,
     adminGetExportData, adminGetSessions,

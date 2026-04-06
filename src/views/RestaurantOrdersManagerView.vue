@@ -4,7 +4,7 @@
       <h1>Заказы ресторанов</h1>
       <div class="rom-toolbar-actions">
         <button class="rom-btn rom-btn-outline" @click="copyRoLink" title="Ссылка для ресторанов">
-          Ссылка /ro
+          Ссылка /restaurant
         </button>
         <button class="rom-btn" @click="showUsersModal = true">Учётки</button>
         <button class="rom-btn rom-btn-primary" @click="handleAutoSession">
@@ -236,6 +236,10 @@
           </div>
 
           <div class="rom-modal-footer">
+            <button class="rom-btn rom-btn-danger" @click="handleDeleteOrder(editingOrder)" :disabled="saving">
+              Удалить заказ
+            </button>
+            <div style="flex:1"></div>
             <button class="rom-btn rom-btn-export" @click="exportSingleOrder(editingOrder)">
               Excel
             </button>
@@ -435,6 +439,21 @@ async function saveEditedOrder() {
   }
 }
 
+async function handleDeleteOrder(order) {
+  if (!order?.id) return;
+  if (!confirm(`Удалить заказ ресторана ${order.restaurant_number}?`)) return;
+  saving.value = true;
+  try {
+    await store.adminDeleteOrder(order.id);
+    showOrderModal.value = false;
+    await loadStatus();
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    saving.value = false;
+  }
+}
+
 // Users
 async function handleBulkCreate() {
   try {
@@ -550,7 +569,7 @@ function exportSingleOrder(order) {
 }
 
 function copyRoLink() {
-  const url = window.location.origin + '/ro';
+  const url = window.location.origin + '/restaurant';
   navigator.clipboard.writeText(url);
   alert('Ссылка скопирована: ' + url);
 }
@@ -771,7 +790,7 @@ function formatTime(dt) {
   font-size: 18px; color: #999; padding: 4px;
 }
 .rom-modal-body { padding: 20px; }
-.rom-modal-footer { padding: 16px 0 0; text-align: right; }
+.rom-modal-footer { padding: 16px 0 0; display: flex; align-items: center; gap: 10px; }
 
 /* Users modal */
 .rom-bulk-row { display: flex; gap: 8px; margin-bottom: 12px; }

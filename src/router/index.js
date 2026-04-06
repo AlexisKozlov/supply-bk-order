@@ -71,19 +71,19 @@ const routes = [
     meta: { title: 'Заказ овощей' },
   },
   {
-    path: '/ro',
+    path: '/restaurant',
     name: 'restaurant-order-login',
     component: () => import('@/views/RestaurantOrderLoginView.vue'),
     meta: { title: 'Заказы — Вход' },
   },
   {
-    path: '/ro/order',
+    path: '/restaurant/order',
     name: 'restaurant-order-form',
     component: () => import('@/views/RestaurantOrderFormView.vue'),
     meta: { title: 'Подать заказ' },
   },
   {
-    path: '/ro/history',
+    path: '/restaurant/history',
     name: 'restaurant-order-history',
     component: () => import('@/views/RestaurantOrderHistoryView.vue'),
     meta: { title: 'Мои заказы' },

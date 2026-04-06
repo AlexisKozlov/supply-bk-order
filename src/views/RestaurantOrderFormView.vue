@@ -32,6 +32,30 @@
       <p>Сейчас приём заявок закрыт. Обратитесь в отдел закупок.</p>
     </div>
 
+    <!-- Success screen after submit -->
+    <div v-else-if="showSuccessScreen" class="ro-success-screen">
+      <div class="ro-success-card">
+        <div class="ro-success-icon">&#10003;</div>
+        <h2 class="ro-success-title">Заказ {{ wasEdited ? 'обновлён' : 'отправлен' }}!</h2>
+        <p class="ro-success-date">Доставка: {{ formatDate(selectedDate) }}</p>
+        <p class="ro-success-stats">{{ totalItems }} поз., {{ totalQty }} кор.</p>
+
+        <div v-if="editTimeLeft" class="ro-success-timer">
+          <p class="ro-success-timer-label">Можно изменить до 10:00</p>
+          <div class="ro-success-countdown">{{ editTimeLeft }}</div>
+        </div>
+        <div v-else class="ro-success-timer ro-success-timer-expired">
+          <p class="ro-success-timer-label">Время на изменение истекло</p>
+        </div>
+
+        <div class="ro-success-actions">
+          <button v-if="editTimeLeft" class="ro-submit-btn" @click="returnToEdit">Изменить заказ</button>
+          <button class="ro-link-btn ro-success-new" @click="goToNextDay">Следующий день</button>
+          <router-link :to="{ name: 'restaurant-order-history' }" class="ro-link-btn ro-success-history">Мои заказы</router-link>
+        </div>
+      </div>
+    </div>
+
     <template v-else>
       <!-- Session info -->
       <div class="ro-session-bar">
@@ -102,6 +126,7 @@
             <button v-if="searchQuery" class="ro-search-clear" @click="searchQuery = ''">X</button>
             <button class="ro-add-btn" @click="showAddModal = true">+ Добавить</button>
             <button v-if="hasTemplateGap" class="ro-tpl-btn" @click="loadTemplateGap">Загрузить шаблон</button>
+            <button class="ro-excel-btn" @click="exportExcel" title="Скачать Excel">Excel</button>
           </div>
 
           <!-- Items table -->
@@ -138,6 +163,7 @@
                     :disabled="!canSubmit && !canEdit"
                     placeholder="0"
                     @input="checkMultiplicity(item)"
+                    @focus="$event.target.select()"
                   />
                   <div v-if="item._multError" class="ro-mult-hint">Кратность: {{ item.multiplicity }}</div>
                 </td>
@@ -173,6 +199,7 @@
             <span>Позиций: <strong>{{ totalItems }}</strong></span>
             <span>Коробок: <strong>{{ totalQty }}</strong></span>
           </div>
+          <button v-if="canSubmit || canEdit" class="ro-clear-btn" @click="clearOrder">Очистить</button>
         </div>
 
         <div class="ro-actions">
@@ -190,9 +217,6 @@
           </button>
           <div v-if="!canSubmit && !canEdit && currentDeadlineStatus === 'closed'" class="ro-locked-msg">
             Заказ заблокирован. Для изменений обратитесь в отдел закупок.
-          </div>
-          <div v-if="submitSuccess" class="ro-success-msg">
-            Заказ успешно {{ existingOrder ? 'обновлён' : 'отправлен' }}!
           </div>
           <div v-if="submitError" class="ro-error-msg">{{ submitError }}</div>
         </div>
@@ -251,8 +275,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 
 const router = useRouter();
@@ -272,6 +296,77 @@ const submitting = ref(false);
 const submitSuccess = ref(false);
 const submitError = ref('');
 const existingOrder = ref(null);
+
+// Отслеживание несохранённых изменений
+const savedSnapshot = ref('');
+
+function takeSnapshot() {
+  return JSON.stringify(orderItems.value.map(i => ({ s: i.sku, q: i.quantity, c: i.comment })));
+}
+
+const hasUnsavedChanges = computed(() => {
+  if (!selectedDate.value || showSuccessScreen.value) return false;
+  const current = takeSnapshot();
+  return current !== savedSnapshot.value && orderItems.value.some(i => i.quantity > 0);
+});
+
+function onBeforeUnload(e) {
+  if (hasUnsavedChanges.value) { e.preventDefault(); e.returnValue = ''; }
+}
+
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload));
+onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload));
+
+onBeforeRouteLeave(() => {
+  if (hasUnsavedChanges.value) {
+    return confirm('Заказ не отправлен. Уйти со страницы?');
+  }
+});
+
+// Success screen
+const showSuccessScreen = ref(false);
+const wasEdited = ref(false);
+const editTimeLeft = ref('');
+let editTimerInterval = null;
+
+function startEditTimer() {
+  clearInterval(editTimerInterval);
+  updateEditTimeLeft();
+  editTimerInterval = setInterval(updateEditTimeLeft, 1000);
+}
+
+function updateEditTimeLeft() {
+  const now = new Date();
+  const deadline = new Date(now);
+  deadline.setHours(10, 0, 0, 0);
+  // Если уже после 10:00 — время вышло
+  if (now >= deadline) {
+    editTimeLeft.value = '';
+    clearInterval(editTimerInterval);
+    return;
+  }
+  const diff = deadline - now;
+  const hours = Math.floor(diff / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  editTimeLeft.value = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function returnToEdit() {
+  showSuccessScreen.value = false;
+  clearInterval(editTimerInterval);
+}
+
+function goToNextDay() {
+  showSuccessScreen.value = false;
+  clearInterval(editTimerInterval);
+  // Найти следующий день после текущего
+  const idx = store.deliveryDays.findIndex(d => d.date === selectedDate.value);
+  const next = store.deliveryDays[idx + 1];
+  if (next) {
+    selectDay(next.date);
+  }
+}
 
 // Add modal
 const showAddModal = ref(false);
@@ -376,6 +471,16 @@ async function selectDay(date) {
       await loadCategoryProducts(cat);
     }
   }
+
+  // Заполненные позиции наверх (один раз при загрузке, без прыжков при вводе)
+  orderItems.value.sort((a, b) => {
+    if (a.category !== b.category) return categories.indexOf(a.category) - categories.indexOf(b.category);
+    const aFilled = a.quantity > 0 ? 0 : 1;
+    const bFilled = b.quantity > 0 ? 0 : 1;
+    return aFilled - bFilled;
+  });
+
+  savedSnapshot.value = takeSnapshot();
 }
 
 async function loadCategoryProducts(category) {
@@ -465,6 +570,15 @@ async function loadTemplateGap() {
   templateLoaded.value = true;
 }
 
+function clearOrder() {
+  if (!confirm('Очистить все количества?')) return;
+  for (const item of orderItems.value) {
+    item.quantity = 0;
+    item.comment = '';
+    item._multError = false;
+  }
+}
+
 function removeItem(item) {
   const idx = orderItems.value.indexOf(item);
   if (idx >= 0) orderItems.value.splice(idx, 1);
@@ -487,10 +601,12 @@ async function handleSubmit() {
     if (!items.length) { submitError.value = 'Добавьте хотя бы одну позицию'; return; }
     const result = await store.submitOrder(selectedDate.value, items);
     if (result.success) {
-      submitSuccess.value = true;
+      wasEdited.value = !!existingOrder.value;
       existingOrder.value = { id: result.order_id };
       store.loadMyInfo();
-      setTimeout(() => { submitSuccess.value = false; }, 5000);
+      savedSnapshot.value = takeSnapshot();
+      showSuccessScreen.value = true;
+      startEditTimer();
     }
   } catch (e) {
     submitError.value = e.message || 'Ошибка при отправке';
@@ -525,6 +641,54 @@ async function handleRepeat(sourceOrderId) {
   } catch (e) {
     submitError.value = e.message || 'Ошибка при повторе заказа';
   }
+}
+
+onUnmounted(() => clearInterval(editTimerInterval));
+
+async function exportExcel() {
+  const XLSX = await import('xlsx-js-style');
+  const wb = XLSX.utils.book_new();
+
+  const header = ['Артикул', 'Название', 'Категория', 'Кратность', 'Кол-во (кор.)', 'Комментарий'];
+  const rows = [header];
+
+  for (const cat of categories) {
+    const items = orderItems.value.filter(i => i.category === cat);
+    for (const item of items) {
+      rows.push([
+        item.sku,
+        item.product_name,
+        item.category,
+        item.multiplicity > 1 ? item.multiplicity : '',
+        item.quantity > 0 ? item.quantity : '',
+        item.comment || '',
+      ]);
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Стили заголовка
+  const sH = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } }, alignment: { horizontal: 'center' } };
+  for (let c = 0; c < header.length; c++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
+    if (cell) cell.s = sH;
+  }
+
+  // Ширина колонок
+  ws['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 20 }];
+
+  const restNum = store.restaurant?.number || '';
+  const dateStr = selectedDate.value || '';
+  const sheetName = `Заказ ${restNum}`;
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+
+  const hasFilled = orderItems.value.some(i => i.quantity > 0);
+  const fileName = hasFilled
+    ? `Заказ_${restNum}_${dateStr}.xlsx`
+    : `Бланк_заказа_${restNum}.xlsx`;
+
+  XLSX.writeFile(wb, fileName);
 }
 
 function handleLogout() {
@@ -638,6 +802,8 @@ function formatDateShort(d) {
 .ro-add-btn:hover { background: #D62300; color: white; }
 .ro-tpl-btn { padding: 10px 16px; border-radius: 10px; border: 2px solid #2563eb; background: #eff6ff; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.2s; }
 .ro-tpl-btn:hover { background: #2563eb; color: white; }
+.ro-excel-btn { padding: 10px 16px; border-radius: 10px; border: 2px solid #16a34a; background: #f0fdf4; color: #16a34a; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.2s; }
+.ro-excel-btn:hover { background: #16a34a; color: white; }
 
 /* Products table */
 .ro-products { background: white; }
@@ -667,6 +833,8 @@ function formatDateShort(d) {
 .ro-summary { background: white; padding: 12px 16px; border-top: 2px solid #e0d5c8; display: flex; justify-content: center; gap: 24px; }
 .ro-summary-stats { display: flex; gap: 20px; font-size: 14px; color: #502314; }
 .ro-summary-stats strong { color: #D62300; }
+.ro-clear-btn { padding: 6px 14px; border-radius: 8px; border: 1px solid #dc2626; background: transparent; color: #dc2626; font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+.ro-clear-btn:hover { background: #dc2626; color: white; }
 
 /* Actions */
 .ro-actions { padding: 16px; text-align: center; }
@@ -700,16 +868,77 @@ function formatDateShort(d) {
 .ro-add-item-meta { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .ro-add-cat { font-size: 11px; color: #8b7355; background: #f5f0eb; padding: 2px 8px; border-radius: 4px; }
 
+/* Success screen */
+.ro-success-screen { display: flex; align-items: center; justify-content: center; min-height: 60vh; padding: 20px; }
+.ro-success-card { background: white; border-radius: 20px; padding: 40px 32px; text-align: center; max-width: 420px; width: 100%; box-shadow: 0 4px 24px rgba(80,35,20,0.1); }
+.ro-success-icon { width: 64px; height: 64px; border-radius: 50%; background: #16a34a; color: white; font-size: 32px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
+.ro-success-title { color: #502314; margin: 0 0 8px; font-size: 22px; }
+.ro-success-date { color: #8b7355; margin: 0 0 4px; font-size: 15px; }
+.ro-success-stats { color: #502314; margin: 0 0 24px; font-size: 14px; font-weight: 600; }
+.ro-success-timer { background: #f0fdf4; border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+.ro-success-timer-expired { background: #fef2f2; }
+.ro-success-timer-label { margin: 0 0 8px; font-size: 13px; color: #8b7355; }
+.ro-success-countdown { font-size: 32px; font-weight: 700; color: #16a34a; font-variant-numeric: tabular-nums; letter-spacing: 2px; }
+.ro-success-timer-expired .ro-success-timer-label { color: #dc2626; }
+.ro-success-actions { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.ro-success-new, .ro-success-history { display: inline-block; padding: 10px 24px; border-radius: 10px; border: 2px solid #e0d5c8; background: white; color: #502314; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; font-family: inherit; transition: all 0.2s; }
+.ro-success-new:hover, .ro-success-history:hover { background: #f5f0eb; }
+
 /* Mobile */
 @media (max-width: 600px) {
-  .ro-table th.ro-th-sku, .ro-table td.ro-td-sku { display: none; }
-  .ro-table th.ro-th-comment, .ro-table td.ro-td-comment { display: none; }
-  .ro-table th.ro-th-mult, .ro-table td.ro-td-mult { display: none; }
-  .ro-qty-input { width: 60px; }
+  .ro-page { padding-bottom: 80px; }
   .ro-header { padding: 10px 12px; }
-  .ro-day-tabs { padding: 10px 8px; gap: 4px; }
+  .ro-header-title { font-size: 14px; }
+  .ro-header-addr { font-size: 11px; }
+  .ro-link-btn { padding: 5px 10px; font-size: 12px; }
+
+  .ro-session-bar { margin: 8px 8px 0; font-size: 12px; }
+  .ro-day-tabs { padding: 8px 6px; gap: 4px; justify-content: flex-start; margin-top: 8px; border-radius: 10px; margin-left: 8px; margin-right: 8px; }
   .ro-day-tab { padding: 6px 10px; }
-  .ro-search-row { flex-wrap: wrap; }
-  .ro-add-btn { flex: 1; text-align: center; }
+  .ro-day-name { font-size: 11px; }
+  .ro-day-date { font-size: 10px; }
+
+  .ro-order-area { margin: 8px; border-radius: 12px; }
+  .ro-deadline-bar { font-size: 12px; padding: 8px 12px; }
+  .ro-cat-tab { padding: 10px 8px; font-size: 13px; }
+
+  /* Поиск и кнопки */
+  .ro-search-row { flex-wrap: wrap; padding: 10px 12px; gap: 6px; }
+  .ro-search-input { width: 100%; flex: none; padding: 8px 12px; font-size: 14px; }
+  .ro-add-btn, .ro-tpl-btn, .ro-excel-btn { flex: 1; text-align: center; padding: 8px 12px; font-size: 12px; }
+
+  /* Таблица — карточный вид */
+  .ro-table { display: block; }
+  .ro-table thead { display: none; }
+  .ro-table tbody { display: block; }
+  .ro-table tr {
+    display: flex; flex-wrap: wrap; align-items: center;
+    padding: 10px 12px; gap: 4px 8px;
+    border-bottom: 1px solid #f0ebe4;
+  }
+  .ro-table td { padding: 0; border: none; }
+  .ro-td-sku { font-size: 10px; color: #8b7355; }
+  .ro-td-name { flex: 1 1 100%; font-size: 13px; font-weight: 500; order: -1; }
+  .ro-td-mult { order: 1; }
+  .ro-td-qty { order: 2; margin-left: auto; }
+  .ro-qty-input { width: 70px; padding: 8px 6px; font-size: 16px; }
+  .ro-td-comment { flex: 1 1 100%; order: 3; margin-top: 4px; }
+  .ro-comment-input { font-size: 13px; padding: 6px 8px; }
+  .ro-td-actions { order: 4; }
+  .ro-row-filled { background: #f0fdf4; }
+
+  /* Итоги */
+  .ro-summary { flex-wrap: wrap; gap: 10px; padding: 10px 12px; justify-content: space-between; }
+  .ro-submit-btn { width: 100%; padding: 14px; font-size: 16px; }
+
+  /* Повторение */
+  .ro-repeat-section { margin: 8px; padding: 12px; }
+
+  /* Модалка */
+  .ro-modal { max-width: 100%; margin: 10px; border-radius: 12px; max-height: 90vh; }
+
+  /* Экран успеха */
+  .ro-success-card { padding: 28px 20px; }
+  .ro-success-countdown { font-size: 28px; }
 }
 </style>
