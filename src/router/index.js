@@ -37,7 +37,7 @@ const routes = [
       { path: 'marketing', name: 'marketing', component: () => import('@/views/MarketingView.vue'), meta: { title: 'Маркетинг', module: 'marketing' } },
       { path: 'marketing/new', name: 'marketing-new', component: () => import('@/views/MarketingDetailView.vue'), meta: { title: 'Новая активность', module: 'marketing' } },
       { path: 'marketing/:id', name: 'marketing-detail', component: () => import('@/views/MarketingDetailView.vue'), meta: { title: 'Маркетинговая активность', module: 'marketing' } },
-      { path: 'veg-admin', name: 'veg-admin', component: () => import('@/views/VegOrderAdminView.vue'), meta: { title: 'Овощи', module: 'veg' } },
+      { path: 'veg-admin', redirect: { name: 'supplier-orders' } },
       { path: 'distribution', name: 'distribution', component: () => import('@/views/DistributionView.vue'), meta: { title: 'Распределение', module: 'distribution' } },
       { path: 'pallet-calc', name: 'pallet-calc', component: () => import('@/views/PalletCalcView.vue'), meta: { title: 'Калькулятор паллет', module: 'pallet-calc' } },
       { path: 'pallet-storage', name: 'pallet-storage', component: () => import('@/views/PalletStorageView.vue'), meta: { title: 'Паллетовка склада', module: 'pallet-storage' } },
@@ -48,6 +48,7 @@ const routes = [
       { path: 'corrections', name: 'corrections', component: () => import('@/views/CorrectionsView.vue'), meta: { title: 'Корректировки', module: 'corrections' } },
       { path: 'chat', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'Чат с ресторанами', module: 'chat' } },
       { path: 'restaurant-orders', name: 'restaurant-orders', component: () => import('@/views/RestaurantOrdersManagerView.vue'), meta: { title: 'Заказы ресторанов', module: 'restaurant-orders' } },
+      { path: 'supplier-orders', name: 'supplier-orders', component: () => import('@/views/SupplierOrdersHubView.vue'), meta: { title: 'Заявки поставщикам', module: 'supplier-orders' } },
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
     ],
@@ -87,6 +88,12 @@ const routes = [
     name: 'restaurant-order-history',
     component: () => import('@/views/RestaurantOrderHistoryView.vue'),
     meta: { title: 'Мои заказы' },
+  },
+  {
+    path: '/supplier-order',
+    name: 'supplier-order-form',
+    component: () => import('@/views/SupplierOrderFormView.vue'),
+    meta: { title: 'Заявки поставщикам' },
   },
   {
     path: '/search-cards',
@@ -142,7 +149,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'veg', 'distribution', 'corrections', 'chat', 'restaurant-orders'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'supplier-orders'];
 
 router.beforeEach((to) => {
   const userStore = useUserStore();
@@ -158,6 +165,10 @@ router.beforeEach((to) => {
   }
   // Модульная проверка прав
   if (to.meta.module && !userStore.hasAccess(to.meta.module, 'view')) {
+    // supplier-orders доступен также тем, у кого есть доступ к veg
+    if (to.meta.module === 'supplier-orders' && userStore.hasAccess('veg', 'view')) {
+      return;
+    }
     // Редирект на первый доступный модуль
     const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));
     return first ? { name: first } : { name: 'home' };

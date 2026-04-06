@@ -4,13 +4,13 @@ import { db, setSessionToken } from '@/lib/apiClient.js';
 
 // ═══ Система модульных прав ═══
 // Fallback-значения (используются до загрузки конфига с сервера)
-export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'shelf-life', 'pricing', 'tenders', 'veg', 'stock-collection', 'deficit', 'distribution', 'telegram', 'pallet-calc', 'cards', 'protocols', 'marketing', 'corrections', 'chat', 'pallet-storage', 'restaurant-orders'];
+export const MODULES = ['order', 'planning', 'history', 'plan-fact', 'database', 'delivery-schedule', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'shelf-life', 'pricing', 'tenders', 'veg', 'stock-collection', 'deficit', 'distribution', 'telegram', 'pallet-calc', 'cards', 'protocols', 'marketing', 'corrections', 'chat', 'pallet-storage', 'restaurant-orders', 'supplier-orders'];
 
 export const ROLE_TEMPLATES = {
-  admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'restaurant-sales': 'full', 'shelf-life': 'full', pricing: 'full', tenders: 'full', veg: 'full', 'stock-collection': 'full', deficit: 'full', distribution: 'full', telegram: 'full', 'pallet-calc': 'full', cards: 'full', protocols: 'full', marketing: 'full', corrections: 'full', chat: 'full', 'pallet-storage': 'full', 'restaurant-orders': 'full' },
-  manager: { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'restaurant-sales': 'full', 'shelf-life': 'full', pricing: 'full', tenders: 'full', veg: 'full', 'stock-collection': 'full', deficit: 'full', distribution: 'full', telegram: 'none', 'pallet-calc': 'full', cards: 'full', protocols: 'full', marketing: 'full', corrections: 'full', chat: 'full', 'pallet-storage': 'full', 'restaurant-orders': 'full' },
-  user:   { order: 'edit', planning: 'edit', history: 'edit', 'plan-fact': 'edit', database: 'edit', 'delivery-schedule': 'edit', analytics: 'view', calendar: 'view', analysis: 'edit', 'restaurant-sales': 'edit', 'shelf-life': 'edit', pricing: 'edit', tenders: 'edit', veg: 'edit', 'stock-collection': 'edit', deficit: 'edit', distribution: 'edit', telegram: 'none', 'pallet-calc': 'edit', cards: 'view', protocols: 'edit', marketing: 'view', corrections: 'view', chat: 'edit', 'pallet-storage': 'none', 'restaurant-orders': 'full' },
-  viewer: { order: 'view', planning: 'view', history: 'view', 'plan-fact': 'view', database: 'view', 'delivery-schedule': 'view', analytics: 'view', calendar: 'view', analysis: 'view', 'restaurant-sales': 'view', 'shelf-life': 'view', pricing: 'view', tenders: 'view', veg: 'view', 'stock-collection': 'view', deficit: 'view', distribution: 'view', telegram: 'none', 'pallet-calc': 'view', cards: 'view', protocols: 'view', marketing: 'none', corrections: 'none', chat: 'none', 'pallet-storage': 'none', 'restaurant-orders': 'view' },
+  admin:  { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'restaurant-sales': 'full', 'shelf-life': 'full', pricing: 'full', tenders: 'full', veg: 'full', 'stock-collection': 'full', deficit: 'full', distribution: 'full', telegram: 'full', 'pallet-calc': 'full', cards: 'full', protocols: 'full', marketing: 'full', corrections: 'full', chat: 'full', 'pallet-storage': 'full', 'restaurant-orders': 'full', 'supplier-orders': 'full' },
+  manager: { order: 'full', planning: 'full', history: 'full', 'plan-fact': 'full', database: 'full', 'delivery-schedule': 'full', analytics: 'full', calendar: 'full', analysis: 'full', 'restaurant-sales': 'full', 'shelf-life': 'full', pricing: 'full', tenders: 'full', veg: 'full', 'stock-collection': 'full', deficit: 'full', distribution: 'full', telegram: 'none', 'pallet-calc': 'full', cards: 'full', protocols: 'full', marketing: 'full', corrections: 'full', chat: 'full', 'pallet-storage': 'full', 'restaurant-orders': 'full', 'supplier-orders': 'full' },
+  user:   { order: 'edit', planning: 'edit', history: 'edit', 'plan-fact': 'edit', database: 'edit', 'delivery-schedule': 'edit', analytics: 'view', calendar: 'view', analysis: 'edit', 'restaurant-sales': 'edit', 'shelf-life': 'edit', pricing: 'edit', tenders: 'edit', veg: 'edit', 'stock-collection': 'edit', deficit: 'edit', distribution: 'edit', telegram: 'none', 'pallet-calc': 'edit', cards: 'view', protocols: 'edit', marketing: 'view', corrections: 'view', chat: 'edit', 'pallet-storage': 'none', 'restaurant-orders': 'full', 'supplier-orders': 'full' },
+  viewer: { order: 'view', planning: 'view', history: 'view', 'plan-fact': 'view', database: 'view', 'delivery-schedule': 'view', analytics: 'view', calendar: 'view', analysis: 'view', 'restaurant-sales': 'view', 'shelf-life': 'view', pricing: 'view', tenders: 'view', veg: 'view', 'stock-collection': 'view', deficit: 'view', distribution: 'view', telegram: 'none', 'pallet-calc': 'view', cards: 'view', protocols: 'view', marketing: 'none', corrections: 'none', chat: 'none', 'pallet-storage': 'none', 'restaurant-orders': 'view', 'supplier-orders': 'view' },
 };
 
 export const ACCESS_LEVELS = { full: 3, edit: 2, view: 1, none: 0 };
@@ -31,6 +31,7 @@ export const MODULE_LABELS = {
   chat: 'Чат с ресторанами',
   'pallet-storage': 'Паллетовка склада',
   'restaurant-orders': 'Заказы ресторанов',
+  'supplier-orders': 'Заявки поставщикам',
 };
 
 // Загрузка RBAC-конфига с сервера (единый источник правды — PHP)
@@ -66,7 +67,10 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function hasAccess(module, minLevel = 'view') {
-    return ACCESS_LEVELS[getAccess(module)] >= ACCESS_LEVELS[minLevel];
+    if (ACCESS_LEVELS[getAccess(module)] >= ACCESS_LEVELS[minLevel]) return true;
+    // supplier-orders доступен также пользователям с доступом к veg
+    if (module === 'supplier-orders') return ACCESS_LEVELS[getAccess('veg')] >= ACCESS_LEVELS[minLevel];
+    return false;
   }
 
   let _sessionRestored = false;

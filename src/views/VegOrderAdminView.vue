@@ -1,7 +1,10 @@
 <template>
   <div class="veg">
-    <div class="veg-top">
+    <div v-if="!embedded" class="veg-top">
       <h1 class="veg-title">Заказ овощей</h1>
+      <button class="veg-btn fill" @click="initCreateDates(); showCreate = true">+ Новая сессия</button>
+    </div>
+    <div v-else class="veg-top">
       <button class="veg-btn fill" @click="initCreateDates(); showCreate = true">+ Новая сессия</button>
     </div>
 
@@ -453,6 +456,10 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import { toLocalDateStr } from '@/lib/utils.js';
+
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+});
 
 const userStore = useUserStore();
 const toastStore = useToastStore();

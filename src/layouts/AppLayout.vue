@@ -420,7 +420,6 @@ const toolsItems = [
   { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
   { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
   { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
-  { module: 'veg', route: 'veg-admin', icon: 'veg', label: 'Овощи' },
   { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
   { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
   { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
@@ -431,6 +430,7 @@ const toolsItems = [
   { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
   { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
   { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
+  { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
 ];
 
 // ═══ Вкладки (tabs) ═══
