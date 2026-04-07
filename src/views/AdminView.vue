@@ -1004,7 +1004,7 @@ const auditCategories = [
   { value: 'marketing', label: 'Маркетинг' },
   { value: 'correction', label: 'Корректировки' },
   { value: 'import', label: 'Импорт данных' },
-  { value: 'veg', label: 'Овощи' },
+  { value: 'veg', label: 'Планета Ресторанов' },
   { value: 'stock_collection', label: 'Сбор остатков' },
   { value: 'distribution', label: 'Распределение' },
   { value: 'system', label: 'Система' },
@@ -1050,7 +1050,7 @@ const AUDIT_ENTITY_LABELS = {
   user: 'Пользователь', price_agreement: 'Протокол цен',
   marketing: 'Маркетинг', tender: 'Тендер',
   correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
-  import: 'Импорт', veg: 'Овощи', system: 'Система',
+  import: 'Импорт', veg: 'Планета Ресторанов', system: 'Система',
 };
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }

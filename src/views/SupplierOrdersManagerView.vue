@@ -245,31 +245,67 @@
     <template v-if="pageTab === 'schedules' && currentSupplierId">
       <div v-if="loadingSchedules" class="rom-loading">Загрузка...</div>
       <div v-else>
-        <div class="rom-table-wrap">
-          <table class="rom-table">
-            <thead>
-              <tr>
-                <th>Ресторан</th>
-                <th>Регион</th>
-                <th>Адрес</th>
-                <th>День заказа</th>
-                <th>День поставки</th>
-                <th>Активен</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="s in schedules" :key="s.id">
-                <td class="rom-td-num">{{ s.restaurant_number }}</td>
-                <td>{{ s.region }}</td>
-                <td>{{ s.address }}</td>
-                <td>{{ dayNamesFull[s.order_day] || s.order_day }}</td>
-                <td>{{ dayNamesFull[s.delivery_day] || s.delivery_day }}</td>
-                <td>{{ s.is_active == 1 ? 'Да' : 'Нет' }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- Дедлайны по дням недели -->
+        <div class="so-deadline-section">
+          <h3 class="so-section-title">Дедлайны по дням доставки</h3>
+          <p class="so-section-hint">Для каждого дня доставки укажите день и время дедлайна подачи заявки</p>
+          <div class="so-deadline-grid">
+            <div v-for="dow in [1,2,3,4,5,6,7]" :key="dow" class="so-deadline-row">
+              <div class="so-deadline-label">
+                <span class="so-dl-day">{{ dayNamesFull[dow] }}</span>
+                <span class="so-dl-hint">доставка</span>
+              </div>
+              <div class="so-deadline-arrow">→</div>
+              <select v-model="deadlineRulesMap[dow].deadline_dow" class="rom-input-sm">
+                <option v-for="d in [1,2,3,4,5,6,7]" :key="d" :value="d">{{ daysShort[d] }}</option>
+              </select>
+              <input type="time" v-model="deadlineRulesMap[dow].deadline_time" class="rom-input-sm" />
+              <button v-if="!deadlineRulesMap[dow].active" class="so-dl-toggle so-dl-off" @click="deadlineRulesMap[dow].active = true" title="Включить">выкл</button>
+              <button v-else class="so-dl-toggle so-dl-on" @click="deadlineRulesMap[dow].active = false" title="Выключить">вкл</button>
+            </div>
+          </div>
+          <button class="rom-btn rom-btn-export" @click="saveDeadlineRules" :disabled="savingDeadlines" style="margin-top:10px">
+            {{ savingDeadlines ? 'Сохранение...' : 'Сохранить дедлайны' }}
+          </button>
         </div>
-        <p class="so-schedule-count">Всего записей: {{ schedules.length }}</p>
+
+        <!-- Графики по ресторанам -->
+        <h3 class="so-section-title" style="margin-top:20px">Дни доставки по ресторанам</h3>
+        <p class="so-section-hint">Отметьте дни недели, когда ресторан получает поставку.</p>
+        <div v-if="scheduleGridLoading" class="rom-loading">Загрузка...</div>
+        <template v-else-if="scheduleRestaurants.length">
+          <div class="so-sched-filter">
+            <input v-model="scheduleFilter" type="text" class="rom-input-sm" placeholder="Поиск ресторана..." style="min-width:200px" />
+            <button class="rom-btn rom-btn-export" @click="saveScheduleGrid" :disabled="savingScheduleGrid">
+              {{ savingScheduleGrid ? 'Сохранение...' : 'Сохранить' }}
+            </button>
+            <span class="so-schedule-count" style="margin:0">{{ scheduleActiveRests }} рест., {{ scheduleActiveDays }} дней</span>
+          </div>
+          <div class="rom-table-wrap">
+            <table class="rom-table so-grid-table">
+              <thead>
+                <tr>
+                  <th class="so-grid-rest">Ресторан</th>
+                  <th v-for="d in 7" :key="d" class="so-grid-day">{{ daysShort[d] }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in filteredScheduleRestaurants" :key="r.id">
+                  <td class="so-grid-rest-cell">
+                    <span class="so-grid-num">{{ r.number }}</span>
+                    <span class="so-grid-addr">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
+                  </td>
+                  <td v-for="d in 7" :key="d" class="so-grid-check" @click="toggleScheduleDay(r, d)">
+                    <input type="checkbox" :checked="!!scheduleGrid[r.id]?.[d]" @click.stop="toggleScheduleDay(r, d)" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+        <div v-else>
+          <button class="rom-btn" @click="loadRestaurantsForSchedule">Загрузить рестораны</button>
+        </div>
       </div>
     </template>
 
@@ -375,7 +411,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 
 const props = defineProps({
@@ -386,6 +422,7 @@ const store = useSupplierOrderStore();
 
 const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ', 7: 'ВС' };
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
+const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
 
 const pageTab = ref('sessions');
 const loading = ref(false);
@@ -422,6 +459,12 @@ const listDateTo = ref(todayStr(7));
 // Schedules
 const loadingSchedules = ref(false);
 const schedules = ref([]);
+const deadlineRulesMap = reactive({});
+const savingDeadlines = ref(false);
+// Инициализируем пустые правила для всех дней
+for (let d = 1; d <= 7; d++) {
+  deadlineRulesMap[d] = { deadline_dow: d > 1 ? d - 1 : 7, deadline_time: '14:00', active: false };
+}
 
 // Templates
 const loadingTemplates = ref(false);
@@ -623,12 +666,116 @@ async function loadSchedules() {
   if (!currentSupplierId.value) return;
   loadingSchedules.value = true;
   try {
-    schedules.value = await store.adminGetSchedules(currentSupplierId.value);
+    const result = await store.adminGetSchedules(currentSupplierId.value);
+    schedules.value = result.schedules;
+    // Заполняем дедлайны
+    for (let d = 1; d <= 7; d++) deadlineRulesMap[d].active = false;
+    for (const r of result.deadlineRules) {
+      const dow = parseInt(r.delivery_dow);
+      if (dow >= 1 && dow <= 7) {
+        deadlineRulesMap[dow].deadline_dow = parseInt(r.deadline_dow);
+        deadlineRulesMap[dow].deadline_time = (r.deadline_time || '14:00:00').substring(0, 5);
+        deadlineRulesMap[dow].active = true;
+      }
+    }
+    // Автоматически загружаем рестораны для сетки
+    if (!scheduleRestaurants.value.length) await loadRestaurantsForSchedule();
   } catch (e) {
     console.error(e);
   } finally {
     loadingSchedules.value = false;
   }
+}
+
+// ═══ Schedule grid ═══
+const scheduleRestaurants = ref([]);
+const scheduleGrid = reactive({});
+const savingScheduleGrid = ref(false);
+const scheduleGridLoading = ref(false);
+const scheduleFilter = ref('');
+
+const filteredScheduleRestaurants = computed(() => {
+  if (!scheduleFilter.value) return scheduleRestaurants.value;
+  const q = scheduleFilter.value.toLowerCase();
+  return scheduleRestaurants.value.filter(r =>
+    String(r.number).includes(q) || (r.city || '').toLowerCase().includes(q) || (r.address || '').toLowerCase().includes(q)
+  );
+});
+
+const scheduleActiveDays = computed(() => {
+  let count = 0;
+  for (const rId of Object.keys(scheduleGrid)) { for (let d = 1; d <= 7; d++) { if (scheduleGrid[rId]?.[d]) count++; } }
+  return count;
+});
+const scheduleActiveRests = computed(() => {
+  let count = 0;
+  for (const rId of Object.keys(scheduleGrid)) { for (let d = 1; d <= 7; d++) { if (scheduleGrid[rId]?.[d]) { count++; break; } } }
+  return count;
+});
+
+async function loadRestaurantsForSchedule() {
+  scheduleGridLoading.value = true;
+  try {
+    const token = localStorage.getItem('bk_session_token') || '';
+    const res = await fetch('/api/restaurants?select=id,number,city,address,region&active=eq.1&order=number.asc&limit=500', {
+      headers: { 'X-Session-Token': token, 'X-API-Key': token },
+    });
+    const data = await res.json();
+    const allRests = (data.data || data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number));
+    // Убираем дубли по номеру (оставляем первый)
+    const seen = new Set();
+    scheduleRestaurants.value = allRests.filter(r => { if (seen.has(r.number)) return false; seen.add(r.number); return true; });
+    // Заполняем сетку из текущих schedules
+    for (const r of scheduleRestaurants.value) scheduleGrid[r.id] = {};
+    for (const s of schedules.value) {
+      const rest = scheduleRestaurants.value.find(r => r.number == s.restaurant_number);
+      if (rest && s.is_active == 1) {
+        if (!scheduleGrid[rest.id]) scheduleGrid[rest.id] = {};
+        scheduleGrid[rest.id][s.delivery_day] = true;
+      }
+    }
+  } catch (e) { console.error(e); }
+  finally { scheduleGridLoading.value = false; }
+}
+
+function toggleScheduleDay(restaurant, dow) {
+  if (!scheduleGrid[restaurant.id]) scheduleGrid[restaurant.id] = {};
+  scheduleGrid[restaurant.id][dow] = !scheduleGrid[restaurant.id][dow];
+}
+
+async function saveScheduleGrid() {
+  savingScheduleGrid.value = true;
+  try {
+    const items = [];
+    for (const r of scheduleRestaurants.value) {
+      for (let d = 1; d <= 7; d++) {
+        if (scheduleGrid[r.id]?.[d]) {
+          const rule = deadlineRulesMap[d];
+          const orderDay = rule?.active ? rule.deadline_dow : (d > 1 ? d - 1 : 7);
+          items.push({ restaurant_id: r.id, order_day: orderDay, delivery_day: d, is_active: 1 });
+        }
+      }
+    }
+    await store.adminSaveSchedules(currentSupplierId.value, items);
+    alert('График сохранён');
+    await loadSchedules();
+  } catch (e) { alert('Ошибка: ' + e.message); }
+  finally { savingScheduleGrid.value = false; }
+}
+
+async function saveDeadlineRules() {
+  savingDeadlines.value = true;
+  try {
+    const rules = [];
+    for (let d = 1; d <= 7; d++) {
+      if (deadlineRulesMap[d].active) {
+        rules.push({ delivery_dow: d, deadline_dow: deadlineRulesMap[d].deadline_dow, deadline_time: deadlineRulesMap[d].deadline_time + ':00' });
+      }
+    }
+    await store.adminSaveDeadlineRules(currentSupplierId.value, rules);
+    alert('Дедлайны сохранены');
+  } catch (e) { alert('Ошибка: ' + e.message); }
+  finally { savingDeadlines.value = false; }
 }
 
 async function loadTemplates() {
@@ -1002,6 +1149,33 @@ function formatTime(dt) {
 .rom-input-sm { padding: 4px 6px; border: 1px solid #e0d5c8; border-radius: 4px; font-size: 13px; }
 .so-date-nav { display: flex; gap: 4px; flex-wrap: wrap; }
 .so-schedule-count { font-size: 13px; color: #8b7355; margin: 8px 16px; }
+
+/* Deadline rules editor */
+.so-deadline-section { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.so-section-title { font-size: 14px; font-weight: 700; color: #502314; margin: 0 0 4px; }
+.so-section-hint { font-size: 12px; color: #8b7355; margin: 0 0 12px; }
+.so-deadline-grid { display: flex; flex-direction: column; gap: 6px; }
+.so-deadline-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #faf8f5; border-radius: 8px; }
+.so-deadline-label { min-width: 120px; }
+.so-dl-day { font-size: 13px; font-weight: 600; color: #502314; }
+.so-dl-hint { font-size: 10px; color: #8b7355; margin-left: 4px; }
+.so-deadline-arrow { color: #8b7355; font-size: 14px; }
+.so-dl-toggle { padding: 3px 8px; border-radius: 4px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.so-dl-on { background: #ecfdf5; color: #16a34a; }
+.so-dl-off { background: #f5f0eb; color: #8b7355; }
+
+/* Schedule grid (like Planeta) */
+.so-sched-filter { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.so-grid-table { border-collapse: collapse; }
+.so-grid-table th, .so-grid-table td { text-align: center; padding: 6px 4px; }
+.so-grid-rest { text-align: left !important; min-width: 220px; padding-left: 10px !important; }
+.so-grid-day { width: 44px; font-size: 12px; font-weight: 700; color: #8b7355; }
+.so-grid-rest-cell { text-align: left !important; padding: 5px 10px !important; white-space: nowrap; }
+.so-grid-num { font-size: 14px; font-weight: 700; color: #502314; background: #f5f0eb; padding: 1px 6px; border-radius: 4px; margin-right: 6px; }
+.so-grid-addr { font-size: 11px; color: #8b7355; }
+.so-grid-check { cursor: pointer; transition: background 0.1s; user-select: none; }
+.so-grid-check:hover { background: #ecfdf5; }
+.so-grid-check input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: #16a34a; }
 
 /* ═══ Sessions ═══ */
 .so-sessions-list { display: flex; flex-direction: column; gap: 8px; }

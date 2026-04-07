@@ -956,6 +956,69 @@ try {
     error_log('[cron_telegram] protocol deadline reminders error: ' . $e->getMessage());
 }
 
+// ═══ ЗАКАЗЫ РЕСТОРАНОВ: напоминания о дедлайнах ═══
+try {
+    // Ищем активную сессию
+    $roSess = $pdo->query("SELECT id, week_start, week_end FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY id DESC LIMIT 1")->fetch();
+    if ($roSess) {
+        $tz = new DateTimeZone('Europe/Minsk');
+        $now = new DateTime('now', $tz);
+        $today = $now->format('Y-m-d');
+        $currentTime = $now->format('H:i');
+
+        // Дни доставки на завтра (дедлайн подачи = сегодня)
+        $tomorrow = (new DateTime('now', $tz))->modify('+1 day')->format('Y-m-d');
+
+        // Напоминаем в 8:00 и 12:00
+        if ($currentTime >= '08:00' && $currentTime < '08:15' || $currentTime >= '12:00' && $currentTime < '12:15') {
+            $reminderType = $currentTime < '09:00' ? 'ro_morning' : 'ro_midday';
+
+            // Рестораны с привязанным Telegram, у которых нет заказа на завтра
+            $s = $pdo->prepare("
+                SELECT ru.restaurant_number, ru.telegram_chat_id
+                FROM ro_users ru
+                WHERE ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
+                AND ru.restaurant_number NOT IN (
+                    SELECT o.restaurant_number FROM ro_orders o
+                    WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+                )
+            ");
+            $s->execute([$roSess['id'], $tomorrow]);
+            $missing = $s->fetchAll();
+
+            foreach ($missing as $m) {
+                $dedupKey = "{$reminderType}_{$m['restaurant_number']}_{$tomorrow}";
+                // Проверяем дедупликацию
+                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 6 HOUR");
+                $dup->execute([$dedupKey]);
+                if ($dup->fetch()) continue;
+
+                $timeLeft = $currentTime < '09:00' ? 'до 10:00' : 'до 13:00';
+                $dateFormatted = (new DateTime($tomorrow))->format('d.m');
+                $text = "⏰ <b>Напоминание</b>\n\n";
+                $text .= "Ресторан <b>{$m['restaurant_number']}</b>: не подана заявка на <b>{$dateFormatted}</b>.\n";
+                $text .= "Дедлайн: {$timeLeft}.\n\n";
+
+                // Генерируем токен для быстрого входа
+                $token = bin2hex(random_bytes(32));
+                $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, expires_at, used) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
+                    ->execute([$token, $m['telegram_chat_id']]);
+                $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
+
+                $btns = ['inline_keyboard' => [
+                    [['text' => '🏠 Открыть кабинет', 'url' => "{$siteUrl}/restaurant?tg_token={$token}"]],
+                ]];
+                sendMessage($m['telegram_chat_id'], $text, $btns);
+                $sent++;
+
+                $pdo->prepare("INSERT INTO tg_notification_log (notification_key, sent_at) VALUES (?, NOW())")->execute([$dedupKey]);
+            }
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] ro deadline reminders error: ' . $e->getMessage());
+}
+
 // Очистка старых записей дедупликации (старше 7 дней)
 try {
     $pdo->exec("DELETE FROM tg_notification_log WHERE sent_at < NOW() - INTERVAL 7 DAY");

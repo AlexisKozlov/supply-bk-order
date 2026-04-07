@@ -19,7 +19,7 @@
         ⚙️ Уведомления
       </button>
       <button class="adm-tab" :class="{ active: tab === 'veg' }" @click="tab = 'veg'">
-        🥬 Овощи <span class="adm-tab-count" :class="{ active: tab === 'veg' }">{{ vegSubCount }}</span>
+        🥬 Планета Ресторанов <span class="adm-tab-count" :class="{ active: tab === 'veg' }">{{ vegSubCount }}</span>
       </button>
       <button class="adm-tab" :class="{ active: tab === 'questions' }" @click="tab = 'questions'; loadQuestions()">
         💬 Вопросы AI

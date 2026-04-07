@@ -207,7 +207,7 @@ if ($roAction === 'login' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Слишком много попыток. Подождите 10 минут'], 429);
     }
 
-    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, session_token, session_active_until FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
+    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, session_token, session_active_until, last_login_at FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
     $s->execute([$restNum]);
     $user = $s->fetch();
 
@@ -216,14 +216,28 @@ if ($roAction === 'login' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Неверный номер ресторана или пароль']);
     }
 
-    // Проверяем: если кто-то сейчас активно работает (сессия активна менее 30 мин) — не даём войти
-    // "session_active_until" обновляется при каждом действии
-    if ($user['session_token'] && $user['session_active_until']) {
+    // Проверяем: есть ли активная сессия (кто-то работает)
+    $force = !empty($body['force']);
+    if (!$force && $user['session_token'] && $user['session_active_until']) {
         $activeUntil = strtotime($user['session_active_until']);
-        // Если сессия активна и была обновлена менее 5 минут назад — значит кто-то работает
-        if ($activeUntil > time() && ($activeUntil - time()) > (23 * 3600 + 55 * 60)) {
-            // session_active_until в будущем и до истечения осталось почти 24 часа — значит только что обновлена
-            // Не блокируем — просто заменяем сессию
+        if ($activeUntil > time()) {
+            // Сессия активна — вычисляем когда был последний вход
+            $lastLogin = $user['last_login_at'] ?? null;
+            $ago = '';
+            if ($lastLogin) {
+                $diff = time() - strtotime($lastLogin);
+                if ($diff < 60) $ago = 'только что';
+                elseif ($diff < 3600) $ago = floor($diff / 60) . ' мин. назад';
+                elseif ($diff < 86400) $ago = floor($diff / 3600) . ' ч. назад';
+                else $ago = floor($diff / 86400) . ' дн. назад';
+            }
+            roRespond([
+                'success' => false,
+                'error' => 'active_session',
+                'active_session' => true,
+                'last_login_at' => $lastLogin,
+                'last_login_ago' => $ago,
+            ]);
         }
     }
 
@@ -277,6 +291,110 @@ if ($roAction === 'logout' && $method === 'POST') {
             ->execute([$rest['restaurant_number']]);
     }
     roRespond(['success' => true]);
+}
+
+// --- Смена пароля ---
+if ($roAction === 'change-password' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $oldPass = $body['old_password'] ?? '';
+    $newPass = $body['new_password'] ?? '';
+    if (!$oldPass || !$newPass) roRespond(['error' => 'Заполните оба поля'], 400);
+    if (mb_strlen($newPass) < 4) roRespond(['error' => 'Новый пароль слишком короткий (минимум 4 символа)'], 400);
+    // Проверяем старый пароль
+    $s = $pdo->prepare("SELECT id, password_hash FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
+    $s->execute([$rest['restaurant_number']]);
+    $user = $s->fetch();
+    if (!$user || !password_verify($oldPass, $user['password_hash'])) {
+        roRespond(['error' => 'Неверный текущий пароль']);
+    }
+    $newHash = password_hash($newPass, PASSWORD_DEFAULT);
+    $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE id = ?")->execute([$newHash, $user['id']]);
+    roRespond(['success' => true]);
+}
+
+// --- Проверка активного сбора остатков ---
+if ($roAction === 'stock-collection-status' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
+    $group = getEntityGroup($le);
+    // Ищем активные сборы для юрлица ресторана
+    $where = ["sc.status = 'active'"];
+    $params = [];
+    if ($group === 'PS') {
+        $where[] = "sc.legal_entity LIKE '%Пицца Стар%'";
+    } else {
+        $where[] = "(sc.legal_entity LIKE '%Бургер БК%' OR sc.legal_entity LIKE '%Воглия Матта%')";
+    }
+    $sql = "SELECT sc.id, sc.name, sc.created_at,
+                (SELECT COUNT(DISTINCT scd.product_id) FROM stock_collection_data scd
+                 JOIN stock_collection_products scp ON scp.id = scd.product_id AND scp.collection_id = sc.id
+                 WHERE scd.restaurant_number = ?) as submitted_count,
+                (SELECT COUNT(*) FROM stock_collection_products scp2 WHERE scp2.collection_id = sc.id) as total_products
+            FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY sc.id DESC LIMIT 1";
+    $s = $pdo->prepare($sql);
+    $s->execute([$rest['restaurant_number']]);
+    $collection = $s->fetch();
+    if (!$collection) {
+        roRespond(['active' => false]);
+    }
+    // Получаем токен для прямого доступа
+    $t = $pdo->prepare("SELECT token FROM stock_collection_tokens WHERE collection_id = ? AND expires_at > NOW() ORDER BY id DESC LIMIT 1");
+    $t->execute([$collection['id']]);
+    $tok = $t->fetch();
+    roRespond([
+        'active' => true,
+        'collection' => [
+            'id' => (int)$collection['id'],
+            'name' => $collection['name'],
+            'submitted' => (int)$collection['submitted_count'] > 0,
+            'submitted_count' => (int)$collection['submitted_count'],
+            'total_products' => (int)$collection['total_products'],
+            'token' => $tok['token'] ?? null,
+        ],
+    ]);
+}
+
+// --- Привязка Telegram: генерация токена ---
+if ($roAction === 'telegram-link' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    // Проверяем, привязан ли уже Telegram
+    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ?");
+    $s->execute([$rest['restaurant_number']]);
+    $user = $s->fetch();
+    if ($user && $user['telegram_chat_id']) {
+        roRespond(['already_linked' => true, 'chat_id' => $user['telegram_chat_id']]);
+    }
+    // Генерируем токен привязки (6-значный код)
+    $code = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+    // Сохраняем в ro_tg_tokens (переиспользуем таблицу)
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, expires_at, used) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
+        ->execute([$code, 0]); // chat_id=0, т.к. пока не знаем; token = код
+    // Запоминаем restaurant_number для этого кода
+    $pdo->prepare("UPDATE ro_tg_tokens SET telegram_chat_id = ? WHERE token = ? AND used = 0")
+        ->execute([-$rest['restaurant_number'], $code]); // используем отрицательное число как маркер «это код привязки»
+    roRespond(['success' => true, 'code' => $code, 'expires_in' => 600]);
+}
+
+// --- Отвязка Telegram ---
+if ($roAction === 'telegram-unlink' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $pdo->prepare("UPDATE ro_users SET telegram_chat_id = NULL WHERE restaurant_number = ?")
+        ->execute([$rest['restaurant_number']]);
+    roRespond(['success' => true]);
+}
+
+// --- Статус привязки Telegram ---
+if ($roAction === 'telegram-status' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ?");
+    $s->execute([$rest['restaurant_number']]);
+    $user = $s->fetch();
+    roRespond(['linked' => !empty($user['telegram_chat_id']), 'chat_id' => $user['telegram_chat_id'] ?? null]);
 }
 
 // --- Инфо: текущая сессия, расписание, дедлайны ---
@@ -455,6 +573,82 @@ if ($roAction === 'my-orders' && $method === 'GET') {
     ");
     $s->execute([$rest['restaurant_number']]);
     roRespond(['orders' => $s->fetchAll()]);
+}
+
+// --- Объединённая история (все источники) ---
+if ($roAction === 'all-history' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $rn = $rest['restaurant_number'];
+    $limit = min((int)($_GET['limit'] ?? 30), 100);
+    $allOrders = [];
+
+    // 1. Основная поставка (ro_orders)
+    $s1 = $pdo->prepare("
+        SELECT o.id, o.delivery_date, o.status, o.submitted_at,
+               (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
+               (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
+        FROM ro_orders o WHERE o.restaurant_number = ?
+        ORDER BY o.delivery_date DESC LIMIT {$limit}
+    ");
+    $s1->execute([$rn]);
+    foreach ($s1->fetchAll() as $r) {
+        $r['source'] = 'delivery';
+        $r['source_name'] = 'Основная поставка';
+        $allOrders[] = $r;
+    }
+
+    // 2. Заявки поставщикам (so_orders)
+    $s2 = $pdo->prepare("
+        SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.supplier_id,
+               s.short_name as supplier_name,
+               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id) as item_count,
+               (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
+        FROM so_orders o
+        LEFT JOIN suppliers s ON s.id = o.supplier_id
+        WHERE o.restaurant_number = ?
+        ORDER BY o.delivery_date DESC LIMIT {$limit}
+    ");
+    $s2->execute([$rn]);
+    foreach ($s2->fetchAll() as $r) {
+        $r['source'] = 'supplier';
+        $r['source_name'] = $r['supplier_name'] ?: 'Поставщик';
+        unset($r['supplier_name']);
+        $allOrders[] = $r;
+    }
+
+    // 3. Планета Ресторанов / овощи (veg_orders)
+    $s3 = $pdo->prepare("
+        SELECT vs.id as session_id, vs.name as session_name, vo.delivery_date,
+               vo.submitted_at,
+               COUNT(*) as item_count,
+               SUM(vo.quantity) as total_qty
+        FROM veg_orders vo
+        JOIN veg_sessions vs ON vs.id = vo.session_id
+        WHERE vo.restaurant_number = ? AND vo.quantity > 0
+        GROUP BY vo.session_id, vo.delivery_date
+        ORDER BY vo.delivery_date DESC LIMIT {$limit}
+    ");
+    $s3->execute([$rn]);
+    foreach ($s3->fetchAll() as $r) {
+        $allOrders[] = [
+            'id' => 'veg_' . $r['session_id'] . '_' . $r['delivery_date'],
+            'delivery_date' => $r['delivery_date'],
+            'status' => 'submitted',
+            'submitted_at' => $r['submitted_at'],
+            'item_count' => $r['item_count'],
+            'total_qty' => $r['total_qty'],
+            'source' => 'planeta',
+            'source_name' => 'Планета Ресторанов',
+        ];
+    }
+
+    // Сортировка по дате доставки
+    usort($allOrders, function($a, $b) {
+        return strcmp($b['delivery_date'], $a['delivery_date']);
+    });
+    $allOrders = array_slice($allOrders, 0, $limit);
+    roRespond(['orders' => $allOrders]);
 }
 
 // --- Отправка заказа ---
@@ -863,6 +1057,70 @@ if (strpos($roAction, 'admin') === 0) {
         roRespond(['error' => 'Unknown action'], 400);
     }
 
+    // --- Универсальный отчёт ---
+    if ($adminAction === 'report' && $method === 'GET') {
+        $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
+        $dateTo = $_GET['date_to'] ?? date('Y-m-d', strtotime('+7 days'));
+        $category = $_GET['category'] ?? '';
+        $status = $_GET['status'] ?? '';
+        $restaurants = $_GET['restaurants'] ?? ''; // comma-separated
+
+        $where = ["o.delivery_date BETWEEN ? AND ?", "o.status != 'draft'"];
+        $params = [$dateFrom, $dateTo];
+
+        if ($status) {
+            $where[] = "o.status = ?";
+            $params[] = $status;
+        }
+        if ($restaurants) {
+            $restNums = array_map('intval', explode(',', $restaurants));
+            $ph = implode(',', array_fill(0, count($restNums), '?'));
+            $where[] = "o.restaurant_number IN ({$ph})";
+            $params = array_merge($params, $restNums);
+        }
+
+        $sql = "SELECT o.id, o.restaurant_number, o.delivery_date, o.status, o.session_id,
+                       r.city, r.address
+                FROM ro_orders o
+                LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
+                WHERE " . implode(' AND ', $where) . "
+                ORDER BY o.delivery_date, o.restaurant_number";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        $orders = $s->fetchAll();
+
+        $orderIds = array_column($orders, 'id');
+        $items = [];
+        if (!empty($orderIds)) {
+            $ph = implode(',', array_fill(0, count($orderIds), '?'));
+            $catWhere = '';
+            $catParams = $orderIds;
+            if ($category) {
+                $catWhere = " AND oi.category = ?";
+                $catParams[] = $category;
+            }
+            $st = $pdo->prepare("SELECT oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment
+                FROM ro_order_items oi WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
+            $st->execute($catParams);
+            $items = $st->fetchAll();
+        }
+
+        // Список ресторанов для фильтра
+        $restList = $pdo->query("SELECT DISTINCT o.restaurant_number FROM ro_orders o WHERE o.status != 'draft' ORDER BY o.restaurant_number")->fetchAll(PDO::FETCH_COLUMN);
+
+        // Список сессий
+        $sessions = $pdo->query("SELECT id, week_start, week_end, status FROM ro_sessions ORDER BY id DESC LIMIT 20")->fetchAll();
+
+        roRespond([
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+            'orders' => $orders,
+            'items' => $items,
+            'restaurant_list' => $restList,
+            'sessions' => $sessions,
+        ]);
+    }
+
     // --- Excel-экспорт ---
     if ($adminAction === 'export' && $method === 'GET') {
         $format = $adminParam ?? 'summary'; // summary, per-restaurant, all
@@ -890,7 +1148,11 @@ if (strpos($roAction, 'admin') === 0) {
         $allItems = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
-            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number FROM ro_order_items oi JOIN ro_orders o ON o.id = oi.order_id WHERE oi.order_id IN ({$ph}) ORDER BY oi.category, oi.product_name");
+            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet
+                FROM ro_order_items oi
+                JOIN ro_orders o ON o.id = oi.order_id
+                LEFT JOIN products p ON p.sku = oi.sku
+                WHERE oi.order_id IN ({$ph}) ORDER BY oi.category, oi.product_name");
             $items->execute($orderIds);
             $allItems = $items->fetchAll();
         }

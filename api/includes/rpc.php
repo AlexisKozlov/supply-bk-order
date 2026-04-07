@@ -259,21 +259,52 @@ if ($endpoint === 'rpc') {
     }
 
     // ═══ VEG ORDER: публичные RPC (заказ овощей — форма ресторанов) ═══
-    if ($fn === 'veg_validate_token') {
+
+    // Хелпер: dual-auth — работает через veg_token ИЛИ через ro_token (кабинет ресторанов)
+    function vegResolveAuth($pdo, $body) {
+        // Путь 1: токен-ссылка (старый способ)
         $tokenVal = $body['token_value'] ?? '';
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
-        $s = $pdo->prepare("SELECT t.id as token_id, t.session_id, t.expires_at, s.name as session_name, s.status
-            FROM veg_tokens t JOIN veg_sessions s ON s.id = t.session_id WHERE t.token = ?");
-        $s->execute([$tokenVal]);
-        $row = $s->fetch();
-        if (!$row) respond(['error' => 'not_found', 'expired' => true]);
-        if (strtotime($row['expires_at']) < time()) respond(['error' => 'expired', 'expired' => true]);
-        if ($row['status'] === 'closed') respond(['error' => 'closed', 'expired' => true]);
+        if ($tokenVal && preg_match('/^[a-f0-9]{64}$/', $tokenVal)) {
+            $s = $pdo->prepare("SELECT t.session_id, t.expires_at, s.name as session_name, s.status, s.date_from, s.date_to
+                FROM veg_tokens t JOIN veg_sessions s ON s.id = t.session_id WHERE t.token = ?");
+            $s->execute([$tokenVal]);
+            $row = $s->fetch();
+            if (!$row) return ['error' => 'not_found', 'expired' => true];
+            if (strtotime($row['expires_at']) < time()) return ['error' => 'expired', 'expired' => true];
+            if ($row['status'] === 'closed') return ['error' => 'closed', 'expired' => true];
+            return ['session_id' => $row['session_id'], 'session_name' => $row['session_name'],
+                    'date_from' => $row['date_from'], 'date_to' => $row['date_to'], 'auth' => 'token'];
+        }
+        // Путь 2: ro_token (кабинет ресторана)
+        $roToken = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+        if ($roToken) {
+            $s = $pdo->prepare("SELECT ru.restaurant_number, ru.session_active_until
+                FROM ro_users ru WHERE ru.session_token = ? AND ru.is_active = 1");
+            $s->execute([$roToken]);
+            $user = $s->fetch();
+            if (!$user) return ['error' => 'invalid_token'];
+            if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return ['error' => 'expired'];
+            // Находим активную veg-сессию
+            $vs = $pdo->query("SELECT id, name, status, date_from, date_to FROM veg_sessions WHERE status = 'active' ORDER BY id DESC LIMIT 1");
+            $sess = $vs->fetch();
+            if (!$sess) return ['error' => 'no_active_session'];
+            return ['session_id' => $sess['id'], 'session_name' => $sess['name'],
+                    'date_from' => $sess['date_from'], 'date_to' => $sess['date_to'],
+                    'restaurant_number' => $user['restaurant_number'], 'auth' => 'ro_token'];
+        }
+        return ['error' => 'no_auth'];
+    }
+
+    if ($fn === 'veg_validate_token') {
+        $auth = vegResolveAuth($pdo, $body);
+        if (isset($auth['error'])) respond($auth);
         // Товары сессии
         $s2 = $pdo->prepare("SELECT id, product_name, unit, multiplicity, sort_order FROM veg_session_products WHERE session_id = ? ORDER BY sort_order");
-        $s2->execute([$row['session_id']]);
+        $s2->execute([$auth['session_id']]);
         $products = $s2->fetchAll();
-        respond(['session_id' => $row['session_id'], 'session_name' => $row['session_name'], 'products' => $products]);
+        $result = ['session_id' => $auth['session_id'], 'session_name' => $auth['session_name'], 'products' => $products];
+        if (isset($auth['restaurant_number'])) $result['restaurant_number'] = $auth['restaurant_number'];
+        respond($result);
     }
     if ($fn === 'veg_get_restaurants') {
         // Все активные рестораны (без фильтра по юрлицу — овощи для всех)
@@ -299,6 +330,13 @@ if ($endpoint === 'rpc') {
     if ($fn === 'veg_get_schedule') {
         $restNum = $body['restaurant_number'] ?? '';
         $tokenVal = $body['token_value'] ?? '';
+
+        // Dual-auth: определяем сессию и ресторан
+        $auth = vegResolveAuth($pdo, $body);
+        if (isset($auth['error'])) respond($auth);
+        // При ro_token ресторан берём из авторизации
+        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
+
         if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
         $s = $pdo->prepare("SELECT day_of_week FROM veg_delivery_days WHERE restaurant_number = ? ORDER BY day_of_week");
         $s->execute([$restNum]);
@@ -311,32 +349,21 @@ if ($endpoint === 'rpc') {
         $tz = new DateTimeZone('Europe/Minsk');
         $now = new DateTime('now', $tz);
 
-        // Определяем диапазон дат из сессии (через токен)
-        $dateFrom = null;
-        $dateTo = null;
-        if ($tokenVal && preg_match('/^[a-f0-9]{64}$/', $tokenVal)) {
-            $tq = $pdo->prepare("SELECT s.date_from, s.date_to FROM veg_tokens t JOIN veg_sessions s ON s.id = t.session_id WHERE t.token = ? AND t.expires_at > NOW()");
-            $tq->execute([$tokenVal]);
-            $tr = $tq->fetch();
-            if ($tr) { $dateFrom = $tr['date_from']; $dateTo = $tr['date_to']; }
-        }
+        // Диапазон дат из сессии (через auth)
+        $dateFrom = $auth['date_from'] ?? null;
+        $dateTo = $auth['date_to'] ?? null;
 
         // Проверяем per-session конфиг дней (veg_session_day_config)
-        $sessionId = null;
+        $sessionId = $auth['session_id'];
         $dayConfig = []; // date → [restNums]
         $hasConfig = false;
-        if ($tokenVal && preg_match('/^[a-f0-9]{64}$/', $tokenVal)) {
-            $sq = $pdo->prepare("SELECT t.session_id FROM veg_tokens t WHERE t.token = ?");
-            $sq->execute([$tokenVal]);
-            $sessionId = $sq->fetchColumn();
-            if ($sessionId) {
-                $cfgSt = $pdo->prepare("SELECT delivery_date, restaurant_number FROM veg_session_day_config WHERE session_id = ?");
-                $cfgSt->execute([$sessionId]);
-                foreach ($cfgSt->fetchAll() as $c) {
-                    $dayConfig[$c['delivery_date']][] = $c['restaurant_number'];
-                }
-                $hasConfig = !empty($dayConfig);
+        if ($sessionId) {
+            $cfgSt = $pdo->prepare("SELECT delivery_date, restaurant_number FROM veg_session_day_config WHERE session_id = ?");
+            $cfgSt->execute([$sessionId]);
+            foreach ($cfgSt->fetchAll() as $c) {
+                $dayConfig[$c['delivery_date']][] = $c['restaurant_number'];
             }
+            $hasConfig = !empty($dayConfig);
         }
 
         // Функция расчёта дедлайна
@@ -391,14 +418,12 @@ if ($endpoint === 'rpc') {
         respond(['days' => array_map('intval', $days), 'deliveries' => $deliveries]);
     }
     if ($fn === 'veg_get_previous_orders') {
-        $tokenVal = $body['token_value'] ?? '';
         $restNum = $body['restaurant_number'] ?? '';
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $auth = vegResolveAuth($pdo, $body);
+        if (isset($auth['error'])) respond($auth);
+        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
         if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        $s = $pdo->prepare("SELECT session_id FROM veg_tokens WHERE token = ? AND expires_at > NOW()");
-        $s->execute([$tokenVal]);
-        $tok = $s->fetch();
-        if (!$tok) respond(['error' => 'expired']);
+        $tok = ['session_id' => $auth['session_id']];
         // Найти предыдущую сессию с заказами этого ресторана (проверяем до 5 сессий назад)
         $prev = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 5");
         $prev->execute([$tok['session_id']]);
@@ -418,31 +443,25 @@ if ($endpoint === 'rpc') {
         respond(['orders' => $orders]);
     }
     if ($fn === 'veg_get_existing_orders') {
-        $tokenVal = $body['token_value'] ?? '';
         $restNum = $body['restaurant_number'] ?? '';
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $auth = vegResolveAuth($pdo, $body);
+        if (isset($auth['error'])) respond($auth);
+        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
         if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        $s = $pdo->prepare("SELECT session_id FROM veg_tokens WHERE token = ? AND expires_at > NOW()");
-        $s->execute([$tokenVal]);
-        $tok = $s->fetch();
-        if (!$tok) respond(['error' => 'expired']);
+        $tok = ['session_id' => $auth['session_id']];
         $st = $pdo->prepare("SELECT product_id, delivery_date, quantity, admin_qty FROM veg_orders WHERE session_id = ? AND restaurant_number = ?");
         $st->execute([$tok['session_id'], $restNum]);
         respond(['orders' => $st->fetchAll()]);
     }
     if ($fn === 'veg_submit_order') {
-        $tokenVal = $body['token_value'] ?? '';
         $restNum = $body['restaurant_number'] ?? '';
         $items = $body['items'] ?? []; // [{product_id, delivery_date, quantity}]
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
+        $auth = vegResolveAuth($pdo, $body);
+        if (isset($auth['error'])) respond($auth);
+        if (isset($auth['restaurant_number']) && !$restNum) $restNum = $auth['restaurant_number'];
         if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
         if (!checkRateLimit($pdo, $clientIp, 60, 5)) respond(['error' => 'too_many_attempts'], 429);
-        // Проверяем токен
-        $s = $pdo->prepare("SELECT session_id FROM veg_tokens WHERE token = ? AND expires_at > NOW()");
-        $s->execute([$tokenVal]);
-        $tok = $s->fetch();
-        if (!$tok) respond(['error' => 'expired']);
-        $sessId = $tok['session_id'];
+        $sessId = $auth['session_id'];
         // Проверяем что сессия активна
         $sc = $pdo->prepare("SELECT status FROM veg_sessions WHERE id = ?");
         $sc->execute([$sessId]);

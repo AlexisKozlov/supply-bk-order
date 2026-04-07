@@ -35,6 +35,9 @@ function buildHeaders() {
   const h = { 'Content-Type': 'application/json' };
   const t = getSessionToken();
   if (t) h['X-Session-Token'] = t;
+  // ro_token для кабинета ресторанов (veg-заказы через ro_token)
+  const roToken = localStorage.getItem('ro_token');
+  if (roToken) h['X-RO-Token'] = roToken;
   return h;
 }
 

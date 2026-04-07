@@ -1823,6 +1823,39 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
+    // ═══ Личный кабинет ресторана ═══
+    if ($data === 'rest_cabinet') {
+        answerCallback($cb['id']);
+        // Находим ресторан пользователя
+        $sub = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+        $sub->execute([$chatId]);
+        $restSub = $sub->fetch();
+        if (!$restSub) {
+            sendMessage($chatId, "Вы не подписаны ни на один ресторан.");
+            exit;
+        }
+        $restNum = $restSub['restaurant_number'];
+        // Проверяем ro_users
+        $ru = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
+        $ru->execute([$restNum]);
+        if (!$ru->fetch()) {
+            sendMessage($chatId, "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок.");
+            exit;
+        }
+        // Генерируем одноразовый токен
+        $token = bin2hex(random_bytes(32));
+        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, expires_at, used) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
+            ->execute([$token, $chatId]);
+        $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
+        $url = "{$siteUrl}/restaurant?tg_token={$token}";
+        $btns = [
+            [['text' => '🏠 Открыть кабинет', 'url' => $url]],
+            [['text' => '« Назад', 'callback_data' => 'start_role_restaurant']],
+        ];
+        editMessage($chatId, $msgId, "🏠 <b>Личный кабинет</b>\n\nНажмите кнопку, чтобы открыть кабинет ресторана {$restNum}.\n\n<i>Ссылка действует 5 минут.</i>", ['inline_keyboard' => $btns]);
+        exit;
+    }
+
     // ═══ Подменю ресторана ═══
     if ($data === 'rest_menu_main') {
         answerCallback($cb['id']);
@@ -1834,9 +1867,35 @@ if (isset($input['callback_query'])) {
         restMenuVeg($chatId, $msgId);
         exit;
     }
+    if ($data === 'rest_menu_supplier') {
+        answerCallback($cb['id']);
+        restMenuSupplier($chatId, $msgId);
+        exit;
+    }
     if ($data === 'rest_ro_orders') {
         answerCallback($cb['id']);
         restRoOrders($chatId, $msgId);
+        exit;
+    }
+    // ═══ Камако / поставщики ═══
+    if (preg_match('/^soord_sup_(.+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soOrderSelectRest($chatId, $msgId, $m[1]);
+        exit;
+    }
+    if (preg_match('/^soord_rest_(.+?)_(\d+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soOrderSelectDay($chatId, $msgId, $m[1], $m[2]);
+        exit;
+    }
+    if (preg_match('/^soord_day_(.+?)_(\d+)_back$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soOrderSelectDay($chatId, $msgId, $m[1], $m[2]);
+        exit;
+    }
+    if (preg_match('/^soord_day_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soOrderShowProducts($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
     if ($data === 'rest_schedule') {
@@ -2289,6 +2348,25 @@ if (!isset($msg['text']) && (isset($msg['photo']) || isset($msg['document']) || 
 
 $text = trim($msg['text'] ?? '');
 
+// 6-значный код — привязка аккаунта ресторана к Telegram
+if (preg_match('/^\d{6}$/', $text)) {
+    $code = $text;
+    $s = $pdo->prepare("SELECT id, telegram_chat_id FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    $s->execute([$code]);
+    $tok = $s->fetch();
+    if ($tok && $tok['telegram_chat_id'] < 0) {
+        $restNum = abs($tok['telegram_chat_id']);
+        // Привязываем
+        $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND is_active = 1")
+            ->execute([$chatId, $restNum]);
+        $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ?")->execute([$tok['id']]);
+        sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан №{$restNum} успешно привязан к вашему Telegram.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
+    } else {
+        sendMessage($chatId, "❌ Код недействителен или истёк.\n\nПолучите новый код в личном кабинете (Профиль → Telegram → Получить код).");
+    }
+    exit;
+}
+
 // /veg — подписка на уведомления о заявках (доступна всем, без привязки аккаунта)
 if ($text === '/veg') {
     @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
@@ -2498,6 +2576,26 @@ if (file_exists($vegOrderFile)) {
                 $userMsgId = $msg['message_id'] ?? null;
                 if ($userMsgId) @deleteMessage($chatId, $userMsgId);
                 vegOrderProcessInput($chatId, $text, $vegMode);
+                exit;
+            }
+        }
+    }
+}
+
+// Режим ввода заявки поставщику (Камако и др.)
+$soOrderFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
+if (file_exists($soOrderFile)) {
+    if (time() - filemtime($soOrderFile) > 1800) {
+        @unlink($soOrderFile);
+    } else {
+        $soMode = trim(@file_get_contents($soOrderFile));
+        if ($soMode && str_starts_with($soMode, 'soord_')) {
+            if (str_starts_with($text, '/')) {
+                @unlink($soOrderFile);
+            } else {
+                $userMsgId = $msg['message_id'] ?? null;
+                if ($userMsgId) @deleteMessage($chatId, $userMsgId);
+                soOrderProcessInput($chatId, $text);
                 exit;
             }
         }

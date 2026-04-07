@@ -1,7 +1,7 @@
 <template>
   <div class="veg">
     <div v-if="!embedded" class="veg-top">
-      <h1 class="veg-title">Заказ овощей</h1>
+      <h1 class="veg-title">Планета Ресторанов</h1>
       <button class="veg-btn fill" @click="initCreateDates(); showCreate = true">+ Новая сессия</button>
     </div>
     <div v-else class="veg-top">
@@ -239,7 +239,7 @@
         </div>
 
         <h3 class="veg-section-title" style="margin-top: 20px;">Дни доставки по ресторанам</h3>
-        <p class="veg-schedule-hint">Отметьте дни недели, когда ресторан получает овощи.</p>
+        <p class="veg-schedule-hint">Отметьте дни недели, когда ресторан получает поставку.</p>
         <div v-if="scheduleLoading" class="veg-empty">Загрузка...</div>
         <template v-else>
           <div class="veg-schedule-filter">
@@ -800,7 +800,7 @@ function copyText(txt) {
 const copiedMissing = ref(false);
 function copyMissingRestaurants() {
   const nums = missingRestaurants.value.map(r => r.number).join(', ');
-  const text = `Нет заявок на овощи планеты ресторанов: ${nums}`;
+  const text = `Нет заявок Планета Ресторанов: ${nums}`;
   navigator.clipboard.writeText(text);
   copiedMissing.value = true;
   toastStore.show('Список скопирован');
@@ -1377,7 +1377,7 @@ async function exportExcel() {
   ws['!rows'] = [{ hpx: 28 }, { hpx: 36 }];
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Овощи');
+  XLSX.utils.book_append_sheet(wb, ws, 'Планета Ресторанов');
   const datesList = dates.map(d => fmtShortDate(d)).join(', ');
   XLSX.writeFile(wb, `Бургер БК Заявки на ${datesList}.xlsx`);
 }

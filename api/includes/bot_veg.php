@@ -91,6 +91,7 @@ function vegShowMySubs($chatId, $msgId = null) {
     @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/sc_data_{$chatId}.json");
     @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
+    @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt");
 
     $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
         FROM veg_telegram_subs vs
@@ -128,17 +129,22 @@ function vegShowMySubs($chatId, $msgId = null) {
         $text .= "\n";
 
         // ── Разделы ──
-        $text .= "📦 <b>Поставки</b> — график, корректировки, остатки\n";
-        $text .= "🛒 <b>Заказы</b> — подать заявку через сайт\n";
-        $text .= "🥬 <b>Овощи</b> — заявки, мои заявки\n";
+        $text .= "🏠 <b>Кабинет</b> — заказы, заявки, профиль\n";
+        $text .= "📦 <b>Поставки</b> — график, корректировки\n";
+        $text .= "🥬 <b>Планета Ресторанов</b> — заявки\n";
+        $text .= "🧴 <b>Камако</b> — заявки на майонез\n";
         if ($activeSc) $text .= "📋 <b>Сбор остатков</b> — {$activeSc['name']}\n";
 
+        $btns[] = [
+            ['text' => '🏠 Личный кабинет', 'callback_data' => 'rest_cabinet'],
+        ];
         $btns[] = [
             ['text' => '📦 Поставки', 'callback_data' => 'rest_menu_main'],
             ['text' => '🛒 Заказы', 'callback_data' => 'rest_ro_orders'],
         ];
         $btns[] = [
-            ['text' => '🥬 Овощи', 'callback_data' => 'rest_menu_veg'],
+            ['text' => '🥬 Планета Ресторанов', 'callback_data' => 'rest_menu_veg'],
+            ['text' => '🧴 Камако', 'callback_data' => 'rest_menu_supplier'],
         ];
         if ($activeSc) {
             $btns[] = [['text' => "📋 Сбор остатков", 'callback_data' => 'rest_sc_start']];
@@ -199,9 +205,9 @@ function restMenuMain($chatId, $msgId) {
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
-// Подменю: Овощи
+// Подменю: Планета Ресторанов
 function restMenuVeg($chatId, $msgId) {
-    $text = "🥬 <b>Овощи</b>\n";
+    $text = "🥬 <b>Планета Ресторанов</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
     $text .= "📝 <b>Заявка</b> — подать через бот или сайт\n";
     $text .= "📋 <b>Мои заявки</b> — статус отправленных";
@@ -218,6 +224,260 @@ function restMenuVeg($chatId, $msgId) {
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Подменю: Камако / поставщики
+function restMenuSupplier($chatId, $msgId) {
+    global $pdo;
+    // Находим рестораны пользователя
+    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? ORDER BY CAST(restaurant_number AS UNSIGNED)");
+    $s->execute([$chatId]);
+    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+    if (!$restNums) {
+        editMessage($chatId, $msgId, "Сначала подпишитесь на ресторан.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
+    // Находим поставщиков с расписанием для этих ресторанов
+    $rIds = $pdo->prepare("SELECT id, number FROM restaurants WHERE number IN (" . implode(',', array_map('intval', $restNums)) . ") AND active = 1");
+    $rIds->execute();
+    $restMap = [];
+    foreach ($rIds->fetchAll() as $r) $restMap[$r['id']] = $r['number'];
+    if (empty($restMap)) {
+        editMessage($chatId, $msgId, "Рестораны не найдены.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
+    $rIdList = implode(',', array_keys($restMap));
+    $sups = $pdo->query("SELECT DISTINCT s.id, s.short_name FROM so_supplier_schedules ss JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 WHERE ss.restaurant_id IN ({$rIdList}) AND ss.is_active = 1 ORDER BY s.short_name")->fetchAll();
+
+    $text = "📦 <b>Заявки поставщикам</b>\n";
+    $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    if (!$sups) {
+        $text .= "Нет доступных поставщиков.";
+        editMessage($chatId, $msgId, $text, ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
+    // Если поставщик один — сразу к нему
+    if (count($sups) === 1) {
+        soOrderSelectRest($chatId, $msgId, $sups[0]['id']);
+        return;
+    }
+    $text .= "Выберите поставщика:\n";
+    $btns = [];
+    foreach ($sups as $sup) {
+        $btns[] = [['text' => $sup['short_name'], 'callback_data' => 'soord_sup_' . substr($sup['id'], 0, 36)]];
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Камако: выбор ресторана
+function soOrderSelectRest($chatId, $msgId, $supplierId) {
+    global $pdo;
+    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? ORDER BY CAST(restaurant_number AS UNSIGNED)");
+    $s->execute([$chatId]);
+    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+
+    if (count($restNums) === 1) {
+        soOrderSelectDay($chatId, $msgId, $supplierId, $restNums[0]);
+        return;
+    }
+    $text = "📦 <b>{$supName}</b>\n\nВыберите ресторан:";
+    $btns = [];
+    foreach ($restNums as $rn) {
+        $btns[] = [['text' => "Ресторан {$rn}", 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Камако: выбор дня
+function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
+    global $pdo;
+    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+
+    // Активная сессия
+    $sess = $pdo->prepare("SELECT * FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1");
+    $sess->execute([$supplierId]);
+    $session = $sess->fetch();
+    if (!$session) {
+        editMessage($chatId, $msgId, "📦 <b>{$supName}</b>\n\nСейчас приём заявок закрыт.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+        return;
+    }
+
+    // Расписание
+    $restId = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND active = 1 LIMIT 1"); $restId->execute([$restNum]); $restId = $restId->fetchColumn();
+    $sch = $pdo->prepare("SELECT order_day, delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1 ORDER BY order_day");
+    $sch->execute([$supplierId, $restId]);
+    $schedules = $sch->fetchAll();
+
+    $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
+    $tz = new DateTimeZone('Europe/Minsk');
+    $weekStart = new DateTime($session['week_start'], $tz);
+
+    $btns = [];
+    $text = "📦 <b>{$supName}</b> — Ресторан {$restNum}\n\nВыберите день доставки:\n";
+
+    foreach ($schedules as $sc) {
+        $deliveryDow = (int)$sc['delivery_day'];
+        $deliveryDateObj = clone $weekStart;
+        $currentDow = (int)$deliveryDateObj->format('N');
+        $diff = $deliveryDow - $currentDow;
+        if ($diff < 0) $diff += 7;
+        $deliveryDateObj->modify("+{$diff} days");
+        if ((int)$sc['delivery_day'] <= (int)$sc['order_day']) $deliveryDateObj->modify('+7 days');
+
+        $deliveryDate = $deliveryDateObj->format('Y-m-d');
+        $dayLabel = $dayNamesFull[$deliveryDow] . ', ' . $deliveryDateObj->format('d.m');
+
+        // Проверяем есть ли заказ
+        $existing = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+        $existing->execute([$session['id'], $restNum, $deliveryDate]);
+        $mark = $existing->fetch() ? ' ✅' : '';
+
+        $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Камако: показ товаров для ввода
+function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
+    global $pdo;
+    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+
+    // Загружаем товары из шаблона
+    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND is_active = 1 ORDER BY sort_order, product_name");
+    $tpl->execute([$supplierId]);
+    $products = $tpl->fetchAll();
+
+    if (!$products) {
+        editMessage($chatId, $msgId, "📦 <b>{$supName}</b>\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+        return;
+    }
+
+    // Существующий заказ
+    $sess = $pdo->prepare("SELECT id FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() LIMIT 1"); $sess->execute([$supplierId]); $session = $sess->fetch();
+    $existingQty = [];
+    if ($session) {
+        $eo = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+        $eo->execute([$session['id'], $restNum, $deliveryDate]);
+        $order = $eo->fetch();
+        if ($order) {
+            $ei = $pdo->prepare("SELECT sku, quantity FROM so_order_items WHERE order_id = ?"); $ei->execute([$order['id']]);
+            foreach ($ei->fetchAll() as $item) $existingQty[$item['sku']] = $item['quantity'];
+        }
+    }
+
+    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+    $d = new DateTime($deliveryDate);
+    $dow = (int)$d->format('N');
+    $dateLabel = $dayNames[$dow] . ', ' . $d->format('d.m');
+
+    $text = "📦 <b>{$supName}</b>\n";
+    $text .= "Ресторан: <b>{$restNum}</b>\n";
+    $text .= "Доставка: <b>{$dateLabel}</b>\n\n";
+    $text .= "Скопируйте, измените количества и отправьте:\n\n<code>";
+
+    foreach ($products as $p) {
+        $qty = $existingQty[$p['sku']] ?? 0;
+        $hint = '';
+        if ($p['multiplicity'] && $p['multiplicity'] > 1) $hint = " (кр.{$p['multiplicity']})";
+        if ($p['min_qty'] && $p['min_qty'] > 0) $hint .= " (мин.{$p['min_qty']})";
+        $text .= "{$p['product_name']}{$hint}: {$qty}\n";
+    }
+    $text .= "</code>";
+
+    // Сохраняем режим ввода
+    $modeData = "soord_{$supplierId}_{$restNum}_{$deliveryDate}_{$session['id']}";
+    file_put_contents(sys_get_temp_dir() . "/soord_{$chatId}.txt", $modeData);
+
+    $btns = [
+        [['text' => '◂ Назад', 'callback_data' => "soord_day_{$supplierId}_{$restNum}_back"]],
+    ];
+    if ($msgId) editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+    else sendMessage($chatId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Камако: обработка текстового ввода
+function soOrderProcessInput($chatId, $text) {
+    global $pdo;
+    $modeFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
+    $mode = trim(file_get_contents($modeFile));
+    @unlink($modeFile);
+
+    // Парсим режим: soord_{supplierId}_{restNum}_{date}_{sessionId}
+    $parts = explode('_', $mode);
+    if (count($parts) < 5) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
+    $supplierId = $parts[1]; $restNum = $parts[2]; $deliveryDate = $parts[3]; $sessionId = $parts[4];
+    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+
+    // Загружаем шаблон
+    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND is_active = 1");
+    $tpl->execute([$supplierId]);
+    $products = $tpl->fetchAll();
+    $prodMap = [];
+    foreach ($products as $p) $prodMap[mb_strtolower(trim($p['product_name']))] = $p;
+
+    // Парсим ввод
+    $items = [];
+    $lines = preg_split("/[\r\n]+/", trim($text));
+    $matched = 0;
+    foreach ($lines as $line) {
+        if (!preg_match('/^(.+?):\s*([\d.,]+)\s*$/u', trim($line), $m)) continue;
+        $name = mb_strtolower(trim($m[1]));
+        // Убираем хинты в скобках
+        $name = preg_replace('/\s*\(.*?\)\s*$/', '', $name);
+        $qty = floatval(str_replace(',', '.', $m[2]));
+        if ($qty <= 0) continue;
+        // Поиск товара
+        $found = null;
+        if (isset($prodMap[$name])) { $found = $prodMap[$name]; }
+        else { foreach ($prodMap as $pName => $p) { if (mb_strpos($pName, $name) !== false || mb_strpos($name, $pName) !== false) { $found = $p; break; } } }
+        if (!$found) continue;
+        // Округление по кратности
+        $mult = floatval($found['multiplicity']);
+        if ($mult > 0 && fmod($qty, $mult) > 0.001) { $qty = ceil($qty / $mult) * $mult; }
+        $items[] = ['product_id' => $found['product_id'] ?? '', 'sku' => $found['sku'], 'product_name' => $found['product_name'], 'quantity' => $qty];
+        $matched++;
+    }
+
+    if (!$items) { sendMessage($chatId, "❌ Не удалось распознать ни одной позиции. Скопируйте шаблон и измените числа."); return; }
+
+    // Сохраняем заказ
+    try {
+        $pdo->beginTransaction();
+        // Удаляем старый если есть
+        $old = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+        $old->execute([$sessionId, $restNum, $deliveryDate]);
+        $oldOrder = $old->fetch();
+        if ($oldOrder) {
+            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$oldOrder['id']]);
+            $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$oldOrder['id']]);
+        }
+        // Вставляем новый
+        $le = 'ООО "Бургер БК"';
+        $pdo->prepare("INSERT INTO so_orders (session_id, supplier_id, restaurant_number, delivery_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
+            ->execute([$sessionId, $supplierId, $restNum, $deliveryDate, $le]);
+        $orderId = $pdo->lastInsertId();
+        $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+        foreach ($items as $it) { $ins->execute([$orderId, $it['product_id'], $it['sku'], $it['product_name'], $it['quantity']]); }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        sendMessage($chatId, "❌ Ошибка сохранения: " . $e->getMessage());
+        return;
+    }
+
+    $totalQty = array_sum(array_column($items, 'quantity'));
+    $confirmText = "✅ <b>Заявка {$supName} отправлена!</b>\n\n";
+    $confirmText .= "Ресторан: <b>{$restNum}</b>\n";
+    $confirmText .= "Доставка: <b>{$deliveryDate}</b>\n";
+    $confirmText .= "Позиций: <b>{$matched}</b>, всего: <b>{$totalQty}</b>\n\n";
+    foreach ($items as $it) { $confirmText .= "• {$it['product_name']}: <b>{$it['quantity']}</b>\n"; }
+
+    $btns = ['inline_keyboard' => [[['text' => '◂ В меню', 'callback_data' => 'veg_my_subs']]]];
+    sendMessage($chatId, $confirmText, $btns);
 }
 
 // График доставок для ресторана (все подписанные рестораны)

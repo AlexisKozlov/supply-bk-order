@@ -154,13 +154,25 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
 
   async function adminGetSchedules(supplierId) {
     const data = await api(`admin/schedules?supplier_id=${supplierId}`);
-    return data.schedules || [];
+    return { schedules: data.schedules || [], deadlineRules: data.deadline_rules || [] };
   }
 
   async function adminSaveSchedules(supplierId, schedules) {
     return api('admin/schedules', {
       method: 'POST',
       body: JSON.stringify({ supplier_id: supplierId, schedules }),
+    });
+  }
+
+  async function adminGetDeadlineRules(supplierId) {
+    const data = await api(`admin/deadline-rules?supplier_id=${supplierId}`);
+    return data.rules || [];
+  }
+
+  async function adminSaveDeadlineRules(supplierId, rules) {
+    return api('admin/deadline-rules', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, rules }),
     });
   }
 
@@ -199,6 +211,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminUpdateOrder, adminDeleteOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminReopenSession, adminDeleteSession, adminUpdateSession, adminGetSessions,
     adminGetSchedules, adminSaveSchedules,
+    adminGetDeadlineRules, adminSaveDeadlineRules,
     adminGetTemplates, adminSaveTemplates,
     adminUpdateQty, adminGetExport,
   };

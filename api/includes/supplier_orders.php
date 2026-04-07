@@ -58,30 +58,53 @@ function soGetActiveSession($pdo, $supplierId) {
     return $s->fetch() ?: null;
 }
 
-function soCheckDeadline($pdo, $session, $orderDate) {
-    // orderDate — дата, когда ресторан должен подать заявку (по графику)
+function soCheckDeadline($pdo, $session, $deliveryDate) {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
-    $today = $now->format('Y-m-d');
+    $supplierId = $session['supplier_id'] ?? '';
 
-    // Получаем дедлайн
-    $deadlineTime = $session['deadline_time'] ?? '14:00:00';
-
-    // Проверяем переопределение
+    // 1. Проверяем переопределение на конкретную дату
     $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
-    $s->execute([$session['id'], $orderDate]);
+    $s->execute([$session['id'], $deliveryDate]);
     $override = $s->fetch();
-    if ($override) $deadlineTime = $override['deadline_time'];
 
-    if ($today < $orderDate) return ['status' => 'open', 'deadline' => $deadlineTime];
-    if ($today > $orderDate) return ['status' => 'closed', 'deadline' => $deadlineTime];
-
-    // Сегодня = день подачи
-    $currentTime = $now->format('H:i:s');
-    if ($currentTime < $deadlineTime) {
-        return ['status' => 'open', 'deadline' => $deadlineTime];
+    // 2. Ищем правило по дню недели доставки
+    $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
+    $rule = null;
+    if ($supplierId) {
+        $r = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+        $r->execute([$supplierId, $deliveryDow]);
+        $rule = $r->fetch();
     }
-    return ['status' => 'closed', 'deadline' => $deadlineTime];
+
+    // 3. Вычисляем дату и время дедлайна
+    if ($override) {
+        // Переопределение: дедлайн в день перед доставкой
+        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+        $deadlineTime = $override['deadline_time'];
+    } elseif ($rule) {
+        // Правило: дедлайн в конкретный день недели
+        $deadlineDow = (int)$rule['deadline_dow'];
+        $deadlineTime = $rule['deadline_time'];
+        $deliveryObj = new DateTime($deliveryDate, $tz);
+        $deadlineDate = clone $deliveryObj;
+        // Отматываем к нужному дню недели (до доставки)
+        $diff = $deliveryDow - $deadlineDow;
+        if ($diff <= 0) $diff += 7;
+        $deadlineDate->modify("-{$diff} days");
+    } else {
+        // Фоллбэк: дедлайн = день перед доставкой, 14:00
+        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+        $deadlineTime = $session['deadline_time'] ?? '14:00:00';
+    }
+
+    $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
+    $deadlineStr = $deadlineDate->format('Y-m-d') . ' ' . substr($deadlineTime, 0, 5);
+
+    if ($now < $deadlineDT) {
+        return ['status' => 'open', 'deadline' => $deadlineStr];
+    }
+    return ['status' => 'closed', 'deadline' => $deadlineStr];
 }
 
 // ═══ Парсинг маршрута ═══
@@ -775,12 +798,16 @@ if ($soAction === 'admin') {
             SELECT ss.id, ss.order_day, ss.delivery_day, ss.is_active,
                    r.number as restaurant_number, r.region, r.city, r.address
             FROM so_supplier_schedules ss
-            JOIN restaurants r ON r.id = ss.restaurant_id
+            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ?
-            ORDER BY r.region, r.number, ss.order_day
+            ORDER BY r.region, CAST(r.number AS UNSIGNED), ss.order_day
         ");
         $s->execute([$supplierId]);
-        soRespond(['schedules' => $s->fetchAll()]);
+        $schedules = $s->fetchAll();
+        // Также подгружаем правила дедлайнов
+        $dr = $pdo->prepare("SELECT delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
+        $dr->execute([$supplierId]);
+        soRespond(['schedules' => $schedules, 'deadline_rules' => $dr->fetchAll()]);
     }
 
     // --- Сохранение графиков ---
@@ -815,6 +842,28 @@ if ($soAction === 'admin') {
         }
 
         soRespond(['success' => true, 'updated' => $count]);
+    }
+
+    // --- Правила дедлайнов ---
+    if ($adminAction === 'deadline-rules' && $method === 'GET') {
+        $supplierId = $_GET['supplier_id'] ?? '';
+        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        $s = $pdo->prepare("SELECT id, delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
+        $s->execute([$supplierId]);
+        soRespond(['rules' => $s->fetchAll()]);
+    }
+
+    if ($adminAction === 'deadline-rules' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        $rules = $body['rules'] ?? [];
+        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        // Очищаем и перезаписываем
+        $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
+        $ins = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
+        foreach ($rules as $r) {
+            $ins->execute([$supplierId, (int)$r['delivery_dow'], (int)$r['deadline_dow'], $r['deadline_time'] ?? '14:00:00']);
+        }
+        soRespond(['success' => true, 'count' => count($rules)]);
     }
 
     // --- Шаблоны товаров ---

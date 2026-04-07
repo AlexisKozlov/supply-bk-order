@@ -68,6 +68,8 @@
         <button class="rom-btn rom-btn-export" @click="exportExcel()" :disabled="exporting">
           {{ exporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
         </button>
+        <button class="rom-btn" @click="openFilteredExport" :disabled="exporting">По позициям</button>
+        <router-link :to="{ name: 'restaurant-report' }" class="rom-btn" style="text-decoration:none">Отчёт</router-link>
         <button class="rom-btn" @click="loadStatus" :disabled="loading">
           {{ loading ? 'Обновление...' : 'Обновить' }}
         </button>
@@ -178,11 +180,11 @@
     </template>
 
     <!-- Add product to template modal -->
-    <div v-if="showTplAddModal" class="rom-modal-overlay" @click.self="showTplAddModal = false">
+    <div v-if="showTplAddModal" class="rom-modal-overlay" @click.self="closeTplAddModal">
       <div class="rom-modal">
         <div class="rom-modal-header">
           <h2>Добавить товар в шаблон</h2>
-          <button class="rom-modal-close" @click="showTplAddModal = false">X</button>
+          <button class="rom-modal-close" @click="closeTplAddModal">X</button>
         </div>
         <div class="rom-modal-body">
           <input
@@ -208,11 +210,11 @@
     </div>
 
     <!-- Order detail modal -->
-    <div v-if="showOrderModal" class="rom-modal-overlay" @click.self="showOrderModal = false">
+    <div v-if="showOrderModal" class="rom-modal-overlay" @click.self="closeOrderModal">
       <div class="rom-modal rom-modal-lg">
         <div class="rom-modal-header">
           <h2>Заказ ресторана {{ editingOrder?.restaurant_number }}</h2>
-          <button class="rom-modal-close" @click="showOrderModal = false">X</button>
+          <button class="rom-modal-close" @click="closeOrderModal">X</button>
         </div>
         <div class="rom-modal-body" v-if="editingOrder">
           <div class="rom-order-meta">
@@ -321,11 +323,55 @@
     </div>
 
     <!-- Old templates modal removed -->
+
+    <!-- Filtered export modal -->
+    <div v-if="showFilteredExport" class="rom-modal-overlay" @click.self="closeFilteredExport">
+      <div class="rom-modal" style="max-width:600px">
+        <div class="rom-modal-header">
+          <h2>Выгрузка по выбранным позициям</h2>
+          <button class="rom-modal-close" @click="closeFilteredExport">&times;</button>
+        </div>
+        <div class="rom-modal-body">
+          <div v-if="filtExpLoading" style="text-align:center; padding:20px"><div class="rom-spinner"></div></div>
+          <template v-else>
+            <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap">
+              <input v-model="filtExpSearch" type="text" placeholder="Поиск товара..." class="rom-input" style="flex:1; min-width:150px" />
+              <button class="rom-btn rom-btn-sm" @click="filtExpSelectAll">Все</button>
+              <button class="rom-btn rom-btn-sm" @click="filtExpSelectNone">Сбросить</button>
+              <span style="font-size:12px; color:#8b7355">{{ filtExpSelected.size }} из {{ filtExpProducts.length }}</span>
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:10px">
+              <button v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-btn rom-btn-sm"
+                :style="filtExpCatFilter === cat ? 'background:#502314; color:white' : ''"
+                @click="filtExpCatFilter = filtExpCatFilter === cat ? '' : cat">{{ cat }}</button>
+            </div>
+            <div style="max-height:400px; overflow-y:auto; border:1px solid #ede8e3; border-radius:8px">
+              <label v-for="p in filtExpFiltered" :key="p.sku"
+                style="display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #f3eeea; cursor:pointer; font-size:13px"
+                :style="filtExpSelected.has(p.sku) ? 'background:#f0fdf4' : ''">
+                <input type="checkbox" :checked="filtExpSelected.has(p.sku)" @change="filtExpToggle(p.sku)" />
+                <span style="font-size:10px; color:#8b7355; min-width:45px">{{ p.sku }}</span>
+                <span style="flex:1; color:#502314">{{ p.product_name }}</span>
+                <span style="font-size:10px; padding:1px 5px; border-radius:4px; font-weight:600"
+                  :style="p.category === 'Мороз' ? 'background:#ede9fe; color:#7c3aed' : p.category === 'Холод' ? 'background:#eff6ff; color:#2563eb' : 'background:#fef3c7; color:#92400e'">{{ p.category }}</span>
+              </label>
+              <div v-if="!filtExpFiltered.length" style="padding:20px; text-align:center; color:#8b7355; font-size:13px">Ничего не найдено</div>
+            </div>
+          </template>
+        </div>
+        <div class="rom-modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-top:1px solid #ede8e3">
+          <span style="font-size:13px; color:#502314">Выбрано: <strong>{{ filtExpSelected.size }}</strong> позиций</span>
+          <button class="rom-btn rom-btn-export" @click="doFilteredExport" :disabled="!filtExpSelected.size || filtExpExporting">
+            {{ filtExpExporting ? 'Выгрузка...' : 'Скачать Excel' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, watchEffect } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import * as XLSX from 'xlsx-js-style';
 
@@ -343,6 +389,7 @@ const exporting = ref(false);
 const showOrderModal = ref(false);
 const editingOrder = ref(null);
 const editItems = ref([]);
+const originalEditItems = ref(null); // snapshot for dirty check
 const saving = ref(false);
 
 // Users
@@ -401,7 +448,59 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopAutoRefresh();
+  window.onbeforeunload = null;
 });
+
+// ═══ Filtered export (declarations hoisted for watchEffect) ═══
+const showFilteredExport = ref(false);
+const filtExpLoading = ref(false);
+const filtExpExporting = ref(false);
+const filtExpProducts = ref([]);
+const filtExpSelected = ref(new Set());
+const filtExpSearch = ref('');
+const filtExpCatFilter = ref('');
+let filtExpData = null;
+
+// ═══ beforeunload protection ═══
+function hasUnsavedChanges() {
+  if (showOrderModal.value && originalEditItems.value !== null) {
+    if (JSON.stringify(editItems.value) !== originalEditItems.value) return true;
+  }
+  if (showFilteredExport.value && filtExpSelected.value.size < filtExpProducts.value.length) {
+    return true;
+  }
+  return false;
+}
+watchEffect(() => {
+  if (hasUnsavedChanges()) {
+    window.onbeforeunload = (e) => { e.preventDefault(); return ''; };
+  } else {
+    window.onbeforeunload = null;
+  }
+});
+
+// ═══ Safe close functions ═══
+function closeFilteredExport() {
+  if (filtExpExporting.value) return; // block close during export
+  if (filtExpSelected.value.size < filtExpProducts.value.length) {
+    if (!confirm('Закрыть? Выбор позиций будет потерян')) return;
+  }
+  showFilteredExport.value = false;
+}
+
+function closeOrderModal() {
+  if (saving.value) return; // block close during save
+  if (originalEditItems.value !== null && JSON.stringify(editItems.value) !== originalEditItems.value) {
+    if (!confirm('Закрыть? Несохранённые изменения будут потеряны')) return;
+  }
+  showOrderModal.value = false;
+  originalEditItems.value = null;
+}
+
+function closeTplAddModal() {
+  // simple modal, just close — no data to lose
+  showTplAddModal.value = false;
+}
 
 function startAutoRefresh() {
   stopAutoRefresh();
@@ -472,6 +571,7 @@ async function viewOrder(orderId) {
     const order = await store.adminGetOrder(orderId);
     editingOrder.value = order;
     editItems.value = (order.items || []).map(i => ({ ...i, quantity: parseFloat(i.quantity) || 0 }));
+    originalEditItems.value = JSON.stringify(editItems.value);
     showOrderModal.value = true;
   } catch (e) {
     alert(e.message);
@@ -538,6 +638,7 @@ async function saveEditedOrder() {
     await store.adminUpdateOrder(editingOrder.value.id, {
       items: editItems.value.filter(i => i.quantity > 0),
     });
+    originalEditItems.value = null;
     showOrderModal.value = false;
     await loadStatus();
   } catch (e) {
@@ -553,6 +654,7 @@ async function handleDeleteOrder(order) {
   saving.value = true;
   try {
     await store.adminDeleteOrder(order.id);
+    originalEditItems.value = null;
     showOrderModal.value = false;
     await loadStatus();
   } catch (e) {
@@ -658,7 +760,7 @@ function addToTemplate(product) {
 
 function buildSingleOrderXlsx(order, items) {
   const wb = XLSX.utils.book_new();
-  const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество'];
+  const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа', 'Внешний код'];
   const rows = [header];
   const addr = order.address || order.city || '';
   const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
@@ -666,7 +768,9 @@ function buildSingleOrderXlsx(order, items) {
   sorted.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
   for (const item of sorted) {
     const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
-    rows.push([order.delivery_date || selectedDate.value, order.restaurant_number, addr, '', ordNum, item.category, productCol, parseFloat(item.quantity) || 0]);
+    const qty = parseFloat(item.quantity) || 0;
+    const bpp = parseFloat(item.boxes_per_pallet) || 0;
+    rows.push([order.delivery_date || selectedDate.value, order.restaurant_number, addr, '', ordNum, item.category, productCol, qty, item.weight_netto ? qty * parseFloat(item.weight_netto) : '', item.weight_brutto ? qty * parseFloat(item.weight_brutto) : '', bpp > 0 ? +(qty / bpp).toFixed(2) : '', item.external_code || '']);
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
@@ -732,7 +836,7 @@ async function exportExcel() {
 
     // Формат: всё списком
     // Дата доставки | № ресторана | Адрес | Время доставки | № заказа | Артикул — Название | Кол-во (кор.)
-    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество'];
+    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа', 'Внешний код'];
 
     function buildRows(orders, items, byRest) {
       const rows = [header];
@@ -746,10 +850,16 @@ async function exportExcel() {
         oi.sort((a, b) => a.category.localeCompare(b.category) || a.product_name.localeCompare(b.product_name));
         for (const item of oi) {
           const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
+          const qty = parseFloat(item.quantity) || 0;
+          const bpp2 = parseFloat(item.boxes_per_pallet) || 0;
           rows.push([
             selectedDate.value, order.restaurant_number, addr,
             ri.delivery_time || '', ordNum, item.category,
-            productCol, parseFloat(item.quantity) || 0,
+            productCol, qty,
+            item.weight_netto ? qty * parseFloat(item.weight_netto) : '',
+            item.weight_brutto ? qty * parseFloat(item.weight_brutto) : '',
+            bpp2 > 0 ? +(qty / bpp2).toFixed(2) : '',
+            item.external_code || '',
           ]);
         }
       }
@@ -762,7 +872,7 @@ async function exportExcel() {
         const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
         if (cell) cell.s = hStyle;
       }
-      ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }];
+      ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 14 }];
       ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: header.length - 1 } }) };
     }
 
@@ -799,6 +909,97 @@ function formatDate(d) {
 function formatTime(dt) {
   if (!dt) return '';
   return new Date(dt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ═══ Filtered export (logic) ═══
+const filtExpFiltered = computed(() => {
+  let list = filtExpProducts.value;
+  if (filtExpCatFilter.value) list = list.filter(p => p.category === filtExpCatFilter.value);
+  if (filtExpSearch.value) {
+    const q = filtExpSearch.value.toLowerCase();
+    list = list.filter(p => p.product_name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  }
+  return list;
+});
+
+function filtExpToggle(sku) {
+  const s = new Set(filtExpSelected.value);
+  if (s.has(sku)) s.delete(sku); else s.add(sku);
+  filtExpSelected.value = s;
+}
+function filtExpSelectAll() {
+  const s = new Set(filtExpSelected.value);
+  for (const p of filtExpFiltered.value) s.add(p.sku);
+  filtExpSelected.value = s;
+}
+function filtExpSelectNone() { filtExpSelected.value = new Set(); }
+
+async function openFilteredExport() {
+  showFilteredExport.value = true;
+  filtExpLoading.value = true;
+  filtExpSearch.value = '';
+  filtExpCatFilter.value = '';
+  try {
+    const data = await store.adminGetExportData('all', selectedDate.value);
+    filtExpData = data;
+    // Уникальные товары из позиций
+    const map = {};
+    for (const item of data.items) {
+      if (!map[item.sku]) map[item.sku] = { sku: item.sku, product_name: item.product_name, category: item.category };
+    }
+    filtExpProducts.value = Object.values(map).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.product_name.localeCompare(b.product_name));
+    // По умолчанию все выбраны
+    filtExpSelected.value = new Set(filtExpProducts.value.map(p => p.sku));
+  } catch (e) { alert('Ошибка: ' + e.message); }
+  finally { filtExpLoading.value = false; }
+}
+
+async function doFilteredExport() {
+  if (!filtExpData || !filtExpSelected.value.size) return;
+  filtExpExporting.value = true;
+  try {
+    const XLSX = (await import('xlsx-js-style')).default || await import('xlsx-js-style');
+    const wb = XLSX.utils.book_new();
+    const skus = filtExpSelected.value;
+
+    const restInfo = {};
+    for (const o of filtExpData.orders) { restInfo[o.restaurant_number] = o; }
+    const byRest = {};
+    for (const item of filtExpData.items) {
+      if (!skus.has(item.sku)) continue;
+      if (!byRest[item.restaurant_number]) byRest[item.restaurant_number] = [];
+      byRest[item.restaurant_number].push(item);
+    }
+
+    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа', 'Внешний код'];
+    const rows = [header];
+    const sorted = [...filtExpData.orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
+    for (const order of sorted) {
+      const oi = byRest[order.restaurant_number] || [];
+      if (!oi.length) continue;
+      const ri = restInfo[order.restaurant_number] || {};
+      const addr = ri.address || ri.city || '';
+      const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
+      oi.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
+      for (const item of oi) {
+        const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
+        const qty = parseFloat(item.quantity) || 0;
+        const bpp3 = parseFloat(item.boxes_per_pallet) || 0;
+        rows.push([selectedDate.value, order.restaurant_number, addr, ri.delivery_time || '', ordNum, item.category, productCol, qty,
+          item.weight_netto ? qty * parseFloat(item.weight_netto) : '', item.weight_brutto ? qty * parseFloat(item.weight_brutto) : '', bpp3 > 0 ? +(qty / bpp3).toFixed(2) : '', item.external_code || '']);
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
+    for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
+    ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 14 }];
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: header.length - 1 } }) };
+    XLSX.utils.book_append_sheet(wb, ws, 'Выборочный заказ');
+    XLSX.writeFile(wb, `Заказы_выборка_${selectedDate.value}.xlsx`);
+    showFilteredExport.value = false;
+  } catch (e) { alert('Ошибка: ' + e.message); }
+  finally { filtExpExporting.value = false; }
 }
 </script>
 

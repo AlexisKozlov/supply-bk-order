@@ -48,6 +48,7 @@ const routes = [
       { path: 'corrections', name: 'corrections', component: () => import('@/views/CorrectionsView.vue'), meta: { title: 'Корректировки', module: 'corrections' } },
       { path: 'chat', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'Чат с ресторанами', module: 'chat' } },
       { path: 'restaurant-orders', name: 'restaurant-orders', component: () => import('@/views/RestaurantOrdersManagerView.vue'), meta: { title: 'Заказы ресторанов', module: 'restaurant-orders' } },
+      { path: 'restaurant-report', name: 'restaurant-report', component: () => import('@/views/RestaurantReportView.vue'), meta: { title: 'Отчёт по заказам', module: 'restaurant-orders' } },
       { path: 'supplier-orders', name: 'supplier-orders', component: () => import('@/views/SupplierOrdersHubView.vue'), meta: { title: 'Заявки поставщикам', module: 'supplier-orders' } },
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
@@ -69,13 +70,19 @@ const routes = [
     path: '/veg-order/:token',
     name: 'veg-order-form',
     component: () => import('@/views/VegOrderFormView.vue'),
-    meta: { title: 'Заказ овощей' },
+    meta: { title: 'Планета Ресторанов' },
   },
   {
     path: '/restaurant',
     name: 'restaurant-order-login',
     component: () => import('@/views/RestaurantOrderLoginView.vue'),
     meta: { title: 'Заказы — Вход' },
+  },
+  {
+    path: '/restaurant/cabinet',
+    name: 'restaurant-cabinet',
+    component: () => import('@/views/RestaurantCabinetView.vue'),
+    meta: { title: 'Личный кабинет' },
   },
   {
     path: '/restaurant/order',

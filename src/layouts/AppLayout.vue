@@ -634,7 +634,7 @@ const pageNames = {
   'marketing-new': 'Новая активность',
   'marketing-detail': 'Маркетинговая активность',
   'stock-collection': 'Сбор остатков',
-  'veg-admin': 'Овощи',
+  'veg-admin': 'Планета Ресторанов',
   'telegram-admin': 'Telegram-бот',
   'corrections': 'Корректировки',
   'chat': 'Чат с ресторанами',

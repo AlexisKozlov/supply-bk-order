@@ -86,7 +86,7 @@ const modules = [
   { title: 'Корректировки заказов', icon: '✏️', route: 'corrections', module: 'corrections' },
   { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
   { title: 'Оплаты поставщиков', icon: '💳', route: 'payments', module: 'plan-fact' },
-  { title: 'Овощи', icon: '🥬', route: 'veg-admin', module: 'veg' },
+  { title: 'Планета Ресторанов', icon: '🥬', route: 'veg-admin', module: 'veg' },
   { title: 'Тендеры', icon: '📑', route: 'tenders', module: 'tenders' },
   { title: 'Распределение', icon: '📦', route: 'distribution', module: 'distribution' },
   { title: 'Калькулятор паллет', icon: '🧮', route: 'pallet-calc', module: 'pallet-calc' },

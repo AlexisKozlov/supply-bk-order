@@ -20,7 +20,7 @@ export const MODULE_LABELS = {
   'plan-fact': 'Поставки', database: 'База товаров', 'delivery-schedule': 'График доставки',
   analytics: 'Аналитика', calendar: 'Календарь', analysis: 'Анализ',
   'restaurant-sales': 'Реализация', 'shelf-life': 'Сроки годности',
-  pricing: 'Цены и ПСЦ', tenders: 'Тендеры', veg: 'Овощи',
+  pricing: 'Цены и ПСЦ', tenders: 'Тендеры', veg: 'Планета Ресторанов',
   'stock-collection': 'Сбор остатков', deficit: 'Распределение дефицита',
   distribution: 'Распределение', telegram: 'Telegram-бот',
   'pallet-calc': 'Калькулятор паллет',

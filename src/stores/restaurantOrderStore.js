@@ -46,10 +46,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
-  async function login(restaurantNumber, password) {
+  async function login(restaurantNumber, password, force = false) {
     const data = await api('login', {
       method: 'POST',
-      body: JSON.stringify({ restaurant_number: restaurantNumber, password }),
+      body: JSON.stringify({ restaurant_number: restaurantNumber, password, force }),
     });
     if (data.success) {
       localStorage.setItem(TOKEN_KEY, data.token);

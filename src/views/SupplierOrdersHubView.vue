@@ -48,7 +48,7 @@ onMounted(async () => {
   // Овощи — показываем если есть доступ к veg или supplier-orders
   const hasVeg = userStore.hasAccess?.('veg', 'view') || userStore.hasAccess?.('supplier-orders', 'view');
   if (hasVeg !== false) {
-    list.push({ id: 'veg', name: 'Овощи', type: 'veg' });
+    list.push({ id: 'veg', name: 'Планета Ресторанов', type: 'veg' });
   }
 
   // SO-поставщики из API
