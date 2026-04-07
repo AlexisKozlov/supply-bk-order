@@ -79,15 +79,15 @@
         <table class="rom-table">
           <thead>
             <tr>
-              <th>Ресторан</th>
+              <th style="width:70px">Ресторан</th>
               <th>Город</th>
               <th>Адрес</th>
-              <th>Статус</th>
-              <th>Позиций</th>
-              <th>Коробок</th>
-              <th>Время подачи</th>
-              <th>Изменён</th>
-              <th></th>
+              <th style="width:90px">Статус</th>
+              <th style="width:70px" class="rom-th-center">Позиций</th>
+              <th style="width:70px" class="rom-th-center">Коробок</th>
+              <th style="width:90px" class="rom-th-center">Подано</th>
+              <th style="min-width:140px">Изменён</th>
+              <th style="width:120px"></th>
             </tr>
           </thead>
           <tbody>
@@ -100,9 +100,9 @@
                   {{ statusLabel(r.order_status) }}
                 </span>
               </td>
-              <td>{{ r.item_count || '—' }}</td>
-              <td>{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
-              <td class="rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
+              <td class="rom-td-center">{{ r.item_count || '—' }}</td>
+              <td class="rom-td-center">{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
+              <td class="rom-td-center rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
               <td class="rom-td-time">
                 <template v-if="r.updated_by">
                   {{ formatTime(r.updated_at) }} ({{ r.updated_by }})
@@ -1251,6 +1251,8 @@ function formatTime(dt) {
   font-size: 13px; color: #502314;
 }
 .rom-td-num { font-weight: 700; }
+.rom-td-center { text-align: center; }
+.rom-th-center { text-align: center; }
 .rom-td-time { font-size: 12px; color: #8b7355; }
 .rom-row-submitted { background: #f0fdf4; }
 .rom-status {
