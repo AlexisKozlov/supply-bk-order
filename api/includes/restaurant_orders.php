@@ -776,6 +776,7 @@ if (strpos($roAction, 'admin') === 0) {
             SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
                    ds.delivery_time,
                    o.id as order_id, o.status as order_status, o.submitted_at,
+                   o.updated_at, o.updated_by,
                    (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
                    (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
             FROM restaurants r
@@ -820,8 +821,11 @@ if (strpos($roAction, 'admin') === 0) {
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
-        $items = $pdo->prepare("SELECT * FROM ro_order_items WHERE order_id = ? ORDER BY category, product_name");
-        $items->execute([$order['id']]);
+        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet
+            FROM ro_order_items oi
+            LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ?
+            WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
+        $items->execute([$order['legal_entity'], $order['id']]);
 
         $order['items'] = $items->fetchAll();
         roRespond(['order' => $order]);
@@ -1151,7 +1155,7 @@ if (strpos($roAction, 'admin') === 0) {
             $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity
                 WHERE oi.order_id IN ({$ph}) ORDER BY oi.category, oi.product_name");
             $items->execute($orderIds);
             $allItems = $items->fetchAll();

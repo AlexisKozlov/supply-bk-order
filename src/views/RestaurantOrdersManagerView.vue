@@ -65,10 +65,9 @@
 
       <!-- Export + refresh -->
       <div class="rom-export-row">
-        <button class="rom-btn rom-btn-export" @click="exportExcel()" :disabled="exporting">
-          {{ exporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
+        <button class="rom-btn rom-btn-export" @click="openExportModal" :disabled="exportExporting">
+          Выгрузить в Excel
         </button>
-        <button class="rom-btn" @click="openFilteredExport" :disabled="exporting">По позициям</button>
         <router-link :to="{ name: 'restaurant-report' }" class="rom-btn" style="text-decoration:none">Отчёт</router-link>
         <button class="rom-btn" @click="loadStatus" :disabled="loading">
           {{ loading ? 'Обновление...' : 'Обновить' }}
@@ -87,6 +86,7 @@
               <th>Позиций</th>
               <th>Коробок</th>
               <th>Время подачи</th>
+              <th>Изменён</th>
               <th></th>
             </tr>
           </thead>
@@ -103,6 +103,12 @@
               <td>{{ r.item_count || '—' }}</td>
               <td>{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
               <td class="rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
+              <td class="rom-td-time">
+                <template v-if="r.updated_by">
+                  {{ formatTime(r.updated_at) }} ({{ r.updated_by }})
+                </template>
+                <template v-else>—</template>
+              </td>
               <td class="rom-td-actions">
                 <button v-if="r.order_id" class="rom-btn-sm" @click="viewOrder(r.order_id)">
                   Открыть
@@ -220,6 +226,9 @@
           <div class="rom-order-meta">
             <span>Дата доставки: <strong>{{ formatDate(editingOrder.delivery_date) }}</strong></span>
             <span>Статус: <strong>{{ statusLabel(editingOrder.status) }}</strong></span>
+            <span v-if="editingOrder.updated_by" class="rom-meta-edited">
+              Изменён: {{ formatTime(editingOrder.updated_at) }} ({{ editingOrder.updated_by }})
+            </span>
           </div>
 
           <div v-for="cat in ['Сухой', 'Холод', 'Мороз']" :key="cat">
@@ -324,45 +333,116 @@
 
     <!-- Old templates modal removed -->
 
-    <!-- Filtered export modal -->
-    <div v-if="showFilteredExport" class="rom-modal-overlay" @click.self="closeFilteredExport">
-      <div class="rom-modal" style="max-width:600px">
+    <!-- Unified export modal -->
+    <div v-if="showExportModal" class="rom-modal-overlay" @click.self="closeExportModal">
+      <div class="rom-modal" style="max-width:650px">
         <div class="rom-modal-header">
-          <h2>Выгрузка по выбранным позициям</h2>
-          <button class="rom-modal-close" @click="closeFilteredExport">&times;</button>
+          <h2>Настройки выгрузки в Excel</h2>
+          <button class="rom-modal-close" @click="closeExportModal">&times;</button>
         </div>
         <div class="rom-modal-body">
-          <div v-if="filtExpLoading" style="text-align:center; padding:20px"><div class="rom-spinner"></div></div>
+          <div v-if="exportLoading" style="text-align:center; padding:20px"><div class="rom-spinner"></div></div>
           <template v-else>
-            <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap">
-              <input v-model="filtExpSearch" type="text" placeholder="Поиск товара..." class="rom-input" style="flex:1; min-width:150px" />
-              <button class="rom-btn rom-btn-sm" @click="filtExpSelectAll">Все</button>
-              <button class="rom-btn rom-btn-sm" @click="filtExpSelectNone">Сбросить</button>
-              <span style="font-size:12px; color:#8b7355">{{ filtExpSelected.size }} из {{ filtExpProducts.length }}</span>
+            <!-- Grouping -->
+            <div class="rom-exp-section-title">Группировка</div>
+            <div class="rom-exp-grouping">
+              <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'list' }" @click="exportGrouping = 'list'">Все списком</button>
+              <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'restaurants' }" @click="exportGrouping = 'restaurants'">По ресторанам</button>
+              <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'categories' }" @click="exportGrouping = 'categories'">По категориям</button>
             </div>
-            <div style="display:flex; gap:6px; margin-bottom:10px">
-              <button v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-btn rom-btn-sm"
-                :style="filtExpCatFilter === cat ? 'background:#502314; color:white' : ''"
-                @click="filtExpCatFilter = filtExpCatFilter === cat ? '' : cat">{{ cat }}</button>
+
+            <!-- Totals option -->
+            <label class="rom-exp-cb-label" style="margin-bottom:12px">
+              <input type="checkbox" v-model="exportShowTotals" />
+              <span style="font-weight:600; color:#502314">Итоги по весу и паллетоместам</span>
+            </label>
+
+            <!-- Filters toggle -->
+            <div class="rom-exp-section-title rom-exp-clickable" @click="exportShowFilters = !exportShowFilters">
+              Фильтры
+              <span class="rom-exp-chevron" :class="{ open: exportShowFilters }">&#9660;</span>
             </div>
-            <div style="max-height:400px; overflow-y:auto; border:1px solid #ede8e3; border-radius:8px">
-              <label v-for="p in filtExpFiltered" :key="p.sku"
-                style="display:flex; align-items:center; gap:8px; padding:7px 10px; border-bottom:1px solid #f3eeea; cursor:pointer; font-size:13px"
-                :style="filtExpSelected.has(p.sku) ? 'background:#f0fdf4' : ''">
-                <input type="checkbox" :checked="filtExpSelected.has(p.sku)" @change="filtExpToggle(p.sku)" />
-                <span style="font-size:10px; color:#8b7355; min-width:45px">{{ p.sku }}</span>
-                <span style="flex:1; color:#502314">{{ p.product_name }}</span>
-                <span style="font-size:10px; padding:1px 5px; border-radius:4px; font-weight:600"
-                  :style="p.category === 'Мороз' ? 'background:#ede9fe; color:#7c3aed' : p.category === 'Холод' ? 'background:#eff6ff; color:#2563eb' : 'background:#fef3c7; color:#92400e'">{{ p.category }}</span>
-              </label>
-              <div v-if="!filtExpFiltered.length" style="padding:20px; text-align:center; color:#8b7355; font-size:13px">Ничего не найдено</div>
+
+            <div v-show="exportShowFilters">
+              <!-- Category filter -->
+              <div class="rom-exp-filter-group">
+                <div class="rom-exp-filter-label">Категория</div>
+                <div class="rom-exp-checkboxes">
+                  <label v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-exp-cb-label">
+                    <input type="checkbox" :checked="exportFilterCategories.has(cat)" @change="toggleSet(exportFilterCategories, cat)" /> {{ cat }}
+                  </label>
+                </div>
+              </div>
+
+              <!-- Region filter -->
+              <div class="rom-exp-filter-group">
+                <div class="rom-exp-filter-label">Регион</div>
+                <div class="rom-exp-checkboxes">
+                  <label v-for="reg in ['Минск','Регионы']" :key="reg" class="rom-exp-cb-label">
+                    <input type="checkbox" :checked="exportFilterRegions.has(reg)" @change="toggleSet(exportFilterRegions, reg)" /> {{ reg }}
+                  </label>
+                </div>
+              </div>
+
+              <!-- Restaurant filter -->
+              <div class="rom-exp-filter-group">
+                <div class="rom-exp-filter-label">Рестораны</div>
+                <label class="rom-exp-cb-label" style="margin-bottom:6px">
+                  <input type="checkbox" v-model="exportAllRestaurants" /> Все
+                </label>
+                <template v-if="!exportAllRestaurants">
+                  <input v-model="exportRestaurantSearch" type="text" placeholder="Поиск ресторана..." class="rom-input" style="width:100%; margin-bottom:6px" />
+                  <div class="rom-exp-select-list">
+                    <label v-for="r in filteredExportRestaurants" :key="r.number"
+                      class="rom-exp-select-item" :class="{ selected: exportFilterRestaurants.has(r.number) }">
+                      <input type="checkbox" :checked="exportFilterRestaurants.has(r.number)" @change="toggleSet(exportFilterRestaurants, r.number)" />
+                      <span style="font-weight:700; min-width:30px">{{ r.number }}</span>
+                      <span style="flex:1; color:#502314">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
+                      <span style="font-size:10px; color:#8b7355">{{ r.region }}</span>
+                    </label>
+                    <div v-if="!filteredExportRestaurants.length" class="rom-no-items">Ничего не найдено</div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Product filter -->
+              <div class="rom-exp-filter-group">
+                <div class="rom-exp-filter-label">Товары</div>
+                <label class="rom-exp-cb-label" style="margin-bottom:6px">
+                  <input type="checkbox" v-model="exportAllProducts" /> Все
+                </label>
+                <template v-if="!exportAllProducts">
+                  <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap">
+                    <input v-model="exportProductSearch" type="text" placeholder="Поиск товара..." class="rom-input" style="flex:1; min-width:150px" />
+                    <button class="rom-btn-sm" @click="expProductsSelectAll">Все</button>
+                    <button class="rom-btn-sm" @click="exportFilterProducts = new Set()">Сбросить</button>
+                    <span style="font-size:12px; color:#8b7355">{{ exportFilterProducts.size }} из {{ exportAvailableProducts.length }}</span>
+                  </div>
+                  <div style="display:flex; gap:6px; margin-bottom:6px">
+                    <button v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-btn-sm"
+                      :style="exportProductCatFilter === cat ? 'background:#502314; color:white' : ''"
+                      @click="exportProductCatFilter = exportProductCatFilter === cat ? '' : cat">{{ cat }}</button>
+                  </div>
+                  <div class="rom-exp-select-list rom-exp-select-list-tall">
+                    <label v-for="p in filteredExportProducts" :key="p.sku"
+                      class="rom-exp-select-item" :class="{ selected: exportFilterProducts.has(p.sku) }">
+                      <input type="checkbox" :checked="exportFilterProducts.has(p.sku)" @change="toggleSet(exportFilterProducts, p.sku)" />
+                      <span style="font-size:10px; color:#8b7355; min-width:45px">{{ p.sku }}</span>
+                      <span style="flex:1; color:#502314">{{ p.product_name }}</span>
+                      <span style="font-size:10px; padding:1px 5px; border-radius:4px; font-weight:600"
+                        :style="p.category === 'Мороз' ? 'background:#ede9fe; color:#7c3aed' : p.category === 'Холод' ? 'background:#eff6ff; color:#2563eb' : 'background:#fef3c7; color:#92400e'">{{ p.category }}</span>
+                    </label>
+                    <div v-if="!filteredExportProducts.length" class="rom-no-items">Ничего не найдено</div>
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
         </div>
-        <div class="rom-modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-top:1px solid #ede8e3">
-          <span style="font-size:13px; color:#502314">Выбрано: <strong>{{ filtExpSelected.size }}</strong> позиций</span>
-          <button class="rom-btn rom-btn-export" @click="doFilteredExport" :disabled="!filtExpSelected.size || filtExpExporting">
-            {{ filtExpExporting ? 'Выгрузка...' : 'Скачать Excel' }}
+        <div v-if="!exportLoading" class="rom-exp-footer">
+          <span class="rom-exp-summary">Заказов: <strong>{{ exportSummary.orders }}</strong>, Позиций: <strong>{{ exportSummary.items }}</strong></span>
+          <button class="rom-btn rom-btn-export" @click="doUnifiedExport" :disabled="!exportSummary.items || exportExporting">
+            {{ exportExporting ? 'Выгрузка...' : 'Скачать Excel' }}
           </button>
         </div>
       </div>
@@ -383,7 +463,6 @@ const selectedDate = ref('');
 const restaurants = ref([]);
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const deadlineStatus = ref(null);
-const exporting = ref(false);
 
 // Order editing
 const showOrderModal = ref(false);
@@ -451,22 +530,32 @@ onUnmounted(() => {
   window.onbeforeunload = null;
 });
 
-// ═══ Filtered export (declarations hoisted for watchEffect) ═══
-const showFilteredExport = ref(false);
-const filtExpLoading = ref(false);
-const filtExpExporting = ref(false);
-const filtExpProducts = ref([]);
-const filtExpSelected = ref(new Set());
-const filtExpSearch = ref('');
-const filtExpCatFilter = ref('');
-let filtExpData = null;
+// ═══ Unified export modal ═══
+const showExportModal = ref(false);
+const exportLoading = ref(false);
+const exportExporting = ref(false);
+const exportGrouping = ref('list');
+const exportFilterCategories = ref(new Set(['Сухой', 'Холод', 'Мороз']));
+const exportFilterRegions = ref(new Set(['Минск', 'Регионы']));
+const exportAllRestaurants = ref(true);
+const exportFilterRestaurants = ref(new Set());
+const exportAllProducts = ref(true);
+const exportFilterProducts = ref(new Set());
+const exportRestaurantSearch = ref('');
+const exportProductSearch = ref('');
+const exportProductCatFilter = ref('');
+const exportShowFilters = ref(false);
+const exportShowTotals = ref(true);
+const exportAvailableRestaurants = ref([]);
+const exportAvailableProducts = ref([]);
+let exportData = null;
 
 // ═══ beforeunload protection ═══
 function hasUnsavedChanges() {
   if (showOrderModal.value && originalEditItems.value !== null) {
     if (JSON.stringify(editItems.value) !== originalEditItems.value) return true;
   }
-  if (showFilteredExport.value && filtExpSelected.value.size < filtExpProducts.value.length) {
+  if (showExportModal.value && exportExporting.value) {
     return true;
   }
   return false;
@@ -480,12 +569,9 @@ watchEffect(() => {
 });
 
 // ═══ Safe close functions ═══
-function closeFilteredExport() {
-  if (filtExpExporting.value) return; // block close during export
-  if (filtExpSelected.value.size < filtExpProducts.value.length) {
-    if (!confirm('Закрыть? Выбор позиций будет потерян')) return;
-  }
-  showFilteredExport.value = false;
+function closeExportModal() {
+  if (exportExporting.value) return;
+  showExportModal.value = false;
 }
 
 function closeOrderModal() {
@@ -758,24 +844,93 @@ function addToTemplate(product) {
   showTplAddModal.value = false;
 }
 
+// ═══ Export helpers ═══
+const EXPORT_HEADER = ['Дата доставки', '№ заказа', '№ ресторана', 'Адрес ресторана', 'Время доставки', 'Хранение', 'Внешний код', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа'];
+const EXPORT_COLS = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }];
+
+function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = false) {
+  const rows = [EXPORT_HEADER];
+  const subtotalRows = [];
+  const sorted = [...orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
+  let grandBrutto = 0, grandPallets = 0;
+  for (const order of sorted) {
+    const oi = itemsByRest[order.restaurant_number] || [];
+    if (!oi.length) continue;
+    const ri = restInfoMap[order.restaurant_number] || {};
+    const addr = ri.address || ri.city || '';
+    const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
+    oi.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
+    let restBrutto = 0;
+    const palletsByCategory = {};
+    for (const item of oi) {
+      const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
+      const qty = parseFloat(item.quantity) || 0;
+      const bpp = parseFloat(item.boxes_per_pallet) || 0;
+      const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
+      const pallets = bpp > 0 ? qty / bpp : 0;
+      restBrutto += brutto;
+      const cat = item.category || 'Сухой';
+      palletsByCategory[cat] = (palletsByCategory[cat] || 0) + pallets;
+      rows.push([
+        date, ordNum, order.restaurant_number, addr,
+        ri.delivery_time || '', item.category,
+        item.external_code || '', productCol, qty,
+        item.weight_netto ? qty * parseFloat(item.weight_netto) : '',
+        brutto || '',
+        pallets > 0 ? +pallets.toFixed(2) : '',
+      ]);
+    }
+    // Each category rounds up separately (different pallets per storage mode)
+    const restPallets = Object.values(palletsByCategory).reduce((sum, v) => sum + (v > 0 ? Math.ceil(v) : 0), 0);
+    if (showTotals) {
+      const subRow = new Array(EXPORT_HEADER.length).fill('');
+      subRow[7] = `Итого рест. ${order.restaurant_number}`;
+      subRow[10] = restBrutto ? +restBrutto.toFixed(0) : '';
+      subRow[11] = restPallets || '';
+      rows.push(subRow);
+      subtotalRows.push({ idx: rows.length - 1, type: 'subtotal' });
+    }
+    grandBrutto += restBrutto;
+    grandPallets += restPallets;
+  }
+  if (showTotals && sorted.length > 1) {
+    const totalRow = new Array(EXPORT_HEADER.length).fill('');
+    totalRow[7] = 'ИТОГО';
+    totalRow[10] = grandBrutto ? +grandBrutto.toFixed(0) : '';
+    totalRow[11] = grandPallets ? +grandPallets.toFixed(2) : '';
+    rows.push(totalRow);
+    subtotalRows.push({ idx: rows.length - 1, type: 'total' });
+  }
+  return { rows, subtotalRows };
+}
+
+function styleExportSheet(ws, rowCount, subtotalRows) {
+  const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
+  for (let c = 0; c < EXPORT_HEADER.length; c++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
+    if (cell) cell.s = hStyle;
+  }
+  // Style subtotal/total rows
+  const subStyle = { font: { bold: true, color: { rgb: '502314' } }, fill: { fgColor: { rgb: 'F5F0EB' } } };
+  const totalStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: 'D62300' } } };
+  for (const sr of (subtotalRows || [])) {
+    const st = sr.type === 'total' ? totalStyle : subStyle;
+    for (let c = 0; c < EXPORT_HEADER.length; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
+      if (cell) cell.s = st;
+    }
+  }
+  ws['!cols'] = EXPORT_COLS;
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: EXPORT_HEADER.length - 1 } }) };
+}
+
 function buildSingleOrderXlsx(order, items) {
   const wb = XLSX.utils.book_new();
-  const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа', 'Внешний код'];
-  const rows = [header];
-  const addr = order.address || order.city || '';
-  const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
-  const sorted = items.filter(i => i.quantity > 0);
-  sorted.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
-  for (const item of sorted) {
-    const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
-    const qty = parseFloat(item.quantity) || 0;
-    const bpp = parseFloat(item.boxes_per_pallet) || 0;
-    rows.push([order.delivery_date || selectedDate.value, order.restaurant_number, addr, '', ordNum, item.category, productCol, qty, item.weight_netto ? qty * parseFloat(item.weight_netto) : '', item.weight_brutto ? qty * parseFloat(item.weight_brutto) : '', bpp > 0 ? +(qty / bpp).toFixed(2) : '', item.external_code || '']);
-  }
+  const restInfo = { [order.restaurant_number]: { city: order.city || '', address: order.address || '', region: order.region || '', delivery_time: '' } };
+  const byRest = { [order.restaurant_number]: items.filter(i => (parseFloat(i.quantity) || 0) > 0) };
+  const { rows, subtotalRows } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
-  for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
-  ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }];
+  styleExportSheet(ws, rows.length, subtotalRows);
   XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`);
   return wb;
 }
@@ -804,101 +959,201 @@ function copyRoLink() {
   alert('Ссылка скопирована: ' + url);
 }
 
-// ═══ Excel export ═══
-async function exportExcel() {
-  exporting.value = true;
+// ═══ Unified export modal logic ═══
+function toggleSet(setRef, value) {
+  const s = new Set(setRef.value);
+  if (s.has(value)) s.delete(value); else s.add(value);
+  setRef.value = s;
+}
+
+const filteredExportRestaurants = computed(() => {
+  let list = exportAvailableRestaurants.value;
+  if (exportRestaurantSearch.value) {
+    const q = exportRestaurantSearch.value.toLowerCase();
+    list = list.filter(r => String(r.number).includes(q) || (r.city || '').toLowerCase().includes(q) || (r.address || '').toLowerCase().includes(q));
+  }
+  // Also filter by region checkboxes
+  if (exportFilterRegions.value.size < 2) {
+    list = list.filter(r => {
+      const isMinsk = r.region === 'Минск';
+      return (isMinsk && exportFilterRegions.value.has('Минск')) || (!isMinsk && exportFilterRegions.value.has('Регионы'));
+    });
+  }
+  return list;
+});
+
+const filteredExportProducts = computed(() => {
+  let list = exportAvailableProducts.value;
+  if (exportProductCatFilter.value) list = list.filter(p => p.category === exportProductCatFilter.value);
+  if (exportProductSearch.value) {
+    const q = exportProductSearch.value.toLowerCase();
+    list = list.filter(p => p.product_name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  }
+  return list;
+});
+
+function expProductsSelectAll() {
+  const s = new Set(exportFilterProducts.value);
+  for (const p of filteredExportProducts.value) s.add(p.sku);
+  exportFilterProducts.value = s;
+}
+
+function getFilteredExportData() {
+  if (!exportData) return { orders: [], items: [] };
+  // Filter orders by region
+  let orders = exportData.orders;
+  if (exportFilterRegions.value.size < 2) {
+    orders = orders.filter(o => {
+      const isMinsk = o.region === 'Минск';
+      return (isMinsk && exportFilterRegions.value.has('Минск')) || (!isMinsk && exportFilterRegions.value.has('Регионы'));
+    });
+  }
+  // Filter by selected restaurants
+  if (!exportAllRestaurants.value && exportFilterRestaurants.value.size > 0) {
+    orders = orders.filter(o => exportFilterRestaurants.value.has(o.restaurant_number));
+  } else if (!exportAllRestaurants.value && exportFilterRestaurants.value.size === 0) {
+    orders = [];
+  }
+  const restNums = new Set(orders.map(o => o.restaurant_number));
+
+  // Filter items
+  let items = exportData.items;
+  // By category
+  if (exportFilterCategories.value.size < 3) {
+    items = items.filter(i => exportFilterCategories.value.has(i.category));
+  }
+  // By restaurant
+  items = items.filter(i => restNums.has(i.restaurant_number));
+  // By products
+  if (!exportAllProducts.value && exportFilterProducts.value.size > 0) {
+    items = items.filter(i => exportFilterProducts.value.has(i.sku));
+  } else if (!exportAllProducts.value && exportFilterProducts.value.size === 0) {
+    items = [];
+  }
+
+  return { orders, items };
+}
+
+const exportSummary = computed(() => {
+  const { orders, items } = getFilteredExportData();
+  // Count orders that have at least one item
+  const restWithItems = new Set(items.map(i => i.restaurant_number));
+  return {
+    orders: orders.filter(o => restWithItems.has(o.restaurant_number)).length,
+    items: items.length,
+  };
+});
+
+async function openExportModal() {
+  showExportModal.value = true;
+  exportLoading.value = true;
+  exportGrouping.value = 'list';
+  exportFilterCategories.value = new Set(['Сухой', 'Холод', 'Мороз']);
+  exportFilterRegions.value = new Set(['Минск', 'Регионы']);
+  exportAllRestaurants.value = true;
+  exportFilterRestaurants.value = new Set();
+  exportAllProducts.value = true;
+  exportFilterProducts.value = new Set();
+  exportRestaurantSearch.value = '';
+  exportProductSearch.value = '';
+  exportProductCatFilter.value = '';
+  exportShowFilters.value = false;
+  exportShowTotals.value = true;
   try {
     const data = await store.adminGetExportData('all', selectedDate.value);
-    if (!data.orders?.length) { alert('Нет заказов для экспорта'); return; }
-
-    const wb = XLSX.utils.book_new();
-    const dateStr = formatDate(selectedDate.value);
-
-    // Маппинг ресторан → инфо
-    const restInfo = {};
-    const orderIdMap = {};
+    exportData = data;
+    // Build available restaurants
+    const restMap = {};
     for (const o of data.orders) {
-      restInfo[o.restaurant_number] = {
-        city: o.city || '',
-        address: o.address || '',
-        delivery_time: o.delivery_time || '',
-        id: o.id,
-      };
-      orderIdMap[o.restaurant_number] = o.id;
+      restMap[o.restaurant_number] = { number: o.restaurant_number, region: o.region || '', city: o.city || '', address: o.address || '' };
     }
-
-    // Группируем позиции по ресторану
-    const byRest = {};
+    exportAvailableRestaurants.value = Object.values(restMap).sort((a, b) => a.number - b.number);
+    // Build available products
+    const prodMap = {};
     for (const item of data.items) {
+      if (!prodMap[item.sku]) prodMap[item.sku] = { sku: item.sku, product_name: item.product_name, category: item.category };
+    }
+    exportAvailableProducts.value = Object.values(prodMap).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.product_name.localeCompare(b.product_name));
+  } catch (e) { alert('Ошибка: ' + e.message); showExportModal.value = false; }
+  finally { exportLoading.value = false; }
+}
+
+async function doUnifiedExport() {
+  if (!exportData) return;
+  exportExporting.value = true;
+  try {
+    const { orders, items } = getFilteredExportData();
+    if (!items.length) { alert('Нет данных для выгрузки'); return; }
+
+    // Build restInfo map
+    const restInfoMap = {};
+    for (const o of exportData.orders) {
+      restInfoMap[o.restaurant_number] = { city: o.city || '', address: o.address || '', region: o.region || '', delivery_time: o.delivery_time || '' };
+    }
+    // Build items by restaurant
+    const byRest = {};
+    for (const item of items) {
       if (!byRest[item.restaurant_number]) byRest[item.restaurant_number] = [];
       byRest[item.restaurant_number].push(item);
     }
+    // Only orders that have items
+    const restWithItems = new Set(items.map(i => i.restaurant_number));
+    const filteredOrders = orders.filter(o => restWithItems.has(o.restaurant_number));
 
-    // Формат: всё списком
-    // Дата доставки | № ресторана | Адрес | Время доставки | № заказа | Артикул — Название | Кол-во (кор.)
-    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа', 'Внешний код'];
+    const wb = XLSX.utils.book_new();
 
-    function buildRows(orders, items, byRest) {
-      const rows = [header];
-      const sorted = [...orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
+    const totals = exportShowTotals.value;
+
+    if (exportGrouping.value === 'list') {
+      // Main sheet with all orders
+      const { rows, subtotalRows } = buildExportRows(filteredOrders, byRest, restInfoMap, selectedDate.value, totals);
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      styleExportSheet(ws, rows.length, subtotalRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Все заказы');
+      // Additional sheet per restaurant
+      const sorted = [...filteredOrders].sort((a, b) => a.restaurant_number - b.restaurant_number);
       for (const order of sorted) {
         const oi = byRest[order.restaurant_number] || [];
         if (!oi.length) continue;
-        const ri = restInfo[order.restaurant_number] || {};
-        const addr = ri.address || ri.city || '';
-        const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
-        oi.sort((a, b) => a.category.localeCompare(b.category) || a.product_name.localeCompare(b.product_name));
-        for (const item of oi) {
-          const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
-          const qty = parseFloat(item.quantity) || 0;
-          const bpp2 = parseFloat(item.boxes_per_pallet) || 0;
-          rows.push([
-            selectedDate.value, order.restaurant_number, addr,
-            ri.delivery_time || '', ordNum, item.category,
-            productCol, qty,
-            item.weight_netto ? qty * parseFloat(item.weight_netto) : '',
-            item.weight_brutto ? qty * parseFloat(item.weight_brutto) : '',
-            bpp2 > 0 ? +(qty / bpp2).toFixed(2) : '',
-            item.external_code || '',
-          ]);
+        const r = buildExportRows([order], { [order.restaurant_number]: oi }, restInfoMap, selectedDate.value, true);
+        const wsR = XLSX.utils.aoa_to_sheet(r.rows);
+        styleExportSheet(wsR, r.rows.length, r.subtotalRows);
+        XLSX.utils.book_append_sheet(wb, wsR, `Рест ${order.restaurant_number}`.slice(0, 31));
+      }
+    } else if (exportGrouping.value === 'restaurants') {
+      const sorted = [...filteredOrders].sort((a, b) => a.restaurant_number - b.restaurant_number);
+      for (const order of sorted) {
+        const oi = byRest[order.restaurant_number] || [];
+        if (!oi.length) continue;
+        const { rows, subtotalRows } = buildExportRows([order], { [order.restaurant_number]: oi }, restInfoMap, selectedDate.value, totals);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        styleExportSheet(ws, rows.length, subtotalRows);
+        XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`.slice(0, 31));
+      }
+    } else if (exportGrouping.value === 'categories') {
+      for (const cat of ['Сухой', 'Холод', 'Мороз']) {
+        const catItems = items.filter(i => i.category === cat);
+        if (!catItems.length) continue;
+        const catByRest = {};
+        for (const item of catItems) {
+          if (!catByRest[item.restaurant_number]) catByRest[item.restaurant_number] = [];
+          catByRest[item.restaurant_number].push(item);
         }
+        const catRestNums = new Set(catItems.map(i => i.restaurant_number));
+        const catOrders = filteredOrders.filter(o => catRestNums.has(o.restaurant_number));
+        const { rows, subtotalRows } = buildExportRows(catOrders, catByRest, restInfoMap, selectedDate.value, totals);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        styleExportSheet(ws, rows.length, subtotalRows);
+        XLSX.utils.book_append_sheet(wb, ws, cat);
       }
-      return rows;
     }
 
-    function styleSheet(ws, rowCount) {
-      const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
-      for (let c = 0; c < header.length; c++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
-        if (cell) cell.s = hStyle;
-      }
-      ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 14 }];
-      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: header.length - 1 } }) };
-    }
-
-    // Общий лист
-    const allRows = buildRows(data.orders, data.items, byRest);
-    const wsAll = XLSX.utils.aoa_to_sheet(allRows);
-    styleSheet(wsAll, allRows.length);
-    XLSX.utils.book_append_sheet(wb, wsAll, 'Все заказы');
-
-    // Отдельный лист на каждый ресторан
-    const sorted = [...data.orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
-    for (const order of sorted) {
-      const oi = byRest[order.restaurant_number] || [];
-      if (!oi.length) continue;
-      const restRows = buildRows([order], oi, { [order.restaurant_number]: oi });
-      const ws = XLSX.utils.aoa_to_sheet(restRows);
-      styleSheet(ws, restRows.length);
-      XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`.slice(0, 31));
-    }
-
-    const fileName = `Заказы_ресторанов_${selectedDate.value}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    XLSX.writeFile(wb, `Заказы_ресторанов_${selectedDate.value}.xlsx`);
+    showExportModal.value = false;
   } catch (e) {
     alert('Ошибка экспорта: ' + e.message);
   } finally {
-    exporting.value = false;
+    exportExporting.value = false;
   }
 }
 
@@ -911,96 +1166,6 @@ function formatTime(dt) {
   return new Date(dt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ═══ Filtered export (logic) ═══
-const filtExpFiltered = computed(() => {
-  let list = filtExpProducts.value;
-  if (filtExpCatFilter.value) list = list.filter(p => p.category === filtExpCatFilter.value);
-  if (filtExpSearch.value) {
-    const q = filtExpSearch.value.toLowerCase();
-    list = list.filter(p => p.product_name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
-  }
-  return list;
-});
-
-function filtExpToggle(sku) {
-  const s = new Set(filtExpSelected.value);
-  if (s.has(sku)) s.delete(sku); else s.add(sku);
-  filtExpSelected.value = s;
-}
-function filtExpSelectAll() {
-  const s = new Set(filtExpSelected.value);
-  for (const p of filtExpFiltered.value) s.add(p.sku);
-  filtExpSelected.value = s;
-}
-function filtExpSelectNone() { filtExpSelected.value = new Set(); }
-
-async function openFilteredExport() {
-  showFilteredExport.value = true;
-  filtExpLoading.value = true;
-  filtExpSearch.value = '';
-  filtExpCatFilter.value = '';
-  try {
-    const data = await store.adminGetExportData('all', selectedDate.value);
-    filtExpData = data;
-    // Уникальные товары из позиций
-    const map = {};
-    for (const item of data.items) {
-      if (!map[item.sku]) map[item.sku] = { sku: item.sku, product_name: item.product_name, category: item.category };
-    }
-    filtExpProducts.value = Object.values(map).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.product_name.localeCompare(b.product_name));
-    // По умолчанию все выбраны
-    filtExpSelected.value = new Set(filtExpProducts.value.map(p => p.sku));
-  } catch (e) { alert('Ошибка: ' + e.message); }
-  finally { filtExpLoading.value = false; }
-}
-
-async function doFilteredExport() {
-  if (!filtExpData || !filtExpSelected.value.size) return;
-  filtExpExporting.value = true;
-  try {
-    const XLSX = (await import('xlsx-js-style')).default || await import('xlsx-js-style');
-    const wb = XLSX.utils.book_new();
-    const skus = filtExpSelected.value;
-
-    const restInfo = {};
-    for (const o of filtExpData.orders) { restInfo[o.restaurant_number] = o; }
-    const byRest = {};
-    for (const item of filtExpData.items) {
-      if (!skus.has(item.sku)) continue;
-      if (!byRest[item.restaurant_number]) byRest[item.restaurant_number] = [];
-      byRest[item.restaurant_number].push(item);
-    }
-
-    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа', 'Внешний код'];
-    const rows = [header];
-    const sorted = [...filtExpData.orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
-    for (const order of sorted) {
-      const oi = byRest[order.restaurant_number] || [];
-      if (!oi.length) continue;
-      const ri = restInfo[order.restaurant_number] || {};
-      const addr = ri.address || ri.city || '';
-      const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
-      oi.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
-      for (const item of oi) {
-        const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
-        const qty = parseFloat(item.quantity) || 0;
-        const bpp3 = parseFloat(item.boxes_per_pallet) || 0;
-        rows.push([selectedDate.value, order.restaurant_number, addr, ri.delivery_time || '', ordNum, item.category, productCol, qty,
-          item.weight_netto ? qty * parseFloat(item.weight_netto) : '', item.weight_brutto ? qty * parseFloat(item.weight_brutto) : '', bpp3 > 0 ? +(qty / bpp3).toFixed(2) : '', item.external_code || '']);
-      }
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
-    for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
-    ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 14 }];
-    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: header.length - 1 } }) };
-    XLSX.utils.book_append_sheet(wb, ws, 'Выборочный заказ');
-    XLSX.writeFile(wb, `Заказы_выборка_${selectedDate.value}.xlsx`);
-    showFilteredExport.value = false;
-  } catch (e) { alert('Ошибка: ' + e.message); }
-  finally { filtExpExporting.value = false; }
-}
 </script>
 
 <style scoped>
@@ -1158,7 +1323,8 @@ async function doFilteredExport() {
 .rom-no-items { padding: 20px; text-align: center; color: #8b7355; font-size: 13px; }
 
 /* Order edit */
-.rom-order-meta { display: flex; gap: 20px; margin-bottom: 16px; font-size: 14px; color: #502314; }
+.rom-order-meta { display: flex; gap: 20px; margin-bottom: 16px; font-size: 14px; color: #502314; flex-wrap: wrap; }
+.rom-meta-edited { font-size: 12px; color: #8b7355; }
 .rom-cat-title { font-size: 14px; color: #D62300; margin: 16px 0 8px; }
 .rom-table-edit td { padding: 4px 8px; }
 .rom-edit-qty {
@@ -1247,4 +1413,39 @@ async function doFilteredExport() {
 .rom-td-actions { display: flex; gap: 4px; }
 .rom-btn-export-sm { color: #16a34a; border-color: #16a34a; }
 .rom-btn-export-sm:hover { background: #f0fdf4; }
+
+/* Unified export modal */
+.rom-exp-section-title {
+  font-size: 14px; font-weight: 700; color: #502314;
+  margin: 16px 0 10px; padding: 0;
+}
+.rom-exp-section-title:first-child { margin-top: 0; }
+.rom-exp-clickable { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.rom-exp-chevron { font-size: 10px; transition: transform 0.2s; }
+.rom-exp-chevron.open { transform: rotate(180deg); }
+.rom-exp-grouping { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.rom-exp-grouping-opt {
+  padding: 8px 16px; border-radius: 8px; border: 2px solid #e0d5c8;
+  background: white; cursor: pointer; font-size: 13px; font-family: inherit;
+  font-weight: 600; color: #502314; transition: all 0.2s;
+}
+.rom-exp-grouping-opt.active { background: #502314; color: white; border-color: #502314; }
+.rom-exp-grouping-opt:hover:not(.active) { background: #f5f0eb; }
+.rom-exp-filter-group { margin-bottom: 14px; }
+.rom-exp-filter-label { font-size: 13px; font-weight: 600; color: #8b7355; margin-bottom: 6px; display: block; }
+.rom-exp-checkboxes { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.rom-exp-cb-label { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #502314; cursor: pointer; }
+.rom-exp-select-list { max-height: 200px; overflow-y: auto; border: 1px solid #ede8e3; border-radius: 8px; }
+.rom-exp-select-list-tall { max-height: 300px; }
+.rom-exp-select-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-bottom: 1px solid #f3eeea; cursor: pointer; font-size: 13px;
+}
+.rom-exp-select-item:hover { background: #faf7f4; }
+.rom-exp-select-item.selected { background: #f0fdf4; }
+.rom-exp-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-top: 1px solid #ede8e3;
+}
+.rom-exp-summary { font-size: 13px; color: #502314; }
 </style>
