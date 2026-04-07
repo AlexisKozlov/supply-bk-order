@@ -2023,7 +2023,7 @@ input[type="number"]:focus {
 .or-table tbody tr:hover { background: rgba(255,135,51,.04); }
 .or-table tbody tr:last-child td { border-bottom: none; }
 .or-num { color: var(--text-muted); font-size: 10px; width: 30px; }
-.or-sku { color: var(--text-muted); font-size: 11px; font-family: monospace; }
+.or-sku { color: var(--text-muted); font-size: 11px; margin-right: 4px; }
 .or-name { font-weight: 600; color: var(--text); }
 .or-qty { font-weight: 700; color: #D62700; text-align: right; white-space: nowrap; }
 

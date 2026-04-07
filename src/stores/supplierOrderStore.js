@@ -178,6 +178,13 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  async function adminUpdateQty(params) {
+    return api('admin/update-qty', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
   async function adminGetExport(supplierId, date) {
     const data = await api(`admin/export?supplier_id=${supplierId}&date=${date}`);
     return data;
@@ -193,6 +200,6 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminCreateSession, adminAutoSession, adminCloseSession, adminReopenSession, adminDeleteSession, adminUpdateSession, adminGetSessions,
     adminGetSchedules, adminSaveSchedules,
     adminGetTemplates, adminSaveTemplates,
-    adminGetExport,
+    adminUpdateQty, adminGetExport,
   };
 });

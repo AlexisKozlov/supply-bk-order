@@ -31,13 +31,12 @@
         <div class="sm-table-wrap">
           <table class="sm-table">
             <thead>
-              <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
+              <tr><th>#</th><th>Товар</th><th>Коробки</th><th>Штуки</th></tr>
             </thead>
             <tbody>
               <tr v-for="(l, idx) in lines" :key="l.sku || idx">
                 <td class="sm-num">{{ idx + 1 }}</td>
-                <td class="sm-sku">{{ l.sku || '—' }}</td>
-                <td class="sm-name">{{ l.name }}</td>
+                <td class="sm-name"><span v-if="l.sku" class="sm-sku">{{ l.sku }}</span> {{ l.name }}</td>
                 <td class="sm-qty">{{ l.boxes }}</td>
                 <td class="sm-qty">{{ nf.format(l.pieces) }}</td>
               </tr>
@@ -152,7 +151,7 @@ watch(() => props.saving, (v) => { if (!v) _confirmed = false; });
 .sm-table tbody td { padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
 .sm-table tbody tr:last-child td { border-bottom: none; }
 .sm-num { width: 28px; color: var(--text-muted); font-size: 11px; }
-.sm-sku { width: 70px; font-weight: 600; color: var(--text-muted); font-size: 11px; }
+.sm-sku { font-weight: 600; color: var(--text-muted); font-size: 11px; margin-right: 4px; }
 .sm-name { color: var(--text); }
 .sm-qty { width: 60px; text-align: right; font-weight: 700; color: var(--bk-brown); }
 

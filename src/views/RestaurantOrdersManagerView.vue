@@ -63,10 +63,13 @@
         </div>
       </div>
 
-      <!-- Export button -->
+      <!-- Export + refresh -->
       <div class="rom-export-row">
         <button class="rom-btn rom-btn-export" @click="exportExcel()" :disabled="exporting">
           {{ exporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
+        </button>
+        <button class="rom-btn" @click="loadStatus" :disabled="loading">
+          {{ loading ? 'Обновление...' : 'Обновить' }}
         </button>
       </div>
 
@@ -98,9 +101,12 @@
               <td>{{ r.item_count || '—' }}</td>
               <td>{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
               <td class="rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
-              <td>
+              <td class="rom-td-actions">
                 <button v-if="r.order_id" class="rom-btn-sm" @click="viewOrder(r.order_id)">
                   Открыть
+                </button>
+                <button v-if="r.order_id" class="rom-btn-sm rom-btn-export-sm" @click="quickExportOrder(r.order_id, r.number)">
+                  Excel
                 </button>
               </td>
             </tr>
@@ -146,8 +152,7 @@
             <thead>
               <tr>
                 <th style="width:40px">#</th>
-                <th style="width:90px">Артикул</th>
-                <th>Название</th>
+                <th>Товар</th>
                 <th style="width:80px">Кратность</th>
                 <th style="width:50px"></th>
               </tr>
@@ -155,8 +160,7 @@
             <tbody>
               <tr v-for="(item, idx) in filteredTemplateItems" :key="item.sku">
                 <td class="rom-td-num">{{ idx + 1 }}</td>
-                <td class="rom-td-sku-tpl">{{ item.sku }}</td>
-                <td>{{ item.product_name }}</td>
+                <td><span class="rom-sku-label">{{ item.sku }}</span> {{ item.product_name }}</td>
                 <td>
                   <input v-model.number="item.multiplicity" type="number" min="1" class="rom-tpl-mult-input" />
                 </td>
@@ -220,12 +224,13 @@
             <h3 class="rom-cat-title">{{ cat }}</h3>
             <table class="rom-table rom-table-edit" v-if="getEditItems(cat).length">
               <thead>
-                <tr><th>Артикул</th><th>Название</th><th>Кол-во</th><th>Комментарий</th><th></th></tr>
+                <tr><th>Товар</th><th>Кол-во</th><th>Комментарий</th><th></th></tr>
               </thead>
               <tbody>
                 <tr v-for="(item, idx) in getEditItems(cat)" :key="idx">
-                  <td>{{ item.sku }}</td>
-                  <td>{{ item.product_name }}</td>
+                  <td class="rom-edit-product" @click="openReplaceProduct(item)" title="Нажмите, чтобы заменить товар">
+                    <span class="rom-edit-sku">{{ item.sku }}</span> {{ item.product_name }}
+                  </td>
                   <td><input v-model.number="item.quantity" type="number" min="0" step="0.5" class="rom-edit-qty" /></td>
                   <td><input v-model="item.comment" type="text" class="rom-edit-comment" /></td>
                   <td><button class="rom-btn-sm rom-btn-danger" @click="removeEditItem(item)">X</button></td>
@@ -233,6 +238,7 @@
               </tbody>
             </table>
             <div v-else class="rom-no-items">Нет позиций</div>
+            <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(cat)">+ Добавить товар</button>
           </div>
 
           <div class="rom-modal-footer">
@@ -247,6 +253,35 @@
               {{ saving ? 'Сохранение...' : 'Сохранить изменения' }}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Order add/replace product modal -->
+    <div v-if="showOrderAddModal" class="rom-modal-overlay" @click.self="showOrderAddModal = false">
+      <div class="rom-modal">
+        <div class="rom-modal-header">
+          <h2>{{ replacingItem ? 'Заменить товар' : 'Добавить товар' }}</h2>
+          <button class="rom-modal-close" @click="showOrderAddModal = false">X</button>
+        </div>
+        <div class="rom-modal-body">
+          <input
+            v-model="orderAddSearch"
+            type="text"
+            placeholder="Поиск по названию или артикулу..."
+            class="rom-input"
+            style="width:100%;margin-bottom:12px"
+            @input="doOrderAddSearch"
+          />
+          <div v-if="orderAddResults.length" style="max-height:400px;overflow-y:auto">
+            <div v-for="p in orderAddResults" :key="p.sku" class="rom-tpl-add-row" @click="pickOrderProduct(p)">
+              <span class="rom-td-sku-tpl">{{ p.sku }}</span>
+              <span style="flex:1">{{ p.name }}</span>
+              <span class="rom-add-cat">{{ p.category }}</span>
+            </div>
+          </div>
+          <div v-else-if="orderAddSearch.length >= 2" class="rom-no-items">Ничего не найдено</div>
+          <div v-else class="rom-no-items">Введите минимум 2 символа</div>
         </div>
       </div>
     </div>
@@ -290,7 +325,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import * as XLSX from 'xlsx-js-style';
 
@@ -316,6 +351,9 @@ const bulkPassword = ref('');
 const usersCount = ref(null);
 const usersList = ref([]);
 
+// Auto-refresh
+let refreshInterval = null;
+
 // Page tabs
 const pageTab = ref('orders');
 
@@ -331,6 +369,13 @@ const showTplAddModal = ref(false);
 const tplAddSearch = ref('');
 const tplAddResults = ref([]);
 const tplAddTimer = ref(null);
+
+// Order item add/replace
+const showOrderAddModal = ref(false);
+const orderAddSearch = ref('');
+const orderAddResults = ref([]);
+const orderAddTimer = ref(null);
+const replacingItem = ref(null); // если не null — режим замены товара
 
 const filteredTemplateItems = computed(() => {
   let items = fullTemplateItems.value.filter(i => i.category === tplCategory.value);
@@ -351,7 +396,25 @@ const deadlineLabel = computed(() => {
 onMounted(async () => {
   setTomorrow();
   await loadStatus();
+  startAutoRefresh();
 });
+
+onUnmounted(() => {
+  stopAutoRefresh();
+});
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshInterval = setInterval(() => {
+    if (pageTab.value === 'orders' && !showOrderModal.value) {
+      loadStatus();
+    }
+  }, 60000);
+}
+
+function stopAutoRefresh() {
+  if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+}
 
 function setTomorrow() {
   const d = new Date();
@@ -421,6 +484,51 @@ function getEditItems(cat) {
 
 function removeEditItem(item) {
   editItems.value = editItems.value.filter(i => i !== item);
+}
+
+function openOrderAddProduct(category) {
+  replacingItem.value = null;
+  orderAddSearch.value = '';
+  orderAddResults.value = [];
+  showOrderAddModal.value = true;
+}
+
+function openReplaceProduct(item) {
+  replacingItem.value = item;
+  orderAddSearch.value = '';
+  orderAddResults.value = [];
+  showOrderAddModal.value = true;
+}
+
+function doOrderAddSearch() {
+  clearTimeout(orderAddTimer.value);
+  if (!orderAddSearch.value || orderAddSearch.value.length < 2) { orderAddResults.value = []; return; }
+  orderAddTimer.value = setTimeout(async () => {
+    try {
+      const products = await store.adminSearchProducts('ООО "Бургер БК"', orderAddSearch.value);
+      const existing = new Set(editItems.value.map(i => i.sku));
+      if (replacingItem.value) existing.delete(replacingItem.value.sku);
+      orderAddResults.value = products.filter(p => !existing.has(p.sku));
+    } catch { orderAddResults.value = []; }
+  }, 300);
+}
+
+function pickOrderProduct(product) {
+  if (replacingItem.value) {
+    replacingItem.value.sku = product.sku;
+    replacingItem.value.product_name = product.name || product.product_name;
+    replacingItem.value.category = product.category || replacingItem.value.category;
+    replacingItem.value = null;
+  } else {
+    editItems.value.push({
+      sku: product.sku,
+      product_name: product.name || product.product_name,
+      category: product.category || 'Сухой',
+      quantity: 1,
+      comment: '',
+    });
+  }
+  showOrderAddModal.value = false;
 }
 
 async function saveEditedOrder() {
@@ -530,7 +638,7 @@ function doTplAddSearch() {
   if (!tplAddSearch.value || tplAddSearch.value.length < 2) { tplAddResults.value = []; return; }
   tplAddTimer.value = setTimeout(async () => {
     try {
-      const products = await store.loadProducts(null, tplAddSearch.value);
+      const products = await store.adminSearchProducts(tplLegalEntity.value, tplAddSearch.value);
       const existing = new Set(fullTemplateItems.value.map(i => i.sku));
       tplAddResults.value = products.filter(p => !existing.has(p.sku));
     } catch { tplAddResults.value = []; }
@@ -548,24 +656,42 @@ function addToTemplate(product) {
   showTplAddModal.value = false;
 }
 
-function exportSingleOrder(order) {
-  if (!order || !editItems.value.length) return;
+function buildSingleOrderXlsx(order, items) {
   const wb = XLSX.utils.book_new();
-  const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Артикул', 'Товар', 'Количество'];
+  const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество'];
   const rows = [header];
   const addr = order.address || order.city || '';
   const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
-  const items = editItems.value.filter(i => i.quantity > 0);
-  items.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
-  for (const item of items) {
-    rows.push([order.delivery_date, order.restaurant_number, addr, '', ordNum, item.category, item.sku, item.product_name, parseFloat(item.quantity) || 0]);
+  const sorted = items.filter(i => i.quantity > 0);
+  sorted.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
+  for (const item of sorted) {
+    const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
+    rows.push([order.delivery_date || selectedDate.value, order.restaurant_number, addr, '', ordNum, item.category, productCol, parseFloat(item.quantity) || 0]);
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
   for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
-  ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 40 }, { wch: 12 }];
+  ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`);
+  return wb;
+}
+
+function exportSingleOrder(order) {
+  if (!order || !editItems.value.length) return;
+  const wb = buildSingleOrderXlsx(order, editItems.value);
   XLSX.writeFile(wb, `Заказ_рест_${order.restaurant_number}_${order.delivery_date}.xlsx`);
+}
+
+async function quickExportOrder(orderId, restaurantNumber) {
+  try {
+    const order = await store.adminGetOrder(orderId);
+    const items = (order.items || []).map(i => ({ ...i, quantity: parseFloat(i.quantity) || 0 }));
+    if (!items.length) { alert('Заказ пуст'); return; }
+    const wb = buildSingleOrderXlsx(order, items);
+    XLSX.writeFile(wb, `Заказ_рест_${restaurantNumber}_${selectedDate.value}.xlsx`);
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
 }
 
 function copyRoLink() {
@@ -606,7 +732,7 @@ async function exportExcel() {
 
     // Формат: всё списком
     // Дата доставки | № ресторана | Адрес | Время доставки | № заказа | Артикул — Название | Кол-во (кор.)
-    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Артикул', 'Товар', 'Количество'];
+    const header = ['Дата доставки', '№ ресторана', 'Адрес ресторана', 'Время доставки', '№ заказа', 'Хранение', 'Товар', 'Количество'];
 
     function buildRows(orders, items, byRest) {
       const rows = [header];
@@ -619,10 +745,11 @@ async function exportExcel() {
         const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
         oi.sort((a, b) => a.category.localeCompare(b.category) || a.product_name.localeCompare(b.product_name));
         for (const item of oi) {
+          const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
           rows.push([
             selectedDate.value, order.restaurant_number, addr,
             ri.delivery_time || '', ordNum, item.category,
-            item.sku, item.product_name, parseFloat(item.quantity) || 0,
+            productCol, parseFloat(item.quantity) || 0,
           ]);
         }
       }
@@ -635,7 +762,7 @@ async function exportExcel() {
         const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
         if (cell) cell.s = hStyle;
       }
-      ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 40 }, { wch: 12 }];
+      ws['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 50 }, { wch: 12 }];
       ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: header.length - 1 } }) };
     }
 
@@ -884,7 +1011,7 @@ function formatTime(dt) {
   margin-bottom: 12px; background: #fef2f2; color: #dc2626;
 }
 .rom-tpl-msg.success { background: #ecfdf5; color: #16a34a; }
-.rom-td-sku-tpl { font-size: 12px; color: #8b7355; font-family: monospace; }
+.rom-sku-label { font-size: 11px; color: #8b7355; margin-right: 4px; }
 .rom-tpl-mult-input {
   width: 60px; padding: 4px 6px; border: 1px solid #e0d5c8;
   border-radius: 6px; font-size: 13px; text-align: center;
@@ -901,4 +1028,22 @@ function formatTime(dt) {
 .rom-tpl-add-row:hover { background: #f5f0eb; border-color: #D62300; }
 .rom-add-cat { font-size: 11px; color: #8b7355; background: #f5f0eb; padding: 2px 8px; border-radius: 4px; }
 .rom-mult-badge { background: #eff6ff; color: #2563eb; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+
+/* Order edit: clickable product name */
+.rom-edit-product {
+  cursor: pointer; transition: background 0.15s; border-radius: 4px; padding: 4px 6px;
+}
+.rom-edit-product:hover { background: #f5f0eb; }
+.rom-edit-sku { color: #8b7355; font-size: 11px; font-family: monospace; margin-right: 4px; }
+
+/* Add item button under category */
+.rom-btn-add-item {
+  margin-top: 6px; color: #16a34a; border-color: #16a34a;
+}
+.rom-btn-add-item:hover { background: #f0fdf4; }
+
+/* Quick export button in table */
+.rom-td-actions { display: flex; gap: 4px; }
+.rom-btn-export-sm { color: #16a34a; border-color: #16a34a; }
+.rom-btn-export-sm:hover { background: #f0fdf4; }
 </style>

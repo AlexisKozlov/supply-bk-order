@@ -249,13 +249,12 @@
           <div class="or-table-wrap">
             <table class="or-table">
               <thead>
-                <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th><th v-if="orderResultTotalSum > 0">Сумма</th></tr>
+                <tr><th>#</th><th>Товар</th><th>Коробки</th><th>Штуки</th><th v-if="orderResultTotalSum > 0">Сумма</th></tr>
               </thead>
               <tbody>
                 <tr v-for="(l, idx) in orderResultModal.lines" :key="l.sku || idx">
                   <td class="or-num">{{ idx + 1 }}</td>
-                  <td class="or-sku">{{ l.sku || '—' }}</td>
-                  <td class="or-name">{{ l.name }}</td>
+                  <td class="or-name"><span v-if="l.sku" class="or-sku">{{ l.sku }}</span> {{ l.name }}</td>
                   <td class="or-qty">{{ l.boxes }}</td>
                   <td class="or-qty">{{ nf.format(l.pieces) }}</td>
                   <td v-if="orderResultTotalSum > 0" class="or-qty">{{ getLineSum(l) }}</td>

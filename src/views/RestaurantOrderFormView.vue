@@ -133,8 +133,7 @@
           <table v-if="filteredItems.length" class="ro-table">
             <thead>
               <tr>
-                <th class="ro-th-sku">Артикул</th>
-                <th class="ro-th-name">Название</th>
+                <th class="ro-th-name">Товар</th>
                 <th class="ro-th-mult">Кратн.</th>
                 <th class="ro-th-qty">Кол-во (кор.)</th>
                 <th class="ro-th-comment">Комментарий</th>
@@ -146,8 +145,7 @@
                 v-for="item in filteredItems" :key="item.sku"
                 :class="{ 'ro-row-filled': item.quantity > 0, 'ro-row-error': item._multError }"
               >
-                <td class="ro-td-sku">{{ item.sku }}</td>
-                <td class="ro-td-name">{{ item.product_name }}</td>
+                <td class="ro-td-name"><span class="ro-sku-label">{{ item.sku }}</span> {{ item.product_name }}</td>
                 <td class="ro-td-mult">
                   <span v-if="item.multiplicity > 1" class="ro-mult-badge">{{ item.multiplicity }}</span>
                 </td>
@@ -649,15 +647,15 @@ async function exportExcel() {
   const XLSX = await import('xlsx-js-style');
   const wb = XLSX.utils.book_new();
 
-  const header = ['Артикул', 'Название', 'Категория', 'Кратность', 'Кол-во (кор.)', 'Комментарий'];
+  const header = ['Товар', 'Категория', 'Кратность', 'Кол-во (кор.)', 'Комментарий'];
   const rows = [header];
 
   for (const cat of categories) {
     const items = orderItems.value.filter(i => i.category === cat);
     for (const item of items) {
+      const product = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
       rows.push([
-        item.sku,
-        item.product_name,
+        product,
         item.category,
         item.multiplicity > 1 ? item.multiplicity : '',
         item.quantity > 0 ? item.quantity : '',
@@ -815,7 +813,7 @@ function formatDateShort(d) {
 .ro-th-qty { width: 120px; }
 .ro-th-comment { width: 140px; }
 .ro-th-actions { width: 36px; }
-.ro-td-sku { font-size: 11px; color: #8b7355; }
+.ro-sku-label { font-size: 11px; color: #8b7355; margin-right: 4px; }
 .ro-td-mult { text-align: center; }
 .ro-mult-badge { background: #eff6ff; color: #2563eb; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 .ro-row-filled { background: #f0fdf4; }
@@ -917,7 +915,7 @@ function formatDateShort(d) {
     border-bottom: 1px solid #f0ebe4;
   }
   .ro-table td { padding: 0; border: none; }
-  .ro-td-sku { font-size: 10px; color: #8b7355; }
+  .ro-sku-label { font-size: 10px; }
   .ro-td-name { flex: 1 1 100%; font-size: 13px; font-weight: 500; order: -1; }
   .ro-td-mult { order: 1; }
   .ro-td-qty { order: 2; margin-left: auto; }

@@ -181,13 +181,12 @@
             <div class="drawer-body">
               <table class="ht-items-table" v-if="orderItemsFiltered(drawerOrder).length">
                 <thead>
-                  <tr><th>#</th><th>Артикул</th><th>Наименование</th><th>Коробки</th><th>Штуки</th></tr>
+                  <tr><th>#</th><th>Товар</th><th>Коробки</th><th>Штуки</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="(item, idx) in orderItemsFiltered(drawerOrder)" :key="item.sku || item.name">
                     <td class="ht-items-num">{{ idx + 1 }}</td>
-                    <td class="ht-items-sku">{{ item.sku || '—' }}</td>
-                    <td class="ht-items-name">{{ item.name }}</td>
+                    <td class="ht-items-name"><span v-if="item.sku" class="ht-items-sku">{{ item.sku }}</span> {{ item.name }}</td>
                     <td class="ht-items-qty">{{ Math.round(item.qty_boxes) }}</td>
                     <td class="ht-items-qty">{{ nf.format(Math.round(item.qty_boxes * (item.qty_per_box || 1))) }}</td>
                   </tr>
@@ -669,7 +668,7 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
 }
 .ht-items-table td { padding: 3px 8px; border-bottom: 1px solid var(--border-light); }
 .ht-items-num { width: 30px; color: var(--text-muted); font-size: 11px; }
-.ht-items-sku { font-weight: 600; color: var(--text-muted); font-size: 11px; width: 80px; }
+.ht-items-sku { font-weight: 600; color: var(--text-muted); font-size: 11px; margin-right: 4px; }
 .ht-items-name { color: var(--text); }
 .ht-items-qty { font-weight: 700; text-align: right; width: 60px; color: var(--bk-brown); }
 

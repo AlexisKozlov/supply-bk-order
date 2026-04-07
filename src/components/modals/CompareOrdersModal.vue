@@ -31,8 +31,7 @@
           <table class="compare-table">
             <thead>
               <tr>
-                <th>Артикул</th>
-                <th>Наименование</th>
+                <th>Товар</th>
                 <th class="ct-right">Заказ 1</th>
                 <th class="ct-right">Заказ 2</th>
                 <th class="ct-right">Разница</th>
@@ -40,8 +39,7 @@
             </thead>
             <tbody>
               <tr v-for="row in diffRows" :key="row.sku || row.name" :class="'ct-' + row.type">
-                <td class="ct-sku">{{ row.sku || '—' }}</td>
-                <td class="ct-name">{{ row.name }}</td>
+                <td class="ct-name"><span v-if="row.sku" class="ct-sku">{{ row.sku }}</span> {{ row.name }}</td>
                 <td class="ct-right">{{ row.qtyA ?? '—' }}</td>
                 <td class="ct-right">{{ row.qtyB ?? '—' }}</td>
                 <td class="ct-right ct-diff">
@@ -158,7 +156,7 @@ const stats = computed(() => {
 }
 .compare-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
 .ct-right { text-align: right; }
-.ct-sku { font-weight: 600; color: var(--text-muted); font-size: 11px; }
+.ct-sku { font-weight: 600; color: var(--text-muted); font-size: 11px; margin-right: 4px; }
 .ct-name { color: var(--text); }
 .ct-diff { font-weight: 700; }
 

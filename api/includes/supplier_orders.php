@@ -487,6 +487,27 @@ if ($soAction === 'admin') {
             ];
         }
 
+        // Товары из шаблонов (все юрлица)
+        $tplStmt = $pdo->prepare("
+            SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.product_id
+            FROM so_templates t
+            WHERE t.supplier_id = ? AND t.is_active = 1
+            ORDER BY t.sort_order, t.product_name
+        ");
+        $tplStmt->execute([$supplierId]);
+        $products = $tplStmt->fetchAll();
+
+        // Все позиции заявок для этой сессии + даты (для сводной таблицы)
+        $itemsStmt = $pdo->prepare("
+            SELECT o.restaurant_number, o.delivery_date,
+                   oi.sku, oi.product_name, oi.quantity, oi.admin_qty, oi.id as item_id, o.id as order_id
+            FROM so_orders o
+            JOIN so_order_items oi ON oi.order_id = o.id
+            WHERE o.session_id = ? AND o.delivery_date = ?
+        ");
+        $itemsStmt->execute([$session['id'], $date]);
+        $orderItems = $itemsStmt->fetchAll();
+
         soRespond([
             'session' => [
                 'id' => (int)$session['id'],
@@ -496,6 +517,8 @@ if ($soAction === 'admin') {
             ],
             'date' => $date,
             'restaurants' => $restaurants,
+            'products' => $products,
+            'order_items' => $orderItems,
             'stats' => ['total' => $total, 'submitted' => $submitted, 'pending' => $total - $submitted],
             'week_dates' => $weekDates,
         ]);
@@ -577,6 +600,61 @@ if ($soAction === 'admin') {
         }
 
         soRespond(['success' => true]);
+    }
+
+    // --- Обновление admin_qty для позиции ---
+    if ($adminAction === 'update-qty' && $method === 'POST') {
+        $itemId = $body['item_id'] ?? null;
+        $adminQty = $body['admin_qty'] ?? null;
+        // Альтернативный путь: создать запись если нет заказа (админ заполняет за ресторан)
+        $restNum = $body['restaurant_number'] ?? null;
+        $deliveryDate = $body['delivery_date'] ?? null;
+        $sku = $body['sku'] ?? null;
+        $productName = $body['product_name'] ?? null;
+        $sessionId = $body['session_id'] ?? null;
+        $suppId = $body['supplier_id'] ?? null;
+
+        $val = ($adminQty !== null && $adminQty !== '') ? (float)$adminQty : null;
+
+        if ($itemId) {
+            // Обновляем существующую позицию
+            $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $itemId]);
+            soRespond(['success' => true]);
+        } elseif ($restNum && $deliveryDate && $sku && $sessionId && $suppId) {
+            // Ищем заказ ресторана
+            $orderStmt = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+            $orderStmt->execute([$sessionId, $restNum, $deliveryDate]);
+            $order = $orderStmt->fetch();
+
+            if (!$order) {
+                // Создаём заказ за ресторан
+                $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
+                $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
+                $pdo->prepare("INSERT INTO so_orders (session_id, restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
+                    VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                    ->execute([$sessionId, $restNum, $suppId, $deliveryDate, $le]);
+                $orderId = $pdo->lastInsertId();
+            } else {
+                $orderId = $order['id'];
+            }
+
+            // Ищем позицию по SKU
+            $existingItem = $pdo->prepare("SELECT id FROM so_order_items WHERE order_id = ? AND sku = ?");
+            $existingItem->execute([$orderId, $sku]);
+            $item = $existingItem->fetch();
+
+            if ($item) {
+                $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $item['id']]);
+            } else {
+                // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе)
+                $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, 0, ?)")
+                    ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val]);
+            }
+
+            soRespond(['success' => true, 'reload' => true]);
+        } else {
+            soRespond(['error' => 'Недостаточно данных'], 400);
+        }
     }
 
     // --- Удаление заявки ---
@@ -811,7 +889,8 @@ if ($soAction === 'admin') {
         $s = $pdo->prepare("
             SELECT o.restaurant_number, o.status, o.submitted_at,
                    r.region, r.address,
-                   oi.sku, oi.product_name, oi.quantity
+                   oi.sku, oi.product_name, oi.quantity, oi.admin_qty,
+                   COALESCE(oi.admin_qty, oi.quantity) as effective_qty
             FROM so_orders o
             JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
             JOIN so_order_items oi ON oi.order_id = o.id
@@ -821,14 +900,14 @@ if ($soAction === 'admin') {
         $s->execute([$session['id'], $date]);
         $rows = $s->fetchAll();
 
-        // Сводка по товарам
+        // Сводка по товарам (используем admin_qty если есть)
         $summary = [];
         foreach ($rows as $row) {
             $key = $row['sku'];
             if (!isset($summary[$key])) {
                 $summary[$key] = ['sku' => $row['sku'], 'product_name' => $row['product_name'], 'total_qty' => 0, 'restaurant_count' => 0];
             }
-            $summary[$key]['total_qty'] += (float)$row['quantity'];
+            $summary[$key]['total_qty'] += (float)$row['effective_qty'];
             $summary[$key]['restaurant_count']++;
         }
 

@@ -193,6 +193,14 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  async function adminSearchProducts(legalEntity, search) {
+    const params = new URLSearchParams();
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    if (search) params.set('search', search);
+    const data = await api(`admin/products?${params}`);
+    return data.products || [];
+  }
+
   async function adminGetUsers() {
     const data = await api('admin/users');
     return data.users || [];
@@ -244,7 +252,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     login, loginByTelegram, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
-    adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock,
+    adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,
     adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword,
     adminGetExportData, adminGetSessions,
   };

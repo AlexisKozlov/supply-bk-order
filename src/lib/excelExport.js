@@ -205,13 +205,12 @@ export async function exportProductsToExcel(products, legalEntity) {
   const XLSX = await import('xlsx-js-style');
 
   const headerRow = [
-    'Артикул', 'Наименование', 'Поставщик', 'Шт/кор', 'Кор/пал',
+    'Товар', 'Поставщик', 'Шт/кор', 'Кор/пал',
     'Ед. измерения', 'Кратность', 'Группа аналогов', 'Хранение', 'Видимость',
   ];
 
   const dataRows = products.map(p => [
-    p.sku || '',
-    p.name || '',
+    p.sku ? `${p.sku}  ${p.name || ''}` : (p.name || ''),
     p.supplier || '',
     p.qty_per_box || '',
     p.boxes_per_pallet || '',
@@ -224,7 +223,7 @@ export async function exportProductsToExcel(products, legalEntity) {
 
   const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
   ws['!cols'] = [
-    { wch: 15 }, { wch: 40 }, { wch: 25 }, { wch: 8 }, { wch: 8 },
+    { wch: 50 }, { wch: 25 }, { wch: 8 }, { wch: 8 },
     { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 10 },
   ];
 
@@ -416,31 +415,31 @@ export async function exportAnalyticsToExcel(analyticsData, seasonalityData) {
   setCell(ws2, r, 0, `Топ товаров за ${period} дней`, sTitle);
   r += 2;
 
-  ['№', 'Артикул', 'Наименование', 'Коробок', 'Заказов', 'Δ к прошл.', 'Прогноз'].forEach((h, c) => {
-    setCell(ws2, r, c, h, c <= 2 ? sHeaderLeft : sHeader);
+  ['№', 'Товар', 'Коробок', 'Заказов', 'Δ к прошл.', 'Прогноз'].forEach((h, c) => {
+    setCell(ws2, r, c, h, c <= 1 ? sHeaderLeft : sHeader);
   });
   r++;
 
   analyticsData.topProducts.forEach((p, i) => {
     const stripe = i % 2 === 1;
+    const productLabel = p.sku ? `${p.sku}  ${p.name || ''}` : (p.name || '—');
     setCell(ws2, r, 0, i + 1, sRank(i));
-    setCell(ws2, r, 1, p.sku || '—', sCell(stripe));
-    setCell(ws2, r, 2, p.name || '—', { ...sCell(stripe), font: { bold: true, sz: 11, name: 'Calibri' } });
-    setCell(ws2, r, 3, Math.round(p.boxes), sCellNum(stripe));
-    setCell(ws2, r, 4, p.orders, sCellNum(stripe));
+    setCell(ws2, r, 1, productLabel, { ...sCell(stripe), font: { bold: true, sz: 11, name: 'Calibri' } });
+    setCell(ws2, r, 2, Math.round(p.boxes), sCellNum(stripe));
+    setCell(ws2, r, 3, p.orders, sCellNum(stripe));
     if (p.deltaBoxes !== null) {
-      setCell(ws2, r, 5, (p.deltaBoxes >= 0 ? '+' : '') + p.deltaBoxes + '%', sDelta(p.deltaBoxes, stripe));
+      setCell(ws2, r, 4, (p.deltaBoxes >= 0 ? '+' : '') + p.deltaBoxes + '%', sDelta(p.deltaBoxes, stripe));
     } else {
-      setCell(ws2, r, 5, '—', sCell(stripe));
+      setCell(ws2, r, 4, '—', sCell(stripe));
     }
-    setCell(ws2, r, 6, '~' + p.forecast, { ...sCellNum(stripe), font: { ...sCellNum(stripe).font, color: { rgb: blue } } });
+    setCell(ws2, r, 5, '~' + p.forecast, { ...sCellNum(stripe), font: { ...sCellNum(stripe).font, color: { rgb: blue } } });
     r++;
   });
 
-  setRef(ws2, r, 6);
-  ws2['!cols'] = [{ wch: 5 }, { wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+  setRef(ws2, r, 5);
+  ws2['!cols'] = [{ wch: 5 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
   ws2['!rows'] = [{ hpt: 24 }];
-  ws2['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+  ws2['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
   XLSX.utils.book_append_sheet(wb, ws2, 'Топ товаров');
 
   // ═══════════════════════════
@@ -945,7 +944,7 @@ export async function exportSupplierOrder(settings, items, priceMap) {
   }
 
   const hasPrices = priceMap && Object.keys(priceMap).length > 0;
-  const lastCol = hasPrices ? 5 : 3;
+  const lastCol = hasPrices ? 4 : 2;
 
   const ws = {};
   let r = 0;
@@ -966,12 +965,11 @@ export async function exportSupplierOrder(settings, items, priceMap) {
   // Шапка таблицы
   const headerRow = r;
   setCell(ws, r, 0, '№п/п', sHeader);
-  setCell(ws, r, 1, 'Артикул', sHeader);
-  setCell(ws, r, 2, 'Наименование', sHeaderLeft);
-  setCell(ws, r, 3, 'Кол-во (кор.)', sHeader);
+  setCell(ws, r, 1, 'Товар', sHeaderLeft);
+  setCell(ws, r, 2, 'Кол-во (кор.)', sHeader);
   if (hasPrices) {
-    setCell(ws, r, 4, 'Цена', sHeader);
-    setCell(ws, r, 5, 'Сумма', sHeader);
+    setCell(ws, r, 3, 'Цена', sHeader);
+    setCell(ws, r, 4, 'Сумма', sHeader);
   }
   r++;
 
@@ -990,10 +988,10 @@ export async function exportSupplierOrder(settings, items, priceMap) {
     const physBoxes = Math.round(accountingBoxes / mult);
 
     idx++;
+    const productLabel = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
     setCell(ws, r, 0, idx, sCellRight());
-    setCell(ws, r, 1, item.sku || '', sCell());
-    setCell(ws, r, 2, item.name || '', sCell());
-    setCell(ws, r, 3, physBoxes, sCellRight());
+    setCell(ws, r, 1, productLabel, sCell());
+    setCell(ws, r, 2, physBoxes, sCellRight());
 
     if (hasPrices) {
       const pi = priceMap[item.sku];
@@ -1004,12 +1002,12 @@ export async function exportSupplierOrder(settings, items, priceMap) {
         if (pi.unit_type === 'box') lineSum = price * physBoxes;
         else if (pi.unit_type === 'thousand') lineSum = price * pieces / 1000;
         else lineSum = price * pieces;
-        setCell(ws, r, 4, price, { ...sCellRight(), numFmt: '#,##0.00' });
-        setCell(ws, r, 5, lineSum, { ...sCellRight(), numFmt: '#,##0.00' });
+        setCell(ws, r, 3, price, { ...sCellRight(), numFmt: '#,##0.00' });
+        setCell(ws, r, 4, lineSum, { ...sCellRight(), numFmt: '#,##0.00' });
         totalSum += lineSum;
       } else {
+        setCell(ws, r, 3, '', sCell());
         setCell(ws, r, 4, '', sCell());
-        setCell(ws, r, 5, '', sCell());
       }
     }
 
@@ -1020,12 +1018,11 @@ export async function exportSupplierOrder(settings, items, priceMap) {
   // ИТОГО
   if (idx > 0) {
     setCell(ws, r, 0, '', sTotalLabel);
-    setCell(ws, r, 1, '', sTotalLabel);
-    setCell(ws, r, 2, 'ИТОГО:', sTotalLabel);
-    setCell(ws, r, 3, totalBoxes, sTotalVal);
+    setCell(ws, r, 1, 'ИТОГО:', sTotalLabel);
+    setCell(ws, r, 2, totalBoxes, sTotalVal);
     if (hasPrices) {
-      setCell(ws, r, 4, '', sTotalLabel);
-      setCell(ws, r, 5, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
+      setCell(ws, r, 3, '', sTotalLabel);
+      setCell(ws, r, 4, totalSum, { ...sTotalVal, numFmt: '#,##0.00' });
       r++;
       // НДС
       let totalVat = 0;
@@ -1045,18 +1042,16 @@ export async function exportSupplierOrder(settings, items, priceMap) {
         totalVat += ls * ((pi.vat_rate ?? 20) / 100);
       });
       setCell(ws, r, 0, '', sTotalLabel);
-      setCell(ws, r, 1, '', sTotalLabel);
-      setCell(ws, r, 2, 'НДС:', sTotalLabel);
+      setCell(ws, r, 1, 'НДС:', sTotalLabel);
+      setCell(ws, r, 2, '', sTotalLabel);
       setCell(ws, r, 3, '', sTotalLabel);
-      setCell(ws, r, 4, '', sTotalLabel);
-      setCell(ws, r, 5, totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
+      setCell(ws, r, 4, totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
       r++;
       setCell(ws, r, 0, '', sTotalLabel);
-      setCell(ws, r, 1, '', sTotalLabel);
-      setCell(ws, r, 2, 'ИТОГО С НДС:', sTotalLabel);
+      setCell(ws, r, 1, 'ИТОГО С НДС:', sTotalLabel);
+      setCell(ws, r, 2, '', sTotalLabel);
       setCell(ws, r, 3, '', sTotalLabel);
-      setCell(ws, r, 4, '', sTotalLabel);
-      setCell(ws, r, 5, totalSum + totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
+      setCell(ws, r, 4, totalSum + totalVat, { ...sTotalVal, numFmt: '#,##0.00' });
     }
     r++;
   }
@@ -1068,8 +1063,8 @@ export async function exportSupplierOrder(settings, items, priceMap) {
   // Диапазон, ширины, мержи
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r - 1, c: lastCol } });
   ws['!cols'] = hasPrices
-    ? [{ wch: 5 }, { wch: 15 }, { wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 15 }]
-    : [{ wch: 5 }, { wch: 15 }, { wch: 30 }, { wch: 12 }];
+    ? [{ wch: 5 }, { wch: 45 }, { wch: 12 }, { wch: 12 }, { wch: 15 }]
+    : [{ wch: 5 }, { wch: 45 }, { wch: 12 }];
   ws['!rows'] = [{ hpt: 22 }];
   // Мержи для заголовочных строк
   for (let mr = 0; mr <= 4; mr++) {
@@ -1130,10 +1125,10 @@ export function printSupplierOrder(settings, items, priceMap) {
       }
     }
 
+    const productHtml = item.sku ? `<span style="color:#888;font-size:11px;">${escapeHtml(item.sku)}</span> ${escapeHtml(item.name)}` : escapeHtml(item.name);
     return `<tr>
       <td style="text-align:center;">${idx + 1}</td>
-      <td>${escapeHtml(item.sku)}</td>
-      <td>${escapeHtml(item.name)}</td>
+      <td>${productHtml}</td>
       <td class="right">${physBoxes}</td>
       ${priceTd}${sumTd}
     </tr>`;
@@ -1164,9 +1159,9 @@ export function printSupplierOrder(settings, items, priceMap) {
     });
   }
   const priceTotals = hasPrices ? `<td></td><td class="right">${totalSum.toFixed(2)}</td>` : '';
-  const vatRow = hasPrices ? `<tr class="total"><td colspan="${hasPrices ? 4 : 3}" style="text-align:right;">НДС:</td><td class="right"></td><td></td><td class="right">${totalVatPrint.toFixed(2)}</td></tr>` : '';
-  const totalWithVatRow = hasPrices ? `<tr class="total"><td colspan="${hasPrices ? 4 : 3}" style="text-align:right;">ИТОГО С НДС:</td><td class="right"></td><td></td><td class="right">${(totalSum + totalVatPrint).toFixed(2)}</td></tr>` : '';
-  const colSpan = hasPrices ? 4 : 3;
+  const vatRow = hasPrices ? `<tr class="total"><td colspan="${hasPrices ? 3 : 2}" style="text-align:right;">НДС:</td><td class="right"></td><td class="right">${totalVatPrint.toFixed(2)}</td></tr>` : '';
+  const totalWithVatRow = hasPrices ? `<tr class="total"><td colspan="${hasPrices ? 3 : 2}" style="text-align:right;">ИТОГО С НДС:</td><td class="right"></td><td class="right">${(totalSum + totalVatPrint).toFixed(2)}</td></tr>` : '';
+  const colSpan = hasPrices ? 3 : 2;
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -1195,8 +1190,7 @@ export function printSupplierOrder(settings, items, priceMap) {
 <table>
   <thead><tr>
     <th style="width:40px;">No</th>
-    <th style="width:80px;">Артикул</th>
-    <th>Наименование</th>
+    <th>Товар</th>
     <th style="width:80px;text-align:right;">Кол-во, кор.</th>
     ${priceHeaders}
   </tr></thead>

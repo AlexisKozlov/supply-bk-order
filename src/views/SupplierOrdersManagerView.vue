@@ -116,51 +116,81 @@
             </div>
           </div>
 
-          <!-- Export -->
+          <!-- Export + controls -->
           <div class="rom-export-row">
             <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting">
               {{ exporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
+            <label class="so-filter-check">
+              <input type="checkbox" v-model="showMissing" /> Не подавшие
+            </label>
+            <input v-model="filterText" type="text" class="rom-input-sm so-filter-input" placeholder="Поиск..." />
           </div>
 
-          <!-- Restaurants table -->
-          <div class="rom-table-wrap">
-            <table class="rom-table">
+          <!-- Pivot table: restaurants × products -->
+          <div class="rom-table-wrap" v-if="products.length">
+            <table class="rom-table so-pivot-table">
               <thead>
                 <tr>
-                  <th>Ресторан</th>
-                  <th>Регион</th>
-                  <th>Адрес</th>
-                  <th>День заказа</th>
-                  <th>Статус</th>
-                  <th>Позиций</th>
-                  <th>Кол-во</th>
-                  <th>Время подачи</th>
-                  <th></th>
+                  <th class="so-th-rest">Ресторан</th>
+                  <th class="so-th-status">Статус</th>
+                  <th v-for="p in products" :key="p.sku" class="so-th-qty">
+                    <div class="so-th-prod">{{ p.sku }}</div>
+                    <div class="so-th-prod">{{ p.product_name }}</div>
+                    <div v-if="p.multiplicity" class="so-th-mult">×{{ p.multiplicity }}</div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in restaurants" :key="r.number" :class="{ 'rom-row-submitted': r.order_status }">
-                  <td class="rom-td-num">{{ r.number }}</td>
-                  <td>{{ r.region }}</td>
-                  <td>{{ r.address }}</td>
-                  <td>{{ dayNames[r.order_day] || '' }}</td>
+                <tr v-for="r in filteredRestaurants" :key="r.number" :class="{ 'rom-row-submitted': r.order_status }">
+                  <td class="so-td-rest">
+                    <span class="rom-td-num">{{ r.number }}</span>
+                    <span class="so-rest-addr">{{ r.city || r.region }}{{ r.address ? ', ' + r.address : '' }}</span>
+                  </td>
                   <td>
                     <span class="rom-status" :class="'st-' + (r.order_status || 'none')">
                       {{ statusLabel(r.order_status) }}
                     </span>
                   </td>
-                  <td>{{ r.item_count || '—' }}</td>
-                  <td>{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
-                  <td class="rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
-                  <td class="rom-td-actions">
-                    <button v-if="r.order_id" class="rom-btn-sm" @click="viewOrder(r.order_id)">Открыть</button>
+                  <td v-for="p in products" :key="p.sku"
+                    class="so-td-qty"
+                    @dblclick="startEdit(r.number, p.sku)">
+                    <template v-if="editCell === `${r.number}_${p.sku}`">
+                      <input
+                        v-model="editValue"
+                        type="text" inputmode="decimal"
+                        class="so-cell-input"
+                        @keydown.enter="saveEdit"
+                        @keydown.escape="editCell = ''"
+                        @blur="saveEdit"
+                        ref="editInputRef"
+                      />
+                    </template>
+                    <template v-else>
+                      <span v-if="getCellAdmin(r.number, p.sku) !== null" class="so-qty-admin" :title="'Исходное: ' + getCellQty(r.number, p.sku)">
+                        {{ getCellAdmin(r.number, p.sku) }}
+                      </span>
+                      <span v-else-if="getCellQty(r.number, p.sku) !== ''" class="so-qty">
+                        {{ getCellQty(r.number, p.sku) }}
+                      </span>
+                      <span v-else class="so-qty-empty">—</span>
+                    </template>
                   </td>
                 </tr>
               </tbody>
+              <tfoot v-if="filteredRestaurants.length">
+                <tr class="so-totals-row">
+                  <td class="so-td-rest"><strong>Итого</strong></td>
+                  <td></td>
+                  <td v-for="p in products" :key="p.sku" class="so-td-qty so-td-total">
+                    <strong>{{ getProductTotal(p.sku) || '' }}</strong>
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
+          <div v-else class="rom-empty">Нет товаров в шаблоне. Добавьте товары во вкладке «Шаблон товаров».</div>
         </template>
       </template>
     </template>
@@ -263,8 +293,7 @@
             <thead>
               <tr>
                 <th style="width:50px">Порядок</th>
-                <th>SKU</th>
-                <th>Название</th>
+                <th>Товар</th>
                 <th style="width:80px">Кратность</th>
                 <th style="width:80px">Мин. кол-во</th>
                 <th style="width:40px"></th>
@@ -273,8 +302,7 @@
             <tbody>
               <tr v-for="(t, idx) in templates" :key="idx">
                 <td><input type="number" v-model.number="t.sort_order" class="rom-input-sm" style="width:50px" /></td>
-                <td>{{ t.sku }}</td>
-                <td>{{ t.product_name }}</td>
+                <td><span class="so-tpl-sku">{{ t.sku }}</span> {{ t.product_name }}</td>
                 <td><input type="number" v-model.number="t.multiplicity" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
                 <td><input type="number" v-model.number="t.min_qty" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
                 <td><button class="rom-btn-sm rom-btn-danger" @click="templates.splice(idx, 1)">✕</button></td>
@@ -328,11 +356,10 @@
           <p><strong>Доставка:</strong> {{ formatDate(viewedOrder.delivery_date) }}</p>
           <p><strong>Подано:</strong> {{ viewedOrder.submitted_at ? formatTime(viewedOrder.submitted_at) : '—' }}</p>
           <table class="rom-table">
-            <thead><tr><th>Товар</th><th>SKU</th><th>Кол-во</th></tr></thead>
+            <thead><tr><th>Товар</th><th>Кол-во</th></tr></thead>
             <tbody>
               <tr v-for="item in viewedOrder.items" :key="item.id">
-                <td>{{ item.product_name }}</td>
-                <td>{{ item.sku }}</td>
+                <td><span class="so-tpl-sku">{{ item.sku }}</span> {{ item.product_name }}</td>
                 <td>{{ item.quantity }}</td>
               </tr>
             </tbody>
@@ -348,7 +375,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 
 const props = defineProps({
@@ -406,6 +433,15 @@ const templateLe = ref('ООО "Бургер БК"');
 const showOrderModal = ref(false);
 const viewedOrder = ref(null);
 const exporting = ref(false);
+
+// Pivot table data
+const products = ref([]);
+const orderItems = ref([]);
+const filterText = ref('');
+const showMissing = ref(true);
+const editCell = ref('');
+const editValue = ref('');
+const editInputRef = ref(null);
 
 function todayStr(offsetDays = 0) {
   const d = new Date();
@@ -494,6 +530,8 @@ async function loadStatus() {
     session.value = data.session;
     stats.value = data.stats || { total: 0, submitted: 0, pending: 0 };
     restaurants.value = data.restaurants || [];
+    products.value = data.products || [];
+    orderItems.value = data.order_items || [];
     weekDates.value = data.week_dates || [];
     if (data.date) selectedDate.value = data.date;
   } catch (e) {
@@ -669,19 +707,23 @@ async function exportExcel() {
 
     const supplierName = allSuppliers.value.find(s => s.id === currentSupplierId.value)?.short_name || 'Поставщик';
 
-    const header = ['Ресторан', 'Регион', 'Адрес', 'SKU', 'Товар', 'Количество'];
+    const header = ['Ресторан', 'Регион', 'Адрес', 'Товар', 'Количество'];
     const rows = [header];
     for (const row of data.orders) {
-      rows.push([row.restaurant_number, row.region, row.address, row.sku, row.product_name, parseFloat(row.quantity) || 0]);
+      const product = row.sku ? `${row.sku} ${row.product_name}` : row.product_name;
+      rows.push([row.restaurant_number, row.region, row.address, product, parseFloat(row.effective_qty || row.quantity) || 0]);
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 40 }, { wch: 15 }, { wch: 40 }, { wch: 12 }];
+    ws['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 40 }, { wch: 50 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Заявки');
 
-    const sumHeader = ['SKU', 'Товар', 'Итого', 'Кол-во ресторанов'];
-    const sumRows = [sumHeader, ...data.summary.map(s => [s.sku, s.product_name, s.total_qty, s.restaurant_count])];
+    const sumHeader = ['Товар', 'Итого', 'Кол-во ресторанов'];
+    const sumRows = [sumHeader, ...data.summary.map(s => {
+      const product = s.sku ? `${s.sku} ${s.product_name}` : s.product_name;
+      return [product, s.total_qty, s.restaurant_count];
+    })];
     const ws2 = XLSX.utils.aoa_to_sheet(sumRows);
-    ws2['!cols'] = [{ wch: 15 }, { wch: 40 }, { wch: 12 }, { wch: 18 }];
+    ws2['!cols'] = [{ wch: 50 }, { wch: 12 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws2, 'Сводка');
 
     XLSX.writeFile(wb, `${supplierName}_${selectedDate.value}.xlsx`);
@@ -689,6 +731,117 @@ async function exportExcel() {
     alert('Ошибка экспорта: ' + e.message);
   } finally {
     exporting.value = false;
+  }
+}
+
+// ═══ Pivot table helpers ═══
+
+// Lookup: { "restNum_sku" => { quantity, admin_qty, item_id, order_id } }
+const itemLookup = computed(() => {
+  const map = {};
+  for (const item of orderItems.value) {
+    const key = `${item.restaurant_number}_${item.sku}`;
+    map[key] = item;
+  }
+  return map;
+});
+
+const filteredRestaurants = computed(() => {
+  let list = restaurants.value;
+  if (!showMissing.value) {
+    list = list.filter(r => r.order_status);
+  }
+  if (filterText.value) {
+    const q = filterText.value.toLowerCase();
+    list = list.filter(r =>
+      String(r.number).includes(q) ||
+      (r.region || '').toLowerCase().includes(q) ||
+      (r.address || '').toLowerCase().includes(q) ||
+      (r.city || '').toLowerCase().includes(q)
+    );
+  }
+  return list;
+});
+
+function getCellQty(restNum, sku) {
+  const item = itemLookup.value[`${restNum}_${sku}`];
+  if (!item) return '';
+  const v = parseFloat(item.quantity);
+  return v === Math.floor(v) ? Math.floor(v) : v;
+}
+
+function getCellAdmin(restNum, sku) {
+  const item = itemLookup.value[`${restNum}_${sku}`];
+  if (!item || item.admin_qty === null || item.admin_qty === undefined) return null;
+  const v = parseFloat(item.admin_qty);
+  return v === Math.floor(v) ? Math.floor(v) : v;
+}
+
+function getProductTotal(sku) {
+  let total = 0;
+  for (const r of filteredRestaurants.value) {
+    const item = itemLookup.value[`${r.number}_${sku}`];
+    if (!item) continue;
+    const admin = item.admin_qty !== null && item.admin_qty !== undefined ? parseFloat(item.admin_qty) : NaN;
+    const qty = !isNaN(admin) ? admin : parseFloat(item.quantity);
+    if (!isNaN(qty)) total += qty;
+  }
+  return total === Math.floor(total) ? Math.floor(total) : +total.toFixed(2);
+}
+
+function shortName(name) {
+  return name && name.length > 15 ? name.slice(0, 15) + '…' : name;
+}
+
+function startEdit(restNum, sku) {
+  const key = `${restNum}_${sku}`;
+  const item = itemLookup.value[key];
+  editCell.value = key;
+  editValue.value = item?.admin_qty !== null && item?.admin_qty !== undefined
+    ? item.admin_qty
+    : (item?.quantity || '');
+  nextTick(() => {
+    const el = document.querySelector('.so-cell-input');
+    if (el) { el.focus(); el.select(); }
+  });
+}
+
+async function saveEdit() {
+  if (!editCell.value) return;
+  const match = editCell.value.match(/^(\d+)_(.+)$/);
+  if (!match) { editCell.value = ''; return; }
+  const [, restNum, sku] = match;
+  const item = itemLookup.value[`${restNum}_${sku}`];
+  const val = parseFloat(String(editValue.value).replace(',', '.'));
+  editCell.value = '';
+
+  try {
+    if (item?.item_id) {
+      // Обновляем существующую позицию
+      await store.adminUpdateQty({
+        item_id: item.item_id,
+        admin_qty: isNaN(val) ? null : val,
+      });
+      item.admin_qty = isNaN(val) ? null : val;
+    } else {
+      // Создаём новую запись (админ заполняет за ресторан)
+      const prod = products.value.find(p => p.sku === sku);
+      const result = await store.adminUpdateQty({
+        restaurant_number: restNum,
+        delivery_date: selectedDate.value,
+        sku,
+        product_name: prod?.product_name || '',
+        product_id: prod?.product_id || '',
+        session_id: activeSessionId.value,
+        supplier_id: currentSupplierId.value,
+        admin_qty: isNaN(val) ? null : val,
+      });
+      if (result.reload) {
+        await loadStatus();
+      }
+    }
+  } catch (e) {
+    alert('Ошибка сохранения: ' + e.message);
   }
 }
 
@@ -793,7 +946,7 @@ function formatTime(dt) {
 .rom-stat-pending { color: #D62300; }
 .rom-stat-label { font-size: 12px; color: #8b7355; }
 
-.rom-export-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.rom-export-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
 
 .rom-loading { padding: 40px; text-align: center; color: #8b7355; }
 .rom-empty { padding: 40px; text-align: center; color: #8b7355; font-size: 15px; }
@@ -883,4 +1036,85 @@ function formatTime(dt) {
 .so-form-row label { font-size: 13px; font-weight: 600; color: #502314; min-width: 130px; }
 .so-form-row input { flex: 1; padding: 8px 12px; border: 2px solid #e0d5c8; border-radius: 8px; font-size: 14px; font-family: inherit; }
 .so-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+/* ═══ Pivot table ═══ */
+.so-filter-check {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 13px; color: #502314; cursor: pointer; white-space: nowrap;
+}
+.so-filter-input {
+  width: 180px; padding: 6px 10px; border: 1.5px solid #e0d5c8; border-radius: 8px;
+  font-size: 13px; font-family: inherit; background: white; color: #502314;
+}
+.so-filter-input:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.12); }
+
+.rom-table-wrap:has(.so-pivot-table) {
+  border: 2px solid #e0d5c8; border-radius: 10px;
+}
+
+.so-pivot-table { border-collapse: separate; border-spacing: 0; min-width: 500px; }
+
+.so-pivot-table th {
+  background: #502314; color: #fff;
+  padding: 10px 10px; font-size: 11px; font-weight: 700;
+  text-align: left; white-space: nowrap;
+  position: sticky; top: 0; z-index: 1;
+  border-bottom: 2px solid #3a1a0e;
+  border-right: 1px solid rgba(255,255,255,0.15);
+}
+.so-pivot-table th:last-child { border-right: none; }
+
+.so-pivot-table td {
+  padding: 7px 10px; border-bottom: 1px solid #f0ebe4;
+  border-right: 1px solid #f0ebe4; font-size: 13px; color: #502314;
+  vertical-align: middle;
+}
+.so-pivot-table td:last-child { border-right: none; }
+
+.so-pivot-table tbody tr:nth-child(even) { background: #faf7f4; }
+.so-pivot-table tbody tr:hover { background: #fff3e0; }
+
+.so-th-rest { min-width: 200px; }
+.so-th-status { min-width: 70px; text-align: center; }
+.so-th-qty { text-align: center !important; min-width: 120px; }
+.so-th-prod {
+  font-size: 11px; font-weight: 700; color: #fff;
+  line-height: 1.3; white-space: normal;
+}
+.so-th-mult { font-size: 9px; color: rgba(255,255,255,0.6); font-weight: 400; }
+
+.so-td-rest {
+  white-space: nowrap; max-width: 280px;
+  border-right: 2px solid #e0d5c8 !important;
+}
+.so-rest-addr { font-size: 11px; color: #8b7355; margin-left: 6px; }
+.rom-td-num { font-weight: 800; color: #D62300; display: inline-block; min-width: 24px; }
+
+.so-td-qty {
+  text-align: center; cursor: pointer; min-width: 65px;
+  transition: background 0.15s;
+}
+.so-td-qty:hover { background: #fff8e1; }
+
+.so-qty { font-weight: 700; color: #502314; }
+.so-qty-admin { font-weight: 800; color: #D62300; }
+.so-qty-empty { color: #ccc; font-size: 14px; }
+
+.so-cell-input {
+  width: 56px; padding: 3px 4px; border: 2px solid #D62300;
+  border-radius: 6px; text-align: center; font-size: 13px; font-weight: 700;
+  font-family: inherit; color: #502314; background: #fff; outline: none;
+  box-shadow: 0 0 0 3px rgba(214,35,0,0.15);
+}
+
+.so-td-total { background: #faf7f4 !important; font-size: 14px; }
+.so-totals-row td {
+  border-top: 2px solid #e0d5c8;
+  padding: 10px 10px;
+  color: #502314;
+}
+
+.so-tpl-sku {
+  font-size: 11px; color: #8b7355; margin-right: 4px; font-weight: 600;
+}
 </style>

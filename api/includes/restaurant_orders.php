@@ -71,14 +71,14 @@ function roGetDeadlines($pdo, $sessionId, $deliveryDate) {
         return [
             'soft' => $override['soft_deadline'],
             'hard' => $override['hard_deadline'],
-            'edit_until' => '11:00:00',
+            'edit_until' => $override['hard_deadline'],
         ];
     }
     // Стандартные дедлайны
     return [
         'soft' => '10:00:00',
         'hard' => '13:00:00',
-        'edit_until' => '11:00:00',
+        'edit_until' => '13:00:00',
     ];
 }
 
@@ -901,6 +901,17 @@ if (strpos($roAction, 'admin') === 0) {
             'items' => $allItems,
             'format' => $format,
         ]);
+    }
+
+    // --- Поиск товаров (для шаблонов) ---
+    if ($adminAction === 'products' && $method === 'GET') {
+        $search = $_GET['search'] ?? '';
+        $le = $_GET['legal_entity'] ?? '';
+        if (!$search || strlen($search) < 2 || !$le) roRespond(['products' => []]);
+        $like = "%{$search}%";
+        $s = $pdo->prepare("SELECT sku, name, category, qty_per_box, multiplicity FROM products WHERE legal_entity = ? AND is_active = 1 AND (name LIKE ? OR sku LIKE ?) ORDER BY name LIMIT 50");
+        $s->execute([$le, $like, $like]);
+        roRespond(['products' => $s->fetchAll()]);
     }
 
     // --- Список всех сессий ---

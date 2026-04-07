@@ -311,16 +311,14 @@
             <table class="anv-modal-table">
               <thead>
                 <tr>
-                  <th>Артикул</th>
-                  <th>Наименование</th>
+                  <th>Товар</th>
                   <th style="text-align:right">Остаток</th>
                   <th style="text-align:right">Расход</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(u, idx) in unmatchedItems" :key="u.sku || idx">
-                  <td class="anv-sku">{{ u.sku || '—' }}</td>
-                  <td>{{ u.name || '—' }}</td>
+                  <td><span v-if="u.sku" class="anv-sku">{{ u.sku }}</span> {{ u.name || '—' }}</td>
                   <td style="text-align:right">{{ u.stock ? nf(u.stock) : '—' }}</td>
                   <td style="text-align:right">{{ u.consumption ? nf(u.consumption) : '—' }}</td>
                 </tr>
@@ -1487,7 +1485,6 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   color: var(--text-secondary);
 }
 .anv-sku {
-  font-family: monospace;
   font-size: 10px;
   color: var(--text-muted);
   margin-right: 4px;
