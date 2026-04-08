@@ -50,6 +50,7 @@ const routes = [
       { path: 'restaurant-orders', name: 'restaurant-orders', component: () => import('@/views/RestaurantOrdersManagerView.vue'), meta: { title: 'Заказы ресторанов', module: 'restaurant-orders' } },
       { path: 'restaurant-report', name: 'restaurant-report', component: () => import('@/views/RestaurantReportView.vue'), meta: { title: 'Отчёт по заказам', module: 'restaurant-orders' } },
       { path: 'supplier-orders', name: 'supplier-orders', component: () => import('@/views/SupplierOrdersHubView.vue'), meta: { title: 'Заявки поставщикам', module: 'supplier-orders' } },
+      { path: 'truck-loading', name: 'truck-loading', component: () => import('@/views/TruckLoadingView.vue'), meta: { title: 'Загрузка машин', module: 'truck-loading' } },
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
     ],
@@ -152,7 +153,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'supplier-orders'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'supplier-orders', 'truck-loading'];
 
 router.beforeEach((to) => {
   const userStore = useUserStore();

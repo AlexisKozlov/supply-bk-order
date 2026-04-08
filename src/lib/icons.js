@@ -70,6 +70,8 @@ export const icons = {
 
   factory: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 20V8l5 4V8l5 4V4h4a1 1 0 011 1v15" fill="#FFE0B2" stroke="#D62700" stroke-width="1.5" stroke-linejoin="round"/><path d="M2 20h20" stroke="#D62700" stroke-width="2" stroke-linecap="round"/></svg>`,
 
+  truck: `<svg viewBox="0 0 24 24" fill="none"><rect x="1" y="6" width="14" height="11" rx="2" fill="#FFE0B2" stroke="#D62700" stroke-width="1.5"/><path d="M15 10h3.4a2 2 0 011.6.8L22 13.5V15a2 2 0 01-2 2h-5" fill="#FF8733" stroke="#D62700" stroke-width="1.5" stroke-linejoin="round"/><circle cx="7" cy="18" r="2.2" fill="#FDBD10" stroke="#D62700" stroke-width="1.5"/><circle cx="17.5" cy="18" r="2.2" fill="#FDBD10" stroke="#D62700" stroke-width="1.5"/><rect x="4" y="9" width="3" height="5" rx=".5" fill="#D62700" opacity="0.3"/><rect x="8" y="9" width="3" height="5" rx=".5" fill="#D62700" opacity="0.2"/></svg>`,
+
   building: `<svg viewBox="0 0 24 24" fill="none"><rect x="4" y="2" width="16" height="20" rx="2" fill="#FFF3E0" stroke="#D62700" stroke-width="1.5"/><circle cx="9" cy="7" r="1.2" fill="#D62700"/><circle cx="15" cy="7" r="1.2" fill="#D62700"/><circle cx="9" cy="12" r="1.2" fill="#FF8733"/><circle cx="15" cy="12" r="1.2" fill="#FF8733"/><rect x="10" y="18" width="4" height="4" fill="#D62700"/></svg>`,
 
   loading: `<svg viewBox="0 0 24 24" fill="none" stroke="#FF8733" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4"/><path d="M12 18v4" opacity=".3"/><path d="M4.93 4.93l2.83 2.83" opacity=".8"/><path d="M16.24 16.24l2.83 2.83" opacity=".2"/><path d="M2 12h4" opacity=".6"/><path d="M18 12h4" opacity=".4"/><path d="M4.93 19.07l2.83-2.83" opacity=".4"/><path d="M16.24 7.76l2.83-2.83" opacity=".7"/></svg>`,

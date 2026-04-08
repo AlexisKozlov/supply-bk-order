@@ -431,6 +431,7 @@ const toolsItems = [
   { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
   { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
   { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
+  { module: 'truck-loading', route: 'truck-loading', icon: 'truck', label: 'Загрузка машин' },
 ];
 
 // ═══ Вкладки (tabs) ═══
