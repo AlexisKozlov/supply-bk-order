@@ -970,14 +970,13 @@ function addToTemplate(product) {
 }
 
 // ═══ Export helpers ═══
-const EXPORT_HEADER = ['Дата доставки', '№ заказа', '№ ресторана', 'Адрес ресторана', 'Время доставки', 'Хранение', 'Внешний код', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Паллетоместа'];
-const EXPORT_COLS = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }];
+const EXPORT_HEADER = ['Дата доставки', '№ заказа', '№ ресторана', 'Адрес ресторана', 'Время доставки', 'Хранение', 'Внешний код', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Палл. товара', 'Вес рест. (кг)', 'Палл. рест.'];
+const EXPORT_COLS = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
 
 function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = false) {
   const rows = [EXPORT_HEADER];
   const subtotalRows = [];
   const sorted = [...orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
-  let grandBrutto = 0, grandPallets = 0;
   for (const order of sorted) {
     const oi = itemsByRest[order.restaurant_number] || [];
     if (!oi.length) continue;
@@ -985,17 +984,29 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
     const addr = ri.address || ri.city || '';
     const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
     oi.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
+
+    // Предварительный расчёт итогов по ресторану
     let restBrutto = 0;
     const palletsByCategory = {};
+    for (const item of oi) {
+      const qty = parseFloat(item.quantity) || 0;
+      const bpp = parseFloat(item.boxes_per_pallet) || 0;
+      const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
+      restBrutto += brutto;
+      const cat = item.category || 'Сухой';
+      if (bpp > 0) palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qty / bpp;
+    }
+    const restPallets = Object.values(palletsByCategory).reduce((sum, v) => sum + (v > 0 ? Math.ceil(v) : 0), 0);
+    const restWeightKg = restBrutto ? +(restBrutto / 1000).toFixed(1) : '';
+
+    // Строки товаров — итоги ресторана записываются в первую строку
+    let isFirst = true;
     for (const item of oi) {
       const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
       const qty = parseFloat(item.quantity) || 0;
       const bpp = parseFloat(item.boxes_per_pallet) || 0;
       const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
       const pallets = bpp > 0 ? qty / bpp : 0;
-      restBrutto += brutto;
-      const cat = item.category || 'Сухой';
-      palletsByCategory[cat] = (palletsByCategory[cat] || 0) + pallets;
       rows.push([
         date, ordNum, order.restaurant_number, addr,
         ri.delivery_time || '', item.category,
@@ -1003,28 +1014,15 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
         item.weight_netto ? qty * parseFloat(item.weight_netto) : '',
         brutto || '',
         pallets > 0 ? +pallets.toFixed(2) : '',
+        isFirst && showTotals ? restWeightKg : '',
+        isFirst && showTotals ? (restPallets || '') : '',
       ]);
+      if (isFirst) {
+        isFirst = false;
+        // Помечаем строку для стилизации (первая строка ресторана)
+        if (showTotals) subtotalRows.push({ idx: rows.length - 1, type: 'subtotal' });
+      }
     }
-    // Each category rounds up separately (different pallets per storage mode)
-    const restPallets = Object.values(palletsByCategory).reduce((sum, v) => sum + (v > 0 ? Math.ceil(v) : 0), 0);
-    if (showTotals) {
-      const subRow = new Array(EXPORT_HEADER.length).fill('');
-      subRow[7] = `Итого рест. ${order.restaurant_number}`;
-      subRow[10] = restBrutto ? +restBrutto.toFixed(0) : '';
-      subRow[11] = restPallets || '';
-      rows.push(subRow);
-      subtotalRows.push({ idx: rows.length - 1, type: 'subtotal' });
-    }
-    grandBrutto += restBrutto;
-    grandPallets += restPallets;
-  }
-  if (showTotals && sorted.length > 1) {
-    const totalRow = new Array(EXPORT_HEADER.length).fill('');
-    totalRow[7] = 'ИТОГО';
-    totalRow[10] = grandBrutto ? +grandBrutto.toFixed(0) : '';
-    totalRow[11] = grandPallets ? +grandPallets.toFixed(2) : '';
-    rows.push(totalRow);
-    subtotalRows.push({ idx: rows.length - 1, type: 'total' });
   }
   return { rows, subtotalRows };
 }
@@ -1034,11 +1032,11 @@ function styleExportSheet(ws, rowCount, subtotalRows) {
     const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
     if (cell) cell.s = EXCEL_HEADER_STYLE;
   }
+  // Стилизуем ячейки итогов ресторана (колонки «Вес рест.» и «Палл. рест.»)
   for (const sr of (subtotalRows || [])) {
-    const st = sr.type === 'total' ? EXCEL_TOTAL_STYLE : EXCEL_SUBTOTAL_STYLE;
-    for (let c = 0; c < EXPORT_HEADER.length; c++) {
+    for (const c of [12, 13]) { // колонки с итогами ресторана
       const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
-      if (cell) cell.s = st;
+      if (cell) cell.s = EXCEL_SUBTOTAL_STYLE;
     }
   }
   ws['!cols'] = EXPORT_COLS;
