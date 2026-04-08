@@ -62,6 +62,13 @@ function roGetActiveSession($pdo) {
     return $s->fetch() ?: null;
 }
 
+function roIsDateOpen($pdo, $sessionId, $deliveryDate) {
+    $s = $pdo->prepare("SELECT is_open FROM ro_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
+    $s->execute([$sessionId, $deliveryDate]);
+    $row = $s->fetch();
+    return $row && $row['is_open'];
+}
+
 function roGetDeadlines($pdo, $sessionId, $deliveryDate) {
     // Сначала проверяем переопределения
     $s = $pdo->prepare("SELECT soft_deadline, hard_deadline FROM ro_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
@@ -83,6 +90,12 @@ function roGetDeadlines($pdo, $sessionId, $deliveryDate) {
 }
 
 function roGetDeadlineStatus($pdo, $sessionId, $deliveryDate) {
+    // Приём открыт только если админ явно открыл эту дату
+    if (!roIsDateOpen($pdo, $sessionId, $deliveryDate)) {
+        $deadlines = roGetDeadlines($pdo, $sessionId, $deliveryDate);
+        return ['status' => 'not_open', 'deadlines' => $deadlines];
+    }
+
     $deadlines = roGetDeadlines($pdo, $sessionId, $deliveryDate);
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
@@ -109,6 +122,9 @@ function roGetDeadlineStatus($pdo, $sessionId, $deliveryDate) {
 }
 
 function roCanEdit($pdo, $sessionId, $deliveryDate) {
+    // Если дата не открыта — редактировать нельзя
+    if (!roIsDateOpen($pdo, $sessionId, $deliveryDate)) return false;
+
     $deadlines = roGetDeadlines($pdo, $sessionId, $deliveryDate);
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
@@ -118,7 +134,7 @@ function roCanEdit($pdo, $sessionId, $deliveryDate) {
     if ($today < $orderDate) return true;
     // После дня подачи — нельзя
     if ($today > $orderDate) return false;
-    // В день подачи — до 11:00
+    // В день подачи — до edit_until
     return $now->format('H:i:s') < $deadlines['edit_until'];
 }
 
@@ -135,7 +151,7 @@ function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     $s->execute([$restaurantNumber]);
     $chatId = $s->fetchColumn();
     if (!$chatId) {
-        $s2 = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND is_active = 1 LIMIT 1");
+        $s2 = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? LIMIT 1");
         $s2->execute([$restaurantNumber]);
         $chatId = $s2->fetchColumn();
     }
@@ -435,7 +451,7 @@ if ($roAction === 'my-info' && $method === 'GET') {
     $ds->execute([$rest['restaurant_number']]);
     $schedule = $ds->fetchAll();
 
-    // Формируем дни доставки на эту неделю
+    // Формируем дни доставки в рамках сессии (может быть несколько недель)
     $dayNames = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
     $deliveryDays = [];
 
@@ -444,38 +460,50 @@ if ($roAction === 'my-info' && $method === 'GET') {
 
     foreach ($schedule as $sch) {
         $dow = (int)$sch['day_of_week'];
-        // Находим дату этого дня недели в рамках сессии
+        // Находим первую дату этого дня недели в рамках сессии
         $date = clone $weekStart;
         $currentDow = (int)$date->format('N'); // 1=Mon
         $diff = $dow - $currentDow;
         if ($diff < 0) $diff += 7;
         $date->modify("+{$diff} days");
 
-        if ($date > $weekEnd) continue;
+        // Перебираем все вхождения этого дня недели в рамках сессии
+        while ($date <= $weekEnd) {
+            $dateStr = $date->format('Y-m-d');
 
-        $dateStr = $date->format('Y-m-d');
-        $deadlineStatus = roGetDeadlineStatus($pdo, $session['id'], $dateStr);
+            // Проверяем есть ли уже заказ
+            $os = $pdo->prepare("SELECT id, status, submitted_at FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+            $os->execute([$session['id'], $rest['restaurant_number'], $dateStr]);
+            $order = $os->fetch();
 
-        // Проверяем есть ли уже заказ
-        $os = $pdo->prepare("SELECT id, status, submitted_at FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $os->execute([$session['id'], $rest['restaurant_number'], $dateStr]);
-        $order = $os->fetch();
+            $dateOpen = roIsDateOpen($pdo, $session['id'], $dateStr);
 
-        $deliveryDays[] = [
-            'date' => $dateStr,
-            'day_of_week' => $dow,
-            'day_name' => $dayNames[$dow] ?? '',
-            'delivery_time' => $sch['delivery_time'],
-            'deadline_status' => $deadlineStatus['status'],
-            'deadlines' => $deadlineStatus['deadlines'],
-            'can_edit' => roCanEdit($pdo, $session['id'], $dateStr),
-            'order' => $order ? [
-                'id' => (int)$order['id'],
-                'status' => $order['status'],
-                'submitted_at' => $order['submitted_at'],
-            ] : null,
-        ];
+            // Показываем дату если: приём открыт ИЛИ уже есть заказ
+            if ($dateOpen || $order) {
+                $deadlineStatus = roGetDeadlineStatus($pdo, $session['id'], $dateStr);
+
+                $deliveryDays[] = [
+                    'date' => $dateStr,
+                    'day_of_week' => $dow,
+                    'day_name' => $dayNames[$dow] ?? '',
+                    'delivery_time' => $sch['delivery_time'],
+                    'deadline_status' => $deadlineStatus['status'],
+                    'deadlines' => $deadlineStatus['deadlines'],
+                    'can_edit' => roCanEdit($pdo, $session['id'], $dateStr),
+                    'order' => $order ? [
+                        'id' => (int)$order['id'],
+                        'status' => $order['status'],
+                        'submitted_at' => $order['submitted_at'],
+                    ] : null,
+                ];
+            }
+
+            $date->modify('+7 days');
+        }
     }
+
+    // Сортируем по дате
+    usort($deliveryDays, function($a, $b) { return strcmp($a['date'], $b['date']); });
 
     roRespond([
         'session' => [
@@ -684,7 +712,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
 
     // Проверяем дедлайн
     $dlStatus = roGetDeadlineStatus($pdo, $session['id'], $deliveryDate);
-    if ($dlStatus['status'] === 'closed') {
+    if ($dlStatus['status'] === 'closed' || $dlStatus['status'] === 'not_open') {
         roRespond(['error' => 'Приём заявок на эту дату закрыт'], 403);
     }
 
@@ -836,7 +864,11 @@ if (strpos($roAction, 'admin') === 0) {
             $ws = $pdo->prepare("
                 SELECT oi.order_id, oi.category,
                        SUM(oi.quantity * COALESCE(p.weight_brutto, 0)) as total_weight,
-                       SUM(CASE WHEN p.boxes_per_pallet > 0 THEN oi.quantity / p.boxes_per_pallet ELSE 0 END) as raw_pallets
+                       SUM(CASE WHEN p.boxes_per_pallet > 0
+                           THEN (CASE WHEN COALESCE(p.multiplicity, 1) > 1
+                                 THEN (oi.quantity / p.multiplicity) / p.boxes_per_pallet
+                                 ELSE oi.quantity / p.boxes_per_pallet END)
+                           ELSE 0 END) as raw_pallets
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
                 LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity
@@ -850,9 +882,10 @@ if (strpos($roAction, 'admin') === 0) {
                     $weightData[$oid] = ['total_weight' => 0, 'pallets' => 0];
                 }
                 $weightData[$oid]['total_weight'] += (float)$row['total_weight'];
-                // Паллеты округляются вверх по каждой категории отдельно
+                // Округление: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх
                 $rawP = (float)$row['raw_pallets'];
-                $weightData[$oid]['pallets'] += $rawP > 0 ? ceil($rawP) : 0;
+                $frac = $rawP - floor($rawP);
+                $weightData[$oid]['pallets'] += ($frac > 0.2) ? ceil($rawP) : floor($rawP);
             }
         }
         // Добавляем к каждому ресторану
@@ -891,12 +924,12 @@ if (strpos($roAction, 'admin') === 0) {
 
     // --- Детали заказа ---
     if ($adminAction === 'order' && $method === 'GET' && $adminParam) {
-        $s = $pdo->prepare("SELECT o.*, r.city, r.address, r.region FROM ro_orders o LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 WHERE o.id = ?");
+        $s = $pdo->prepare("SELECT o.*, r.city, r.address, r.region FROM ro_orders o LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END) WHERE o.id = ?");
         $s->execute([$adminParam]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
-        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet
+        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
             FROM ro_order_items oi
             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ?
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
@@ -911,6 +944,7 @@ if (strpos($roAction, 'admin') === 0) {
         $orderId = (int)$adminParam;
         $items = $body['items'] ?? null;
         $status = $body['status'] ?? null;
+        $deliveryDate = $body['delivery_date'] ?? null;
 
         $pdo->beginTransaction();
         try {
@@ -923,6 +957,11 @@ if (strpos($roAction, 'admin') === 0) {
                     if ($qty <= 0) continue;
                     $insert->execute([$orderId, $item['sku'] ?? '', $item['product_name'] ?? '', $item['category'] ?? 'Сухой', $qty, $item['comment'] ?? null]);
                 }
+            }
+
+            if ($deliveryDate) {
+                $pdo->prepare("UPDATE ro_orders SET delivery_date = ? WHERE id = ?")
+                    ->execute([$deliveryDate, $orderId]);
             }
 
             $updatedBy = $sessionUser ? $sessionUser['name'] : 'admin';
@@ -971,7 +1010,31 @@ if (strpos($roAction, 'admin') === 0) {
         roRespond(['success' => true]);
     }
 
-    // --- Упр��вление сессией ---
+    // --- Удаление отдельной позиции из заказа ---
+    if ($adminAction === 'item' && $method === 'DELETE' && $adminParam) {
+        $itemId = (int)$adminParam;
+        // Проверяем существование
+        $check = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id
+            FROM ro_order_items oi JOIN ro_orders o ON o.id = oi.order_id WHERE oi.id = ?");
+        $check->execute([$itemId]);
+        $item = $check->fetch();
+        if (!$item) roRespond(['error' => 'Позиция не найдена'], 404);
+
+        $pdo->prepare("DELETE FROM ro_order_items WHERE id = ?")->execute([$itemId]);
+
+        // Если в заказе больше нет позиций — удаляем сам заказ
+        $remaining = $pdo->prepare("SELECT COUNT(*) FROM ro_order_items WHERE order_id = ?");
+        $remaining->execute([$item['order_id']]);
+        $orderDeleted = false;
+        if ((int)$remaining->fetchColumn() === 0) {
+            $pdo->prepare("DELETE FROM ro_orders WHERE id = ?")->execute([$item['order_id']]);
+            $orderDeleted = true;
+        }
+
+        roRespond(['success' => true, 'order_deleted' => $orderDeleted]);
+    }
+
+    // --- Управление сессией ---
     if ($adminAction === 'session' && $method === 'POST') {
         $action = $body['action'] ?? 'create';
 
@@ -1013,6 +1076,52 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         roRespond(['error' => 'Unknown action'], 400);
+    }
+
+    // --- Открыть / закрыть приём на дату ---
+    if ($adminAction === 'toggle-date' && $method === 'POST') {
+        $sessionId = $body['session_id'] ?? null;
+        $date = $body['delivery_date'] ?? '';
+        $isOpen = isset($body['is_open']) ? ($body['is_open'] ? 1 : 0) : 1;
+        $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
+
+        if (!$sessionId || !$date) roRespond(['error' => 'Не указана сессия или дата'], 400);
+
+        // Если открываем дату за пределами сессии — расширяем сессию
+        if ($isOpen) {
+            $sess = $pdo->prepare("SELECT week_start, week_end FROM ro_sessions WHERE id = ?");
+            $sess->execute([$sessionId]);
+            $sessData = $sess->fetch();
+            if ($sessData) {
+                if ($date < $sessData['week_start']) {
+                    $pdo->prepare("UPDATE ro_sessions SET week_start = ? WHERE id = ?")->execute([$date, $sessionId]);
+                }
+                if ($date > $sessData['week_end']) {
+                    $pdo->prepare("UPDATE ro_sessions SET week_end = ? WHERE id = ?")->execute([$date, $sessionId]);
+                }
+            }
+        }
+
+        $pdo->prepare("INSERT INTO ro_deadline_overrides (session_id, delivery_date, is_open, created_by)
+            VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE is_open = VALUES(is_open), created_by = VALUES(created_by)")
+            ->execute([$sessionId, $date, $isOpen, $createdBy]);
+
+        roRespond(['success' => true, 'is_open' => (bool)$isOpen]);
+    }
+
+    // --- Список открытых дат сессии ---
+    if ($adminAction === 'open-dates' && $method === 'GET') {
+        $sessionId = $_GET['session_id'] ?? null;
+        if (!$sessionId) {
+            $session = roGetActiveSession($pdo);
+            $sessionId = $session ? $session['id'] : null;
+        }
+        if (!$sessionId) roRespond(['dates' => []]);
+
+        $s = $pdo->prepare("SELECT delivery_date, is_open, soft_deadline, hard_deadline FROM ro_deadline_overrides WHERE session_id = ? ORDER BY delivery_date");
+        $s->execute([$sessionId]);
+        roRespond(['dates' => $s->fetchAll()]);
     }
 
     // --- Продление дедлайна ---
@@ -1193,7 +1302,7 @@ if (strpos($roAction, 'admin') === 0) {
         $sql = "SELECT o.id, o.restaurant_number, o.delivery_date, o.status, o.session_id,
                        r.city, r.address
                 FROM ro_orders o
-                LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
+                LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
                 WHERE " . implode(' AND ', $where) . "
                 ORDER BY o.delivery_date, o.restaurant_number";
         $s = $pdo->prepare($sql);
@@ -1210,7 +1319,7 @@ if (strpos($roAction, 'admin') === 0) {
                 $catWhere = " AND oi.category = ?";
                 $catParams[] = $category;
             }
-            $st = $pdo->prepare("SELECT oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment
+            $st = $pdo->prepare("SELECT oi.id, oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment
                 FROM ro_order_items oi WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
             $st->execute($catParams);
             $items = $st->fetchAll();
@@ -1246,7 +1355,7 @@ if (strpos($roAction, 'admin') === 0) {
                    r.region, r.city, r.address,
                    ds.delivery_time
             FROM ro_orders o
-            LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
+            LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
             LEFT JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ?
             WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
             ORDER BY o.restaurant_number
@@ -1259,7 +1368,7 @@ if (strpos($roAction, 'admin') === 0) {
         $allItems = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
-            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet
+            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
                 LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity
@@ -1291,6 +1400,172 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'sessions' && $method === 'GET') {
         $s = $pdo->query("SELECT * FROM ro_sessions ORDER BY week_start DESC LIMIT 20");
         roRespond(['sessions' => $s->fetchAll()]);
+    }
+
+    // ═══ Остатки склада ═══
+
+    // --- Загрузка остатков из Excel ---
+    if ($adminAction === 'stock-upload' && $method === 'POST') {
+        if (empty($_FILES['file'])) roRespond(['error' => 'Файл не загружен'], 400);
+        $balanceDate = $_POST['balance_date'] ?? '';
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $balanceDate)) roRespond(['error' => 'Неверный формат даты'], 400);
+
+        require_once __DIR__ . '/../lib/SimpleXLSX.php';
+        $filePath = $_FILES['file']['tmp_name'];
+        $xlsx = \Shuchkin\SimpleXLSX::parse($filePath);
+        if (!$xlsx) roRespond(['error' => 'Не удалось прочитать Excel файл'], 400);
+
+        // Загружаем все товары из БД для сопоставления
+        $productsStmt = $pdo->query("SELECT sku, external_code, name FROM products WHERE is_active = 1");
+        $productsBySku = [];
+        $productsByExtCode = [];
+        foreach ($productsStmt->fetchAll() as $p) {
+            $productsBySku[trim($p['sku'])] = $p;
+            if (!empty($p['external_code'])) {
+                $productsByExtCode[trim($p['external_code'])] = $p;
+            }
+        }
+
+        $matched = 0;
+        $skipped = 0;
+        $rows = [];
+
+        foreach ($xlsx->sheetNames() as $sheetIdx => $sheetName) {
+            // Определяем тип склада (пропускаем листы с примерами заказов)
+            if (mb_stripos($sheetName, 'Пример') !== false) continue;
+            $warehouse = '';
+            if (mb_stripos($sheetName, 'П6') !== false) $warehouse = 'Сухой';
+            elseif (mb_stripos($sheetName, 'П1') !== false) $warehouse = 'Холод+Мороз';
+            else continue;
+
+            $sheetRows = $xlsx->rows($sheetIdx);
+            if (empty($sheetRows)) continue;
+
+            // Ищем заголовок
+            $headerRow = -1;
+            $colProduct = -1;
+            $colOwner = -1;
+            $colQty = -1;
+            for ($r = 0; $r < min(10, count($sheetRows)); $r++) {
+                foreach ($sheetRows[$r] as $c => $val) {
+                    $v = mb_strtolower(trim((string)$val));
+                    if ($v === 'товар') $colProduct = $c;
+                    if (mb_strpos($v, 'владелец') !== false) $colOwner = $c;
+                    if (mb_strpos($v, 'итого') !== false && mb_strpos($v, 'шт') !== false) $colQty = $c;
+                }
+                if ($colProduct >= 0 && $colQty >= 0) { $headerRow = $r; break; }
+            }
+            if ($headerRow < 0) continue;
+
+            for ($r = $headerRow + 1; $r < count($sheetRows); $r++) {
+                $productStr = trim((string)($sheetRows[$r][$colProduct] ?? ''));
+                $qty = (float)($sheetRows[$r][$colQty] ?? 0);
+                if (!$productStr || $qty <= 0) continue;
+
+                // Определяем юрлицо по владельцу
+                $ownerStr = mb_strtolower(trim((string)($sheetRows[$r][$colOwner] ?? '')));
+                $legalEntity = '';
+                if (mb_strpos($ownerStr, 'воглия') !== false) {
+                    $legalEntity = 'ООО "Воглия Матта"';
+                } elseif (mb_strpos($ownerStr, 'бургер') !== false) {
+                    $legalEntity = 'ООО "Бургер БК"';
+                } else {
+                    continue; // пропускаем ДоДо, Сбарро и т.д.
+                }
+
+                // Парсим: "внешний_код - SKU Название"
+                if (!preg_match('/^(\S+)\s*-\s*(\S+)\s+(.+)$/', $productStr, $m)) continue;
+                $extCode = trim($m[1]);
+                $sku = trim($m[2]);
+
+                // Сопоставляем: сначала по SKU, потом по внешнему коду
+                $foundProduct = $productsBySku[$sku] ?? $productsByExtCode[$extCode] ?? null;
+                if ($foundProduct) {
+                    $fSku = $foundProduct['sku'];
+                    $key = $fSku . '|' . $legalEntity;
+                    if (isset($rows[$key])) {
+                        $rows[$key][2] += $qty;
+                    } else {
+                        $rows[$key] = [$fSku, $foundProduct['name'], $qty, $warehouse, $legalEntity, $balanceDate];
+                    }
+                    $matched++;
+                } else {
+                    $skipped++;
+                }
+            }
+        }
+
+        // Вставляем в БД
+        if (!empty($rows)) {
+            $pdo->prepare("DELETE FROM ro_stock_balances WHERE balance_date = ?")->execute([$balanceDate]);
+            $stmt = $pdo->prepare("INSERT INTO ro_stock_balances (sku, product_name, quantity, warehouse, legal_entity, balance_date) VALUES (?, ?, ?, ?, ?, ?)");
+            foreach ($rows as $row) {
+                $stmt->execute(array_values($row));
+            }
+        }
+
+        roRespond(['success' => true, 'matched' => $matched, 'skipped' => $skipped, 'date' => $balanceDate]);
+    }
+
+    // --- Остатки с учётом заказов ---
+    if ($adminAction === 'stock-balances' && $method === 'GET') {
+        $balanceDate = $_GET['date'] ?? '';
+        $deliveryDate = $_GET['delivery_date'] ?? '';
+        $legalEntity = $_GET['legal_entity'] ?? '';
+        if (!$balanceDate || !$deliveryDate) roRespond(['error' => 'Не указаны даты'], 400);
+
+        // Остатки на дату (с фильтром по юрлицу если указано)
+        if ($legalEntity) {
+            $s = $pdo->prepare("SELECT sku, product_name, quantity, warehouse, legal_entity FROM ro_stock_balances WHERE balance_date = ? AND legal_entity = ? ORDER BY warehouse, product_name");
+            $s->execute([$balanceDate, $legalEntity]);
+        } else {
+            $s = $pdo->prepare("SELECT sku, product_name, quantity, warehouse, legal_entity FROM ro_stock_balances WHERE balance_date = ? ORDER BY legal_entity, warehouse, product_name");
+            $s->execute([$balanceDate]);
+        }
+        $balances = $s->fetchAll();
+
+        // Суммарные заказы от даты остатков+1 до выбранной даты, с разбивкой по юрлицу
+        // Ресторан 3 = Воглия Матта, остальные = Бургер БК
+        $s2 = $pdo->prepare("
+            SELECT oi.sku,
+                   CASE WHEN o.restaurant_number = 3 THEN 'ООО \"Воглия Матта\"' ELSE 'ООО \"Бургер БК\"' END as real_legal_entity,
+                   SUM(oi.quantity) as total_ordered
+            FROM ro_order_items oi
+            JOIN ro_orders o ON o.id = oi.order_id
+            WHERE o.delivery_date > ? AND o.delivery_date <= ?
+              AND o.status IN ('submitted','edited','locked')
+            GROUP BY oi.sku, real_legal_entity
+        ");
+        $s2->execute([$balanceDate, $deliveryDate]);
+        $orders = [];
+        foreach ($s2->fetchAll() as $row) {
+            $orders[$row['sku'] . '|' . $row['real_legal_entity']] = (float)$row['total_ordered'];
+        }
+
+        $items = [];
+        foreach ($balances as $b) {
+            $stockQty = (float)$b['quantity'];
+            $le = $b['legal_entity'];
+            $orderedQty = $orders[$b['sku'] . '|' . $le] ?? 0;
+            $items[] = [
+                'sku' => $b['sku'],
+                'product_name' => $b['product_name'],
+                'warehouse' => $b['warehouse'],
+                'legal_entity' => $le,
+                'stock_qty' => $stockQty,
+                'ordered_qty' => $orderedQty,
+                'remaining' => $stockQty - $orderedQty,
+            ];
+        }
+
+        roRespond(['items' => $items, 'balance_date' => $balanceDate, 'delivery_date' => $deliveryDate]);
+    }
+
+    // --- Доступные даты остатков ---
+    if ($adminAction === 'stock-dates' && $method === 'GET') {
+        $s = $pdo->query("SELECT DISTINCT balance_date FROM ro_stock_balances ORDER BY balance_date DESC LIMIT 30");
+        $dates = array_column($s->fetchAll(), 'balance_date');
+        roRespond(['dates' => $dates]);
     }
 
     roRespond(['error' => 'Not found'], 404);

@@ -21,6 +21,9 @@
       <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadFullTemplates()">
         Шаблон заказа
       </button>
+      <button class="rom-page-tab" :class="{ active: pageTab === 'stock' }" @click="pageTab = 'stock'; initStockTab()">
+        Остатки
+      </button>
     </div>
 
     <!-- ═══ TAB: Orders ═══ -->
@@ -30,7 +33,13 @@
         <label>Дата доставки:</label>
         <input type="date" v-model="selectedDate" @change="loadStatus" />
         <button class="rom-btn-sm" @click="setTomorrow">Завтра</button>
-        <button v-if="session" class="rom-btn-sm rom-btn-danger" @click="handleExtendDeadline">
+        <button v-if="session && !isDateOpen" class="rom-btn-sm rom-btn-success" @click="handleToggleDate(true)">
+          Открыть приём
+        </button>
+        <button v-if="session && isDateOpen" class="rom-btn-sm rom-btn-danger" @click="handleToggleDate(false)">
+          Закрыть приём
+        </button>
+        <button v-if="session && isDateOpen" class="rom-btn-sm" @click="handleExtendDeadline">
           Продлить дедлайн
         </button>
       </div>
@@ -199,6 +208,75 @@
       </div>
     </template>
 
+    <!-- ═══ TAB: Stock balances ═══ -->
+    <template v-if="pageTab === 'stock'">
+      <div class="rom-stock-toolbar">
+        <div class="rom-stock-field">
+          <label>Дата остатков:</label>
+          <select v-model="stockBalanceDate" @change="loadStockData" class="rom-input">
+            <option v-for="d in stockDates" :key="d" :value="d">{{ formatDate(d) }}</option>
+          </select>
+        </div>
+        <div class="rom-stock-field">
+          <label>На дату доставки:</label>
+          <input type="date" v-model="stockDeliveryDate" @change="loadStockData" class="rom-input" />
+        </div>
+        <div class="rom-stock-field rom-stock-upload">
+          <input type="file" ref="stockFileInput" accept=".xlsx,.xls" style="display:none" @change="handleStockFile" />
+          <button class="rom-btn" @click="$refs.stockFileInput.click()" :disabled="stockUploading">
+            {{ stockUploading ? 'Загрузка...' : 'Загрузить остатки из Excel' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="stockMessage" class="rom-tpl-msg" :class="{ success: stockMessageOk }">{{ stockMessage }}</div>
+
+      <div class="rom-tpl-tabs">
+        <button class="rom-tpl-tab" :class="{ active: stockLegalEntity === stockLE_BK }"
+          @click="stockLegalEntity = stockLE_BK; loadStockData()">Бургер БК</button>
+        <button class="rom-tpl-tab" :class="{ active: stockLegalEntity === stockLE_VM }"
+          @click="stockLegalEntity = stockLE_VM; loadStockData()">Воглия Матта</button>
+      </div>
+
+      <div class="rom-stock-filter-row">
+        <input v-model="stockFilter" type="text" placeholder="Фильтр по названию или артикулу..." class="rom-input rom-tpl-filter-input" />
+        <label class="rom-stock-checkbox"><input type="checkbox" v-model="stockShowDeficit" /> Только дефицит</label>
+        <span class="rom-stock-summary" v-if="stockItems.length">
+          Всего: {{ stockItems.length }} · Дефицит: {{ stockItems.filter(i => i.remaining < 0).length }}
+        </span>
+      </div>
+
+      <div class="rom-table-wrap" v-if="!stockLoading">
+        <table class="rom-table" v-if="filteredStockItems.length">
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Склад</th>
+              <th class="rom-th-right">Остаток</th>
+              <th class="rom-th-right">Заказано</th>
+              <th class="rom-th-right">Останется</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, idx) in filteredStockItems" :key="item.sku + item.legal_entity"
+              :class="{ 'rom-row-deficit': item.remaining < 0 }">
+              <td><span class="rom-sku-label">{{ item.sku }}</span> {{ item.product_name }}</td>
+              <td>{{ item.warehouse }}</td>
+              <td class="rom-td-right">{{ item.stock_qty }}</td>
+              <td class="rom-td-right">{{ item.ordered_qty || '' }}</td>
+              <td class="rom-td-right rom-td-remaining" :class="{ 'rom-deficit': item.remaining < 0 }">
+                {{ item.remaining }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="rom-empty">
+          {{ stockDates.length ? 'Нет данных. Выберите дату остатков и дату доставки.' : 'Остатки ещё не загружены. Нажмите «Загрузить остатки из Excel».' }}
+        </div>
+      </div>
+      <div v-else class="rom-loading">Загрузка...</div>
+    </template>
+
     <!-- Add product to template modal -->
     <div v-if="showTplAddModal" class="rom-modal-overlay" @click.self="closeTplAddModal">
       <div class="rom-modal">
@@ -238,7 +316,15 @@
         </div>
         <div class="rom-modal-body" v-if="editingOrder">
           <div class="rom-order-meta">
-            <span>Дата доставки: <strong>{{ formatDate(editingOrder.delivery_date) }}</strong></span>
+            <span class="rom-meta-date">
+              Дата доставки:
+              <strong v-if="!editingDateMode" @click="editingDateMode = true" class="rom-date-editable" title="Нажмите, чтобы изменить дату">{{ formatDate(editingOrder.delivery_date) }} ✎</strong>
+              <span v-else class="rom-date-edit">
+                <input type="date" v-model="editingNewDate" class="rom-input-date" />
+                <button class="rom-btn-sm rom-btn-primary" @click="changeDeliveryDate" :disabled="saving">OK</button>
+                <button class="rom-btn-sm" @click="editingDateMode = false">Отмена</button>
+              </span>
+            </span>
             <span>Статус: <strong>{{ statusLabel(editingOrder.status) }}</strong></span>
             <span v-if="editingOrder.updated_by" class="rom-meta-edited">
               Изменён: {{ formatTime(editingOrder.updated_at) }} ({{ editingOrder.updated_by }})
@@ -426,7 +512,7 @@
                 <div class="rom-exp-filter-label">Категория</div>
                 <div class="rom-exp-checkboxes">
                   <label v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-exp-cb-label">
-                    <input type="checkbox" :checked="exportFilterCategories.has(cat)" @change="toggleSet(exportFilterCategories, cat)" /> {{ cat }}
+                    <input type="checkbox" :checked="exportFilterCategories.has(cat)" @change="toggleExportFilter('categories', cat)" /> {{ cat }}
                   </label>
                 </div>
               </div>
@@ -436,7 +522,7 @@
                 <div class="rom-exp-filter-label">Регион</div>
                 <div class="rom-exp-checkboxes">
                   <label v-for="reg in ['Минск','Регионы']" :key="reg" class="rom-exp-cb-label">
-                    <input type="checkbox" :checked="exportFilterRegions.has(reg)" @change="toggleSet(exportFilterRegions, reg)" /> {{ reg }}
+                    <input type="checkbox" :checked="exportFilterRegions.has(reg)" @change="toggleExportFilter('regions', reg)" /> {{ reg }}
                   </label>
                 </div>
               </div>
@@ -452,7 +538,7 @@
                   <div class="rom-exp-select-list">
                     <label v-for="r in filteredExportRestaurants" :key="r.number"
                       class="rom-exp-select-item" :class="{ selected: exportFilterRestaurants.has(r.number) }">
-                      <input type="checkbox" :checked="exportFilterRestaurants.has(r.number)" @change="toggleSet(exportFilterRestaurants, r.number)" />
+                      <input type="checkbox" :checked="exportFilterRestaurants.has(r.number)" @change="toggleExportFilter('restaurants', r.number)" />
                       <span style="font-weight:700; min-width:30px">{{ r.number }}</span>
                       <span style="flex:1; color:#502314">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
                       <span style="font-size:10px; color:#8b7355">{{ r.region }}</span>
@@ -483,7 +569,7 @@
                   <div class="rom-exp-select-list rom-exp-select-list-tall">
                     <label v-for="p in filteredExportProducts" :key="p.sku"
                       class="rom-exp-select-item" :class="{ selected: exportFilterProducts.has(p.sku) }">
-                      <input type="checkbox" :checked="exportFilterProducts.has(p.sku)" @change="toggleSet(exportFilterProducts, p.sku)" />
+                      <input type="checkbox" :checked="exportFilterProducts.has(p.sku)" @change="toggleExportFilter('products', p.sku)" />
                       <span style="font-size:10px; color:#8b7355; min-width:45px">{{ p.sku }}</span>
                       <span style="flex:1; color:#502314">{{ p.product_name }}</span>
                       <span style="font-size:10px; padding:1px 5px; border-radius:4px; font-weight:600"
@@ -509,9 +595,10 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, watchEffect } from 'vue';
+import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { formatDate, formatTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE } from '@/lib/roUtils.js';
+import { formatDate, formatTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import * as XLSX from 'xlsx-js-style';
 
 const store = useRestaurantOrderStore();
@@ -530,6 +617,8 @@ const editingOrder = ref(null);
 const editItems = ref([]);
 const originalEditItems = ref(null); // snapshot for dirty check
 const saving = ref(false);
+const editingDateMode = ref(false);
+const editingNewDate = ref('');
 
 // Users
 const showUsersModal = ref(false);
@@ -555,6 +644,78 @@ const showTplAddModal = ref(false);
 const tplAddSearch = ref('');
 const tplAddResults = ref([]);
 const tplAddTimer = ref(null);
+
+// Stock balances
+const stockBalanceDate = ref('');
+const stockDeliveryDate = ref('');
+const stockLE_BK = 'ООО "Бургер БК"';
+const stockLE_VM = 'ООО "Воглия Матта"';
+const stockLegalEntity = ref(stockLE_BK);
+const stockDates = ref([]);
+const stockItems = ref([]);
+const stockFilter = ref('');
+const stockShowDeficit = ref(false);
+const stockUploading = ref(false);
+const stockLoading = ref(false);
+const stockMessage = ref('');
+const stockMessageOk = ref(false);
+const stockFileInput = ref(null);
+
+const filteredStockItems = computed(() => {
+  let items = stockItems.value;
+  if (stockShowDeficit.value) items = items.filter(i => i.remaining < 0);
+  if (stockFilter.value) {
+    const q = stockFilter.value.toLowerCase();
+    items = items.filter(i => i.product_name.toLowerCase().includes(q) || i.sku.includes(q));
+  }
+  return items;
+});
+
+async function initStockTab() {
+  if (!stockDates.value.length) {
+    stockDates.value = await store.adminGetStockDates();
+    if (stockDates.value.length) stockBalanceDate.value = stockDates.value[0];
+  }
+  if (!stockDeliveryDate.value) stockDeliveryDate.value = selectedDate.value;
+  await loadStockData();
+}
+
+async function loadStockData() {
+  if (!stockBalanceDate.value || !stockDeliveryDate.value) return;
+  stockLoading.value = true;
+  try {
+    const data = await store.adminGetStockBalances(stockBalanceDate.value, stockDeliveryDate.value, stockLegalEntity.value);
+    stockItems.value = data.items || [];
+  } catch (e) {
+    toast.error('Ошибка загрузки остатков');
+  } finally {
+    stockLoading.value = false;
+  }
+}
+
+async function handleStockFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const dateStr = prompt('Дата остатков (ГГГГ-ММ-ДД):', new Date().toISOString().slice(0, 10));
+  if (!dateStr) { event.target.value = ''; return; }
+  stockUploading.value = true;
+  stockMessage.value = '';
+  try {
+    const result = await store.adminUploadStock(file, dateStr);
+    stockMessage.value = `Загружено: ${result.matched} позиций, пропущено: ${result.skipped}`;
+    stockMessageOk.value = true;
+    stockDates.value = await store.adminGetStockDates();
+    stockBalanceDate.value = dateStr;
+    if (!stockDeliveryDate.value) stockDeliveryDate.value = selectedDate.value;
+    await loadStockData();
+  } catch (e) {
+    stockMessage.value = e.message || 'Ошибка загрузки';
+    stockMessageOk.value = false;
+  } finally {
+    stockUploading.value = false;
+    event.target.value = '';
+  }
+}
 
 // Order item add/replace
 const showOrderAddModal = ref(false);
@@ -588,17 +749,48 @@ const totalStats = computed(() => {
   };
 });
 
+const isDateOpen = computed(() => {
+  const s = deadlineStatus.value;
+  return s && s.status !== 'not_open';
+});
+
 const deadlineLabel = computed(() => {
   const s = deadlineStatus.value;
   if (!s) return '';
-  const labels = { open: 'Приём открыт', warning: 'Дедлайн прошёл (ещё можно подать)', closed: 'Приём закрыт', not_yet: 'Ещё не начат' };
+  const labels = { open: 'Приём открыт', warning: 'Дедлайн прошёл (ещё можно подать)', closed: 'Приём закрыт', not_open: 'Приём не открыт', not_yet: 'Ещё не начат' };
   return labels[s.status] || '';
 });
 
+const route = useRoute();
+
+async function handleRouteQuery() {
+  if (route.query.date) {
+    selectedDate.value = route.query.date;
+    await loadStatus();
+  }
+  if (route.query.order) {
+    await viewOrder(parseInt(route.query.order));
+  }
+}
+
 onMounted(async () => {
-  setTomorrow();
+  if (route.query.date) {
+    selectedDate.value = route.query.date;
+  } else {
+    setTomorrow();
+  }
   await loadStatus();
   startAutoRefresh();
+  if (route.query.order) {
+    viewOrder(parseInt(route.query.order));
+  }
+});
+
+// Если пользователь уже на странице и переходит из отчёта повторно
+watch(() => route.query.t, async () => {
+  if (route.query.order) {
+    await handleRouteQuery();
+  }
 });
 
 onUnmounted(() => {
@@ -709,6 +901,17 @@ async function handleAutoSession() {
   }
 }
 
+async function handleToggleDate(open) {
+  if (!session.value) return;
+  try {
+    await store.adminToggleDate(session.value.id, selectedDate.value, open);
+    toast.success(open ? 'Приём заявок открыт' : 'Приём заявок закрыт');
+    await loadStatus();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  }
+}
+
 function handleExtendDeadline() {
   if (!session.value) return;
   deadlineSoft.value = '14:00';
@@ -739,6 +942,8 @@ async function viewOrder(orderId) {
     editingOrder.value = order;
     editItems.value = (order.items || []).map(i => ({ ...i, quantity: parseFloat(i.quantity) || 0 }));
     originalEditItems.value = JSON.stringify(editItems.value);
+    editingDateMode.value = false;
+    editingNewDate.value = order.delivery_date || '';
     showOrderModal.value = true;
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -753,6 +958,19 @@ function removeEditItem(item) {
   editItems.value = editItems.value.filter(i => i !== item);
 }
 
+// Штучный товар: кол-во в штуках → коробки
+function qtyToBoxes(qty, mult) {
+  const m = parseFloat(mult) || 1;
+  return m > 1 ? qty / m : qty;
+}
+
+// Округление паллет: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх
+function roundPallets(raw) {
+  if (raw <= 0) return 0;
+  const frac = raw - Math.floor(raw);
+  return frac > 0.2 ? Math.ceil(raw) : Math.floor(raw);
+}
+
 function catTotals(cat) {
   const items = getEditItems(cat).filter(i => (parseFloat(i.quantity) || 0) > 0);
   const boxes = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
@@ -760,12 +978,13 @@ function catTotals(cat) {
   let rawPallets = 0;
   for (const item of items) {
     const bpp = parseFloat(item.boxes_per_pallet) || 0;
-    if (bpp > 0) rawPallets += (parseFloat(item.quantity) || 0) / bpp;
+    const qty = parseFloat(item.quantity) || 0;
+    if (bpp > 0) rawPallets += qtyToBoxes(qty, item.multiplicity) / bpp;
   }
   return {
     boxes: boxes.toFixed(0),
     weight: (weight / 1000).toFixed(1),
-    pallets: rawPallets > 0 ? Math.ceil(rawPallets) : 0,
+    pallets: roundPallets(rawPallets),
   };
 }
 
@@ -786,10 +1005,10 @@ const orderTotals = computed(() => {
     const qty = parseFloat(item.quantity) || 0;
     if (bpp > 0) {
       const cat = item.category || 'Сухой';
-      palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qty / bpp;
+      palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qtyToBoxes(qty, item.multiplicity) / bpp;
     }
   }
-  const pallets = Object.values(palletsByCategory).reduce((s, v) => s + (v > 0 ? Math.ceil(v) : 0), 0);
+  const pallets = Object.values(palletsByCategory).reduce((s, v) => s + roundPallets(v), 0);
   return {
     boxes: boxes.toFixed(0),
     weight: (weight / 1000).toFixed(1),
@@ -851,6 +1070,25 @@ async function saveEditedOrder() {
     });
     originalEditItems.value = null;
     showOrderModal.value = false;
+    await loadStatus();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function changeDeliveryDate() {
+  if (!editingOrder.value || !editingNewDate.value) return;
+  if (editingNewDate.value === editingOrder.value.delivery_date) { editingDateMode.value = false; return; }
+  saving.value = true;
+  try {
+    await store.adminUpdateOrder(editingOrder.value.id, {
+      delivery_date: editingNewDate.value,
+    });
+    editingOrder.value.delivery_date = editingNewDate.value;
+    editingDateMode.value = false;
+    toast.success('Дата доставки изменена');
     await loadStatus();
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -994,9 +1232,9 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
       const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
       restBrutto += brutto;
       const cat = item.category || 'Сухой';
-      if (bpp > 0) palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qty / bpp;
+      if (bpp > 0) palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qtyToBoxes(qty, item.multiplicity) / bpp;
     }
-    const restPallets = Object.values(palletsByCategory).reduce((sum, v) => sum + (v > 0 ? Math.ceil(v) : 0), 0);
+    const restPallets = Object.values(palletsByCategory).reduce((sum, v) => sum + roundPallets(v), 0);
     const restWeightKg = restBrutto ? +(restBrutto / 1000).toFixed(1) : '';
 
     // Строки товаров — итоги ресторана записываются в первую строку
@@ -1006,7 +1244,8 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
       const qty = parseFloat(item.quantity) || 0;
       const bpp = parseFloat(item.boxes_per_pallet) || 0;
       const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
-      const pallets = bpp > 0 ? qty / bpp : 0;
+      const boxes = qtyToBoxes(qty, item.multiplicity);
+      const pallets = bpp > 0 ? boxes / bpp : 0;
       rows.push([
         date, ordNum, order.restaurant_number, addr,
         ri.delivery_time || '', item.category,
@@ -1017,6 +1256,7 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
         isFirst && showTotals ? restWeightKg : '',
         isFirst && showTotals ? (restPallets || '') : '',
       ]);
+      if (item.is_traceable == 1) subtotalRows.push({ idx: rows.length - 1, type: 'traceable' });
       if (isFirst) {
         isFirst = false;
         // Помечаем строку для стилизации (первая строка ресторана)
@@ -1032,11 +1272,19 @@ function styleExportSheet(ws, rowCount, subtotalRows) {
     const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
     if (cell) cell.s = EXCEL_HEADER_STYLE;
   }
-  // Стилизуем ячейки итогов ресторана (колонки «Вес рест.» и «Палл. рест.»)
   for (const sr of (subtotalRows || [])) {
-    for (const c of [12, 13]) { // колонки с итогами ресторана
-      const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
-      if (cell) cell.s = EXCEL_SUBTOTAL_STYLE;
+    if (sr.type === 'traceable') {
+      // Жёлтая подсветка всей строки для прослеживаемых товаров
+      for (let c = 0; c < EXPORT_HEADER.length; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
+        if (cell) cell.s = EXCEL_TRACEABLE_STYLE;
+      }
+    } else {
+      // Стилизуем ячейки итогов ресторана (колонки «Вес рест.» и «Палл. рест.»)
+      for (const c of [12, 13]) {
+        const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
+        if (cell) cell.s = EXCEL_SUBTOTAL_STYLE;
+      }
     }
   }
   ws['!cols'] = EXPORT_COLS;
@@ -1079,10 +1327,18 @@ function copyRoLink() {
 }
 
 // ═══ Unified export modal logic ═══
-function toggleSet(setRef, value) {
-  const s = new Set(setRef.value);
+function toggleExportFilter(refName, value) {
+  const refs = {
+    categories: exportFilterCategories,
+    regions: exportFilterRegions,
+    restaurants: exportFilterRestaurants,
+    products: exportFilterProducts,
+  };
+  const r = refs[refName];
+  if (!r) return;
+  const s = new Set(r.value);
   if (s.has(value)) s.delete(value); else s.add(value);
-  setRef.value = s;
+  r.value = s;
 }
 
 const filteredExportRestaurants = computed(() => {
@@ -1308,6 +1564,8 @@ async function doUnifiedExport() {
   background: white; cursor: pointer; font-size: 12px; font-family: inherit;
 }
 .rom-btn-danger { color: #dc2626; border-color: #dc2626; }
+.rom-btn-success { color: #16a34a; border-color: #16a34a; font-weight: 600; }
+.rom-btn-success:hover { background: #ecfdf5; }
 
 /* Date row */
 .rom-date-row {
@@ -1339,6 +1597,7 @@ async function doUnifiedExport() {
 .dl-warning { background: #fffbeb; color: #d97706; }
 .dl-closed { background: #fef2f2; color: #dc2626; }
 .dl-not_yet { background: #f0f9ff; color: #2563eb; }
+.dl-not_open { background: #f5f5f4; color: #78716c; }
 
 /* Export row */
 .rom-export-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -1437,8 +1696,12 @@ async function doUnifiedExport() {
 .rom-no-items { padding: 20px; text-align: center; color: #8b7355; font-size: 13px; }
 
 /* Order edit */
-.rom-order-meta { display: flex; gap: 20px; margin-bottom: 16px; font-size: 14px; color: #502314; flex-wrap: wrap; }
+.rom-order-meta { display: flex; gap: 20px; margin-bottom: 16px; font-size: 14px; color: #502314; flex-wrap: wrap; align-items: center; }
 .rom-meta-edited { font-size: 12px; color: #8b7355; }
+.rom-date-editable { cursor: pointer; border-bottom: 1px dashed #8b7355; }
+.rom-date-editable:hover { color: #D62300; border-color: #D62300; }
+.rom-date-edit { display: inline-flex; align-items: center; gap: 6px; }
+.rom-input-date { padding: 4px 8px; border: 1.5px solid #e0dbd5; border-radius: 6px; font-size: 13px; font-family: inherit; }
 .rom-cat-title { font-size: 14px; color: #D62300; margin: 16px 0 8px; }
 .rom-table-edit td { padding: 4px 8px; }
 .rom-edit-qty {
@@ -1589,4 +1852,20 @@ async function doUnifiedExport() {
 .rom-deadline-fields { display: flex; flex-direction: column; gap: 12px; }
 .rom-deadline-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #502314; font-weight: 600; }
 .rom-deadline-label input[type="time"] { width: 140px; }
+
+/* Stock balances tab */
+.rom-stock-toolbar { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+.rom-stock-field label { display: block; font-size: 12px; font-weight: 600; color: #502314; margin-bottom: 4px; }
+.rom-stock-field select, .rom-stock-field input[type="date"] { min-width: 160px; }
+.rom-stock-upload { align-self: flex-end; }
+.rom-stock-filter-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.rom-stock-checkbox { font-size: 13px; color: #502314; white-space: nowrap; cursor: pointer; }
+.rom-stock-checkbox input { margin-right: 4px; }
+.rom-stock-summary { font-size: 12px; color: #8b7355; white-space: nowrap; }
+.rom-th-right { text-align: right; }
+.rom-td-right { text-align: right; font-variant-numeric: tabular-nums; }
+.rom-row-deficit { background: #f3f4f6 !important; }
+.rom-row-deficit td { color: #6b7280 !important; }
+.rom-deficit { font-weight: 700; color: #dc2626 !important; }
+.rom-td-remaining { font-weight: 600; }
 </style>

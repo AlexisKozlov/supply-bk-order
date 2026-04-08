@@ -164,6 +164,19 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  async function adminToggleDate(sessionId, deliveryDate, isOpen) {
+    return await api('admin/toggle-date', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, is_open: isOpen }),
+    });
+  }
+
+  async function adminGetOpenDates(sessionId) {
+    const params = sessionId ? `?session_id=${sessionId}` : '';
+    const data = await api(`admin/open-dates${params}`);
+    return data.dates || [];
+  }
+
   async function adminExtendDeadline(sessionId, deliveryDate, soft, hard) {
     return await api('admin/extend-deadline', {
       method: 'POST',
@@ -247,13 +260,47 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.sessions || [];
   }
 
+  async function adminDeleteItem(itemId) {
+    return await api(`admin/item/${itemId}`, { method: 'DELETE' });
+  }
+
+  // === Остатки склада ===
+  async function adminUploadStock(file, balanceDate) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('balance_date', balanceDate);
+    const res = await fetch(`${API_BASE}/admin/stock-upload`, {
+      method: 'POST',
+      headers: {
+        'X-Session-Token': localStorage.getItem('bk_session_token') || '',
+      },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok && data.error) throw new Error(data.error);
+    return data;
+  }
+
+  async function adminGetStockBalances(balanceDate, deliveryDate, legalEntity = '') {
+    let url = `admin/stock-balances?date=${balanceDate}&delivery_date=${deliveryDate}`;
+    if (legalEntity) url += `&legal_entity=${encodeURIComponent(legalEntity)}`;
+    return await api(url);
+  }
+
+  async function adminGetStockDates() {
+    const data = await api('admin/stock-dates');
+    return data.dates || [];
+  }
+
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
     login, loginByTelegram, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
+    adminToggleDate, adminGetOpenDates,
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,
     adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword,
-    adminGetExportData, adminGetSessions,
+    adminGetExportData, adminGetSessions, adminDeleteItem,
+    adminUploadStock, adminGetStockBalances, adminGetStockDates,
   };
 });
