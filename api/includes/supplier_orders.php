@@ -49,6 +49,9 @@ function soGetRestaurantSession($pdo) {
     $user = $s->fetch();
     if (!$user) return null;
     if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return null;
+    // Продлеваем сессию при каждом запросе (сброс таймера неактивности)
+    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
+        ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
     return $user;
 }
 
@@ -323,8 +326,9 @@ if ($soAction === 'my-orders' && $method === 'GET') {
         JOIN suppliers s ON s.id = o.supplier_id
         WHERE {$where}
         ORDER BY o.delivery_date DESC
-        LIMIT {$limit}
+        LIMIT ?
     ");
+    $params[] = $limit;
     $s->execute($params);
     soRespond(['orders' => $s->fetchAll()]);
 }
@@ -356,34 +360,42 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     $existing->execute([$session['id'], $rest['restaurant_number'], $deliveryDate]);
     $existingOrder = $existing->fetch();
 
-    if ($existingOrder) {
-        $orderId = $existingOrder['id'];
-        $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
-        $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
-            ->execute([$orderId]);
-    } else {
-        $le = $rest['legal_entity'];
-        $pdo->prepare("INSERT INTO so_orders (session_id, restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, ?, 'submitted', NOW(), ?)")
-            ->execute([$session['id'], $rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
-        $orderId = $pdo->lastInsertId();
-    }
+    $pdo->beginTransaction();
+    try {
+        if ($existingOrder) {
+            $orderId = $existingOrder['id'];
+            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
+            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
+                ->execute([$orderId]);
+        } else {
+            $le = $rest['legal_entity'];
+            $pdo->prepare("INSERT INTO so_orders (session_id, restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, ?, 'submitted', NOW(), ?)")
+                ->execute([$session['id'], $rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
+            $orderId = $pdo->lastInsertId();
+        }
 
-    // Вставляем позиции
-    $insertItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
-    $totalQty = 0;
-    $totalItems = 0;
-    foreach ($items as $item) {
-        $qty = floatval($item['quantity'] ?? 0);
-        if ($qty <= 0) continue;
-        $insertItem->execute([
-            $orderId,
-            $item['product_id'] ?? '',
-            $item['sku'] ?? '',
-            $item['product_name'] ?? '',
-            $qty,
-        ]);
-        $totalQty += $qty;
-        $totalItems++;
+        // Вставляем позиции
+        $insertItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+        $totalQty = 0;
+        $totalItems = 0;
+        foreach ($items as $item) {
+            $qty = floatval($item['quantity'] ?? 0);
+            if ($qty <= 0) continue;
+            $insertItem->execute([
+                $orderId,
+                $item['product_id'] ?? '',
+                $item['sku'] ?? '',
+                $item['product_name'] ?? '',
+                $qty,
+            ]);
+            $totalQty += $qty;
+            $totalItems++;
+        }
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        soRespond(['error' => 'Ошибка сохранения заявки'], 500);
     }
 
     soRespond([
@@ -402,6 +414,20 @@ if ($soAction === 'admin') {
     $sessionUser = getSessionUser($pdo);
     if (!$sessionUser) {
         if (!checkApiKey($pdo)) soRespond(['error' => 'Unauthorized'], 401);
+    }
+
+    // RBAC: проверяем доступ к модулю supplier-orders
+    if ($sessionUser) {
+        global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+        $userRole = $sessionUser['role'] ?? 'user';
+        if ($userRole !== 'admin') {
+            $perms = resolvePermissions($userRole, $sessionUser['permissions'] ?? null, $ROLE_TEMPLATES);
+            $soRequiredLevel = ($method === 'GET') ? $ACCESS_LEVELS['view'] : $ACCESS_LEVELS['edit'];
+            $soUserLevel = $ACCESS_LEVELS[$perms['supplier-orders'] ?? 'none'] ?? 0;
+            if ($soUserLevel < $soRequiredLevel) {
+                soRespond(['error' => 'Недостаточно прав для модуля «Заявки поставщикам»'], 403);
+            }
+        }
     }
 
     $adminAction = $soParam1 ?? '';
@@ -622,6 +648,18 @@ if ($soAction === 'admin') {
             $pdo->prepare("UPDATE so_orders SET updated_at = NOW() WHERE id = ?")->execute([$orderId]);
         }
 
+        // Уведомляем ресторан в Telegram
+        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
+        $oi->execute([$orderId]);
+        $orderInfo = $oi->fetch();
+        if ($orderInfo) {
+            $dowNames = [0=>'Вс',1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
+            $dow = (int)date('w', strtotime($orderInfo['delivery_date']));
+            $dateStr = ($dowNames[$dow] ?? '') . ', ' . date('d.m', strtotime($orderInfo['delivery_date']));
+            roNotifyRestaurant($pdo, $orderInfo['restaurant_number'],
+                "✏️ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} изменена ({$updatedBy}).");
+        }
+
         soRespond(['success' => true]);
     }
 
@@ -652,7 +690,7 @@ if ($soAction === 'admin') {
             if (!$order) {
                 // Создаём заказ за ресторан
                 $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
-                $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
+                $le = $body['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
                 $pdo->prepare("INSERT INTO so_orders (session_id, restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
                     VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
                     ->execute([$sessionId, $restNum, $suppId, $deliveryDate, $le]);
@@ -682,8 +720,25 @@ if ($soAction === 'admin') {
 
     // --- Удаление заявки ---
     if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
-        $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([(int)$adminParam]);
-        $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([(int)$adminParam]);
+        $orderId = (int)$adminParam;
+        // Сохраняем инфо до удаления
+        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
+        $oi->execute([$orderId]);
+        $orderInfo = $oi->fetch();
+
+        $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
+        $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$orderId]);
+
+        // Уведомляем ресторан
+        if ($orderInfo) {
+            $dowNames = [0=>'Вс',1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
+            $dow = (int)date('w', strtotime($orderInfo['delivery_date']));
+            $dateStr = ($dowNames[$dow] ?? '') . ', ' . date('d.m', strtotime($orderInfo['delivery_date']));
+            $by = $sessionUser ? $sessionUser['name'] : 'admin';
+            roNotifyRestaurant($pdo, $orderInfo['restaurant_number'],
+                "❌ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} удалена ({$by}).");
+        }
+
         soRespond(['success' => true]);
     }
 
@@ -818,6 +873,9 @@ if ($soAction === 'admin') {
         if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
 
         $updatedBy = $sessionUser ? $sessionUser['name'] : 'admin';
+
+        // Сначала деактивируем все расписания поставщика, потом активируем присланные
+        $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
 
         // Upsert
         $upsert = $pdo->prepare("

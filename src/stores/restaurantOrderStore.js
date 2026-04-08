@@ -20,6 +20,15 @@ async function api(path, opts = {}) {
   const url = `${API_BASE}/${path}`;
   const res = await fetch(url, { headers: buildHeaders(), ...opts });
   const data = await res.json();
+  // При 401 — сессия невалидна, выкидываем на логин
+  if (res.status === 401 && !path.startsWith('admin')) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REST_KEY);
+    if (window.location.pathname.startsWith('/ro') || window.location.pathname.startsWith('/restaurant')) {
+      window.location.href = '/restaurant/login';
+    }
+    throw new Error('Сессия завершена');
+  }
   if (!res.ok && data.error) throw new Error(data.error);
   return data;
 }
@@ -112,10 +121,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.orders || [];
   }
 
-  async function submitOrder(deliveryDate, items) {
+  async function submitOrder(deliveryDate, items, comment = null) {
     return await api('submit-order', {
       method: 'POST',
-      body: JSON.stringify({ delivery_date: deliveryDate, items }),
+      body: JSON.stringify({ delivery_date: deliveryDate, items, comment }),
     });
   }
 
@@ -292,9 +301,39 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.dates || [];
   }
 
+  // === Личный кабинет ресторана ===
+  async function loadAllHistory(limit = 30) {
+    const data = await api(`all-history?limit=${limit}`);
+    return data.orders || [];
+  }
+
+  async function changePassword(oldPassword, newPassword) {
+    return await api('change-password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+  }
+
+  async function getTelegramStatus() {
+    return await api('telegram-status');
+  }
+
+  async function telegramLink() {
+    return await api('telegram-link', { method: 'POST' });
+  }
+
+  async function telegramUnlink() {
+    return await api('telegram-unlink', { method: 'POST' });
+  }
+
+  async function getStockCollectionStatus() {
+    return await api('stock-collection-status');
+  }
+
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
     login, loginByTelegram, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
+    loadAllHistory, changePassword, getTelegramStatus, telegramLink, telegramUnlink, getStockCollectionStatus,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,

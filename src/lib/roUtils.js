@@ -57,3 +57,7 @@ export const EXCEL_TOTAL_STYLE = {
   font: { bold: true, color: { rgb: 'FFFFFF' } },
   fill: { fgColor: { rgb: 'D62300' } },
 };
+
+export const EXCEL_TRACEABLE_STYLE = {
+  fill: { fgColor: { rgb: 'FFF9C4' } },
+};

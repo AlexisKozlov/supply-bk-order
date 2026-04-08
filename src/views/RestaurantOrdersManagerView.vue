@@ -110,6 +110,7 @@
                 <span class="rom-status" :class="'st-' + (r.order_status || 'none')">
                   {{ statusLabel(r.order_status) }}
                 </span>
+                <span v-if="r.order_comment" class="rom-comment-icon" :title="r.order_comment">&#128172;</span>
               </td>
               <td class="rom-td-center">{{ r.item_count || '—' }}</td>
               <td class="rom-td-center">{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
@@ -118,7 +119,7 @@
               <td class="rom-td-center rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
               <td class="rom-td-time">
                 <template v-if="r.updated_by">
-                  {{ formatTime(r.updated_at) }} ({{ r.updated_by }})
+                  {{ formatDateTime(r.updated_at) }} ({{ r.updated_by }})
                 </template>
                 <template v-else>—</template>
               </td>
@@ -309,36 +310,55 @@
 
     <!-- Order detail modal -->
     <div v-if="showOrderModal" class="rom-modal-overlay" @click.self="closeOrderModal">
-      <div class="rom-modal rom-modal-lg">
+      <div class="rom-modal rom-modal-lg rom-modal-fixed">
+        <!-- Фиксированная шапка -->
         <div class="rom-modal-header">
           <h2>Заказ ресторана {{ editingOrder?.restaurant_number }}</h2>
           <button class="rom-modal-close" @click="closeOrderModal">X</button>
         </div>
-        <div class="rom-modal-body" v-if="editingOrder">
-          <div class="rom-order-meta">
-            <span class="rom-meta-date">
-              Дата доставки:
-              <strong v-if="!editingDateMode" @click="editingDateMode = true" class="rom-date-editable" title="Нажмите, чтобы изменить дату">{{ formatDate(editingOrder.delivery_date) }} ✎</strong>
-              <span v-else class="rom-date-edit">
-                <input type="date" v-model="editingNewDate" class="rom-input-date" />
-                <button class="rom-btn-sm rom-btn-primary" @click="changeDeliveryDate" :disabled="saving">OK</button>
-                <button class="rom-btn-sm" @click="editingDateMode = false">Отмена</button>
+
+        <template v-if="editingOrder">
+          <!-- Фиксированная мета-панель -->
+          <div class="rom-order-bar">
+            <div class="rom-order-meta">
+              <span class="rom-meta-date">
+                Доставка:
+                <strong v-if="!editingDateMode" @click="editingDateMode = true" class="rom-date-editable" title="Нажмите, чтобы изменить дату">{{ formatDate(editingOrder.delivery_date) }} ✎</strong>
+                <span v-else class="rom-date-edit">
+                  <input type="date" v-model="editingNewDate" class="rom-input-date" />
+                  <button class="rom-btn-sm rom-btn-primary" @click="changeDeliveryDate" :disabled="saving">OK</button>
+                  <button class="rom-btn-sm" @click="editingDateMode = false">Отмена</button>
+                </span>
               </span>
-            </span>
-            <span>Статус: <strong>{{ statusLabel(editingOrder.status) }}</strong></span>
-            <span v-if="editingOrder.updated_by" class="rom-meta-edited">
-              Изменён: {{ formatTime(editingOrder.updated_at) }} ({{ editingOrder.updated_by }})
-            </span>
+              <span>Статус: <strong>{{ statusLabel(editingOrder.status) }}</strong></span>
+              <span v-if="editingOrder.updated_by" class="rom-meta-edited">
+                Изменён: {{ formatDateTime(editingOrder.updated_at) }} ({{ editingOrder.updated_by }})
+              </span>
+            </div>
+            <div class="rom-order-totals-bar">
+              <span>Коробок: <strong>{{ orderTotals.boxes }}</strong></span>
+              <span>Вес: <strong>{{ orderTotals.weight }} кг</strong></span>
+              <span>Паллет: <strong>{{ orderTotals.pallets }}</strong></span>
+            </div>
           </div>
 
-          <div v-for="cat in ['Сухой', 'Холод', 'Мороз']" :key="cat">
-            <h3 class="rom-cat-title">{{ cat }}</h3>
-            <table class="rom-table rom-table-edit" v-if="getEditItems(cat).length">
+          <!-- Табы режимов -->
+          <div class="rom-cat-tabs">
+            <button v-for="cat in ['Сухой', 'Холод', 'Мороз']" :key="cat"
+              class="rom-cat-tab" :class="{ active: editCategory === cat }" @click="editCategory = cat">
+              {{ cat }}
+              <span v-if="getEditItems(cat).length" class="rom-cat-tab-count">{{ getEditItems(cat).length }}</span>
+            </button>
+          </div>
+
+          <!-- Скроллируемое содержимое (активная категория) -->
+          <div class="rom-modal-scroll">
+            <table class="rom-table rom-table-edit" v-if="getEditItems(editCategory).length">
               <thead>
                 <tr><th>Товар</th><th style="width:70px">Кол-во</th><th style="width:80px">Вес, кг</th><th>Комментарий</th><th></th></tr>
               </thead>
               <tbody>
-                <tr v-for="(item, idx) in getEditItems(cat)" :key="idx">
+                <tr v-for="(item, idx) in getEditItems(editCategory)" :key="idx">
                   <td class="rom-edit-product" @click="openReplaceProduct(item)" title="Нажмите, чтобы заменить товар">
                     <span class="rom-edit-sku">{{ item.sku }}</span> {{ item.product_name }}
                   </td>
@@ -349,22 +369,15 @@
                 </tr>
               </tbody>
             </table>
-            <div v-if="getEditItems(cat).length" class="rom-cat-summary">
-              {{ getEditItems(cat).length }} поз., {{ catTotals(cat).boxes }} кор., {{ catTotals(cat).weight }} кг
-              <span class="rom-cat-pallets">{{ catTotals(cat).pallets }} палл.</span>
-            </div>
             <div v-else class="rom-no-items">Нет позиций</div>
-            <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(cat)">+ Добавить товар</button>
+            <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(editCategory)">+ Добавить товар</button>
+            <div v-if="getEditItems(editCategory).length" class="rom-cat-summary">
+              {{ catTotals(editCategory).boxes }} кор., {{ catTotals(editCategory).weight }} кг, {{ catTotals(editCategory).pallets }} палл.
+            </div>
           </div>
 
-          <!-- Order totals -->
-          <div class="rom-order-totals">
-            <span>Коробок: <strong>{{ orderTotals.boxes }}</strong></span>
-            <span>Вес: <strong>{{ orderTotals.weight }} кг</strong></span>
-            <span>Паллет: <strong>{{ orderTotals.pallets }}</strong></span>
-          </div>
-
-          <div class="rom-modal-footer">
+          <!-- Фиксированный подвал с кнопками -->
+          <div class="rom-modal-footer-fixed">
             <button class="rom-btn rom-btn-danger" @click="handleDeleteOrder(editingOrder)" :disabled="saving">
               Удалить заказ
             </button>
@@ -376,7 +389,7 @@
               {{ saving ? 'Сохранение...' : 'Сохранить изменения' }}
             </button>
           </div>
-        </div>
+        </template>
       </div>
     </div>
 
@@ -594,11 +607,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, watchEffect } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { formatDate, formatTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
+import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import * as XLSX from 'xlsx-js-style';
 
 const store = useRestaurantOrderStore();
@@ -619,6 +632,7 @@ const originalEditItems = ref(null); // snapshot for dirty check
 const saving = ref(false);
 const editingDateMode = ref(false);
 const editingNewDate = ref('');
+const editCategory = ref('Сухой');
 
 // Users
 const showUsersModal = ref(false);
@@ -774,6 +788,7 @@ async function handleRouteQuery() {
 }
 
 onMounted(async () => {
+  window.addEventListener('beforeunload', onBeforeUnload);
   if (route.query.date) {
     selectedDate.value = route.query.date;
   } else {
@@ -793,9 +808,16 @@ watch(() => route.query.t, async () => {
   }
 });
 
+function onBeforeUnload(e) {
+  if (hasUnsavedChanges()) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+}
+
 onUnmounted(() => {
   stopAutoRefresh();
-  window.onbeforeunload = null;
+  window.removeEventListener('beforeunload', onBeforeUnload);
 });
 
 // ═══ Unified export modal ═══
@@ -828,13 +850,6 @@ function hasUnsavedChanges() {
   }
   return false;
 }
-watchEffect(() => {
-  if (hasUnsavedChanges()) {
-    window.onbeforeunload = (e) => { e.preventDefault(); return ''; };
-  } else {
-    window.onbeforeunload = null;
-  }
-});
 
 // ═══ Safe close functions ═══
 function closeExportModal() {
@@ -944,6 +959,10 @@ async function viewOrder(orderId) {
     originalEditItems.value = JSON.stringify(editItems.value);
     editingDateMode.value = false;
     editingNewDate.value = order.delivery_date || '';
+    // Открываем на первой непустой категории
+    const cats = ['Сухой', 'Холод', 'Мороз'];
+    const firstWithItems = cats.find(c => editItems.value.some(i => i.category === c)) || 'Сухой';
+    editCategory.value = firstWithItems;
     showOrderModal.value = true;
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -1035,7 +1054,8 @@ function doOrderAddSearch() {
   if (!orderAddSearch.value || orderAddSearch.value.length < 2) { orderAddResults.value = []; return; }
   orderAddTimer.value = setTimeout(async () => {
     try {
-      const products = await store.adminSearchProducts('ООО "Бургер БК"', orderAddSearch.value);
+      const le = editingOrder.value?.legal_entity || 'ООО "Бургер БК"';
+      const products = await store.adminSearchProducts(le, orderAddSearch.value);
       const existing = new Set(editItems.value.map(i => i.sku));
       if (replacingItem.value) existing.delete(replacingItem.value.sku);
       orderAddResults.value = products.filter(p => !existing.has(p.sku));
@@ -1629,6 +1649,7 @@ async function doUnifiedExport() {
 .rom-status {
   padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
 }
+.rom-comment-icon { cursor: help; font-size: 14px; margin-left: 4px; }
 .st-submitted { background: #ecfdf5; color: #16a34a; }
 .st-edited { background: #eff6ff; color: #2563eb; }
 .st-draft { background: #f5f5f5; color: #666; }
@@ -1646,9 +1667,13 @@ async function doUnifiedExport() {
   box-shadow: 0 8px 40px rgba(0,0,0,0.2);
 }
 .rom-modal-lg { max-width: 900px; }
+.rom-modal-fixed {
+  display: flex; flex-direction: column; overflow: hidden;
+}
 .rom-modal-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 16px 20px; border-bottom: 1px solid #e0d5c8;
+  flex-shrink: 0;
 }
 .rom-modal-header h2 { margin: 0; font-size: 18px; color: #502314; }
 .rom-modal-close {
@@ -1657,6 +1682,48 @@ async function doUnifiedExport() {
 }
 .rom-modal-body { padding: 20px; }
 .rom-modal-footer { padding: 16px 0 0; display: flex; align-items: center; gap: 10px; }
+
+/* Фиксированная мета-панель заказа */
+.rom-order-bar {
+  padding: 14px 20px; border-bottom: 1px solid #e0d5c8;
+  background: #faf8f5; flex-shrink: 0;
+}
+.rom-order-totals-bar {
+  display: flex; gap: 20px; margin-top: 8px; font-size: 14px; color: #502314;
+  background: #f0ebe4; padding: 8px 14px; border-radius: 8px;
+}
+.rom-order-totals-bar strong { color: #D62300; }
+
+/* Табы режимов в модалке заказа */
+.rom-cat-tabs {
+  display: flex; gap: 0; border-bottom: 2px solid #e0d5c8;
+  padding: 0 20px; flex-shrink: 0; background: white;
+}
+.rom-cat-tab {
+  padding: 10px 20px; border: none; background: transparent;
+  cursor: pointer; font-size: 14px; font-weight: 600;
+  color: #8b7355; border-bottom: 3px solid transparent;
+  transition: all 0.15s; font-family: inherit;
+  display: flex; align-items: center; gap: 6px;
+}
+.rom-cat-tab.active { color: #D62300; border-bottom-color: #D62300; }
+.rom-cat-tab:hover:not(.active) { color: #502314; }
+.rom-cat-tab-count {
+  background: #f0ebe4; padding: 1px 7px; border-radius: 10px; font-size: 11px; color: #502314;
+}
+.rom-cat-tab.active .rom-cat-tab-count { background: rgba(214, 35, 0, 0.1); color: #D62300; }
+
+/* Скроллируемая часть модалки */
+.rom-modal-scroll {
+  flex: 1; overflow-y: auto; padding: 0 20px 10px;
+  min-height: 0;
+}
+
+/* Фиксированный подвал */
+.rom-modal-footer-fixed {
+  padding: 14px 20px; display: flex; align-items: center; gap: 10px;
+  border-top: 1px solid #e0d5c8; background: white; flex-shrink: 0;
+}
 
 /* Users modal */
 .rom-bulk-row { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -1703,7 +1770,11 @@ async function doUnifiedExport() {
 .rom-date-edit { display: inline-flex; align-items: center; gap: 6px; }
 .rom-input-date { padding: 4px 8px; border: 1.5px solid #e0dbd5; border-radius: 6px; font-size: 13px; font-family: inherit; }
 .rom-cat-title { font-size: 14px; color: #D62300; margin: 16px 0 8px; }
-.rom-table-edit td { padding: 4px 8px; }
+.rom-table-edit th { text-align: center; }
+.rom-table-edit th:first-child { text-align: left; }
+.rom-table-edit td { padding: 4px 8px; text-align: left; }
+.rom-table-edit td:nth-child(2),
+.rom-table-edit td:nth-child(3) { text-align: center; }
 .rom-edit-qty {
   width: 70px; padding: 4px 6px; border: 1px solid #e0d5c8;
   border-radius: 6px; font-size: 13px; text-align: center;
@@ -1826,11 +1897,6 @@ async function doUnifiedExport() {
 }
 .rom-exp-summary { font-size: 13px; color: #502314; }
 
-/* Order totals */
-.rom-order-totals {
-  display: flex; gap: 20px; padding: 12px 0; margin-top: 12px;
-  border-top: 2px solid #e0d5c8; font-size: 14px; color: #502314;
-}
 .rom-td-weight { font-size: 12px; color: #8b7355; }
 .rom-cat-summary {
   display: flex; gap: 12px; align-items: center;

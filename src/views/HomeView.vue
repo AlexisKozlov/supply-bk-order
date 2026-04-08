@@ -135,19 +135,43 @@
             <button class="login-close" @click="showLoginModal = false"><BkIcon name="close" size="xs"/></button>
             <div class="login-form">
               <div class="login-form-title">Вход в систему</div>
-              <div class="login-form-sub">Введите email и пароль</div>
-              <div class="login-field">
-                <label>Email</label>
-                <input v-model="selectedUser" type="email" placeholder="Введите email" autocomplete="email" :disabled="loginLoading" @keydown.enter="passwordInput?.focus()" />
+              <!-- Переключатель: Отдел закупок / Ресторан -->
+              <div class="login-mode-tabs">
+                <button class="login-mode-tab" :class="{ active: loginMode === 'staff' }" @click="switchLoginMode('staff')">Отдел закупок</button>
+                <button class="login-mode-tab" :class="{ active: loginMode === 'restaurant' }" @click="switchLoginMode('restaurant')">Ресторан</button>
               </div>
-              <div class="login-field">
-                <label>Пароль</label>
-                <input ref="passwordInput" v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
-              </div>
-              <div v-if="loginError" class="login-error">{{ loginError }}</div>
-              <button class="login-submit" @click="doLogin" :disabled="loginLoading || !selectedUser">
-                {{ loginLoading ? 'Вход...' : 'Войти' }}
-              </button>
+              <!-- Форма для отдела закупок -->
+              <template v-if="loginMode === 'staff'">
+                <div class="login-form-sub">Введите email и пароль</div>
+                <div class="login-field">
+                  <label>Email</label>
+                  <input v-model="selectedUser" type="email" placeholder="Введите email" autocomplete="email" :disabled="loginLoading" @keydown.enter="passwordInput?.focus()" />
+                </div>
+                <div class="login-field">
+                  <label>Пароль</label>
+                  <input ref="passwordInput" v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
+                </div>
+                <div v-if="loginError" class="login-error">{{ loginError }}</div>
+                <button class="login-submit" @click="doLogin" :disabled="loginLoading || !selectedUser">
+                  {{ loginLoading ? 'Вход...' : 'Войти' }}
+                </button>
+              </template>
+              <!-- Форма для ресторана -->
+              <template v-else>
+                <div class="login-form-sub">Введите номер ресторана и пароль</div>
+                <div class="login-field">
+                  <label>Номер ресторана</label>
+                  <input v-model="roNumber" type="number" inputmode="numeric" placeholder="Например: 24" :disabled="loginLoading" @keydown.enter="roPasswordInput?.focus()" />
+                </div>
+                <div class="login-field">
+                  <label>Пароль</label>
+                  <input ref="roPasswordInput" v-model="roPassword" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doRoLogin" :disabled="loginLoading" />
+                </div>
+                <div v-if="loginError" class="login-error">{{ loginError }}</div>
+                <button class="login-submit" @click="doRoLogin" :disabled="loginLoading || !roNumber || !roPassword">
+                  {{ loginLoading ? 'Вход...' : 'Войти' }}
+                </button>
+              </template>
             </div>
           </div>
         </div>
@@ -195,6 +219,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
@@ -207,6 +232,7 @@ const route = useRoute();
 const userStore = useUserStore();
 const orderStore = useOrderStore();
 const toast = useToastStore();
+const roStore = useRestaurantOrderStore();
 
 const showLogoutConfirm = ref(false);
 const showLoginModal = ref(false);
@@ -234,6 +260,10 @@ const password = ref('');
 const passwordInput = ref(null);
 const loginError = ref('');
 const loginLoading = ref(false);
+const loginMode = ref('staff');
+const roNumber = ref('');
+const roPassword = ref('');
+const roPasswordInput = ref(null);
 const isMaintenance = ref(false);
 const maintenanceBannerText = ref('');
 const maintenanceEndTimeRaw = ref(null);
@@ -487,6 +517,34 @@ async function doLogin() {
   finally { loginLoading.value = false; }
 }
 
+function switchLoginMode(mode) {
+  loginMode.value = mode;
+  loginError.value = '';
+}
+
+const roForceLogin = ref(false);
+
+async function doRoLogin() {
+  if (!roNumber.value || !roPassword.value) return;
+  loginError.value = '';
+  loginLoading.value = true;
+  try {
+    const result = await roStore.login(parseInt(roNumber.value), roPassword.value, roForceLogin.value);
+    if (result.success) {
+      roForceLogin.value = false;
+      showLoginModal.value = false;
+      router.push({ name: 'restaurant-cabinet' });
+    } else if (result.active_session) {
+      loginError.value = `В аккаунте работает другой пользователь${result.last_login_ago ? ' (вошёл ' + result.last_login_ago + ')' : ''}. Нажмите «Войти» ещё раз, чтобы завершить его сессию.`;
+      roForceLogin.value = true;
+    } else {
+      loginError.value = result.error || 'Неверный номер или пароль';
+      roForceLogin.value = false;
+    }
+  } catch (e) { loginError.value = e.message || 'Ошибка соединения'; roForceLogin.value = false; }
+  finally { loginLoading.value = false; }
+}
+
 function confirmLogout() {
   showLogoutConfirm.value = false;
   localStorage.removeItem('bk_draft');
@@ -593,12 +651,19 @@ function confirmLogout() {
 .login-brand-sub { font-size: 9px; font-weight: 700; color: rgba(245,166,35,.5); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
 .login-right { flex: 1; background: #FFFBF5; padding: 32px; position: relative; }
 .login-close { position: absolute; top: 12px; right: 14px; background: none; border: none; font-size: 18px; color: #A08870; cursor: pointer; }
-.login-form-title { font-size: 18px; font-weight: 800; color: #502314; margin-bottom: 4px; }
-.login-form-sub { font-size: 12px; color: #A08870; margin-bottom: 20px; }
+.login-form-title { font-size: 18px; font-weight: 800; color: #502314; margin-bottom: 10px; }
+.login-mode-tabs { display: flex; gap: 0; margin-bottom: 16px; border-radius: 10px; overflow: hidden; border: 1.5px solid #E8DDD0; }
+.login-mode-tab { flex: 1; padding: 9px 0; border: none; background: #FFFBF5; color: #8B7355; font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
+.login-mode-tab.active { background: #502314; color: #F5E6D0; }
+.login-mode-tab:not(.active):hover { background: #f0ebe4; }
+.login-form-sub { font-size: 12px; color: #A08870; margin-bottom: 16px; }
 .login-field { margin-bottom: 12px; }
 .login-field label { display: block; font-size: 10px; font-weight: 700; color: #8B7355; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 4px; }
 .login-field select, .login-field input { width: 100%; padding: 10px 12px; border: 1.5px solid #E8DDD0; border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; }
 .login-field select:focus, .login-field input:focus { border-color: #D62700; outline: none; }
+.login-field input[type="number"] { -moz-appearance: textfield; }
+.login-field input[type="number"]::-webkit-inner-spin-button,
+.login-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .login-error { color: #D62700; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
 .login-submit { width: 100%; padding: 11px; border: none; border-radius: 10px; background: #D62700; color: #fff; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
 .login-submit:hover { background: #B52200; }

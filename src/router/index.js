@@ -74,24 +74,36 @@ const routes = [
     meta: { title: 'Планета Ресторанов' },
   },
   {
-    path: '/restaurant',
+    path: '/restaurant/login',
     name: 'restaurant-order-login',
     component: () => import('@/views/RestaurantOrderLoginView.vue'),
     meta: { title: 'Заказы — Вход' },
   },
   {
-    path: '/restaurant/cabinet',
+    path: '/restaurant',
     name: 'restaurant-cabinet',
     component: () => import('@/views/RestaurantCabinetView.vue'),
     meta: { title: 'Личный кабинет' },
   },
   {
+    path: '/restaurant/cabinet',
+    redirect: '/restaurant',
+  },
+  {
+    path: '/restaurant/home',
+    redirect: '/restaurant',
+  },
+  {
     path: '/restaurant/order',
-    redirect: '/restaurant/cabinet',
+    redirect: '/restaurant',
   },
   {
     path: '/restaurant/history',
-    redirect: '/restaurant/cabinet',
+    redirect: '/restaurant',
+  },
+  {
+    path: '/ro',
+    redirect: '/restaurant/login',
   },
   {
     path: '/supplier-order',

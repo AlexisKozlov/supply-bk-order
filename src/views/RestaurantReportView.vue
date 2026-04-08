@@ -58,6 +58,13 @@
           Показать
         </button>
       </div>
+      <!-- Поиск по товару -->
+      <div v-if="loaded" class="rr-search-row">
+        <input v-model="searchQuery" type="text" class="rr-input rr-search-input" placeholder="Поиск по артикулу или названию товара..." />
+        <span v-if="searchQuery" class="rr-search-hint">
+          Найдено: {{ filteredData.length }} из {{ reportData.length }} позиций
+        </span>
+      </div>
     </div>
 
     <!-- Группировка -->
@@ -72,7 +79,50 @@
     <div v-if="loading" class="rr-loader"><div class="rr-spin rr-spin-lg"></div></div>
 
     <!-- Нет данных -->
-    <div v-else-if="loaded && !reportData.length" class="rr-empty">Нет данных за выбранный период</div>
+    <div v-else-if="loaded && !filteredData.length" class="rr-empty">
+      {{ searchQuery ? 'Ничего не найдено по запросу «' + searchQuery + '»' : 'Нет данных за выбранный период' }}
+    </div>
+
+    <!-- ═══ Таблица: Позиции (детально) ═══ -->
+    <div v-else-if="loaded && groupBy === 'items'" class="rr-table-wrap">
+      <table class="rr-table">
+        <thead>
+          <tr>
+            <th @click="sortTable('delivery_date')">Дата {{ sortIcon('delivery_date') }}</th>
+            <th @click="sortTable('restaurant_number')">Рест. {{ sortIcon('restaurant_number') }}</th>
+            <th>Город</th>
+            <th class="rr-th-name" @click="sortTable('product_name')">Товар {{ sortIcon('product_name') }}</th>
+            <th class="rr-th-cat" @click="sortTable('category')">Режим {{ sortIcon('category') }}</th>
+            <th class="rr-th-num" @click="sortTable('quantity')">Кол-во {{ sortIcon('quantity') }}</th>
+            <th style="width:90px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in sortedItemsData" :key="row.id" class="rr-item-row">
+            <td>{{ fmtDate(row.delivery_date) }}</td>
+            <td><strong>{{ row.restaurant_number }}</strong></td>
+            <td class="rr-city">{{ row.city }}</td>
+            <td>
+              <span class="rr-sku">{{ row.sku }}</span> {{ row.product_name }}
+              <span v-if="row.comment" class="rr-comment" :title="row.comment">💬</span>
+            </td>
+            <td><span class="rr-cat-badge" :class="'cat-' + row.category">{{ row.category }}</span></td>
+            <td class="rr-num">{{ fmtNum(row.quantity) }}</td>
+            <td class="rr-item-actions">
+              <button class="rr-action-btn rr-action-goto" @click="goToOrder(row)" title="Открыть заказ">→</button>
+              <button class="rr-action-btn rr-action-del" @click="deleteItem(row)" title="Удалить позицию">✕</button>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="5"><strong>Итого: {{ sortedItemsData.length }} позиций, {{ itemsRestCount }} рест., {{ itemsOrderCount }} заказов</strong></td>
+            <td class="rr-num"><strong>{{ fmtNum(itemsTotalQty) }}</strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
 
     <!-- ═══ Таблица: По товарам ═══ -->
     <div v-else-if="loaded && groupBy === 'product'" class="rr-table-wrap">
@@ -88,7 +138,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in sortedProductData" :key="row.sku">
+          <tr v-for="row in sortedProductData" :key="row.sku" class="rr-clickable" @click="drillDown(row.sku, row.name)">
             <td><span class="rr-sku">{{ row.sku }}</span> {{ row.name }}</td>
             <td><span class="rr-cat-badge" :class="'cat-' + row.category">{{ row.category }}</span></td>
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
@@ -229,15 +279,30 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Диалог подтверждения удаления -->
+    <div v-if="deleteConfirm" class="rr-overlay" @click.self="deleteConfirm = null">
+      <div class="rr-confirm">
+        <p>Удалить <strong>{{ deleteConfirm.sku }} {{ deleteConfirm.product_name }}</strong> ({{ deleteConfirm.quantity }} кор.) из заказа ресторана <strong>{{ deleteConfirm.restaurant_number }}</strong> на {{ fmtDate(deleteConfirm.delivery_date) }}?</p>
+        <div class="rr-confirm-btns">
+          <button class="rr-btn rr-btn-danger" @click="confirmDelete" :disabled="deleting">{{ deleting ? 'Удаление...' : 'Удалить' }}</button>
+          <button class="rr-btn rr-btn-outline" @click="deleteConfirm = null">Отмена</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { useToastStore } from '@/stores/toastStore.js';
 import { EXCEL_HEADER_STYLE } from '@/lib/roUtils.js';
 
 const store = useRestaurantOrderStore();
+const toast = useToastStore();
+const router = useRouter();
 
 const today = new Date();
 const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
@@ -250,15 +315,20 @@ const selectedRestaurants = ref([]);
 const showRestPicker = ref(false);
 const loading = ref(false);
 const loaded = ref(false);
-const groupBy = ref('product');
+const groupBy = ref('items');
 const sortKey = ref('');
 const sortDir = ref('asc');
+const searchQuery = ref('');
 
 const rawOrders = ref([]);
 const rawItems = ref([]);
 const restaurantList = ref([]);
 
+const deleteConfirm = ref(null);
+const deleting = ref(false);
+
 const groupOptions = [
+  { id: 'items', label: 'Позиции' },
   { id: 'product', label: 'По товарам' },
   { id: 'restaurant', label: 'По ресторанам' },
   { id: 'day', label: 'По дням' },
@@ -290,7 +360,7 @@ async function loadReport() {
   finally { loading.value = false; }
 }
 
-// Enriched items: add restaurant_number and delivery_date from orders
+// Enriched items: add restaurant_number, delivery_date, city from orders
 const reportData = computed(() => {
   const orderMap = {};
   for (const o of rawOrders.value) orderMap[o.id] = o;
@@ -300,10 +370,26 @@ const reportData = computed(() => {
   });
 });
 
+// Filtered by search query
+const filteredData = computed(() => {
+  if (!searchQuery.value) return reportData.value;
+  const q = searchQuery.value.toLowerCase();
+  return reportData.value.filter(item =>
+    (item.sku || '').toLowerCase().includes(q) ||
+    (item.product_name || '').toLowerCase().includes(q)
+  );
+});
+
+// ═══ Group: Items (detail) ═══
+const sortedItemsData = computed(() => applySorted(filteredData.value));
+const itemsTotalQty = computed(() => sortedItemsData.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
+const itemsRestCount = computed(() => new Set(sortedItemsData.value.map(i => i.restaurant_number)).size);
+const itemsOrderCount = computed(() => new Set(sortedItemsData.value.map(i => i.order_id)).size);
+
 // ═══ Group: By Product ═══
 const productData = computed(() => {
   const map = {};
-  for (const item of reportData.value) {
+  for (const item of filteredData.value) {
     const key = item.sku;
     if (!map[key]) map[key] = { sku: item.sku, name: item.product_name, category: item.category, totalQty: 0, orderCount: 0, rests: new Set() };
     map[key].totalQty += parseFloat(item.quantity) || 0;
@@ -316,7 +402,7 @@ const productData = computed(() => {
 // ═══ Group: By Restaurant ═══
 const restData = computed(() => {
   const map = {};
-  for (const item of reportData.value) {
+  for (const item of filteredData.value) {
     const key = item.restaurant_number;
     if (!map[key]) map[key] = { number: key, city: item.city, totalQty: 0, itemCount: 0, orders: new Set() };
     map[key].totalQty += parseFloat(item.quantity) || 0;
@@ -329,7 +415,7 @@ const restData = computed(() => {
 // ═══ Group: By Day ═══
 const dayData = computed(() => {
   const map = {};
-  for (const item of reportData.value) {
+  for (const item of filteredData.value) {
     const key = item.delivery_date;
     if (!key) continue;
     if (!map[key]) { const d = new Date(key + 'T00:00:00'); map[key] = { date: key, dayName: DAY_NAMES[d.getDay()], totalQty: 0, itemCount: 0, orders: new Set(), rests: new Set() }; }
@@ -344,7 +430,7 @@ const dayData = computed(() => {
 // ═══ Group: By Category ═══
 const categoryData = computed(() => {
   const map = {};
-  for (const item of reportData.value) {
+  for (const item of filteredData.value) {
     const key = item.category || 'Без категории';
     if (!map[key]) map[key] = { category: key, totalQty: 0, lineCount: 0, products: new Set() };
     map[key].totalQty += parseFloat(item.quantity) || 0;
@@ -357,12 +443,12 @@ const categoryData = computed(() => {
 // ═══ Cross table ═══
 const crossRestaurants = computed(() => {
   const rests = new Set();
-  for (const item of reportData.value) if (item.restaurant_number) rests.add(item.restaurant_number);
+  for (const item of filteredData.value) if (item.restaurant_number) rests.add(item.restaurant_number);
   return [...rests].sort((a, b) => a - b);
 });
 const crossData = computed(() => {
   const map = {};
-  for (const item of reportData.value) {
+  for (const item of filteredData.value) {
     const key = item.sku;
     if (!map[key]) map[key] = { sku: item.sku, name: item.product_name, byRest: {}, total: 0 };
     const qty = parseFloat(item.quantity) || 0;
@@ -373,14 +459,14 @@ const crossData = computed(() => {
 });
 
 // Totals
-const totalQty = computed(() => reportData.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
-const totalItems = computed(() => reportData.value.length);
-const totalOrders = computed(() => new Set(reportData.value.map(i => i.order_id)).size);
+const totalQty = computed(() => filteredData.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
+const totalItems = computed(() => filteredData.value.length);
+const totalOrders = computed(() => new Set(filteredData.value.map(i => i.order_id)).size);
 
 // Sorting
 function sortTable(key) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
-  else { sortKey.value = key; sortDir.value = key === 'name' || key === 'date' || key === 'city' || key === 'dayName' ? 'asc' : 'desc'; }
+  else { sortKey.value = key; sortDir.value = key === 'name' || key === 'date' || key === 'delivery_date' || key === 'city' || key === 'dayName' || key === 'product_name' ? 'asc' : 'desc'; }
 }
 function sortIcon(key) { if (sortKey.value !== key) return ''; return sortDir.value === 'asc' ? '\u25B2' : '\u25BC'; }
 function applySorted(data) {
@@ -398,6 +484,47 @@ const sortedDayData = computed(() => applySorted(dayData.value));
 
 function fmtNum(n) { if (!n) return '0'; const v = parseFloat(n); return v % 1 === 0 ? v.toLocaleString('ru-RU') : v.toFixed(1); }
 function fmtDate(d) { if (!d) return ''; return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
+
+// ═══ Actions ═══
+
+// Клик по товару в группировке "По товарам" → переключиться на "Позиции" с поиском
+function drillDown(sku) {
+  searchQuery.value = sku;
+  groupBy.value = 'items';
+  sortKey.value = 'restaurant_number';
+  sortDir.value = 'asc';
+}
+
+// Переход к заказу в менеджере
+function goToOrder(item) {
+  router.push({ name: 'restaurant-orders', query: { date: item.delivery_date, order: item.order_id, t: Date.now() } });
+}
+
+// Удаление позиции
+function deleteItem(item) {
+  deleteConfirm.value = item;
+}
+
+async function confirmDelete() {
+  if (!deleteConfirm.value) return;
+  deleting.value = true;
+  try {
+    const result = await store.adminDeleteItem(deleteConfirm.value.id);
+    // Удаляем из локальных данных
+    const itemId = deleteConfirm.value.id;
+    const orderId = deleteConfirm.value.order_id;
+    rawItems.value = rawItems.value.filter(i => i.id !== itemId);
+    if (result.order_deleted) {
+      rawOrders.value = rawOrders.value.filter(o => o.id !== orderId);
+    }
+    toast.success('Позиция удалена');
+    deleteConfirm.value = null;
+  } catch (e) {
+    toast.error('Ошибка удаления', e.message);
+  } finally {
+    deleting.value = false;
+  }
+}
 
 // Excel
 async function exportExcel() {
@@ -449,6 +576,9 @@ async function exportExcel() {
 .rr-field label { font-size: 11px; font-weight: 600; color: #8b7355; }
 .rr-input { padding: 7px 10px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 13px; font-family: inherit; background: white; min-width: 120px; }
 .rr-input:focus { outline: none; border-color: #D62300; }
+.rr-search-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.rr-search-input { flex: 1; min-width: 250px; }
+.rr-search-hint { font-size: 12px; color: #8b7355; white-space: nowrap; }
 .rr-rest-select { padding: 7px 10px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 13px; cursor: pointer; min-width: 100px; display: flex; justify-content: space-between; align-items: center; gap: 6px; background: white; }
 .rr-rest-select:hover { border-color: #c4b8a8; }
 .rr-chevron { font-size: 10px; color: #8b7355; }
@@ -475,6 +605,9 @@ async function exportExcel() {
 .rr-btn-green:disabled { opacity: 0.4; }
 .rr-btn-outline { border: 1.5px solid #e0dbd5; background: white; color: #502314; }
 .rr-btn-outline:hover { border-color: #D62300; color: #D62300; }
+.rr-btn-danger { background: #dc2626; color: white; }
+.rr-btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.rr-btn-danger:disabled { opacity: 0.5; }
 
 /* Loader */
 .rr-loader { padding: 60px; text-align: center; }
@@ -501,6 +634,26 @@ async function exportExcel() {
 .cat-Сухой { background: #fef3c7; color: #92400e; }
 .cat-Холод { background: #eff6ff; color: #2563eb; }
 .cat-Мороз { background: #ede9fe; color: #7c3aed; }
+.rr-city { font-size: 12px; color: #8b7355; }
+.rr-comment { font-size: 11px; cursor: help; margin-left: 4px; }
+
+/* Clickable rows */
+.rr-clickable { cursor: pointer; }
+.rr-clickable:hover { background: #f0ede8 !important; }
+
+/* Item actions */
+.rr-item-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.rr-action-btn { width: 28px; height: 28px; border-radius: 6px; border: 1.5px solid #e0dbd5; background: white; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.rr-action-goto { color: #2563eb; }
+.rr-action-goto:hover { background: #eff6ff; border-color: #2563eb; }
+.rr-action-del { color: #dc2626; }
+.rr-action-del:hover { background: #fef2f2; border-color: #dc2626; }
+
+/* Confirm dialog */
+.rr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.rr-confirm { background: white; border-radius: 12px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.rr-confirm p { margin: 0 0 16px; font-size: 14px; color: #502314; line-height: 1.5; }
+.rr-confirm-btns { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* Cross table */
 .rr-cross-wrap { overflow-x: auto; }
@@ -521,5 +674,6 @@ async function exportExcel() {
   .rr-rest-select { width: 100%; }
   .rr-group-bar { overflow-x: auto; flex-wrap: nowrap; }
   .rr-table { font-size: 12px; }
+  .rr-search-row { flex-direction: column; align-items: stretch; }
 }
 </style>

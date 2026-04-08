@@ -1,25 +1,88 @@
 <template>
   <div class="cab">
-    <!-- ══════ Header ══════ -->
-    <header class="cab-header">
-      <nav class="cab-nav">
-        <button v-for="tab in mainTabs" :key="tab.id" class="cab-nav-btn"
-          :class="{ active: activeTab === tab.id, blink: tab.blink }" @click="switchTab(tab.id)">
+    <!-- ══════ Sidebar ══════ -->
+    <aside class="cab-sidebar">
+      <div class="sb-brand">
+        <div class="sb-logo">
+          <svg width="26" height="26" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <circle cx="16" cy="16" r="10" fill="#D62300"/><circle cx="32" cy="16" r="10" fill="#F5A623"/>
+            <circle cx="16" cy="32" r="10" fill="#FF8733"/><circle cx="32" cy="32" r="10" fill="#FFD54F"/>
+            <circle cx="24" cy="24" r="8.5" fill="#502314"/>
+            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
+          </svg>
+        </div>
+        <div>
+          <div class="sb-brand-text">Supply Portal</div>
+          <div class="sb-brand-sub">Burger King</div>
+        </div>
+      </div>
+
+      <button class="sb-item" :class="{ active: activeTab === 'dashboard' }" @click="switchTab('dashboard')">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>
+        Главная
+      </button>
+
+      <div class="sb-label">Заказы</div>
+      <!-- Основная поставка -->
+      <button class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'delivery' }"
+        @click="switchTab('orders'); orderSubTab = 'delivery'">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5a2 2 0 01-2 2h-1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+        Основная поставка
+        <span v-if="deliveryBadge" class="sb-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
+      </button>
+      <!-- Планета Ресторанов -->
+      <button class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'planeta' }"
+        @click="switchTab('orders'); switchOrderSub('planeta')">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></span>
+        Планета Ресторанов
+        <span v-if="planetaBadge" class="sb-badge" :class="planetaBadge.type">{{ planetaBadge.text }}</span>
+      </button>
+      <!-- Поставщики (Камако и др.) -->
+      <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
+        :class="{ active: activeTab === 'orders' && orderSubTab === 'sup_' + sup.id }"
+        @click="switchTab('orders'); switchOrderSub('sup_' + sup.id)">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg></span>
+        {{ sup.name }}
+        <span v-if="supplierBadge(sup)" class="sb-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
+      </button>
+
+      <template v-for="tab in mainTabs.filter(t => t.id !== 'dashboard' && t.id !== 'orders')" :key="tab.id">
+        <div v-if="tab.id === 'stock'" class="sb-label">Другое</div>
+        <button class="sb-item" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
+          <span class="sb-icon"><svg v-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
           {{ tab.label }}
-          <span v-if="tab.badge" class="cab-nav-badge" :class="tab.badgeType">{{ tab.badge }}</span>
+          <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
-      </nav>
-      <div class="cab-rest-chip">
-        <div class="cab-avatar">{{ roStore.restaurant?.number }}</div>
-        <span class="cab-rest-name">{{ restaurantAddress || 'Ресторан ' + roStore.restaurant?.number }}</span>
+      </template>
+
+      <div class="sb-label">Аккаунт</div>
+      <button class="sb-item" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+        Профиль
+      </button>
+      <button class="sb-item" @click="handleLogout">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+        Выйти
+      </button>
+
+      <div class="sb-spacer"></div>
+      <div class="sb-rest">
+        <div class="sb-rest-top">
+          <div class="sb-avatar">{{ roStore.restaurant?.number }}</div>
+          <div class="sb-rest-name">Ресторан {{ roStore.restaurant?.number }}</div>
+        </div>
+        <div class="sb-rest-addr">{{ restaurantAddress }}</div>
       </div>
-      <div class="cab-header-right">
-        <button class="cab-nav-btn" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">Профиль</button>
-        <button class="cab-logout" @click="handleLogout" title="Выйти">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+    </aside>
+
+    <!-- ══════ Main ══════ -->
+    <div class="cab-main">
+      <div class="cab-topbar">
+        <div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'stock' ? 'Остатки' : 'Профиль' }}</div>
+          <div class="cab-topbar-sub">Ресторан {{ roStore.restaurant?.number }} · {{ restaurantAddress }}</div>
+        </div>
       </div>
-    </header>
 
     <!-- ══════ Loading ══════ -->
     <div v-if="globalLoading" class="cab-loader">
@@ -121,8 +184,10 @@
       <!-- ── Основная поставка ── -->
       <div v-if="orderSubTab === 'delivery'">
         <div v-if="!roStore.sessionInfo" class="cab-empty-card">
-          <h2>Нет активной сессии</h2>
-          <p>Сейчас приём заявок закрыт. Обратитесь в отдел закупок.</p>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5a2 2 0 01-2 2h-1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+          <h2>Основная поставка</h2>
+          <p>Сейчас приём заявок закрыт. Закупщик ещё не открыл сессию на эту неделю.</p>
+          <p style="margin-top:10px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок для уточнения</p>
         </div>
 
         <div v-else-if="delShowSuccess" class="cab-success">
@@ -148,7 +213,7 @@
           </div>
 
           <div class="day-tabs">
-            <button v-for="day in roStore.deliveryDays" :key="day.date" class="day-tab"
+            <button v-for="day in sortedDeliveryDays" :key="day.date" class="day-tab"
               :class="{ active: delSelectedDate === day.date, done: day.order?.status === 'submitted' || day.order?.status === 'edited', closed: day.deadline_status === 'closed' || day.deadline_status === 'not_open', warn: day.deadline_status === 'warning' }"
               @click="delSelectDay(day.date)">
               <span class="day-tab-label">
@@ -168,8 +233,8 @@
               <span class="deadline-icon" v-else>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
               </span>
-              <template v-if="delCurrentDeadlineStatus === 'open'">Приём заявок открыт до {{ delCurrentDeadlines?.soft }}</template>
-              <template v-else-if="delCurrentDeadlineStatus === 'warning'">Основной дедлайн прошёл. Можно подать до {{ delCurrentDeadlines?.hard }}</template>
+              <template v-if="delCurrentDeadlineStatus === 'open'">Приём заявок открыт до {{ delCurrentDeadlines?.soft?.substring(0,5) }}, {{ delOrderDateLabel }}</template>
+              <template v-else-if="delCurrentDeadlineStatus === 'warning'">Дедлайн прошёл. Можно подать до {{ delCurrentDeadlines?.hard?.substring(0,5) }}, {{ delOrderDateLabel }}</template>
               <template v-else-if="delCurrentDeadlineStatus === 'closed'">Приём заявок на эту дату закрыт</template>
               <template v-else-if="delCurrentDeadlineStatus === 'not_open'">Приём заявок на эту дату закрыт</template>
               <template v-else-if="delCurrentDeadlineStatus === 'not_yet'">Приём заявок ещё не начался</template>
@@ -192,12 +257,19 @@
             <div class="products-list">
               <table v-if="delFilteredItems.length" class="del-table">
                 <thead>
-                  <tr><th class="del-th-name">Товар</th><th class="del-th-qty">Кол-во</th><th class="del-th-cmt">Комментарий</th><th class="del-th-act"></th></tr>
+                  <tr>
+                    <th class="del-th-name">Товар</th>
+                    <th class="del-th-mult">Кратность</th>
+                    <th class="del-th-qty">Кол-во</th>
+                    <th class="del-th-act"></th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr v-for="item in delFilteredItems" :key="item.sku" :class="{ 'del-filled': item.quantity > 0, 'del-err': item._multError }">
                     <td class="del-td-name">
                       <span class="del-sku">{{ item.sku }}</span> {{ item.product_name }}
+                    </td>
+                    <td class="del-td-mult">
                       <span v-if="item.multiplicity > 1" class="del-mult">x{{ item.multiplicity }}</span>
                     </td>
                     <td class="del-td-qty">
@@ -207,9 +279,6 @@
                         :disabled="!delCanSubmit && !delCanEdit" placeholder="0"
                         @input="delCheckMultiplicity(item)" @focus="$event.target.select()" />
                       <div v-if="item._multError" class="del-mult-hint">Кратность {{ item.multiplicity }}</div>
-                    </td>
-                    <td class="del-td-cmt">
-                      <input v-model="item.comment" type="text" class="del-cmt" :disabled="!delCanSubmit && !delCanEdit" />
                     </td>
                     <td class="del-td-act">
                       <button v-if="item._added" class="btn-icon-danger" @click="delRemoveItem(item)">&times;</button>
@@ -224,16 +293,22 @@
 
             <div class="submit-area">
               <div v-if="delHasMultErrors" class="error-msg">Исправьте количество — некоторые товары заказаны не кратно</div>
-              <div v-if="delTotalItems > 0" class="submit-summary">
-                <span>{{ delTotalItems }} поз.</span>
-                <span>{{ delTotalQty }} кор.</span>
-                <button v-if="delCanSubmit || delCanEdit" class="btn btn-sm btn-danger-outline" @click="delClearOrder">Очистить</button>
+              <div v-if="delCanSubmit || delCanEdit" class="order-comment-row">
+                <input v-model="delOrderComment" type="text" class="order-comment-input" placeholder="Комментарий к заказу (необязательно)" :disabled="!delCanSubmit && !delCanEdit" />
               </div>
-              <button v-if="delCanSubmit || delCanEdit" class="btn btn-primary btn-lg"
-                :disabled="delSubmitting || delTotalItems === 0 || delHasMultErrors" @click="delHandleSubmit">
-                <span v-if="delSubmitting" class="cab-spin cab-spin-sm"></span>
-                {{ delExistingOrder ? 'Обновить заказ' : 'Отправить заказ' }}
-              </button>
+              <div class="submit-bottom">
+                <div v-if="delTotalItems > 0" class="submit-summary">
+                  <span><strong>{{ delTotalItems }}</strong> поз.</span>
+                  <span><strong>{{ delTotalQty }}</strong> кор.</span>
+                  <button v-if="delCanSubmit || delCanEdit" class="btn btn-sm btn-danger-outline" @click="delClearOrder">Очистить</button>
+                </div>
+                <div v-else></div>
+                <button v-if="delCanSubmit || delCanEdit" class="btn btn-primary btn-lg"
+                  :disabled="delSubmitting || delTotalItems === 0 || delHasMultErrors" @click="delHandleSubmit">
+                  <span v-if="delSubmitting" class="cab-spin cab-spin-sm"></span>
+                  {{ delExistingOrder ? 'Обновить заказ' : 'Отправить заказ' }}
+                </button>
+              </div>
               <div v-if="!delCanSubmit && !delCanEdit && delCurrentDeadlineStatus === 'closed'" class="locked-msg">
                 Заказ заблокирован. Для изменений обратитесь в отдел закупок.
               </div>
@@ -255,8 +330,15 @@
       <div v-if="orderSubTab === 'planeta'">
         <div v-if="vegLoading" class="mini-loader"><div class="cab-spin"></div></div>
         <div v-else-if="vegNoSession" class="cab-empty-card">
-          <h2>Нет активной сессии</h2>
-          <p>Сейчас приём заявок не проводится.</p>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+          <h2>Планета Ресторанов</h2>
+          <p>Сейчас приём заявок не проводится. Возможные причины:</p>
+          <ul style="text-align:left; max-width:320px; margin:10px auto 0; font-size:13px; color:#8b7355; line-height:1.8">
+            <li>Для вашего ресторана не настроен график доставки овощей</li>
+            <li>Нет активной сессии приёма заявок</li>
+            <li>Дедлайн подачи истёк</li>
+          </ul>
+          <p style="margin-top:14px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок для уточнения</p>
         </div>
 
         <div v-else-if="vegSubmitted && !vegEditing" class="cab-success">
@@ -283,6 +365,13 @@
         </div>
 
         <template v-else-if="vegInfo">
+          <div v-if="!vegDeliveries.length" class="cab-empty-card">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+            <h2>Планета Ресторанов</h2>
+            <p>Для вашего ресторана не настроен график доставки овощей.</p>
+            <p style="margin-top:10px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок для настройки</p>
+          </div>
+          <template v-else>
           <div class="cab-info-bar">{{ vegInfo.session_name }}</div>
           <div class="day-tabs">
             <button v-for="(del, dIdx) in vegDeliveries" :key="del.date"
@@ -344,6 +433,7 @@
             <button v-if="vegEditing" class="btn btn-outline" @click="vegEditing = false; vegSubmitted = true">Отмена</button>
             <div v-if="vegError" class="error-msg">{{ vegError }}</div>
           </div>
+          </template>
         </template>
       </div>
 
@@ -351,8 +441,14 @@
       <template v-for="sup in suppliers" :key="'stab-' + sup.id">
         <div v-if="orderSubTab === 'sup_' + sup.id">
           <div v-if="!sup.session" class="cab-empty-card">
-            <h2>Приём заявок закрыт</h2>
-            <p>Сейчас заявки для {{ sup.name }} не принимаются.</p>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+            <h2>{{ sup.name }}</h2>
+            <p>Сейчас приём заявок не проводится. Возможные причины:</p>
+            <ul style="text-align:left; max-width:320px; margin:10px auto 0; font-size:13px; color:#8b7355; line-height:1.8">
+              <li>Нет активной сессии для этого поставщика</li>
+              <li>Для вашего ресторана не настроен график доставки</li>
+            </ul>
+            <p style="margin-top:14px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок</p>
           </div>
           <template v-else>
             <div class="cab-info-bar">{{ sup.name }}</div>
@@ -526,7 +622,7 @@
       <div class="cab-modal">
         <div class="cab-modal-head"><h2>Добавить товар</h2><button class="cab-modal-close" @click="delShowAddModal = false">&times;</button></div>
         <div class="cab-modal-body">
-          <input v-model="delAddSearch" type="text" placeholder="Поиск..." class="input-search" @input="delDoAddSearch" ref="delAddSearchInput" />
+          <input v-model="delAddSearch" type="text" placeholder="Поиск..." class="input-search modal-search" @input="delDoAddSearch" ref="delAddSearchInput" />
           <div v-if="delAddLoading" class="mini-loader"><div class="cab-spin"></div></div>
           <div v-else-if="delAddResults.length" class="add-list">
             <div v-for="p in delAddResults" :key="p.sku" class="add-item" @click="delAddProduct(p)">
@@ -553,6 +649,21 @@
         <button class="btn btn-primary" @click="supShowSuccess = false">OK</button>
       </div>
     </div>
+
+    <!-- ══════ Mobile tab bar ══════ -->
+    <div class="mob-tabbar">
+      <button v-for="tab in mainTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
+        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'stock' ? '\u{1F4CB}' : '\u{2699}' }}</span>
+        <span class="mob-tab-label">{{ tab.label }}</span>
+        <span v-if="tab.badge" class="mob-tab-badge">{{ tab.badge }}</span>
+      </button>
+      <button class="mob-tab" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">
+        <span class="mob-tab-icon">&#128100;</span>
+        <span class="mob-tab-label">Профиль</span>
+      </button>
+    </div>
+
+    </div><!-- /cab-main -->
   </div>
 </template>
 
@@ -682,9 +793,6 @@ const mainTabs = computed(() => {
   }
   return tabs;
 });
-// Keep visibleTabs for compatibility (includes profile)
-const visibleTabs = computed(() => [...mainTabs.value, { id: 'profile', label: 'Профиль' }]);
-
 // ═══ Delivery (основная поставка) ═══
 const delSelectedDate = ref('');
 const delActiveCategory = ref('Сухой');
@@ -697,6 +805,7 @@ const delSubmitError = ref('');
 const delExistingOrder = ref(null);
 const delProductsLoading = ref(false);
 const delShowSuccess = ref(false);
+const delOrderComment = ref('');
 const delWasEdited = ref(false);
 const delEditTimeLeft = ref('');
 let delEditTimerInterval = null;
@@ -709,10 +818,29 @@ let delAddTimer = null;
 const delSavedSnapshot = ref('');
 
 const delCurrentDay = computed(() => roStore.deliveryDays.find(d => d.date === delSelectedDate.value));
+// Дни: сначала открытые без заказа, потом остальные по дате
+const sortedDeliveryDays = computed(() => {
+  const days = [...roStore.deliveryDays];
+  days.sort((a, b) => {
+    const aOpen = !a.order && (a.deadline_status === 'open' || a.deadline_status === 'warning');
+    const bOpen = !b.order && (b.deadline_status === 'open' || b.deadline_status === 'warning');
+    if (aOpen && !bOpen) return -1;
+    if (!aOpen && bOpen) return 1;
+    return a.date.localeCompare(b.date);
+  });
+  return days;
+});
 const delCurrentDeadlineStatus = computed(() => delCurrentDay.value?.deadline_status || 'closed');
 const delCurrentDeadlines = computed(() => delCurrentDay.value?.deadlines);
 const delCanSubmit = computed(() => ['open', 'warning'].includes(delCurrentDeadlineStatus.value));
 const delCanEdit = computed(() => delCurrentDay.value?.can_edit && delExistingOrder.value);
+const delOrderDateLabel = computed(() => {
+  if (!delSelectedDate.value) return '';
+  const d = new Date(delSelectedDate.value + 'T00:00:00');
+  d.setDate(d.getDate() - 1); // день подачи = день до доставки
+  const days = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  return days[d.getDay()] + ' ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+});
 const delEditDeadlineTime = computed(() => {
   const deadlines = delCurrentDeadlines.value;
   const t = deadlines?.edit_until || deadlines?.hard || '13:00:00';
@@ -752,9 +880,11 @@ async function delSelectDay(date) {
   delSubmitError.value = '';
   delSearchQuery.value = '';
   delActiveCategory.value = 'Сухой';
+  delOrderComment.value = '';
   const order = await roStore.loadMyOrder(date);
   if (order) {
     delExistingOrder.value = order;
+    delOrderComment.value = order.comment || '';
     delOrderItems.value = order.items.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: parseFloat(i.quantity) || 0, comment: i.comment || '', multiplicity: 1, _added: false, _multError: false }));
   } else { delOrderItems.value = []; }
   for (const cat of delCategories) { if (!delOrderItems.value.some(i => i.category === cat)) await delLoadCategoryProducts(cat); }
@@ -775,9 +905,9 @@ async function delLoadCategoryProducts(category) {
 async function delHandleSubmit() {
   delSubmitting.value = true; delSubmitError.value = '';
   try {
-    const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: i.quantity, comment: i.comment || null }));
+    const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: i.quantity }));
     if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
-    const result = await roStore.submitOrder(delSelectedDate.value, items);
+    const result = await roStore.submitOrder(delSelectedDate.value, items, delOrderComment.value || null);
     if (result.success) { delWasEdited.value = !!delExistingOrder.value; delExistingOrder.value = { id: result.order_id }; roStore.loadMyInfo(); delShowSuccess.value = true; delStartEditTimer(); }
   } catch (e) { delSubmitError.value = e.message || 'Ошибка'; }
   finally { delSubmitting.value = false; }
@@ -788,11 +918,17 @@ function delUpdateEditTimeLeft() {
   const deadlines = delCurrentDeadlines.value;
   const editUntil = deadlines?.edit_until || deadlines?.hard || '13:00:00';
   const parts = editUntil.split(':');
+  // Дедлайн относится к дню подачи = день доставки минус 1
+  const deliveryDate = delSelectedDate.value;
+  if (!deliveryDate) { delEditTimeLeft.value = ''; return; }
+  const orderDate = new Date(deliveryDate + 'T00:00:00');
+  orderDate.setDate(orderDate.getDate() - 1);
+  const orderDateStr = orderDate.toISOString().slice(0, 10);
+  // Собираем дедлайн в минском времени (UTC+3)
+  const dlMinsk = new Date(`${orderDateStr}T${editUntil}+03:00`);
   const now = new Date();
-  const dl = new Date(now);
-  dl.setHours(parseInt(parts[0]) || 13, parseInt(parts[1]) || 0, parseInt(parts[2]) || 0, 0);
-  if (now >= dl) { delEditTimeLeft.value = ''; clearInterval(delEditTimerInterval); return; }
-  const d = dl - now; const h = Math.floor(d/3600000); const m = Math.floor((d%3600000)/60000); const s = Math.floor((d%60000)/1000);
+  if (now >= dlMinsk) { delEditTimeLeft.value = ''; clearInterval(delEditTimerInterval); return; }
+  const d = dlMinsk - now; const h = Math.floor(d/3600000); const m = Math.floor((d%3600000)/60000); const s = Math.floor((d%60000)/1000);
   delEditTimeLeft.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 function delGoToNextDay() { delShowSuccess.value = false; clearInterval(delEditTimerInterval); const idx = roStore.deliveryDays.findIndex(d => d.date === delSelectedDate.value); const next = roStore.deliveryDays[idx + 1]; if (next) delSelectDay(next.date); }
@@ -995,7 +1131,7 @@ function handleLogout() { roStore.logout(); router.replace({ name: 'restaurant-o
 
 async function loadHistory() {
   historyLoading.value = true;
-  try { const token = localStorage.getItem('ro_token') || ''; const res = await fetch('/api/ro/all-history?limit=50', { headers: { 'Content-Type': 'application/json', 'X-RO-Token': token } }); const data = await res.json(); historyOrders.value = data.orders || []; }
+  try { historyOrders.value = await roStore.loadAllHistory(50); }
   catch { historyOrders.value = []; }
   finally { historyLoading.value = false; }
 }
@@ -1007,30 +1143,24 @@ async function changePassword() {
   if (pwNew.value.length < 4) { pwError.value = 'Минимум 4 символа'; return; }
   pwLoading.value = true;
   try {
-    const token = localStorage.getItem('ro_token') || '';
-    const res = await fetch('/api/ro/change-password', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RO-Token': token }, body: JSON.stringify({ old_password: pwOld.value, new_password: pwNew.value }) });
-    const data = await res.json();
+    const data = await roStore.changePassword(pwOld.value, pwNew.value);
     if (data.success) { pwSuccess.value = true; pwOld.value = ''; pwNew.value = ''; pwConfirm.value = ''; }
     else { pwError.value = data.error || 'Ошибка'; }
-  } catch { pwError.value = 'Ошибка соединения'; }
+  } catch (e) { pwError.value = e.message || 'Ошибка соединения'; }
   finally { pwLoading.value = false; }
 }
 
 // Telegram
 async function loadTgStatus() {
   try {
-    const token = localStorage.getItem('ro_token') || '';
-    const res = await fetch('/api/ro/telegram-status', { headers: { 'X-RO-Token': token } });
-    const data = await res.json();
+    const data = await roStore.getTelegramStatus();
     tgStatus.linked = data.linked; tgStatus.chat_id = data.chat_id;
   } catch {}
 }
 async function tgGetCode() {
   tgLinkLoading.value = true;
   try {
-    const token = localStorage.getItem('ro_token') || '';
-    const res = await fetch('/api/ro/telegram-link', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RO-Token': token } });
-    const data = await res.json();
+    const data = await roStore.telegramLink();
     if (data.already_linked) { tgStatus.linked = true; return; }
     if (data.code) tgLinkCode.value = data.code;
   } catch {}
@@ -1039,8 +1169,7 @@ async function tgGetCode() {
 async function tgUnlink() {
   if (!confirm('Отключить Telegram?')) return;
   try {
-    const token = localStorage.getItem('ro_token') || '';
-    await fetch('/api/ro/telegram-unlink', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-RO-Token': token } });
+    await roStore.telegramUnlink();
     tgStatus.linked = false; tgStatus.chat_id = null; tgLinkCode.value = '';
   } catch {}
 }
@@ -1048,9 +1177,7 @@ async function tgUnlink() {
 // Stock collection check
 async function checkStockCollection() {
   try {
-    const token = localStorage.getItem('ro_token') || '';
-    const res = await fetch('/api/ro/stock-collection-status', { headers: { 'X-RO-Token': token } });
-    const data = await res.json();
+    const data = await roStore.getStockCollectionStatus();
     stockCollection.active = data.active;
     stockCollection.collection = data.collection || null;
   } catch {}
@@ -1093,36 +1220,45 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 
 <style scoped>
 /* ═══ Base ═══ */
-.cab { min-height: 100vh; background: #f7f5f2; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; padding-bottom: 20px; box-sizing: border-box; }
+.cab { min-height: 100vh; background: #F5F0EB; font-family: 'Inter', system-ui, -apple-system, sans-serif; box-sizing: border-box; display: flex; }
 .cab *, .cab *::before, .cab *::after { box-sizing: border-box; }
 
-/* Header: [Nav] ... [Restaurant] [Profile] [Logout] */
-.cab-header { background: #502314; color: white; padding: 0 12px; display: flex; align-items: stretch; min-height: 46px; gap: 4px; }
+/* ═══ Sidebar ═══ */
+.cab-sidebar {
+  width: 220px; min-height: 100vh; background: #502314;
+  display: flex; flex-direction: column; padding: 20px 10px;
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
+}
+.sb-brand { display: flex; align-items: center; gap: 11px; padding: 6px 10px; margin-bottom: 24px; }
+.sb-logo { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; backdrop-filter: blur(4px); }
+.sb-brand-text { font-size: 14px; font-weight: 800; color: white; letter-spacing: -0.3px; }
+.sb-brand-sub { font-size: 9px; color: rgba(255,255,255,0.3); font-weight: 500; margin-top: 1px; letter-spacing: 0.5px; text-transform: uppercase; }
+.sb-label { font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 1.5px; padding: 0 12px; margin: 18px 0 6px; }
+.sb-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 11px; border: none; background: transparent; color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.18s; width: 100%; text-align: left; }
+.sb-item:hover { background: rgba(255,255,255,0.12); color: white; }
+.sb-item.active { background: rgba(214,35,0,0.3); color: #FF8733; }
+.sb-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
+.sb-badge { margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px; background: #D62300; color: white; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 6px; flex-shrink: 0; }
+.sb-badge.warn { background: #f59e0b; }
+.sb-badge.ok { background: #16a34a; }
+.sb-badge.alert { background: #dc2626; }
+.sb-spacer { flex: 1; }
+.sb-rest { background: rgba(255,255,255,0.06); border-radius: 13px; padding: 14px; margin-top: 8px; border: 1px solid rgba(255,255,255,0.04); }
+.sb-rest-top { display: flex; align-items: center; gap: 10px; }
+.sb-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #D62300, #FF8733); color: white; font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sb-rest-name { font-size: 12px; font-weight: 700; color: white; }
+.sb-rest-addr { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; line-height: 1.35; }
 
-/* Nav (left) */
-.cab-nav { display: flex; align-items: stretch; }
-.cab-nav-btn { flex-shrink: 0; padding: 0 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.5); font-family: inherit; border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; position: relative; display: flex; align-items: center; }
-.cab-nav-btn.active { color: white; border-bottom-color: #F5A623; background: rgba(255,255,255,0.07); }
-.cab-nav-btn:hover:not(.active) { color: rgba(255,255,255,0.8); }
-.cab-nav-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 6px; min-width: 14px; text-align: center; margin-left: 4px; }
-.cab-nav-badge.warn { background: #f59e0b; color: white; }
-.cab-nav-badge.ok { background: #16a34a; color: white; }
-.cab-nav-badge.alert { background: #dc2626; color: white; }
-.cab-nav-btn.blink { animation: cab-blink 1.2s ease-in-out infinite; }
-@keyframes cab-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+/* ═══ Main ═══ */
+.cab-main { flex: 1; margin-left: 220px; min-height: 100vh; }
 
-/* Restaurant chip (middle, pushes right) */
-.cab-rest-chip { display: flex; align-items: center; gap: 6px; margin-left: auto; padding: 0 10px; flex-shrink: 1; min-width: 0; }
-.cab-avatar { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0; }
-.cab-rest-name { font-size: 12px; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* Right side (profile + logout) */
-.cab-header-right { display: flex; align-items: stretch; flex-shrink: 0; }
-.cab-logout { background: none; border: none; padding: 0 8px; color: rgba(255,255,255,0.35); cursor: pointer; display: flex; align-items: center; transition: color 0.15s; }
-.cab-logout:hover { color: rgba(255,255,255,0.8); }
+/* Topbar */
+.cab-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 28px; background: white; border-bottom: 1px solid #EDE8E3; position: sticky; top: 0; z-index: 50; }
+.cab-topbar-title { font-size: 17px; font-weight: 800; color: #502314; letter-spacing: -0.3px; }
+.cab-topbar-sub { font-size: 11px; color: #8B7355; margin-top: 1px; }
 
 /* Section */
-.cab-section { max-width: 900px; margin: 0 auto; padding: 0 12px; }
+.cab-section { padding: 24px 28px; }
 
 /* Loader */
 .cab-loader { display: flex; justify-content: center; padding: 60px; }
@@ -1132,123 +1268,133 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .mini-loader { padding: 24px; text-align: center; }
 
 /* ═══ Dashboard ═══ */
-.dash-urgent { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.dash-card { display: flex; align-items: center; gap: 10px; background: white; border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: background 0.15s; border-left: 3px solid #f59e0b; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-.dash-card:hover { background: #faf8f5; }
+.dash-urgent { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+.dash-card { display: flex; align-items: center; gap: 14px; background: white; border-radius: 16px; padding: 16px 18px; cursor: pointer; transition: all 0.18s; border: 1px solid #EDE8E3; border-left: 4px solid #f59e0b; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.dash-card:hover { transform: translateX(4px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 .dash-card--warn { border-left-color: #f59e0b; }
 .dash-card--green { border-left-color: #16a34a; }
 .dash-card--orange { border-left-color: #ea580c; }
 .dash-card--alert { border-left-color: #dc2626; }
-.dash-card-icon { font-size: 18px; flex-shrink: 0; }
+.dash-card-icon { font-size: 26px; flex-shrink: 0; }
 .dash-card-body { flex: 1; min-width: 0; }
-.dash-card-title { font-size: 13px; font-weight: 600; color: #502314; }
-.dash-card-sub { font-size: 11px; color: #8b7355; }
+.dash-card-title { font-size: 13px; font-weight: 700; color: #502314; }
+.dash-card-sub { font-size: 11px; color: #8b7355; margin-top: 1px; }
 .dash-card-time { font-size: 16px; font-weight: 700; color: #D62300; font-variant-numeric: tabular-nums; }
-.dash-card-arrow { color: #ccc; flex-shrink: 0; }
+.dash-card-arrow { color: #D4C4B0; flex-shrink: 0; }
 
-.dash-grid { display: flex; gap: 8px; margin-top: 10px; }
-.dash-stat { flex: 1; background: white; border-radius: 10px; padding: 12px 10px; text-align: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-.dash-stat:hover { background: #faf8f5; }
-.dash-stat-num { font-size: 22px; font-weight: 800; color: #502314; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.dash-stat { background: white; border-radius: 16px; padding: 20px; text-align: center; cursor: pointer; border: 1px solid #EDE8E3; transition: all 0.18s; position: relative; overflow: hidden; }
+.dash-stat::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: #EDE8E3; transition: background 0.18s; }
+.dash-stat:hover { box-shadow: 0 8px 32px rgba(80,35,20,0.1); transform: translateY(-2px); }
+.dash-stat:hover::after { background: #D62300; }
+.dash-stat-num { font-size: 28px; font-weight: 900; color: #502314; letter-spacing: -1px; }
 .dash-stat-alert { color: #dc2626; }
-.dash-stat-label { font-size: 11px; color: #8b7355; margin-top: 2px; }
+.dash-stat-label { font-size: 10px; color: #8b7355; margin-top: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
 
-.dash-actions { margin-top: 12px; }
-.dash-section-title { font-size: 12px; font-weight: 700; color: #8b7355; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px; }
-.dash-action-grid { display: flex; gap: 6px; }
-.dash-action { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; background: white; border-radius: 10px; padding: 10px 4px; border: none; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 600; color: #502314; text-decoration: none; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-.dash-action:hover { background: #faf8f5; }
-.dash-action-icon { font-size: 20px; }
-.dash-action--alert { border: 1.5px solid #dc2626; }
+.dash-actions { margin-bottom: 24px; }
+.dash-section-title { font-size: 14px; font-weight: 800; color: #502314; margin: 0 0 12px; }
+.dash-action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.dash-action { display: flex; flex-direction: column; align-items: center; gap: 8px; background: white; border-radius: 16px; padding: 20px 12px; border: 1px solid #EDE8E3; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 700; color: #502314; text-decoration: none; transition: all 0.18s; }
+.dash-action:hover { border-color: rgba(214,35,0,0.3); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+.dash-action-icon { font-size: 28px; }
+.dash-action--alert { border-color: rgba(214,35,0,0.2); }
 
-.dash-recent { margin-top: 12px; }
-.dash-order { display: flex; justify-content: space-between; align-items: center; background: white; padding: 8px 10px; border-bottom: 1px solid #f3eeea; }
-.dash-order:first-child { border-radius: 8px 8px 0 0; }
-.dash-order:last-child { border-bottom: none; border-radius: 0 0 8px 8px; }
-.dash-order-left { display: flex; align-items: center; gap: 6px; }
-.dash-order-right { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #8b7355; }
-.dash-order-source { font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
-.src-delivery { background: #eff6ff; color: #2563eb; }
-.src-supplier { background: #fef3c7; color: #92400e; }
+.dash-recent { }
+.dash-order { display: flex; justify-content: space-between; align-items: center; background: white; padding: 11px 18px; border-bottom: 1px solid #F5F2EE; transition: background 0.1s; cursor: pointer; }
+.dash-order:hover { background: #FAF8F5; }
+.dash-order:first-child { border-radius: 16px 16px 0 0; }
+.dash-order:last-child { border-bottom: none; border-radius: 0 0 16px 16px; }
+.dash-order-left { display: flex; align-items: center; gap: 10px; }
+.dash-order-right { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8b7355; }
+.dash-order-source { font-size: 9px; padding: 3px 8px; border-radius: 6px; font-weight: 700; }
+.src-delivery { background: #FFF5F2; color: #D62300; }
+.src-supplier { background: #EFF6FF; color: #2563eb; }
 .src-planeta { background: #ecfdf5; color: #16a34a; }
 .dash-order-date { font-size: 12px; font-weight: 600; color: #502314; }
-.dash-order-status { font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
+.dash-order-status { font-size: 9px; padding: 3px 8px; border-radius: 6px; font-weight: 700; }
 .st-submitted { background: #ecfdf5; color: #16a34a; }
 .st-edited { background: #eff6ff; color: #2563eb; }
 .st-draft { background: #f5f0eb; color: #8b7355; }
 .st-locked { background: #fef2f2; color: #dc2626; }
 
 /* ═══ Orders ═══ */
-.ord-tabs { display: flex; gap: 6px; padding: 10px 0; overflow-x: auto; flex-wrap: wrap; -webkit-overflow-scrolling: touch; }
-.ord-tab { flex-shrink: 0; padding: 6px 14px; border-radius: 20px; border: 1.5px solid #e0dbd5; background: white; cursor: pointer; font-size: 12px; font-weight: 600; color: #8b7355; font-family: inherit; transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.ord-tab:hover:not(.active) { border-color: #c4b8a8; color: #502314; }
+.ord-tabs { display: flex; gap: 6px; padding: 0 0 16px; overflow-x: auto; flex-wrap: wrap; -webkit-overflow-scrolling: touch; }
+.ord-tab { flex-shrink: 0; padding: 8px 18px; border-radius: 12px; border: 2px solid #EDE8E3; background: white; cursor: pointer; font-size: 13px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.18s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ord-tab:hover:not(.active) { border-color: #502314; color: #502314; }
 .ord-tab.active { background: #502314; color: white; border-color: #502314; }
-.ord-tab-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 6px; }
+.ord-tab-badge { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
 .ord-tab-badge.warn { background: #f59e0b; color: white; }
 .ord-tab-badge.ok { background: #16a34a; color: white; }
 
 /* Shared order components */
-.cab-info-bar { background: #502314; color: white; text-align: center; padding: 6px 10px; font-size: 12px; font-weight: 600; border-radius: 8px; margin-top: 8px; }
-.cab-empty-card { background: white; border-radius: 12px; padding: 28px 20px; margin: 12px 0; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-.cab-empty-card h2 { color: #502314; margin: 0 0 6px; font-size: 16px; }
+.cab-info-bar { background: linear-gradient(135deg, #502314, #3A1A0C); color: white; text-align: center; padding: 12px 18px; font-size: 13px; font-weight: 600; border-radius: 14px; margin-bottom: 12px; }
+.cab-empty-card { background: white; border-radius: 18px; padding: 40px 24px; margin: 12px 0; text-align: center; border: 1px solid #EDE8E3; }
+.cab-empty-card h2 { color: #502314; margin: 0 0 8px; font-size: 17px; }
 .cab-empty-card p { color: #8b7355; margin: 0; font-size: 13px; }
 
-.day-tabs { display: flex; gap: 6px; padding: 8px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.day-tab { flex-shrink: 0; padding: 8px 16px; border-radius: 10px; border: 1.5px solid #e0dbd5; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.15s; position: relative; font-size: 13px; }
-.day-tab:hover { border-color: #c4b8a8; }
-.day-tab.active { background: #D62300; color: white; border-color: #D62300; }
+.day-tabs { display: flex; gap: 8px; padding: 0 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.day-tab { flex-shrink: 0; padding: 12px 20px; border-radius: 14px; border: 2px solid #EDE8E3; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.18s; position: relative; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); min-width: 76px; }
+.day-tab:hover { border-color: #8b7355; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.day-tab.active { background: #D62300; color: white; border-color: #D62300; box-shadow: 0 4px 16px rgba(214,35,0,0.25); }
 .day-tab.active .day-tab-name, .day-tab.active .day-tab-date, .day-tab.active .day-tab-label { color: white; }
-.day-tab.done { border-left: 3px solid #16a34a; }
+.day-tab.done { border-color: #16a34a; }
 .day-tab.closed { opacity: 0.5; }
 .day-tab.closed .day-tab-name, .day-tab.closed .day-tab-label { text-decoration: line-through; }
 .day-tab.warn { border-color: #f59e0b; }
 .day-tab-label { display: flex; align-items: center; gap: 5px; }
-.day-tab-name { font-size: 13px; font-weight: 600; color: #502314; }
-.day-tab-date { font-size: 12px; color: #8b7355; }
-.day-tab-mark { position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.day-tab-name { display: block; font-size: 13px; font-weight: 700; color: #502314; }
+.day-tab-date { display: block; font-size: 10px; color: #8b7355; margin-top: 2px; }
+.day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
 .day-tab-mark.done { background: #16a34a; color: white; }
 .day-tab-mark.closed { background: #9ca3af; color: white; }
 
-.order-form { background: white; border-radius: 12px; margin-top: 6px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,0.06); }
+.order-form { background: white; border-radius: 20px; margin-top: 8px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
-.deadline-bar { padding: 10px 14px; font-size: 13px; font-weight: 600; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.deadline-bar { padding: 10px 18px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 0; }
 .deadline-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
-.dl-open { background: #ecfdf5; color: #16a34a; }
-.dl-warning { background: #fffbeb; color: #d97706; }
-.dl-closed { background: #fef2f2; color: #dc2626; }
-.dl-not_open { background: #fef2f2; color: #dc2626; }
+.dl-open { background: #ECFDF5; color: #16a34a; }
+.dl-warning { background: #FFFBEB; color: #d97706; }
+.dl-closed { background: #FEF2F2; color: #dc2626; }
+.dl-not_open { background: #FEF2F2; color: #dc2626; }
 .dl-not_yet { background: #f0f9ff; color: #2563eb; }
 
-.cat-tabs { display: flex; border-bottom: 1px solid #ede8e3; }
-.cat-tab { flex: 1; padding: 7px; border: none; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; color: #8b7355; font-family: inherit; border-bottom: 2px solid transparent; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 4px; }
-.cat-tab.active { color: #D62300; border-bottom-color: #D62300; }
-.cat-count { background: #D62300; color: white; font-size: 9px; padding: 0 5px; border-radius: 6px; font-weight: 700; }
+.cat-tabs { display: flex; gap: 4px; padding: 12px 18px; border-bottom: 1px solid #EDE8E3; background: #FAFAF8; justify-content: center; }
+.cat-tab { padding: 8px 18px; border-radius: 10px; border: none; background: transparent; cursor: pointer; font-size: 13px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.cat-tab:hover { background: #EDE8E3; color: #502314; }
+.cat-tab.active { background: #502314; color: white; }
+.cat-count { background: rgba(0,0,0,0.08); padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 800; }
+.cat-tab.active .cat-count { background: rgba(255,255,255,0.2); }
 
-.search-row { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid #f0ebe4; align-items: center; flex-wrap: wrap; }
-.input-search { flex: 1; min-width: 120px; padding: 6px 10px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 13px; font-family: inherit; }
-.input-search:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
+.search-row { display: flex; gap: 8px; padding: 10px 18px; border-bottom: 1px solid #EDE8E3; align-items: center; flex-wrap: wrap; }
+.input-search { flex: 1; min-width: 120px; padding: 9px 14px; border: 1.5px solid #EDE8E3; border-radius: 10px; font-size: 13px; font-family: inherit; background: #FAFAF8; transition: border-color 0.15s; }
+.input-search:focus { outline: none; border-color: #D62300; background: white; box-shadow: 0 0 0 3px rgba(214,35,0,0.06); }
 .search-clear { background: none; border: none; cursor: pointer; font-size: 16px; color: #999; padding: 0 4px; }
 
 /* Delivery table */
 .del-table { width: 100%; border-collapse: collapse; }
-.del-table th { padding: 8px 12px; font-size: 11px; font-weight: 700; color: #8b7355; text-align: left; background: #faf8f5; border-bottom: 2px solid #ede8e3; text-transform: uppercase; letter-spacing: 0.3px; }
-.del-table td { padding: 8px 12px; border-bottom: 1px solid #f3eeea; font-size: 13px; color: #502314; vertical-align: middle; }
-.del-table tbody tr:hover { background: #faf8f5; }
-.del-th-name { min-width: 180px; }
+.del-table th { padding: 10px 20px; font-size: 10px; font-weight: 700; color: #8b7355; text-align: center; background: #FAFAF8; border-bottom: 1px solid #EDE8E3; text-transform: uppercase; letter-spacing: 1px; }
+.del-table th:first-child { text-align: left; }
+.del-table td { padding: 0 20px; height: 52px; border-bottom: 1px solid #F5F2EE; font-size: 14px; color: #502314; vertical-align: middle; text-align: left; }
+.del-table tbody tr { transition: background 0.1s; }
+.del-table tbody tr:hover { background: #FEFCFA; }
+.del-th-name { text-align: left; }
+.del-th-mult { width: 90px; text-align: center; }
 .del-th-qty { width: 100px; text-align: center; }
-.del-th-cmt { width: 160px; }
-.del-th-act { width: 32px; }
-.del-td-name { font-weight: 500; }
-.del-sku { font-size: 10px; color: #8b7355; margin-right: 2px; }
-.del-mult { font-size: 10px; color: #2563eb; background: #eff6ff; padding: 1px 5px; border-radius: 4px; font-weight: 600; margin-left: 4px; }
+.del-th-act { width: 36px; }
+.del-td-name { font-weight: 600; text-align: left; }
+.del-td-mult { text-align: center; }
+.del-sku { font-size: 10px; color: #B0A090; font-family: 'SF Mono', 'JetBrains Mono', monospace; margin-right: 4px; }
+.del-mult { font-size: 10px; color: #2563eb; background: #EFF6FF; padding: 3px 8px; border-radius: 6px; font-weight: 700; margin-left: 6px; }
 .del-td-qty { text-align: center; }
-.del-qty { width: 72px; padding: 7px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 15px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
-.del-qty:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
+.del-qty { width: 72px; height: 40px; padding: 0; border: 2px solid #EDE8E3; border-radius: 11px; font-size: 15px; text-align: center; font-family: inherit; font-weight: 700; background: #FAFAF8; color: #502314; transition: all 0.15s; -moz-appearance: textfield; }
+.del-qty::-webkit-inner-spin-button { -webkit-appearance: none; }
+.del-qty:focus { outline: none; border-color: #D62300; background: white; box-shadow: 0 0 0 3px rgba(214,35,0,0.06); }
 .del-qty-err { border-color: #dc2626 !important; background: #fef2f2; }
 .del-mult-hint { font-size: 10px; color: #dc2626; margin-top: 2px; }
-.del-cmt { width: 100%; padding: 6px 8px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 12px; font-family: inherit; background: white; }
-.del-cmt:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
-tr.del-filled { background: #f0fdf4; }
+.del-cmt { width: 100%; max-width: 180px; padding: 7px 10px; border: 1.5px solid #EDE8E3; border-radius: 8px; font-size: 12px; font-family: inherit; color: #502314; background: transparent; transition: border-color 0.15s; }
+.del-cmt:focus { outline: none; border-color: #D62300; }
+.del-cmt::placeholder { color: #D4C4B0; }
+tr.del-filled { background: #FFFBF8; }
 tr.del-err { background: #fef2f2; }
 
 .btn-icon-danger { background: none; border: none; cursor: pointer; color: #dc2626; font-size: 18px; padding: 2px 4px; flex-shrink: 0; }
@@ -1264,34 +1410,35 @@ tr.del-err { background: #fef2f2; }
 /* Submit summary (integrated with button) */
 .submit-summary { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 13px; font-weight: 600; color: #502314; margin-bottom: 8px; }
 
-.submit-area { padding: 10px; text-align: center; }
+.submit-area { padding: 16px 18px; text-align: center; border-top: 1px solid #EDE8E3; background: #FAFAF8; }
 .error-msg { padding: 6px 10px; border-radius: 6px; background: #fef2f2; color: #dc2626; font-size: 12px; font-weight: 600; text-align: center; margin-bottom: 8px; }
 .success-msg { padding: 6px 10px; border-radius: 6px; background: #ecfdf5; color: #16a34a; font-size: 12px; font-weight: 600; text-align: center; margin-bottom: 8px; }
 .locked-msg { color: #dc2626; font-size: 12px; font-weight: 600; }
 
 /* Buttons */
-.btn { padding: 8px 18px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s; }
-.btn-primary { background: #D62300; color: white; }
-.btn-primary:hover:not(:disabled) { background: #b81e00; }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-outline { border: 1.5px solid #ede8e3; background: white; color: #502314; }
-.btn-outline:hover { background: #f7f5f2; }
-.btn-danger-outline { border: 1px solid #dc2626; background: transparent; color: #dc2626; }
+.btn { padding: 8px 18px; border-radius: 10px; border: none; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: all 0.18s; }
+.btn-primary { background: #D62300; color: white; box-shadow: 0 2px 8px rgba(214,35,0,0.2); }
+.btn-primary:hover:not(:disabled) { background: #b81e00; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(214,35,0,0.25); }
+.btn-primary:active:not(:disabled) { transform: scale(0.98); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+.btn-outline { border: 1.5px solid #EDE8E3; background: white; color: #502314; }
+.btn-outline:hover { border-color: #502314; }
+.btn-danger-outline { border: 1.5px solid #dc2626; background: transparent; color: #dc2626; }
 .btn-danger-outline:hover { background: #fef2f2; }
 .btn-green { border: 1.5px solid #16a34a; background: #f0fdf4; color: #16a34a; }
 .btn-green:hover { background: #16a34a; color: white; }
-.btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 6px; }
-.btn-lg { padding: 12px 28px; font-size: 15px; font-weight: 700; border-radius: 10px; }
+.btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 8px; }
+.btn-lg { padding: 12px 36px; font-size: 15px; font-weight: 800; border-radius: 14px; }
 
-.repeat-section { padding: 10px 12px; background: #faf8f5; border-top: 1px solid #ede8e3; }
-.repeat-title { font-size: 13px; font-weight: 600; color: #502314; margin-bottom: 8px; }
-.repeat-btn { display: block; width: 100%; padding: 10px 14px; border: 1px solid #ede8e3; border-radius: 8px; background: white; cursor: pointer; font-size: 13px; font-family: inherit; color: #502314; text-align: left; margin-bottom: 6px; }
-.repeat-btn:hover { background: #f7f5f2; border-color: #D62300; }
+.repeat-section { padding: 16px 18px; background: #FAFAF8; border-top: 1px solid #EDE8E3; }
+.repeat-title { font-size: 12px; font-weight: 700; color: #8b7355; margin-bottom: 8px; }
+.repeat-btn { display: inline-block; padding: 8px 16px; border: 1.5px solid #EDE8E3; border-radius: 10px; background: white; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; color: #502314; margin: 0 8px 6px 0; transition: all 0.15s; }
+.repeat-btn:hover { border-color: #D62300; color: #D62300; }
 
 /* Success */
 .cab-success { display: flex; align-items: center; justify-content: center; min-height: 30vh; padding: 16px; }
-.cab-success-inner { background: white; border-radius: 14px; padding: 24px 20px; text-align: center; max-width: 380px; width: 100%; }
-.cab-success-check { width: 44px; height: 44px; border-radius: 50%; background: #16a34a; color: white; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
+.cab-success-inner { background: white; border-radius: 20px; padding: 32px 24px; text-align: center; max-width: 420px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border: 1px solid #EDE8E3; }
+.cab-success-check { width: 56px; height: 56px; border-radius: 50%; background: #16a34a; color: white; font-size: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; box-shadow: 0 4px 16px rgba(22,163,74,0.25); }
 .cab-success-inner h2 { color: #502314; margin: 0 0 4px; font-size: 17px; }
 .cab-success-stat { font-size: 13px; font-weight: 600; color: #502314; }
 .cab-success-timer { background: #ecfdf5; border-radius: 8px; padding: 10px; margin: 10px 0; }
@@ -1328,30 +1475,31 @@ tr.del-err { background: #fef2f2; }
 .veg-success-skip { color: #d97706; font-size: 11px; padding: 2px 0; font-style: italic; }
 
 /* History */
-.history-list { padding: 12px 0; }
-.history-card { background: white; padding: 12px 14px; border-bottom: 1px solid #f3eeea; }
-.history-card:first-child { border-radius: 12px 12px 0 0; }
-.history-card:last-child { border-bottom: none; border-radius: 0 0 12px 12px; }
+.history-list { padding: 0; }
+.history-card { background: white; padding: 14px 18px; border-bottom: 1px solid #F5F2EE; transition: background 0.1s; cursor: pointer; }
+.history-card:hover { background: #FAF8F5; }
+.history-card:first-child { border-radius: 16px 16px 0 0; }
+.history-card:last-child { border-bottom: none; border-radius: 0 0 16px 16px; }
 .history-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .history-date { font-weight: 700; color: #502314; font-size: 14px; }
 .history-meta { display: flex; gap: 10px; font-size: 12px; color: #8b7355; margin-top: 4px; }
 .history-time { margin-left: auto; }
 
 /* Stock */
-.stock-card { background: white; border-radius: 12px; padding: 24px 20px; margin: 20px 0; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.stock-card { background: white; border-radius: 18px; padding: 32px 24px; margin: 0 0 16px; text-align: center; border: 1px solid #EDE8E3; }
 .stock-card h2 { color: #502314; margin: 0 0 12px; }
 .stock-card p { color: #8b7355; font-size: 14px; margin: 0; }
 .stock-link { display: inline-flex; margin-top: 16px; }
 
 /* Profile */
-.profile-card { background: white; border-radius: 10px; padding: 14px 16px; margin-top: 10px; display: flex; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.profile-card { background: white; border-radius: 18px; padding: 20px; margin-bottom: 12px; display: flex; border: 1px solid #EDE8E3; }
 .profile-header { display: flex; align-items: center; gap: 12px; }
 .profile-avatar { width: 40px; height: 40px; border-radius: 10px; background: #D62300; color: white; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; flex-shrink: 0; }
 .profile-header h2 { margin: 0; font-size: 15px; color: #502314; }
 .profile-header p { margin: 1px 0 0; font-size: 12px; color: #8b7355; }
 .profile-le { font-size: 11px; color: #b39b83; }
 
-.profile-block { background: white; border-radius: 10px; padding: 14px 16px; margin-top: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.profile-block { background: white; border-radius: 16px; padding: 18px 20px; margin-bottom: 10px; border: 1px solid #EDE8E3; }
 .profile-block h3 { margin: 0 0 8px; font-size: 13px; color: #502314; }
 
 .profile-tg-linked { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -1373,12 +1521,14 @@ tr.del-err { background: #fef2f2; }
 .logout-full { width: 100%; margin-top: 16px; }
 
 /* Modal */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px; }
-.cab-modal { background: white; border-radius: 16px; width: 100%; max-width: 480px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,0.2); }
-.cab-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #ede8e3; }
-.cab-modal-head h2 { margin: 0; font-size: 17px; color: #502314; }
-.cab-modal-close { background: none; border: none; cursor: pointer; font-size: 20px; color: #999; }
-.cab-modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px; }
+.cab-modal { background: white; border-radius: 20px; width: 100%; max-width: 480px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,0.15); }
+.cab-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 22px; border-bottom: 1px solid #EDE8E3; }
+.cab-modal-head h2 { margin: 0; font-size: 17px; font-weight: 800; color: #502314; }
+.cab-modal-close { background: none; border: none; cursor: pointer; font-size: 20px; color: #B0A090; transition: color 0.15s; }
+.cab-modal-close:hover { color: #502314; }
+.cab-modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
+.modal-search { width: 50%; min-width: 200px; margin-bottom: 12px; }
 .add-list { display: flex; flex-direction: column; gap: 4px; }
 .add-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid #f5f0eb; }
 .add-item:hover { background: #f7f5f2; border-color: #D62300; }
@@ -1386,93 +1536,111 @@ tr.del-err { background: #fef2f2; }
 .add-cat { font-size: 10px; color: #8b7355; background: #f7f5f2; padding: 2px 6px; border-radius: 4px; }
 
 /* ═══ Mobile ═══ */
-@media (max-width: 600px) {
-  .cab { padding-bottom: 16px; }
-  .cab-section { padding: 0 6px; }
-
-  /* Header mobile */
-  .cab-header { flex-wrap: nowrap; padding: 0 6px; min-height: 42px; gap: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .cab-rest-chip { display: none; }
-  .cab-nav-btn { padding: 0 10px; font-size: 12px; }
-  .cab-logout { padding: 0 6px; }
+@media (max-width: 768px) {
+  .cab { display: block; }
+  .cab-sidebar { display: none; }
+  .cab-main { margin-left: 0; }
+  .cab-section { padding: 16px; }
 
   /* Dashboard */
-  .dash-grid { flex-wrap: wrap; }
-  .dash-stat { min-width: calc(50% - 4px); }
-  .dash-action-grid { flex-wrap: wrap; }
-  .dash-action { min-width: calc(50% - 3px); }
+  .dash-grid { grid-template-columns: repeat(2, 1fr); }
+  .dash-action-grid { grid-template-columns: repeat(2, 1fr); }
 
   /* Order sub-tabs */
-  .ord-tabs { gap: 4px; padding: 8px 4px; flex-wrap: nowrap; }
-  .ord-tab { padding: 5px 10px; font-size: 11px; }
+  .ord-tabs { gap: 4px; flex-wrap: nowrap; overflow-x: auto; }
+  .ord-tab { padding: 6px 12px; font-size: 12px; }
 
   /* Day tabs */
-  .day-tabs { gap: 4px; padding: 6px 0; justify-content: flex-start; }
-  .day-tab { padding: 6px 10px; }
-  .day-tab-label { font-size: 12px; }
+  .day-tabs { gap: 6px; }
+  .day-tab { padding: 10px 14px; min-width: 66px; }
 
   /* Search */
-  .search-row { padding: 6px 8px; gap: 4px; }
-  .input-search { width: 100%; flex: none; font-size: 16px; padding: 8px 10px; }
-  .btn-sm { padding: 6px 10px; }
+  .search-row { padding: 8px 12px; }
+  .input-search { width: 100%; flex: none; font-size: 16px; padding: 10px 12px; }
 
   /* Delivery table mobile */
   .del-table { display: block; }
   .del-table thead { display: none; }
   .del-table tbody { display: block; }
-  .del-table tr { display: flex; flex-wrap: wrap; align-items: center; padding: 10px; gap: 6px; border-bottom: 1px solid #f3eeea; }
-  .del-table td { padding: 0; border: none; }
-  .del-td-name { flex: 1 1 100%; font-size: 14px; order: -1; margin-bottom: 4px; }
-  .del-td-qty { order: 1; }
-  .del-td-cmt { flex: 1; order: 2; }
-  .del-td-act { order: 3; }
-  .del-qty { width: 70px; font-size: 16px; padding: 10px 4px; }
-  .del-cmt { font-size: 14px; padding: 8px; }
+  .del-table tr { display: flex; align-items: center; padding: 10px 12px; gap: 10px; border-bottom: 1px solid #F5F2EE; flex-wrap: nowrap; }
+  .del-table td { padding: 0; border: none; height: auto; }
+  .del-td-name { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .del-td-mult { display: none; }
+  .del-td-qty { flex-shrink: 0; }
+  .del-td-act { flex-shrink: 0; }
+  .del-qty { width: 68px; height: 42px; font-size: 16px; }
 
   /* Item list (Planeta, Kamako) */
-  .item-row { padding: 10px; flex-wrap: wrap; }
+  .item-row { padding: 10px 12px; flex-wrap: wrap; }
   .item-info { flex: 1 1 100%; margin-bottom: 6px; }
   .item-name { font-size: 14px; }
-  .item-qty { width: 70px; font-size: 16px; padding: 10px 4px; }
+  .item-qty { width: 72px; font-size: 16px; padding: 10px 4px; }
 
   /* Buttons */
   .btn-lg { width: 100%; justify-content: center; padding: 14px; font-size: 16px; }
-  .btn { font-size: 14px; }
 
   /* Category tabs */
-  .cat-tab { padding: 8px 4px; font-size: 13px; }
-
-  /* Deadline bar */
-  .deadline-bar { font-size: 13px; padding: 8px 12px; }
-
-  /* Submit */
-  .submit-area { padding: 12px 10px; }
-  .submit-summary { font-size: 13px; }
+  .cat-tabs { padding: 10px 12px; }
+  .cat-tab { padding: 8px 12px; font-size: 12px; }
 
   /* Modal */
-  .cab-modal { max-width: 100%; margin: 8px; border-radius: 12px; }
-  .cab-modal-head { padding: 12px 16px; }
-  .cab-modal-body { padding: 12px 16px; }
+  .cab-modal { max-width: 100%; margin: 8px; border-radius: 14px; }
 
   /* Profile */
   .profile-card { margin-top: 8px; }
-  .profile-block { padding: 12px 14px; }
   .input-field { font-size: 16px; padding: 12px 14px; }
   .pw-form .btn { width: 100%; justify-content: center; }
 
-  /* History */
-  .history-card { padding: 10px 12px; }
-  .history-date { font-size: 13px; }
-
-  /* Success screens */
-  .cab-success { min-height: 25vh; padding: 12px; }
-  .cab-success-inner { padding: 20px 16px; }
+  /* Success */
+  .cab-success { min-height: 25vh; }
+  .cab-success-inner { padding: 24px 16px; }
 
   /* Order form */
-  .order-form { border-radius: 10px; margin-top: 6px; }
-  .cab-info-bar { font-size: 12px; border-radius: 6px; }
+  .order-form { border-radius: 14px; }
 
-  /* Quick actions */
-  .quick-actions { padding: 6px 10px; }
+  /* Mobile tab bar */
+  .mob-tabbar { display: flex !important; }
+  .cab-topbar { display: none; }
+  .cab-section { padding: 16px 12px 90px; }
 }
+
+/* ═══ Mobile tab bar ═══ */
+.mob-tabbar {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: white; border-top: 1px solid #EDE8E3;
+  padding: 6px 0 env(safe-area-inset-bottom, 6px);
+  z-index: 200; box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
+}
+.mob-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  cursor: pointer; padding: 6px 0; border: none; background: none; font-family: inherit;
+  color: #B0A090; transition: color 0.15s; position: relative;
+}
+.mob-tab.active { color: #D62300; }
+.mob-tab-icon { font-size: 20px; }
+.mob-tab-label { font-size: 9px; font-weight: 700; }
+.mob-tab-badge {
+  position: absolute; top: 2px; right: calc(50% - 16px);
+  min-width: 16px; height: 16px; border-radius: 8px;
+  background: #D62300; color: white; font-size: 9px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ═══ Order comment ═══ */
+.order-comment-row { margin-bottom: 12px; }
+.order-comment-input {
+  width: 100%; padding: 10px 14px; border: 1.5px solid #EDE8E3; border-radius: 10px;
+  font-size: 13px; font-family: inherit; color: #502314; background: white;
+  transition: border-color 0.15s;
+}
+.order-comment-input:focus { outline: none; border-color: #D62300; }
+.order-comment-input::placeholder { color: #D4C4B0; }
+
+/* ═══ Submit bottom ═══ */
+.submit-bottom {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.submit-summary { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #8b7355; }
+.submit-summary strong { color: #502314; }
 </style>

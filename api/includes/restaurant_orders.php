@@ -50,10 +50,13 @@ function roGetRestaurantSession($pdo) {
     $s->execute([$token]);
     $user = $s->fetch();
     if (!$user) return null;
-    // Проверяем активность сессии (24 часа)
+    // Проверяем активность сессии (3 часа неактивности)
     if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) {
         return null;
     }
+    // Продлеваем сессию при каждом запросе (сброс таймера неактивности)
+    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
+        ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
     return $user;
 }
 
@@ -139,7 +142,10 @@ function roCanEdit($pdo, $sessionId, $deliveryDate) {
 }
 
 function roGetLegalEntity($pdo, $restaurantNumber) {
-    // Все рестораны используют товары Бургер БК (включая Воглия Матта)
+    // Ресторан 3 = Воглия Матта, остальные = Бургер БК
+    if ((int)$restaurantNumber === 3) {
+        return 'ООО "Воглия Матта"';
+    }
     return 'ООО "Бургер БК"';
 }
 
@@ -205,7 +211,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
 
     // Создаём сессию — аналогично обычному логину
     $token = bin2hex(random_bytes(32));
-    $activeUntil = date('Y-m-d H:i:s', strtotime('+24 hours'));
+    $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
 
@@ -276,7 +282,7 @@ if ($roAction === 'login' && $method === 'POST') {
 
     // Создаём новую сессию
     $token = bin2hex(random_bytes(32));
-    $activeUntil = date('Y-m-d H:i:s', strtotime('+24 hours'));
+    $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
 
@@ -304,9 +310,6 @@ if ($roAction === 'validate' && $method === 'POST') {
     if (!$rest) {
         roRespond(['valid' => false]);
     }
-    // Продлеваем сессию при каждой валидации
-    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE restaurant_number = ?")
-        ->execute([date('Y-m-d H:i:s', strtotime('+24 hours')), $rest['restaurant_number']]);
     roRespond(['valid' => true, 'restaurant' => [
         'number' => $rest['restaurant_number'],
         'legal_entity' => $rest['legal_entity'],
@@ -330,6 +333,10 @@ if ($roAction === 'logout' && $method === 'POST') {
 if ($roAction === 'change-password' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    if (!checkRateLimit($pdo, $clientIp, 10, 10)) {
+        roRespond(['error' => 'Слишком много попыток. Подождите 10 минут'], 429);
+    }
     $oldPass = $body['old_password'] ?? '';
     $newPass = $body['new_password'] ?? '';
     if (!$oldPass || !$newPass) roRespond(['error' => 'Заполните оба поля'], 400);
@@ -339,6 +346,7 @@ if ($roAction === 'change-password' && $method === 'POST') {
     $s->execute([$rest['restaurant_number']]);
     $user = $s->fetch();
     if (!$user || !password_verify($oldPass, $user['password_hash'])) {
+        recordFailedLogin($pdo, $clientIp, "ro_chpass_{$rest['restaurant_number']}");
         roRespond(['error' => 'Неверный текущий пароль']);
     }
     $newHash = password_hash($newPass, PASSWORD_DEFAULT);
@@ -580,7 +588,7 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
     $session = roGetActiveSession($pdo);
     if (!$session) roRespond(['order' => null]);
 
-    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at, updated_by FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at, updated_by, comment FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
     $s->execute([$session['id'], $rest['restaurant_number'], $date]);
     $order = $s->fetch();
 
@@ -596,6 +604,7 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
             'submitted_at' => $order['submitted_at'],
             'updated_at' => $order['updated_at'],
             'updated_by' => $order['updated_by'],
+            'comment' => $order['comment'] ?? null,
             'items' => $items->fetchAll(),
         ],
     ]);
@@ -703,6 +712,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
 
     $deliveryDate = $body['delivery_date'] ?? '';
     $items = $body['items'] ?? [];
+    $comment = $body['comment'] ?? null;
 
     if (!$deliveryDate) roRespond(['error' => 'Не указана дата доставки'], 400);
     if (empty($items)) roRespond(['error' => 'Заказ пуст'], 400);
@@ -733,14 +743,14 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             $orderId = $existing['id'];
             // Удаляем старые позиции
             $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?")->execute([$orderId]);
-            // Обновляем статус
-            $pdo->prepare("UPDATE ro_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), updated_by = ? WHERE id = ?")
-                ->execute(["Ресторан {$rest['restaurant_number']}", $orderId]);
+            // Обновляем статус и комментарий
+            $pdo->prepare("UPDATE ro_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), updated_by = ?, comment = ? WHERE id = ?")
+                ->execute(["Ресторан {$rest['restaurant_number']}", $comment, $orderId]);
         } else {
             // Создаём новый заказ
             $le = $rest['legal_entity'];
-            $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?)")
-                ->execute([$session['id'], $rest['restaurant_number'], $deliveryDate, "Ресторан {$rest['restaurant_number']}", $le]);
+            $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?)")
+                ->execute([$session['id'], $rest['restaurant_number'], $deliveryDate, "Ресторан {$rest['restaurant_number']}", $le, $comment]);
             $orderId = $pdo->lastInsertId();
         }
 
@@ -843,7 +853,7 @@ if (strpos($roAction, 'admin') === 0) {
         $rests = $pdo->prepare("
             SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
                    ds.delivery_time,
-                   o.id as order_id, o.status as order_status, o.submitted_at,
+                   o.id as order_id, o.status as order_status, o.submitted_at, o.comment as order_comment,
                    o.updated_at, o.updated_by,
                    (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
                    (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
@@ -946,6 +956,16 @@ if (strpos($roAction, 'admin') === 0) {
         $status = $body['status'] ?? null;
         $deliveryDate = $body['delivery_date'] ?? null;
 
+        // Запоминаем старые позиции для сравнения
+        $oldItems = [];
+        if ($items !== null) {
+            $oldSt = $pdo->prepare("SELECT sku, product_name, quantity FROM ro_order_items WHERE order_id = ?");
+            $oldSt->execute([$orderId]);
+            foreach ($oldSt->fetchAll() as $oi) {
+                $oldItems[$oi['sku']] = ['name' => $oi['product_name'], 'qty' => floatval($oi['quantity'])];
+            }
+        }
+
         $pdo->beginTransaction();
         try {
             if ($items !== null) {
@@ -975,14 +995,70 @@ if (strpos($roAction, 'admin') === 0) {
             roRespond(['error' => 'Ошибка сохранения'], 500);
         }
 
-        // Уведомляем ресторан в Telegram
+        // Уведомляем ресторан в Telegram с деталями изменений
         $orderInfo = $pdo->prepare("SELECT restaurant_number, delivery_date FROM ro_orders WHERE id = ?");
         $orderInfo->execute([$orderId]);
         $oi = $orderInfo->fetch();
         if ($oi) {
-            $date = date('d.m', strtotime($oi['delivery_date']));
-            roNotifyRestaurant($pdo, $oi['restaurant_number'],
-                "📝 Ваш заказ на {$date} был изменён отделом закупок ({$updatedBy}).");
+            $dayNames = [0=>'Воскресенье',1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота'];
+            $dow = (int)date('w', strtotime($oi['delivery_date']));
+            $dayName = $dayNames[$dow] ?? '';
+            $dateStr = $dayName . ', ' . date('d.m', strtotime($oi['delivery_date']));
+            $restNum = $oi['restaurant_number'];
+
+            $msg = "📝 Ресторан {$restNum} — заказ на {$dateStr}\n";
+            $msg .= "Изменён: {$updatedBy}\n";
+
+            // Формируем список изменений
+            if ($items !== null) {
+                $newItems = [];
+                foreach ($items as $item) {
+                    $qty = floatval($item['quantity'] ?? 0);
+                    if ($qty <= 0) continue;
+                    $newItems[$item['sku'] ?? ''] = ['name' => $item['product_name'] ?? '', 'qty' => $qty];
+                }
+
+                $changes = [];
+                // Добавленные
+                foreach ($newItems as $sku => $ni) {
+                    if (!isset($oldItems[$sku])) {
+                        $changes[] = "  ➕ {$ni['name']} — {$ni['qty']} кор.";
+                    }
+                }
+                // Изменённые
+                foreach ($newItems as $sku => $ni) {
+                    if (isset($oldItems[$sku]) && abs($oldItems[$sku]['qty'] - $ni['qty']) > 0.001) {
+                        $oldQ = $oldItems[$sku]['qty'];
+                        $diff = $ni['qty'] - $oldQ;
+                        $arrow = $diff > 0 ? '↑' : '↓';
+                        $changes[] = "  ✏️ {$ni['name']}: {$oldQ} → {$ni['qty']} ({$arrow}" . abs($diff) . ")";
+                    }
+                }
+                // Удалённые
+                foreach ($oldItems as $sku => $oi2) {
+                    if (!isset($newItems[$sku])) {
+                        $changes[] = "  ❌ {$oi2['name']} — убрано";
+                    }
+                }
+
+                if (!empty($changes)) {
+                    $msg .= "\nИзменения:\n" . implode("\n", $changes);
+                }
+
+                // Итого
+                $totalItems = count($newItems);
+                $totalQty = array_sum(array_column($newItems, 'qty'));
+                $msg .= "\n\nИтого: {$totalItems} поз., {$totalQty} кор.";
+            }
+
+            if ($deliveryDate) {
+                $newDow = (int)date('w', strtotime($deliveryDate));
+                $newDayName = $dayNames[$newDow] ?? '';
+                $newDateStr = $newDayName . ', ' . date('d.m', strtotime($deliveryDate));
+                $msg .= "\n📅 Дата доставки изменена на {$newDateStr}";
+            }
+
+            roNotifyRestaurant($pdo, $restNum, $msg);
         }
 
         roRespond(['success' => true]);
@@ -1001,10 +1077,14 @@ if (strpos($roAction, 'admin') === 0) {
 
         // Уведомляем ресторан
         if ($oi) {
-            $date = date('d.m', strtotime($oi['delivery_date']));
+            $dayNames = [0=>'Воскресенье',1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота'];
+            $dow = (int)date('w', strtotime($oi['delivery_date']));
+            $dayName = $dayNames[$dow] ?? '';
+            $dateStr = $dayName . ', ' . date('d.m', strtotime($oi['delivery_date']));
+            $restNum = $oi['restaurant_number'];
             $by = $sessionUser ? $sessionUser['name'] : 'admin';
-            roNotifyRestaurant($pdo, $oi['restaurant_number'],
-                "❌ Ваш заказ на {$date} был удалён отделом закупок ({$by}). Если это ошибка — свяжитесь с нами.");
+            roNotifyRestaurant($pdo, $restNum,
+                "❌ Ресторан {$restNum} — заказ на {$dateStr} удалён ({$by}). Если это ошибка — свяжитесь с нами.");
         }
 
         roRespond(['success' => true]);
@@ -1134,7 +1214,7 @@ if (strpos($roAction, 'admin') === 0) {
 
         if (!$sessionId || !$date) roRespond(['error' => 'Не указана сессия или дата'], 400);
 
-        $pdo->prepare("INSERT INTO ro_deadline_overrides (session_id, delivery_date, soft_deadline, hard_deadline, created_by) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE soft_deadline = VALUES(soft_deadline), hard_deadline = VALUES(hard_deadline), created_by = VALUES(created_by)")
+        $pdo->prepare("INSERT INTO ro_deadline_overrides (session_id, delivery_date, is_open, soft_deadline, hard_deadline, created_by) VALUES (?, ?, 1, ?, ?, ?) ON DUPLICATE KEY UPDATE soft_deadline = VALUES(soft_deadline), hard_deadline = VALUES(hard_deadline), created_by = VALUES(created_by)")
             ->execute([$sessionId, $date, $softDeadline, $hardDeadline, $createdBy]);
 
         roRespond(['success' => true]);
@@ -1543,10 +1623,13 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         $items = [];
+        $seenSkus = [];
         foreach ($balances as $b) {
             $stockQty = (float)$b['quantity'];
             $le = $b['legal_entity'];
-            $orderedQty = $orders[$b['sku'] . '|' . $le] ?? 0;
+            $key = $b['sku'] . '|' . $le;
+            $orderedQty = $orders[$key] ?? 0;
+            $seenSkus[$key] = true;
             $items[] = [
                 'sku' => $b['sku'],
                 'product_name' => $b['product_name'],
@@ -1555,6 +1638,33 @@ if (strpos($roAction, 'admin') === 0) {
                 'stock_qty' => $stockQty,
                 'ordered_qty' => $orderedQty,
                 'remaining' => $stockQty - $orderedQty,
+            ];
+        }
+
+        // Товары, которые заказаны, но которых нет в остатках
+        foreach ($orders as $key => $orderedQty) {
+            if (isset($seenSkus[$key])) continue;
+            list($sku, $le) = explode('|', $key);
+            if ($legalEntity && $le !== $legalEntity) continue;
+            // Получаем название товара из БД
+            $ps = $pdo->prepare("SELECT name, category FROM products WHERE sku = ? LIMIT 1");
+            $ps->execute([$sku]);
+            $prod = $ps->fetch();
+            $prodName = $prod ? $prod['name'] : $sku;
+            $warehouse = '';
+            if ($prod) {
+                $cat = $prod['category'] ?? '';
+                if ($cat === 'Мороз' || $cat === 'Холод') $warehouse = 'Холод+Мороз';
+                else $warehouse = 'Сухой';
+            }
+            $items[] = [
+                'sku' => $sku,
+                'product_name' => $prodName,
+                'warehouse' => $warehouse,
+                'legal_entity' => $le,
+                'stock_qty' => 0,
+                'ordered_qty' => $orderedQty,
+                'remaining' => -$orderedQty,
             ];
         }
 
