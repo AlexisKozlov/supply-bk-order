@@ -69,6 +69,13 @@
               <option :value="false">Нет</option>
             </select>
           </div>
+          <div class="modal-field" style="width:140px;flex-shrink:0;">
+            <span class="modal-field-label">Прослеживаемость</span>
+            <select v-model="form.is_traceable">
+              <option :value="false">Нет</option>
+              <option :value="true">Да</option>
+            </select>
+          </div>
         </div>
 
         <div class="modal-row-2" style="grid-template-columns: 1fr 1fr 1fr;">
@@ -160,7 +167,7 @@ const originalValues = ref(null);
 const form = ref({
   sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
-  analog_group: '', is_active: true, category: '',
+  analog_group: '', is_active: true, is_traceable: false, category: '',
   weight_netto: '', weight_brutto: '', external_code: '',
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
@@ -179,7 +186,8 @@ onMounted(async () => {
         qty_per_box: data.qty_per_box ?? '', boxes_per_pallet: data.boxes_per_pallet ?? '',
         multiplicity: data.multiplicity ?? '', unit_of_measure: data.unit_of_measure || 'шт',
         analog_group: data.analog_group || '',
-        is_active: data.is_active !== undefined ? !!data.is_active : true,
+        is_active: data.is_active == 1,
+        is_traceable: data.is_traceable == 1,
         category: data.category || '',
         weight_netto: data.weight_netto ?? '', weight_brutto: data.weight_brutto ?? '',
         external_code: data.external_code || '',
@@ -192,7 +200,7 @@ onMounted(async () => {
       qty_per_box: props.product.qty_per_box ?? '', boxes_per_pallet: props.product.boxes_per_pallet ?? '',
       multiplicity: props.product.multiplicity ?? '', unit_of_measure: props.product.unit_of_measure || 'шт',
       analog_group: props.product.analog_group || '',
-      is_active: props.product.is_active !== undefined ? !!props.product.is_active : true,
+      is_active: props.product.is_active == 1,
       category: props.product.category || '',
       weight_netto: props.product.weight_netto ?? '', weight_brutto: props.product.weight_brutto ?? '',
       external_code: props.product.external_code || '',
@@ -271,7 +279,7 @@ const FIELD_LABELS = {
   name: 'Наименование', sku: 'Артикул', supplier: 'Поставщик',
   qty_per_box: 'Штук в коробке', boxes_per_pallet: 'Коробок на паллете',
   multiplicity: 'Кратность', unit_of_measure: 'Ед. измерения',
-  analog_group: 'Группа аналогов', is_active: 'Видимость', category: 'Хранение',
+  analog_group: 'Группа аналогов', is_active: 'Видимость', is_traceable: 'Прослеживаемость', category: 'Хранение',
   weight_netto: 'Нетто (г)', weight_brutto: 'Брутто (г)', external_code: 'Внешний код',
 };
 
@@ -288,6 +296,7 @@ async function save() {
       unit_of_measure: form.value.unit_of_measure || 'шт',
       analog_group: form.value.analog_group || null,
       is_active: form.value.is_active ? 1 : 0,
+      is_traceable: form.value.is_traceable ? 1 : 0,
       category: form.value.category || null,
       weight_netto: +form.value.weight_netto || null,
       weight_brutto: +form.value.weight_brutto || null,

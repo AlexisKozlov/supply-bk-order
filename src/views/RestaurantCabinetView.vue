@@ -149,14 +149,14 @@
 
           <div class="day-tabs">
             <button v-for="day in roStore.deliveryDays" :key="day.date" class="day-tab"
-              :class="{ active: delSelectedDate === day.date, done: day.order?.status === 'submitted' || day.order?.status === 'edited', closed: day.deadline_status === 'closed', warn: day.deadline_status === 'warning' }"
+              :class="{ active: delSelectedDate === day.date, done: day.order?.status === 'submitted' || day.order?.status === 'edited', closed: day.deadline_status === 'closed' || day.deadline_status === 'not_open', warn: day.deadline_status === 'warning' }"
               @click="delSelectDay(day.date)">
               <span class="day-tab-label">
                 <span class="day-tab-name">{{ day.day_name }}</span>
                 <span class="day-tab-date">{{ fmtDateShort(day.date) }}</span>
               </span>
               <span v-if="day.order?.status === 'submitted' || day.order?.status === 'edited'" class="day-tab-mark done">&#10003;</span>
-              <span v-else-if="day.deadline_status === 'closed'" class="day-tab-mark closed">&#10005;</span>
+              <span v-else-if="day.deadline_status === 'closed' || day.deadline_status === 'not_open'" class="day-tab-mark closed">&#10005;</span>
             </button>
           </div>
 
@@ -171,6 +171,7 @@
               <template v-if="delCurrentDeadlineStatus === 'open'">Приём заявок открыт до {{ delCurrentDeadlines?.soft }}</template>
               <template v-else-if="delCurrentDeadlineStatus === 'warning'">Основной дедлайн прошёл. Можно подать до {{ delCurrentDeadlines?.hard }}</template>
               <template v-else-if="delCurrentDeadlineStatus === 'closed'">Приём заявок на эту дату закрыт</template>
+              <template v-else-if="delCurrentDeadlineStatus === 'not_open'">Приём заявок на эту дату закрыт</template>
               <template v-else-if="delCurrentDeadlineStatus === 'not_yet'">Приём заявок ещё не начался</template>
             </div>
 
@@ -248,27 +249,6 @@
           </div>
         </template>
 
-        <!-- Add modal -->
-        <div v-if="delShowAddModal" class="modal-overlay" @click.self="delShowAddModal = false">
-          <div class="modal">
-            <div class="modal-head"><h2>Добавить товар</h2><button class="modal-close" @click="delShowAddModal = false">&times;</button></div>
-            <div class="modal-body">
-              <input v-model="delAddSearch" type="text" placeholder="Поиск..." class="input-search" @input="delDoAddSearch" ref="delAddSearchInput" />
-              <div v-if="delAddLoading" class="mini-loader"><div class="cab-spin"></div></div>
-              <div v-else-if="delAddResults.length" class="add-list">
-                <div v-for="p in delAddResults" :key="p.sku" class="add-item" @click="delAddProduct(p)">
-                  <div><span class="sku">{{ p.sku }}</span> {{ p.name }}</div>
-                  <div class="add-item-meta">
-                    <span class="add-cat">{{ p.category }}</span>
-                    <span v-if="p.multiplicity > 1" class="mult">x{{ p.multiplicity }}</span>
-                  </div>
-                </div>
-              </div>
-              <div v-else-if="delAddSearch.length >= 2" class="empty-msg">Ничего не найдено</div>
-              <div v-else class="empty-msg">Введите минимум 2 символа</div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- ── Планета Ресторанов ── -->
@@ -541,6 +521,28 @@
       <button class="btn btn-danger-outline btn-lg logout-full" @click="handleLogout">Выйти из аккаунта</button>
     </section>
 
+    <!-- Add product modal -->
+    <div v-if="delShowAddModal" class="modal-overlay" @click.self="delShowAddModal = false">
+      <div class="cab-modal">
+        <div class="cab-modal-head"><h2>Добавить товар</h2><button class="cab-modal-close" @click="delShowAddModal = false">&times;</button></div>
+        <div class="cab-modal-body">
+          <input v-model="delAddSearch" type="text" placeholder="Поиск..." class="input-search" @input="delDoAddSearch" ref="delAddSearchInput" />
+          <div v-if="delAddLoading" class="mini-loader"><div class="cab-spin"></div></div>
+          <div v-else-if="delAddResults.length" class="add-list">
+            <div v-for="p in delAddResults" :key="p.sku" class="add-item" @click="delAddProduct(p)">
+              <div><span class="sku">{{ p.sku }}</span> {{ p.name }}</div>
+              <div class="add-item-meta">
+                <span class="add-cat">{{ p.category }}</span>
+                <span v-if="p.multiplicity > 1" class="mult">x{{ p.multiplicity }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="delAddSearch.length >= 2" class="empty-msg">Ничего не найдено</div>
+          <div v-else class="empty-msg">Введите минимум 2 символа</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Supplier success overlay -->
     <div v-if="supShowSuccess" class="modal-overlay" @click.self="supShowSuccess = false">
       <div class="cab-success-inner">
@@ -613,7 +615,7 @@ const dashOrdersSubmitted = computed(() => {
   return delSub;
 });
 const dashOrdersPending = computed(() => {
-  const delOpen = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && !d.order).length;
+  const delOpen = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && d.deadline_status !== 'not_open' && !d.order).length;
   return delOpen;
 });
 
@@ -735,7 +737,7 @@ const delHasUnsavedChanges = computed(() => {
 const deliveryBadge = computed(() => {
   if (!roStore.sessionInfo) return null;
   const submitted = roStore.deliveryDays.filter(d => d.order?.status === 'submitted' || d.order?.status === 'edited').length;
-  const open = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && !d.order).length;
+  const open = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && d.deadline_status !== 'not_open' && !d.order).length;
   if (open > 0) return { text: open, type: 'warn' };
   if (submitted > 0) return { text: submitted, type: 'ok' };
   return null;
@@ -1214,6 +1216,7 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .dl-open { background: #ecfdf5; color: #16a34a; }
 .dl-warning { background: #fffbeb; color: #d97706; }
 .dl-closed { background: #fef2f2; color: #dc2626; }
+.dl-not_open { background: #fef2f2; color: #dc2626; }
 .dl-not_yet { background: #f0f9ff; color: #2563eb; }
 
 .cat-tabs { display: flex; border-bottom: 1px solid #ede8e3; }
@@ -1370,12 +1373,12 @@ tr.del-err { background: #fef2f2; }
 .logout-full { width: 100%; margin-top: 16px; }
 
 /* Modal */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
-.modal { background: white; border-radius: 16px; width: 100%; max-width: 480px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,0.2); }
-.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #ede8e3; }
-.modal-head h2 { margin: 0; font-size: 17px; color: #502314; }
-.modal-close { background: none; border: none; cursor: pointer; font-size: 20px; color: #999; }
-.modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px; }
+.cab-modal { background: white; border-radius: 16px; width: 100%; max-width: 480px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,0.2); }
+.cab-modal-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #ede8e3; }
+.cab-modal-head h2 { margin: 0; font-size: 17px; color: #502314; }
+.cab-modal-close { background: none; border: none; cursor: pointer; font-size: 20px; color: #999; }
+.cab-modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
 .add-list { display: flex; flex-direction: column; gap: 4px; }
 .add-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid #f5f0eb; }
 .add-item:hover { background: #f7f5f2; border-color: #D62300; }
@@ -1447,9 +1450,9 @@ tr.del-err { background: #fef2f2; }
   .submit-summary { font-size: 13px; }
 
   /* Modal */
-  .modal { max-width: 100%; margin: 8px; border-radius: 12px; }
-  .modal-head { padding: 12px 16px; }
-  .modal-body { padding: 12px 16px; }
+  .cab-modal { max-width: 100%; margin: 8px; border-radius: 12px; }
+  .cab-modal-head { padding: 12px 16px; }
+  .cab-modal-body { padding: 12px 16px; }
 
   /* Profile */
   .profile-card { margin-top: 8px; }
