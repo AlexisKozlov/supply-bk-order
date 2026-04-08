@@ -829,7 +829,7 @@ if (strpos($roAction, 'admin') === 0) {
         $restaurants = $rests->fetchAll();
 
         // Подгружаем вес и паллеты для всех заказов
-        $orderIds = array_filter(array_column($restaurants, 'order_id'));
+        $orderIds = array_values(array_filter(array_column($restaurants, 'order_id')));
         $weightData = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
