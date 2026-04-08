@@ -263,6 +263,10 @@
                 </tr>
               </tbody>
             </table>
+            <div v-if="getEditItems(cat).length" class="rom-cat-summary">
+              {{ getEditItems(cat).length }} поз., {{ catTotals(cat).boxes }} кор., {{ catTotals(cat).weight }} кг
+              <span class="rom-cat-pallets">{{ catTotals(cat).pallets }} палл.</span>
+            </div>
             <div v-else class="rom-no-items">Нет позиций</div>
             <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(cat)">+ Добавить товар</button>
           </div>
@@ -747,6 +751,22 @@ function getEditItems(cat) {
 
 function removeEditItem(item) {
   editItems.value = editItems.value.filter(i => i !== item);
+}
+
+function catTotals(cat) {
+  const items = getEditItems(cat).filter(i => (parseFloat(i.quantity) || 0) > 0);
+  const boxes = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
+  const weight = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.weight_brutto) || 0), 0);
+  let rawPallets = 0;
+  for (const item of items) {
+    const bpp = parseFloat(item.boxes_per_pallet) || 0;
+    if (bpp > 0) rawPallets += (parseFloat(item.quantity) || 0) / bpp;
+  }
+  return {
+    boxes: boxes.toFixed(0),
+    weight: (weight / 1000).toFixed(1),
+    pallets: rawPallets > 0 ? Math.ceil(rawPallets) : 0,
+  };
 }
 
 function itemWeight(item) {
@@ -1551,6 +1571,15 @@ async function doUnifiedExport() {
   border-top: 2px solid #e0d5c8; font-size: 14px; color: #502314;
 }
 .rom-td-weight { font-size: 12px; color: #8b7355; }
+.rom-cat-summary {
+  display: flex; gap: 12px; align-items: center;
+  padding: 6px 10px; margin-top: 4px;
+  font-size: 12px; color: #8b7355; background: #faf7f4; border-radius: 6px;
+}
+.rom-cat-pallets {
+  font-weight: 700; color: #502314;
+  background: #ede8e3; padding: 2px 8px; border-radius: 4px;
+}
 
 /* Totals row */
 .rom-totals-row td {
