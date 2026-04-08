@@ -132,7 +132,7 @@
             <p>Доставка: {{ fmtDate(delSelectedDate) }}</p>
             <p class="cab-success-stat">{{ delTotalItems }} поз., {{ delTotalQty }} кор.</p>
             <div v-if="delEditTimeLeft" class="cab-success-timer">
-              <p>Можно изменить до 10:00</p>
+              <p>Можно изменить до {{ delEditDeadlineTime }}</p>
               <div class="cab-success-time">{{ delEditTimeLeft }}</div>
             </div>
             <div class="cab-success-btns">
@@ -560,6 +560,7 @@ import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { db } from '@/lib/apiClient.js';
+import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 
 const router = useRouter();
 const roStore = useRestaurantOrderStore();
@@ -710,6 +711,11 @@ const delCurrentDeadlineStatus = computed(() => delCurrentDay.value?.deadline_st
 const delCurrentDeadlines = computed(() => delCurrentDay.value?.deadlines);
 const delCanSubmit = computed(() => ['open', 'warning'].includes(delCurrentDeadlineStatus.value));
 const delCanEdit = computed(() => delCurrentDay.value?.can_edit && delExistingOrder.value);
+const delEditDeadlineTime = computed(() => {
+  const deadlines = delCurrentDeadlines.value;
+  const t = deadlines?.edit_until || deadlines?.hard || '13:00:00';
+  return t.slice(0, 5);
+});
 const delFilteredItems = computed(() => {
   let items = delOrderItems.value.filter(i => i.category === delActiveCategory.value);
   if (delSearchQuery.value) {
@@ -776,7 +782,17 @@ async function delHandleSubmit() {
 }
 
 function delStartEditTimer() { clearInterval(delEditTimerInterval); delUpdateEditTimeLeft(); delEditTimerInterval = setInterval(delUpdateEditTimeLeft, 1000); }
-function delUpdateEditTimeLeft() { const now = new Date(); const dl = new Date(now); dl.setHours(10,0,0,0); if (now >= dl) { delEditTimeLeft.value = ''; clearInterval(delEditTimerInterval); return; } const d = dl - now; const h = Math.floor(d/3600000); const m = Math.floor((d%3600000)/60000); const s = Math.floor((d%60000)/1000); delEditTimeLeft.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+function delUpdateEditTimeLeft() {
+  const deadlines = delCurrentDeadlines.value;
+  const editUntil = deadlines?.edit_until || deadlines?.hard || '13:00:00';
+  const parts = editUntil.split(':');
+  const now = new Date();
+  const dl = new Date(now);
+  dl.setHours(parseInt(parts[0]) || 13, parseInt(parts[1]) || 0, parseInt(parts[2]) || 0, 0);
+  if (now >= dl) { delEditTimeLeft.value = ''; clearInterval(delEditTimerInterval); return; }
+  const d = dl - now; const h = Math.floor(d/3600000); const m = Math.floor((d%3600000)/60000); const s = Math.floor((d%60000)/1000);
+  delEditTimeLeft.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
 function delGoToNextDay() { delShowSuccess.value = false; clearInterval(delEditTimerInterval); const idx = roStore.deliveryDays.findIndex(d => d.date === delSelectedDate.value); const next = roStore.deliveryDays[idx + 1]; if (next) delSelectDay(next.date); }
 function delClearOrder() { if (!confirm('Очистить все количества?')) return; for (const item of delOrderItems.value) { item.quantity = 0; item.comment = ''; item._multError = false; } }
 function delRemoveItem(item) { const idx = delOrderItems.value.indexOf(item); if (idx >= 0) delOrderItems.value.splice(idx, 1); }
@@ -973,10 +989,7 @@ function switchOrderSub(sub) {
 function handleLogout() { roStore.logout(); router.replace({ name: 'restaurant-order-login' }); }
 
 // Format helpers
-function fmtDate(d) { if (!d) return ''; return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }); }
-function fmtDateShort(d) { if (!d) return ''; return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
-function fmtDateTime(dt) { if (!dt) return ''; const d = new Date(dt); return d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
-function statusLabel(s) { return { draft: 'Черновик', submitted: 'Подано', edited: 'Изменён', locked: 'Заблокирован' }[s] || s; }
+// fmtDate, fmtDateShort, fmtDateTime, statusLabel imported from roUtils.js
 
 async function loadHistory() {
   historyLoading.value = true;

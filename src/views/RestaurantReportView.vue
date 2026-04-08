@@ -235,6 +235,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { EXCEL_HEADER_STYLE } from '@/lib/roUtils.js';
 
 const store = useRestaurantOrderStore();
 
@@ -402,7 +403,7 @@ function fmtDate(d) { if (!d) return ''; return new Date(d + 'T00:00:00').toLoca
 async function exportExcel() {
   const XLSX = await import('xlsx-js-style');
   const wb = XLSX.utils.book_new();
-  const hStyle = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } }, alignment: { horizontal: 'center' } };
+  const hStyle = { ...EXCEL_HEADER_STYLE, alignment: { horizontal: 'center' } };
 
   // Sheet 1: По товарам
   const prodRows = [['Артикул', 'Товар', 'Режим', 'Всего (кор.)', 'Заказов', 'Ресторанов', 'Ср. на заказ']];

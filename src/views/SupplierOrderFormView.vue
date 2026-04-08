@@ -15,7 +15,7 @@
         </div>
       </div>
       <div class="ro-header-actions">
-        <router-link :to="{ name: 'restaurant-order-form' }" class="ro-link-btn">Заказ продуктов</router-link>
+        <router-link :to="{ name: 'restaurant-cabinet' }" class="ro-link-btn">Заказ продуктов</router-link>
         <button class="ro-link-btn ro-logout-btn" @click="handleLogout">Выйти</button>
       </div>
     </div>

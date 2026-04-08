@@ -85,6 +85,8 @@
               <th style="width:90px">Статус</th>
               <th style="width:70px" class="rom-th-center">Позиций</th>
               <th style="width:70px" class="rom-th-center">Коробок</th>
+              <th style="width:70px" class="rom-th-center">Вес, кг</th>
+              <th style="width:70px" class="rom-th-center">Паллет</th>
               <th style="width:90px" class="rom-th-center">Подано</th>
               <th style="min-width:140px">Изменён</th>
               <th style="width:120px"></th>
@@ -102,6 +104,8 @@
               </td>
               <td class="rom-td-center">{{ r.item_count || '—' }}</td>
               <td class="rom-td-center">{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
+              <td class="rom-td-center">{{ r.total_weight ? (r.total_weight / 1000).toFixed(1) : '—' }}</td>
+              <td class="rom-td-center">{{ r.pallets || '—' }}</td>
               <td class="rom-td-center rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
               <td class="rom-td-time">
                 <template v-if="r.updated_by">
@@ -119,6 +123,16 @@
               </td>
             </tr>
           </tbody>
+          <tfoot v-if="restaurants.some(r => r.order_status)">
+            <tr class="rom-totals-row">
+              <td colspan="4"><strong>Итого</strong></td>
+              <td class="rom-td-center"><strong>{{ totalStats.items }}</strong></td>
+              <td class="rom-td-center"><strong>{{ totalStats.boxes }}</strong></td>
+              <td class="rom-td-center"><strong>{{ totalStats.weight }}</strong></td>
+              <td class="rom-td-center"><strong>{{ totalStats.pallets }}</strong></td>
+              <td colspan="3"></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </template>
@@ -235,7 +249,7 @@
             <h3 class="rom-cat-title">{{ cat }}</h3>
             <table class="rom-table rom-table-edit" v-if="getEditItems(cat).length">
               <thead>
-                <tr><th>Товар</th><th>Кол-во</th><th>Комментарий</th><th></th></tr>
+                <tr><th>Товар</th><th style="width:70px">Кол-во</th><th style="width:80px">Вес, кг</th><th>Комментарий</th><th></th></tr>
               </thead>
               <tbody>
                 <tr v-for="(item, idx) in getEditItems(cat)" :key="idx">
@@ -243,6 +257,7 @@
                     <span class="rom-edit-sku">{{ item.sku }}</span> {{ item.product_name }}
                   </td>
                   <td><input v-model.number="item.quantity" type="number" min="0" step="0.5" class="rom-edit-qty" /></td>
+                  <td class="rom-td-center rom-td-weight">{{ itemWeight(item) }}</td>
                   <td><input v-model="item.comment" type="text" class="rom-edit-comment" /></td>
                   <td><button class="rom-btn-sm rom-btn-danger" @click="removeEditItem(item)">X</button></td>
                 </tr>
@@ -250,6 +265,13 @@
             </table>
             <div v-else class="rom-no-items">Нет позиций</div>
             <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(cat)">+ Добавить товар</button>
+          </div>
+
+          <!-- Order totals -->
+          <div class="rom-order-totals">
+            <span>Коробок: <strong>{{ orderTotals.boxes }}</strong></span>
+            <span>Вес: <strong>{{ orderTotals.weight }} кг</strong></span>
+            <span>Паллет: <strong>{{ orderTotals.pallets }}</strong></span>
           </div>
 
           <div class="rom-modal-footer">
@@ -332,6 +354,37 @@
     </div>
 
     <!-- Old templates modal removed -->
+
+    <!-- Deadline extend modal -->
+    <div v-if="showDeadlineModal" class="rom-modal-overlay" @click.self="showDeadlineModal = false">
+      <div class="rom-modal" style="max-width:380px">
+        <div class="rom-modal-header">
+          <h2>Продлить дедлайн</h2>
+          <button class="rom-modal-close" @click="showDeadlineModal = false">&times;</button>
+        </div>
+        <div class="rom-modal-body">
+          <p style="font-size:13px; color:#8b7355; margin-bottom:14px">
+            Дата: <strong>{{ formatDate(selectedDate) }}</strong>
+          </p>
+          <div class="rom-deadline-fields">
+            <label class="rom-deadline-label">
+              <span>Мягкий дедлайн (предупреждение)</span>
+              <input type="time" v-model="deadlineSoft" class="rom-input" />
+            </label>
+            <label class="rom-deadline-label">
+              <span>Жёсткий дедлайн (закрытие)</span>
+              <input type="time" v-model="deadlineHard" class="rom-input" />
+            </label>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px">
+            <button class="rom-btn" @click="showDeadlineModal = false">Отмена</button>
+            <button class="rom-btn rom-btn-primary" @click="saveDeadlineExtend" :disabled="deadlineSaving">
+              {{ deadlineSaving ? 'Сохранение...' : 'Продлить' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Unified export modal -->
     <div v-if="showExportModal" class="rom-modal-overlay" @click.self="closeExportModal">
@@ -453,9 +506,12 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, watchEffect } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { useToastStore } from '@/stores/toastStore.js';
+import { formatDate, formatTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE } from '@/lib/roUtils.js';
 import * as XLSX from 'xlsx-js-style';
 
 const store = useRestaurantOrderStore();
+const toast = useToastStore();
 
 const loading = ref(true);
 const session = ref(null);
@@ -503,6 +559,12 @@ const orderAddResults = ref([]);
 const orderAddTimer = ref(null);
 const replacingItem = ref(null); // если не null — режим замены товара
 
+// Deadline extend modal
+const showDeadlineModal = ref(false);
+const deadlineSoft = ref('14:00');
+const deadlineHard = ref('17:00');
+const deadlineSaving = ref(false);
+
 const filteredTemplateItems = computed(() => {
   let items = fullTemplateItems.value.filter(i => i.category === tplCategory.value);
   if (tplFilter.value) {
@@ -510,6 +572,16 @@ const filteredTemplateItems = computed(() => {
     items = items.filter(i => i.product_name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q));
   }
   return items;
+});
+
+const totalStats = computed(() => {
+  const submitted = restaurants.value.filter(r => r.order_status);
+  return {
+    items: submitted.reduce((s, r) => s + (parseInt(r.item_count) || 0), 0),
+    boxes: submitted.reduce((s, r) => s + (parseFloat(r.total_qty) || 0), 0).toFixed(0),
+    weight: (submitted.reduce((s, r) => s + (parseFloat(r.total_weight) || 0), 0) / 1000).toFixed(1),
+    pallets: submitted.reduce((s, r) => s + (parseInt(r.pallets) || 0), 0),
+  };
 });
 
 const deadlineLabel = computed(() => {
@@ -629,28 +701,33 @@ async function handleAutoSession() {
       await loadStatus();
     }
   } catch (e) {
-    alert(e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
-async function handleExtendDeadline() {
+function handleExtendDeadline() {
   if (!session.value) return;
-  const soft = prompt('Новый мягкий дедлайн (формат ЧЧ:ММ):', '14:00');
-  if (!soft) return;
-  const hard = prompt('Новый жёсткий дедлайн:', '17:00');
-  if (!hard) return;
+  deadlineSoft.value = '14:00';
+  deadlineHard.value = '17:00';
+  showDeadlineModal.value = true;
+}
+
+async function saveDeadlineExtend() {
+  if (!session.value) return;
+  deadlineSaving.value = true;
   try {
-    await store.adminExtendDeadline(session.value.id, selectedDate.value, soft + ':00', hard + ':00');
+    await store.adminExtendDeadline(session.value.id, selectedDate.value, deadlineSoft.value + ':00', deadlineHard.value + ':00');
+    showDeadlineModal.value = false;
+    toast.success('Дедлайн продлён');
     await loadStatus();
   } catch (e) {
-    alert(e.message);
+    toast.error('Ошибка', e.message);
+  } finally {
+    deadlineSaving.value = false;
   }
 }
 
-function statusLabel(status) {
-  const labels = { submitted: 'Подано', edited: 'Изменён', draft: 'Черновик', locked: 'Заблокирован' };
-  return labels[status] || 'Не подано';
-}
+// statusLabel imported from roUtils.js
 
 async function viewOrder(orderId) {
   try {
@@ -660,7 +737,7 @@ async function viewOrder(orderId) {
     originalEditItems.value = JSON.stringify(editItems.value);
     showOrderModal.value = true;
   } catch (e) {
-    alert(e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -671,6 +748,34 @@ function getEditItems(cat) {
 function removeEditItem(item) {
   editItems.value = editItems.value.filter(i => i !== item);
 }
+
+function itemWeight(item) {
+  const qty = parseFloat(item.quantity) || 0;
+  const brutto = parseFloat(item.weight_brutto) || 0;
+  if (!qty || !brutto) return '—';
+  return (qty * brutto / 1000).toFixed(1);
+}
+
+const orderTotals = computed(() => {
+  const items = editItems.value.filter(i => (parseFloat(i.quantity) || 0) > 0);
+  const boxes = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
+  const weight = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.weight_brutto) || 0), 0);
+  const palletsByCategory = {};
+  for (const item of items) {
+    const bpp = parseFloat(item.boxes_per_pallet) || 0;
+    const qty = parseFloat(item.quantity) || 0;
+    if (bpp > 0) {
+      const cat = item.category || 'Сухой';
+      palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qty / bpp;
+    }
+  }
+  const pallets = Object.values(palletsByCategory).reduce((s, v) => s + (v > 0 ? Math.ceil(v) : 0), 0);
+  return {
+    boxes: boxes.toFixed(0),
+    weight: (weight / 1000).toFixed(1),
+    pallets,
+  };
+});
 
 function openOrderAddProduct(category) {
   replacingItem.value = null;
@@ -728,7 +833,7 @@ async function saveEditedOrder() {
     showOrderModal.value = false;
     await loadStatus();
   } catch (e) {
-    alert(e.message);
+    toast.error('Ошибка', e.message);
   } finally {
     saving.value = false;
   }
@@ -744,7 +849,7 @@ async function handleDeleteOrder(order) {
     showOrderModal.value = false;
     await loadStatus();
   } catch (e) {
-    alert(e.message);
+    toast.error('Ошибка', e.message);
   } finally {
     saving.value = false;
   }
@@ -757,7 +862,7 @@ async function handleBulkCreate() {
     usersCount.value = result.created;
     usersList.value = await store.adminGetUsers();
   } catch (e) {
-    alert(e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -905,16 +1010,12 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
 }
 
 function styleExportSheet(ws, rowCount, subtotalRows) {
-  const hStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } } };
   for (let c = 0; c < EXPORT_HEADER.length; c++) {
     const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
-    if (cell) cell.s = hStyle;
+    if (cell) cell.s = EXCEL_HEADER_STYLE;
   }
-  // Style subtotal/total rows
-  const subStyle = { font: { bold: true, color: { rgb: '502314' } }, fill: { fgColor: { rgb: 'F5F0EB' } } };
-  const totalStyle = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: 'D62300' } } };
   for (const sr of (subtotalRows || [])) {
-    const st = sr.type === 'total' ? totalStyle : subStyle;
+    const st = sr.type === 'total' ? EXCEL_TOTAL_STYLE : EXCEL_SUBTOTAL_STYLE;
     for (let c = 0; c < EXPORT_HEADER.length; c++) {
       const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
       if (cell) cell.s = st;
@@ -945,18 +1046,18 @@ async function quickExportOrder(orderId, restaurantNumber) {
   try {
     const order = await store.adminGetOrder(orderId);
     const items = (order.items || []).map(i => ({ ...i, quantity: parseFloat(i.quantity) || 0 }));
-    if (!items.length) { alert('Заказ пуст'); return; }
+    if (!items.length) { toast.warning('Заказ пуст'); return; }
     const wb = buildSingleOrderXlsx(order, items);
     XLSX.writeFile(wb, `Заказ_рест_${restaurantNumber}_${selectedDate.value}.xlsx`);
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
 function copyRoLink() {
   const url = window.location.origin + '/restaurant';
   navigator.clipboard.writeText(url);
-  alert('Ссылка скопирована: ' + url);
+  toast.success('Ссылка скопирована', url);
 }
 
 // ═══ Unified export modal logic ═══
@@ -1074,7 +1175,7 @@ async function openExportModal() {
       if (!prodMap[item.sku]) prodMap[item.sku] = { sku: item.sku, product_name: item.product_name, category: item.category };
     }
     exportAvailableProducts.value = Object.values(prodMap).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.product_name.localeCompare(b.product_name));
-  } catch (e) { alert('Ошибка: ' + e.message); showExportModal.value = false; }
+  } catch (e) { toast.error('Ошибка', e.message); showExportModal.value = false; }
   finally { exportLoading.value = false; }
 }
 
@@ -1083,7 +1184,7 @@ async function doUnifiedExport() {
   exportExporting.value = true;
   try {
     const { orders, items } = getFilteredExportData();
-    if (!items.length) { alert('Нет данных для выгрузки'); return; }
+    if (!items.length) { toast.warning('Нет данных для выгрузки'); return; }
 
     // Build restInfo map
     const restInfoMap = {};
@@ -1151,20 +1252,13 @@ async function doUnifiedExport() {
     XLSX.writeFile(wb, `Заказы_ресторанов_${selectedDate.value}.xlsx`);
     showExportModal.value = false;
   } catch (e) {
-    alert('Ошибка экспорта: ' + e.message);
+    toast.error('Ошибка экспорта', e.message);
   } finally {
     exportExporting.value = false;
   }
 }
 
-function formatDate(d) {
-  if (!d) return '';
-  return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-}
-function formatTime(dt) {
-  if (!dt) return '';
-  return new Date(dt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
+// formatDate, formatTime imported from roUtils.js
 
 </script>
 
@@ -1450,4 +1544,22 @@ function formatTime(dt) {
   padding: 12px 16px; border-top: 1px solid #ede8e3;
 }
 .rom-exp-summary { font-size: 13px; color: #502314; }
+
+/* Order totals */
+.rom-order-totals {
+  display: flex; gap: 20px; padding: 12px 0; margin-top: 12px;
+  border-top: 2px solid #e0d5c8; font-size: 14px; color: #502314;
+}
+.rom-td-weight { font-size: 12px; color: #8b7355; }
+
+/* Totals row */
+.rom-totals-row td {
+  padding: 10px 12px !important; background: #faf7f4;
+  border-top: 2px solid #e0d5c8; font-size: 13px; color: #502314;
+}
+
+/* Deadline modal */
+.rom-deadline-fields { display: flex; flex-direction: column; gap: 12px; }
+.rom-deadline-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #502314; font-weight: 600; }
+.rom-deadline-label input[type="time"] { width: 140px; }
 </style>

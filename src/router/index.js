@@ -86,15 +86,11 @@ const routes = [
   },
   {
     path: '/restaurant/order',
-    name: 'restaurant-order-form',
-    component: () => import('@/views/RestaurantOrderFormView.vue'),
-    meta: { title: 'Подать заказ' },
+    redirect: '/restaurant/cabinet',
   },
   {
     path: '/restaurant/history',
-    name: 'restaurant-order-history',
-    component: () => import('@/views/RestaurantOrderHistoryView.vue'),
-    meta: { title: 'Мои заказы' },
+    redirect: '/restaurant/cabinet',
   },
   {
     path: '/supplier-order',
