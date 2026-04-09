@@ -181,7 +181,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     }
 
     // Ищем токен
-    $s = $pdo->prepare("SELECT id, telegram_chat_id FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
     $s->execute([$tgToken]);
     $tgAuth = $s->fetch();
     if (!$tgAuth) {
@@ -191,15 +191,18 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     // Помечаем токен использованным
     $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ?")->execute([$tgAuth['id']]);
 
-    // Находим ресторан по подписке
-    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
-    $s->execute([$tgAuth['telegram_chat_id']]);
-    $sub = $s->fetch();
-    if (!$sub) {
-        roRespond(['success' => false, 'error' => 'Вы не подписаны ни на один ресторан в боте']);
+    // Если в токене явно указан ресторан (например, выбран в меню Камако) — используем его
+    $restNum = $tgAuth['restaurant_number'] ?? null;
+    if (!$restNum) {
+        // Иначе берём первую подписку этого чата
+        $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+        $s->execute([$tgAuth['telegram_chat_id']]);
+        $sub = $s->fetch();
+        if (!$sub) {
+            roRespond(['success' => false, 'error' => 'Вы не подписаны ни на один ресторан в боте']);
+        }
+        $restNum = $sub['restaurant_number'];
     }
-
-    $restNum = $sub['restaurant_number'];
 
     // Проверяем, есть ли учётка ресторана
     $s = $pdo->prepare("SELECT id, restaurant_number, legal_entity FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
@@ -485,9 +488,11 @@ if ($roAction === 'my-info' && $method === 'GET') {
             $order = $os->fetch();
 
             $dateOpen = roIsDateOpen($pdo, $session['id'], $dateStr);
+            $today = date('Y-m-d');
 
-            // Показываем дату если: приём открыт ИЛИ уже есть заказ
-            if ($dateOpen || $order) {
+            // Показываем дату если: приём открыт ИЛИ уже есть заказ ИЛИ дата сегодня/в будущем
+            // (даже если приём закрыт — ресторан должен видеть свой график)
+            if ($dateOpen || $order || $dateStr >= $today) {
                 $deadlineStatus = roGetDeadlineStatus($pdo, $session['id'], $dateStr);
 
                 $deliveryDays[] = [
@@ -779,6 +784,71 @@ if ($roAction === 'submit-order' && $method === 'POST') {
         roRespond(['error' => 'Ошибка сохранения заказа'], 500);
     }
 
+    // Уведомление в Telegram о принятой/обновлённой заявке
+    try {
+        $isNew = !$existing;
+        $deliveryDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+
+        // Группируем позиции по категориям
+        $byCat = [];
+        foreach ($items as $it) {
+            $q = floatval($it['quantity'] ?? 0);
+            if ($q <= 0) continue;
+            $cat = $it['category'] ?? 'Сухой';
+            if (!isset($byCat[$cat])) $byCat[$cat] = [];
+            $byCat[$cat][] = [
+                'sku' => $it['sku'] ?? '',
+                'name' => $it['product_name'] ?? '',
+                'qty' => $q,
+            ];
+        }
+
+        $fmtQty = function($q) {
+            $s = number_format((float)$q, 1, '.', '');
+            return rtrim(rtrim($s, '0'), '.');
+        };
+        $esc = function($s) {
+            return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        };
+
+        $catIcons = ['Сухой' => '📦', 'Холод' => '🧊', 'Мороз' => '❄️'];
+
+        $title = $isNew ? '✅ <b>Заявка отправлена</b>' : '✏️ <b>Заявка обновлена</b>';
+        $lines = [];
+        $lines[] = $title;
+        $lines[] = '';
+        $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
+        $lines[] = "📋 <b>Позиций:</b> {$totalItems}   📦 <b>Всего:</b> " . $fmtQty($totalQty) . " кор.";
+
+        foreach (['Сухой', 'Холод', 'Мороз'] as $cat) {
+            if (empty($byCat[$cat])) continue;
+            $catItems = $byCat[$cat];
+            $catQty = array_sum(array_column($catItems, 'qty'));
+            $icon = $catIcons[$cat] ?? '•';
+            $lines[] = '';
+            $lines[] = "{$icon} <b>{$cat}</b> — " . count($catItems) . " поз., " . $fmtQty($catQty) . " кор.";
+            foreach ($catItems as $ci) {
+                $sku = $esc($ci['sku']);
+                $name = $esc($ci['name']);
+                $lines[] = "• <code>{$sku}</code> {$name} — <b>" . $fmtQty($ci['qty']) . "</b>";
+            }
+        }
+        if ($comment !== null && $comment !== '') {
+            $lines[] = '';
+            $lines[] = "💬 <i>" . $esc($comment) . "</i>";
+        }
+
+        $msg = implode("\n", $lines);
+        // Лимит Telegram ~4096 символов
+        if (mb_strlen($msg) > 3900) {
+            $msg = mb_substr($msg, 0, 3900) . "\n\n…(сообщение обрезано)";
+        }
+
+        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg);
+    } catch (Exception $e) {
+        // Уведомление не критично — игнорируем ошибку
+    }
+
     roRespond([
         'success' => true,
         'order_id' => (int)$orderId,
@@ -892,10 +962,15 @@ if (strpos($roAction, 'admin') === 0) {
                     $weightData[$oid] = ['total_weight' => 0, 'pallets' => 0];
                 }
                 $weightData[$oid]['total_weight'] += (float)$row['total_weight'];
-                // Округление: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх
+                // Округление: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх.
+                // Если товар есть (raw > 0) — минимум 1 паллета.
                 $rawP = (float)$row['raw_pallets'];
-                $frac = $rawP - floor($rawP);
-                $weightData[$oid]['pallets'] += ($frac > 0.2) ? ceil($rawP) : floor($rawP);
+                if ($rawP > 0) {
+                    $frac = $rawP - floor($rawP);
+                    $rounded = ($frac > 0.2) ? ceil($rawP) : floor($rawP);
+                    if ($rounded < 1) $rounded = 1;
+                    $weightData[$oid]['pallets'] += $rounded;
+                }
             }
         }
         // Добавляем к каждому ресторану
@@ -939,7 +1014,7 @@ if (strpos($roAction, 'admin') === 0) {
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
-        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
+        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
             FROM ro_order_items oi
             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ?
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
@@ -1293,15 +1368,37 @@ if (strpos($roAction, 'admin') === 0) {
     }
 
     // --- Управление учётками ресторанов ---
+    // Источник истины — справочник ресторанов. ro_users только хранит пароль/сессию.
     if ($adminAction === 'users' && $method === 'GET') {
         $s = $pdo->query("
-            SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.is_active, ru.created_at, ru.last_login_at,
-                   r.region, r.city, r.address
-            FROM ro_users ru
-            LEFT JOIN restaurants r ON r.number = ru.restaurant_number AND r.active = 1
-            ORDER BY ru.restaurant_number
+            SELECT
+                r.number AS restaurant_number,
+                MIN(r.region) AS region,
+                MIN(r.city) AS city,
+                MIN(r.address) AS address,
+                ru.id,
+                ru.legal_entity,
+                ru.is_active,
+                ru.last_login_at,
+                ru.telegram_chat_id,
+                CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password
+            FROM restaurants r
+            LEFT JOIN ro_users ru ON ru.restaurant_number = r.number
+            WHERE r.active = 1
+            GROUP BY r.number, ru.id, ru.legal_entity, ru.is_active, ru.last_login_at, ru.telegram_chat_id, has_password
+            ORDER BY r.number
         ");
-        roRespond(['users' => $s->fetchAll()]);
+        $rows = $s->fetchAll();
+        // Подставим юрлицо для тех, у кого ещё нет учётки
+        foreach ($rows as &$row) {
+            if (empty($row['legal_entity'])) {
+                $row['legal_entity'] = roGetLegalEntity($pdo, $row['restaurant_number']);
+            }
+            $row['is_active'] = (int)($row['is_active'] ?? 1);
+            $row['has_password'] = (int)$row['has_password'];
+        }
+        unset($row);
+        roRespond(['users' => $rows]);
     }
 
     if ($adminAction === 'users' && $method === 'POST') {
@@ -1322,20 +1419,29 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         if ($action === 'create-bulk') {
-            // Создать учётки для всех активных ресторанов
+            // Назначить пароль для ресторанов
+            // mode = 'missing' (по умолчанию) — только тем, у кого ещё нет пароля
+            // mode = 'all' — всем подряд (затирая существующие пароли)
             $password = $body['password'] ?? '';
+            $mode = ($body['mode'] ?? 'missing') === 'all' ? 'all' : 'missing';
             if (!$password) roRespond(['error' => 'Не указан пароль'], 400);
 
             $hash = password_hash($password, PASSWORD_BCRYPT);
-            $rests = $pdo->query("SELECT number FROM restaurants WHERE active = 1 ORDER BY number");
-            $created = 0;
+            $rests = $pdo->query("SELECT DISTINCT number FROM restaurants WHERE active = 1 ORDER BY number");
+            $changed = 0;
+            $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, password_hash, legal_entity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1");
+            $check = $pdo->prepare("SELECT password_hash FROM ro_users WHERE restaurant_number = ?");
             foreach ($rests->fetchAll() as $r) {
+                if ($mode === 'missing') {
+                    $check->execute([$r['number']]);
+                    $existing = $check->fetchColumn();
+                    if ($existing) continue;
+                }
                 $le = roGetLegalEntity($pdo, $r['number']);
-                $pdo->prepare("INSERT INTO ro_users (restaurant_number, password_hash, legal_entity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1")
-                    ->execute([$r['number'], $hash, $le]);
-                $created++;
+                $insert->execute([$r['number'], $hash, $le]);
+                $changed++;
             }
-            roRespond(['success' => true, 'created' => $created]);
+            roRespond(['success' => true, 'created' => $changed, 'mode' => $mode]);
         }
 
         if ($action === 'toggle') {
@@ -1448,7 +1554,7 @@ if (strpos($roAction, 'admin') === 0) {
         $allItems = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
-            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
+            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
                 LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity
@@ -1531,7 +1637,8 @@ if (strpos($roAction, 'admin') === 0) {
                     $v = mb_strtolower(trim((string)$val));
                     if ($v === 'товар') $colProduct = $c;
                     if (mb_strpos($v, 'владелец') !== false) $colOwner = $c;
-                    if (mb_strpos($v, 'итого') !== false && mb_strpos($v, 'шт') !== false) $colQty = $c;
+                    // Колонка количества: «Итог», «Итого», «Итого шт.» и т.п.
+                    if (preg_match('/^итог/u', $v)) $colQty = $c;
                 }
                 if ($colProduct >= 0 && $colQty >= 0) { $headerRow = $r; break; }
             }

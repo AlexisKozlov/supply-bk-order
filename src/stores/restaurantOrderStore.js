@@ -235,10 +235,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
-  async function adminCreateBulkUsers(password) {
+  async function adminCreateBulkUsers(password, mode = 'missing') {
     return await api('admin/users', {
       method: 'POST',
-      body: JSON.stringify({ action: 'create-bulk', password }),
+      body: JSON.stringify({ action: 'create-bulk', password, mode }),
     });
   }
 

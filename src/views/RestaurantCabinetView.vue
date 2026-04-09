@@ -45,33 +45,44 @@
         {{ sup.name }}
         <span v-if="supplierBadge(sup)" class="sb-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
       </button>
+      <!-- История заказов -->
+      <button class="sb-item"
+        :class="{ active: activeTab === 'orders' && orderSubTab === 'history' }"
+        @click="switchTab('orders'); switchOrderSub('history')">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></span>
+        История
+      </button>
 
+      <div class="sb-label">Другое</div>
       <template v-for="tab in mainTabs.filter(t => t.id !== 'dashboard' && t.id !== 'orders')" :key="tab.id">
-        <div v-if="tab.id === 'stock'" class="sb-label">Другое</div>
         <button class="sb-item" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
           <span class="sb-icon"><svg v-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
           {{ tab.label }}
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
       </template>
-
-      <div class="sb-label">Аккаунт</div>
-      <button class="sb-item" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
-        Профиль
-      </button>
-      <button class="sb-item" @click="handleLogout">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
-        Выйти
-      </button>
+      <router-link :to="{ name: 'search-cards' }" target="_blank" class="sb-item sb-item-link">
+        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></span>
+        Поиск карточек
+        <span class="sb-item-ext" title="Откроется в новой вкладке">↗</span>
+      </router-link>
 
       <div class="sb-spacer"></div>
-      <div class="sb-rest">
-        <div class="sb-rest-top">
+      <div class="sb-rest" :class="{ active: activeTab === 'profile' }">
+        <button class="sb-rest-main" @click="switchTab('profile')" title="Открыть профиль">
           <div class="sb-avatar">{{ roStore.restaurant?.number }}</div>
-          <div class="sb-rest-name">Ресторан {{ roStore.restaurant?.number }}</div>
-        </div>
-        <div class="sb-rest-addr">{{ restaurantAddress }}</div>
+          <div class="sb-rest-info">
+            <div class="sb-rest-name">Ресторан {{ roStore.restaurant?.number }}</div>
+            <div class="sb-rest-addr">{{ restaurantAddress }}</div>
+          </div>
+        </button>
+        <button class="sb-rest-logout" @click="handleLogout" title="Выйти из аккаунта">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
       </div>
     </aside>
 
@@ -160,27 +171,7 @@
     </section>
 
     <!-- ══════ TAB: Заказы ══════ -->
-    <section v-if="activeTab === 'orders' && !globalLoading" class="cab-section">
-      <!-- Sub-tabs (pill navigation) -->
-      <div class="ord-tabs">
-        <button class="ord-tab" :class="{ active: orderSubTab === 'delivery' }" @click="orderSubTab = 'delivery'">
-          Основная поставка
-          <span v-if="deliveryBadge" class="ord-tab-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
-        </button>
-        <button class="ord-tab" :class="{ active: orderSubTab === 'planeta' }" @click="switchOrderSub('planeta')">
-          Планета Ресторанов
-          <span v-if="planetaBadge" class="ord-tab-badge" :class="planetaBadge.type">{{ planetaBadge.text }}</span>
-        </button>
-        <button v-for="sup in suppliers" :key="sup.id" class="ord-tab"
-          :class="{ active: orderSubTab === 'sup_' + sup.id }" @click="switchOrderSub('sup_' + sup.id)">
-          {{ sup.name }}
-          <span v-if="supplierBadge(sup)" class="ord-tab-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
-        </button>
-        <button class="ord-tab" :class="{ active: orderSubTab === 'history' }" @click="switchOrderSub('history')">
-          История
-        </button>
-      </div>
-
+    <section v-if="activeTab === 'orders' && !globalLoading" class="cab-section cab-section-orders">
       <!-- ── Основная поставка ── -->
       <div v-if="orderSubTab === 'delivery'">
         <div v-if="!roStore.sessionInfo" class="cab-empty-card">
@@ -193,16 +184,29 @@
         <div v-else-if="delShowSuccess" class="cab-success">
           <div class="cab-success-inner">
             <div class="cab-success-check">&#10003;</div>
-            <h2>Заказ {{ delWasEdited ? 'обновлён' : 'отправлен' }}!</h2>
-            <p>Доставка: {{ fmtDate(delSelectedDate) }}</p>
-            <p class="cab-success-stat">{{ delTotalItems }} поз., {{ delTotalQty }} кор.</p>
+            <h2>Заказ {{ delWasEdited ? 'обновлён' : 'отправлен' }}</h2>
+            <div class="cab-success-date">Доставка {{ fmtDate(delSelectedDate) }}</div>
+
+            <div class="cab-success-stats">
+              <div class="cab-success-stat-item">
+                <div class="cab-success-stat-num">{{ delTotalItems }}</div>
+                <div class="cab-success-stat-lbl">позиций</div>
+              </div>
+              <div class="cab-success-stat-divider"></div>
+              <div class="cab-success-stat-item">
+                <div class="cab-success-stat-num">{{ delTotalQty }}</div>
+                <div class="cab-success-stat-lbl">коробок</div>
+              </div>
+            </div>
+
             <div v-if="delEditTimeLeft" class="cab-success-timer">
-              <p>Можно изменить до {{ delEditDeadlineTime }}</p>
+              <div class="cab-success-timer-lbl">Можно изменить до {{ delEditDeadlineTime }}</div>
               <div class="cab-success-time">{{ delEditTimeLeft }}</div>
             </div>
+
             <div class="cab-success-btns">
-              <button v-if="delEditTimeLeft" class="btn btn-primary" @click="delShowSuccess = false">Изменить</button>
-              <button class="btn btn-outline" @click="delGoToNextDay">Следующий день</button>
+              <button v-if="delEditTimeLeft" class="btn btn-outline" @click="delShowSuccess = false">Изменить</button>
+              <button class="btn btn-primary" @click="delGoToNextDay">Следующий день</button>
             </div>
           </div>
         </div>
@@ -212,7 +216,7 @@
             Сессия: {{ fmtDate(roStore.sessionInfo.week_start) }} — {{ fmtDate(roStore.sessionInfo.week_end) }}
           </div>
 
-          <div class="day-tabs">
+          <div v-if="sortedDeliveryDays.length" class="day-tabs">
             <button v-for="day in sortedDeliveryDays" :key="day.date" class="day-tab"
               :class="{ active: delSelectedDate === day.date, done: day.order?.status === 'submitted' || day.order?.status === 'edited', closed: day.deadline_status === 'closed' || day.deadline_status === 'not_open', warn: day.deadline_status === 'warning' }"
               @click="delSelectDay(day.date)">
@@ -224,8 +228,16 @@
               <span v-else-if="day.deadline_status === 'closed' || day.deadline_status === 'not_open'" class="day-tab-mark closed">&#10005;</span>
             </button>
           </div>
+          <div v-else class="cab-empty-card">
+            <h2>Нет дней доставки</h2>
+            <p>В этой сессии не запланировано ни одного дня поставки для вашего ресторана.</p>
+            <p style="margin-top:10px; font-size:12px; color:#B0A090">Если это ошибка — обратитесь в отдел закупок</p>
+          </div>
 
           <div v-if="delSelectedDate" class="order-form">
+            <div v-if="delDraftRestoreNotice" class="draft-restored">
+              <span>↩ {{ delDraftRestoreNotice }}</span>
+            </div>
             <div class="deadline-bar" :class="'dl-' + delCurrentDeadlineStatus">
               <span class="deadline-icon" v-if="delCurrentDeadlineStatus === 'open' || delCurrentDeadlineStatus === 'warning'">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -383,55 +395,61 @@
             </button>
           </div>
 
-          <div v-for="(del, dIdx) in vegDeliveries" :key="'vd-'+del.date" v-show="vegActiveDay === dIdx" class="order-form">
-            <div class="deadline-bar" :class="del.expired ? 'dl-closed' : 'dl-open'">
-              <span class="deadline-icon" v-if="!del.expired">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              </span>
-              <span class="deadline-icon" v-else>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-              </span>
-              <template v-if="del.expired">Дедлайн прошёл</template>
-              <template v-else-if="del.deadline">Дедлайн: {{ vegFmtDeadline(del.deadline) }}</template>
-            </div>
-            <template v-if="!del.expired">
-              <div class="quick-actions">
-                <button v-if="vegHasPrevData(del.date) && !vegDayHasData(del.date)" class="btn btn-sm btn-outline" @click="vegFillFromPrev(del.date)">Повторить предыдущий</button>
-                <button v-if="!vegDayAllZeros(del.date)" class="btn btn-sm btn-danger-outline" @click="vegFillZeros(del.date)">Не нужна</button>
+          <div class="order-form">
+            <div v-for="(del, dIdx) in vegDeliveries" :key="'vd-'+del.date" v-show="vegActiveDay === dIdx">
+              <div class="deadline-bar" :class="del.expired ? 'dl-closed' : 'dl-open'">
+                <span class="deadline-icon" v-if="!del.expired">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </span>
+                <span class="deadline-icon" v-else>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                </span>
+                <template v-if="del.expired">Дедлайн прошёл</template>
+                <template v-else-if="del.deadline">Дедлайн: {{ vegFmtDeadline(del.deadline) }}</template>
               </div>
-              <div class="item-list">
-                <div v-for="prod in vegInfo.products" :key="prod.id + '-' + del.date"
-                  class="item-row" :class="{ 'item-filled': parseFloat(vegOrderValues[del.date + '_' + prod.id]) > 0, 'item-error': vegMultError(del.date, prod) }">
-                  <div class="item-info">
-                    <span class="item-name">{{ prod.product_name }}</span>
-                    <span v-if="prod.multiplicity" class="item-hint">кр. {{ prod.multiplicity }}</span>
-                  </div>
-                  <div class="item-input">
-                    <input v-model="vegOrderValues[del.date + '_' + prod.id]" type="text" inputmode="decimal" placeholder="0"
-                      class="item-qty" :class="{ 'item-qty-err': vegMultError(del.date, prod) }" @focus="$event.target.select()" />
-                    <span class="item-unit">{{ vegUnitShort(prod.unit) }}</span>
+              <template v-if="!del.expired">
+                <div v-if="vegHasPrevData(del.date) && !vegDayHasData(del.date)" class="quick-actions">
+                  <button class="btn btn-sm btn-outline" @click="vegFillFromPrev(del.date)">Повторить предыдущий</button>
+                </div>
+                <div class="item-list">
+                  <div v-for="prod in vegInfo.products" :key="prod.id + '-' + del.date"
+                    class="item-row" :class="{ 'item-filled': parseFloat(vegOrderValues[del.date + '_' + prod.id]) > 0, 'item-error': vegMultError(del.date, prod) }">
+                    <div class="item-info">
+                      <span class="item-name">{{ prod.product_name }}</span>
+                      <span v-if="prod.multiplicity" class="item-hint">кр. {{ prod.multiplicity }}</span>
+                    </div>
+                    <div class="item-input">
+                      <input v-model="vegOrderValues[del.date + '_' + prod.id]" type="text" inputmode="decimal" placeholder="0"
+                        class="item-qty" :class="{ 'item-qty-err': vegMultError(del.date, prod) }" @focus="$event.target.select()" />
+                      <span class="item-unit">{{ vegUnitShort(prod.unit) }}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </template>
-            <div v-if="del.expired && vegHasPrevData(del.date)" class="prev-data">
-              <div class="prev-data-title">Предыдущий заказ:</div>
-              <div v-for="prod in vegInfo.products" :key="'prev-' + prod.id" class="prev-data-row">
-                <span>{{ prod.product_name }}</span>
-                <strong v-if="vegPrevInfo(del.date, prod)">{{ vegPrevInfo(del.date, prod).qty }} {{ vegUnitShort(prod.unit) }}</strong>
-                <span v-else>—</span>
+              </template>
+              <div v-if="del.expired && vegHasPrevData(del.date)" class="prev-data">
+                <div class="prev-data-title">Предыдущий заказ:</div>
+                <div v-for="prod in vegInfo.products" :key="'prev-' + prod.id" class="prev-data-row">
+                  <span>{{ prod.product_name }}</span>
+                  <strong v-if="vegPrevInfo(del.date, prod)">{{ vegPrevInfo(del.date, prod).qty }} {{ vegUnitShort(prod.unit) }}</strong>
+                  <span v-else>—</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="submit-area" v-if="vegDeliveries.some(d => !d.expired)">
-            <div v-if="vegHasMultErrors" class="error-msg">Исправьте кратность</div>
-            <button class="btn btn-primary btn-lg" :disabled="!vegCanSubmit || vegSubmitting || vegHasMultErrors" @click="vegSubmit">
-              <span v-if="vegSubmitting" class="cab-spin cab-spin-sm"></span>
-              {{ vegEditing ? 'Сохранить' : 'Отправить' }}
-            </button>
-            <button v-if="vegEditing" class="btn btn-outline" @click="vegEditing = false; vegSubmitted = true">Отмена</button>
-            <div v-if="vegError" class="error-msg">{{ vegError }}</div>
+            <div class="submit-area" v-if="vegDeliveries.some(d => !d.expired)">
+              <div v-if="vegHasMultErrors" class="error-msg">Исправьте кратность</div>
+              <div class="submit-buttons-row">
+                <button v-if="vegEditing" class="btn btn-outline btn-lg" @click="vegEditing = false; vegSubmitted = true">Отмена</button>
+                <button class="btn btn-danger-outline btn-lg" :disabled="vegSubmitting" @click="vegSkipDelivery">
+                  Поставка не нужна
+                </button>
+                <button class="btn btn-primary btn-lg" :disabled="!vegCanSubmit || vegSubmitting || vegHasMultErrors" @click="vegSubmit">
+                  <span v-if="vegSubmitting" class="cab-spin cab-spin-sm"></span>
+                  {{ vegEditing ? 'Сохранить' : 'Отправить' }}
+                </button>
+              </div>
+              <div v-if="vegError" class="error-msg">{{ vegError }}</div>
+            </div>
           </div>
           </template>
         </template>
@@ -479,11 +497,15 @@
               <template v-else>
                 <div v-if="supProducts[sup.id]?.length" class="item-list">
                   <div v-for="p in supProducts[sup.id]" :key="p.sku"
-                    class="item-row" :class="{ 'item-filled': supQuantities[sup.id]?.[p.sku] > 0, 'item-error': supHasError(sup.id, p) }">
+                    class="item-row" :class="{ 'item-filled': supQuantities[sup.id]?.[p.sku] > 0, 'item-error': supHasError(sup.id, p), 'item-admin-edited': supAdminEditInfo(sup.id, p.sku) }">
                     <div class="item-info">
                       <span class="item-name">{{ p.product_name || p.name }}</span>
                       <span v-if="p.multiplicity" class="item-hint">кр. {{ supFmtNum(p.multiplicity) }}</span>
                       <span v-if="p.min_qty" class="item-hint item-hint-warn">мин. {{ supFmtNum(p.min_qty) }}</span>
+                      <span v-if="supAdminEditInfo(sup.id, p.sku)" class="item-edit-mark"
+                        :title="`Изменено закупщиком: было ${supFmtNum(supAdminEditInfo(sup.id, p.sku).original)}, стало ${supFmtNum(supAdminEditInfo(sup.id, p.sku).edited)}`">
+                        ✏ {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).original) }} → {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).edited) }}
+                      </span>
                     </div>
                     <div class="item-input">
                       <input type="number" class="item-qty" :class="{ 'item-qty-err': supHasError(sup.id, p) }"
@@ -496,14 +518,20 @@
                 <div class="submit-area">
                   <div v-if="supHasErrors(sup.id)" class="error-msg">Исправьте количество</div>
                   <div v-if="supFilledCount(sup.id) > 0" class="submit-summary">
-                    <span>{{ supFilledCount(sup.id) }} поз.</span>
-                    <span>{{ supFilledTotal(sup.id) }} шт.</span>
+                    <span><strong>{{ supFilledCount(sup.id) }}</strong> поз.</span>
+                    <span><strong>{{ supFilledTotal(sup.id) }}</strong> шт.</span>
                   </div>
-                  <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-primary btn-lg"
-                    :disabled="supFilledCount(sup.id) === 0 || supSubmitting[sup.id] || supHasErrors(sup.id)" @click="supHandleSubmit(sup)">
-                    <span v-if="supSubmitting[sup.id]" class="cab-spin cab-spin-sm"></span>
-                    {{ supCurrentDateInfo(sup)?.order ? 'Обновить' : 'Отправить' }}
-                  </button>
+                  <div class="submit-buttons-row">
+                    <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-danger-outline btn-lg"
+                      :disabled="supSubmitting[sup.id]" @click="supSkipDelivery(sup)">
+                      Поставка не нужна
+                    </button>
+                    <button v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'" class="btn btn-primary btn-lg"
+                      :disabled="supFilledCount(sup.id) === 0 || supSubmitting[sup.id] || supHasErrors(sup.id)" @click="supHandleSubmit(sup)">
+                      <span v-if="supSubmitting[sup.id]" class="cab-spin cab-spin-sm"></span>
+                      {{ supCurrentDateInfo(sup)?.order ? 'Обновить' : 'Отправить' }}
+                    </button>
+                  </div>
                 </div>
               </template>
             </div>
@@ -642,11 +670,29 @@
     <!-- Supplier success overlay -->
     <div v-if="supShowSuccess" class="modal-overlay" @click.self="supShowSuccess = false">
       <div class="cab-success-inner">
-        <div class="cab-success-check">&#10003;</div>
-        <h2>Заявка отправлена!</h2>
-        <p>{{ supSuccessInfo.supplier_name }} — {{ fmtDate(supSuccessInfo.delivery_date) }}</p>
-        <p class="cab-success-stat">{{ supSuccessInfo.total_items }} поз., {{ supSuccessInfo.total_qty }} шт.</p>
-        <button class="btn btn-primary" @click="supShowSuccess = false">OK</button>
+        <div class="cab-success-check" :class="{ 'cab-success-check-skip': supSuccessInfo.skipped }">
+          <template v-if="supSuccessInfo.skipped">&#10005;</template>
+          <template v-else>&#10003;</template>
+        </div>
+        <h2>{{ supSuccessInfo.skipped ? 'Поставка отмечена как ненужная' : 'Заявка отправлена' }}</h2>
+        <div class="cab-success-date">{{ supSuccessInfo.supplier_name }} — {{ fmtDate(supSuccessInfo.delivery_date) }}</div>
+        <div v-if="!supSuccessInfo.skipped" class="cab-success-stats">
+          <div class="cab-success-stat-item">
+            <div class="cab-success-stat-num">{{ supSuccessInfo.total_items }}</div>
+            <div class="cab-success-stat-lbl">позиций</div>
+          </div>
+          <div class="cab-success-stat-divider"></div>
+          <div class="cab-success-stat-item">
+            <div class="cab-success-stat-num">{{ supSuccessInfo.total_qty }}</div>
+            <div class="cab-success-stat-lbl">шт.</div>
+          </div>
+        </div>
+        <div v-else class="cab-success-skip-note">
+          Закупщик увидит, что на эту дату ваш ресторан ничего не заказывает.
+        </div>
+        <div class="cab-success-btns">
+          <button class="btn btn-primary" @click="supShowSuccess = false">OK</button>
+        </div>
       </div>
     </div>
 
@@ -664,18 +710,22 @@
     </div>
 
     </div><!-- /cab-main -->
+    <!-- Скрытый router-view: дочерние маршруты используют пустой компонент-заглушку,
+         сам кабинет управляет содержимым через состояние табов -->
+    <router-view v-slot="{ Component }"><component :is="Component" v-if="false" /></router-view>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 
 const router = useRouter();
+const route = useRoute();
 const roStore = useRestaurantOrderStore();
 const soStore = useSupplierOrderStore();
 
@@ -722,12 +772,29 @@ const historyOrders = ref([]);
 
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
-  const delSub = roStore.deliveryDays.filter(d => d.order?.status === 'submitted' || d.order?.status === 'edited').length;
-  return delSub;
+  // Основная поставка
+  let total = roStore.deliveryDays.filter(d => d.order?.status === 'submitted' || d.order?.status === 'edited').length;
+  // Поставщики (Камако и др.)
+  for (const sup of suppliers.value) {
+    total += (sup.available_dates || []).filter(d => !!d.order).length;
+  }
+  // Планета — считаем как 1 поданную, если ресторан отправил
+  if (vegInfo.value && vegSubmitted.value) total += 1;
+  return total;
 });
 const dashOrdersPending = computed(() => {
-  const delOpen = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && d.deadline_status !== 'not_open' && !d.order).length;
-  return delOpen;
+  // Основная поставка: открытые дни без заявки
+  let total = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && d.deadline_status !== 'not_open' && !d.order).length;
+  // Поставщики: открытые даты без заявки
+  for (const sup of suppliers.value) {
+    total += (sup.available_dates || []).filter(d => d.deadline_status === 'open' && !d.order).length;
+  }
+  // Планета: 1, если есть открытые дни и ничего не подано
+  if (vegInfo.value && !vegSubmitted.value) {
+    const openVeg = vegDeliveries.value.filter(d => !d.expired).length;
+    if (openVeg > 0) total += 1;
+  }
+  return total;
 });
 
 const urgentItems = computed(() => {
@@ -818,16 +885,10 @@ let delAddTimer = null;
 const delSavedSnapshot = ref('');
 
 const delCurrentDay = computed(() => roStore.deliveryDays.find(d => d.date === delSelectedDate.value));
-// Дни: сначала открытые без заказа, потом остальные по дате
+// Дни: новая дата (поздняя) слева, старые (ранние) справа
 const sortedDeliveryDays = computed(() => {
   const days = [...roStore.deliveryDays];
-  days.sort((a, b) => {
-    const aOpen = !a.order && (a.deadline_status === 'open' || a.deadline_status === 'warning');
-    const bOpen = !b.order && (b.deadline_status === 'open' || b.deadline_status === 'warning');
-    if (aOpen && !bOpen) return -1;
-    if (!aOpen && bOpen) return 1;
-    return a.date.localeCompare(b.date);
-  });
+  days.sort((a, b) => b.date.localeCompare(a.date));
   return days;
 });
 const delCurrentDeadlineStatus = computed(() => delCurrentDay.value?.deadline_status || 'closed');
@@ -881,6 +942,7 @@ async function delSelectDay(date) {
   delSearchQuery.value = '';
   delActiveCategory.value = 'Сухой';
   delOrderComment.value = '';
+  delDraftRestoreNotice.value = '';
   const order = await roStore.loadMyOrder(date);
   if (order) {
     delExistingOrder.value = order;
@@ -889,8 +951,82 @@ async function delSelectDay(date) {
   } else { delOrderItems.value = []; }
   for (const cat of delCategories) { if (!delOrderItems.value.some(i => i.category === cat)) await delLoadCategoryProducts(cat); }
   delOrderItems.value.sort((a, b) => { if (a.category !== b.category) return delCategories.indexOf(a.category) - delCategories.indexOf(b.category); return (a.quantity > 0 ? 0 : 1) - (b.quantity > 0 ? 0 : 1); });
+
+  // Восстановление черновика, если он есть и заказ ещё можно редактировать
+  const draft = delLoadDraft(date);
+  if (draft && (delCanSubmit.value || delCanEdit.value)) {
+    let restored = 0;
+    for (const dItem of (draft.items || [])) {
+      const existing = delOrderItems.value.find(i => i.sku === dItem.sku);
+      if (existing) {
+        if (dItem.quantity !== existing.quantity || (dItem.comment || '') !== (existing.comment || '')) {
+          existing.quantity = dItem.quantity;
+          existing.comment = dItem.comment || '';
+          restored++;
+        }
+      } else if (dItem.quantity > 0) {
+        delOrderItems.value.push({ sku: dItem.sku, product_name: dItem.product_name, category: dItem.category || 'Сухой', quantity: dItem.quantity, comment: dItem.comment || '', multiplicity: dItem.multiplicity || 1, _added: true, _multError: false });
+        restored++;
+      }
+    }
+    if (draft.comment && draft.comment !== delOrderComment.value) {
+      delOrderComment.value = draft.comment;
+      restored++;
+    }
+    if (restored > 0) {
+      const ts = draft.savedAt ? new Date(draft.savedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+      delDraftRestoreNotice.value = `Восстановлен черновик от ${ts}`;
+      setTimeout(() => { delDraftRestoreNotice.value = ''; }, 8000);
+    }
+  }
+
   delSavedSnapshot.value = JSON.stringify(delOrderItems.value.map(i => ({ s: i.sku, q: i.quantity })));
 }
+
+// ═══ Автосохранение черновика основной поставки ═══
+const delDraftRestoreNotice = ref('');
+let delDraftSaveTimer = null;
+
+function delDraftKey(date) {
+  const rn = roStore.restaurant?.number || 'unknown';
+  return `bk_ro_draft_${rn}_${date}`;
+}
+
+function delSaveDraft() {
+  if (!delSelectedDate.value) return;
+  // Не сохраняем, если ничего не введено
+  const meaningful = delOrderItems.value.filter(i => i.quantity > 0);
+  if (!meaningful.length && !delOrderComment.value) {
+    try { localStorage.removeItem(delDraftKey(delSelectedDate.value)); } catch {}
+    return;
+  }
+  try {
+    localStorage.setItem(delDraftKey(delSelectedDate.value), JSON.stringify({
+      items: meaningful.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: i.quantity, comment: i.comment, multiplicity: i.multiplicity })),
+      comment: delOrderComment.value || '',
+      savedAt: Date.now(),
+    }));
+  } catch {}
+}
+
+function delLoadDraft(date) {
+  try {
+    const raw = localStorage.getItem(delDraftKey(date));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function delClearDraft(date) {
+  try { localStorage.removeItem(delDraftKey(date)); } catch {}
+}
+
+// Watch — дебаунс 800мс на сохранение
+watch([() => delOrderItems.value.map(i => ({ s: i.sku, q: i.quantity, c: i.comment })), delOrderComment], () => {
+  if (!delSelectedDate.value) return;
+  if (delDraftSaveTimer) clearTimeout(delDraftSaveTimer);
+  delDraftSaveTimer = setTimeout(delSaveDraft, 800);
+}, { deep: true });
 
 async function delLoadCategoryProducts(category) {
   delProductsLoading.value = true;
@@ -908,7 +1044,14 @@ async function delHandleSubmit() {
     const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: i.quantity }));
     if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
     const result = await roStore.submitOrder(delSelectedDate.value, items, delOrderComment.value || null);
-    if (result.success) { delWasEdited.value = !!delExistingOrder.value; delExistingOrder.value = { id: result.order_id }; roStore.loadMyInfo(); delShowSuccess.value = true; delStartEditTimer(); }
+    if (result.success) {
+      delClearDraft(delSelectedDate.value);
+      delWasEdited.value = !!delExistingOrder.value;
+      delExistingOrder.value = { id: result.order_id };
+      roStore.loadMyInfo();
+      delShowSuccess.value = true;
+      delStartEditTimer();
+    }
   } catch (e) { delSubmitError.value = e.message || 'Ошибка'; }
   finally { delSubmitting.value = false; }
 }
@@ -1063,10 +1206,23 @@ async function vegSubmit() {
   finally { vegSubmitting.value = false; }
 }
 
+async function vegSkipDelivery() {
+  if (!confirm('Подтвердить, что поставка от «Планета Ресторанов» не нужна на эти дни?')) return;
+  // Заполняем нулями все активные дни
+  for (const del of vegDeliveries.value) {
+    if (del.expired) continue;
+    for (const prod of (vegInfo.value?.products || [])) {
+      vegOrderValues[del.date + '_' + prod.id] = '0';
+    }
+  }
+  await vegSubmit();
+}
+
 // ═══ Supplier orders ═══
 const supSelectedDates = reactive({});
 const supProducts = reactive({});
 const supQuantities = reactive({});
+const supAdminEdits = reactive({}); // { supId: { sku: { original, edited } } } — правки закупщика
 const supProductsLoading = reactive({});
 const supSubmitting = reactive({});
 const supShowSuccess = ref(false);
@@ -1078,12 +1234,33 @@ function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(
 
 async function supSelectDate(sup, dateInfo) {
   supSelectedDates[sup.id] = dateInfo.delivery_date;
-  supProductsLoading[sup.id] = true; supQuantities[sup.id] = {};
+  supProductsLoading[sup.id] = true;
+  supQuantities[sup.id] = {};
+  supAdminEdits[sup.id] = {};
   try {
     supProducts[sup.id] = await soStore.loadProducts(sup.id);
-    if (dateInfo.order) { const order = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date); if (order?.items) { for (const item of order.items) supQuantities[sup.id][item.sku] = parseFloat(item.quantity) || 0; } }
+    if (dateInfo.order) {
+      const order = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date);
+      if (order?.items) {
+        for (const item of order.items) {
+          const orig = parseFloat(item.quantity) || 0;
+          const adminQ = (item.admin_qty !== null && item.admin_qty !== undefined && item.admin_qty !== '')
+            ? parseFloat(item.admin_qty) : null;
+          // Эффективное значение: правка закупщика, если есть, иначе исходное
+          supQuantities[sup.id][item.sku] = adminQ !== null ? adminQ : orig;
+          // Помечаем правку, если значение реально изменилось
+          if (adminQ !== null && Math.abs(adminQ - orig) > 0.001) {
+            supAdminEdits[sup.id][item.sku] = { original: orig, edited: adminQ };
+          }
+        }
+      }
+    }
   } catch (e) { console.error('Ошибка загрузки:', e); }
   finally { supProductsLoading[sup.id] = false; }
+}
+
+function supAdminEditInfo(supId, sku) {
+  return supAdminEdits[supId]?.[sku] || null;
 }
 
 function supFmtNum(v) { const n = parseFloat(v); return n % 1 === 0 ? n.toFixed(0) : n.toString(); }
@@ -1101,6 +1278,33 @@ async function supHandleSubmit(sup) {
     const dateInfo = supCurrentDateInfo(sup);
     const result = await soStore.submitOrder(sup.id, supSelectedDates[sup.id], dateInfo?.order_date || '', items);
     if (result.success) { supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) }; supShowSuccess.value = true; suppliers.value = await soStore.loadSuppliers(); }
+  } catch (e) { alert(e.message || 'Ошибка отправки'); }
+  finally { supSubmitting[sup.id] = false; }
+}
+
+async function supSkipDelivery(sup) {
+  if (!confirm(`Подтвердить, что поставка от «${sup.name}» на эту дату не нужна?`)) return;
+  supSubmitting[sup.id] = true;
+  try {
+    // Сбрасываем все количества в форме
+    if (supProducts[sup.id]) {
+      for (const p of supProducts[sup.id]) {
+        supQuantities[sup.id][p.sku] = 0;
+      }
+    }
+    const dateInfo = supCurrentDateInfo(sup);
+    const result = await soStore.submitOrder(
+      sup.id,
+      supSelectedDates[sup.id],
+      dateInfo?.order_date || '',
+      [],
+      { skipDelivery: true }
+    );
+    if (result.success) {
+      supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: 0, total_qty: 0, skipped: true };
+      supShowSuccess.value = true;
+      suppliers.value = await soStore.loadSuppliers();
+    }
   } catch (e) { alert(e.message || 'Ошибка отправки'); }
   finally { supSubmitting[sup.id] = false; }
 }
@@ -1123,6 +1327,84 @@ function switchOrderSub(sub) {
   orderSubTab.value = sub;
   if (sub === 'planeta' && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
   if (sub === 'history' && !historyOrders.value.length) loadHistory();
+  // Автовыбор ближайшей даты при открытии вкладки поставщика
+  if (sub.startsWith('sup_')) {
+    const supId = sub.slice(4);
+    const sup = suppliers.value.find(s => String(s.id) === String(supId));
+    if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+  }
+}
+
+// ═══ Синхронизация табов с роутом (URL) ═══
+function applyRouteToState() {
+  const name = route.name;
+  if (!name) return;
+  if (name === 'restaurant-dashboard') {
+    activeTab.value = 'dashboard';
+  } else if (name === 'restaurant-orders-tab' || name === 'restaurant-orders-delivery') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'delivery';
+  } else if (name === 'restaurant-orders-planeta') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'planeta';
+    if (!vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
+  } else if (name === 'restaurant-orders-history') {
+    activeTab.value = 'orders';
+    orderSubTab.value = 'history';
+    if (!historyOrders.value.length) loadHistory();
+  } else if (name === 'restaurant-orders-supplier') {
+    activeTab.value = 'orders';
+    const supId = String(route.params.supplierId || '');
+    orderSubTab.value = 'sup_' + supId;
+    const sup = suppliers.value.find(s => String(s.id) === supId);
+    if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+  } else if (name === 'restaurant-stock') {
+    activeTab.value = 'stock';
+  } else if (name === 'restaurant-profile') {
+    activeTab.value = 'profile';
+  }
+}
+
+function syncStateToRoute() {
+  let target = null;
+  if (activeTab.value === 'dashboard') {
+    target = { name: 'restaurant-dashboard' };
+  } else if (activeTab.value === 'stock') {
+    target = { name: 'restaurant-stock' };
+  } else if (activeTab.value === 'profile') {
+    target = { name: 'restaurant-profile' };
+  } else if (activeTab.value === 'orders') {
+    const sub = orderSubTab.value;
+    if (sub === 'delivery') target = { name: 'restaurant-orders-delivery' };
+    else if (sub === 'planeta') target = { name: 'restaurant-orders-planeta' };
+    else if (sub === 'history') target = { name: 'restaurant-orders-history' };
+    else if (sub && sub.startsWith('sup_')) {
+      target = { name: 'restaurant-orders-supplier', params: { supplierId: sub.slice(4) } };
+    } else {
+      target = { name: 'restaurant-orders-delivery' };
+    }
+  }
+  if (!target) return;
+  const resolved = router.resolve(target);
+  if (resolved.fullPath !== route.fullPath) {
+    router.replace(target).catch(() => {});
+  }
+}
+
+// Реакция на навигацию через браузер (back/forward) или переход по ссылке
+watch(() => route.fullPath, applyRouteToState);
+// Реакция на смену табов в любом месте кода — обновляем URL
+watch([activeTab, orderSubTab], syncStateToRoute);
+
+function supAutoSelectDate(sup) {
+  const dates = sup.available_dates || [];
+  if (!dates.length) return;
+  // Из открытых выбираем самую раннюю (ближайшую к сегодня), чтобы не пропустить дедлайн
+  const sortedAsc = [...dates].sort((a, b) => a.delivery_date.localeCompare(b.delivery_date));
+  const openNoOrder = sortedAsc.find(d => d.deadline_status === 'open' && !d.order);
+  const open = sortedAsc.find(d => d.deadline_status === 'open');
+  const target = openNoOrder || open || sortedAsc[0];
+  if (target) supSelectDate(sup, target);
 }
 
 function handleLogout() { roStore.logout(); router.replace({ name: 'restaurant-order-login' }); }
@@ -1193,6 +1475,32 @@ function onBeforeUnload(e) {
 
 onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload);
+  // Если в URL есть tg_token — это переход из бота, надо переавторизоваться
+  // (важно когда кликают «Через сайт» для другого ресторана)
+  const tgTokenParam = route.query.tg_token;
+  if (tgTokenParam) {
+    const redirectQ = route.query.redirect;
+    const redirectPath = (typeof redirectQ === 'string' && /^\/restaurant(\/|$)/.test(redirectQ)) ? redirectQ : null;
+    // Сбрасываем старую сессию (другого ресторана)
+    roStore.logout();
+    try {
+      const result = await roStore.loginByTelegram(tgTokenParam);
+      if (!result.success) {
+        router.replace({ name: 'restaurant-order-login' });
+        return;
+      }
+    } catch {
+      router.replace({ name: 'restaurant-order-login' });
+      return;
+    }
+    // Чистим query, идём на нужный путь
+    if (redirectPath) {
+      router.replace(redirectPath);
+    } else {
+      router.replace({ name: 'restaurant-cabinet' });
+    }
+    return; // onMounted перезапустится после router.replace
+  }
   if (!roStore.isAuthenticated) {
     const valid = await roStore.validate();
     if (!valid) { router.replace({ name: 'restaurant-order-login' }); return; }
@@ -1200,6 +1508,8 @@ onMounted(async () => {
   try {
     await roStore.loadMyInfo();
     try { suppliers.value = await soStore.loadSuppliers(); } catch (e) { console.warn('Поставщики:', e); }
+    // Применяем активный роут (например, при заходе по прямой ссылке /restaurant/orders/supplier/1)
+    applyRouteToState();
     // Auto-select first delivery day
     if (roStore.deliveryDays.length) {
       const today = new Date().toISOString().slice(0, 10);
@@ -1238,17 +1548,41 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .sb-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 11px; border: none; background: transparent; color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.18s; width: 100%; text-align: left; }
 .sb-item:hover { background: rgba(255,255,255,0.12); color: white; }
 .sb-item.active { background: rgba(214,35,0,0.3); color: #FF8733; }
+.sb-item-link { text-decoration: none; }
+.sb-item-ext { margin-left: auto; font-size: 11px; color: rgba(255,255,255,0.4); }
 .sb-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
 .sb-badge { margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px; background: #D62300; color: white; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 6px; flex-shrink: 0; }
 .sb-badge.warn { background: #f59e0b; }
 .sb-badge.ok { background: #16a34a; }
 .sb-badge.alert { background: #dc2626; }
 .sb-spacer { flex: 1; }
-.sb-rest { background: rgba(255,255,255,0.06); border-radius: 13px; padding: 14px; margin-top: 8px; border: 1px solid rgba(255,255,255,0.04); }
-.sb-rest-top { display: flex; align-items: center; gap: 10px; }
+.sb-rest {
+  background: rgba(255,255,255,0.06); border-radius: 13px;
+  margin-top: 8px; border: 1px solid rgba(255,255,255,0.04);
+  display: flex; align-items: stretch; overflow: hidden;
+  transition: background 0.18s, border-color 0.18s;
+}
+.sb-rest:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.08); }
+.sb-rest.active { background: rgba(214,35,0,0.18); border-color: rgba(255,135,51,0.35); }
+.sb-rest-main {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px; background: transparent; border: none;
+  cursor: pointer; font-family: inherit; text-align: left;
+  color: inherit;
+}
+.sb-rest-info { flex: 1; min-width: 0; }
 .sb-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #D62300, #FF8733); color: white; font-size: 13px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.sb-rest-name { font-size: 12px; font-weight: 700; color: white; }
-.sb-rest-addr { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; line-height: 1.35; }
+.sb-rest-name { font-size: 12px; font-weight: 700; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-rest-addr { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 3px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sb-rest-logout {
+  flex-shrink: 0; width: 38px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-left: 1px solid rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.5); cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.sb-rest-logout:hover { color: #FF8733; background: rgba(255,255,255,0.04); }
 
 /* ═══ Main ═══ */
 .cab-main { flex: 1; margin-left: 220px; min-height: 100vh; }
@@ -1260,6 +1594,9 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 
 /* Section */
 .cab-section { padding: 24px 28px; }
+/* Вкладка заказов: ограничиваем максимальную ширину на больших мониторах,
+   чтобы форма не растягивалась на пол-экрана и не выглядела пустой */
+.cab-section.cab-section-orders { max-width: 1180px; margin-left: auto; margin-right: auto; padding: 20px 24px; }
 
 /* Loader */
 .cab-loader { display: flex; justify-content: center; padding: 60px; }
@@ -1319,8 +1656,8 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .st-locked { background: #fef2f2; color: #dc2626; }
 
 /* ═══ Orders ═══ */
-.ord-tabs { display: flex; gap: 6px; padding: 0 0 16px; overflow-x: auto; flex-wrap: wrap; -webkit-overflow-scrolling: touch; }
-.ord-tab { flex-shrink: 0; padding: 8px 18px; border-radius: 12px; border: 2px solid #EDE8E3; background: white; cursor: pointer; font-size: 13px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.18s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ord-tabs { display: flex; gap: 6px; padding: 0 0 12px; overflow-x: auto; flex-wrap: wrap; -webkit-overflow-scrolling: touch; }
+.ord-tab { flex-shrink: 0; padding: 6px 14px; border-radius: 10px; border: 1.5px solid #EDE8E3; background: white; cursor: pointer; font-size: 12px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.18s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ord-tab:hover:not(.active) { border-color: #502314; color: #502314; }
 .ord-tab.active { background: #502314; color: white; border-color: #502314; }
 .ord-tab-badge { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
@@ -1328,13 +1665,22 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .ord-tab-badge.ok { background: #16a34a; color: white; }
 
 /* Shared order components */
-.cab-info-bar { background: linear-gradient(135deg, #502314, #3A1A0C); color: white; text-align: center; padding: 12px 18px; font-size: 13px; font-weight: 600; border-radius: 14px; margin-bottom: 12px; }
-.cab-empty-card { background: white; border-radius: 18px; padding: 40px 24px; margin: 12px 0; text-align: center; border: 1px solid #EDE8E3; }
-.cab-empty-card h2 { color: #502314; margin: 0 0 8px; font-size: 17px; }
+/* Центрированная колонка для форм заказа (заявка, планета, поставщики) */
+.cab-info-bar,
+.day-tabs,
+.order-form,
+.cab-empty-card {
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.cab-info-bar { background: #FAF7F4; color: #6b3e2c; text-align: center; padding: 6px 14px; font-size: 11px; font-weight: 600; border-radius: 8px; margin-bottom: 8px; border: 1px solid #EDE8E3; }
+.cab-empty-card { background: white; border-radius: 14px; padding: 32px 24px; margin: 12px auto; text-align: center; border: 1px solid #EDE8E3; max-width: 480px; }
+.cab-empty-card h2 { color: #502314; margin: 0 0 6px; font-size: 16px; }
 .cab-empty-card p { color: #8b7355; margin: 0; font-size: 13px; }
 
-.day-tabs { display: flex; gap: 8px; padding: 0 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.day-tab { flex-shrink: 0; padding: 12px 20px; border-radius: 14px; border: 2px solid #EDE8E3; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.18s; position: relative; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); min-width: 76px; }
+.day-tabs { display: flex; gap: 6px; padding: 8px 8px 10px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.day-tab { flex-shrink: 0; padding: 8px 14px; border-radius: 11px; border: 1.5px solid #EDE8E3; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.18s; position: relative; font-size: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); min-width: 64px; }
 .day-tab:hover { border-color: #8b7355; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 .day-tab.active { background: #D62300; color: white; border-color: #D62300; box-shadow: 0 4px 16px rgba(214,35,0,0.25); }
 .day-tab.active .day-tab-name, .day-tab.active .day-tab-date, .day-tab.active .day-tab-label { color: white; }
@@ -1343,15 +1689,17 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .day-tab.closed .day-tab-name, .day-tab.closed .day-tab-label { text-decoration: line-through; }
 .day-tab.warn { border-color: #f59e0b; }
 .day-tab-label { display: flex; align-items: center; gap: 5px; }
-.day-tab-name { display: block; font-size: 13px; font-weight: 700; color: #502314; }
-.day-tab-date { display: block; font-size: 10px; color: #8b7355; margin-top: 2px; }
+.day-tab-name { display: block; font-size: 12px; font-weight: 700; color: #502314; }
+.day-tab-date { display: block; font-size: 10px; color: #8b7355; margin-top: 1px; }
 .day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
 .day-tab-mark.done { background: #16a34a; color: white; }
 .day-tab-mark.closed { background: #9ca3af; color: white; }
 
-.order-form { background: white; border-radius: 20px; margin-top: 8px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
-.deadline-bar { padding: 10px 18px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 0; }
+.deadline-bar { padding: 8px 14px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 0; }
+.draft-restored { padding: 8px 18px; font-size: 12px; font-weight: 600; color: #b45309; background: #fffbeb; border-bottom: 1px solid #fde68a; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; animation: draftFadeIn 0.3s ease; }
+@keyframes draftFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .deadline-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
 .dl-open { background: #ECFDF5; color: #16a34a; }
 .dl-warning { background: #FFFBEB; color: #d97706; }
@@ -1359,35 +1707,35 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .dl-not_open { background: #FEF2F2; color: #dc2626; }
 .dl-not_yet { background: #f0f9ff; color: #2563eb; }
 
-.cat-tabs { display: flex; gap: 4px; padding: 12px 18px; border-bottom: 1px solid #EDE8E3; background: #FAFAF8; justify-content: center; }
-.cat-tab { padding: 8px 18px; border-radius: 10px; border: none; background: transparent; cursor: pointer; font-size: 13px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.cat-tabs { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid #EDE8E3; background: #FAFAF8; justify-content: center; }
+.cat-tab { padding: 6px 14px; border-radius: 8px; border: none; background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .cat-tab:hover { background: #EDE8E3; color: #502314; }
 .cat-tab.active { background: #502314; color: white; }
-.cat-count { background: rgba(0,0,0,0.08); padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 800; }
+.cat-count { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 5px; font-size: 10px; font-weight: 800; }
 .cat-tab.active .cat-count { background: rgba(255,255,255,0.2); }
 
-.search-row { display: flex; gap: 8px; padding: 10px 18px; border-bottom: 1px solid #EDE8E3; align-items: center; flex-wrap: wrap; }
-.input-search { flex: 1; min-width: 120px; padding: 9px 14px; border: 1.5px solid #EDE8E3; border-radius: 10px; font-size: 13px; font-family: inherit; background: #FAFAF8; transition: border-color 0.15s; }
+.search-row { display: flex; gap: 8px; padding: 8px 14px; border-bottom: 1px solid #EDE8E3; align-items: center; flex-wrap: wrap; }
+.input-search { flex: 1; min-width: 120px; padding: 7px 12px; border: 1.5px solid #EDE8E3; border-radius: 8px; font-size: 13px; font-family: inherit; background: #FAFAF8; transition: border-color 0.15s; }
 .input-search:focus { outline: none; border-color: #D62300; background: white; box-shadow: 0 0 0 3px rgba(214,35,0,0.06); }
 .search-clear { background: none; border: none; cursor: pointer; font-size: 16px; color: #999; padding: 0 4px; }
 
-/* Delivery table */
+/* Delivery table — компактно */
 .del-table { width: 100%; border-collapse: collapse; }
-.del-table th { padding: 10px 20px; font-size: 10px; font-weight: 700; color: #8b7355; text-align: center; background: #FAFAF8; border-bottom: 1px solid #EDE8E3; text-transform: uppercase; letter-spacing: 1px; }
+.del-table th { padding: 6px 14px; font-size: 10px; font-weight: 700; color: #8b7355; text-align: center; background: #FAFAF8; border-bottom: 1px solid #EDE8E3; text-transform: uppercase; letter-spacing: 0.6px; }
 .del-table th:first-child { text-align: left; }
-.del-table td { padding: 0 20px; height: 52px; border-bottom: 1px solid #F5F2EE; font-size: 14px; color: #502314; vertical-align: middle; text-align: left; }
+.del-table td { padding: 0 14px; height: 38px; border-bottom: 1px solid #F5F2EE; font-size: 13px; color: #502314; vertical-align: middle; text-align: left; }
 .del-table tbody tr { transition: background 0.1s; }
 .del-table tbody tr:hover { background: #FEFCFA; }
 .del-th-name { text-align: left; }
-.del-th-mult { width: 90px; text-align: center; }
-.del-th-qty { width: 100px; text-align: center; }
-.del-th-act { width: 36px; }
-.del-td-name { font-weight: 600; text-align: left; }
+.del-th-mult { width: 80px; text-align: center; }
+.del-th-qty { width: 90px; text-align: center; }
+.del-th-act { width: 30px; }
+.del-td-name { font-weight: 500; text-align: left; }
 .del-td-mult { text-align: center; }
 .del-sku { font-size: 10px; color: #B0A090; font-family: 'SF Mono', 'JetBrains Mono', monospace; margin-right: 4px; }
-.del-mult { font-size: 10px; color: #2563eb; background: #EFF6FF; padding: 3px 8px; border-radius: 6px; font-weight: 700; margin-left: 6px; }
+.del-mult { font-size: 10px; color: #2563eb; background: #EFF6FF; padding: 2px 7px; border-radius: 5px; font-weight: 700; margin-left: 6px; }
 .del-td-qty { text-align: center; }
-.del-qty { width: 72px; height: 40px; padding: 0; border: 2px solid #EDE8E3; border-radius: 11px; font-size: 15px; text-align: center; font-family: inherit; font-weight: 700; background: #FAFAF8; color: #502314; transition: all 0.15s; -moz-appearance: textfield; }
+.del-qty { width: 64px; height: 30px; padding: 0; border: 1.5px solid #EDE8E3; border-radius: 8px; font-size: 13px; text-align: center; font-family: inherit; font-weight: 700; background: #FAFAF8; color: #502314; transition: all 0.15s; -moz-appearance: textfield; }
 .del-qty::-webkit-inner-spin-button { -webkit-appearance: none; }
 .del-qty:focus { outline: none; border-color: #D62300; background: white; box-shadow: 0 0 0 3px rgba(214,35,0,0.06); }
 .del-qty-err { border-color: #dc2626 !important; background: #fef2f2; }
@@ -1411,7 +1759,7 @@ tr.del-err { background: #fef2f2; }
 /* Submit summary (integrated with button) */
 .submit-summary { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 13px; font-weight: 600; color: #502314; margin-bottom: 8px; }
 
-.submit-area { padding: 16px 18px; text-align: center; border-top: 1px solid #EDE8E3; background: #FAFAF8; }
+.submit-area { padding: 8px 14px; text-align: center; border-top: 1px solid #EDE8E3; background: #FAFAF8; }
 .error-msg { padding: 6px 10px; border-radius: 6px; background: #fef2f2; color: #dc2626; font-size: 12px; font-weight: 600; text-align: center; margin-bottom: 8px; }
 .success-msg { padding: 6px 10px; border-radius: 6px; background: #ecfdf5; color: #16a34a; font-size: 12px; font-weight: 600; text-align: center; margin-bottom: 8px; }
 .locked-msg { color: #dc2626; font-size: 12px; font-weight: 600; }
@@ -1429,23 +1777,79 @@ tr.del-err { background: #fef2f2; }
 .btn-green { border: 1.5px solid #16a34a; background: #f0fdf4; color: #16a34a; }
 .btn-green:hover { background: #16a34a; color: white; }
 .btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 8px; }
-.btn-lg { padding: 12px 36px; font-size: 15px; font-weight: 800; border-radius: 14px; }
+.btn-lg { padding: 8px 22px; font-size: 13px; font-weight: 700; border-radius: 10px; }
 
-.repeat-section { padding: 16px 18px; background: #FAFAF8; border-top: 1px solid #EDE8E3; }
-.repeat-title { font-size: 12px; font-weight: 700; color: #8b7355; margin-bottom: 8px; }
-.repeat-btn { display: inline-block; padding: 8px 16px; border: 1.5px solid #EDE8E3; border-radius: 10px; background: white; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; color: #502314; margin: 0 8px 6px 0; transition: all 0.15s; }
+.repeat-section { padding: 10px 14px; background: #FAFAF8; border-top: 1px solid #EDE8E3; }
+.repeat-title { font-size: 11px; font-weight: 700; color: #8b7355; margin-bottom: 6px; }
+.repeat-btn { display: inline-block; padding: 6px 12px; border: 1.5px solid #EDE8E3; border-radius: 8px; background: white; cursor: pointer; font-size: 11px; font-weight: 600; font-family: inherit; color: #502314; margin: 0 6px 4px 0; transition: all 0.15s; }
 .repeat-btn:hover { border-color: #D62300; color: #D62300; }
 
 /* Success */
-.cab-success { display: flex; align-items: center; justify-content: center; min-height: 30vh; padding: 16px; }
-.cab-success-inner { background: white; border-radius: 20px; padding: 32px 24px; text-align: center; max-width: 420px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border: 1px solid #EDE8E3; }
-.cab-success-check { width: 56px; height: 56px; border-radius: 50%; background: #16a34a; color: white; font-size: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; box-shadow: 0 4px 16px rgba(22,163,74,0.25); }
-.cab-success-inner h2 { color: #502314; margin: 0 0 4px; font-size: 17px; }
-.cab-success-stat { font-size: 13px; font-weight: 600; color: #502314; }
-.cab-success-timer { background: #ecfdf5; border-radius: 8px; padding: 10px; margin: 10px 0; }
-.cab-success-timer p { margin: 0 0 4px; font-size: 11px; color: #8b7355; }
-.cab-success-time { font-size: 24px; font-weight: 700; color: #16a34a; font-variant-numeric: tabular-nums; letter-spacing: 2px; }
-.cab-success-btns { display: flex; flex-direction: column; gap: 6px; align-items: center; margin-top: 12px; }
+.cab-success { display: flex; align-items: center; justify-content: center; min-height: 50vh; padding: 24px 16px; }
+.cab-success-inner {
+  background: white; border-radius: 24px; padding: 44px 36px; text-align: center;
+  max-width: 480px; width: 100%;
+  box-shadow: 0 12px 40px rgba(80, 35, 20, 0.08);
+  border: 1px solid #EDE8E3;
+  animation: cabSuccessIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes cabSuccessIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.cab-success-check {
+  width: 76px; height: 76px; border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: white; font-size: 38px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 18px;
+  box-shadow: 0 8px 24px rgba(22, 163, 74, 0.3);
+}
+.cab-success-check-skip {
+  background: linear-gradient(135deg, #fb923c, #ea580c);
+  box-shadow: 0 8px 24px rgba(234, 88, 12, 0.3);
+}
+.cab-success-skip-note {
+  font-size: 13px; color: #8b7355; line-height: 1.5;
+  background: #fff7ed; border: 1px solid #fed7aa;
+  border-radius: 12px; padding: 12px 16px; margin: 12px 0 18px;
+}
+.cab-success-inner h2 { color: #502314; margin: 0 0 6px; font-size: 24px; font-weight: 800; letter-spacing: -0.3px; }
+.cab-success-inner p { font-size: 14px; color: #8b7355; margin: 0 0 4px; }
+.cab-success-date { font-size: 14px; color: #8b7355; margin-bottom: 22px; }
+.cab-success-stat { font-size: 14px; font-weight: 600; color: #502314 !important; margin-top: 4px !important; }
+
+.cab-success-stats {
+  display: flex; align-items: center; justify-content: center; gap: 28px;
+  background: #FAFAF8; border-radius: 16px; padding: 18px 24px; margin-bottom: 18px;
+  border: 1px solid #F0EBE4;
+}
+.cab-success-stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.cab-success-stat-num { font-size: 32px; font-weight: 800; color: #502314; line-height: 1; font-variant-numeric: tabular-nums; }
+.cab-success-stat-lbl { font-size: 11px; color: #8b7355; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.cab-success-stat-divider { width: 1px; height: 36px; background: #E0D5C8; }
+
+.cab-success-timer {
+  background: linear-gradient(135deg, #ecfdf5, #f0fdf4);
+  border: 1px solid #bbf7d0; border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 18px;
+}
+.cab-success-timer-lbl { font-size: 11px; color: #15803d; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.cab-success-time { font-size: 28px; font-weight: 800; color: #16a34a; font-variant-numeric: tabular-nums; letter-spacing: 2px; line-height: 1; }
+
+.cab-success-btns { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
+.cab-success-btns .btn { flex: 1; min-width: 0; max-width: 200px; padding: 12px 18px; font-size: 14px; }
+
+@media (max-width: 480px) {
+  .cab-success-inner { padding: 32px 22px; border-radius: 20px; }
+  .cab-success-check { width: 64px; height: 64px; font-size: 32px; }
+  .cab-success-inner h2 { font-size: 20px; }
+  .cab-success-stats { gap: 20px; padding: 14px 18px; }
+  .cab-success-stat-num { font-size: 26px; }
+  .cab-success-time { font-size: 24px; }
+  .cab-success-btns { flex-direction: column; }
+  .cab-success-btns .btn { max-width: none; }
+}
 
 /* Unified item list (Планета, Камако, etc.) */
 .quick-actions { display: flex; gap: 6px; padding: 8px 12px; }
@@ -1459,6 +1863,9 @@ tr.del-err { background: #fef2f2; }
 .item-name { font-size: 14px; font-weight: 500; color: #502314; }
 .item-hint { font-size: 10px; color: #2563eb; background: #eff6ff; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
 .item-hint-warn { color: #92400e; background: #fef3c7; }
+.item-edit-mark { font-size: 10px; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; font-weight: 700; cursor: help; white-space: nowrap; }
+.item-admin-edited { background: #fffbeb; }
+.item-admin-edited:hover { background: #fef3c7; }
 .item-input { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .item-qty { width: 72px; padding: 8px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 16px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
 .item-qty:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
@@ -1640,8 +2047,11 @@ tr.del-err { background: #fef2f2; }
 
 /* ═══ Submit bottom ═══ */
 .submit-bottom {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.submit-summary { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #8b7355; }
-.submit-summary strong { color: #502314; }
+.submit-buttons-row {
+  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+}
+.submit-summary { display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 13px; color: #8b7355; margin-bottom: 8px; }
+.submit-summary strong { color: #502314; font-weight: 700; }
 </style>

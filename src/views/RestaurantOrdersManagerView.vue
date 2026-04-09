@@ -1,47 +1,71 @@
 <template>
   <div class="rom-page">
-    <div class="rom-toolbar">
-      <h1>Заказы ресторанов</h1>
-      <div class="rom-toolbar-actions">
-        <button class="rom-btn rom-btn-outline" @click="copyRoLink" title="Ссылка для ресторанов">
-          Ссылка /restaurant
-        </button>
-        <button class="rom-btn" @click="showUsersModal = true">Учётки</button>
+    <!-- ─── Шапка страницы ─── -->
+    <div class="rom-header">
+      <div class="rom-header-left">
+        <h1>Заказы ресторанов</h1>
+        <div class="rom-page-tabs">
+          <button class="rom-page-tab" :class="{ active: pageTab === 'orders' }" @click="pageTab = 'orders'">
+            Заявки
+          </button>
+          <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadFullTemplates()">
+            Шаблон заказа
+          </button>
+          <button class="rom-page-tab" :class="{ active: pageTab === 'stock' }" @click="pageTab = 'stock'; initStockTab()">
+            Остатки
+          </button>
+          <router-link :to="{ name: 'restaurant-report' }" class="rom-page-tab rom-page-tab-link">
+            Отчёт →
+          </router-link>
+        </div>
+      </div>
+      <div class="rom-header-right">
         <button class="rom-btn rom-btn-primary" @click="handleAutoSession">
           {{ session ? 'Сессия активна' : 'Создать сессию' }}
         </button>
+        <div class="rom-menu-wrap" v-click-outside="() => moreMenuOpen = false">
+          <button class="rom-btn rom-btn-icon" @click="moreMenuOpen = !moreMenuOpen" title="Ещё">⋯</button>
+          <div v-if="moreMenuOpen" class="rom-menu">
+            <button class="rom-menu-item" @click="moreMenuOpen = false; openUsersModal()">Учётки ресторанов</button>
+            <button class="rom-menu-item" @click="moreMenuOpen = false; copyRoLink()">Скопировать ссылку /restaurant</button>
+          </div>
+        </div>
       </div>
-    </div>
-
-    <!-- Page tabs -->
-    <div class="rom-page-tabs">
-      <button class="rom-page-tab" :class="{ active: pageTab === 'orders' }" @click="pageTab = 'orders'">
-        Заявки
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'templates' }" @click="pageTab = 'templates'; loadFullTemplates()">
-        Шаблон заказа
-      </button>
-      <button class="rom-page-tab" :class="{ active: pageTab === 'stock' }" @click="pageTab = 'stock'; initStockTab()">
-        Остатки
-      </button>
     </div>
 
     <!-- ═══ TAB: Orders ═══ -->
     <template v-if="pageTab === 'orders'">
-      <!-- Date selector -->
-      <div class="rom-date-row">
-        <label>Дата доставки:</label>
-        <input type="date" v-model="selectedDate" @change="loadStatus" />
-        <button class="rom-btn-sm" @click="setTomorrow">Завтра</button>
-        <button v-if="session && !isDateOpen" class="rom-btn-sm rom-btn-success" @click="handleToggleDate(true)">
-          Открыть приём
-        </button>
-        <button v-if="session && isDateOpen" class="rom-btn-sm rom-btn-danger" @click="handleToggleDate(false)">
-          Закрыть приём
-        </button>
-        <button v-if="session && isDateOpen" class="rom-btn-sm" @click="handleExtendDeadline">
-          Продлить дедлайн
-        </button>
+      <!-- Командир: дата + дедлайн + управление приёмом -->
+      <div class="rom-command">
+        <div class="rom-command-date">
+          <label class="rom-cmd-label">Дата доставки</label>
+          <input type="date" v-model="selectedDate" @change="loadStatus" class="rom-cmd-date" />
+        </div>
+        <div class="rom-command-deadline" :class="'dl-' + (deadlineStatus?.status || 'none')">
+          <div class="rom-cmd-label">Статус приёма</div>
+          <div class="rom-cmd-deadline-text">{{ deadlineLabel || (session ? 'Приём не открыт' : 'Нет сессии') }}</div>
+          <div v-if="deadlineStatus?.soft_deadline || deadlineStatus?.hard_deadline" class="rom-cmd-deadline-times">
+            <span v-if="deadlineStatus.soft_deadline">мягкий: <strong>{{ deadlineStatus.soft_deadline.slice(0,5) }}</strong></span>
+            <span v-if="deadlineStatus.hard_deadline">жёсткий: <strong>{{ deadlineStatus.hard_deadline.slice(0,5) }}</strong></span>
+          </div>
+        </div>
+        <div class="rom-command-actions">
+          <button v-if="session && !isDateOpen" class="rom-btn rom-btn-success" @click="handleToggleDate(true)">
+            Открыть приём
+          </button>
+          <button v-if="session && isDateOpen" class="rom-btn rom-btn-danger" @click="handleToggleDate(false)">
+            Закрыть приём
+          </button>
+          <button v-if="session && isDateOpen" class="rom-btn" @click="handleExtendDeadline">
+            Продлить дедлайн
+          </button>
+          <button class="rom-btn rom-btn-export" @click="openExportModal" :disabled="exportExporting">
+            Excel
+          </button>
+          <button class="rom-btn rom-btn-icon" @click="loadStatus" :disabled="loading" title="Обновить">
+            {{ loading ? '...' : '↻' }}
+          </button>
+        </div>
       </div>
 
       <!-- Loading -->
@@ -52,105 +76,120 @@
         Нет активной сессии. Нажмите «Создать сессию» для открытия приёма заявок.
       </div>
 
-    <template v-else>
-      <!-- Stats bar -->
-      <div class="rom-stats">
-        <div class="rom-stat">
-          <span class="rom-stat-value">{{ stats.submitted }}</span>
-          <span class="rom-stat-label">подано</span>
+      <template v-else>
+        <!-- Карточки-сводка -->
+        <div class="rom-cards">
+          <div class="rom-card">
+            <div class="rom-card-num">{{ stats.submitted }}</div>
+            <div class="rom-card-label">подано</div>
+          </div>
+          <div class="rom-card rom-card-warn">
+            <div class="rom-card-num">{{ stats.pending }}</div>
+            <div class="rom-card-label">не подано</div>
+          </div>
+          <div class="rom-card">
+            <div class="rom-card-num">{{ stats.total }}</div>
+            <div class="rom-card-label">всего</div>
+          </div>
+          <div class="rom-card rom-card-info">
+            <div class="rom-card-num">{{ totalStats.boxes }}</div>
+            <div class="rom-card-label">коробок</div>
+          </div>
+          <div class="rom-card rom-card-info">
+            <div class="rom-card-num">{{ totalStats.weight }}</div>
+            <div class="rom-card-label">кг</div>
+          </div>
+          <div class="rom-card rom-card-info">
+            <div class="rom-card-num">{{ totalStats.pallets }}</div>
+            <div class="rom-card-label">паллет</div>
+          </div>
         </div>
-        <div class="rom-stat">
-          <span class="rom-stat-value rom-stat-pending">{{ stats.pending }}</span>
-          <span class="rom-stat-label">не подано</span>
-        </div>
-        <div class="rom-stat">
-          <span class="rom-stat-value">{{ stats.total }}</span>
-          <span class="rom-stat-label">всего</span>
-        </div>
-        <div class="rom-stat-deadline" :class="'dl-' + deadlineStatus?.status">
-          {{ deadlineLabel }}
-        </div>
-      </div>
 
-      <!-- Export + refresh -->
-      <div class="rom-export-row">
-        <button class="rom-btn rom-btn-export" @click="openExportModal" :disabled="exportExporting">
-          Выгрузить в Excel
-        </button>
-        <router-link :to="{ name: 'restaurant-report' }" class="rom-btn" style="text-decoration:none">Отчёт</router-link>
-        <button class="rom-btn" @click="loadStatus" :disabled="loading">
-          {{ loading ? 'Обновление...' : 'Обновить' }}
-        </button>
-      </div>
+        <!-- Поиск + фильтры -->
+        <div class="rom-list-filters">
+          <input v-model="restFilter" type="text" placeholder="Поиск по номеру, городу или адресу..." class="rom-input rom-list-search" />
+          <div class="rom-list-status-filters">
+            <button class="rom-chip" :class="{ active: restStatusFilter === '' }" @click="restStatusFilter = ''">Все</button>
+            <button class="rom-chip" :class="{ active: restStatusFilter === 'submitted' }" @click="restStatusFilter = 'submitted'">Подано</button>
+            <button class="rom-chip rom-chip-warn" :class="{ active: restStatusFilter === 'pending' }" @click="restStatusFilter = 'pending'">Не подано</button>
+          </div>
+        </div>
 
-      <!-- Restaurants table -->
-      <div class="rom-table-wrap">
-        <table class="rom-table">
-          <thead>
-            <tr>
-              <th style="width:70px">Ресторан</th>
-              <th>Город</th>
-              <th>Адрес</th>
-              <th style="width:90px">Статус</th>
-              <th style="width:70px" class="rom-th-center">Позиций</th>
-              <th style="width:70px" class="rom-th-center">Коробок</th>
-              <th style="width:70px" class="rom-th-center">Вес, кг</th>
-              <th style="width:70px" class="rom-th-center">Паллет</th>
-              <th style="width:90px" class="rom-th-center">Подано</th>
-              <th style="min-width:140px">Изменён</th>
-              <th style="width:120px"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in restaurants" :key="r.number" :class="{ 'rom-row-submitted': r.order_status }">
-              <td class="rom-td-num">{{ r.number }}</td>
-              <td>{{ r.city }}</td>
-              <td>{{ r.address }}</td>
-              <td>
-                <span class="rom-status" :class="'st-' + (r.order_status || 'none')">
-                  {{ statusLabel(r.order_status) }}
-                </span>
-                <span v-if="r.order_comment" class="rom-comment-icon" :title="r.order_comment">&#128172;</span>
-              </td>
-              <td class="rom-td-center">{{ r.item_count || '—' }}</td>
-              <td class="rom-td-center">{{ r.total_qty ? (+r.total_qty).toFixed(0) : '—' }}</td>
-              <td class="rom-td-center">{{ r.total_weight ? (r.total_weight / 1000).toFixed(1) : '—' }}</td>
-              <td class="rom-td-center">{{ r.pallets || '—' }}</td>
-              <td class="rom-td-center rom-td-time">{{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}</td>
-              <td class="rom-td-time">
-                <template v-if="r.updated_by">
-                  {{ formatDateTime(r.updated_at) }} ({{ r.updated_by }})
-                </template>
-                <template v-else>—</template>
-              </td>
-              <td class="rom-td-actions">
-                <button v-if="r.order_id" class="rom-btn-sm" @click="viewOrder(r.order_id)">
-                  Открыть
-                </button>
-                <button v-if="r.order_id" class="rom-btn-sm rom-btn-export-sm" @click="quickExportOrder(r.order_id, r.number)">
-                  Excel
-                </button>
-              </td>
-            </tr>
-          </tbody>
-          <tfoot v-if="restaurants.some(r => r.order_status)">
-            <tr class="rom-totals-row">
-              <td colspan="4"><strong>Итого</strong></td>
-              <td class="rom-td-center"><strong>{{ totalStats.items }}</strong></td>
-              <td class="rom-td-center"><strong>{{ totalStats.boxes }}</strong></td>
-              <td class="rom-td-center"><strong>{{ totalStats.weight }}</strong></td>
-              <td class="rom-td-center"><strong>{{ totalStats.pallets }}</strong></td>
-              <td colspan="3"></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </template>
+        <!-- Единая таблица всех заявок -->
+        <div class="rom-table-card">
+          <table class="rom-table rom-table-compact">
+            <colgroup>
+              <col style="width:50px">
+              <col style="width:32%">
+              <col style="width:110px">
+              <col style="width:240px">
+              <col style="width:80px">
+              <col style="width:200px">
+              <col style="width:46px">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th class="rom-th-left">Ресторан</th>
+                <th>Статус</th>
+                <th>Объём</th>
+                <th>Подано</th>
+                <th>Изменён</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in filteredRestaurants" :key="r.number"
+                  class="rom-row"
+                  :class="{
+                    'rom-row-submitted': r.order_status,
+                    'rom-row-pending': !r.order_status,
+                    'rom-row-clickable': r.order_id,
+                  }"
+                  @click="r.order_id && viewOrder(r.order_id)">
+                <td class="rom-td-num">{{ r.number }}</td>
+                <td class="rom-td-rest">
+                  <span class="rom-cell-rest-city">{{ r.city }}</span><span v-if="r.address">, </span><span class="rom-cell-rest-addr">{{ r.address }}</span>
+                </td>
+                <td class="rom-td-status">
+                  <span class="rom-status" :class="'st-' + (r.order_status || 'none')">
+                    {{ statusLabel(r.order_status) }}
+                  </span>
+                  <span v-if="r.order_comment" class="rom-comment-icon" :title="r.order_comment">💬</span>
+                </td>
+                <td class="rom-td-volume">
+                  <template v-if="r.order_status">
+                    {{ r.item_count || 0 }} поз. · {{ r.total_qty ? (+r.total_qty).toFixed(0) : 0 }} кор. · {{ r.total_weight ? (r.total_weight / 1000).toFixed(1) : 0 }} кг · {{ r.pallets || 0 }} пал.
+                  </template>
+                  <span v-else class="rom-dim">—</span>
+                </td>
+                <td class="rom-td-time">
+                  {{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}
+                </td>
+                <td class="rom-td-edited" :title="r.updated_by ? formatDateTime(r.updated_at) + ' (' + r.updated_by + ')' : ''">
+                  <template v-if="r.updated_by">
+                    <span class="rom-td-edited-by">{{ r.updated_by }}</span> · {{ formatTime(r.updated_at) }}
+                  </template>
+                  <template v-else>—</template>
+                </td>
+                <td class="rom-td-actions" @click.stop>
+                  <button v-if="r.order_id" class="rom-btn-sm rom-btn-export-sm" @click="quickExportOrder(r.order_id, r.number)" title="Скачать Excel">
+                    ⬇
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="!filteredRestaurants.length">
+                <td colspan="7" class="rom-no-items">Ничего не найдено</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
     </template>
 
     <!-- ═══ TAB: Templates ═══ -->
     <template v-if="pageTab === 'templates'">
-      <div class="rom-tpl-page">
+      <div class="rom-panel">
         <div class="rom-tpl-toolbar">
           <div class="rom-tpl-tabs-inline">
             <button v-for="cat in ['Сухой','Холод','Мороз']" :key="cat"
@@ -211,6 +250,7 @@
 
     <!-- ═══ TAB: Stock balances ═══ -->
     <template v-if="pageTab === 'stock'">
+      <div class="rom-panel">
       <div class="rom-stock-toolbar">
         <div class="rom-stock-field">
           <label>Дата остатков:</label>
@@ -276,6 +316,7 @@
         </div>
       </div>
       <div v-else class="rom-loading">Загрузка...</div>
+      </div>
     </template>
 
     <!-- Add product to template modal -->
@@ -342,23 +383,30 @@
             </div>
           </div>
 
-          <!-- Табы режимов -->
+          <!-- Табы режимов + поиск -->
           <div class="rom-cat-tabs">
             <button v-for="cat in ['Сухой', 'Холод', 'Мороз']" :key="cat"
               class="rom-cat-tab" :class="{ active: editCategory === cat }" @click="editCategory = cat">
               {{ cat }}
               <span v-if="getEditItems(cat).length" class="rom-cat-tab-count">{{ getEditItems(cat).length }}</span>
             </button>
+            <input
+              v-model="editSearch"
+              type="text"
+              placeholder="Поиск по артикулу или названию..."
+              class="rom-input rom-edit-search"
+            />
+            <button v-if="editSearch" class="rom-btn-sm" @click="editSearch = ''" title="Очистить">✕</button>
           </div>
 
           <!-- Скроллируемое содержимое (активная категория) -->
           <div class="rom-modal-scroll">
-            <table class="rom-table rom-table-edit" v-if="getEditItems(editCategory).length">
+            <table class="rom-table rom-table-edit" v-if="getDisplayEditItems(editCategory).length">
               <thead>
                 <tr><th>Товар</th><th style="width:70px">Кол-во</th><th style="width:80px">Вес, кг</th><th>Комментарий</th><th></th></tr>
               </thead>
               <tbody>
-                <tr v-for="(item, idx) in getEditItems(editCategory)" :key="idx">
+                <tr v-for="(item, idx) in getDisplayEditItems(editCategory)" :key="idx">
                   <td class="rom-edit-product" @click="openReplaceProduct(item)" title="Нажмите, чтобы заменить товар">
                     <span class="rom-edit-sku">{{ item.sku }}</span> {{ item.product_name }}
                   </td>
@@ -369,6 +417,7 @@
                 </tr>
               </tbody>
             </table>
+            <div v-else-if="editSearch" class="rom-no-items">Ничего не найдено</div>
             <div v-else class="rom-no-items">Нет позиций</div>
             <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(editCategory)">+ Добавить товар</button>
             <div v-if="getEditItems(editCategory).length" class="rom-cat-summary">
@@ -424,32 +473,94 @@
 
     <!-- Users modal -->
     <div v-if="showUsersModal" class="rom-modal-overlay" @click.self="showUsersModal = false">
-      <div class="rom-modal">
+      <div class="rom-modal" style="max-width:820px">
         <div class="rom-modal-header">
           <h2>Учётные записи ресторанов</h2>
-          <button class="rom-modal-close" @click="showUsersModal = false">X</button>
+          <button class="rom-modal-close" @click="showUsersModal = false">&times;</button>
         </div>
         <div class="rom-modal-body">
-          <div class="rom-bulk-row">
-            <input v-model="bulkPassword" type="text" placeholder="Пароль для всех" class="rom-input" />
-            <button class="rom-btn rom-btn-primary" @click="handleBulkCreate" :disabled="!bulkPassword">
-              Создать для всех ресторанов
-            </button>
-          </div>
-          <div class="rom-users-info" v-if="usersCount !== null">
-            Создано учёток: {{ usersCount }}
+          <div class="rom-users-hint" style="margin-bottom:10px">
+            Список берётся из справочника ресторанов. Каждый активный ресторан = потенциальный пользователь.
+            Чтобы ресторан смог войти, нужно задать ему пароль.
           </div>
 
-          <div v-if="usersList.length" class="rom-users-list">
-            <div v-for="u in usersList" :key="u.restaurant_number" class="rom-user-row">
-              <span class="rom-user-num">{{ u.restaurant_number }}</span>
-              <span class="rom-user-addr">{{ u.city }} {{ u.address }}</span>
-              <span class="rom-user-status" :class="{ active: u.is_active }">
-                {{ u.is_active ? 'Активен' : 'Отключен' }}
-              </span>
-              <span v-if="u.last_login_at" class="rom-user-login">
-                Вход: {{ formatTime(u.last_login_at) }}
-              </span>
+          <!-- Сводка -->
+          <div class="rom-users-summary">
+            <div class="rom-users-summary-item">
+              <span class="rom-users-summary-num">{{ usersList.length }}</span>
+              <span class="rom-users-summary-label">всего</span>
+            </div>
+            <div class="rom-users-summary-item ok">
+              <span class="rom-users-summary-num">{{ usersWithPasswordCount }}</span>
+              <span class="rom-users-summary-label">с паролем</span>
+            </div>
+            <div class="rom-users-summary-item warn">
+              <span class="rom-users-summary-num">{{ usersWithoutPasswordCount }}</span>
+              <span class="rom-users-summary-label">без пароля</span>
+            </div>
+            <div class="rom-users-summary-item off">
+              <span class="rom-users-summary-num">{{ usersDisabledCount }}</span>
+              <span class="rom-users-summary-label">отключено</span>
+            </div>
+          </div>
+
+          <!-- Массовая выдача пароля -->
+          <div class="rom-users-section">
+            <div class="rom-users-section-title">Массовая выдача пароля</div>
+            <div class="rom-bulk-row">
+              <input v-model="bulkPassword" type="text" placeholder="Пароль" class="rom-input" />
+              <select v-model="bulkMode" class="rom-select">
+                <option value="missing">Только тем, у кого нет пароля</option>
+                <option value="all">Всем (затереть существующие)</option>
+              </select>
+              <button class="rom-btn rom-btn-primary" @click="handleBulkCreate" :disabled="!bulkPassword || usersBusy">
+                Применить
+              </button>
+            </div>
+            <div class="rom-users-info" v-if="usersCount !== null">
+              Обновлено учёток: {{ usersCount }}
+            </div>
+          </div>
+
+          <!-- Список -->
+          <div class="rom-users-section">
+            <div class="rom-users-section-title">
+              Рестораны
+              <button class="rom-btn-sm" style="margin-left:8px" @click="reloadUsers" :disabled="usersBusy">Обновить</button>
+            </div>
+            <div class="rom-users-filters">
+              <input v-model="usersFilter" type="text" placeholder="Поиск по номеру, городу или адресу" class="rom-input" />
+              <select v-model="usersFilterStatus" class="rom-select">
+                <option value="">Все статусы</option>
+                <option value="ready">С паролем, активные</option>
+                <option value="nopwd">Без пароля</option>
+                <option value="disabled">Отключённые</option>
+              </select>
+            </div>
+
+            <div v-if="usersLoading" class="rom-no-items">Загрузка...</div>
+            <div v-else-if="!filteredUsers.length" class="rom-no-items">Ничего не найдено</div>
+            <div v-else class="rom-users-list">
+              <div v-for="u in filteredUsers" :key="u.restaurant_number" class="rom-user-row">
+                <span class="rom-user-num">№{{ u.restaurant_number }}</span>
+                <span class="rom-user-addr">
+                  <span class="rom-user-addr-main">{{ u.city || '—' }} {{ u.address || '' }}</span>
+                  <span class="rom-user-addr-le">{{ shortLegalEntity(u.legal_entity) }}</span>
+                </span>
+                <span class="rom-user-pwd-status" :class="userStatusClass(u)">
+                  {{ userStatusLabel(u) }}
+                </span>
+                <span class="rom-user-login">
+                  {{ u.last_login_at ? 'Вход: ' + formatTime(u.last_login_at) : '—' }}
+                </span>
+                <button class="rom-btn-sm" @click="handleSetPassword(u)" :disabled="usersBusy" :title="u.has_password ? 'Сменить пароль' : 'Задать пароль'">
+                  {{ u.has_password ? 'Сменить пароль' : 'Задать пароль' }}
+                </button>
+                <button v-if="u.has_password" class="rom-btn-sm" :class="u.is_active ? 'rom-btn-danger' : 'rom-btn-success'" @click="handleToggleUser(u)" :disabled="usersBusy">
+                  {{ u.is_active ? 'Отключить' : 'Включить' }}
+                </button>
+                <span v-else class="rom-user-toggle-placeholder"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -491,113 +602,160 @@
 
     <!-- Unified export modal -->
     <div v-if="showExportModal" class="rom-modal-overlay" @click.self="closeExportModal">
-      <div class="rom-modal" style="max-width:650px">
+      <div class="rom-modal rom-exp-modal">
         <div class="rom-modal-header">
-          <h2>Настройки выгрузки в Excel</h2>
+          <h2>Выгрузка в Excel</h2>
           <button class="rom-modal-close" @click="closeExportModal">&times;</button>
         </div>
-        <div class="rom-modal-body">
-          <div v-if="exportLoading" style="text-align:center; padding:20px"><div class="rom-spinner"></div></div>
+        <div class="rom-modal-body rom-exp-body">
+          <div v-if="exportLoading" style="text-align:center; padding:40px"><div class="rom-spinner"></div></div>
           <template v-else>
-            <!-- Grouping -->
-            <div class="rom-exp-section-title">Группировка</div>
-            <div class="rom-exp-grouping">
-              <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'list' }" @click="exportGrouping = 'list'">Все списком</button>
-              <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'restaurants' }" @click="exportGrouping = 'restaurants'">По ресторанам</button>
-              <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'categories' }" @click="exportGrouping = 'categories'">По категориям</button>
-            </div>
-
-            <!-- Totals option -->
-            <label class="rom-exp-cb-label" style="margin-bottom:12px">
-              <input type="checkbox" v-model="exportShowTotals" />
-              <span style="font-weight:600; color:#502314">Итоги по весу и паллетоместам</span>
-            </label>
-
-            <!-- Filters toggle -->
-            <div class="rom-exp-section-title rom-exp-clickable" @click="exportShowFilters = !exportShowFilters">
-              Фильтры
-              <span class="rom-exp-chevron" :class="{ open: exportShowFilters }">&#9660;</span>
-            </div>
-
-            <div v-show="exportShowFilters">
-              <!-- Category filter -->
-              <div class="rom-exp-filter-group">
-                <div class="rom-exp-filter-label">Категория</div>
-                <div class="rom-exp-checkboxes">
-                  <label v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-exp-cb-label">
-                    <input type="checkbox" :checked="exportFilterCategories.has(cat)" @change="toggleExportFilter('categories', cat)" /> {{ cat }}
-                  </label>
+            <!-- Левая колонка: настройки -->
+            <div class="rom-exp-col rom-exp-col-left">
+              <!-- Группировка -->
+              <div class="rom-exp-block">
+                <div class="rom-exp-block-title">Как разделить на листы</div>
+                <div class="rom-exp-grouping">
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'list' }" @click="exportGrouping = 'list'">
+                    <div class="rom-exp-grouping-name">Один общий + по ресторанам</div>
+                    <div class="rom-exp-grouping-hint">Главный лист + лист на каждый ресторан</div>
+                  </button>
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'restaurants' }" @click="exportGrouping = 'restaurants'">
+                    <div class="rom-exp-grouping-name">Только по ресторанам</div>
+                    <div class="rom-exp-grouping-hint">Один лист на ресторан, без сводного</div>
+                  </button>
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'categories' }" @click="exportGrouping = 'categories'">
+                    <div class="rom-exp-grouping-name">По категориям хранения</div>
+                    <div class="rom-exp-grouping-hint">Сухой / Холод / Мороз — каждый лист отдельно</div>
+                  </button>
                 </div>
               </div>
 
-              <!-- Region filter -->
-              <div class="rom-exp-filter-group">
-                <div class="rom-exp-filter-label">Регион</div>
-                <div class="rom-exp-checkboxes">
-                  <label v-for="reg in ['Минск','Регионы']" :key="reg" class="rom-exp-cb-label">
-                    <input type="checkbox" :checked="exportFilterRegions.has(reg)" @change="toggleExportFilter('regions', reg)" /> {{ reg }}
-                  </label>
+              <!-- Итоги -->
+              <div class="rom-exp-block">
+                <label class="rom-exp-cb-label">
+                  <input type="checkbox" v-model="exportShowTotals" />
+                  <span><strong>Итоги по ресторану</strong> (вес и паллеты в первой строке)</span>
+                </label>
+              </div>
+
+              <!-- Фильтры -->
+              <div class="rom-exp-block">
+                <div class="rom-exp-block-title rom-exp-clickable" @click="exportShowFilters = !exportShowFilters">
+                  <span>Фильтры данных</span>
+                  <span class="rom-exp-chevron" :class="{ open: exportShowFilters }">▾</span>
+                </div>
+                <div v-show="exportShowFilters" class="rom-exp-filters">
+                  <div class="rom-exp-filter-group">
+                    <div class="rom-exp-filter-label">Категория</div>
+                    <div class="rom-exp-checkboxes">
+                      <label v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-exp-cb-label">
+                        <input type="checkbox" :checked="exportFilterCategories.has(cat)" @change="toggleExportFilter('categories', cat)" /> {{ cat }}
+                      </label>
+                    </div>
+                  </div>
+                  <div class="rom-exp-filter-group">
+                    <div class="rom-exp-filter-label">Регион</div>
+                    <div class="rom-exp-checkboxes">
+                      <label v-for="reg in ['Минск','Регионы']" :key="reg" class="rom-exp-cb-label">
+                        <input type="checkbox" :checked="exportFilterRegions.has(reg)" @change="toggleExportFilter('regions', reg)" /> {{ reg }}
+                      </label>
+                    </div>
+                  </div>
+                  <div class="rom-exp-filter-group">
+                    <div class="rom-exp-filter-label">Рестораны</div>
+                    <label class="rom-exp-cb-label" style="margin-bottom:6px">
+                      <input type="checkbox" v-model="exportAllRestaurants" /> Все
+                    </label>
+                    <template v-if="!exportAllRestaurants">
+                      <input v-model="exportRestaurantSearch" type="text" placeholder="Поиск ресторана..." class="rom-input" style="width:100%; margin-bottom:6px" />
+                      <div class="rom-exp-select-list">
+                        <label v-for="r in filteredExportRestaurants" :key="r.number"
+                          class="rom-exp-select-item" :class="{ selected: exportFilterRestaurants.has(r.number) }">
+                          <input type="checkbox" :checked="exportFilterRestaurants.has(r.number)" @change="toggleExportFilter('restaurants', r.number)" />
+                          <span style="font-weight:700; min-width:30px">{{ r.number }}</span>
+                          <span style="flex:1; color:#502314">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
+                          <span style="font-size:10px; color:#8b7355">{{ r.region }}</span>
+                        </label>
+                        <div v-if="!filteredExportRestaurants.length" class="rom-no-items">Ничего не найдено</div>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="rom-exp-filter-group">
+                    <div class="rom-exp-filter-label">Товары</div>
+                    <label class="rom-exp-cb-label" style="margin-bottom:6px">
+                      <input type="checkbox" v-model="exportAllProducts" /> Все
+                    </label>
+                    <template v-if="!exportAllProducts">
+                      <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap">
+                        <input v-model="exportProductSearch" type="text" placeholder="Поиск товара..." class="rom-input" style="flex:1; min-width:150px" />
+                        <button class="rom-btn-sm" @click="expProductsSelectAll">Все</button>
+                        <button class="rom-btn-sm" @click="exportFilterProducts = new Set()">Сброс</button>
+                        <span style="font-size:12px; color:#8b7355">{{ exportFilterProducts.size }} из {{ exportAvailableProducts.length }}</span>
+                      </div>
+                      <div style="display:flex; gap:6px; margin-bottom:6px">
+                        <button v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-btn-sm"
+                          :style="exportProductCatFilter === cat ? 'background:#502314; color:white' : ''"
+                          @click="exportProductCatFilter = exportProductCatFilter === cat ? '' : cat">{{ cat }}</button>
+                      </div>
+                      <div class="rom-exp-select-list rom-exp-select-list-tall">
+                        <label v-for="p in filteredExportProducts" :key="p.sku"
+                          class="rom-exp-select-item" :class="{ selected: exportFilterProducts.has(p.sku) }">
+                          <input type="checkbox" :checked="exportFilterProducts.has(p.sku)" @change="toggleExportFilter('products', p.sku)" />
+                          <span style="font-size:10px; color:#8b7355; min-width:45px">{{ p.sku }}</span>
+                          <span style="flex:1; color:#502314">{{ p.product_name }}</span>
+                          <span style="font-size:10px; padding:1px 5px; border-radius:4px; font-weight:600"
+                            :style="p.category === 'Мороз' ? 'background:#ede9fe; color:#7c3aed' : p.category === 'Холод' ? 'background:#eff6ff; color:#2563eb' : 'background:#fef3c7; color:#92400e'">{{ p.category }}</span>
+                        </label>
+                        <div v-if="!filteredExportProducts.length" class="rom-no-items">Ничего не найдено</div>
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              <!-- Restaurant filter -->
-              <div class="rom-exp-filter-group">
-                <div class="rom-exp-filter-label">Рестораны</div>
-                <label class="rom-exp-cb-label" style="margin-bottom:6px">
-                  <input type="checkbox" v-model="exportAllRestaurants" /> Все
-                </label>
-                <template v-if="!exportAllRestaurants">
-                  <input v-model="exportRestaurantSearch" type="text" placeholder="Поиск ресторана..." class="rom-input" style="width:100%; margin-bottom:6px" />
-                  <div class="rom-exp-select-list">
-                    <label v-for="r in filteredExportRestaurants" :key="r.number"
-                      class="rom-exp-select-item" :class="{ selected: exportFilterRestaurants.has(r.number) }">
-                      <input type="checkbox" :checked="exportFilterRestaurants.has(r.number)" @change="toggleExportFilter('restaurants', r.number)" />
-                      <span style="font-weight:700; min-width:30px">{{ r.number }}</span>
-                      <span style="flex:1; color:#502314">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
-                      <span style="font-size:10px; color:#8b7355">{{ r.region }}</span>
+            <!-- Правая колонка: выбор колонок -->
+            <div class="rom-exp-col rom-exp-col-right">
+              <div class="rom-exp-block">
+                <div class="rom-exp-block-title">Колонки в Excel</div>
+                <div class="rom-exp-presets">
+                  <button v-for="(p, k) in EXPORT_COLUMN_PRESETS" :key="k" class="rom-exp-preset-btn" @click="applyExportPreset(k)" :title="p.label">
+                    {{ p.label }}
+                  </button>
+                </div>
+                <div class="rom-exp-cols-hint">
+                  Выбрано: <strong>{{ exportSelectedColumns.length }}</strong> из {{ EXPORT_COLUMNS_DEF.length }}.
+                  Стрелки ↑↓ меняют порядок столбцов в файле.
+                </div>
+                <div class="rom-exp-cols-list">
+                  <div v-for="col in EXPORT_COLUMNS_DEF" :key="col.key"
+                       class="rom-exp-col-row"
+                       :class="{ selected: exportSelectedColumns.includes(col.key) }">
+                    <label class="rom-exp-col-cb">
+                      <input type="checkbox" :checked="exportSelectedColumns.includes(col.key)" @change="toggleExportColumn(col.key)" />
+                      <span class="rom-exp-col-name">{{ col.label }}</span>
+                      <span v-if="exportSelectedColumns.includes(col.key)" class="rom-exp-col-pos">
+                        {{ exportSelectedColumns.indexOf(col.key) + 1 }}
+                      </span>
                     </label>
-                    <div v-if="!filteredExportRestaurants.length" class="rom-no-items">Ничего не найдено</div>
+                    <div v-if="exportSelectedColumns.includes(col.key)" class="rom-exp-col-arrows">
+                      <button class="rom-exp-arrow" @click="moveExportColumn(col.key, -1)" :disabled="exportSelectedColumns.indexOf(col.key) === 0" title="Выше">↑</button>
+                      <button class="rom-exp-arrow" @click="moveExportColumn(col.key, 1)" :disabled="exportSelectedColumns.indexOf(col.key) === exportSelectedColumns.length - 1" title="Ниже">↓</button>
+                    </div>
                   </div>
-                </template>
-              </div>
-
-              <!-- Product filter -->
-              <div class="rom-exp-filter-group">
-                <div class="rom-exp-filter-label">Товары</div>
-                <label class="rom-exp-cb-label" style="margin-bottom:6px">
-                  <input type="checkbox" v-model="exportAllProducts" /> Все
-                </label>
-                <template v-if="!exportAllProducts">
-                  <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap">
-                    <input v-model="exportProductSearch" type="text" placeholder="Поиск товара..." class="rom-input" style="flex:1; min-width:150px" />
-                    <button class="rom-btn-sm" @click="expProductsSelectAll">Все</button>
-                    <button class="rom-btn-sm" @click="exportFilterProducts = new Set()">Сбросить</button>
-                    <span style="font-size:12px; color:#8b7355">{{ exportFilterProducts.size }} из {{ exportAvailableProducts.length }}</span>
-                  </div>
-                  <div style="display:flex; gap:6px; margin-bottom:6px">
-                    <button v-for="cat in ['Сухой','Холод','Мороз']" :key="cat" class="rom-btn-sm"
-                      :style="exportProductCatFilter === cat ? 'background:#502314; color:white' : ''"
-                      @click="exportProductCatFilter = exportProductCatFilter === cat ? '' : cat">{{ cat }}</button>
-                  </div>
-                  <div class="rom-exp-select-list rom-exp-select-list-tall">
-                    <label v-for="p in filteredExportProducts" :key="p.sku"
-                      class="rom-exp-select-item" :class="{ selected: exportFilterProducts.has(p.sku) }">
-                      <input type="checkbox" :checked="exportFilterProducts.has(p.sku)" @change="toggleExportFilter('products', p.sku)" />
-                      <span style="font-size:10px; color:#8b7355; min-width:45px">{{ p.sku }}</span>
-                      <span style="flex:1; color:#502314">{{ p.product_name }}</span>
-                      <span style="font-size:10px; padding:1px 5px; border-radius:4px; font-weight:600"
-                        :style="p.category === 'Мороз' ? 'background:#ede9fe; color:#7c3aed' : p.category === 'Холод' ? 'background:#eff6ff; color:#2563eb' : 'background:#fef3c7; color:#92400e'">{{ p.category }}</span>
-                    </label>
-                    <div v-if="!filteredExportProducts.length" class="rom-no-items">Ничего не найдено</div>
-                  </div>
-                </template>
+                </div>
               </div>
             </div>
           </template>
         </div>
         <div v-if="!exportLoading" class="rom-exp-footer">
-          <span class="rom-exp-summary">Заказов: <strong>{{ exportSummary.orders }}</strong>, Позиций: <strong>{{ exportSummary.items }}</strong></span>
-          <button class="rom-btn rom-btn-export" @click="doUnifiedExport" :disabled="!exportSummary.items || exportExporting">
+          <span class="rom-exp-summary">
+            Заказов: <strong>{{ exportSummary.orders }}</strong> ·
+            Позиций: <strong>{{ exportSummary.items }}</strong> ·
+            Колонок: <strong>{{ exportSelectedColumns.length }}</strong>
+          </span>
+          <button class="rom-btn rom-btn-export" @click="doUnifiedExport" :disabled="!exportSummary.items || !exportSelectedColumns.length || exportExporting">
             {{ exportExporting ? 'Выгрузка...' : 'Скачать Excel' }}
           </button>
         </div>
@@ -633,12 +791,86 @@ const saving = ref(false);
 const editingDateMode = ref(false);
 const editingNewDate = ref('');
 const editCategory = ref('Сухой');
+const editSearch = ref('');
+
+// Page state (orders tab)
+const moreMenuOpen = ref(false);
+const restFilter = ref('');
+const restStatusFilter = ref('');
+
+const filteredRestaurants = computed(() => {
+  const q = restFilter.value.trim().toLowerCase();
+  const st = restStatusFilter.value;
+  return restaurants.value.filter(r => {
+    if (q) {
+      const hay = (String(r.number) + ' ' + (r.city || '') + ' ' + (r.address || '')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (st === 'submitted' && !r.order_status) return false;
+    if (st === 'pending' && r.order_status) return false;
+    return true;
+  });
+});
+
+// Click-outside директива для меню «···»
+const vClickOutside = {
+  beforeMount(el, binding) {
+    el._clickOutside = (e) => { if (!el.contains(e.target)) binding.value(e); };
+    document.addEventListener('mousedown', el._clickOutside);
+  },
+  unmounted(el) {
+    document.removeEventListener('mousedown', el._clickOutside);
+  },
+};
 
 // Users
 const showUsersModal = ref(false);
 const bulkPassword = ref('');
+const bulkMode = ref('missing');
 const usersCount = ref(null);
 const usersList = ref([]);
+const usersLoading = ref(false);
+const usersBusy = ref(false);
+const usersFilter = ref('');
+const usersFilterStatus = ref('');
+
+const usersWithPasswordCount = computed(() => usersList.value.filter(u => u.has_password).length);
+const usersWithoutPasswordCount = computed(() => usersList.value.filter(u => !u.has_password).length);
+const usersDisabledCount = computed(() => usersList.value.filter(u => u.has_password && !u.is_active).length);
+
+const filteredUsers = computed(() => {
+  const q = usersFilter.value.trim().toLowerCase();
+  const st = usersFilterStatus.value;
+  return usersList.value.filter(u => {
+    if (q) {
+      const num = String(u.restaurant_number || '');
+      const addr = ((u.city || '') + ' ' + (u.address || '')).toLowerCase();
+      if (!num.includes(q) && !addr.includes(q)) return false;
+    }
+    if (st === 'ready' && !(u.has_password && u.is_active)) return false;
+    if (st === 'nopwd' && u.has_password) return false;
+    if (st === 'disabled' && !(u.has_password && !u.is_active)) return false;
+    return true;
+  });
+});
+
+function userStatusClass(u) {
+  if (!u.has_password) return 'nopwd';
+  if (!u.is_active) return 'off';
+  return 'ok';
+}
+function userStatusLabel(u) {
+  if (!u.has_password) return 'Без пароля';
+  if (!u.is_active) return 'Отключён';
+  return 'Активен';
+}
+function shortLegalEntity(le) {
+  if (!le) return '';
+  if (le.includes('Воглия')) return 'Воглия Матта';
+  if (le.includes('Бургер')) return 'Бургер БК';
+  if (le.includes('Пицца')) return 'Пицца Стар';
+  return le;
+}
 
 // Auto-refresh
 let refreshInterval = null;
@@ -821,6 +1053,49 @@ onUnmounted(() => {
 });
 
 // ═══ Unified export modal ═══
+// Описание всех доступных колонок выгрузки.
+// key — внутренний ключ; label — заголовок в Excel; width — ширина;
+// subtotal — флаг, что в эту колонку пишется итог по ресторану в первой строке;
+// value(ctx, item) — значение ячейки.
+const EXPORT_COLUMNS_DEF = [
+  { key: 'date', label: 'Дата доставки', width: 14, value: ctx => ctx.date },
+  { key: 'order_num', label: '№ заказа', width: 12, value: ctx => ctx.ordNum },
+  { key: 'rest_num', label: '№ ресторана', width: 10, value: ctx => ctx.order.restaurant_number },
+  { key: 'rest_addr', label: 'Адрес ресторана', width: 40, value: ctx => ctx.ri.address || ctx.ri.city || '' },
+  { key: 'rest_city', label: 'Город', width: 16, value: ctx => ctx.ri.city || '' },
+  { key: 'rest_region', label: 'Регион', width: 12, value: ctx => ctx.ri.region || '' },
+  { key: 'delivery_time', label: 'Время доставки', width: 14, value: ctx => ctx.ri.delivery_time || '' },
+  { key: 'category', label: 'Хранение', width: 10, value: (ctx, item) => item.category },
+  { key: 'external_code', label: 'Внешний код', width: 14, value: (ctx, item) => item.external_code || '' },
+  { key: 'gtin', label: 'GTIN', width: 16, value: (ctx, item) => item.gtin || '' },
+  { key: 'sku', label: 'Артикул', width: 12, value: (ctx, item) => item.sku || '' },
+  { key: 'product', label: 'Товар', width: 50, value: (ctx, item) => item.sku ? `${item.sku} ${item.product_name}` : item.product_name },
+  { key: 'product_name', label: 'Название товара', width: 50, value: (ctx, item) => item.product_name || '' },
+  { key: 'quantity', label: 'Количество', width: 12, value: (ctx, item) => parseFloat(item.quantity) || 0 },
+  { key: 'multiplicity', label: 'Кратность', width: 10, value: (ctx, item) => parseFloat(item.multiplicity) || 1 },
+  { key: 'netto', label: 'Нетто (г)', width: 12, value: (ctx, item) => item.weight_netto ? (parseFloat(item.quantity) || 0) * parseFloat(item.weight_netto) : '' },
+  { key: 'brutto', label: 'Брутто (г)', width: 12, value: (ctx, item) => item.weight_brutto ? (parseFloat(item.quantity) || 0) * parseFloat(item.weight_brutto) : '' },
+  { key: 'item_pallets', label: 'Палл. товара', width: 12, value: (ctx, item) => {
+      const qty = parseFloat(item.quantity) || 0;
+      const bpp = parseFloat(item.boxes_per_pallet) || 0;
+      if (!bpp) return '';
+      const boxes = qtyToBoxes(qty, item.multiplicity);
+      const p = boxes / bpp;
+      return p > 0 ? +p.toFixed(2) : '';
+    } },
+  { key: 'comment', label: 'Комментарий', width: 30, value: (ctx, item) => item.comment || '' },
+  { key: 'rest_weight', label: 'Вес рест. (кг)', width: 14, subtotal: true, value: ctx => ctx.isFirst ? ctx.restWeightKg : '' },
+  { key: 'rest_pallets', label: 'Палл. рест.', width: 12, subtotal: true, value: ctx => ctx.isFirst ? (ctx.restPallets || '') : '' },
+];
+
+// Колонки по умолчанию (как было до правки)
+const DEFAULT_EXPORT_COLUMNS = ['date', 'order_num', 'rest_num', 'rest_addr', 'delivery_time', 'category', 'external_code', 'gtin', 'product', 'quantity', 'netto', 'brutto', 'item_pallets', 'rest_weight', 'rest_pallets'];
+
+function getExportColumnDefs(keys) {
+  const map = Object.fromEntries(EXPORT_COLUMNS_DEF.map(c => [c.key, c]));
+  return keys.map(k => map[k]).filter(Boolean);
+}
+
 const showExportModal = ref(false);
 const exportLoading = ref(false);
 const exportExporting = ref(false);
@@ -838,7 +1113,35 @@ const exportShowFilters = ref(false);
 const exportShowTotals = ref(true);
 const exportAvailableRestaurants = ref([]);
 const exportAvailableProducts = ref([]);
+const exportSelectedColumns = ref([...DEFAULT_EXPORT_COLUMNS]);
+const EXPORT_COLUMN_PRESETS = {
+  default: { label: 'Стандартный (как раньше)', cols: [...DEFAULT_EXPORT_COLUMNS] },
+  minimal: { label: 'Минимальный', cols: ['rest_num', 'rest_addr', 'category', 'product', 'quantity'] },
+  full: { label: 'Полный (все колонки)', cols: EXPORT_COLUMNS_DEF.map(c => c.key) },
+  warehouse: { label: 'Для склада', cols: ['rest_num', 'rest_addr', 'delivery_time', 'category', 'product', 'quantity', 'item_pallets', 'rest_weight', 'rest_pallets'] },
+  traceable: { label: 'С прослеживаемостью', cols: ['rest_num', 'rest_addr', 'category', 'external_code', 'gtin', 'product', 'quantity'] },
+};
 let exportData = null;
+
+function applyExportPreset(presetKey) {
+  const p = EXPORT_COLUMN_PRESETS[presetKey];
+  if (p) exportSelectedColumns.value = [...p.cols];
+}
+
+function toggleExportColumn(key) {
+  const idx = exportSelectedColumns.value.indexOf(key);
+  if (idx >= 0) exportSelectedColumns.value.splice(idx, 1);
+  else exportSelectedColumns.value.push(key);
+}
+
+function moveExportColumn(key, direction) {
+  const arr = exportSelectedColumns.value;
+  const idx = arr.indexOf(key);
+  if (idx < 0) return;
+  const target = idx + direction;
+  if (target < 0 || target >= arr.length) return;
+  [arr[idx], arr[target]] = [arr[target], arr[idx]];
+}
 
 // ═══ beforeunload protection ═══
 function hasUnsavedChanges() {
@@ -864,6 +1167,7 @@ function closeOrderModal() {
   }
   showOrderModal.value = false;
   originalEditItems.value = null;
+  editSearch.value = '';
 }
 
 function closeTplAddModal() {
@@ -959,6 +1263,7 @@ async function viewOrder(orderId) {
     originalEditItems.value = JSON.stringify(editItems.value);
     editingDateMode.value = false;
     editingNewDate.value = order.delivery_date || '';
+    editSearch.value = '';
     // Открываем на первой непустой категории
     const cats = ['Сухой', 'Холод', 'Мороз'];
     const firstWithItems = cats.find(c => editItems.value.some(i => i.category === c)) || 'Сухой';
@@ -973,6 +1278,16 @@ function getEditItems(cat) {
   return editItems.value.filter(i => i.category === cat);
 }
 
+function getDisplayEditItems(cat) {
+  const items = getEditItems(cat);
+  const q = editSearch.value.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter(i =>
+    (i.sku || '').toLowerCase().includes(q) ||
+    (i.product_name || '').toLowerCase().includes(q)
+  );
+}
+
 function removeEditItem(item) {
   editItems.value = editItems.value.filter(i => i !== item);
 }
@@ -983,11 +1298,13 @@ function qtyToBoxes(qty, mult) {
   return m > 1 ? qty / m : qty;
 }
 
-// Округление паллет: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх
+// Округление паллет: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх.
+// Но если товар есть (raw > 0), минимум — 1 паллета.
 function roundPallets(raw) {
   if (raw <= 0) return 0;
   const frac = raw - Math.floor(raw);
-  return frac > 0.2 ? Math.ceil(raw) : Math.floor(raw);
+  const rounded = frac > 0.2 ? Math.ceil(raw) : Math.floor(raw);
+  return rounded === 0 ? 1 : rounded;
 }
 
 function catTotals(cat) {
@@ -1134,13 +1451,70 @@ async function handleDeleteOrder(order) {
 }
 
 // Users
-async function handleBulkCreate() {
+async function openUsersModal() {
+  showUsersModal.value = true;
+  usersCount.value = null;
+  await reloadUsers();
+}
+
+async function reloadUsers() {
+  usersLoading.value = true;
   try {
-    const result = await store.adminCreateBulkUsers(bulkPassword.value);
-    usersCount.value = result.created;
     usersList.value = await store.adminGetUsers();
   } catch (e) {
+    toast.error('Ошибка загрузки', e.message);
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+async function handleBulkCreate() {
+  const warn = bulkMode.value === 'all'
+    ? 'Назначить пароль ВСЕМ активным ресторанам? У существующих пароль будет заменён.'
+    : 'Назначить пароль только тем ресторанам, у которых пароля ещё нет?';
+  if (!confirm(warn)) return;
+  usersBusy.value = true;
+  try {
+    const result = await store.adminCreateBulkUsers(bulkPassword.value, bulkMode.value);
+    usersCount.value = result.created;
+    bulkPassword.value = '';
+    await reloadUsers();
+    toast.success('Готово', `Обновлено: ${result.created}`);
+  } catch (e) {
     toast.error('Ошибка', e.message);
+  } finally {
+    usersBusy.value = false;
+  }
+}
+
+async function handleSetPassword(u) {
+  const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
+  const pass = prompt(`${verb} для ресторана ${u.restaurant_number}:`);
+  if (!pass) return;
+  usersBusy.value = true;
+  try {
+    // adminCreateUser делает INSERT … ON DUPLICATE KEY UPDATE — то же самое, что reset.
+    await store.adminCreateUser(u.restaurant_number, pass);
+    toast.success('Готово', `Пароль ресторана ${u.restaurant_number} сохранён`);
+    await reloadUsers();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    usersBusy.value = false;
+  }
+}
+
+async function handleToggleUser(u) {
+  const next = u.is_active ? 0 : 1;
+  if (next === 0 && !confirm(`Отключить учётку ресторана ${u.restaurant_number}? Он не сможет войти.`)) return;
+  usersBusy.value = true;
+  try {
+    await store.adminToggleUser(u.restaurant_number, next);
+    u.is_active = next;
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    usersBusy.value = false;
   }
 }
 
@@ -1228,18 +1602,15 @@ function addToTemplate(product) {
 }
 
 // ═══ Export helpers ═══
-const EXPORT_HEADER = ['Дата доставки', '№ заказа', '№ ресторана', 'Адрес ресторана', 'Время доставки', 'Хранение', 'Внешний код', 'Товар', 'Количество', 'Нетто (г)', 'Брутто (г)', 'Палл. товара', 'Вес рест. (кг)', 'Палл. рест.'];
-const EXPORT_COLS = [{ wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
-
-function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = false) {
-  const rows = [EXPORT_HEADER];
+function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = false, columnKeys = DEFAULT_EXPORT_COLUMNS) {
+  const cols = getExportColumnDefs(columnKeys);
+  const rows = [cols.map(c => c.label)];
   const subtotalRows = [];
   const sorted = [...orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
   for (const order of sorted) {
     const oi = itemsByRest[order.restaurant_number] || [];
     if (!oi.length) continue;
     const ri = restInfoMap[order.restaurant_number] || {};
-    const addr = ri.address || ri.city || '';
     const ordNum = `RO-${String(order.id).padStart(4, '0')}`;
     oi.sort((a, b) => (a.category || '').localeCompare(b.category || '') || (a.product_name || '').localeCompare(b.product_name || ''));
 
@@ -1260,64 +1631,56 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
     // Строки товаров — итоги ресторана записываются в первую строку
     let isFirst = true;
     for (const item of oi) {
-      const productCol = item.sku ? `${item.sku} ${item.product_name}` : item.product_name;
-      const qty = parseFloat(item.quantity) || 0;
-      const bpp = parseFloat(item.boxes_per_pallet) || 0;
-      const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
-      const boxes = qtyToBoxes(qty, item.multiplicity);
-      const pallets = bpp > 0 ? boxes / bpp : 0;
-      rows.push([
-        date, ordNum, order.restaurant_number, addr,
-        ri.delivery_time || '', item.category,
-        item.external_code || '', productCol, qty,
-        item.weight_netto ? qty * parseFloat(item.weight_netto) : '',
-        brutto || '',
-        pallets > 0 ? +pallets.toFixed(2) : '',
-        isFirst && showTotals ? restWeightKg : '',
-        isFirst && showTotals ? (restPallets || '') : '',
-      ]);
+      const ctx = { date, ordNum, order, ri, isFirst, restWeightKg, restPallets, showTotals };
+      const row = cols.map(c => {
+        // Колонки итогов выводятся только если включены showTotals
+        if (c.subtotal && !showTotals) return '';
+        return c.value(ctx, item);
+      });
+      rows.push(row);
       if (item.is_traceable == 1) subtotalRows.push({ idx: rows.length - 1, type: 'traceable' });
       if (isFirst) {
         isFirst = false;
-        // Помечаем строку для стилизации (первая строка ресторана)
         if (showTotals) subtotalRows.push({ idx: rows.length - 1, type: 'subtotal' });
       }
     }
   }
-  return { rows, subtotalRows };
+  // Возвращаем индексы subtotal-колонок для стилизации
+  const subtotalColIdx = cols
+    .map((c, i) => c.subtotal ? i : -1)
+    .filter(i => i >= 0);
+  return { rows, subtotalRows, subtotalColIdx, colDefs: cols };
 }
 
-function styleExportSheet(ws, rowCount, subtotalRows) {
-  for (let c = 0; c < EXPORT_HEADER.length; c++) {
+function styleExportSheet(ws, rowCount, subtotalRows, colCount, subtotalColIdx, colDefs) {
+  for (let c = 0; c < colCount; c++) {
     const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
     if (cell) cell.s = EXCEL_HEADER_STYLE;
   }
   for (const sr of (subtotalRows || [])) {
     if (sr.type === 'traceable') {
-      // Жёлтая подсветка всей строки для прослеживаемых товаров
-      for (let c = 0; c < EXPORT_HEADER.length; c++) {
+      for (let c = 0; c < colCount; c++) {
         const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
         if (cell) cell.s = EXCEL_TRACEABLE_STYLE;
       }
     } else {
-      // Стилизуем ячейки итогов ресторана (колонки «Вес рест.» и «Палл. рест.»)
-      for (const c of [12, 13]) {
+      for (const c of (subtotalColIdx || [])) {
         const cell = ws[XLSX.utils.encode_cell({ r: sr.idx, c })];
         if (cell) cell.s = EXCEL_SUBTOTAL_STYLE;
       }
     }
   }
-  ws['!cols'] = EXPORT_COLS;
-  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: EXPORT_HEADER.length - 1 } }) };
+  ws['!cols'] = (colDefs || []).map(c => ({ wch: c.width }));
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: colCount - 1 } }) };
 }
 
 function buildSingleOrderXlsx(order, items) {
   const wb = XLSX.utils.book_new();
   const restInfo = { [order.restaurant_number]: { city: order.city || '', address: order.address || '', region: order.region || '', delivery_time: '' } };
   const byRest = { [order.restaurant_number]: items.filter(i => (parseFloat(i.quantity) || 0) > 0) };
-  const { rows, subtotalRows } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value);
+  const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  styleExportSheet(ws, rows.length, subtotalRows);
+  styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
   XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`);
   return wb;
 }
@@ -1454,6 +1817,7 @@ async function openExportModal() {
   exportProductCatFilter.value = '';
   exportShowFilters.value = false;
   exportShowTotals.value = true;
+  exportSelectedColumns.value = [...DEFAULT_EXPORT_COLUMNS];
   try {
     const data = await store.adminGetExportData('all', selectedDate.value);
     exportData = data;
@@ -1498,32 +1862,33 @@ async function doUnifiedExport() {
     const wb = XLSX.utils.book_new();
 
     const totals = exportShowTotals.value;
+    // Если итоги выключены — убираем колонки итогов из выбора, чтобы не плодить пустые столбцы
+    let columns = [...exportSelectedColumns.value];
+    if (!totals) columns = columns.filter(k => k !== 'rest_weight' && k !== 'rest_pallets');
+    if (!columns.length) { toast.warning('Не выбрана ни одна колонка'); return; }
+
+    const writeSheet = (orders, byRestArg, name) => {
+      const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows(orders, byRestArg, restInfoMap, selectedDate.value, totals, columns);
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
+      XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+    };
 
     if (exportGrouping.value === 'list') {
-      // Main sheet with all orders
-      const { rows, subtotalRows } = buildExportRows(filteredOrders, byRest, restInfoMap, selectedDate.value, totals);
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      styleExportSheet(ws, rows.length, subtotalRows);
-      XLSX.utils.book_append_sheet(wb, ws, 'Все заказы');
+      writeSheet(filteredOrders, byRest, 'Все заказы');
       // Additional sheet per restaurant
       const sorted = [...filteredOrders].sort((a, b) => a.restaurant_number - b.restaurant_number);
       for (const order of sorted) {
         const oi = byRest[order.restaurant_number] || [];
         if (!oi.length) continue;
-        const r = buildExportRows([order], { [order.restaurant_number]: oi }, restInfoMap, selectedDate.value, true);
-        const wsR = XLSX.utils.aoa_to_sheet(r.rows);
-        styleExportSheet(wsR, r.rows.length, r.subtotalRows);
-        XLSX.utils.book_append_sheet(wb, wsR, `Рест ${order.restaurant_number}`.slice(0, 31));
+        writeSheet([order], { [order.restaurant_number]: oi }, `Рест ${order.restaurant_number}`);
       }
     } else if (exportGrouping.value === 'restaurants') {
       const sorted = [...filteredOrders].sort((a, b) => a.restaurant_number - b.restaurant_number);
       for (const order of sorted) {
         const oi = byRest[order.restaurant_number] || [];
         if (!oi.length) continue;
-        const { rows, subtotalRows } = buildExportRows([order], { [order.restaurant_number]: oi }, restInfoMap, selectedDate.value, totals);
-        const ws = XLSX.utils.aoa_to_sheet(rows);
-        styleExportSheet(ws, rows.length, subtotalRows);
-        XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`.slice(0, 31));
+        writeSheet([order], { [order.restaurant_number]: oi }, `Рест ${order.restaurant_number}`);
       }
     } else if (exportGrouping.value === 'categories') {
       for (const cat of ['Сухой', 'Холод', 'Мороз']) {
@@ -1536,10 +1901,7 @@ async function doUnifiedExport() {
         }
         const catRestNums = new Set(catItems.map(i => i.restaurant_number));
         const catOrders = filteredOrders.filter(o => catRestNums.has(o.restaurant_number));
-        const { rows, subtotalRows } = buildExportRows(catOrders, catByRest, restInfoMap, selectedDate.value, totals);
-        const ws = XLSX.utils.aoa_to_sheet(rows);
-        styleExportSheet(ws, rows.length, subtotalRows);
-        XLSX.utils.book_append_sheet(wb, ws, cat);
+        writeSheet(catOrders, catByRest, cat);
       }
     }
 
@@ -1559,68 +1921,207 @@ async function doUnifiedExport() {
 <style scoped>
 .rom-page { padding: 20px; }
 
-/* Toolbar */
-.rom-toolbar {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+/* Header */
+.rom-header {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  margin-bottom: 18px; flex-wrap: wrap; gap: 12px;
+  border-bottom: 1px solid #e0d5c8; padding-bottom: 0;
 }
-.rom-toolbar h1 { margin: 0; font-size: 22px; color: #502314; }
-.rom-toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rom-header h1 {
+  margin: 0 0 10px 0; font-size: 22px; color: #502314;
+  font-weight: 700; letter-spacing: -0.2px;
+}
+.rom-header-left { display: flex; flex-direction: column; gap: 4px; }
+.rom-header-right { display: flex; gap: 8px; align-items: center; padding-bottom: 10px; }
+.rom-btn-icon {
+  width: 36px; height: 36px; padding: 0; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 18px;
+  border: 1px solid #e0d5c8; color: #502314; background: white;
+}
+.rom-btn-icon:hover { background: #faf0e6; }
+.rom-menu-wrap { position: relative; }
+.rom-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 240px;
+  background: white; border: 1px solid #e0d5c8; border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(80,35,20,0.14); padding: 6px; z-index: 50;
+}
+.rom-menu-item {
+  display: block; width: 100%; padding: 10px 14px; border: none;
+  background: transparent; text-align: left; font-size: 13px; font-family: inherit;
+  color: #502314; cursor: pointer; border-radius: 6px; font-weight: 500;
+}
+.rom-menu-item:hover { background: #faf0e6; }
+
+/* Командир: дата + дедлайн + действия */
+.rom-command {
+  display: grid; grid-template-columns: auto 1fr auto;
+  gap: 16px; align-items: stretch;
+  background: white;
+  border: 1px solid #e8dccd;
+  border-radius: 12px;
+  padding: 14px 18px; margin-bottom: 18px;
+  box-shadow: 0 4px 16px rgba(80,35,20,0.06);
+}
+.rom-command-date, .rom-command-deadline { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rom-cmd-label {
+  font-size: 10px; color: #8b7355; text-transform: uppercase;
+  letter-spacing: 0.6px; font-weight: 700;
+}
+.rom-cmd-date {
+  padding: 8px 12px; border: 1px solid #e0d5c8; border-radius: 8px;
+  font-size: 14px; font-family: inherit; color: #502314; font-weight: 600;
+  background: #faf7f4;
+}
+.rom-cmd-date:focus { outline: none; border-color: #D62300; background: white; }
+.rom-command-deadline {
+  padding: 8px 16px; border-radius: 10px;
+  background: #faf7f4;
+  border-left: 4px solid #d4c2a8;
+  justify-content: center;
+}
+.rom-cmd-deadline-text { font-size: 16px; font-weight: 700; color: #502314; }
+.rom-cmd-deadline-times { display: flex; gap: 16px; font-size: 11px; color: #8b7355; font-weight: 500; }
+.rom-cmd-deadline-times strong { color: #502314; }
+.rom-command-deadline.dl-open { background: #ecfdf5; border-left-color: #16a34a; }
+.rom-command-deadline.dl-open .rom-cmd-deadline-text { color: #15803d; }
+.rom-command-deadline.dl-warning { background: #fffbeb; border-left-color: #d97706; }
+.rom-command-deadline.dl-warning .rom-cmd-deadline-text { color: #b45309; }
+.rom-command-deadline.dl-closed { background: #fef2f2; border-left-color: #dc2626; }
+.rom-command-deadline.dl-closed .rom-cmd-deadline-text { color: #b91c1c; }
+.rom-command-deadline.dl-not_yet { background: #eff6ff; border-left-color: #2563eb; }
+.rom-command-deadline.dl-not_yet .rom-cmd-deadline-text { color: #1d4ed8; }
+.rom-command-deadline.dl-not_open, .rom-command-deadline.dl-none { background: #f5f5f4; border-left-color: #a8a29e; }
+.rom-command-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Cards (карточки-сводка) */
+.rom-cards {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: 12px; margin-bottom: 18px;
+}
+.rom-card {
+  background: white;
+  border: 1px solid #e8dccd;
+  border-radius: 10px;
+  padding: 14px 14px; text-align: center;
+  box-shadow: 0 2px 8px rgba(80,35,20,0.05);
+  position: relative; overflow: hidden;
+}
+.rom-card::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: #502314;
+}
+.rom-card-num { font-size: 26px; font-weight: 700; color: #502314; line-height: 1.05; }
+.rom-card-label {
+  font-size: 10px; color: #8b7355; text-transform: uppercase;
+  margin-top: 4px; letter-spacing: 0.5px; font-weight: 700;
+}
+.rom-card-warn { background: #fffbeb; border-color: #f5e6a3; }
+.rom-card-warn::before { background: #d97706; }
+.rom-card-warn .rom-card-num { color: #b45309; }
+.rom-card-info { background: #faf7f4; border-color: #e8dccd; }
+.rom-card-info::before { background: #8b7355; }
+.rom-card-info .rom-card-num { font-size: 22px; color: #6b3e2c; }
+
+/* Filters */
+.rom-list-filters {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.rom-list-search {
+  max-width: 360px; padding: 9px 14px;
+  border: 1px solid #e0d5c8; border-radius: 8px;
+  font-size: 14px; font-family: inherit; color: #502314; background: white;
+}
+.rom-list-search:focus { outline: none; border-color: #D62300; }
+.rom-list-search::placeholder { color: #a08570; }
+.rom-list-status-filters { display: flex; gap: 6px; }
+.rom-chip {
+  padding: 7px 16px; border-radius: 20px;
+  border: 1px solid #e0d5c8;
+  background: white; cursor: pointer; font-size: 12px; font-family: inherit;
+  color: #502314; transition: all 0.15s; font-weight: 600;
+}
+.rom-chip:hover { background: #faf0e6; }
+.rom-chip.active { background: #502314; color: white; border-color: #502314; }
+.rom-chip-warn.active { background: #d97706; border-color: #d97706; color: white; }
+
+/* Table card */
+.rom-table-card {
+  background: white;
+  border: 1px solid #e8dccd;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(80,35,20,0.06);
+}
+
+/* Compact table */
+.rom-table.rom-table-compact { border-radius: 0; box-shadow: none; table-layout: fixed; }
+.rom-table.rom-table-compact th {
+  background: #faf7f4; color: #8b7355; padding: 9px 12px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; border-bottom: 1px solid #e8dccd;
+  text-align: center;
+}
+.rom-table.rom-table-compact th.rom-th-left { text-align: left; }
+.rom-table.rom-table-compact td {
+  padding: 5px 12px; font-size: 12px; line-height: 1.3;
+  white-space: nowrap; border-bottom: 1px solid #f3ebe0;
+  text-align: center;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.rom-table-compact tr:last-child td { border-bottom: none; }
+.rom-row-clickable { cursor: pointer; }
+.rom-row-clickable:hover td { background: #fff5e8 !important; }
+.rom-row-submitted td { background: #f6fef9; }
+.rom-row-pending td { background: #fffbf0; }
+.rom-row-pending.rom-row-clickable:hover td { background: #fff5e8 !important; }
+.rom-td-num { font-weight: 700; color: #502314; }
+.rom-td-rest {
+  text-align: left !important;
+}
+.rom-cell-rest-city { color: #502314; font-weight: 600; }
+.rom-cell-rest-addr { color: #8b7355; }
+.rom-td-status { text-align: center; }
+.rom-td-volume { color: #502314; font-weight: 500; }
+.rom-td-time { color: #8b7355; }
+.rom-td-edited { font-size: 11px; color: #8b7355; }
+.rom-td-edited-by { color: #502314; font-weight: 600; }
+.rom-dim { color: #c0a080; }
+.rom-td-actions { text-align: center !important; padding: 2px 10px !important; }
+.rom-td-actions .rom-btn-sm { padding: 3px 9px; }
+
+/* Status pills */
+.rom-status {
+  padding: 3px 10px; border-radius: 12px; font-size: 11px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  display: inline-block;
+}
 
 /* Buttons */
 .rom-btn {
-  padding: 8px 16px; border-radius: 8px; border: 1px solid #e0d5c8;
+  padding: 8px 16px; border-radius: 8px;
+  border: 1px solid #e0d5c8;
   background: white; cursor: pointer; font-size: 13px;
-  font-family: inherit; color: #502314; transition: all 0.2s;
+  font-family: inherit; color: #502314; font-weight: 600;
+  transition: all 0.15s;
 }
-.rom-btn:hover { background: #f5f0eb; }
+.rom-btn:hover { background: #faf0e6; border-color: #d4c2a8; }
 .rom-btn-primary { background: #D62300; color: white; border-color: #D62300; }
-.rom-btn-primary:hover { background: #b81e00; }
+.rom-btn-primary:hover { background: #b81e00; border-color: #b81e00; color: white; }
 .rom-btn-outline { border-style: dashed; }
-.rom-btn-export { background: #f0fdf4; color: #16a34a; border-color: #16a34a; }
-.rom-btn-export:hover { background: #dcfce7; }
+.rom-btn-export { background: white; color: #16a34a; border-color: #c5f0d8; }
+.rom-btn-export:hover { background: #ecfdf5; border-color: #16a34a; }
 .rom-btn-sm {
-  padding: 4px 10px; border-radius: 6px; border: 1px solid #e0d5c8;
-  background: white; cursor: pointer; font-size: 12px; font-family: inherit;
+  padding: 4px 10px; border-radius: 6px;
+  border: 1px solid #e0d5c8;
+  background: white; cursor: pointer; font-size: 12px;
+  font-family: inherit; color: #502314; font-weight: 500;
 }
-.rom-btn-danger { color: #dc2626; border-color: #dc2626; }
-.rom-btn-success { color: #16a34a; border-color: #16a34a; font-weight: 600; }
-.rom-btn-success:hover { background: #ecfdf5; }
-
-/* Date row */
-.rom-date-row {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 16px; flex-wrap: wrap;
-}
-.rom-date-row label { font-size: 14px; font-weight: 600; color: #502314; }
-.rom-date-row input[type="date"] {
-  padding: 8px 12px; border: 2px solid #e0d5c8; border-radius: 8px;
-  font-size: 14px; font-family: inherit;
-}
-
-/* Stats */
-.rom-stats {
-  display: flex; gap: 16px; margin-bottom: 16px;
-  align-items: center; flex-wrap: wrap;
-}
-.rom-stat {
-  background: white; padding: 12px 20px; border-radius: 10px;
-  text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-.rom-stat-value { display: block; font-size: 28px; font-weight: 700; color: #16a34a; }
-.rom-stat-pending { color: #D62300; }
-.rom-stat-label { font-size: 12px; color: #8b7355; }
-.rom-stat-deadline {
-  padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
-}
-.dl-open { background: #ecfdf5; color: #16a34a; }
-.dl-warning { background: #fffbeb; color: #d97706; }
-.dl-closed { background: #fef2f2; color: #dc2626; }
-.dl-not_yet { background: #f0f9ff; color: #2563eb; }
-.dl-not_open { background: #f5f5f4; color: #78716c; }
-
-/* Export row */
-.rom-export-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.rom-btn-sm:hover { background: #faf0e6; border-color: #d4c2a8; }
+.rom-btn-danger { color: #dc2626 !important; border-color: #f5cccc !important; }
+.rom-btn-danger:hover { background: #fef2f2 !important; border-color: #dc2626 !important; }
+.rom-btn-success { color: #16a34a !important; border-color: #c5f0d8 !important; font-weight: 600; }
+.rom-btn-success:hover { background: #ecfdf5 !important; border-color: #16a34a !important; }
 
 /* Loading / Empty */
 .rom-loading { padding: 40px; text-align: center; color: #8b7355; }
@@ -1698,6 +2199,11 @@ async function doUnifiedExport() {
 .rom-cat-tabs {
   display: flex; gap: 0; border-bottom: 2px solid #e0d5c8;
   padding: 0 20px; flex-shrink: 0; background: white;
+  align-items: center;
+}
+.rom-edit-search {
+  margin-left: auto; margin-bottom: 0; max-width: 280px;
+  height: 30px; font-size: 13px;
 }
 .rom-cat-tab {
   padding: 10px 20px; border: none; background: transparent;
@@ -1726,22 +2232,53 @@ async function doUnifiedExport() {
 }
 
 /* Users modal */
-.rom-bulk-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.rom-bulk-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
 .rom-input {
   flex: 1; padding: 8px 12px; border: 2px solid #e0d5c8;
   border-radius: 8px; font-size: 14px; font-family: inherit;
 }
-.rom-users-info { color: #16a34a; font-size: 13px; margin-bottom: 12px; }
-.rom-users-list { max-height: 300px; overflow-y: auto; }
+.rom-users-section {
+  padding: 12px 0; border-bottom: 1px solid #f0ebe4;
+}
+.rom-users-section:last-child { border-bottom: none; }
+.rom-users-section-title {
+  font-weight: 700; color: #502314; font-size: 14px; margin-bottom: 8px;
+  display: flex; align-items: center;
+}
+.rom-users-hint { font-size: 12px; color: #8b7355; margin-bottom: 4px; }
+.rom-users-info { color: #16a34a; font-size: 13px; margin-top: 6px; }
+.rom-users-list { max-height: 360px; overflow-y: auto; }
 .rom-user-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 6px 0; border-bottom: 1px solid #f0ebe4; font-size: 13px;
+  padding: 8px 0; border-bottom: 1px solid #f0ebe4; font-size: 13px;
 }
-.rom-user-num { font-weight: 700; min-width: 30px; color: #502314; }
-.rom-user-addr { flex: 1; color: #8b7355; }
-.rom-user-status { font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+.rom-user-num { font-weight: 700; min-width: 44px; color: #502314; }
+.rom-user-addr { flex: 1; color: #8b7355; min-width: 0; display: flex; flex-direction: column; }
+.rom-user-addr-main { font-size: 13px; color: #502314; }
+.rom-user-addr-le { font-size: 11px; color: #a08570; }
+.rom-user-status { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #fef2f2; color: #b91c1c; }
 .rom-user-status.active { background: #ecfdf5; color: #16a34a; }
-.rom-user-login { font-size: 11px; color: #8b7355; }
+.rom-user-pwd-status { font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: 600; min-width: 90px; text-align: center; }
+.rom-user-pwd-status.ok { background: #ecfdf5; color: #16a34a; }
+.rom-user-pwd-status.nopwd { background: #fef3c7; color: #b45309; }
+.rom-user-pwd-status.off { background: #fef2f2; color: #b91c1c; }
+.rom-user-login { font-size: 11px; color: #8b7355; min-width: 110px; text-align: right; }
+.rom-user-toggle-placeholder { display: inline-block; min-width: 90px; }
+
+.rom-users-summary { display: flex; gap: 10px; margin-bottom: 14px; }
+.rom-users-summary-item {
+  flex: 1; padding: 10px; border-radius: 10px; background: #f8f4ef;
+  border: 1px solid #e8dccd; display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.rom-users-summary-item.ok { background: #ecfdf5; border-color: #c5f0d8; }
+.rom-users-summary-item.warn { background: #fef9e7; border-color: #f5e6a3; }
+.rom-users-summary-item.off { background: #fef2f2; border-color: #f5cccc; }
+.rom-users-summary-num { font-size: 22px; font-weight: 700; color: #502314; }
+.rom-users-summary-label { font-size: 11px; color: #8b7355; text-transform: lowercase; }
+
+.rom-users-filters { display: flex; gap: 8px; margin-bottom: 10px; }
+.rom-users-filters .rom-input { flex: 1; }
+.rom-users-filters .rom-select { min-width: 200px; }
 
 /* Templates */
 .rom-tpl-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -1797,6 +2334,19 @@ async function doUnifiedExport() {
 }
 .rom-page-tab.active { color: #D62300; border-bottom-color: #D62300; }
 .rom-page-tab:hover { color: #502314; }
+.rom-page-tab-link {
+  text-decoration: none; margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+
+/* Универсальная панель-карточка для вкладок */
+.rom-panel {
+  background: white;
+  border: 1px solid #e8dccd;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 4px 16px rgba(80,35,20,0.06);
+}
 
 /* Template page */
 .rom-tpl-page { }
@@ -1863,39 +2413,109 @@ async function doUnifiedExport() {
 .rom-btn-export-sm:hover { background: #f0fdf4; }
 
 /* Unified export modal */
-.rom-exp-section-title {
-  font-size: 14px; font-weight: 700; color: #502314;
-  margin: 16px 0 10px; padding: 0;
+.rom-exp-modal { max-width: 900px; }
+.rom-exp-body {
+  display: flex; gap: 18px; padding: 18px;
+  max-height: calc(85vh - 120px); overflow: hidden;
 }
-.rom-exp-section-title:first-child { margin-top: 0; }
-.rom-exp-clickable { cursor: pointer; display: flex; align-items: center; gap: 8px; }
-.rom-exp-chevron { font-size: 10px; transition: transform 0.2s; }
+.rom-exp-col { flex: 1; min-width: 0; overflow-y: auto; padding-right: 4px; }
+.rom-exp-col-left { flex: 0 0 360px; border-right: 1px solid #f3ebe0; padding-right: 18px; }
+.rom-exp-col-right { flex: 1; }
+
+.rom-exp-block { margin-bottom: 18px; }
+.rom-exp-block:last-child { margin-bottom: 0; }
+.rom-exp-block-title {
+  font-size: 11px; font-weight: 700; color: #8b7355;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;
+}
+.rom-exp-clickable { cursor: pointer; user-select: none; }
+.rom-exp-clickable:hover { color: #502314; }
+.rom-exp-chevron { font-size: 12px; transition: transform 0.2s; }
 .rom-exp-chevron.open { transform: rotate(180deg); }
-.rom-exp-grouping { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+
+.rom-exp-grouping { display: flex; flex-direction: column; gap: 8px; }
 .rom-exp-grouping-opt {
-  padding: 8px 16px; border-radius: 8px; border: 2px solid #e0d5c8;
-  background: white; cursor: pointer; font-size: 13px; font-family: inherit;
-  font-weight: 600; color: #502314; transition: all 0.2s;
+  padding: 10px 14px; border-radius: 10px; border: 1px solid #e0d5c8;
+  background: white; cursor: pointer; font-family: inherit;
+  text-align: left; transition: all 0.15s;
 }
-.rom-exp-grouping-opt.active { background: #502314; color: white; border-color: #502314; }
-.rom-exp-grouping-opt:hover:not(.active) { background: #f5f0eb; }
-.rom-exp-filter-group { margin-bottom: 14px; }
-.rom-exp-filter-label { font-size: 13px; font-weight: 600; color: #8b7355; margin-bottom: 6px; display: block; }
+.rom-exp-grouping-opt:hover { background: #faf0e6; border-color: #d4c2a8; }
+.rom-exp-grouping-opt.active {
+  background: #fff5e8; border-color: #D62300;
+  box-shadow: 0 0 0 2px rgba(214,35,0,0.12);
+}
+.rom-exp-grouping-name { font-size: 13px; font-weight: 700; color: #502314; }
+.rom-exp-grouping-hint { font-size: 11px; color: #8b7355; margin-top: 2px; }
+
+.rom-exp-filters { padding-top: 6px; }
+.rom-exp-filter-group { margin-bottom: 12px; padding: 10px; background: #faf7f4; border-radius: 8px; }
+.rom-exp-filter-label { font-size: 11px; font-weight: 700; color: #8b7355; margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: 0.4px; }
 .rom-exp-checkboxes { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
-.rom-exp-cb-label { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #502314; cursor: pointer; }
-.rom-exp-select-list { max-height: 200px; overflow-y: auto; border: 1px solid #ede8e3; border-radius: 8px; }
-.rom-exp-select-list-tall { max-height: 300px; }
+.rom-exp-cb-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: #502314; cursor: pointer; line-height: 1.4;
+}
+.rom-exp-select-list { max-height: 200px; overflow-y: auto; border: 1px solid #e8dccd; border-radius: 8px; background: white; }
+.rom-exp-select-list-tall { max-height: 280px; }
 .rom-exp-select-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; border-bottom: 1px solid #f3eeea; cursor: pointer; font-size: 13px;
+  padding: 7px 10px; border-bottom: 1px solid #f3eeea; cursor: pointer; font-size: 12px;
 }
+.rom-exp-select-item:last-child { border-bottom: none; }
 .rom-exp-select-item:hover { background: #faf7f4; }
 .rom-exp-select-item.selected { background: #f0fdf4; }
+
+/* Колонки */
+.rom-exp-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.rom-exp-preset-btn {
+  padding: 6px 12px; border-radius: 16px; border: 1px solid #e0d5c8;
+  background: white; cursor: pointer; font-size: 11px; font-family: inherit;
+  color: #502314; font-weight: 600; transition: all 0.15s;
+}
+.rom-exp-preset-btn:hover { background: #fff5e8; border-color: #D62300; color: #D62300; }
+.rom-exp-cols-hint { font-size: 11px; color: #8b7355; margin-bottom: 8px; line-height: 1.4; }
+.rom-exp-cols-list {
+  border: 1px solid #e8dccd; border-radius: 10px;
+  background: white; max-height: 420px; overflow-y: auto;
+}
+.rom-exp-col-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-bottom: 1px solid #f3eeea;
+  font-size: 13px;
+}
+.rom-exp-col-row:last-child { border-bottom: none; }
+.rom-exp-col-row:hover { background: #faf7f4; }
+.rom-exp-col-row.selected { background: #f0fdf4; }
+.rom-exp-col-cb {
+  display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer; min-width: 0;
+}
+.rom-exp-col-name { color: #502314; font-weight: 500; }
+.rom-exp-col-row.selected .rom-exp-col-name { font-weight: 600; }
+.rom-exp-col-pos {
+  background: #502314; color: white; font-size: 10px; font-weight: 700;
+  width: 20px; height: 20px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: auto;
+}
+.rom-exp-col-arrows { display: flex; gap: 2px; }
+.rom-exp-arrow {
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid #e0d5c8; border-radius: 4px;
+  background: white; cursor: pointer; font-size: 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #502314;
+}
+.rom-exp-arrow:hover:not(:disabled) { background: #fff5e8; border-color: #D62300; color: #D62300; }
+.rom-exp-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
+
 .rom-exp-footer {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 12px 16px; border-top: 1px solid #ede8e3;
+  padding: 14px 18px; border-top: 1px solid #e8dccd; background: #faf7f4;
+  border-radius: 0 0 16px 16px;
 }
 .rom-exp-summary { font-size: 13px; color: #502314; }
+.rom-exp-summary strong { color: #D62300; }
 
 .rom-td-weight { font-size: 12px; color: #8b7355; }
 .rom-cat-summary {
