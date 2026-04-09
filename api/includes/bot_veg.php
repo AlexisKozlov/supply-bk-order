@@ -270,7 +270,7 @@ function restMenuVeg($chatId, $msgId) {
             ['text' => '📋 Мои заявки', 'callback_data' => 'veg_my_orders'],
         ],
     ];
-    $formLink = vegGetFormLink();
+    $formLink = vegGetFormLink($chatId);
     if ($formLink) {
         $btns[] = [['text' => '🌐 Через сайт', 'web_app' => ['url' => $formLink]]];
     }
@@ -403,6 +403,22 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
             $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
         }
     }
+
+    // Кнопка «Через сайт» — открывает заявку Камако в личном кабинете ресторана
+    // Доступна, только если у ресторана есть активная учётка
+    $checkUser = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
+    $checkUser->execute([$restNum]);
+    if ($checkUser->fetch()) {
+        $tgToken = bin2hex(random_bytes(32));
+        // Сохраняем выбранный ресторан в токене — иначе при двух+ подписках tg-auth возьмёт первый
+        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
+            ->execute([$tgToken, $chatId, $restNum]);
+        $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
+        $redirect = '/restaurant/orders/supplier/' . urlencode($supplierId);
+        $webUrl = "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode($redirect);
+        $btns[] = [['text' => '🌐 Через сайт', 'web_app' => ['url' => $webUrl]]];
+    }
+
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
@@ -476,10 +492,94 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     file_put_contents(sys_get_temp_dir() . "/soord_{$chatId}.txt", $modeData);
 
     $btns = [
+        [['text' => '🚫 Поставка не нужна', 'callback_data' => "soord_skip_{$supplierId}_{$restNum}_{$deliveryDate}"]],
         [['text' => '◂ Назад', 'callback_data' => "soord_day_{$supplierId}_{$restNum}_back"]],
     ];
     if ($msgId) editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
     else sendMessage($chatId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Камако: «Поставка не нужна» — создаём пустую заявку-отказ
+function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
+    global $pdo;
+    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+    $supName->execute([$supplierId]);
+    $supName = $supName->fetchColumn() ?: 'Поставщик';
+
+    // Активная сессия
+    $sess = $pdo->prepare("SELECT * FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() LIMIT 1");
+    $sess->execute([$supplierId]);
+    $session = $sess->fetch();
+    if (!$session) {
+        editMessage($chatId, $msgId, "❌ Сессия не активна.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+        return;
+    }
+
+    // Дедлайн
+    $dlStatus = soBotCheckDeadline($pdo, $session, $deliveryDate);
+    if ($dlStatus['status'] === 'closed') {
+        editMessage($chatId, $msgId, "❌ Приём заявок на эту дату закрыт (дедлайн: {$dlStatus['deadline']}).", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        return;
+    }
+
+    $le = soGetLegalEntity($restNum);
+
+    // Сохраняем заявку-отказ (без позиций)
+    try {
+        $pdo->beginTransaction();
+        $old = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
+        $old->execute([$session['id'], $restNum, $deliveryDate]);
+        $oldOrder = $old->fetch();
+        $isUpdate = false;
+        if ($oldOrder) {
+            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$oldOrder['id']]);
+            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
+                ->execute([$oldOrder['id']]);
+            $isUpdate = true;
+        } else {
+            $pdo->prepare("INSERT INTO so_orders (session_id, supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                ->execute([$session['id'], $supplierId, $restNum, $deliveryDate, $le]);
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        editMessage($chatId, $msgId, "❌ Ошибка сохранения: " . htmlspecialchars($e->getMessage()), ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        return;
+    }
+
+    // Уведомление другим подписчикам этого ресторана (кто не нажимал сам)
+    try {
+        $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+        $title = $isUpdate ? '🚫 <b>Поставка отменена</b>' : '🚫 <b>Поставка не нужна</b>';
+        $msg = $title . "\n\n";
+        $msg .= "🏪 <b>Поставщик:</b> " . htmlspecialchars($supName, ENT_QUOTES | ENT_HTML5, 'UTF-8') . "\n";
+        $msg .= "📅 <b>Доставка:</b> " . $deliveryFmt . "\n\n";
+        $msg .= "<i>Ресторан отметил, что поставка на эту дату не требуется.</i>";
+
+        $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND chat_id <> ?");
+        $subs->execute([$restNum, $chatId]);
+        foreach ($subs->fetchAll(PDO::FETCH_COLUMN) as $cid) {
+            if ($cid && function_exists('sendMessage')) {
+                @sendMessage($cid, $msg);
+            }
+        }
+    } catch (Exception $e) {
+        // не критично
+    }
+
+    // Подтверждение в чате
+    $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+    $confirmText = "🚫 <b>Поставка не нужна</b>\n\n";
+    $confirmText .= "Поставщик: <b>{$supName}</b>\n";
+    $confirmText .= "Ресторан: <b>{$restNum}</b>\n";
+    $confirmText .= "Дата: <b>{$deliveryFmt}</b>\n\n";
+    $confirmText .= "<i>Закупщик увидит, что на эту дату ваш ресторан ничего не заказывает.</i>";
+
+    $btns = ['inline_keyboard' => [
+        [['text' => '📦 К дням поставщика', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]],
+        [['text' => '◂ В меню', 'callback_data' => 'veg_my_subs']],
+    ]];
+    editMessage($chatId, $msgId, $confirmText, $btns);
 }
 
 // Камако: обработка текстового ввода
@@ -1072,11 +1172,16 @@ function restNotifToggle($chatId, $msgId, $field) {
 }
 
 // Получить ссылку на форму заявки (активный токен)
-function vegGetFormLink() {
+// $chatId — если задан, добавляется в URL для автоматического определения ресторана
+function vegGetFormLink($chatId = null) {
     global $pdo, $SITE_URL;
     $token = $pdo->query("SELECT token FROM veg_tokens WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1")->fetchColumn();
     if (!$token) return null;
-    return "{$SITE_URL}/veg-order/{$token}";
+    $url = "{$SITE_URL}/veg-order/{$token}";
+    if ($chatId !== null && preg_match('/^-?\d+$/', (string)$chatId)) {
+        $url .= '?tg=' . urlencode((string)$chatId);
+    }
+    return $url;
 }
 
 // Просмотр заявок — список ресторанов, на которые подписан
@@ -1175,7 +1280,7 @@ function vegShowRestOrders($chatId, $msgId, $restNum) {
             $text .= vegFormatOrders($orders);
         }
 
-        $formLink = vegGetFormLink();
+        $formLink = vegGetFormLink($chatId);
         if ($formLink) {
             $btns[] = [['text' => '📝 Заполнить/изменить заявку', 'url' => $formLink]];
         }

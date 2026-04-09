@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supply Portal — Desktop</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #F5F0EB;
+  --card: #FFFFFF;
+  --border: #EDE8E3;
+  --brown: #502314;
+  --brown-light: #8B7355;
+  --red: #D62300;
+  --orange: #FF8733;
+  --green: #16A34A;
+  --blue: #2563EB;
+  --radius: 18px;
+  --shadow: 0 2px 8px rgba(80,35,20,0.06);
+  --shadow-lg: 0 8px 32px rgba(80,35,20,0.1);
+}
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--brown);
+  min-height: 100vh;
+  display: flex;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ═══ Sidebar ═══ */
+.sidebar {
+  width: 240px; min-height: 100vh; background: var(--brown);
+  display: flex; flex-direction: column; padding: 20px 12px;
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
+}
+.sb-brand { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-bottom: 28px; }
+.sb-logo {
+  width: 42px; height: 42px; border-radius: 13px;
+  background: linear-gradient(135deg, var(--red), var(--orange));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 900; color: white;
+  box-shadow: 0 4px 16px rgba(214,35,0,0.35);
+  flex-shrink: 0;
+}
+.sb-brand-text { font-size: 15px; font-weight: 800; color: white; letter-spacing: -0.3px; }
+.sb-brand-sub { font-size: 10px; color: rgba(255,255,255,0.35); font-weight: 500; margin-top: 1px; }
+
+.sb-section { font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.2); text-transform: uppercase; letter-spacing: 2px; padding: 0 12px; margin: 20px 0 8px; }
+
+.sb-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; border-radius: 12px; border: none;
+  background: transparent; color: rgba(255,255,255,0.45);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: all 0.15s; width: 100%;
+  text-align: left; position: relative;
+}
+.sb-item:hover { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.7); }
+.sb-item.active { background: rgba(214,35,0,0.2); color: var(--orange); }
+.sb-item-icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+.sb-item .badge {
+  position: absolute; right: 12px; min-width: 20px; height: 20px;
+  border-radius: 10px; background: var(--red); color: white;
+  font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+  padding: 0 6px;
+}
+
+.sb-spacer { flex: 1; }
+
+.sb-rest {
+  background: rgba(255,255,255,0.06); border-radius: 14px;
+  padding: 14px; margin-top: 12px;
+}
+.sb-rest-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.sb-rest-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--red), var(--orange));
+  color: white; font-size: 14px; font-weight: 900;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.sb-rest-name { font-size: 13px; font-weight: 700; color: white; }
+.sb-rest-addr { font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 4px; line-height: 1.3; }
+
+/* ═══ Main ═══ */
+.main { flex: 1; margin-left: 240px; min-height: 100vh; }
+
+/* Topbar */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 32px; background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 50;
+}
+.topbar-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; }
+.topbar-sub { font-size: 11px; color: var(--brown-light); margin-top: 1px; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.tb-btn {
+  width: 38px; height: 38px; border-radius: 12px; border: 1.5px solid var(--border);
+  background: var(--card); cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 16px; color: var(--brown-light);
+  transition: all 0.15s;
+}
+.tb-btn:hover { border-color: var(--red); color: var(--red); }
+
+/* Content */
+.content { padding: 28px 32px; max-width: 1200px; }
+
+/* ═══ Dashboard grid ═══ */
+.dash { display: grid; grid-template-columns: 1fr 340px; gap: 24px; margin-bottom: 28px; }
+
+/* Left: alerts + stats */
+.dash-left { display: flex; flex-direction: column; gap: 16px; }
+
+/* Stat strip */
+.stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.stat-card {
+  background: var(--card); border-radius: var(--radius); padding: 20px;
+  border: 1px solid var(--border); text-align: center;
+  cursor: pointer; transition: all 0.2s;
+}
+.stat-card:hover { border-color: rgba(214,35,0,0.3); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+.sc-num { font-size: 28px; font-weight: 900; letter-spacing: -1px; color: var(--brown); }
+.sc-num.accent { color: var(--red); }
+.sc-num.warn { color: var(--orange); }
+.sc-label { font-size: 10px; color: var(--brown-light); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+/* Alert cards */
+.alert-list { display: flex; flex-direction: column; gap: 10px; }
+.alert-card {
+  background: var(--card); border-radius: 16px; padding: 16px 20px;
+  border: 1px solid var(--border); border-left: 4px solid var(--red);
+  display: flex; align-items: center; gap: 14px; cursor: pointer;
+  transition: all 0.2s; box-shadow: var(--shadow);
+}
+.alert-card:hover { transform: translateX(4px); box-shadow: var(--shadow-lg); }
+.alert-card:active { transform: translateX(2px) scale(0.99); }
+.alert-card.green { border-left-color: var(--green); }
+.alert-card.blue { border-left-color: var(--blue); }
+.alert-card.orange { border-left-color: var(--orange); }
+.al-icon { font-size: 28px; flex-shrink: 0; }
+.al-body { flex: 1; }
+.al-title { font-size: 14px; font-weight: 700; }
+.al-sub { font-size: 12px; color: var(--brown-light); margin-top: 1px; }
+.al-arrow { color: #D4C4B0; font-size: 20px; font-weight: 300; }
+
+/* Right: supplier cards */
+.dash-right {}
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-title { font-size: 15px; font-weight: 800; }
+.section-link { font-size: 12px; font-weight: 600; color: var(--red); cursor: pointer; text-decoration: none; }
+.section-link:hover { text-decoration: underline; }
+
+.sup-list { display: flex; flex-direction: column; gap: 10px; }
+.sup-card {
+  background: var(--card); border-radius: 16px; padding: 16px 18px;
+  border: 1.5px solid var(--border); cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; gap: 14px; position: relative;
+  box-shadow: var(--shadow);
+}
+.sup-card:hover { border-color: var(--red); transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+.sup-card:active { transform: scale(0.99); }
+.sup-card.urgent { border-color: rgba(214,35,0,0.25); background: #FFFBF8; }
+.sup-icon { font-size: 28px; flex-shrink: 0; }
+.sup-body { flex: 1; }
+.sup-name { font-size: 14px; font-weight: 700; }
+.sup-meta { font-size: 11px; color: var(--brown-light); margin-top: 1px; }
+.sup-badge {
+  min-width: 24px; height: 24px; border-radius: 12px; font-size: 11px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; padding: 0 8px;
+}
+.sup-badge.open { background: #FEF2F2; color: var(--red); }
+.sup-badge.done { background: #ECFDF5; color: var(--green); }
+
+/* ═══ Order section ═══ */
+.order-section {
+  background: var(--card); border-radius: 22px;
+  border: 1px solid var(--border); overflow: hidden;
+  box-shadow: var(--shadow); margin-bottom: 24px;
+}
+.os-header {
+  padding: 20px 24px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.os-title { font-size: 16px; font-weight: 800; }
+.os-actions { display: flex; gap: 8px; }
+.os-btn {
+  padding: 8px 16px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--card); color: var(--brown); font-size: 12px; font-weight: 700;
+  cursor: pointer; font-family: inherit; transition: all 0.15s;
+}
+.os-btn:hover { border-color: var(--brown); }
+.os-btn.primary { background: var(--brown); color: white; border-color: var(--brown); }
+.os-btn.primary:hover { background: #3A1A0C; }
+
+/* Day tabs */
+.day-bar { padding: 14px 24px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; overflow-x: auto; background: #FAFAF8; }
+.day-tab {
+  padding: 10px 18px; border-radius: 12px; border: 2px solid var(--border);
+  background: var(--card); cursor: pointer; text-align: center; transition: all 0.15s;
+  min-width: 72px; position: relative; flex-shrink: 0;
+}
+.day-tab:hover { border-color: var(--brown-light); }
+.day-tab.active { background: var(--red); border-color: var(--red); color: white; }
+.day-tab.done { border-color: var(--green); }
+.day-tab.done::after {
+  content: '\2713'; position: absolute; top: -5px; right: -5px;
+  width: 18px; height: 18px; border-radius: 50%; background: var(--green);
+  color: white; font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--bg);
+}
+.dt-name { display: block; font-size: 13px; font-weight: 700; }
+.dt-date { display: block; font-size: 10px; opacity: 0.55; margin-top: 1px; }
+.day-tab.active .dt-date { opacity: 0.7; }
+
+/* Deadline bar */
+.dl-bar {
+  padding: 10px 24px; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.dl-bar.open { background: #ECFDF5; color: var(--green); }
+.dl-bar.warn { background: #FFFBEB; color: #92400E; }
+.dl-bar.closed { background: #FEF2F2; color: #DC2626; }
+
+/* Category tabs */
+.cat-bar { padding: 12px 24px; display: flex; gap: 6px; border-bottom: 1px solid var(--border); }
+.cat-tab {
+  padding: 8px 18px; border-radius: 10px; border: none;
+  background: transparent; color: var(--brown-light); font-size: 13px;
+  font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.15s;
+  display: flex; align-items: center; gap: 6px;
+}
+.cat-tab:hover { background: #F5F0EB; }
+.cat-tab.active { background: var(--brown); color: white; }
+.cat-count {
+  background: rgba(0,0,0,0.08); padding: 2px 7px; border-radius: 6px;
+  font-size: 10px; font-weight: 800;
+}
+.cat-tab.active .cat-count { background: rgba(255,255,255,0.2); }
+
+/* Product table */
+.prod-table { width: 100%; border-collapse: collapse; }
+.prod-table th {
+  padding: 10px 24px; font-size: 10px; font-weight: 700; color: var(--brown-light);
+  text-transform: uppercase; letter-spacing: 1px; text-align: left;
+  background: #FAFAF8; border-bottom: 1px solid var(--border);
+}
+.prod-table th.center { text-align: center; }
+.prod-table td {
+  padding: 12px 24px; font-size: 14px; border-bottom: 1px solid #F7F5F2;
+  vertical-align: middle;
+}
+.prod-table tr { transition: background 0.1s; }
+.prod-table tbody tr:hover { background: #FAFAF8; }
+.prod-table tr.filled { background: #FFFCFA; }
+.pt-name { font-weight: 600; }
+.pt-sku { font-size: 11px; color: var(--brown-light); font-family: 'JetBrains Mono', 'SF Mono', monospace; }
+.pt-tag {
+  font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+  display: inline-block;
+}
+.pt-tag.mult { background: #EFF6FF; color: var(--blue); }
+.pt-tag.min { background: #FEF3C7; color: #92400E; }
+.pt-input {
+  width: 76px; height: 40px; border: 2px solid var(--border); border-radius: 11px;
+  background: #FAFAF8; font-size: 15px; text-align: center; font-family: inherit;
+  font-weight: 700; color: var(--brown); transition: all 0.15s;
+  -moz-appearance: textfield; display: block; margin: 0 auto;
+}
+.pt-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.pt-input:focus { outline: none; border-color: var(--red); background: white; box-shadow: 0 0 0 3px rgba(214,35,0,0.08); }
+.pt-input.filled { background: #FFF5F2; border-color: #FECACA; }
+.pt-comment {
+  width: 100%; max-width: 160px; padding: 6px 10px; border: 1.5px solid var(--border);
+  border-radius: 8px; font-size: 12px; font-family: inherit; color: var(--brown);
+  background: transparent; transition: border-color 0.15s;
+}
+.pt-comment:focus { outline: none; border-color: var(--red); }
+.pt-comment::placeholder { color: #D4C4B0; }
+
+/* Submit footer */
+.os-footer {
+  padding: 16px 24px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: #FAFAF8;
+}
+.osf-stats { display: flex; gap: 24px; }
+.osf-stat { font-size: 13px; color: var(--brown-light); }
+.osf-stat strong { color: var(--brown); font-weight: 800; }
+.osf-btn {
+  padding: 12px 36px; border: none; border-radius: 14px;
+  background: var(--red); color: white; font-size: 15px; font-weight: 800;
+  cursor: pointer; font-family: inherit; transition: all 0.2s;
+  box-shadow: 0 4px 16px rgba(214,35,0,0.25);
+}
+.osf-btn:hover { background: #B51E00; transform: translateY(-1px); box-shadow: 0 6px 24px rgba(214,35,0,0.35); }
+.osf-btn:active { transform: scale(0.98); }
+.osf-btn.success { background: var(--green); box-shadow: 0 4px 16px rgba(22,163,74,0.3); }
+
+/* ═══ Recent orders ═══ */
+.recent-card {
+  background: var(--card); border-radius: var(--radius); border: 1px solid var(--border);
+  overflow: hidden; box-shadow: var(--shadow);
+}
+.recent-header { padding: 18px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.recent-table { width: 100%; border-collapse: collapse; }
+.recent-table th { padding: 10px 24px; font-size: 10px; font-weight: 700; color: var(--brown-light); text-transform: uppercase; letter-spacing: 1px; text-align: left; background: #FAFAF8; border-bottom: 1px solid var(--border); }
+.recent-table td { padding: 12px 24px; font-size: 13px; border-bottom: 1px solid #F7F5F2; }
+.recent-table tr:last-child td { border: none; }
+.recent-table tr { transition: background 0.1s; cursor: pointer; }
+.recent-table tbody tr:hover { background: #FAFAF8; }
+.src-tag { font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 7px; }
+.src-tag.delivery { background: #FFF5F2; color: var(--red); }
+.src-tag.planeta { background: #ECFDF5; color: var(--green); }
+.src-tag.supplier { background: #EFF6FF; color: var(--blue); }
+.st-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.st-dot.ok { background: var(--green); }
+.st-dot.pending { background: #F59E0B; }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 1100px) {
+  .dash { grid-template-columns: 1fr; }
+  .stat-strip { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; }
+  .content { padding: 16px; }
+  .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .os-footer { flex-direction: column; gap: 12px; }
+  .osf-btn { width: 100%; text-align: center; }
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sb-brand">
+    <div class="sb-logo">S</div>
+    <div>
+      <div class="sb-brand-text">Supply Portal</div>
+      <div class="sb-brand-sub">Burger King</div>
+    </div>
+  </div>
+
+  <div class="sb-section">Меню</div>
+  <button class="sb-item active"><span class="sb-item-icon">&#127968;</span> Главная</button>
+  <button class="sb-item"><span class="sb-item-icon">&#128230;</span> Заказы <span class="badge">3</span></button>
+  <button class="sb-item"><span class="sb-item-icon">&#128203;</span> Остатки</button>
+  <button class="sb-item"><span class="sb-item-icon">&#128269;</span> Карточки</button>
+
+  <div class="sb-section">Аккаунт</div>
+  <button class="sb-item"><span class="sb-item-icon">&#128100;</span> Профиль</button>
+  <button class="sb-item"><span class="sb-item-icon">&#128172;</span> Telegram</button>
+
+  <div class="sb-spacer"></div>
+
+  <div class="sb-rest">
+    <div class="sb-rest-top">
+      <div class="sb-rest-avatar">24</div>
+      <div class="sb-rest-name">Ресторан 24</div>
+    </div>
+    <div class="sb-rest-addr">Минск, пр. Независимости 168</div>
+  </div>
+</aside>
+
+<!-- Main -->
+<div class="main">
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">Главная</div>
+      <div class="topbar-sub">Среда, 9 апреля 2026</div>
+    </div>
+    <div class="topbar-actions">
+      <button class="tb-btn" title="Уведомления">&#128276;</button>
+      <button class="tb-btn" title="Выйти">&#10132;</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- Dashboard -->
+    <div class="dash">
+      <div class="dash-left">
+        <!-- Stats -->
+        <div class="stat-strip">
+          <div class="stat-card" onclick="this.style.transform='scale(0.97)'; setTimeout(()=>this.style.transform='',150)">
+            <div class="sc-num">5</div><div class="sc-label">Подано</div>
+          </div>
+          <div class="stat-card">
+            <div class="sc-num warn">3</div><div class="sc-label">Ожидают</div>
+          </div>
+          <div class="stat-card">
+            <div class="sc-num">127</div><div class="sc-label">Позиций</div>
+          </div>
+          <div class="stat-card">
+            <div class="sc-num">48</div><div class="sc-label">Коробок</div>
+          </div>
+        </div>
+
+        <!-- Alerts -->
+        <div class="alert-list">
+          <div class="alert-card" onclick="this.style.transform='translateX(4px) scale(0.99)'; setTimeout(()=>this.style.transform='',200)">
+            <span class="al-icon">&#128293;</span>
+            <div class="al-body">
+              <div class="al-title">Основная поставка: 3 дня без заявки</div>
+              <div class="al-sub">Среда, Четверг, Пятница</div>
+            </div>
+            <span class="al-arrow">&#8250;</span>
+          </div>
+          <div class="alert-card green">
+            <span class="al-icon">&#127811;</span>
+            <div class="al-body">
+              <div class="al-title">Планета Ресторанов: заявка не подана</div>
+              <div class="al-sub">2 дня доставки</div>
+            </div>
+            <span class="al-arrow">&#8250;</span>
+          </div>
+          <div class="alert-card orange">
+            <span class="al-icon">&#128203;</span>
+            <div class="al-body">
+              <div class="al-title">Сбор остатков</div>
+              <div class="al-sub">Нужно заполнить 45 позиций</div>
+            </div>
+            <span class="al-arrow">&#8250;</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suppliers -->
+      <div class="dash-right">
+        <div class="section-header">
+          <div class="section-title">Заявки</div>
+          <a class="section-link">История</a>
+        </div>
+        <div class="sup-list">
+          <div class="sup-card urgent" onclick="this.style.transform='scale(0.98)'; setTimeout(()=>this.style.transform='',150)">
+            <span class="sup-icon">&#128230;</span>
+            <div class="sup-body">
+              <div class="sup-name">Основная поставка</div>
+              <div class="sup-meta">Сухой / Холод / Мороз</div>
+            </div>
+            <span class="sup-badge open">3</span>
+          </div>
+          <div class="sup-card">
+            <span class="sup-icon">&#127811;</span>
+            <div class="sup-body">
+              <div class="sup-name">Планета Ресторанов</div>
+              <div class="sup-meta">Овощи и зелень</div>
+            </div>
+            <span class="sup-badge open">2</span>
+          </div>
+          <div class="sup-card">
+            <span class="sup-icon">&#129472;</span>
+            <div class="sup-body">
+              <div class="sup-name">Камако</div>
+              <div class="sup-meta">Соусы и майонез</div>
+            </div>
+            <span class="sup-badge done">&#10003;</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Order form -->
+    <div class="order-section">
+      <div class="os-header">
+        <div class="os-title">Основная поставка</div>
+        <div class="os-actions">
+          <button class="os-btn">+ Добавить товар</button>
+          <button class="os-btn">Excel</button>
+        </div>
+      </div>
+
+      <div class="day-bar">
+        <div class="day-tab done"><span class="dt-name">Вт</span><span class="dt-date">8 апр</span></div>
+        <div class="day-tab active"><span class="dt-name">Ср</span><span class="dt-date">9 апр</span></div>
+        <div class="day-tab"><span class="dt-name">Чт</span><span class="dt-date">10 апр</span></div>
+        <div class="day-tab"><span class="dt-name">Пт</span><span class="dt-date">11 апр</span></div>
+        <div class="day-tab"><span class="dt-name">Сб</span><span class="dt-date">12 апр</span></div>
+      </div>
+
+      <div class="dl-bar open">
+        <span>&#128337;</span> Приём заявок открыт до 10:00 (осталось 1ч 23мин)
+      </div>
+
+      <div class="cat-bar">
+        <button class="cat-tab active">Сухой <span class="cat-count">3</span></button>
+        <button class="cat-tab">Холод <span class="cat-count">2</span></button>
+        <button class="cat-tab">Мороз <span class="cat-count">1</span></button>
+      </div>
+
+      <table class="prod-table">
+        <thead>
+          <tr>
+            <th style="width:50%">Товар</th>
+            <th>Кратность</th>
+            <th class="center">Кол-во</th>
+            <th>Комментарий</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="filled">
+            <td><div class="pt-name">Котлета Воппер 83г</div><div class="pt-sku">24011</div></td>
+            <td><span class="pt-tag mult">x4</span></td>
+            <td><input class="pt-input filled" type="number" value="8"></td>
+            <td><input class="pt-comment" type="text" placeholder="Комментарий..."></td>
+          </tr>
+          <tr>
+            <td><div class="pt-name">Булочка Биг Кинг с кунжутом</div><div class="pt-sku">24015</div></td>
+            <td><span class="pt-tag mult">x6</span></td>
+            <td><input class="pt-input" type="number" placeholder="0"></td>
+            <td><input class="pt-comment" type="text" placeholder="Комментарий..."></td>
+          </tr>
+          <tr>
+            <td><div class="pt-name">Соус Биг Кинг 10мл</div><div class="pt-sku">24023</div></td>
+            <td></td>
+            <td><input class="pt-input" type="number" placeholder="0"></td>
+            <td><input class="pt-comment" type="text" placeholder="Комментарий..."></td>
+          </tr>
+          <tr class="filled">
+            <td><div class="pt-name">Сыр Чеддер слайс 200шт</div><div class="pt-sku">24030</div></td>
+            <td><span class="pt-tag mult">x2</span></td>
+            <td><input class="pt-input filled" type="number" value="4"></td>
+            <td><input class="pt-comment" type="text" placeholder="Комментарий..."></td>
+          </tr>
+          <tr>
+            <td><div class="pt-name">Лук кольца панир. 1кг</div><div class="pt-sku">24042</div></td>
+            <td><span class="pt-tag min">мин. 2</span></td>
+            <td><input class="pt-input" type="number" placeholder="0"></td>
+            <td><input class="pt-comment" type="text" placeholder="Комментарий..."></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="os-footer">
+        <div class="osf-stats">
+          <div class="osf-stat"><strong>2</strong> позиции</div>
+          <div class="osf-stat"><strong>12</strong> коробок</div>
+          <div class="osf-stat"><strong>3</strong> пустых</div>
+        </div>
+        <button class="osf-btn" id="submitBtn">Отправить заказ</button>
+      </div>
+    </div>
+
+    <!-- Recent -->
+    <div class="recent-card">
+      <div class="recent-header">
+        <div class="section-title">Последние заказы</div>
+        <a class="section-link">Вся история</a>
+      </div>
+      <table class="recent-table">
+        <thead><tr><th>Источник</th><th>Дата доставки</th><th>Позиций</th><th>Коробок</th><th>Статус</th><th>Подано</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="src-tag delivery">Доставка</span></td>
+            <td>Четверг, 10 апреля</td>
+            <td>12</td><td>48</td>
+            <td><span class="st-dot ok"></span>Подано</td>
+            <td style="color:var(--brown-light)">14:32</td>
+          </tr>
+          <tr>
+            <td><span class="src-tag planeta">Планета</span></td>
+            <td>Среда, 9 апреля</td>
+            <td>6</td><td>—</td>
+            <td><span class="st-dot ok"></span>Подано</td>
+            <td style="color:var(--brown-light)">11:05</td>
+          </tr>
+          <tr>
+            <td><span class="src-tag supplier">Камако</span></td>
+            <td>Вторник, 8 апреля</td>
+            <td>4</td><td>—</td>
+            <td><span class="st-dot pending"></span>Ожидает</td>
+            <td style="color:var(--brown-light)">09:15</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// Sidebar nav
+document.querySelectorAll('.sb-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sb-item').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// Day tabs
+document.querySelectorAll('.day-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+
+// Category tabs
+document.querySelectorAll('.cat-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+
+// Input highlight
+document.querySelectorAll('.pt-input').forEach(input => {
+  input.addEventListener('input', () => {
+    const filled = input.value && parseFloat(input.value) > 0;
+    input.classList.toggle('filled', filled);
+    input.closest('tr').classList.toggle('filled', filled);
+  });
+});
+
+// Submit button
+document.getElementById('submitBtn').addEventListener('click', function() {
+  this.textContent = 'Отправлено!';
+  this.classList.add('success');
+  setTimeout(() => {
+    this.textContent = 'Отправить заказ';
+    this.classList.remove('success');
+  }, 2000);
+});
+
+// Stat cards click
+document.querySelectorAll('.stat-card').forEach(card => {
+  card.addEventListener('click', () => {
+    card.style.transform = 'scale(0.96)';
+    setTimeout(() => card.style.transform = '', 150);
+  });
+});
+</script>
+</body>
+</html>

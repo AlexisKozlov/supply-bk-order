@@ -96,6 +96,9 @@
             </button>
           </div>
           <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
+          <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
+            ⏰ Продлить дедлайн
+          </button>
         </div>
 
         <div v-if="loading" class="rom-loading">Загрузка...</div>
@@ -143,18 +146,22 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in filteredRestaurants" :key="r.number" :class="{ 'rom-row-submitted': r.order_status }">
+                <tr v-for="r in filteredRestaurants" :key="r.number" :class="{ 'rom-row-submitted': r.order_status, 'so-row-skip': isSkipOrder(r) }">
                   <td class="so-td-rest">
                     <span class="rom-td-num">{{ r.number }}</span>
                     <span class="so-rest-addr">{{ r.city || r.region }}{{ r.address ? ', ' + r.address : '' }}</span>
                   </td>
                   <td>
-                    <span class="rom-status" :class="'st-' + (r.order_status || 'none')">
+                    <span v-if="isSkipOrder(r)" class="rom-status st-skip" title="Ресторан отметил, что поставка не нужна">
+                      🚫 Не нужна
+                    </span>
+                    <span v-else class="rom-status" :class="'st-' + (r.order_status || 'none')">
                       {{ statusLabel(r.order_status) }}
                     </span>
                   </td>
                   <td v-for="p in products" :key="p.sku"
                     class="so-td-qty"
+                    :class="{ 'so-td-skip-cell': isSkipOrder(r) }"
                     @dblclick="startEdit(r.number, p.sku)">
                     <template v-if="editCell === `${r.number}_${p.sku}`">
                       <input
@@ -166,6 +173,9 @@
                         @blur="saveEdit"
                         ref="editInputRef"
                       />
+                    </template>
+                    <template v-else-if="isSkipOrder(r)">
+                      <span class="so-qty-zero" title="Поставка не нужна">0</span>
                     </template>
                     <template v-else>
                       <span v-if="getCellAdmin(r.number, p.sku) !== null" class="so-qty-admin" :title="'Исходное: ' + getCellQty(r.number, p.sku)">
@@ -581,6 +591,23 @@ async function loadStatus() {
     console.error(e);
   } finally {
     loading.value = false;
+  }
+}
+
+async function handleExtendDeadline() {
+  if (!activeSessionId.value || !selectedDate.value) return;
+  const time = prompt('Новое время дедлайна для этой даты (HH:MM):', '15:00');
+  if (!time) return;
+  if (!/^\d{1,2}:\d{2}$/.test(time)) {
+    alert('Введите время в формате HH:MM (например 15:00)');
+    return;
+  }
+  try {
+    await store.adminExtendDeadline(activeSessionId.value, selectedDate.value, time);
+    alert(`Дедлайн на ${selectedDate.value} продлён до ${time}`);
+    await loadStatus();
+  } catch (e) {
+    alert('Ошибка: ' + (e.message || 'не удалось продлить дедлайн'));
   }
 }
 
@@ -1005,6 +1032,13 @@ function statusLabel(s) {
   return 'Не подано';
 }
 
+// Заявка-отказ: подана, но без позиций — ресторан отметил «Поставка не нужна»
+function isSkipOrder(r) {
+  if (!r || !r.order_id) return false;
+  if (r.order_status !== 'submitted' && r.order_status !== 'locked') return false;
+  return Number(r.item_count || 0) === 0;
+}
+
 function formatDate(d) {
   if (!d) return '';
   return new Date(d + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
@@ -1124,6 +1158,11 @@ function formatTime(dt) {
 .st-draft { background: #f5f5f5; color: #666; }
 .st-none { background: #fef2f2; color: #dc2626; }
 .st-locked { background: #fef3c7; color: #92400e; }
+.st-skip { background: #fff7ed; color: #c2410c; }
+.so-row-skip { background: #fff7ed !important; }
+.so-row-skip:hover { background: #ffedd5 !important; }
+.so-td-skip-cell { background: #fff7ed; }
+.so-qty-zero { color: #c2410c; font-weight: 700; }
 
 .rom-modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);

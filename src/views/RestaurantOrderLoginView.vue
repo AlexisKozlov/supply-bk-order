@@ -135,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 
@@ -152,34 +152,63 @@ const sessionConflict = ref(false);
 const sessionConflictAgo = ref('');
 const tgLoading = ref(false);
 
+function safeRedirect(target) {
+  // Разрешаем только локальные пути под /restaurant/ — защита от open-redirect
+  if (typeof target === 'string' && /^\/restaurant(\/|$)/.test(target)) return target;
+  return null;
+}
+
+async function handleTgLogin(tgToken, redirectTarget) {
+  tgLoading.value = true;
+  // Очищаем предыдущую сессию (если был залогинен другой ресторан)
+  store.logout();
+  try {
+    const result = await store.loginByTelegram(tgToken);
+    if (result.success) {
+      if (redirectTarget) {
+        router.replace(redirectTarget);
+      } else {
+        router.replace({ name: 'restaurant-cabinet' });
+      }
+      return;
+    }
+    error.value = result.error || 'Ссылка недействительна или истекла';
+  } catch (e) {
+    error.value = e.message || 'Ошибка входа через Telegram';
+  } finally {
+    tgLoading.value = false;
+  }
+  // Убираем токен из URL
+  router.replace({ query: {} });
+}
+
 onMounted(async () => {
   // Автовход по токену из Telegram
   const tgToken = route.query.tg_token;
+  const redirectTarget = safeRedirect(route.query.redirect);
   if (tgToken) {
-    tgLoading.value = true;
-    try {
-      const result = await store.loginByTelegram(tgToken);
-      if (result.success) {
-        router.replace({ name: 'restaurant-cabinet' });
-        return;
-      }
-      error.value = result.error || 'Ссылка недействительна или истекла';
-    } catch (e) {
-      error.value = e.message || 'Ошибка входа через Telegram';
-    } finally {
-      tgLoading.value = false;
-    }
-    // Убираем токен из URL
-    router.replace({ query: {} });
+    await handleTgLogin(tgToken, redirectTarget);
     return;
   }
 
   if (store.isAuthenticated) {
     const valid = await store.validate();
     if (valid) {
-      router.replace({ name: 'restaurant-cabinet' });
+      if (redirectTarget) {
+        router.replace(redirectTarget);
+      } else {
+        router.replace({ name: 'restaurant-cabinet' });
+      }
       return;
     }
+  }
+});
+
+// Если страница уже открыта (например, в Telegram WebApp), а URL поменялся —
+// например, пользователь нажал «Через сайт» для другого ресторана — обработать новый токен
+watch(() => route.query.tg_token, (newToken) => {
+  if (newToken) {
+    handleTgLogin(newToken, safeRedirect(route.query.redirect));
   }
 });
 

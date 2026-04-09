@@ -85,16 +85,29 @@
             @dragover.prevent
             @drop="onDropUnassigned($event)">
             <div class="tl-section-header">
-              Нераспределённые <span class="tl-section-count">{{ store.unassignedItems.length }}</span>
+              Нераспределённые <span class="tl-section-count">{{ filteredItems.length }}</span>
             </div>
 
-            <div v-if="!store.unassignedItems.length" class="tl-empty-section">
-              Все заказы распределены
+            <!-- Фильтры -->
+            <div class="tl-filters" v-if="store.orders.length">
+              <div class="tl-filter-row">
+                <input type="text" v-model="filterRestaurant" placeholder="Ресторан №" class="tl-filter-input" />
+                <div class="tl-filter-cats">
+                  <button class="tl-filter-cat" :class="{ active: !filterCategory }" @click="filterCategory = ''">Все</button>
+                  <button class="tl-filter-cat cat-dry" :class="{ active: filterCategory === 'Сухой' }" @click="filterCategory = filterCategory === 'Сухой' ? '' : 'Сухой'">Сухой</button>
+                  <button class="tl-filter-cat cat-cold" :class="{ active: filterCategory === 'Холод' }" @click="filterCategory = filterCategory === 'Холод' ? '' : 'Холод'">Холод</button>
+                  <button class="tl-filter-cat cat-frozen" :class="{ active: filterCategory === 'Мороз' }" @click="filterCategory = filterCategory === 'Мороз' ? '' : 'Мороз'">Мороз</button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!filteredItems.length" class="tl-empty-section">
+              {{ store.unassignedItems.length ? 'Ничего не найдено' : 'Все заказы распределены' }}
             </div>
 
             <!-- groupBy = restaurant -->
             <template v-if="store.groupBy === 'restaurant'">
-              <div v-for="item in store.unassignedItems" :key="item.key"
+              <div v-for="item in filteredItems" :key="item.key"
                 class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
                 <div class="tl-card-header">
                   <span class="tl-card-num">{{ item.restaurant_number }}</span>
@@ -106,31 +119,31 @@
                     {{ cat }}: {{ data.pallets }}п / {{ (+data.weight).toFixed(0) }}кг
                   </span>
                 </div>
-                <div class="tl-card-total">{{ (+item.pallets).toFixed(1) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
+                <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
               </div>
             </template>
 
             <!-- groupBy = category -->
             <template v-else-if="store.groupBy === 'category'">
-              <div v-for="item in store.unassignedItems" :key="item.key"
+              <div v-for="item in filteredItems" :key="item.key"
                 class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
                 <div class="tl-card-header">
                   <span class="tl-card-num">{{ item.restaurant_number }}</span>
                   <span class="tl-cat-badge" :class="'cat-' + catClass(item.category)">{{ item.category }}</span>
                 </div>
-                <div class="tl-card-total">{{ (+item.pallets).toFixed(1) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
+                <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
               </div>
             </template>
 
             <!-- groupBy = item -->
             <template v-else>
-              <div v-for="item in store.unassignedItems" :key="item.key"
+              <div v-for="item in filteredItems" :key="item.key"
                 class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
                 <div class="tl-card-header">
                   <span class="tl-card-num">{{ item.restaurant_number }}</span>
                   <span class="tl-card-sku">{{ item.sku }} {{ item.product_name }}</span>
                 </div>
-                <div class="tl-card-total">{{ item.quantity }} шт. | {{ (+item.pallets).toFixed(1) }} палл.</div>
+                <div class="tl-card-total">{{ item.quantity }} шт. | {{ fmtPallets(item.pallets) }} палл.</div>
               </div>
             </template>
           </div>
@@ -188,7 +201,7 @@
                   draggable="true" @dragstart="onDragStartFromTruck($event, tIdx, aIdx, a)">
                   <span class="tl-assigned-rest">{{ a.restaurant_number }}</span>
                   <span class="tl-assigned-cat" v-if="a.category" :class="'cat-' + catClass(a.category)">{{ a.category }}</span>
-                  <span class="tl-assigned-stats">{{ (+a.pallets).toFixed(1) }}п | {{ (+a.weight_kg).toFixed(0) }}кг</span>
+                  <span class="tl-assigned-stats">{{ fmtPallets(a.pallets) }}п | {{ (+a.weight_kg).toFixed(0) }}кг</span>
                   <button class="tl-btn-unassign" @click="store.unassign(tIdx, aIdx)">&#10005;</button>
                 </div>
                 <div v-if="!truck.assignments.length" class="tl-truck-empty">
@@ -255,7 +268,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useTruckLoadingStore } from '@/stores/truckLoadingStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { exportTruckLoading } from '@/lib/truckLoadingExport.js';
@@ -276,6 +289,42 @@ const newVehicle = ref({ name: '', capacity_pallets: 33, capacity_kg: 20000 });
 
 // Add truck dropdown
 const showAddTruck = ref(false);
+
+// Filters
+const filterCategory = ref('');       // '' = все, 'Сухой', 'Холод', 'Мороз'
+const filterRestaurant = ref('');     // поиск по номеру ресторана
+
+const filteredItems = computed(() => {
+  let items = store.unassignedItems;
+  const cat = filterCategory.value;
+  const rest = filterRestaurant.value.trim();
+
+  if (cat) {
+    items = items.filter(item => {
+      // Для группировки «по ресторанам» — проверяем наличие категории в заказе
+      if (item.categories) return item.categories[cat];
+      // Для группировки «по режимам» / «по позициям» — прямое совпадение
+      return item.category === cat;
+    });
+  }
+
+  if (rest) {
+    items = items.filter(item => String(item.restaurant_number).includes(rest));
+  }
+
+  return items;
+});
+
+// --- Format helpers ---
+
+function fmtPallets(v) {
+  const n = +v;
+  if (n === 0) return '0';
+  if (n >= 1) return n.toFixed(1);
+  // Меньше 1 — показываем 2 знака, но не «0.00»
+  const s = n.toFixed(2);
+  return s === '0.00' ? n.toFixed(3) : s;
+}
 
 // --- Date helpers ---
 
@@ -448,9 +497,7 @@ onMounted(async () => {
 
 <style scoped>
 .tl-page {
-  padding: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 20px 28px;
 }
 
 /* Toolbar */
@@ -806,6 +853,76 @@ onMounted(async () => {
   font-size: 13px;
   border: 2px dashed #e0d5c8;
   border-radius: 10px;
+}
+
+/* Filters */
+.tl-filters {
+  margin-bottom: 10px;
+}
+
+.tl-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tl-filter-input {
+  width: 100px;
+  padding: 5px 8px;
+  border: 2px solid #e0d5c8;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #502314;
+  background: white;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.tl-filter-input:focus {
+  border-color: #D62300;
+}
+
+.tl-filter-cats {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tl-filter-cat {
+  padding: 4px 10px;
+  border: 2px solid #e0d5c8;
+  border-radius: 6px;
+  background: white;
+  font-size: 11px;
+  font-weight: 600;
+  color: #502314;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tl-filter-cat:hover {
+  border-color: #502314;
+}
+
+.tl-filter-cat.active {
+  border-color: #502314;
+  background: #502314;
+  color: white;
+}
+
+.tl-filter-cat.cat-dry.active {
+  background: #92400e;
+  border-color: #92400e;
+}
+
+.tl-filter-cat.cat-cold.active {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.tl-filter-cat.cat-frozen.active {
+  background: #7c3aed;
+  border-color: #7c3aed;
 }
 
 /* Cards (unassigned) */

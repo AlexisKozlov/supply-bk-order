@@ -148,7 +148,8 @@ function tlGetOrdersForDate($pdo, $date) {
         $items = $pdo->prepare("
             SELECT oi.id as item_id, oi.sku, oi.product_name, oi.category, oi.quantity,
                    COALESCE(p.weight_brutto, 0) as weight_brutto,
-                   COALESCE(p.boxes_per_pallet, 0) as boxes_per_pallet
+                   COALESCE(p.boxes_per_pallet, 0) as boxes_per_pallet,
+                   COALESCE(p.multiplicity, 1) as multiplicity
             FROM ro_order_items oi
             LEFT JOIN products p ON p.sku = oi.sku AND p.is_active = 1
             WHERE oi.order_id = ?
@@ -166,9 +167,16 @@ function tlGetOrdersForDate($pdo, $date) {
             $qty = floatval($item['quantity']);
             $weightBrutto = floatval($item['weight_brutto']); // в граммах
             $bpp = floatval($item['boxes_per_pallet']);
+            $mult = floatval($item['multiplicity']);
 
-            $itemWeight = $qty * $weightBrutto / 1000; // в кг
-            $itemPallets = ($bpp > 0) ? $qty / $bpp : 0;
+            // Штучный товар (multiplicity > 1): количество в штуках → коробки
+            $boxes = $qty;
+            if ($mult > 1) {
+                $boxes = $qty / $mult;
+            }
+
+            $itemWeight = $qty * $weightBrutto / 1000; // в кг (вес считаем по штукам)
+            $itemPallets = ($bpp > 0) ? $boxes / $bpp : 0;
 
             $cat = $item['category'] ?: 'Сухой';
 
@@ -194,14 +202,22 @@ function tlGetOrdersForDate($pdo, $date) {
             ];
         }
 
-        // Округление паллет по категориям (ceil)
+        // Округление паллет по категориям: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх.
+        // Если в категории есть товар (raw > 0) — минимум 1 паллета.
         $catResult = [];
         foreach ($categories as $catName => $catData) {
-            $palletsCeil = ceil($catData['pallets_raw']);
-            $totalPallets += $palletsCeil;
+            $raw = $catData['pallets_raw'];
+            if ($raw > 0) {
+                $frac = $raw - floor($raw);
+                $palletsRounded = ($frac > 0.2) ? ceil($raw) : floor($raw);
+                if ($palletsRounded < 1) $palletsRounded = 1;
+            } else {
+                $palletsRounded = 0;
+            }
+            $totalPallets += $palletsRounded;
             $catResult[$catName] = [
                 'weight' => round($catData['weight'], 2),
-                'pallets' => (int)$palletsCeil,
+                'pallets' => (int)$palletsRounded,
                 'items_count' => $catData['items_count'],
             ];
         }

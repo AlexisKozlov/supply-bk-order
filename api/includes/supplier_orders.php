@@ -215,6 +215,11 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                     ] : null,
                 ];
             }
+
+            // Сортировка: новая (поздняя) дата доставки слева, ранние справа
+            usort($availableDates, function ($a, $b) {
+                return strcmp($b['delivery_date'], $a['delivery_date']);
+            });
         }
 
         $result[] = [
@@ -289,7 +294,8 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
 
     if (!$order) soRespond(['order' => null]);
 
-    $items = $pdo->prepare("SELECT product_id, sku, product_name, quantity FROM so_order_items WHERE order_id = ? ORDER BY product_name");
+    // quantity — исходное значение от ресторана, admin_qty — правка закупщика (если была)
+    $items = $pdo->prepare("SELECT product_id, sku, product_name, quantity, admin_qty FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0 ORDER BY product_name");
     $items->execute([$order['id']]);
 
     soRespond([
@@ -320,8 +326,8 @@ if ($soAction === 'my-orders' && $method === 'GET') {
     $s = $pdo->prepare("
         SELECT o.id, o.delivery_date, o.order_date, o.status, o.submitted_at, o.supplier_id,
                s.short_name as supplier_name,
-               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id) as item_count,
-               (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
+               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
+               (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
         FROM so_orders o
         JOIN suppliers s ON s.id = o.supplier_id
         WHERE {$where}
@@ -342,9 +348,11 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     $deliveryDate = $body['delivery_date'] ?? '';
     $orderDate = $body['order_date'] ?? '';
     $items = $body['items'] ?? [];
+    // Флаг «Поставка не нужна» — пустая заявка-отказ
+    $skipDelivery = !empty($body['skip_delivery']);
 
     if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата доставки'], 400);
-    if (empty($items)) soRespond(['error' => 'Заявка пуста'], 400);
+    if (empty($items) && !$skipDelivery) soRespond(['error' => 'Заявка пуста'], 400);
 
     $session = soGetActiveSession($pdo, $supplierId);
     if (!$session) soRespond(['error' => 'Нет активной сессии приёма заявок для этого поставщика'], 400);
@@ -396,6 +404,80 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     } catch (Exception $e) {
         $pdo->rollBack();
         soRespond(['error' => 'Ошибка сохранения заявки'], 500);
+    }
+
+    // Уведомление в Telegram о принятой/обновлённой заявке
+    try {
+        $isNew = !$existingOrder;
+        $deliveryDateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+
+        // Название поставщика
+        $sn = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+        $sn->execute([$supplierId]);
+        $supplierName = $sn->fetchColumn() ?: 'поставщику';
+
+        $fmtQty = function($q) {
+            $s = number_format((float)$q, 1, '.', '');
+            return rtrim(rtrim($s, '0'), '.');
+        };
+        $esc = function($s) {
+            return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        };
+
+        // Подтягиваем единицы измерения из products по sku
+        $skus = [];
+        foreach ($items as $it) {
+            $sk = trim((string)($it['sku'] ?? ''));
+            if ($sk !== '' && floatval($it['quantity'] ?? 0) > 0) $skus[$sk] = true;
+        }
+        $unitBySku = [];
+        if (!empty($skus)) {
+            $skuList = array_keys($skus);
+            $ph = implode(',', array_fill(0, count($skuList), '?'));
+            $us = $pdo->prepare("SELECT sku, unit_of_measure FROM products WHERE sku IN ($ph)");
+            $us->execute($skuList);
+            foreach ($us->fetchAll() as $up) {
+                $unitBySku[$up['sku']] = $up['unit_of_measure'] ?: '';
+            }
+        }
+
+        $isSkip = $skipDelivery && $totalItems === 0;
+        if ($isSkip) {
+            $title = $isNew ? '🚫 <b>Поставка не нужна</b>' : '🚫 <b>Поставка отменена</b>';
+        } else {
+            $title = $isNew ? '✅ <b>Заявка отправлена</b>' : '✏️ <b>Заявка обновлена</b>';
+        }
+        $lines = [];
+        $lines[] = $title;
+        $lines[] = '';
+        $lines[] = "🏪 <b>Поставщик:</b> " . $esc($supplierName);
+        $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
+        if (!$isSkip) {
+            $lines[] = "📋 <b>Позиций:</b> {$totalItems}";
+            $lines[] = '';
+            $lines[] = '<b>Состав:</b>';
+            foreach ($items as $it) {
+                $q = floatval($it['quantity'] ?? 0);
+                if ($q <= 0) continue;
+                $sku = $esc($it['sku'] ?? '');
+                $name = $esc($it['product_name'] ?? '');
+                $unit = $esc($unitBySku[$it['sku'] ?? ''] ?? '');
+                $unitStr = $unit !== '' ? " {$unit}" : '';
+                $lines[] = "• <code>{$sku}</code> {$name} — <b>" . $fmtQty($q) . $unitStr . "</b>";
+            }
+        } else {
+            $lines[] = '';
+            $lines[] = '<i>Ресторан отметил, что поставка на эту дату не требуется.</i>';
+        }
+
+        $msg = implode("\n", $lines);
+        if (mb_strlen($msg) > 3900) {
+            $msg = mb_substr($msg, 0, 3900) . "\n\n…(сообщение обрезано)";
+        }
+
+        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg);
+    } catch (Exception $e) {
+        // Уведомление не критично — игнорируем ошибку
     }
 
     soRespond([
@@ -677,10 +759,35 @@ if ($soAction === 'admin') {
 
         $val = ($adminQty !== null && $adminQty !== '') ? (float)$adminQty : null;
 
+        // Данные для уведомления
+        $notify = null;
+
         if ($itemId) {
-            // Обновляем существующую позицию
+            // Получаем текущее состояние ДО обновления
+            $cur = $pdo->prepare("
+                SELECT oi.product_name, oi.sku, oi.quantity, oi.admin_qty,
+                       o.restaurant_number, o.delivery_date, s.short_name as supplier_name
+                FROM so_order_items oi
+                JOIN so_orders o ON o.id = oi.order_id
+                JOIN suppliers s ON s.id = o.supplier_id
+                WHERE oi.id = ?
+            ");
+            $cur->execute([$itemId]);
+            $info = $cur->fetch();
+            if ($info) {
+                $oldVal = ($info['admin_qty'] !== null) ? (float)$info['admin_qty'] : (float)$info['quantity'];
+                $notify = [
+                    'restaurant_number' => $info['restaurant_number'],
+                    'supplier_name' => $info['supplier_name'],
+                    'delivery_date' => $info['delivery_date'],
+                    'sku' => $info['sku'],
+                    'product_name' => $info['product_name'],
+                    'old_val' => $oldVal,
+                    'new_val' => $val,
+                ];
+            }
             $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $itemId]);
-            soRespond(['success' => true]);
+            $reload = false;
         } elseif ($restNum && $deliveryDate && $sku && $sessionId && $suppId) {
             // Ищем заказ ресторана
             $orderStmt = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
@@ -700,22 +807,82 @@ if ($soAction === 'admin') {
             }
 
             // Ищем позицию по SKU
-            $existingItem = $pdo->prepare("SELECT id FROM so_order_items WHERE order_id = ? AND sku = ?");
+            $existingItem = $pdo->prepare("SELECT id, quantity, admin_qty, product_name FROM so_order_items WHERE order_id = ? AND sku = ?");
             $existingItem->execute([$orderId, $sku]);
             $item = $existingItem->fetch();
 
             if ($item) {
+                $oldVal = ($item['admin_qty'] !== null) ? (float)$item['admin_qty'] : (float)$item['quantity'];
                 $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $item['id']]);
             } else {
+                $oldVal = 0;
                 // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе)
                 $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, 0, ?)")
                     ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val]);
             }
 
-            soRespond(['success' => true, 'reload' => true]);
+            // Подтянем название поставщика для уведомления
+            $sn = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+            $sn->execute([$suppId]);
+            $supplierName = $sn->fetchColumn() ?: 'поставщику';
+
+            $notify = [
+                'restaurant_number' => $restNum,
+                'supplier_name' => $supplierName,
+                'delivery_date' => $deliveryDate,
+                'sku' => $sku,
+                'product_name' => $item ? $item['product_name'] : ($productName ?? ''),
+                'old_val' => $oldVal,
+                'new_val' => $val,
+            ];
+
+            $reload = true;
         } else {
             soRespond(['error' => 'Недостаточно данных'], 400);
         }
+
+        // Уведомление в Telegram о ручной правке закупщиком
+        if ($notify) {
+            try {
+                // Единица измерения товара
+                $us = $pdo->prepare("SELECT unit_of_measure FROM products WHERE sku = ? LIMIT 1");
+                $us->execute([$notify['sku']]);
+                $unit = $us->fetchColumn() ?: '';
+                $unitStr = $unit ? ' ' . $unit : '';
+
+                $fmt = function($v) {
+                    if ($v === null) return null;
+                    $s = number_format((float)$v, 1, '.', '');
+                    return rtrim(rtrim($s, '0'), '.');
+                };
+                $esc = function($s) {
+                    return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                };
+
+                $by = $sessionUser ? ($sessionUser['name'] ?? 'закупщик') : 'закупщик';
+                $deliveryFmt = (new DateTime($notify['delivery_date']))->format('d.m.Y');
+                $oldStr = $notify['old_val'] > 0 ? ($fmt($notify['old_val']) . $unitStr) : '—';
+                $newStr = $notify['new_val'] !== null && $notify['new_val'] > 0 ? ($fmt($notify['new_val']) . $unitStr) : '—';
+
+                $lines = [];
+                $lines[] = '✏️ <b>Закупщик изменил заявку</b>';
+                $lines[] = '';
+                $lines[] = '🏪 <b>Поставщик:</b> ' . $esc($notify['supplier_name']);
+                $lines[] = '📅 <b>Доставка:</b> ' . $deliveryFmt;
+                $lines[] = '';
+                $lines[] = '<code>' . $esc($notify['sku']) . '</code> ' . $esc($notify['product_name']);
+                $lines[] = $oldStr . ' → <b>' . $newStr . '</b>';
+                $lines[] = '';
+                $lines[] = '<i>Изменил: ' . $esc($by) . '</i>';
+
+                $msg = implode("\n", $lines);
+                roNotifyRestaurant($pdo, $notify['restaurant_number'], $msg);
+            } catch (Exception $e) {
+                // Уведомление не критично
+            }
+        }
+
+        soRespond(['success' => true, 'reload' => !empty($reload)]);
     }
 
     // --- Удаление заявки ---
@@ -922,6 +1089,30 @@ if ($soAction === 'admin') {
             $ins->execute([$supplierId, (int)$r['delivery_dow'], (int)$r['deadline_dow'], $r['deadline_time'] ?? '14:00:00']);
         }
         soRespond(['success' => true, 'count' => count($rules)]);
+    }
+
+    // --- Разовое продление дедлайна на конкретную дату доставки ---
+    if ($adminAction === 'extend-deadline' && $method === 'POST') {
+        $sessionId = $body['session_id'] ?? null;
+        $deliveryDate = $body['delivery_date'] ?? '';
+        $deadlineTime = $body['deadline_time'] ?? '';
+
+        if (!$sessionId || !$deliveryDate || !$deadlineTime) {
+            soRespond(['error' => 'Не указаны сессия, дата доставки или новое время'], 400);
+        }
+        // Нормализуем время к формату HH:MM:SS
+        if (preg_match('/^(\d{1,2}):(\d{2})$/', $deadlineTime, $m)) {
+            $deadlineTime = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
+        } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $deadlineTime)) {
+            soRespond(['error' => 'Неверный формат времени, используйте HH:MM'], 400);
+        }
+
+        $createdBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+        $pdo->prepare("INSERT INTO so_deadline_overrides (session_id, delivery_date, deadline_time, created_by) VALUES (?, ?, ?, ?)
+                       ON DUPLICATE KEY UPDATE deadline_time = VALUES(deadline_time), created_by = VALUES(created_by)")
+            ->execute([$sessionId, $deliveryDate, $deadlineTime, $createdBy]);
+
+        soRespond(['success' => true, 'session_id' => (int)$sessionId, 'delivery_date' => $deliveryDate, 'deadline_time' => $deadlineTime]);
     }
 
     // --- Шаблоны товаров ---

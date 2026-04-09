@@ -71,6 +71,7 @@
             <span>{{ p.qty_per_box || '?' }} {{ p.unit_of_measure || 'шт' }}/кор</span>
             <span v-if="p.boxes_per_pallet">{{ p.boxes_per_pallet }}/пал</span>
             <span v-if="p.multiplicity > 1">×{{ p.multiplicity }}</span>
+            <span v-if="p.is_traceable == 1" class="db-card-traceable-badge">прослеж.</span>
             <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">скрыта</span>
           </div>
           <div v-if="!isViewer" class="db-card-btns">
@@ -732,6 +733,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .analog-item:hover { background:rgba(245,166,35,.04); }
 .db-card-inactive { opacity:0.5; }
 .db-card-inactive-badge { background:#FFEBEE; color:#E57373; font-weight:600; border:1px solid #E57373; }
+.db-card-traceable-badge { background:#FFF9C4; color:#F9A825; font-weight:600; border:1px solid #F9A825; }
 
 /* ═══ Sort bar ═══ */
 .db-sort-bar {

@@ -57,10 +57,16 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data.orders || [];
   }
 
-  async function submitOrder(supplierId, deliveryDate, orderDate, items) {
+  async function submitOrder(supplierId, deliveryDate, orderDate, items, opts = {}) {
     return api('submit-order', {
       method: 'POST',
-      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate, order_date: orderDate, items }),
+      body: JSON.stringify({
+        supplier_id: supplierId,
+        delivery_date: deliveryDate,
+        order_date: orderDate,
+        items,
+        skip_delivery: !!opts.skipDelivery,
+      }),
     });
   }
 
@@ -176,6 +182,13 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  async function adminExtendDeadline(sessionId, deliveryDate, deadlineTime) {
+    return api('admin/extend-deadline', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, deadline_time: deadlineTime }),
+    });
+  }
+
   async function adminGetTemplates(supplierId, legalEntity) {
     const params = new URLSearchParams({ supplier_id: supplierId });
     if (legalEntity) params.set('legal_entity', legalEntity);
@@ -211,7 +224,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminUpdateOrder, adminDeleteOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminReopenSession, adminDeleteSession, adminUpdateSession, adminGetSessions,
     adminGetSchedules, adminSaveSchedules,
-    adminGetDeadlineRules, adminSaveDeadlineRules,
+    adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline,
     adminGetTemplates, adminSaveTemplates,
     adminUpdateQty, adminGetExport,
   };

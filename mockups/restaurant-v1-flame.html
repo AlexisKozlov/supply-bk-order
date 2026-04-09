@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Вариант 1 — Flame Dark</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+body { font-family: 'Inter', system-ui, sans-serif; background: #0D0906; color: #F5E6D0; min-height: 100vh; overflow-x: hidden; }
+
+/* ═══ Header ═══ */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; position: sticky; top: 0; z-index: 100;
+  background: rgba(13,9,6,0.85); backdrop-filter: blur(24px) saturate(1.8);
+  border-bottom: 1px solid rgba(214,35,0,0.15);
+}
+.header-left { display: flex; align-items: center; gap: 14px; }
+.logo { width: 44px; height: 44px; border-radius: 14px; background: linear-gradient(135deg, #D62300, #FF6B35); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; color: white; box-shadow: 0 4px 20px rgba(214,35,0,0.4); }
+.header-title { font-size: 18px; font-weight: 800; letter-spacing: -0.5px; }
+.header-sub { font-size: 11px; color: rgba(245,230,208,0.4); font-weight: 500; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.rest-chip { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); }
+.rest-num { width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #D62300, #FF6B35); color: white; font-size: 14px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.rest-info { font-size: 12px; font-weight: 600; }
+.rest-addr { font-size: 10px; color: rgba(245,230,208,0.4); }
+.btn-icon { width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: rgba(245,230,208,0.5); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.2s; }
+.btn-icon:hover { background: rgba(255,255,255,0.08); color: #F5E6D0; }
+
+/* ═══ Nav ═══ */
+.nav { display: flex; gap: 4px; padding: 8px 24px; overflow-x: auto; }
+.nav-btn { padding: 10px 20px; border-radius: 12px; border: none; background: transparent; color: rgba(245,230,208,0.45); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.2s; white-space: nowrap; position: relative; }
+.nav-btn:hover { color: rgba(245,230,208,0.7); background: rgba(255,255,255,0.04); }
+.nav-btn.active { color: #FF6B35; background: rgba(214,35,0,0.12); }
+.nav-btn .badge { position: absolute; top: 4px; right: 4px; min-width: 18px; height: 18px; border-radius: 9px; background: #D62300; color: white; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
+
+/* ═══ Content ═══ */
+.content { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+
+/* Urgent cards — glass morphism */
+.urgent-cards { display: flex; gap: 12px; margin-bottom: 24px; overflow-x: auto; padding: 2px; }
+.urgent-card {
+  flex: 0 0 auto; min-width: 260px; padding: 18px 20px;
+  background: rgba(214,35,0,0.08); border: 1px solid rgba(214,35,0,0.2);
+  border-radius: 16px; cursor: pointer; transition: all 0.25s;
+  backdrop-filter: blur(10px); position: relative; overflow: hidden;
+}
+.urgent-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #D62300, #FF6B35); opacity: 0.8; }
+.urgent-card:hover { transform: translateY(-2px); border-color: rgba(214,35,0,0.4); box-shadow: 0 8px 32px rgba(214,35,0,0.15); }
+.urgent-card.green { background: rgba(22,163,74,0.08); border-color: rgba(22,163,74,0.2); }
+.urgent-card.green::before { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.uc-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.uc-icon { font-size: 24px; }
+.uc-title { font-size: 14px; font-weight: 700; }
+.uc-sub { font-size: 12px; color: rgba(245,230,208,0.5); }
+
+/* Stats grid */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 28px; }
+.stat-card {
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 16px; padding: 20px; text-align: center; cursor: pointer;
+  transition: all 0.2s;
+}
+.stat-card:hover { border-color: rgba(214,35,0,0.3); background: rgba(214,35,0,0.05); }
+.stat-num { font-size: 32px; font-weight: 900; letter-spacing: -1px; background: linear-gradient(135deg, #FF6B35, #D62300); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.stat-label { font-size: 11px; color: rgba(245,230,208,0.4); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+/* Section title */
+.section-title { font-size: 13px; font-weight: 700; color: rgba(245,230,208,0.3); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 14px; }
+
+/* Day tabs — pill style */
+.day-tabs { display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; padding: 2px; }
+.day-tab {
+  flex: 0 0 auto; padding: 12px 18px; border-radius: 14px;
+  border: 1.5px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03);
+  cursor: pointer; text-align: center; transition: all 0.2s; min-width: 80px;
+}
+.day-tab:hover { border-color: rgba(255,255,255,0.15); }
+.day-tab.active { border-color: #D62300; background: rgba(214,35,0,0.12); }
+.day-tab.done { border-color: rgba(22,163,74,0.4); }
+.day-tab.done::after { content: '\2713'; position: absolute; top: -4px; right: -4px; background: #16a34a; color: white; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; display: flex; align-items: center; justify-content: center; }
+.day-name { display: block; font-size: 12px; font-weight: 700; color: rgba(245,230,208,0.7); }
+.day-date { display: block; font-size: 11px; color: rgba(245,230,208,0.35); margin-top: 2px; }
+
+/* Order table */
+.order-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.order-table th {
+  padding: 10px 14px; font-size: 10px; font-weight: 700; color: rgba(245,230,208,0.3);
+  text-transform: uppercase; letter-spacing: 1px; text-align: left;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.order-table th.center { text-align: center; }
+.order-table td {
+  padding: 12px 14px; font-size: 13px; color: rgba(245,230,208,0.8);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.15s;
+}
+.order-table tr:hover td { background: rgba(255,255,255,0.02); }
+.sku { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: rgba(245,230,208,0.35); margin-right: 6px; }
+.prod-name { font-weight: 600; }
+.qty-input {
+  width: 72px; padding: 8px 10px; border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 10px; background: rgba(255,255,255,0.04); color: #F5E6D0;
+  font-size: 14px; text-align: center; font-family: inherit; font-weight: 700;
+  transition: all 0.2s;
+}
+.qty-input:focus { outline: none; border-color: #D62300; background: rgba(214,35,0,0.08); box-shadow: 0 0 0 4px rgba(214,35,0,0.1); }
+.qty-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.mult { font-size: 10px; color: rgba(245,230,208,0.3); padding: 2px 6px; background: rgba(255,255,255,0.05); border-radius: 4px; }
+
+/* Submit area */
+.submit-bar {
+  position: sticky; bottom: 0; left: 0; right: 0;
+  background: rgba(13,9,6,0.9); backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 16px 24px; display: flex; align-items: center; justify-content: space-between;
+  margin: 0 -24px;
+}
+.submit-summary { display: flex; gap: 20px; font-size: 13px; color: rgba(245,230,208,0.5); }
+.submit-summary strong { color: #FF6B35; font-weight: 800; }
+.submit-btn {
+  padding: 14px 40px; border: none; border-radius: 14px;
+  background: linear-gradient(135deg, #D62300, #FF6B35); color: white;
+  font-size: 15px; font-weight: 800; cursor: pointer; font-family: inherit;
+  transition: all 0.2s; box-shadow: 0 4px 20px rgba(214,35,0,0.35);
+}
+.submit-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 32px rgba(214,35,0,0.45); }
+
+/* Quick actions */
+.actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 28px; }
+.action-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 20px 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02); cursor: pointer; transition: all 0.2s;
+  text-decoration: none; color: inherit;
+}
+.action-card:hover { border-color: rgba(214,35,0,0.3); transform: translateY(-2px); }
+.action-icon { font-size: 28px; }
+.action-label { font-size: 11px; font-weight: 700; color: rgba(245,230,208,0.5); }
+
+/* Recent orders */
+.recent-list { display: flex; flex-direction: column; gap: 6px; }
+.recent-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04); transition: all 0.15s;
+}
+.recent-item:hover { background: rgba(255,255,255,0.04); }
+.recent-left { display: flex; align-items: center; gap: 10px; }
+.recent-source { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.recent-source.del { background: rgba(214,35,0,0.12); color: #FF6B35; }
+.recent-source.veg { background: rgba(22,163,74,0.12); color: #4ade80; }
+.recent-source.sup { background: rgba(37,99,235,0.12); color: #60a5fa; }
+.recent-date { font-size: 13px; font-weight: 600; }
+.recent-right { display: flex; align-items: center; gap: 12px; font-size: 12px; color: rgba(245,230,208,0.4); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-dot.ok { background: #16a34a; box-shadow: 0 0 6px rgba(22,163,74,0.5); }
+.status-dot.pending { background: #f59e0b; box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+
+/* Glow effects */
+.glow-red { position: fixed; width: 400px; height: 400px; border-radius: 50%; background: radial-gradient(circle, rgba(214,35,0,0.08) 0%, transparent 70%); pointer-events: none; z-index: -1; }
+
+@media (max-width: 768px) {
+  .header { padding: 12px 16px; }
+  .content { padding: 16px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .rest-info, .rest-addr { display: none; }
+}
+</style>
+</head>
+<body>
+  <div class="glow-red" style="top: -100px; right: -100px;"></div>
+  <div class="glow-red" style="bottom: -150px; left: -150px; opacity: 0.5;"></div>
+
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">S</div>
+      <div>
+        <div class="header-title">Supply Portal</div>
+        <div class="header-sub">Burger King Supply Chain</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="rest-chip">
+        <div class="rest-num">24</div>
+        <div>
+          <div class="rest-info">Ресторан 24</div>
+          <div class="rest-addr">Минск, пр. Независимости</div>
+        </div>
+      </div>
+      <button class="btn-icon" title="Профиль">&#9881;</button>
+      <button class="btn-icon" title="Выйти">&#10132;</button>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <button class="nav-btn active">Главная</button>
+    <button class="nav-btn">Заказы <span class="badge">3</span></button>
+    <button class="nav-btn">Остатки</button>
+    <button class="nav-btn">Профиль</button>
+  </nav>
+
+  <main class="content">
+    <!-- Urgent cards -->
+    <div class="urgent-cards">
+      <div class="urgent-card" onclick="this.style.transform='scale(0.98)'; setTimeout(()=>this.style.transform='',150)">
+        <div class="uc-top">
+          <span class="uc-icon">&#128293;</span>
+          <span class="uc-title">3 дня без заявки</span>
+        </div>
+        <div class="uc-sub">Основная поставка: Среда, Четверг, Пятница</div>
+      </div>
+      <div class="urgent-card green">
+        <div class="uc-top">
+          <span class="uc-icon">&#127811;</span>
+          <span class="uc-title">Планета Ресторанов</span>
+        </div>
+        <div class="uc-sub">Заявка не подана, 2 дня доставки</div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-num">5</div>
+        <div class="stat-label">Подано</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">3</div>
+        <div class="stat-label">Ожидают</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">127</div>
+        <div class="stat-label">Позиций</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">48</div>
+        <div class="stat-label">Коробок</div>
+      </div>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="section-title">Быстрые действия</div>
+    <div class="actions-grid">
+      <a class="action-card">
+        <span class="action-icon">&#128230;</span>
+        <span class="action-label">Заказы</span>
+      </a>
+      <a class="action-card">
+        <span class="action-icon">&#128269;</span>
+        <span class="action-label">Карточки</span>
+      </a>
+      <a class="action-card">
+        <span class="action-icon">&#128203;</span>
+        <span class="action-label">Остатки</span>
+      </a>
+      <a class="action-card">
+        <span class="action-icon">&#9881;</span>
+        <span class="action-label">Профиль</span>
+      </a>
+    </div>
+
+    <!-- Recent orders -->
+    <div class="section-title">Последние заказы</div>
+    <div class="recent-list">
+      <div class="recent-item">
+        <div class="recent-left">
+          <span class="recent-source del">Доставка</span>
+          <span class="recent-date">Четверг, 10 апр.</span>
+        </div>
+        <div class="recent-right">
+          <span>12 поз.</span>
+          <span class="status-dot ok"></span>
+        </div>
+      </div>
+      <div class="recent-item">
+        <div class="recent-left">
+          <span class="recent-source veg">Планета</span>
+          <span class="recent-date">Среда, 9 апр.</span>
+        </div>
+        <div class="recent-right">
+          <span>6 поз.</span>
+          <span class="status-dot ok"></span>
+        </div>
+      </div>
+      <div class="recent-item">
+        <div class="recent-left">
+          <span class="recent-source sup">Камако</span>
+          <span class="recent-date">Вторник, 8 апр.</span>
+        </div>
+        <div class="recent-right">
+          <span>4 поз.</span>
+          <span class="status-dot pending"></span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="submit-bar">
+    <div class="submit-summary">
+      <span><strong>12</strong> позиций</span>
+      <span><strong>48</strong> коробок</span>
+    </div>
+    <button class="submit-btn" onclick="this.textContent='Отправлено!'; this.style.background='#16a34a'; setTimeout(()=>{this.textContent='Отправить заказ'; this.style.background='';}, 1500)">
+      Отправить заказ
+    </button>
+  </div>
+
+<script>
+// Parallax glow on mouse
+document.addEventListener('mousemove', e => {
+  const glows = document.querySelectorAll('.glow-red');
+  glows[0].style.transform = `translate(${e.clientX * 0.02}px, ${e.clientY * 0.02}px)`;
+});
+
+// Nav interaction
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// Stat cards pulse
+document.querySelectorAll('.stat-card').forEach(card => {
+  card.addEventListener('click', () => {
+    card.style.transform = 'scale(0.95)';
+    setTimeout(() => card.style.transform = '', 150);
+  });
+});
+</script>
+</body>
+</html>

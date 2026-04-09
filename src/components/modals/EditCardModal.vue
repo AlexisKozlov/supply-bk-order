@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div class="modal" @click.self="tryClose">
-      <div class="modal-box" style="width:480px;">
+      <div class="modal-box" style="width:560px;">
         <div class="modal-header">
           <h2><BkIcon v-if="product" name="edit" size="sm"/> <BkIcon v-else name="add" size="sm"/> {{ product ? 'Редактирование карточки' : 'Новый товар' }}</h2>
           <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
@@ -49,7 +49,8 @@
           </div>
         </div>
 
-        <div class="modal-row-2">
+        <!-- Упаковка -->
+        <div class="modal-row-2" style="grid-template-columns: 1fr 1fr 1fr;">
           <div class="modal-field">
             <span class="modal-field-label">Штук в коробке*</span>
             <input v-model.number="form.qty_per_box" type="number" placeholder="0" />
@@ -62,34 +63,43 @@
             <span class="modal-field-label">Кратность</span>
             <input v-model.number="form.multiplicity" type="number" placeholder="0" title="0 = по коробкам" />
           </div>
-          <div class="modal-field" style="width:100px;flex-shrink:0;">
+        </div>
+
+        <!-- Вес -->
+        <div class="modal-row-2" style="grid-template-columns: 1fr 1fr 1fr;">
+          <div class="modal-field">
+            <span class="modal-field-label">Нетто, г</span>
+            <input v-model.number="form.weight_netto" type="number" placeholder="0" />
+          </div>
+          <div class="modal-field">
+            <span class="modal-field-label">Брутто, г</span>
+            <input v-model.number="form.weight_brutto" type="number" placeholder="0" />
+          </div>
+          <div class="modal-field">
+            <span class="modal-field-label">Внешний код</span>
+            <input v-model="form.external_code" placeholder="" />
+          </div>
+        </div>
+
+        <!-- Идентификатор и переключатели -->
+        <div class="modal-row-2" style="grid-template-columns: 1.6fr 90px 130px;">
+          <div class="modal-field">
+            <span class="modal-field-label">GTIN (штрих-код)</span>
+            <input v-model="form.gtin" placeholder="" />
+          </div>
+          <div class="modal-field">
             <span class="modal-field-label">Видимость</span>
             <select v-model="form.is_active">
               <option :value="true">Да</option>
               <option :value="false">Нет</option>
             </select>
           </div>
-          <div class="modal-field" style="width:140px;flex-shrink:0;">
+          <div class="modal-field">
             <span class="modal-field-label">Прослеживаемость</span>
             <select v-model="form.is_traceable">
               <option :value="false">Нет</option>
               <option :value="true">Да</option>
             </select>
-          </div>
-        </div>
-
-        <div class="modal-row-2" style="grid-template-columns: 1fr 1fr 1fr;">
-          <div class="modal-field">
-            <span class="modal-field-label">Нетто (г)</span>
-            <input v-model.number="form.weight_netto" type="number" placeholder="0" />
-          </div>
-          <div class="modal-field">
-            <span class="modal-field-label">Брутто (г)</span>
-            <input v-model.number="form.weight_brutto" type="number" placeholder="0" />
-          </div>
-          <div class="modal-field">
-            <span class="modal-field-label">Внешний код</span>
-            <input v-model="form.external_code" placeholder="" />
           </div>
         </div>
 
@@ -168,7 +178,7 @@ const form = ref({
   sku: '', name: '', supplier: '', legal_entity: orderStore.settings.legalEntity || DEFAULT_ENTITY,
   qty_per_box: '', boxes_per_pallet: '', multiplicity: '', unit_of_measure: 'шт',
   analog_group: '', is_active: true, is_traceable: false, category: '',
-  weight_netto: '', weight_brutto: '', external_code: '',
+  weight_netto: '', weight_brutto: '', external_code: '', gtin: '',
 });
 const { saveSnapshot, isDirty } = useFormDirty(form);
 
@@ -191,6 +201,7 @@ onMounted(async () => {
         category: data.category || '',
         weight_netto: data.weight_netto ?? '', weight_brutto: data.weight_brutto ?? '',
         external_code: data.external_code || '',
+        gtin: data.gtin || '',
       });
     }
   } else if (props.product) {
@@ -204,6 +215,7 @@ onMounted(async () => {
       category: props.product.category || '',
       weight_netto: props.product.weight_netto ?? '', weight_brutto: props.product.weight_brutto ?? '',
       external_code: props.product.external_code || '',
+      gtin: props.product.gtin || '',
     });
   }
   await loadSuppliers();
@@ -280,7 +292,7 @@ const FIELD_LABELS = {
   qty_per_box: 'Штук в коробке', boxes_per_pallet: 'Коробок на паллете',
   multiplicity: 'Кратность', unit_of_measure: 'Ед. измерения',
   analog_group: 'Группа аналогов', is_active: 'Видимость', is_traceable: 'Прослеживаемость', category: 'Хранение',
-  weight_netto: 'Нетто (г)', weight_brutto: 'Брутто (г)', external_code: 'Внешний код',
+  weight_netto: 'Нетто (г)', weight_brutto: 'Брутто (г)', external_code: 'Внешний код', gtin: 'GTIN',
 };
 
 async function save() {
@@ -301,6 +313,7 @@ async function save() {
       weight_netto: +form.value.weight_netto || null,
       weight_brutto: +form.value.weight_brutto || null,
       external_code: form.value.external_code || null,
+      gtin: form.value.gtin || null,
     };
     let error, insertedId;
     if (props.product) {

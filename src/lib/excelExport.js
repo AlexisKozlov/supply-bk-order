@@ -205,12 +205,14 @@ export async function exportProductsToExcel(products, legalEntity) {
   const XLSX = await import('xlsx-js-style');
 
   const headerRow = [
-    'Товар', 'Поставщик', 'Шт/кор', 'Кор/пал',
-    'Ед. измерения', 'Кратность', 'Группа аналогов', 'Хранение', 'Видимость',
+    'Артикул', 'Товар', 'Поставщик', 'Шт/кор', 'Кор/пал',
+    'Ед. измерения', 'Кратность', 'Группа аналогов', 'Хранение',
+    'Внешний код', 'Нетто (г)', 'Брутто (г)', 'Прослеживаемость', 'Видимость',
   ];
 
   const dataRows = products.map(p => [
-    p.sku ? `${p.sku}  ${p.name || ''}` : (p.name || ''),
+    p.sku || '',
+    p.name || '',
     p.supplier || '',
     p.qty_per_box || '',
     p.boxes_per_pallet || '',
@@ -218,13 +220,18 @@ export async function exportProductsToExcel(products, legalEntity) {
     p.multiplicity || '',
     p.analog_group || '',
     p.category || '',
+    p.external_code || '',
+    p.weight_netto || '',
+    p.weight_brutto || '',
+    (p.is_traceable === 1 || p.is_traceable === '1') ? 'Да' : 'Нет',
     (p.is_active === 0 || p.is_active === '0') ? 'Нет' : 'Да',
   ]);
 
   const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
   ws['!cols'] = [
-    { wch: 50 }, { wch: 25 }, { wch: 8 }, { wch: 8 },
-    { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 10 },
+    { wch: 14 }, { wch: 45 }, { wch: 25 }, { wch: 8 }, { wch: 8 },
+    { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 12 },
+    { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 },
   ];
 
   const wb = XLSX.utils.book_new();

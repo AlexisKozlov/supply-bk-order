@@ -999,10 +999,10 @@ try {
                 $text .= "Ресторан <b>{$m['restaurant_number']}</b>: не подана заявка на <b>{$dateFormatted}</b>.\n";
                 $text .= "Дедлайн: {$timeLeft}.\n\n";
 
-                // Генерируем токен для быстрого входа
+                // Генерируем токен для быстрого входа (с привязкой к ресторану из напоминания)
                 $token = bin2hex(random_bytes(32));
-                $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, expires_at, used) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
-                    ->execute([$token, $m['telegram_chat_id']]);
+                $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
+                    ->execute([$token, $m['telegram_chat_id'], $m['restaurant_number']]);
                 $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
 
                 $btns = ['inline_keyboard' => [

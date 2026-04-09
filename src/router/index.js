@@ -3,6 +3,10 @@ import { useUserStore } from '@/stores/userStore.js';
 
 const APP_TITLE = 'Портал закупок';
 
+// Пустой компонент-заглушка для child-маршрутов кабинета ресторана
+// (родитель сам управляет отображением вкладок через свой state)
+const EmptySlot = { name: 'EmptySlot', render: () => null };
+
 const routes = [
   {
     path: '/',
@@ -81,9 +85,19 @@ const routes = [
   },
   {
     path: '/restaurant',
-    name: 'restaurant-cabinet',
     component: () => import('@/views/RestaurantCabinetView.vue'),
     meta: { title: 'Личный кабинет' },
+    children: [
+      { path: '', name: 'restaurant-cabinet', redirect: { name: 'restaurant-dashboard' } },
+      { path: 'dashboard', name: 'restaurant-dashboard', component: EmptySlot, meta: { title: 'Главная' } },
+      { path: 'orders', name: 'restaurant-orders-tab', component: EmptySlot, meta: { title: 'Заказы' } },
+      { path: 'orders/delivery', name: 'restaurant-orders-delivery', component: EmptySlot, meta: { title: 'Основная поставка' } },
+      { path: 'orders/planeta', name: 'restaurant-orders-planeta', component: EmptySlot, meta: { title: 'Планета Ресторанов' } },
+      { path: 'orders/supplier/:supplierId', name: 'restaurant-orders-supplier', component: EmptySlot, meta: { title: 'Поставщик' } },
+      { path: 'orders/history', name: 'restaurant-orders-history', component: EmptySlot, meta: { title: 'История заказов' } },
+      { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Остатки' } },
+      { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
+    ],
   },
   {
     path: '/restaurant/cabinet',
@@ -95,11 +109,7 @@ const routes = [
   },
   {
     path: '/restaurant/order',
-    redirect: '/restaurant',
-  },
-  {
-    path: '/restaurant/history',
-    redirect: '/restaurant',
+    redirect: '/restaurant/orders/delivery',
   },
   {
     path: '/ro',

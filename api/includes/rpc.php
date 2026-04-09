@@ -307,6 +307,34 @@ if ($endpoint === 'rpc') {
         respond($result);
     }
     if ($fn === 'veg_get_restaurants') {
+        // Если передан tg_chat_id — возвращаем только рестораны, на которые подписан этот чат
+        $tgChatId = isset($body['tg_chat_id']) ? trim((string)$body['tg_chat_id']) : '';
+        if ($tgChatId !== '' && preg_match('/^-?\d+$/', $tgChatId)) {
+            $subs = $pdo->prepare("SELECT DISTINCT restaurant_number FROM veg_telegram_subs WHERE chat_id = ?");
+            $subs->execute([$tgChatId]);
+            $allowedNums = array_column($subs->fetchAll(), 'restaurant_number');
+            if (empty($allowedNums)) {
+                respond([]);
+            }
+            $ph = implode(',', array_fill(0, count($allowedNums), '?'));
+            $s = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group
+                FROM restaurants WHERE active = 1 AND number IN ({$ph})
+                ORDER BY legal_entity_group = 'BK_VM' DESC, sort_order, number");
+            $s->execute($allowedNums);
+            $rows = $s->fetchAll();
+            // Убираем дубли по number (один номер может быть в нескольких юрлицах)
+            $seen = [];
+            $unique = [];
+            foreach ($rows as $r) {
+                if (!isset($seen[$r['number']])) {
+                    $seen[$r['number']] = true;
+                    $unique[] = $r;
+                }
+            }
+            usort($unique, function($a, $b) { return intval($a['number']) - intval($b['number']); });
+            respond($unique);
+        }
+
         // Все активные рестораны (без фильтра по юрлицу — овощи для всех)
         // GROUP BY number — убираем дубли (один ресторан может быть в нескольких юрлицах)
         // Приоритет BK_VM (основная запись с полным адресом)

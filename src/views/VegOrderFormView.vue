@@ -26,8 +26,8 @@
       </div>
 
       <template v-else-if="info">
-        <!-- Step 1: Restaurant select -->
-        <div class="sf-field">
+        <!-- Step 1: Restaurant select (скрыт, если у пользователя только один ресторан) -->
+        <div v-if="restaurants.length > 1" class="sf-field">
           <label>
             <span class="sf-field-icon">1</span>
             Выберите ресторан
@@ -38,6 +38,13 @@
               {{ r.number }} — {{ r.city ? r.city + ', ' : '' }}{{ r.address || '' }}
             </option>
           </select>
+        </div>
+        <div v-else-if="restaurants.length === 1" class="sf-field sf-field-rest-fixed">
+          <div class="sf-rest-fixed-label">Ресторан</div>
+          <div class="sf-rest-fixed-value">
+            <strong>{{ restaurants[0].number }}</strong>
+            <span>{{ restaurants[0].city }}{{ restaurants[0].address ? ', ' + restaurants[0].address : '' }}</span>
+          </div>
         </div>
 
         <!-- Step 2: Delivery schedule -->
@@ -300,6 +307,8 @@ import { db } from '@/lib/apiClient.js';
 
 const route = useRoute();
 const token = route.params.token;
+// Telegram chat_id (если открыто из бота через WebApp / по ссылке с tg=) — для автовыбора ресторана
+const tgChatId = route.query.tg ? String(route.query.tg) : '';
 
 const DAY_NAMES = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
 
@@ -466,8 +475,15 @@ onMounted(async () => {
     for (const p of data.products) {
       // Will be filled per delivery day later
     }
-    const { data: rd } = await db.rpc('veg_get_restaurants', {});
+    // Если открыто из Telegram — фильтруем рестораны по подпискам этого чата
+    const rpcParams = tgChatId ? { tg_chat_id: tgChatId } : {};
+    const { data: rd } = await db.rpc('veg_get_restaurants', rpcParams);
     restaurants.value = rd || [];
+    // Если ресторан только один (например, у этого чата он единственный) — автовыбираем и подгружаем расписание
+    if (restaurants.value.length === 1) {
+      selectedRestaurant.value = String(restaurants.value[0].number);
+      await onRestaurantChange();
+    }
   } catch { expired.value = true; expiredReason.value = 'error'; } finally { loading.value = false; }
 });
 
@@ -641,6 +657,11 @@ async function submitEdit() {
 }
 .sf-select:focus { outline: none; border-color: #66BB6A; box-shadow: 0 0 0 2px rgba(102,187,106,0.15); }
 .sf-select.filled { color: #502314; border-color: #A5D6A7; }
+.sf-field-rest-fixed { background: #f7faf3; border: 1px solid #c5e1a5; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; }
+.sf-rest-fixed-label { font-size: 10px; color: #689F38; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin-bottom: 4px; }
+.sf-rest-fixed-value { display: flex; align-items: baseline; gap: 8px; font-size: 14px; color: #502314; }
+.sf-rest-fixed-value strong { font-size: 18px; font-weight: 800; color: #2e7d32; }
+.sf-rest-fixed-value span { color: #689F38; }
 
 /* Day tabs */
 .veg-day-tabs {

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Вариант 3 — Mobile-First App</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+body { font-family: 'Inter', system-ui, sans-serif; background: #F5F0EB; color: #502314; min-height: 100vh; max-width: 480px; margin: 0 auto; position: relative; padding-bottom: 80px; }
+
+/* ═══ Status bar (fake iOS) ═══ */
+.statusbar { height: 44px; background: #502314; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.8); }
+
+/* ═══ Header ═══ */
+.app-header {
+  background: #502314; color: white; padding: 0 20px 20px;
+  border-radius: 0 0 28px 28px; position: relative;
+  box-shadow: 0 4px 24px rgba(80,35,20,0.2);
+}
+.ah-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; }
+.ah-greeting { font-size: 14px; opacity: 0.6; }
+.ah-rest { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; }
+.ah-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #D62300, #FF8733); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 900; box-shadow: 0 2px 12px rgba(214,35,0,0.4); cursor: pointer; }
+
+/* Summary cards inside header */
+.ah-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
+.ah-card { background: rgba(255,255,255,0.1); border-radius: 16px; padding: 14px; text-align: center; backdrop-filter: blur(10px); }
+.ah-card-num { font-size: 24px; font-weight: 900; }
+.ah-card-label { font-size: 10px; opacity: 0.5; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+.ah-card-num.accent { color: #FF8733; }
+
+/* ═══ Content ═══ */
+.page { padding: 20px; }
+
+/* Alert cards — swipeable */
+.alerts { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 2px 0 12px; -webkit-overflow-scrolling: touch; }
+.alerts::-webkit-scrollbar { display: none; }
+.alert-card {
+  flex: 0 0 calc(100% - 40px); scroll-snap-align: start;
+  background: white; border-radius: 20px; padding: 18px 20px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.05); border-left: 4px solid #D62300;
+  display: flex; align-items: center; gap: 14px; cursor: pointer;
+  transition: transform 0.15s; position: relative;
+}
+.alert-card:active { transform: scale(0.98); }
+.alert-card.green { border-left-color: #16A34A; }
+.alert-card.blue { border-left-color: #2563EB; }
+.al-icon { font-size: 28px; flex-shrink: 0; }
+.al-body { flex: 1; }
+.al-title { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
+.al-sub { font-size: 12px; color: #8B7355; }
+.al-arrow { color: #D4C4B0; font-size: 18px; }
+.dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: #D4C4B0; transition: all 0.2s; }
+.dot.active { background: #D62300; width: 20px; border-radius: 3px; }
+
+/* Section */
+.section { margin-bottom: 24px; }
+.s-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.s-title { font-size: 16px; font-weight: 800; }
+.s-link { font-size: 12px; font-weight: 600; color: #D62300; text-decoration: none; }
+
+/* Supplier cards — swipeable horizontally */
+.sup-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px; -webkit-overflow-scrolling: touch; }
+.sup-scroll::-webkit-scrollbar { display: none; }
+.sup-card {
+  flex: 0 0 170px; background: white; border-radius: 18px; padding: 18px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.2s;
+  border: 2px solid transparent; position: relative;
+}
+.sup-card:active { transform: scale(0.97); }
+.sup-card.urgent { border-color: rgba(214,35,0,0.2); }
+.sup-icon { font-size: 32px; margin-bottom: 10px; }
+.sup-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.sup-status { font-size: 11px; font-weight: 600; }
+.sup-status.open { color: #16A34A; }
+.sup-status.closed { color: #DC2626; }
+.sup-status.done { color: #2563EB; }
+.sup-count { position: absolute; top: 12px; right: 12px; min-width: 22px; height: 22px; border-radius: 11px; background: #D62300; color: white; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
+/* Day carousel */
+.day-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0; -webkit-overflow-scrolling: touch; }
+.day-scroll::-webkit-scrollbar { display: none; }
+.day-chip {
+  flex: 0 0 auto; padding: 10px 18px; border-radius: 14px;
+  background: white; border: 2px solid #EDE8E3; font-weight: 700;
+  font-size: 13px; cursor: pointer; text-align: center; transition: all 0.2s;
+  min-width: 70px; position: relative;
+}
+.day-chip.active { background: #D62300; color: white; border-color: #D62300; }
+.day-chip.done { border-color: #16A34A; }
+.day-chip.done::after { content: ''; position: absolute; top: -3px; right: -3px; width: 14px; height: 14px; border-radius: 50%; background: #16A34A; border: 2px solid #F5F0EB; }
+.dc-name { display: block; font-size: 12px; }
+.dc-date { display: block; font-size: 10px; opacity: 0.6; margin-top: 1px; }
+.day-chip.active .dc-date { opacity: 0.7; }
+
+/* Product items — mobile native feel */
+.prod-list { background: white; border-radius: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.04); overflow: hidden; }
+.prod-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #F5F0EB;
+  transition: background 0.15s; gap: 12px;
+}
+.prod-item:last-child { border: none; }
+.prod-item:active { background: #FAF8F5; }
+.pi-info { flex: 1; min-width: 0; }
+.pi-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pi-meta { display: flex; gap: 6px; margin-top: 3px; }
+.pi-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 5px; }
+.pi-tag.mult { background: #EFF6FF; color: #2563EB; }
+.pi-tag.min { background: #FEF3C7; color: #92400E; }
+.pi-input-wrap { position: relative; }
+.pi-input {
+  width: 72px; height: 44px; border: 2px solid #EDE8E3; border-radius: 12px;
+  background: #FAFAF8; font-size: 16px; text-align: center; font-family: inherit;
+  font-weight: 700; color: #502314; transition: all 0.2s; -moz-appearance: textfield;
+}
+.pi-input:focus { outline: none; border-color: #D62300; background: white; }
+.pi-input.filled { background: #FFF5F2; border-color: #D62300; }
+.pi-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* Deadline banner */
+.deadline-banner { padding: 10px 18px; border-radius: 14px; margin-bottom: 14px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.deadline-banner.open { background: #ECFDF5; color: #16A34A; }
+.deadline-banner.closed { background: #FEF2F2; color: #DC2626; }
+
+/* Category tabs */
+.cat-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.cat-tab { padding: 8px 16px; border-radius: 10px; border: none; background: white; color: #8B7355; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.cat-tab.active { background: #502314; color: white; }
+.cat-count { background: rgba(0,0,0,0.1); padding: 1px 6px; border-radius: 6px; font-size: 10px; margin-left: 4px; }
+.cat-tab.active .cat-count { background: rgba(255,255,255,0.2); }
+
+/* Recent orders */
+.recent-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; background: white; border-radius: 14px;
+  margin-bottom: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+}
+.ri-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.ri-dot.ok { background: #16A34A; }
+.ri-dot.pending { background: #F59E0B; }
+.ri-body { flex: 1; }
+.ri-title { font-size: 13px; font-weight: 600; }
+.ri-sub { font-size: 11px; color: #8B7355; }
+.ri-right { font-size: 12px; color: #8B7355; text-align: right; }
+
+/* ═══ Bottom Tab Bar ═══ */
+.tab-bar {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 480px;
+  background: white; border-top: 1px solid #EDE8E3;
+  display: flex; padding: 8px 0 env(safe-area-inset-bottom, 6px);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
+}
+.tab-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  cursor: pointer; padding: 6px 0; border: none; background: none; font-family: inherit;
+  color: #B0A090; transition: color 0.2s; position: relative;
+}
+.tab-item.active { color: #D62300; }
+.tab-icon { font-size: 22px; }
+.tab-label { font-size: 9px; font-weight: 700; }
+.tab-badge { position: absolute; top: 2px; right: calc(50% - 18px); min-width: 16px; height: 16px; border-radius: 8px; background: #D62300; color: white; font-size: 9px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+
+/* Floating submit */
+.float-submit {
+  position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%);
+  max-width: 440px; width: calc(100% - 40px);
+  background: #D62300; color: white; border: none; border-radius: 16px;
+  padding: 16px; font-size: 16px; font-weight: 800; cursor: pointer; font-family: inherit;
+  box-shadow: 0 8px 32px rgba(214,35,0,0.35);
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: all 0.2s;
+}
+.float-submit:active { transform: translateX(-50%) scale(0.98); }
+.fs-count { background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+  <!-- Status bar -->
+  <div class="statusbar">
+    <span>9:41</span>
+    <span>Supply Portal</span>
+    <span>&#128267; 87%</span>
+  </div>
+
+  <!-- Header -->
+  <div class="app-header">
+    <div class="ah-top">
+      <div>
+        <div class="ah-greeting">Supply Department</div>
+        <div class="ah-rest">Ресторан 24</div>
+      </div>
+      <div class="ah-avatar" onclick="this.style.transform='scale(0.9)'; setTimeout(()=>this.style.transform='',150)">24</div>
+    </div>
+    <div class="ah-cards">
+      <div class="ah-card"><div class="ah-card-num">5</div><div class="ah-card-label">Подано</div></div>
+      <div class="ah-card"><div class="ah-card-num accent">3</div><div class="ah-card-label">Ожидают</div></div>
+      <div class="ah-card"><div class="ah-card-num">48</div><div class="ah-card-label">Коробок</div></div>
+    </div>
+  </div>
+
+  <div class="page">
+    <!-- Alerts -->
+    <div class="alerts" id="alertsScroll">
+      <div class="alert-card" onclick="this.style.transform='scale(0.98)'; setTimeout(()=>this.style.transform='',150)">
+        <span class="al-icon">&#128293;</span>
+        <div class="al-body">
+          <div class="al-title">3 дня без заявки</div>
+          <div class="al-sub">Среда, Четверг, Пятница</div>
+        </div>
+        <span class="al-arrow">&#8250;</span>
+      </div>
+      <div class="alert-card green">
+        <span class="al-icon">&#127811;</span>
+        <div class="al-body">
+          <div class="al-title">Планета Ресторанов</div>
+          <div class="al-sub">2 дня доставки</div>
+        </div>
+        <span class="al-arrow">&#8250;</span>
+      </div>
+      <div class="alert-card blue">
+        <span class="al-icon">&#128203;</span>
+        <div class="al-body">
+          <div class="al-title">Сбор остатков</div>
+          <div class="al-sub">Нужно заполнить</div>
+        </div>
+        <span class="al-arrow">&#8250;</span>
+      </div>
+    </div>
+    <div class="dots" id="dots">
+      <div class="dot active"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+
+    <!-- Suppliers -->
+    <div class="section">
+      <div class="s-header">
+        <div class="s-title">Заявки</div>
+        <a class="s-link">История</a>
+      </div>
+      <div class="sup-scroll">
+        <div class="sup-card urgent" onclick="this.style.transform='scale(0.97)'; setTimeout(()=>this.style.transform='',150)">
+          <span class="sup-count">3</span>
+          <div class="sup-icon">&#128230;</div>
+          <div class="sup-name">Основная поставка</div>
+          <div class="sup-status open">3 дня открыто</div>
+        </div>
+        <div class="sup-card">
+          <div class="sup-icon">&#127811;</div>
+          <div class="sup-name">Планета Ресторанов</div>
+          <div class="sup-status open">Не подано</div>
+        </div>
+        <div class="sup-card">
+          <div class="sup-icon">&#129472;</div>
+          <div class="sup-name">Камако</div>
+          <div class="sup-status done">Подано</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Order form -->
+    <div class="section">
+      <div class="s-header">
+        <div class="s-title">Основная поставка</div>
+      </div>
+
+      <div class="day-scroll">
+        <div class="day-chip done"><span class="dc-name">Вт</span><span class="dc-date">8 апр</span></div>
+        <div class="day-chip active"><span class="dc-name">Ср</span><span class="dc-date">9 апр</span></div>
+        <div class="day-chip"><span class="dc-name">Чт</span><span class="dc-date">10 апр</span></div>
+        <div class="day-chip"><span class="dc-name">Пт</span><span class="dc-date">11 апр</span></div>
+      </div>
+
+      <div class="deadline-banner open">
+        <span>&#128337;</span> Приём до 10:00 (ещё 1ч 23мин)
+      </div>
+
+      <div class="cat-tabs">
+        <button class="cat-tab active">Сухой <span class="cat-count">3</span></button>
+        <button class="cat-tab">Холод</button>
+        <button class="cat-tab">Мороз <span class="cat-count">1</span></button>
+      </div>
+
+      <div class="prod-list">
+        <div class="prod-item">
+          <div class="pi-info">
+            <div class="pi-name">Котлета Воппер 83г</div>
+            <div class="pi-meta"><span class="pi-tag mult">x4</span></div>
+          </div>
+          <div class="pi-input-wrap"><input class="pi-input filled" type="number" value="8"></div>
+        </div>
+        <div class="prod-item">
+          <div class="pi-info">
+            <div class="pi-name">Булочка Биг Кинг с кунжутом</div>
+            <div class="pi-meta"><span class="pi-tag mult">x6</span></div>
+          </div>
+          <div class="pi-input-wrap"><input class="pi-input" type="number" value="" placeholder="0"></div>
+        </div>
+        <div class="prod-item">
+          <div class="pi-info">
+            <div class="pi-name">Соус Биг Кинг 10мл</div>
+          </div>
+          <div class="pi-input-wrap"><input class="pi-input" type="number" value="" placeholder="0"></div>
+        </div>
+        <div class="prod-item">
+          <div class="pi-info">
+            <div class="pi-name">Сыр Чеддер слайс 200шт</div>
+            <div class="pi-meta"><span class="pi-tag mult">x2</span></div>
+          </div>
+          <div class="pi-input-wrap"><input class="pi-input filled" type="number" value="4"></div>
+        </div>
+        <div class="prod-item">
+          <div class="pi-info">
+            <div class="pi-name">Лук кольца панир. 1кг</div>
+            <div class="pi-meta"><span class="pi-tag min">мин. 2</span></div>
+          </div>
+          <div class="pi-input-wrap"><input class="pi-input" type="number" value="" placeholder="0"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent -->
+    <div class="section">
+      <div class="s-header">
+        <div class="s-title">Последние</div>
+        <a class="s-link">Все</a>
+      </div>
+      <div class="recent-item"><div class="ri-dot ok"></div><div class="ri-body"><div class="ri-title">Основная поставка</div><div class="ri-sub">Чт, 10 апр. — 12 поз.</div></div><div class="ri-right">14:32</div></div>
+      <div class="recent-item"><div class="ri-dot ok"></div><div class="ri-body"><div class="ri-title">Планета Ресторанов</div><div class="ri-sub">Ср, 9 апр. — 6 поз.</div></div><div class="ri-right">11:05</div></div>
+      <div class="recent-item"><div class="ri-dot pending"></div><div class="ri-body"><div class="ri-title">Камако</div><div class="ri-sub">Вт, 8 апр. — 4 поз.</div></div><div class="ri-right">09:15</div></div>
+    </div>
+  </div>
+
+  <!-- Floating submit button -->
+  <button class="float-submit" onclick="this.innerHTML='&#10003; Отправлено!'; this.style.background='#16a34a'; setTimeout(()=>{this.innerHTML='Отправить заказ <span class=fs-count>2 поз. / 12 кор.</span>'; this.style.background='';}, 1500)">
+    Отправить заказ <span class="fs-count">2 поз. / 12 кор.</span>
+  </button>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-item active"><span class="tab-icon">&#127968;</span><span class="tab-label">Главная</span></button>
+    <button class="tab-item"><span class="tab-icon">&#128230;</span><span class="tab-label">Заказы</span><span class="tab-badge">3</span></button>
+    <button class="tab-item"><span class="tab-icon">&#128203;</span><span class="tab-label">Остатки</span></button>
+    <button class="tab-item"><span class="tab-icon">&#128100;</span><span class="tab-label">Профиль</span></button>
+  </div>
+
+<script>
+// Tab bar
+document.querySelectorAll('.tab-item').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+
+// Day chips
+document.querySelectorAll('.day-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.day-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+  });
+});
+
+// Category tabs
+document.querySelectorAll('.cat-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+
+// Input highlight
+document.querySelectorAll('.pi-input').forEach(input => {
+  input.addEventListener('input', () => {
+    input.classList.toggle('filled', input.value && parseFloat(input.value) > 0);
+  });
+});
+
+// Alert scroll dots
+const alertsEl = document.getElementById('alertsScroll');
+const dotsEl = document.getElementById('dots');
+alertsEl.addEventListener('scroll', () => {
+  const idx = Math.round(alertsEl.scrollLeft / (alertsEl.scrollWidth / 3));
+  dotsEl.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+});
+
+// Haptic feedback simulation
+document.querySelectorAll('.alert-card, .sup-card, .ah-avatar').forEach(el => {
+  el.addEventListener('touchstart', () => {
+    if (navigator.vibrate) navigator.vibrate(10);
+  });
+});
+</script>
+</body>
+</html>

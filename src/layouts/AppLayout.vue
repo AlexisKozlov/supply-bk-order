@@ -36,11 +36,11 @@
       </template>
 
       <template v-for="section in sidebarSections" :key="section.title">
-        <template v-if="section.items.some(i => userStore.hasAccess(i.module, 'view') && isModuleVisible(i.module))">
+        <template v-if="section.items.some(i => i.public || (userStore.hasAccess(i.module, 'view') && isModuleVisible(i.module)))">
           <div class="sidebar-section" v-if="!sidebarCollapsed">{{ section.title }}</div>
           <nav class="sidebar-nav">
-            <template v-for="item in section.items" :key="item.module">
-              <router-link v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module)" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }" @contextmenu.prevent="togglePin(item.route)">
+            <template v-for="item in section.items" :key="item.route">
+              <router-link v-if="item.public || (userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module))" :to="{ name: item.route }" class="sidebar-item" :class="{ active: currentRoute === item.route }" @contextmenu.prevent="togglePin(item.route)">
                 <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                 <span v-if="!sidebarCollapsed">{{ item.label }}</span>
                 <span v-if="!sidebarCollapsed && isPinned(item.route)" class="sidebar-pin-mark">⭐</span>

@@ -1842,10 +1842,10 @@ if (isset($input['callback_query'])) {
             sendMessage($chatId, "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок.");
             exit;
         }
-        // Генерируем одноразовый токен
+        // Генерируем одноразовый токен (с явной привязкой к выбранному ресторану)
         $token = bin2hex(random_bytes(32));
-        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, expires_at, used) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
-            ->execute([$token, $chatId]);
+        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
+            ->execute([$token, $chatId, $restNum]);
         $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
         $url = "{$siteUrl}/restaurant?tg_token={$token}";
         $btns = [
@@ -1896,6 +1896,12 @@ if (isset($input['callback_query'])) {
     if (preg_match('/^soord_day_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
         answerCallback($cb['id']);
         soOrderShowProducts($chatId, $msgId, $m[1], $m[2], $m[3]);
+        exit;
+    }
+    // Поставка не нужна (заявка-отказ)
+    if (preg_match('/^soord_skip_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soOrderSkipDelivery($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
     if ($data === 'rest_schedule') {
