@@ -472,7 +472,7 @@
                 <span class="deadline-icon" v-else>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                 </span>
-                <template v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'">Дедлайн: {{ supCurrentDateInfo(sup)?.deadline?.substring(0,5) }}</template>
+                <template v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'">Дедлайн: {{ formatDeadline(supCurrentDateInfo(sup)?.deadline) }}</template>
                 <template v-else>Приём заявок на эту дату закрыт</template>
               </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
@@ -1074,6 +1074,7 @@ const supSuccessInfo = ref({});
 
 function supplierBadge(sup) { if (!sup.session) return null; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
 function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; return sup.available_dates?.find(d => d.delivery_date === supSelectedDates[sup.id]); }
+function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(' '); const d = new Date(date + 'T00:00:00'); const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' }); return (time || '') + ', ' + label; }
 
 async function supSelectDate(sup, dateInfo) {
   supSelectedDates[sup.id] = dateInfo.delivery_date;

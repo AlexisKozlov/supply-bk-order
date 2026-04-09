@@ -98,7 +98,7 @@
         <div v-if="selectedDeliveryDate" class="ro-order-area">
           <div class="ro-deadline-bar" :class="'ro-deadline-' + currentDateInfo?.deadline_status">
             <template v-if="currentDateInfo?.deadline_status === 'open'">
-              Дедлайн подачи: {{ currentDateInfo.deadline?.substring(0,5) }} ({{ formatDate(currentDateInfo.order_date) }})
+              Дедлайн подачи: {{ currentDateInfo.deadline?.split(' ')[1] || '' }}, {{ formatDate(currentDateInfo.deadline?.split(' ')[0]) }}
             </template>
             <template v-else>
               Приём заявок на эту дату закрыт

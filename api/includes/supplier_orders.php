@@ -194,7 +194,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
                 $orderDateStr = $orderDateObj->format('Y-m-d');
                 $deliveryDateStr = $deliveryDateObj->format('Y-m-d');
 
-                $deadlineInfo = soCheckDeadline($pdo, $session, $orderDateStr);
+                $deadlineInfo = soCheckDeadline($pdo, $session, $deliveryDateStr);
 
                 // Проверяем есть ли уже заявка
                 $os = $pdo->prepare("SELECT id, status, submitted_at FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
@@ -349,8 +349,8 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     $session = soGetActiveSession($pdo, $supplierId);
     if (!$session) soRespond(['error' => 'Нет активной сессии приёма заявок для этого поставщика'], 400);
 
-    // Проверяем дедлайн
-    $dlStatus = soCheckDeadline($pdo, $session, $orderDate ?: date('Y-m-d'));
+    // Проверяем дедлайн (по дате доставки)
+    $dlStatus = soCheckDeadline($pdo, $session, $deliveryDate);
     if ($dlStatus['status'] === 'closed') {
         soRespond(['error' => 'Приём заявок на эту дату закрыт (дедлайн ' . substr($dlStatus['deadline'], 0, 5) . ')'], 403);
     }

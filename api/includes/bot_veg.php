@@ -7,6 +7,58 @@
 // corrStart, corrShowDelivery, corrSearchProduct, corrProcessTextInput,
 // corrSubmit, corrNotifyPurchasers, corrGetNextDeliveries, corrReview
 
+// ═══ Хелперы для заявок поставщикам ═══
+
+/** Юрлицо ресторана по его номеру */
+function soGetLegalEntity($restNum) {
+    if ((int)$restNum === 3) return 'ООО "Воглия Матта"';
+    return 'ООО "Бургер БК"';
+}
+
+/** Проверка дедлайна заявки (open/closed) */
+function soBotCheckDeadline($pdo, $session, $deliveryDate) {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+    $supplierId = $session['supplier_id'] ?? '';
+    $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
+
+    // 1. Переопределение на конкретную дату
+    $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
+    $s->execute([$session['id'], $deliveryDate]);
+    $override = $s->fetch();
+
+    // 2. Правило по дню недели
+    $rule = null;
+    if ($supplierId) {
+        $r = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+        $r->execute([$supplierId, $deliveryDow]);
+        $rule = $r->fetch();
+    }
+
+    // 3. Вычисляем дедлайн
+    if ($override) {
+        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+        $deadlineTime = $override['deadline_time'];
+    } elseif ($rule) {
+        $deadlineDow = (int)$rule['deadline_dow'];
+        $deadlineTime = $rule['deadline_time'];
+        $deliveryObj = new DateTime($deliveryDate, $tz);
+        $deadlineDate = clone $deliveryObj;
+        $diff = $deliveryDow - $deadlineDow;
+        if ($diff <= 0) $diff += 7;
+        $deadlineDate->modify("-{$diff} days");
+    } else {
+        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+        $deadlineTime = $session['deadline_time'] ?? '14:00:00';
+    }
+
+    $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
+    $deadlineStr = $deadlineDate->format('Y-m-d') . ' ' . substr($deadlineTime, 0, 5);
+
+    if ($now < $deadlineDT) return ['status' => 'open', 'deadline' => $deadlineStr];
+    return ['status' => 'closed', 'deadline' => $deadlineStr];
+}
+
 // ═══ Овощи: статистика подписок (для админа) ═══
 
 function cmdVegStats($chatId, $msgId) {
@@ -287,7 +339,7 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
     foreach ($restNums as $rn) {
         $btns[] = [['text' => "Ресторан {$rn}", 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
     }
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
@@ -330,12 +382,26 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
         $deliveryDate = $deliveryDateObj->format('Y-m-d');
         $dayLabel = $dayNamesFull[$deliveryDow] . ', ' . $deliveryDateObj->format('d.m');
 
+        // Проверяем дедлайн
+        $dlStatus = soBotCheckDeadline($pdo, $session, $deliveryDate);
+
         // Проверяем есть ли заказ
         $existing = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
         $existing->execute([$session['id'], $restNum, $deliveryDate]);
-        $mark = $existing->fetch() ? ' ✅' : '';
+        $hasOrder = $existing->fetch();
 
-        $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+        if ($hasOrder) {
+            $mark = ' ✅';
+        } elseif ($dlStatus['status'] === 'closed') {
+            $mark = ' ✕';
+        } else {
+            $mark = '';
+        }
+
+        // Показываем кнопку: открытые дни + дни с уже поданной заявкой (для просмотра)
+        if ($dlStatus['status'] === 'open' || $hasOrder) {
+            $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+        }
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -345,10 +411,11 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
 function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
     $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+    $le = soGetLegalEntity($restNum);
 
-    // Загружаем товары из шаблона
-    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND is_active = 1 ORDER BY sort_order, product_name");
-    $tpl->execute([$supplierId]);
+    // Загружаем товары из шаблона (с учётом юрлица)
+    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 ORDER BY sort_order, product_name");
+    $tpl->execute([$supplierId, $le]);
     $products = $tpl->fetchAll();
 
     if (!$products) {
@@ -374,11 +441,27 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $dow = (int)$d->format('N');
     $dateLabel = $dayNames[$dow] . ', ' . $d->format('d.m');
 
+    $hasExisting = !empty($existingQty);
+
     $text = "📦 <b>{$supName}</b>\n";
     $text .= "Ресторан: <b>{$restNum}</b>\n";
     $text .= "Доставка: <b>{$dateLabel}</b>\n\n";
-    $text .= "Скопируйте, измените количества и отправьте:\n\n<code>";
 
+    // Показываем текущую заявку, если есть
+    if ($hasExisting) {
+        $text .= "✅ <b>Ваша текущая заявка:</b>\n";
+        foreach ($products as $p) {
+            $qty = $existingQty[$p['sku']] ?? 0;
+            if ($qty > 0) {
+                $text .= "• {$p['product_name']}: <b>{$qty}</b>\n";
+            }
+        }
+        $text .= "\nЧтобы изменить — скопируйте шаблон ниже, измените числа и отправьте:\n\n";
+    } else {
+        $text .= "Скопируйте, измените количества и отправьте:\n\n";
+    }
+
+    $text .= "<code>";
     foreach ($products as $p) {
         $qty = $existingQty[$p['sku']] ?? 0;
         $hint = '';
@@ -412,9 +495,10 @@ function soOrderProcessInput($chatId, $text) {
     $supplierId = $parts[1]; $restNum = $parts[2]; $deliveryDate = $parts[3]; $sessionId = $parts[4];
     $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
 
-    // Загружаем шаблон
-    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND is_active = 1");
-    $tpl->execute([$supplierId]);
+    // Загружаем шаблон (с учётом юрлица)
+    $le = soGetLegalEntity($restNum);
+    $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1");
+    $tpl->execute([$supplierId, $le]);
     $products = $tpl->fetchAll();
     $prodMap = [];
     foreach ($products as $p) $prodMap[mb_strtolower(trim($p['product_name']))] = $p;
@@ -426,8 +510,8 @@ function soOrderProcessInput($chatId, $text) {
     foreach ($lines as $line) {
         if (!preg_match('/^(.+?):\s*([\d.,]+)\s*$/u', trim($line), $m)) continue;
         $name = mb_strtolower(trim($m[1]));
-        // Убираем хинты в скобках
-        $name = preg_replace('/\s*\(.*?\)\s*$/', '', $name);
+        // Убираем хинты в скобках (кр.6), (мин.12) и т.д.
+        $name = trim(preg_replace('/\s*\(.*?\)/', '', $name));
         $qty = floatval(str_replace(',', '.', $m[2]));
         if ($qty <= 0) continue;
         // Поиск товара
@@ -435,6 +519,9 @@ function soOrderProcessInput($chatId, $text) {
         if (isset($prodMap[$name])) { $found = $prodMap[$name]; }
         else { foreach ($prodMap as $pName => $p) { if (mb_strpos($pName, $name) !== false || mb_strpos($name, $pName) !== false) { $found = $p; break; } } }
         if (!$found) continue;
+        // Проверка минимального количества
+        $minQty = floatval($found['min_qty']);
+        if ($minQty > 0 && $qty < $minQty) { $qty = $minQty; }
         // Округление по кратности
         $mult = floatval($found['multiplicity']);
         if ($mult > 0 && fmod($qty, $mult) > 0.001) { $qty = ceil($qty / $mult) * $mult; }
@@ -443,6 +530,19 @@ function soOrderProcessInput($chatId, $text) {
     }
 
     if (!$items) { sendMessage($chatId, "❌ Не удалось распознать ни одной позиции. Скопируйте шаблон и измените числа."); return; }
+
+    // Проверяем дедлайн
+    $session = $pdo->prepare("SELECT * FROM so_sessions WHERE id = ?"); $session->execute([$sessionId]); $session = $session->fetch();
+    if ($session) {
+        $dlStatus = soBotCheckDeadline($pdo, $session, $deliveryDate);
+        if ($dlStatus['status'] === 'closed') {
+            sendMessage($chatId, "❌ Приём заявок на эту дату закрыт (дедлайн: {$dlStatus['deadline']}).");
+            return;
+        }
+    }
+
+    // Определяем юрлицо ресторана
+    $le = soGetLegalEntity($restNum);
 
     // Сохраняем заказ
     try {
@@ -456,8 +556,7 @@ function soOrderProcessInput($chatId, $text) {
             $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$oldOrder['id']]);
         }
         // Вставляем новый
-        $le = 'ООО "Бургер БК"';
-        $pdo->prepare("INSERT INTO so_orders (session_id, supplier_id, restaurant_number, delivery_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
+        $pdo->prepare("INSERT INTO so_orders (session_id, supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
             ->execute([$sessionId, $supplierId, $restNum, $deliveryDate, $le]);
         $orderId = $pdo->lastInsertId();
         $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
@@ -476,7 +575,10 @@ function soOrderProcessInput($chatId, $text) {
     $confirmText .= "Позиций: <b>{$matched}</b>, всего: <b>{$totalQty}</b>\n\n";
     foreach ($items as $it) { $confirmText .= "• {$it['product_name']}: <b>{$it['quantity']}</b>\n"; }
 
-    $btns = ['inline_keyboard' => [[['text' => '◂ В меню', 'callback_data' => 'veg_my_subs']]]];
+    $btns = ['inline_keyboard' => [
+        [['text' => '📦 К заявкам', 'callback_data' => "soord_sup_{$supplierId}"]],
+        [['text' => '◂ В меню', 'callback_data' => 'veg_my_subs']],
+    ]];
     sendMessage($chatId, $confirmText, $btns);
 }
 
