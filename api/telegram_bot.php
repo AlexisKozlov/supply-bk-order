@@ -1499,6 +1499,7 @@ function showSettings($chatId, $msgId, $userName) {
         'low_stock' => '📉 Остатки заканчиваются',
         'correction_notifications' => '✏️ Корректировки заказов',
         'chat_notifications' => '💬 Сообщения из ресторанов',
+        'so_deadline_summary' => '🧾 Сводка заявок поставщикам',
     ];
 
     $text = "⚙️ <b>Настройки уведомлений</b>\n\nНажмите кнопку чтобы включить/выключить:";
@@ -1735,7 +1736,7 @@ if (isset($input['callback_query'])) {
     if (str_starts_with($data, 'toggle_')) {
         answerCallback($cb['id']);
         $field = substr($data, 7);
-        $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary', 'data_updates', 'expiring_items', 'restaurant_sales', 'correction_notifications', 'chat_notifications'];
+        $allowed = ['psc_expiry', 'overdue_delivery', 'price_changed', 'low_stock', 'daily_summary', 'data_updates', 'expiring_items', 'restaurant_sales', 'correction_notifications', 'chat_notifications', 'so_deadline_summary'];
         if (in_array($field, $allowed)) {
             $u = $pdo->prepare("SELECT name FROM users WHERE telegram_chat_id = ?");
             $u->execute([$chatId]);

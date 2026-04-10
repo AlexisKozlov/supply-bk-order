@@ -3900,6 +3900,7 @@ if ($endpoint === 'rpc') {
             ts.daily_summary, ts.psc_expiry, ts.price_changed, ts.overdue_delivery,
             ts.data_updates, ts.expiring_items, ts.restaurant_sales, ts.low_stock,
             ts.correction_notifications, ts.chat_notifications,
+            ts.so_deadline_summary,
             ts.last_question_at
             FROM users u
             LEFT JOIN telegram_settings ts ON ts.user_name = u.name
@@ -4027,7 +4028,7 @@ if ($endpoint === 'rpc') {
     if ($fn === 'tg_admin_toggle_setting') {
         $userName = $body['user_name'] ?? '';
         $field = $body['field'] ?? '';
-        $allowed = ['daily_summary', 'psc_expiry', 'price_changed', 'overdue_delivery', 'data_updates', 'expiring_items', 'restaurant_sales', 'low_stock', 'correction_notifications', 'chat_notifications'];
+        $allowed = ['daily_summary', 'psc_expiry', 'price_changed', 'overdue_delivery', 'data_updates', 'expiring_items', 'restaurant_sales', 'low_stock', 'correction_notifications', 'chat_notifications', 'so_deadline_summary'];
         if (!$userName || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
         $pdo->prepare("UPDATE telegram_settings SET `$field` = NOT `$field` WHERE user_name = ?")->execute([$userName]);
         $newVal = $pdo->prepare("SELECT `$field` FROM telegram_settings WHERE user_name = ?");

@@ -56,6 +56,38 @@ function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
     return $result;
 }
 
+/**
+ * Отправить документ (файл) в Telegram. Поддерживает бинарные вложения (xlsx, pdf и т.п.).
+ * $content — сырое содержимое файла (строка).
+ */
+function tgSendDocument($chatId, $filename, $content, $caption = '', $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+    global $BOT_TOKEN;
+    $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendDocument";
+    $boundary = '----BkCalc' . bin2hex(random_bytes(8));
+    $crlf = "\r\n";
+    $body  = "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"chat_id\"{$crlf}{$crlf}{$chatId}{$crlf}";
+    if ($caption !== '') {
+        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"caption\"{$crlf}{$crlf}{$caption}{$crlf}";
+        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"parse_mode\"{$crlf}{$crlf}HTML{$crlf}";
+    }
+    $body .= "--{$boundary}{$crlf}";
+    $body .= "Content-Disposition: form-data; name=\"document\"; filename=\"{$filename}\"{$crlf}";
+    $body .= "Content-Type: {$mime}{$crlf}{$crlf}";
+    $body .= $content . $crlf;
+    $body .= "--{$boundary}--{$crlf}";
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data; boundary=' . $boundary],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $result = curl_exec($ch);
+    curl_close($ch);
+    return $result;
+}
+
 // ═══ AI для утренней сводки ═══
 
 function askAIDigest($context) {
@@ -946,7 +978,7 @@ try {
             $text .= "📋 Совещание: {$dec['topic']}\n";
             $text .= "📝 {$dec['text']}\n";
             $text .= "📅 Срок: {$deadlineDate}\n";
-            sendTelegramMessage($BOT_TOKEN, $chatId, $text, 'HTML');
+            tgSend($chatId, $text);
             $notified = true;
             $sent++;
         }
@@ -1038,6 +1070,453 @@ try {
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] ro deadline reminders error: ' . $e->getMessage());
+}
+
+// ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): напоминания ресторанам о дедлайнах ═══
+// Аналогично овощам: вечернее за день до дедлайна + 3ч/2ч/1ч/30мин + expired.
+try {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+
+    // Все активные поставщики с графиком, принимающие заявки
+    $suppliers = $pdo->query("
+        SELECT DISTINCT s.id, s.short_name,
+               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+        FROM suppliers s
+        JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+        LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
+        WHERE s.is_active = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
+    ")->fetchAll();
+
+    foreach ($suppliers as $sup) {
+        $supId = $sup['id'];
+        $supName = $sup['short_name'];
+        $defaultDeadlineTime = $sup['default_deadline_time'];
+
+        // Пары (ресторан, дни), у которых есть привязанный Telegram
+        $schStmt = $pdo->prepare("
+            SELECT ss.restaurant_id, ss.order_day, ss.delivery_day,
+                   r.number AS restaurant_number, ru.telegram_chat_id
+            FROM so_supplier_schedules ss
+            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+            JOIN ro_users ru ON ru.restaurant_number = r.number
+                 AND ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
+            WHERE ss.supplier_id = ? AND ss.is_active = 1
+        ");
+        $schStmt->execute([$supId]);
+        $schRows = $schStmt->fetchAll();
+
+        // Группируем по ресторану
+        $byRest = [];
+        foreach ($schRows as $s) {
+            $rn = $s['restaurant_number'];
+            if (!isset($byRest[$rn])) {
+                $byRest[$rn] = ['chat_id' => $s['telegram_chat_id'], 'schedule' => []];
+            }
+            $byRest[$rn]['schedule'][] = [
+                'order_day' => (int)$s['order_day'],
+                'delivery_day' => (int)$s['delivery_day'],
+            ];
+        }
+
+        foreach ($byRest as $restNum => $info) {
+            $chatId = $info['chat_id'];
+
+            // Ищем ближайший будущий день поставки (в пределах 2 недель)
+            $nextDelivery = null;
+            foreach ($info['schedule'] as $sc) {
+                $deliveryDow = $sc['delivery_day'];
+
+                // Понедельник текущей недели
+                $weekStart = clone $now;
+                $weekStart->setTime(0, 0, 0);
+                $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
+
+                for ($w = 0; $w < 2; $w++) {
+                    $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+                    if ($deliveryDateObj < (clone $now)->setTime(0,0,0)) continue;
+
+                    $deliveryDate = $deliveryDateObj->format('Y-m-d');
+
+                    // Дедлайн: override → rule → default
+                    $ovStmt = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                    $ovStmt->execute([$supId, $deliveryDate]);
+                    $override = $ovStmt->fetchColumn();
+
+                    if ($override) {
+                        $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
+                        $deadlineTime = $override;
+                    } else {
+                        $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                        $rlStmt->execute([$supId, $deliveryDow]);
+                        $rule = $rlStmt->fetch();
+                        if ($rule) {
+                            $deadlineDow = (int)$rule['deadline_dow'];
+                            $deadlineTime = $rule['deadline_time'];
+                            $deadlineDateObj = clone $deliveryDateObj;
+                            $diff = $deliveryDow - $deadlineDow;
+                            if ($diff <= 0) $diff += 7;
+                            $deadlineDateObj->modify("-{$diff} days");
+                        } else {
+                            $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
+                            $deadlineTime = $defaultDeadlineTime;
+                        }
+                    }
+
+                    $tp = explode(':', $deadlineTime);
+                    $deadline = clone $deadlineDateObj;
+                    $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                    $minutesLeft = ($deadline->getTimestamp() - $now->getTimestamp()) / 60;
+
+                    // Берём ближайший активный дедлайн (-10..+2000 мин)
+                    if ($minutesLeft > -10 && $minutesLeft < 2000) {
+                        if (!$nextDelivery || $minutesLeft < $nextDelivery['minutesLeft']) {
+                            $nextDelivery = [
+                                'date' => $deliveryDate,
+                                'deadline' => $deadline,
+                                'minutesLeft' => $minutesLeft,
+                                'dow' => $deliveryDow,
+                            ];
+                        }
+                    }
+                }
+            }
+
+            if (!$nextDelivery) continue;
+
+            $deliveryDate = $nextDelivery['date'];
+            $minutesLeft = $nextDelivery['minutesLeft'];
+            $deadlineFmt = $nextDelivery['deadline']->format('d.m H:i');
+
+            // Есть ли непустая заявка?
+            $oc = $pdo->prepare("SELECT COUNT(*) FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND status != 'draft'");
+            $oc->execute([$supId, $restNum, $deliveryDate]);
+            $hasOrder = (int)$oc->fetchColumn() > 0;
+
+            // Вечернее напоминание в 18:00 за день до дедлайна
+            $eveningCheck = clone $nextDelivery['deadline'];
+            $eveningCheck->modify('-1 day')->setTime(18, 0);
+            $minutesToEvening = ($eveningCheck->getTimestamp() - $now->getTimestamp()) / 60;
+
+            $reminderType = null;
+            if (!$hasOrder && $minutesToEvening <= 5 && $minutesToEvening > -5) {
+                $reminderType = 'evening';
+            } elseif (!$hasOrder && $minutesLeft <= -0.1 && $minutesLeft > -10) {
+                $reminderType = 'expired';
+            } elseif (!$hasOrder) {
+                if ($minutesLeft <= 180 && $minutesLeft > 175) $reminderType = '3h';
+                elseif ($minutesLeft <= 120 && $minutesLeft > 115) $reminderType = '2h';
+                elseif ($minutesLeft <= 60 && $minutesLeft > 55) $reminderType = '1h';
+                elseif ($minutesLeft <= 30 && $minutesLeft > 25) $reminderType = '30m';
+            }
+
+            if (!$reminderType) continue;
+
+            // Дедупликация
+            $dedupKey = "so_rem_{$reminderType}_{$supId}_{$restNum}_{$deliveryDate}";
+            $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 24 HOUR LIMIT 1");
+            $dup->execute([$dedupKey]);
+            if ($dup->fetch()) continue;
+
+            // Текст
+            $dayNames = [1=>'понедельник',2=>'вторник',3=>'среду',4=>'четверг',5=>'пятницу',6=>'субботу',7=>'воскресенье'];
+            $dayName = $dayNames[$nextDelivery['dow']] ?? '';
+
+            if ($reminderType === 'expired') {
+                $msgText = "⚠️ <b>Дедлайн заявки истёк!</b>\n\n";
+                $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+                $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n\n";
+                $msgText .= "Заявка не была подана.";
+            } elseif ($reminderType === 'evening') {
+                $msgText = "🌙 <b>Напоминание: заявка поставщику</b>\n\n";
+                $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+                $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n";
+                $msgText .= "⏳ Дедлайн завтра: <b>{$deadlineFmt}</b>\n\n";
+                $msgText .= "Не забудьте подать заявку!";
+            } else {
+                $timeLabels = ['3h' => '3 часа', '2h' => '2 часа', '1h' => '1 час', '30m' => '30 минут'];
+                $timeLabel = $timeLabels[$reminderType] ?? $reminderType;
+                $msgText = "⏰ <b>Напоминание: заявка поставщику</b>\n\n";
+                $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+                $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n";
+                $msgText .= "⏳ До дедлайна: <b>{$timeLabel}</b> (до {$deadlineFmt})\n\n";
+                $msgText .= "Заявка ещё не подана!";
+            }
+
+            // Токен быстрого входа → страница поставщика в кабинете
+            $token = bin2hex(random_bytes(32));
+            $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)")
+                ->execute([$token, $chatId, $restNum]);
+
+            $redirect = "/restaurant/orders/supplier/{$supId}";
+            $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
+
+            $keyboard = ['inline_keyboard' => [
+                [['text' => '📝 Открыть заявку', 'url' => $url]],
+            ]];
+
+            tgSend($chatId, $msgText, true, $keyboard);
+            $sent++;
+
+            $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)")
+                ->execute([$chatId, $dedupKey]);
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] so reminders error: ' . $e->getMessage());
+}
+
+// ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): итоговая сводка закупщикам после дедлайна ═══
+// После прохождения дедлайна (не более 20 мин назад) шлём подписчикам
+// (telegram_settings.so_deadline_summary = 1) сводку: краткий текст + Excel-файл.
+try {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+
+    // Подписчики на сводку
+    $subs = $pdo->query("
+        SELECT u.name, u.telegram_chat_id
+        FROM users u
+        JOIN telegram_settings ts ON ts.user_name = u.name
+        WHERE u.telegram_chat_id IS NOT NULL AND ts.so_deadline_summary = 1
+    ")->fetchAll();
+
+    if ($subs) {
+        $suppliers = $pdo->query("
+            SELECT DISTINCT s.id, s.short_name,
+                   COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+            FROM suppliers s
+            JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+            LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
+            WHERE s.is_active = 1
+        ")->fetchAll();
+
+        foreach ($suppliers as $sup) {
+            $supId = $sup['id'];
+            $supName = $sup['short_name'];
+            $defaultDeadlineTime = $sup['default_deadline_time'];
+
+            // Уникальные дни доставки у этого поставщика
+            $dowStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1");
+            $dowStmt->execute([$supId]);
+            $deliveryDows = array_map('intval', $dowStmt->fetchAll(PDO::FETCH_COLUMN));
+
+            // Формируем список ближайших дат поставки (прошлая, текущая, следующая неделя)
+            $datesSet = [];
+            foreach ($deliveryDows as $dow) {
+                $weekStart = clone $now;
+                $weekStart->setTime(0, 0, 0);
+                $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
+                for ($w = -1; $w < 2; $w++) {
+                    $dd = (clone $weekStart)->modify('+' . ($dow - 1 + $w * 7) . ' days')->format('Y-m-d');
+                    $datesSet[$dd] = $dow;
+                }
+            }
+
+            foreach ($datesSet as $deliveryDate => $deliveryDow) {
+                // Вычисляем дедлайн
+                $ovStmt = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                $ovStmt->execute([$supId, $deliveryDate]);
+                $override = $ovStmt->fetchColumn();
+
+                if ($override) {
+                    $deadlineDateObj = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+                    $deadlineTime = $override;
+                } else {
+                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                    $rlStmt->execute([$supId, $deliveryDow]);
+                    $rule = $rlStmt->fetch();
+                    if ($rule) {
+                        $deadlineDow = (int)$rule['deadline_dow'];
+                        $deadlineTime = $rule['deadline_time'];
+                        $deadlineDateObj = new DateTime($deliveryDate, $tz);
+                        $diff = $deliveryDow - $deadlineDow;
+                        if ($diff <= 0) $diff += 7;
+                        $deadlineDateObj->modify("-{$diff} days");
+                    } else {
+                        $deadlineDateObj = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+                        $deadlineTime = $defaultDeadlineTime;
+                    }
+                }
+
+                $tp = explode(':', $deadlineTime);
+                $deadline = clone $deadlineDateObj;
+                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
+
+                // Окно: дедлайн прошёл не более 20 мин назад и не в будущем
+                if ($minutesSince < 0 || $minutesSince > 20) continue;
+
+                // Дедупликация
+                $dedupKey = "so_summary_{$supId}_{$deliveryDate}";
+                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
+                $dup->execute([$dedupKey]);
+                if ($dup->fetch()) continue;
+
+                // Ожидаемые рестораны (по графику на этот день поставки)
+                $expStmt = $pdo->prepare("
+                    SELECT DISTINCT r.number, r.region, r.address, r.city
+                    FROM so_supplier_schedules ss
+                    JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+                    WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
+                    ORDER BY r.region, CAST(r.number AS UNSIGNED)
+                ");
+                $expStmt->execute([$supId, $deliveryDow]);
+                $expectedRests = $expStmt->fetchAll();
+
+                if (!$expectedRests) continue;
+
+                // Все поданные строки заказов
+                $ordStmt = $pdo->prepare("
+                    SELECT o.restaurant_number, oi.sku, oi.product_name,
+                           COALESCE(oi.admin_qty, oi.quantity) AS qty
+                    FROM so_orders o
+                    JOIN so_order_items oi ON oi.order_id = o.id
+                    WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+                      AND COALESCE(oi.admin_qty, oi.quantity) > 0
+                ");
+                $ordStmt->execute([$supId, $deliveryDate]);
+                $orderRows = $ordStmt->fetchAll();
+
+                // Пивот: список товаров и матрица значений
+                $productsOrdered = [];  // sku => ['sku','name']
+                $pivot = [];            // rest_num => sku => qty
+                foreach ($orderRows as $row) {
+                    $sku = $row['sku'];
+                    if (!isset($productsOrdered[$sku])) {
+                        $productsOrdered[$sku] = ['sku' => $sku, 'name' => $row['product_name']];
+                    }
+                    $rn = $row['restaurant_number'];
+                    if (!isset($pivot[$rn])) $pivot[$rn] = [];
+                    $pivot[$rn][$sku] = ($pivot[$rn][$sku] ?? 0) + (float)$row['qty'];
+                }
+                uasort($productsOrdered, function($a, $b) { return strcmp($a['name'], $b['name']); });
+
+                $expectedNums = array_column($expectedRests, 'number');
+                $submittedNums = array_intersect($expectedNums, array_keys($pivot));
+                $submittedCount = count($submittedNums);
+                $missingCount = count($expectedNums) - $submittedCount;
+                $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+                $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+                $dayShort = $dayNames[$deliveryDow] ?? '';
+
+                // Если вообще никто не подал — шлём только текст без файла
+                if (!$productsOrdered) {
+                    $caption = "⚠️ <b>Никто не подал заявку</b>\n";
+                    $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+                    $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
+                    $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
+                    foreach ($subs as $sub) {
+                        tgSend($sub['telegram_chat_id'], $caption, true);
+                        $sent++;
+                    }
+                    $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                        ->execute([$dedupKey]);
+                    continue;
+                }
+
+                // Список товаров: те, что есть в заказах (из шаблона при необходимости)
+                $productsOut = array_values($productsOrdered);
+
+                // Если ни один ресторан не подал — товаров нет, но нам всё равно нужен
+                // хоть один столбец-товар. В этом случае тянем шаблон поставщика.
+                if (!$productsOut) {
+                    $tplStmt = $pdo->prepare("SELECT DISTINCT sku, product_name FROM so_templates WHERE supplier_id = ? AND is_active = 1 ORDER BY sort_order, product_name");
+                    $tplStmt->execute([$supId]);
+                    foreach ($tplStmt->fetchAll() as $t) {
+                        $productsOut[] = ['sku' => $t['sku'], 'name' => $t['product_name']];
+                    }
+                }
+
+                // Формируем данные для Node-генератора
+                $restaurantsOut = [];
+                foreach ($expectedRests as $rest) {
+                    $rn = $rest['number'];
+                    $restaurantsOut[] = [
+                        'number'   => (int)$rn,
+                        'city'     => $rest['city'] ?: '',
+                        'region'   => $rest['region'] ?: '',
+                        'address'  => $rest['address'] ?: '',
+                        'submitted'=> isset($pivot[$rn]),
+                    ];
+                }
+
+                $itemsOut = new stdClass();
+                $colTotals = array_fill_keys(array_column($productsOut, 'sku'), 0);
+                foreach ($pivot as $rn => $pmap) {
+                    foreach ($pmap as $sku => $qty) {
+                        $itemsOut->{"{$rn}_{$sku}"} = ['qty' => (float)$qty, 'is_admin' => false];
+                        if (isset($colTotals[$sku])) $colTotals[$sku] += (float)$qty;
+                    }
+                }
+
+                $payload = [
+                    'supplier_name'      => $supName,
+                    'delivery_date_fmt'  => $dateFmt,
+                    'sheet_name'         => $supName,
+                    'products'           => $productsOut,
+                    'restaurants'        => $restaurantsOut,
+                    'items'              => $itemsOut,
+                ];
+
+                // Временные файлы для обмена с Node
+                $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
+                $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
+                file_put_contents($tmpJson, json_encode($payload, JSON_UNESCAPED_UNICODE));
+
+                $scriptPath = escapeshellarg(__DIR__ . '/../scripts/build_so_order_xlsx.mjs');
+                $cmd = 'node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1';
+                exec($cmd, $outLines, $rc);
+                @unlink($tmpJson);
+
+                if ($rc !== 0 || !file_exists($tmpXlsx)) {
+                    error_log('[cron_telegram] so summary: node generator failed (rc=' . $rc . '): ' . implode("\n", $outLines));
+                    @unlink($tmpXlsx);
+                    continue;
+                }
+
+                $xlsxBinary = file_get_contents($tmpXlsx);
+                @unlink($tmpXlsx);
+
+                $filename = "Заявка {$supName} на {$dateFmt}.xlsx";
+
+                $caption = "🧾 <b>Заказ поставщику</b>\n";
+                $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+                $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
+                $caption .= "\n";
+                $caption .= "✅ Подали: <b>{$submittedCount}</b> из <b>" . count($expectedRests) . "</b>\n";
+                if ($missingCount > 0) {
+                    $caption .= "❌ Не подали: <b>{$missingCount}</b>\n";
+                }
+                arsort($colTotals);
+                $topProducts = array_slice($colTotals, 0, 5, true);
+                if ($topProducts) {
+                    $caption .= "\n📊 <b>Итого по товарам:</b>\n";
+                    foreach ($topProducts as $sku => $tot) {
+                        if ($tot <= 0) continue;
+                        $name = $productsOrdered[$sku]['name'] ?? $sku;
+                        $caption .= "• " . htmlspecialchars($name, ENT_QUOTES) . " — <b>" . rtrim(rtrim(number_format($tot, 2, '.', ''), '0'), '.') . "</b>\n";
+                    }
+                    if (count($colTotals) > 5) {
+                        $caption .= "… и ещё " . (count($colTotals) - 5) . " позиций в файле";
+                    }
+                }
+
+                foreach ($subs as $sub) {
+                    tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
+                    $sent++;
+                }
+
+                $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                    ->execute([$dedupKey]);
+            }
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] so summary error: ' . $e->getMessage());
 }
 
 // Очистка старых записей дедупликации (старше 7 дней)
