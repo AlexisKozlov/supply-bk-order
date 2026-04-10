@@ -54,12 +54,17 @@
           <div class="so-supplier-schedule">
             График: {{ sup.schedule.map(s => s.order_day_name + ' → ' + s.delivery_day_name).join(', ') }}
           </div>
-          <div v-if="!sup.session" class="so-supplier-status closed">Приём заявок закрыт</div>
+          <div v-if="!sup.is_accepting_orders" class="so-supplier-status closed">
+            {{ sup.pause_message || 'Приём заявок временно приостановлен' }}
+          </div>
+          <div v-else-if="!sup.available_dates?.length" class="so-supplier-status closed">
+            Ближайшие поставки не запланированы
+          </div>
           <div v-else class="so-supplier-dates">
             <div v-for="d in sup.available_dates" :key="d.delivery_date" class="so-date-chip"
               :class="{ submitted: d.order, closed: d.deadline_status === 'closed' && !d.order }">
               {{ formatDateShort(d.delivery_date) }}
-              <span v-if="d.order" class="so-chip-icon">��</span>
+              <span v-if="d.order" class="so-chip-icon">✓</span>
               <span v-else-if="d.deadline_status === 'closed'" class="so-chip-icon">✕</span>
             </div>
           </div>
@@ -73,25 +78,30 @@
         <h2 class="so-section-title">{{ selectedSupplier.name }}</h2>
 
         <!-- Date tabs -->
-        <div v-if="selectedSupplier.session" class="ro-day-tabs">
+        <div v-if="selectedSupplier.is_accepting_orders && selectedSupplier.available_dates?.length" class="ro-day-tabs">
           <button
             v-for="d in selectedSupplier.available_dates" :key="d.delivery_date"
             class="ro-day-tab"
             :class="{
               active: selectedDeliveryDate === d.delivery_date,
-              submitted: !!d.order,
+              submitted: !!d.order && !d.order?.is_skip,
+              skipped: !!d.order?.is_skip,
               closed: d.deadline_status === 'closed' && !d.order,
             }"
             @click="selectDate(d)"
           >
             <span class="ro-day-name">{{ d.delivery_day_name }}</span>
             <span class="ro-day-date">{{ formatDateShort(d.delivery_date) }}</span>
-            <span v-if="d.order" class="ro-day-badge ok">V</span>
+            <span v-if="d.order?.is_skip" class="ro-day-badge skipped" title="Поставка не нужна">🚫</span>
+            <span v-else-if="d.order" class="ro-day-badge ok">V</span>
             <span v-else-if="d.deadline_status === 'closed'" class="ro-day-badge closed">X</span>
           </button>
         </div>
         <div v-else class="ro-card ro-empty">
-          <p>Приём заявок для этого поставщика закрыт.</p>
+          <p v-if="!selectedSupplier.is_accepting_orders">
+            {{ selectedSupplier.pause_message || 'Приём заявок временно приостановлен.' }}
+          </p>
+          <p v-else>Ближайшие поставки не запланированы.</p>
         </div>
 
         <!-- Order area -->
@@ -108,7 +118,12 @@
           <!-- Products -->
           <div v-if="currentDateInfo?.deadline_status === 'open' || currentDateInfo?.order" class="ro-products">
             <div v-if="productsLoading" class="ro-loading"><div class="ro-spinner"></div></div>
-            <table v-else class="ro-table">
+            <div v-else-if="isSkipOrder" class="ro-skip-banner">
+              <span class="ro-skip-icon">🚫</span>
+              <strong>Поставка не нужна.</strong>
+              <span class="ro-skip-hint">Впишите количества, чтобы отменить.</span>
+            </div>
+            <table v-if="!productsLoading" class="ro-table">
               <thead>
                 <tr>
                   <th class="ro-th-name">Товар</th>
@@ -184,6 +199,7 @@ const products = ref([]);
 const quantities = ref({});
 const showSuccess = ref(false);
 const successInfo = ref({});
+const isSkipOrder = ref(false);
 
 const currentDateInfo = computed(() => {
   if (!selectedSupplier.value || !selectedDeliveryDate.value) return null;
@@ -260,6 +276,7 @@ async function selectDate(dateInfo) {
   selectedDeliveryDate.value = dateInfo.delivery_date;
   productsLoading.value = true;
   quantities.value = {};
+  isSkipOrder.value = false;
 
   try {
     products.value = await soStore.loadProducts(selectedSupplier.value.id);
@@ -267,9 +284,16 @@ async function selectDate(dateInfo) {
     // Если есть существующий заказ — загрузить
     if (dateInfo.order) {
       const order = await soStore.loadMyOrder(selectedSupplier.value.id, dateInfo.delivery_date);
-      if (order?.items) {
+      const itemCount = order?.items?.length || 0;
+      if (itemCount > 0) {
         for (const item of order.items) {
           quantities.value[item.sku] = parseFloat(item.quantity) || 0;
+        }
+      } else {
+        // Заявка есть, но позиций нет → «Поставка не нужна»
+        isSkipOrder.value = true;
+        for (const p of products.value) {
+          quantities.value[p.sku] = 0;
         }
       }
     }
@@ -394,7 +418,21 @@ function formatDateShort(d) {
 .ro-day-date { display: block; font-size: 11px; color: #8b7355; }
 .ro-day-badge { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .ro-day-badge.ok { background: #16a34a; color: white; }
+.ro-day-badge.skipped { background: #9ca3af; color: white; font-size: 10px; }
 .ro-day-badge.closed { background: #9ca3af; color: white; }
+.ro-day-tab.skipped { border-color: #9ca3af; background: #f5f5f5; }
+.ro-day-tab.active.skipped { background: #D62300; border-color: #D62300; color: white; }
+.ro-day-tab.active.skipped .ro-day-name, .ro-day-tab.active.skipped .ro-day-date { color: white; }
+
+.ro-skip-banner {
+  padding: 8px 14px; background: #fef3c7; border: 1px solid #fbbf24;
+  border-radius: 8px; color: #92400e; margin-bottom: 10px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  font-size: 12px; line-height: 1.3;
+}
+.ro-skip-banner strong { font-size: 13px; }
+.ro-skip-icon { font-size: 14px; }
+.ro-skip-hint { font-size: 11px; opacity: 0.75; }
 
 /* Deadline bar */
 .ro-deadline-bar { padding: 10px 16px; font-size: 13px; font-weight: 600; text-align: center; }

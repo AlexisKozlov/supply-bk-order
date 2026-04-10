@@ -458,27 +458,30 @@
       <!-- ── Поставщик (Камако и др.) ── -->
       <template v-for="sup in suppliers" :key="'stab-' + sup.id">
         <div v-if="orderSubTab === 'sup_' + sup.id">
-          <div v-if="!sup.session" class="cab-empty-card">
+          <div v-if="!sup.is_accepting_orders" class="cab-empty-card">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
             <h2>{{ sup.name }}</h2>
-            <p>Сейчас приём заявок не проводится. Возможные причины:</p>
-            <ul style="text-align:left; max-width:320px; margin:10px auto 0; font-size:13px; color:#8b7355; line-height:1.8">
-              <li>Нет активной сессии для этого поставщика</li>
-              <li>Для вашего ресторана не настроен график доставки</li>
-            </ul>
+            <p>{{ sup.pause_message || 'Приём заявок временно приостановлен.' }}</p>
+            <p style="margin-top:14px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок</p>
+          </div>
+          <div v-else-if="!sup.available_dates?.length" class="cab-empty-card">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+            <h2>{{ sup.name }}</h2>
+            <p>Ближайшие поставки не запланированы.</p>
             <p style="margin-top:14px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок</p>
           </div>
           <template v-else>
             <div class="cab-info-bar">{{ sup.name }}</div>
             <div class="day-tabs">
               <button v-for="d in sup.available_dates" :key="d.delivery_date" class="day-tab"
-                :class="{ active: supSelectedDates[sup.id] === d.delivery_date, done: !!d.order, closed: d.deadline_status === 'closed' && !d.order }"
+                :class="{ active: supSelectedDates[sup.id] === d.delivery_date, done: !!d.order && !d.order?.is_skip, skipped: !!d.order?.is_skip, closed: d.deadline_status === 'closed' && !d.order }"
                 @click="supSelectDate(sup, d)">
                 <span class="day-tab-label">
                   <span class="day-tab-name">{{ d.delivery_day_name }}</span>
                   <span class="day-tab-date">{{ fmtDateShort(d.delivery_date) }}</span>
                 </span>
-                <span v-if="d.order" class="day-tab-mark done">&#10003;</span>
+                <span v-if="d.order?.is_skip" class="day-tab-mark skipped" title="Поставка не нужна">&#128683;</span>
+                <span v-else-if="d.order" class="day-tab-mark done">&#10003;</span>
                 <span v-else-if="d.deadline_status === 'closed'" class="day-tab-mark closed">&#10005;</span>
               </button>
             </div>
@@ -495,6 +498,11 @@
               </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
               <template v-else>
+                <div v-if="supIsSkipOrder[sup.id]" class="sup-skip-banner">
+                  <span class="sup-skip-icon">🚫</span>
+                  <strong>Поставка не нужна.</strong>
+                  <span class="sup-skip-hint">Впишите количества, чтобы отменить.</span>
+                </div>
                 <div v-if="supProducts[sup.id]?.length" class="item-list">
                   <div v-for="p in supProducts[sup.id]" :key="p.sku"
                     class="item-row" :class="{ 'item-filled': supQuantities[sup.id]?.[p.sku] > 0, 'item-error': supHasError(sup.id, p), 'item-admin-edited': supAdminEditInfo(sup.id, p.sku) }">
@@ -1224,11 +1232,12 @@ const supProducts = reactive({});
 const supQuantities = reactive({});
 const supAdminEdits = reactive({}); // { supId: { sku: { original, edited } } } — правки закупщика
 const supProductsLoading = reactive({});
+const supIsSkipOrder = reactive({}); // { supId: true } — заявка с флагом «поставка не нужна»
 const supSubmitting = reactive({});
 const supShowSuccess = ref(false);
 const supSuccessInfo = ref({});
 
-function supplierBadge(sup) { if (!sup.session) return null; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
+function supplierBadge(sup) { if (!sup.is_accepting_orders) return null; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
 function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; return sup.available_dates?.find(d => d.delivery_date === supSelectedDates[sup.id]); }
 function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(' '); const d = new Date(date + 'T00:00:00'); const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' }); return (time || '') + ', ' + label; }
 
@@ -1237,11 +1246,13 @@ async function supSelectDate(sup, dateInfo) {
   supProductsLoading[sup.id] = true;
   supQuantities[sup.id] = {};
   supAdminEdits[sup.id] = {};
+  supIsSkipOrder[sup.id] = false;
   try {
     supProducts[sup.id] = await soStore.loadProducts(sup.id);
     if (dateInfo.order) {
       const order = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date);
-      if (order?.items) {
+      const itemCount = order?.items?.length || 0;
+      if (itemCount > 0) {
         for (const item of order.items) {
           const orig = parseFloat(item.quantity) || 0;
           const adminQ = (item.admin_qty !== null && item.admin_qty !== undefined && item.admin_qty !== '')
@@ -1252,6 +1263,12 @@ async function supSelectDate(sup, dateInfo) {
           if (adminQ !== null && Math.abs(adminQ - orig) > 0.001) {
             supAdminEdits[sup.id][item.sku] = { original: orig, edited: adminQ };
           }
+        }
+      } else {
+        // Заявка есть, но позиций нет → «Поставка не нужна»: ставим нули во все поля
+        supIsSkipOrder[sup.id] = true;
+        for (const p of (supProducts[sup.id] || [])) {
+          supQuantities[sup.id][p.sku] = 0;
         }
       }
     }
@@ -1685,6 +1702,9 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .day-tab.active { background: #D62300; color: white; border-color: #D62300; box-shadow: 0 4px 16px rgba(214,35,0,0.25); }
 .day-tab.active .day-tab-name, .day-tab.active .day-tab-date, .day-tab.active .day-tab-label { color: white; }
 .day-tab.done { border-color: #16a34a; }
+.day-tab.skipped { border-color: #9ca3af; background: #f5f5f5; }
+.day-tab.active.skipped { background: #D62300; border-color: #D62300; }
+.day-tab.active.skipped .day-tab-name, .day-tab.active.skipped .day-tab-date { color: white; }
 .day-tab.closed { opacity: 0.5; }
 .day-tab.closed .day-tab-name, .day-tab.closed .day-tab-label { text-decoration: line-through; }
 .day-tab.warn { border-color: #f59e0b; }
@@ -1693,7 +1713,17 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .day-tab-date { display: block; font-size: 10px; color: #8b7355; margin-top: 1px; }
 .day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
 .day-tab-mark.done { background: #16a34a; color: white; }
+.day-tab-mark.skipped { background: #9ca3af; color: white; font-size: 11px; }
 .day-tab-mark.closed { background: #9ca3af; color: white; }
+
+.sup-skip-banner {
+  padding: 7px 14px; background: #fef3c7; border-bottom: 1px solid #fbbf24;
+  color: #92400e; font-size: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  line-height: 1.3;
+}
+.sup-skip-banner strong { font-size: 13px; }
+.sup-skip-icon { font-size: 14px; }
+.sup-skip-hint { font-size: 11px; opacity: 0.75; }
 
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 

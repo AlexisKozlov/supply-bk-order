@@ -14,6 +14,9 @@
           <button class="rom-page-tab" :class="{ active: pageTab === 'stock' }" @click="pageTab = 'stock'; initStockTab()">
             Остатки
           </button>
+          <button class="rom-page-tab" :class="{ active: pageTab === 'audit' }" @click="pageTab = 'audit'; loadAuditLog()">
+            Журнал
+          </button>
           <router-link :to="{ name: 'restaurant-report' }" class="rom-page-tab rom-page-tab-link">
             Отчёт →
           </router-link>
@@ -319,6 +322,96 @@
       </div>
     </template>
 
+    <!-- ═══ TAB: Audit log ═══ -->
+    <template v-if="pageTab === 'audit'">
+      <div class="rom-audit-wrap">
+        <div class="rom-audit-filters">
+          <input type="date" v-model="auditFilters.dateFrom" @change="loadAuditLog" class="rom-input rom-input-sm" />
+          <span>—</span>
+          <input type="date" v-model="auditFilters.dateTo" @change="loadAuditLog" class="rom-input rom-input-sm" />
+          <input type="text" v-model="auditFilters.restaurant" @input="debouncedAuditSearch" placeholder="№ рест." class="rom-input rom-input-sm" style="width:80px" />
+          <input type="text" v-model="auditFilters.actor" @input="debouncedAuditSearch" placeholder="Кто изменил…" class="rom-input rom-input-sm" style="width:150px" />
+          <select v-model="auditFilters.action" @change="loadAuditLog" class="rom-input rom-input-sm">
+            <option value="">Все действия</option>
+            <option value="order_created">Заказ создан</option>
+            <option value="order_updated">Заказ обновлён</option>
+            <option value="order_deleted">Заказ удалён</option>
+            <option value="item_added">Позиция добавлена</option>
+            <option value="item_changed">Количество изменено</option>
+            <option value="item_deleted">Позиция удалена</option>
+            <option value="status_changed">Смена статуса</option>
+            <option value="delivery_date_changed">Смена даты</option>
+          </select>
+          <input type="text" v-model="auditFilters.search" @input="debouncedAuditSearch" placeholder="SKU или название товара…" class="rom-input rom-input-sm" style="flex:1;min-width:180px" />
+          <button class="rom-btn rom-btn-sm" @click="loadAuditLog" :disabled="auditLoading">
+            {{ auditLoading ? '…' : '⟳' }}
+          </button>
+          <button class="rom-btn rom-btn-sm" @click="resetAuditFilters">Сбросить</button>
+          <label class="rom-audit-auto">
+            <input type="checkbox" v-model="auditAutoRefresh" /> Авто
+          </label>
+        </div>
+
+        <div class="rom-audit-stats">
+          Всего событий: <strong>{{ auditTotal }}</strong>
+          <span v-if="auditLastRefresh"> · Обновлено: {{ auditLastRefresh }}</span>
+        </div>
+
+        <div v-if="auditLoading && !auditEvents.length" class="rom-loading">Загрузка журнала…</div>
+        <div v-else-if="!auditEvents.length" class="rom-audit-empty">Событий не найдено</div>
+        <div v-else class="rom-audit-list">
+          <div v-for="ev in auditEvents" :key="ev.id" class="rom-audit-row" :class="'act-' + ev.action">
+            <div class="rom-audit-time">
+              <div class="rom-audit-date">{{ fmtAuditDate(ev.created_at) }}</div>
+              <div class="rom-audit-clock">{{ fmtAuditTime(ev.created_at) }}</div>
+            </div>
+            <div class="rom-audit-icon" :class="'ai-' + ev.action">{{ auditIcon(ev.action) }}</div>
+            <div class="rom-audit-body">
+              <div class="rom-audit-head">
+                <span class="rom-audit-action">{{ auditActionLabel(ev.action) }}</span>
+                <span class="rom-audit-actor" :class="'actor-' + ev.actor_type">{{ ev.actor_name || '—' }}</span>
+                <span v-if="ev.restaurant_number" class="rom-audit-rest">Рест. {{ ev.restaurant_number }}</span>
+                <span v-if="ev.delivery_date" class="rom-audit-deliv">на {{ fmtAuditDate(ev.delivery_date) }}</span>
+              </div>
+              <div class="rom-audit-detail">
+                <template v-if="ev.sku || ev.product_name">
+                  <span class="rom-audit-sku">{{ ev.sku }}</span>
+                  <span>{{ ev.product_name }}</span>
+                  <template v-if="ev.action === 'item_changed'">
+                    <span class="rom-audit-arrow">{{ fmtAuditNum(ev.old_value) }} → <b>{{ fmtAuditNum(ev.new_value) }}</b></span>
+                  </template>
+                  <template v-else-if="ev.action === 'item_deleted'">
+                    <span class="rom-audit-del">было {{ fmtAuditNum(ev.old_value) }}</span>
+                  </template>
+                  <template v-else-if="ev.action === 'item_added'">
+                    <span class="rom-audit-add">+{{ fmtAuditNum(ev.new_value) }}</span>
+                  </template>
+                </template>
+                <template v-else-if="ev.action === 'status_changed' || ev.action === 'delivery_date_changed'">
+                  <span>{{ ev.old_value || '—' }} → <b>{{ ev.new_value || '—' }}</b></span>
+                </template>
+                <template v-else-if="ev.new_value || ev.old_value">
+                  <span>{{ ev.new_value || ev.old_value }}</span>
+                </template>
+                <button v-if="ev.details" class="rom-audit-details-btn" @click="toggleAuditDetails(ev.id)">
+                  {{ auditExpanded[ev.id] ? 'скрыть' : 'подробнее' }}
+                </button>
+              </div>
+              <pre v-if="auditExpanded[ev.id] && ev.details" class="rom-audit-details">{{ fmtAuditDetails(ev.details) }}</pre>
+            </div>
+            <button v-if="ev.order_id" class="rom-audit-goto" @click="goToAuditOrder(ev)" title="Открыть заказ">→</button>
+          </div>
+        </div>
+
+        <div v-if="auditEvents.length && auditEvents.length < auditTotal" class="rom-audit-more">
+          <button class="rom-btn" @click="loadMoreAuditLog" :disabled="auditLoading">
+            {{ auditLoading ? 'Загрузка…' : 'Показать ещё' }}
+          </button>
+          <span class="rom-audit-more-hint">Показано {{ auditEvents.length }} из {{ auditTotal }}</span>
+        </div>
+      </div>
+    </template>
+
     <!-- Add product to template modal -->
     <div v-if="showTplAddModal" class="rom-modal-overlay" @click.self="closeTplAddModal">
       <div class="rom-modal">
@@ -430,6 +523,9 @@
             <button class="rom-btn rom-btn-danger" @click="handleDeleteOrder(editingOrder)" :disabled="saving">
               Удалить заказ
             </button>
+            <button class="rom-btn" @click="openOrderHistory(editingOrder)" title="История изменений этого заказа">
+              История
+            </button>
             <div style="flex:1"></div>
             <button class="rom-btn rom-btn-export" @click="exportSingleOrder(editingOrder)">
               Excel
@@ -439,6 +535,53 @@
             </button>
           </div>
         </template>
+      </div>
+    </div>
+
+    <!-- Order history modal -->
+    <div v-if="showOrderHistoryModal" class="rom-modal-overlay" @click.self="showOrderHistoryModal = false">
+      <div class="rom-modal rom-modal-lg">
+        <div class="rom-modal-header">
+          <h2>История заказа #{{ historyOrderId }}</h2>
+          <button class="rom-modal-close" @click="showOrderHistoryModal = false">X</button>
+        </div>
+        <div class="rom-modal-body" style="max-height:70vh;overflow:auto">
+          <div v-if="historyLoading" class="rom-loading">Загрузка…</div>
+          <div v-else-if="!historyEvents.length" class="rom-no-items">Событий пока нет</div>
+          <div v-else class="rom-audit-list">
+            <div v-for="ev in historyEvents" :key="ev.id" class="rom-audit-row" :class="'act-' + ev.action">
+              <div class="rom-audit-time">
+                <div class="rom-audit-date">{{ fmtAuditDate(ev.created_at) }}</div>
+                <div class="rom-audit-clock">{{ fmtAuditTime(ev.created_at) }}</div>
+              </div>
+              <div class="rom-audit-icon">{{ auditIcon(ev.action) }}</div>
+              <div class="rom-audit-body">
+                <div class="rom-audit-head">
+                  <span class="rom-audit-action">{{ auditActionLabel(ev.action) }}</span>
+                  <span class="rom-audit-actor" :class="'actor-' + ev.actor_type">{{ ev.actor_name || '—' }}</span>
+                </div>
+                <div class="rom-audit-detail">
+                  <template v-if="ev.sku || ev.product_name">
+                    <span class="rom-audit-sku">{{ ev.sku }}</span>
+                    <span>{{ ev.product_name }}</span>
+                    <template v-if="ev.action === 'item_changed'">
+                      <span class="rom-audit-arrow">{{ fmtAuditNum(ev.old_value) }} → <b>{{ fmtAuditNum(ev.new_value) }}</b></span>
+                    </template>
+                    <template v-else-if="ev.action === 'item_deleted'">
+                      <span class="rom-audit-del">было {{ fmtAuditNum(ev.old_value) }}</span>
+                    </template>
+                    <template v-else-if="ev.action === 'item_added'">
+                      <span class="rom-audit-add">+{{ fmtAuditNum(ev.new_value) }}</span>
+                    </template>
+                  </template>
+                  <template v-else-if="ev.new_value || ev.old_value">
+                    <span>{{ ev.old_value || '—' }} → <b>{{ ev.new_value || '—' }}</b></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -765,7 +908,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -877,6 +1020,175 @@ let refreshInterval = null;
 
 // Page tabs
 const pageTab = ref('orders');
+
+// ═══ История одного заказа (модалка) ═══
+const showOrderHistoryModal = ref(false);
+const historyOrderId = ref(null);
+const historyEvents = ref([]);
+const historyLoading = ref(false);
+
+async function openOrderHistory(order) {
+  if (!order?.id) return;
+  historyOrderId.value = order.id;
+  historyEvents.value = [];
+  historyLoading.value = true;
+  showOrderHistoryModal.value = true;
+  try {
+    historyEvents.value = await store.adminGetOrderHistory(order.id);
+  } catch (e) {
+    alert('Не удалось загрузить историю: ' + (e.message || ''));
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+// ═══ Audit log (Журнал) ═══
+const auditEvents = ref([]);
+const auditTotal = ref(0);
+const auditLoading = ref(false);
+const auditLastRefresh = ref('');
+const auditExpanded = reactive({});
+const auditAutoRefresh = ref(false);
+let auditRefreshTimer = null;
+let auditSearchDebounce = null;
+const auditFilters = reactive({
+  dateFrom: '',
+  dateTo: '',
+  restaurant: '',
+  actor: '',
+  action: '',
+  search: '',
+});
+const AUDIT_PAGE_SIZE = 200;
+let auditOffset = 0;
+
+async function loadAuditLog(append = false) {
+  if (!append) {
+    auditOffset = 0;
+    auditEvents.value = [];
+  }
+  auditLoading.value = true;
+  try {
+    const data = await store.adminGetAuditLog({
+      dateFrom: auditFilters.dateFrom || undefined,
+      dateTo: auditFilters.dateTo || undefined,
+      restaurant: auditFilters.restaurant || undefined,
+      actor: auditFilters.actor || undefined,
+      action: auditFilters.action || undefined,
+      search: auditFilters.search || undefined,
+      limit: AUDIT_PAGE_SIZE,
+      offset: auditOffset,
+    });
+    if (append) auditEvents.value.push(...(data.events || []));
+    else auditEvents.value = data.events || [];
+    auditTotal.value = data.total || 0;
+    auditLastRefresh.value = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch (e) {
+    console.error('audit load failed', e);
+  } finally {
+    auditLoading.value = false;
+  }
+}
+
+async function loadMoreAuditLog() {
+  auditOffset += AUDIT_PAGE_SIZE;
+  await loadAuditLog(true);
+}
+
+function debouncedAuditSearch() {
+  clearTimeout(auditSearchDebounce);
+  auditSearchDebounce = setTimeout(() => loadAuditLog(), 300);
+}
+
+function resetAuditFilters() {
+  auditFilters.dateFrom = '';
+  auditFilters.dateTo = '';
+  auditFilters.restaurant = '';
+  auditFilters.actor = '';
+  auditFilters.action = '';
+  auditFilters.search = '';
+  loadAuditLog();
+}
+
+function toggleAuditDetails(id) {
+  auditExpanded[id] = !auditExpanded[id];
+}
+
+function goToAuditOrder(ev) {
+  if (!ev.order_id) return;
+  pageTab.value = 'orders';
+  // Передаём дату поставки в основную вкладку, чтобы открыть соответствующий день
+  if (ev.delivery_date) {
+    selectedDate.value = ev.delivery_date;
+    loadStatus();
+  }
+}
+
+function auditIcon(action) {
+  const map = {
+    order_created: '✅',
+    order_updated: '✏️',
+    order_deleted: '❌',
+    item_added: '➕',
+    item_changed: '🔄',
+    item_deleted: '➖',
+    status_changed: '🏷',
+    delivery_date_changed: '📅',
+  };
+  return map[action] || '•';
+}
+
+function auditActionLabel(action) {
+  const map = {
+    order_created: 'Заказ создан',
+    order_updated: 'Заказ обновлён',
+    order_deleted: 'Заказ удалён',
+    item_added: 'Позиция добавлена',
+    item_changed: 'Кол-во изменено',
+    item_deleted: 'Позиция удалена',
+    status_changed: 'Смена статуса',
+    delivery_date_changed: 'Смена даты доставки',
+  };
+  return map[action] || action;
+}
+
+function fmtAuditDate(s) {
+  if (!s) return '';
+  // s либо 'YYYY-MM-DD', либо 'YYYY-MM-DD HH:MM:SS'
+  const [d] = s.split(' ');
+  const [y, m, dd] = d.split('-');
+  return `${dd}.${m}`;
+}
+function fmtAuditTime(s) {
+  if (!s || !s.includes(' ')) return '';
+  return s.split(' ')[1].substring(0, 5);
+}
+function fmtAuditNum(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = parseFloat(v);
+  if (isNaN(n)) return v;
+  return n % 1 === 0 ? n.toFixed(0) : n.toString();
+}
+function fmtAuditDetails(d) {
+  if (!d) return '';
+  try {
+    const parsed = typeof d === 'string' ? JSON.parse(d) : d;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return String(d);
+  }
+}
+
+// Автообновление каждые 30 сек, пока вкладка открыта и включён чекбокс
+watch([pageTab, auditAutoRefresh], ([tab, auto]) => {
+  clearInterval(auditRefreshTimer);
+  if (tab === 'audit' && auto) {
+    auditRefreshTimer = setInterval(() => {
+      // Сбрасываем offset и перезагружаем с начала
+      loadAuditLog();
+    }, 30000);
+  }
+});
 
 // Templates (full page)
 const tplCategory = ref('Сухой');
@@ -2554,4 +2866,94 @@ async function doUnifiedExport() {
 .rom-row-deficit td { color: #6b7280 !important; }
 .rom-deficit { font-weight: 700; color: #dc2626 !important; }
 .rom-td-remaining { font-weight: 600; }
+
+/* ═══ Audit log (Журнал) ═══ */
+.rom-audit-wrap { padding: 0; }
+.rom-audit-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 10px 12px; background: #faf7f4; border: 1px solid #EDE8E3;
+  border-radius: 10px; margin-bottom: 10px;
+}
+.rom-audit-filters .rom-input-sm { padding: 5px 8px; font-size: 12px; }
+.rom-audit-auto { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #6b5d4c; cursor: pointer; user-select: none; }
+
+.rom-audit-stats { font-size: 12px; color: #8b7355; padding: 0 4px 8px; }
+
+.rom-audit-empty { text-align: center; padding: 40px; color: #9ca3af; font-size: 13px; }
+
+.rom-audit-list { display: flex; flex-direction: column; gap: 4px; }
+.rom-audit-row {
+  display: grid;
+  grid-template-columns: 60px 30px 1fr 30px;
+  gap: 10px; align-items: start;
+  padding: 10px 12px; background: white;
+  border: 1px solid #EDE8E3; border-left: 3px solid #d1d5db;
+  border-radius: 8px; transition: background 0.1s;
+}
+.rom-audit-row:hover { background: #faf7f4; }
+.rom-audit-row.act-order_created { border-left-color: #16a34a; }
+.rom-audit-row.act-order_updated { border-left-color: #f59e0b; }
+.rom-audit-row.act-order_deleted { border-left-color: #dc2626; }
+.rom-audit-row.act-item_added { border-left-color: #16a34a; }
+.rom-audit-row.act-item_changed { border-left-color: #f59e0b; }
+.rom-audit-row.act-item_deleted { border-left-color: #dc2626; }
+.rom-audit-row.act-status_changed { border-left-color: #3b82f6; }
+.rom-audit-row.act-delivery_date_changed { border-left-color: #8b5cf6; }
+
+.rom-audit-time { text-align: center; color: #8b7355; font-size: 11px; line-height: 1.2; padding-top: 1px; }
+.rom-audit-date { font-weight: 700; color: #502314; font-size: 12px; }
+.rom-audit-clock { font-variant-numeric: tabular-nums; }
+
+.rom-audit-icon {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; background: #f3f4f6;
+}
+
+.rom-audit-body { min-width: 0; }
+.rom-audit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 3px; font-size: 12px; }
+.rom-audit-action { font-weight: 700; color: #502314; }
+.rom-audit-actor {
+  padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600;
+  background: #f3f4f6; color: #374151;
+}
+.rom-audit-actor.actor-restaurant { background: #dbeafe; color: #1e40af; }
+.rom-audit-actor.actor-admin { background: #fef3c7; color: #92400e; }
+.rom-audit-actor.actor-bot { background: #ede9fe; color: #6d28d9; }
+.rom-audit-rest { font-size: 11px; color: #6b7280; font-weight: 600; }
+.rom-audit-deliv { font-size: 11px; color: #6b7280; }
+
+.rom-audit-detail { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: #4b5563; }
+.rom-audit-sku { font-family: monospace; font-size: 11px; color: #6b7280; background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+.rom-audit-arrow { font-variant-numeric: tabular-nums; }
+.rom-audit-arrow b { color: #502314; }
+.rom-audit-del { color: #dc2626; font-size: 11px; }
+.rom-audit-add { color: #16a34a; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.rom-audit-details-btn {
+  background: none; border: none; color: #8b7355; cursor: pointer;
+  font-size: 11px; padding: 0 4px; text-decoration: underline;
+}
+.rom-audit-details-btn:hover { color: #D62300; }
+.rom-audit-details {
+  grid-column: 3 / 5; margin: 6px 0 0; padding: 8px 10px;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+  font-size: 11px; color: #374151; font-family: monospace;
+  white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto;
+}
+
+.rom-audit-goto {
+  background: none; border: 1px solid #e5e7eb; border-radius: 6px;
+  width: 28px; height: 28px; cursor: pointer; color: #6b7280; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.rom-audit-goto:hover { border-color: #D62300; color: #D62300; background: #fff8f0; }
+
+.rom-audit-more { text-align: center; padding: 16px 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.rom-audit-more-hint { font-size: 11px; color: #9ca3af; }
+
+@media (max-width: 700px) {
+  .rom-audit-row { grid-template-columns: 48px 26px 1fr; }
+  .rom-audit-goto { grid-column: 3; justify-self: end; margin-top: 4px; }
+}
 </style>

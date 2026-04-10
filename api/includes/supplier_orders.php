@@ -3,6 +3,8 @@
  * API заявок поставщикам — универсальный модуль.
  * Подключается из index.php. Переменные ($pdo, $endpoint, $subpoint, $method, $body, $uri) через global.
  *
+ * Постоянный режим: вместо сессий — флаг is_accepting_orders в so_supplier_settings.
+ *
  * Маршруты для ресторанов (авторизация через ro_users / X-RO-Token):
  *   GET    so/suppliers           — список поставщиков с графиком для ресторана
  *   GET    so/products/:suppId    — товары по поставщику (шаблон)
@@ -16,12 +18,13 @@
  *   GET    so/admin/order/:id     — детали заявки
  *   PATCH  so/admin/order/:id     — редактировать заявку
  *   DELETE so/admin/order/:id     — удалить заявку
- *   POST   so/admin/session       — управление сессиями
- *   GET    so/admin/sessions      — список сессий
+ *   GET    so/admin/settings      — настройки поставщика (вкл/выкл, дедлайн)
+ *   POST   so/admin/settings      — обновить настройки
  *   GET    so/admin/schedules     — графики поставок
  *   POST   so/admin/schedules     — сохранить графики
  *   GET    so/admin/templates     — шаблоны товаров
  *   POST   so/admin/templates     — сохранить шаблон
+ *   POST   so/admin/extend-deadline — разовое продление дедлайна
  *   GET    so/admin/export        — Excel-экспорт
  */
 
@@ -55,23 +58,30 @@ function soGetRestaurantSession($pdo) {
     return $user;
 }
 
-function soGetActiveSession($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT * FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1");
+// Настройки поставщика: есть строка в so_supplier_settings или дефолты
+function soGetSupplierSettings($pdo, $supplierId) {
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
-    return $s->fetch() ?: null;
+    $row = $s->fetch();
+    if ($row) return $row;
+    return [
+        'supplier_id' => $supplierId,
+        'is_accepting_orders' => 1,
+        'default_deadline_time' => '14:00:00',
+        'pause_message' => null,
+    ];
 }
 
-function soCheckDeadline($pdo, $session, $deliveryDate) {
+function soCheckDeadline($pdo, $supplierId, $deliveryDate) {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
-    $supplierId = $session['supplier_id'] ?? '';
 
-    // 1. Проверяем переопределение на конкретную дату
-    $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
-    $s->execute([$session['id'], $deliveryDate]);
+    // 1. Переопределение на конкретную дату (по поставщику)
+    $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+    $s->execute([$supplierId, $deliveryDate]);
     $override = $s->fetch();
 
-    // 2. Ищем правило по дню недели доставки
+    // 2. Правило по дню недели доставки
     $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
     $rule = null;
     if ($supplierId) {
@@ -82,23 +92,21 @@ function soCheckDeadline($pdo, $session, $deliveryDate) {
 
     // 3. Вычисляем дату и время дедлайна
     if ($override) {
-        // Переопределение: дедлайн в день перед доставкой
         $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
         $deadlineTime = $override['deadline_time'];
     } elseif ($rule) {
-        // Правило: дедлайн в конкретный день недели
         $deadlineDow = (int)$rule['deadline_dow'];
         $deadlineTime = $rule['deadline_time'];
         $deliveryObj = new DateTime($deliveryDate, $tz);
         $deadlineDate = clone $deliveryObj;
-        // Отматываем к нужному дню недели (до доставки)
         $diff = $deliveryDow - $deadlineDow;
         if ($diff <= 0) $diff += 7;
         $deadlineDate->modify("-{$diff} days");
     } else {
-        // Фоллбэк: дедлайн = день перед доставкой, 14:00
+        // Фоллбэк: дедлайн = день перед доставкой, по умолчанию из настроек поставщика
+        $settings = soGetSupplierSettings($pdo, $supplierId);
         $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-        $deadlineTime = $session['deadline_time'] ?? '14:00:00';
+        $deadlineTime = $settings['default_deadline_time'] ?? '14:00:00';
     }
 
     $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
@@ -141,8 +149,12 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $s->execute([$rest['restaurant_id']]);
     $suppliers = $s->fetchAll();
 
-    // Для каждого поставщика — график и активные сессии
+    // Для каждого поставщика — график, настройки, ближайшие поставки
     $result = [];
+    $tz = new DateTimeZone('Europe/Minsk');
+    $today = new DateTime('now', $tz);
+    $today->setTime(0, 0, 0);
+
     foreach ($suppliers as $sup) {
         // График
         $sch = $pdo->prepare("SELECT order_day, delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1 ORDER BY order_day");
@@ -159,66 +171,78 @@ if ($soAction === 'suppliers' && $method === 'GET') {
             ];
         }
 
-        // Активная сессия
-        $session = soGetActiveSession($pdo, $sup['id']);
+        // Настройки: приём вкл/выкл
+        $settings = soGetSupplierSettings($pdo, $sup['id']);
+        $isAccepting = (int)($settings['is_accepting_orders'] ?? 1) === 1;
 
-        // Доступные даты заказа на эту неделю
+        // Доступные поставки: следующие 2 цикла для каждого пункта графика
         $availableDates = [];
-        if ($session) {
-            $weekStart = new DateTime($session['week_start']);
-            $weekEnd = new DateTime($session['week_end']);
-
+        if ($isAccepting) {
+            $WEEKS_AHEAD = 2; // показываем поставки на текущую и следующую неделю
             foreach ($schedule as $sc) {
                 $orderDow = (int)$sc['order_day'];
                 $deliveryDow = (int)$sc['delivery_day'];
 
-                // Находим дату дня заказа в рамках сессии
-                $orderDateObj = clone $weekStart;
-                $currentDow = (int)$orderDateObj->format('N');
-                $diff = $orderDow - $currentDow;
-                if ($diff < 0) $diff += 7;
-                $orderDateObj->modify("+{$diff} days");
+                // Базовая дата — понедельник текущей недели (по ISO)
+                $weekStart = clone $today;
+                $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
 
-                // Дата поставки
-                $deliveryDateObj = clone $weekStart;
-                $diff2 = $deliveryDow - $currentDow;
-                if ($diff2 < 0) $diff2 += 7;
-                $deliveryDateObj->modify("+{$diff2} days");
-                // Если день поставки <= день заказа по номеру, поставка на следующей неделе
-                if ($deliveryDow <= $orderDow) {
-                    $deliveryDateObj->modify('+7 days');
+                for ($w = 0; $w < $WEEKS_AHEAD; $w++) {
+                    $orderDateObj = (clone $weekStart)->modify('+' . ($orderDow - 1 + $w * 7) . ' days');
+                    $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+                    // Если день поставки по номеру <= день заказа, поставка на следующей неделе относительно заказа
+                    if ($deliveryDow <= $orderDow) {
+                        $deliveryDateObj->modify('+7 days');
+                    }
+
+                    // Скрываем поставки, которые уже прошли (delivery_date < сегодня)
+                    if ($deliveryDateObj < $today) continue;
+
+                    $orderDateStr = $orderDateObj->format('Y-m-d');
+                    $deliveryDateStr = $deliveryDateObj->format('Y-m-d');
+
+                    $deadlineInfo = soCheckDeadline($pdo, $sup['id'], $deliveryDateStr);
+
+                    // Существующая заявка (без привязки к сессии)
+                    $os = $pdo->prepare("SELECT o.id, o.status, o.submitted_at,
+                               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
+                        FROM so_orders o
+                        WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?");
+                    $os->execute([$sup['id'], $rest['restaurant_number'], $deliveryDateStr]);
+                    $order = $os->fetch();
+
+                    // Если дедлайн прошёл и нет заявки — не показываем
+                    if ($deadlineInfo['status'] === 'closed' && !$order) continue;
+
+                    $availableDates[] = [
+                        'order_date' => $orderDateStr,
+                        'order_day_name' => $dayNamesFull[$orderDow] ?? '',
+                        'delivery_date' => $deliveryDateStr,
+                        'delivery_day_name' => $dayNamesFull[$deliveryDow] ?? '',
+                        'deadline' => $deadlineInfo['deadline'],
+                        'deadline_status' => $deadlineInfo['status'],
+                        'order' => $order ? [
+                            'id' => (int)$order['id'],
+                            'status' => $order['status'],
+                            'submitted_at' => $order['submitted_at'],
+                            'item_count' => (int)$order['item_count'],
+                            'is_skip' => ((int)$order['item_count']) === 0,
+                        ] : null,
+                    ];
                 }
-
-                if ($orderDateObj > $weekEnd) continue;
-
-                $orderDateStr = $orderDateObj->format('Y-m-d');
-                $deliveryDateStr = $deliveryDateObj->format('Y-m-d');
-
-                $deadlineInfo = soCheckDeadline($pdo, $session, $deliveryDateStr);
-
-                // Проверяем есть ли уже заявка
-                $os = $pdo->prepare("SELECT id, status, submitted_at FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-                $os->execute([$session['id'], $rest['restaurant_number'], $deliveryDateStr]);
-                $order = $os->fetch();
-
-                $availableDates[] = [
-                    'order_date' => $orderDateStr,
-                    'order_day_name' => $dayNamesFull[$orderDow] ?? '',
-                    'delivery_date' => $deliveryDateStr,
-                    'delivery_day_name' => $dayNamesFull[$deliveryDow] ?? '',
-                    'deadline' => $deadlineInfo['deadline'],
-                    'deadline_status' => $deadlineInfo['status'],
-                    'order' => $order ? [
-                        'id' => (int)$order['id'],
-                        'status' => $order['status'],
-                        'submitted_at' => $order['submitted_at'],
-                    ] : null,
-                ];
             }
 
-            // Сортировка: новая (поздняя) дата доставки слева, ранние справа
+            // Убираем дубли по delivery_date (если в графике несколько записей указывают на одну дату)
+            $seen = [];
+            $availableDates = array_values(array_filter($availableDates, function ($d) use (&$seen) {
+                if (isset($seen[$d['delivery_date']])) return false;
+                $seen[$d['delivery_date']] = true;
+                return true;
+            }));
+
+            // Сортировка: ближайшая дата поставки первой (по возрастанию)
             usort($availableDates, function ($a, $b) {
-                return strcmp($b['delivery_date'], $a['delivery_date']);
+                return strcmp($a['delivery_date'], $b['delivery_date']);
             });
         }
 
@@ -227,11 +251,8 @@ if ($soAction === 'suppliers' && $method === 'GET') {
             'name' => $sup['short_name'],
             'full_name' => $sup['full_name'],
             'schedule' => $scheduleFormatted,
-            'session' => $session ? [
-                'id' => (int)$session['id'],
-                'week_start' => $session['week_start'],
-                'week_end' => $session['week_end'],
-            ] : null,
+            'is_accepting_orders' => $isAccepting,
+            'pause_message' => $settings['pause_message'] ?? null,
             'available_dates' => $availableDates,
         ];
     }
@@ -285,11 +306,8 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
     $supplierId = $soParam1;
     $deliveryDate = $soParam2;
 
-    $session = soGetActiveSession($pdo, $supplierId);
-    if (!$session) soRespond(['order' => null]);
-
-    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-    $s->execute([$session['id'], $rest['restaurant_number'], $deliveryDate]);
+    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+    $s->execute([$supplierId, $rest['restaurant_number'], $deliveryDate]);
     $order = $s->fetch();
 
     if (!$order) soRespond(['order' => null]);
@@ -354,18 +372,22 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата доставки'], 400);
     if (empty($items) && !$skipDelivery) soRespond(['error' => 'Заявка пуста'], 400);
 
-    $session = soGetActiveSession($pdo, $supplierId);
-    if (!$session) soRespond(['error' => 'Нет активной сессии приёма заявок для этого поставщика'], 400);
+    // Проверяем, что поставщик принимает заявки
+    $settings = soGetSupplierSettings($pdo, $supplierId);
+    if ((int)($settings['is_accepting_orders'] ?? 1) !== 1) {
+        $msg = $settings['pause_message'] ?: 'Приём заявок для этого поставщика временно приостановлен';
+        soRespond(['error' => $msg], 403);
+    }
 
     // Проверяем дедлайн (по дате доставки)
-    $dlStatus = soCheckDeadline($pdo, $session, $deliveryDate);
+    $dlStatus = soCheckDeadline($pdo, $supplierId, $deliveryDate);
     if ($dlStatus['status'] === 'closed') {
         soRespond(['error' => 'Приём заявок на эту дату закрыт (дедлайн ' . substr($dlStatus['deadline'], 0, 5) . ')'], 403);
     }
 
     // Проверяем: есть ли уже заявка?
-    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-    $existing->execute([$session['id'], $rest['restaurant_number'], $deliveryDate]);
+    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+    $existing->execute([$supplierId, $rest['restaurant_number'], $deliveryDate]);
     $existingOrder = $existing->fetch();
 
     $pdo->beginTransaction();
@@ -377,8 +399,8 @@ if ($soAction === 'submit-order' && $method === 'POST') {
                 ->execute([$orderId]);
         } else {
             $le = $rest['legal_entity'];
-            $pdo->prepare("INSERT INTO so_orders (session_id, restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, ?, 'submitted', NOW(), ?)")
-                ->execute([$session['id'], $rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
+            $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
+                ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
             $orderId = $pdo->lastInsertId();
         }
 
@@ -521,9 +543,10 @@ if ($soAction === 'admin') {
         $s = $pdo->query("
             SELECT s.id, s.short_name, s.full_name,
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
-                   (SELECT COUNT(*) FROM so_sessions ses WHERE ses.supplier_id = s.id AND ses.status = 'active') as has_active_session
+                   COALESCE(sst.is_accepting_orders, 1) as is_accepting_orders
             FROM suppliers s
             JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+            LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
             WHERE s.is_active = 1
             GROUP BY s.id
             ORDER BY s.short_name
@@ -531,29 +554,61 @@ if ($soAction === 'admin') {
         soRespond(['suppliers' => $s->fetchAll()]);
     }
 
+    // --- Настройки поставщика (GET) ---
+    if ($adminAction === 'settings' && $method === 'GET') {
+        $supplierId = $_GET['supplier_id'] ?? '';
+        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        $settings = soGetSupplierSettings($pdo, $supplierId);
+        // Список разовых переопределений дедлайна
+        $ov = $pdo->prepare("SELECT delivery_date, deadline_time, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
+        $ov->execute([$supplierId]);
+        soRespond([
+            'settings' => $settings,
+            'overrides' => $ov->fetchAll(),
+        ]);
+    }
+
+    // --- Обновить настройки поставщика (POST) ---
+    if ($adminAction === 'settings' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        $updatedBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+
+        $isAccepting = isset($body['is_accepting_orders']) ? ((int)!!$body['is_accepting_orders']) : 1;
+        $defaultDl = $body['default_deadline_time'] ?? '14:00:00';
+        if (preg_match('/^(\d{1,2}):(\d{2})$/', $defaultDl, $m)) {
+            $defaultDl = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
+        } elseif (!preg_match('/^\d{2}:\d{2}:\d{2}$/', $defaultDl)) {
+            $defaultDl = '14:00:00';
+        }
+        $pauseMsg = $body['pause_message'] ?? null;
+
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, default_deadline_time, pause_message, updated_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              is_accepting_orders = VALUES(is_accepting_orders),
+              default_deadline_time = VALUES(default_deadline_time),
+              pause_message = VALUES(pause_message),
+              updated_by = VALUES(updated_by)")
+            ->execute([$supplierId, $isAccepting, $defaultDl, $pauseMsg, $updatedBy]);
+
+        soRespond(['success' => true, 'settings' => soGetSupplierSettings($pdo, $supplierId)]);
+    }
+
     // --- Сводка заявок по поставщику + дате ---
     if ($adminAction === 'status' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
         $date = $_GET['date'] ?? '';
-        $sessionIdParam = $_GET['session_id'] ?? '';
 
         if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
 
-        if ($sessionIdParam) {
-            $ss = $pdo->prepare("SELECT * FROM so_sessions WHERE id = ? AND supplier_id = ?");
-            $ss->execute([$sessionIdParam, $supplierId]);
-            $session = $ss->fetch() ?: null;
-        } else {
-            $session = soGetActiveSession($pdo, $supplierId);
-        }
-        if (!$session) soRespond(['session' => null, 'restaurants' => [], 'stats' => ['total' => 0, 'submitted' => 0, 'pending' => 0]]);
+        $settings = soGetSupplierSettings($pdo, $supplierId);
 
-        // Если дата не указана, берём ближайший день поставки
+        // Если дата не указана, берём ближайший день поставки >= сегодня
         if (!$date) {
             $tz = new DateTimeZone('Europe/Minsk');
             $now = new DateTime('now', $tz);
             $todayDow = (int)$now->format('N');
-            // Ищем ближайший день поставки
             $s = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1 ORDER BY delivery_day");
             $s->execute([$supplierId]);
             $deliveryDays = array_column($s->fetchAll(), 'delivery_day');
@@ -573,7 +628,7 @@ if ($soAction === 'admin') {
 
         $deliveryDow = (int)(new DateTime($date))->format('N');
 
-        // Все рестораны, у которых поставка в этот день
+        // Все рестораны, у которых поставка в этот день (без session_id)
         $rests = $pdo->prepare("
             SELECT r.number, r.region, r.city, r.address,
                    ss.order_day,
@@ -582,11 +637,11 @@ if ($soAction === 'admin') {
                    (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-            LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.session_id = ? AND o.delivery_date = ?
+            LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.supplier_id = ? AND o.delivery_date = ?
             WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
             ORDER BY r.region, r.number
         ");
-        $rests->execute([$session['id'], $date, $supplierId, $deliveryDow]);
+        $rests->execute([$supplierId, $date, $supplierId, $deliveryDow]);
         $restaurants = $rests->fetchAll();
 
         $total = count($restaurants);
@@ -595,28 +650,31 @@ if ($soAction === 'admin') {
             if ($r['order_status'] === 'submitted' || $r['order_status'] === 'locked') $submitted++;
         }
 
-        // Все даты поставок на неделю (для навигации)
+        // Навигационные даты: ближайшие 2 цикла поставок по графику от сегодня
         $weekDates = [];
-        $weekStart = new DateTime($session['week_start']);
-        $weekEnd = new DateTime($session['week_end']);
+        $tz = new DateTimeZone('Europe/Minsk');
+        $today = (new DateTime('now', $tz))->setTime(0, 0, 0);
+        $weekStart = (clone $today)->modify('-' . ((int)$today->format('N') - 1) . ' days');
         $schStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1 ORDER BY delivery_day");
         $schStmt->execute([$supplierId]);
         $deliveryDaysAll = array_column($schStmt->fetchAll(), 'delivery_day');
-        foreach ($deliveryDaysAll as $dd) {
-            $dd = (int)$dd;
-            $dObj = clone $weekStart;
-            $cur = (int)$dObj->format('N');
-            $d = $dd - $cur;
-            if ($d < 0) $d += 7;
-            $dObj->modify("+{$d} days");
-            // Если доставка < заказа, это следующая неделя
-            $dateStr = $dObj->format('Y-m-d');
-            $weekDates[] = [
-                'date' => $dateStr,
-                'day_name' => $dayNames[$dd] ?? '',
-                'day_name_full' => $dayNamesFull[$dd] ?? '',
-            ];
+        $seenWD = [];
+        foreach ([0, 1] as $w) {
+            foreach ($deliveryDaysAll as $dd) {
+                $dd = (int)$dd;
+                $dObj = (clone $weekStart)->modify('+' . ($dd - 1 + $w * 7) . ' days');
+                if ($dObj < $today) continue;
+                $dateStr = $dObj->format('Y-m-d');
+                if (isset($seenWD[$dateStr])) continue;
+                $seenWD[$dateStr] = true;
+                $weekDates[] = [
+                    'date' => $dateStr,
+                    'day_name' => $dayNames[$dd] ?? '',
+                    'day_name_full' => $dayNamesFull[$dd] ?? '',
+                ];
+            }
         }
+        usort($weekDates, fn($a, $b) => strcmp($a['date'], $b['date']));
 
         // Товары из шаблонов (все юрлица)
         $tplStmt = $pdo->prepare("
@@ -628,25 +686,25 @@ if ($soAction === 'admin') {
         $tplStmt->execute([$supplierId]);
         $products = $tplStmt->fetchAll();
 
-        // Все позиции заявок для этой сессии + даты (для сводной таблицы)
+        // Все позиции заявок для этой даты
         $itemsStmt = $pdo->prepare("
             SELECT o.restaurant_number, o.delivery_date,
                    oi.sku, oi.product_name, oi.quantity, oi.admin_qty, oi.id as item_id, o.id as order_id
             FROM so_orders o
             JOIN so_order_items oi ON oi.order_id = o.id
-            WHERE o.session_id = ? AND o.delivery_date = ?
+            WHERE o.supplier_id = ? AND o.delivery_date = ?
         ");
-        $itemsStmt->execute([$session['id'], $date]);
+        $itemsStmt->execute([$supplierId, $date]);
         $orderItems = $itemsStmt->fetchAll();
 
+        // Дедлайн для этой даты
+        $deadlineInfo = soCheckDeadline($pdo, $supplierId, $date);
+
         soRespond([
-            'session' => [
-                'id' => (int)$session['id'],
-                'week_start' => $session['week_start'],
-                'week_end' => $session['week_end'],
-                'deadline_time' => $session['deadline_time'],
-            ],
+            'settings' => $settings,
             'date' => $date,
+            'deadline' => $deadlineInfo['deadline'],
+            'deadline_status' => $deadlineInfo['status'],
             'restaurants' => $restaurants,
             'products' => $products,
             'order_items' => $orderItems,
@@ -754,7 +812,6 @@ if ($soAction === 'admin') {
         $deliveryDate = $body['delivery_date'] ?? null;
         $sku = $body['sku'] ?? null;
         $productName = $body['product_name'] ?? null;
-        $sessionId = $body['session_id'] ?? null;
         $suppId = $body['supplier_id'] ?? null;
 
         $val = ($adminQty !== null && $adminQty !== '') ? (float)$adminQty : null;
@@ -788,19 +845,18 @@ if ($soAction === 'admin') {
             }
             $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $itemId]);
             $reload = false;
-        } elseif ($restNum && $deliveryDate && $sku && $sessionId && $suppId) {
+        } elseif ($restNum && $deliveryDate && $sku && $suppId) {
             // Ищем заказ ресторана
-            $orderStmt = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-            $orderStmt->execute([$sessionId, $restNum, $deliveryDate]);
+            $orderStmt = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+            $orderStmt->execute([$suppId, $restNum, $deliveryDate]);
             $order = $orderStmt->fetch();
 
             if (!$order) {
                 // Создаём заказ за ресторан
-                $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
                 $le = $body['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
-                $pdo->prepare("INSERT INTO so_orders (session_id, restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
-                    VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-                    ->execute([$sessionId, $restNum, $suppId, $deliveryDate, $le]);
+                $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
+                    VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                    ->execute([$restNum, $suppId, $deliveryDate, $le]);
                 $orderId = $pdo->lastInsertId();
             } else {
                 $orderId = $order['id'];
@@ -909,107 +965,8 @@ if ($soAction === 'admin') {
         soRespond(['success' => true]);
     }
 
-    // --- Управление сессиями ---
-    if ($adminAction === 'session' && $method === 'POST') {
-        $action = $body['action'] ?? 'create';
-        $supplierId = $body['supplier_id'] ?? '';
-
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
-
-        if ($action === 'create' || $action === 'auto') {
-            // Автосоздание: если нет активной — создаём
-            $existing = soGetActiveSession($pdo, $supplierId);
-            if ($existing && $action === 'auto') {
-                soRespond(['success' => true, 'session' => $existing, 'created' => false]);
-            }
-
-            // Ближайший ПН — ВС (если сегодня ВС — начинаем с завтра)
-            $tz = new DateTimeZone('Europe/Minsk');
-            $now = new DateTime('now', $tz);
-            $dow = (int)$now->format('N');
-            $mondayOffset = ($dow === 7) ? 1 : (1 - $dow); // Если ВС → +1, иначе назад к ПН
-            $monday = (clone $now)->modify("{$mondayOffset} days");
-            $sunday = (clone $monday)->modify('+6 days');
-            $weekStart = $body['week_start'] ?? $monday->format('Y-m-d');
-            $weekEnd = $body['week_end'] ?? $sunday->format('Y-m-d');
-            $deadlineTime = $body['deadline_time'] ?? '14:00:00';
-            $createdBy = $sessionUser ? $sessionUser['name'] : 'system';
-
-            // Закрываем старые сессии этого поставщика
-            $pdo->prepare("UPDATE so_sessions SET status = 'closed' WHERE supplier_id = ? AND status = 'active'")
-                ->execute([$supplierId]);
-
-            $pdo->prepare("INSERT INTO so_sessions (supplier_id, week_start, week_end, deadline_time, created_by) VALUES (?, ?, ?, ?, ?)")
-                ->execute([$supplierId, $weekStart, $weekEnd, $deadlineTime, $createdBy]);
-
-            $newSession = $pdo->prepare("SELECT * FROM so_sessions WHERE id = ?");
-            $newSession->execute([$pdo->lastInsertId()]);
-            soRespond(['success' => true, 'session' => $newSession->fetch(), 'created' => true]);
-        }
-
-        if ($action === 'close') {
-            $sessionId = $body['session_id'] ?? null;
-            if ($sessionId) {
-                $pdo->prepare("UPDATE so_sessions SET status = 'closed' WHERE id = ?")->execute([$sessionId]);
-            }
-            soRespond(['success' => true]);
-        }
-
-        if ($action === 'update') {
-            $sessionId = $body['session_id'] ?? null;
-            if (!$sessionId) soRespond(['error' => 'Не указана сессия'], 400);
-            $sets = [];
-            $params = [];
-            if (isset($body['deadline_time'])) { $sets[] = 'deadline_time = ?'; $params[] = $body['deadline_time']; }
-            if (isset($body['week_start'])) { $sets[] = 'week_start = ?'; $params[] = $body['week_start']; }
-            if (isset($body['week_end'])) { $sets[] = 'week_end = ?'; $params[] = $body['week_end']; }
-            if (empty($sets)) soRespond(['error' => 'Нечего обновлять'], 400);
-            $params[] = $sessionId;
-            $pdo->prepare("UPDATE so_sessions SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
-            soRespond(['success' => true]);
-        }
-
-        if ($action === 'reopen') {
-            $sessionId = $body['session_id'] ?? null;
-            if (!$sessionId) soRespond(['error' => 'Не указана сессия'], 400);
-            $pdo->prepare("UPDATE so_sessions SET status = 'active' WHERE id = ?")->execute([$sessionId]);
-            soRespond(['success' => true]);
-        }
-
-        if ($action === 'delete') {
-            $sessionId = $body['session_id'] ?? null;
-            if (!$sessionId) soRespond(['error' => 'Не указана сессия'], 400);
-            $pdo->prepare("DELETE FROM so_order_items WHERE order_id IN (SELECT id FROM so_orders WHERE session_id = ?)")->execute([$sessionId]);
-            $pdo->prepare("DELETE FROM so_orders WHERE session_id = ?")->execute([$sessionId]);
-            $pdo->prepare("DELETE FROM so_deadline_overrides WHERE session_id = ?")->execute([$sessionId]);
-            $pdo->prepare("DELETE FROM so_sessions WHERE id = ?")->execute([$sessionId]);
-            soRespond(['success' => true]);
-        }
-
-        soRespond(['error' => 'Unknown action'], 400);
-    }
-
-    // --- Список сессий ---
-    if ($adminAction === 'sessions' && $method === 'GET') {
-        $supplierId = $_GET['supplier_id'] ?? '';
-        $where = "1=1";
-        $params = [];
-        if ($supplierId) {
-            $where .= " AND ss.supplier_id = ?";
-            $params[] = $supplierId;
-        }
-        $s = $pdo->prepare("
-            SELECT ss.*, s.short_name as supplier_name,
-                   (SELECT COUNT(*) FROM so_orders WHERE session_id = ss.id) as order_count
-            FROM so_sessions ss
-            JOIN suppliers s ON s.id = ss.supplier_id
-            WHERE {$where}
-            ORDER BY ss.created_at DESC
-            LIMIT 50
-        ");
-        $s->execute($params);
-        soRespond(['sessions' => $s->fetchAll()]);
-    }
+    // Устаревшие маршруты управления сессиями удалены.
+    // Постоянный режим: см. so/admin/settings (вкл/выкл приёма заявок).
 
     // --- Графики поставок ---
     if ($adminAction === 'schedules' && $method === 'GET') {
@@ -1093,12 +1050,12 @@ if ($soAction === 'admin') {
 
     // --- Разовое продление дедлайна на конкретную дату доставки ---
     if ($adminAction === 'extend-deadline' && $method === 'POST') {
-        $sessionId = $body['session_id'] ?? null;
+        $supplierId = $body['supplier_id'] ?? null;
         $deliveryDate = $body['delivery_date'] ?? '';
         $deadlineTime = $body['deadline_time'] ?? '';
 
-        if (!$sessionId || !$deliveryDate || !$deadlineTime) {
-            soRespond(['error' => 'Не указаны сессия, дата доставки или новое время'], 400);
+        if (!$supplierId || !$deliveryDate || !$deadlineTime) {
+            soRespond(['error' => 'Не указаны поставщик, дата доставки или новое время'], 400);
         }
         // Нормализуем время к формату HH:MM:SS
         if (preg_match('/^(\d{1,2}):(\d{2})$/', $deadlineTime, $m)) {
@@ -1108,11 +1065,21 @@ if ($soAction === 'admin') {
         }
 
         $createdBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
-        $pdo->prepare("INSERT INTO so_deadline_overrides (session_id, delivery_date, deadline_time, created_by) VALUES (?, ?, ?, ?)
+        $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_time, created_by) VALUES (?, ?, ?, ?)
                        ON DUPLICATE KEY UPDATE deadline_time = VALUES(deadline_time), created_by = VALUES(created_by)")
-            ->execute([$sessionId, $deliveryDate, $deadlineTime, $createdBy]);
+            ->execute([$supplierId, $deliveryDate, $deadlineTime, $createdBy]);
 
-        soRespond(['success' => true, 'session_id' => (int)$sessionId, 'delivery_date' => $deliveryDate, 'deadline_time' => $deadlineTime]);
+        soRespond(['success' => true, 'supplier_id' => $supplierId, 'delivery_date' => $deliveryDate, 'deadline_time' => $deadlineTime]);
+    }
+
+    // --- Удалить разовое продление дедлайна ---
+    if ($adminAction === 'remove-deadline-override' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? null;
+        $deliveryDate = $body['delivery_date'] ?? '';
+        if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
+        $pdo->prepare("DELETE FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?")
+            ->execute([$supplierId, $deliveryDate]);
+        soRespond(['success' => true]);
     }
 
     // --- Шаблоны товаров ---
@@ -1178,12 +1145,7 @@ if ($soAction === 'admin') {
 
         if (!$supplierId || !$date) soRespond(['error' => 'Не указан поставщик или дата'], 400);
 
-        $session = soGetActiveSession($pdo, $supplierId);
-        if (!$session) soRespond(['error' => 'Нет активной сессии'], 400);
-
-        $deliveryDow = (int)(new DateTime($date))->format('N');
-
-        // Все заявки на эту дату
+        // Все заявки на эту дату (без session_id)
         $s = $pdo->prepare("
             SELECT o.restaurant_number, o.status, o.submitted_at,
                    r.region, r.address,
@@ -1192,10 +1154,10 @@ if ($soAction === 'admin') {
             FROM so_orders o
             JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
             JOIN so_order_items oi ON oi.order_id = o.id
-            WHERE o.session_id = ? AND o.delivery_date = ?
+            WHERE o.supplier_id = ? AND o.delivery_date = ?
             ORDER BY r.region, r.number, oi.product_name
         ");
-        $s->execute([$session['id'], $date]);
+        $s->execute([$supplierId, $date]);
         $rows = $s->fetchAll();
 
         // Сводка по товарам (используем admin_qty если есть)

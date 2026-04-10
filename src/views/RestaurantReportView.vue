@@ -508,19 +508,26 @@ function deleteItem(item) {
 async function confirmDelete() {
   if (!deleteConfirm.value) return;
   deleting.value = true;
+  const target = deleteConfirm.value;
   try {
-    const result = await store.adminDeleteItem(deleteConfirm.value.id);
-    // Удаляем из локальных данных
-    const itemId = deleteConfirm.value.id;
-    const orderId = deleteConfirm.value.order_id;
-    rawItems.value = rawItems.value.filter(i => i.id !== itemId);
+    // Передаём id + fallback-пару (order_id, sku): если заказ пересохранили и id устарел,
+    // бэкенд найдёт позицию по order_id+sku.
+    const result = await store.adminDeleteItem(target.id, target.order_id, target.sku);
+    rawItems.value = rawItems.value.filter(i => i.id !== target.id && !(i.order_id === target.order_id && i.sku === target.sku));
     if (result.order_deleted) {
-      rawOrders.value = rawOrders.value.filter(o => o.id !== orderId);
+      rawOrders.value = rawOrders.value.filter(o => o.id !== target.order_id);
     }
     toast.success('Позиция удалена');
     deleteConfirm.value = null;
   } catch (e) {
-    toast.error('Ошибка удаления', e.message);
+    // Позиция уже удалена (заказ пересохранён, ID устарели) — мягко убираем из списка
+    if (/не найдена|404/i.test(e.message || '')) {
+      rawItems.value = rawItems.value.filter(i => i.id !== target.id && !(i.order_id === target.order_id && i.sku === target.sku));
+      toast.success('Позиция уже была удалена', 'Заказ, возможно, пересохранили. Данные обновлены.');
+      deleteConfirm.value = null;
+    } else {
+      toast.error('Ошибка удаления', e.message);
+    }
   } finally {
     deleting.value = false;
   }

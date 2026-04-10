@@ -269,8 +269,31 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.sessions || [];
   }
 
-  async function adminDeleteItem(itemId) {
-    return await api(`admin/item/${itemId}`, { method: 'DELETE' });
+  async function adminDeleteItem(itemId, orderId = null, sku = null) {
+    const params = new URLSearchParams();
+    if (orderId) params.set('order_id', orderId);
+    if (sku) params.set('sku', sku);
+    const qs = params.toString() ? `?${params}` : '';
+    return await api(`admin/item/${itemId}${qs}`, { method: 'DELETE' });
+  }
+
+  // === Журнал изменений ===
+  async function adminGetAuditLog(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.dateFrom) params.set('date_from', filters.dateFrom);
+    if (filters.dateTo) params.set('date_to', filters.dateTo);
+    if (filters.restaurant) params.set('restaurant', filters.restaurant);
+    if (filters.actor) params.set('actor', filters.actor);
+    if (filters.action) params.set('action', filters.action);
+    if (filters.search) params.set('search', filters.search);
+    if (filters.limit) params.set('limit', filters.limit);
+    if (filters.offset) params.set('offset', filters.offset);
+    return await api(`admin/audit?${params}`);
+  }
+
+  async function adminGetOrderHistory(orderId) {
+    const data = await api(`admin/audit/${orderId}`);
+    return data.events || [];
   }
 
   // === Остатки склада ===
@@ -340,6 +363,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,
     adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword,
     adminGetExportData, adminGetSessions, adminDeleteItem,
+    adminGetAuditLog, adminGetOrderHistory,
     adminUploadStock, adminGetStockBalances, adminGetStockDates,
   };
 });

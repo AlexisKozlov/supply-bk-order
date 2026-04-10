@@ -8,8 +8,9 @@
       <!-- Меню по центру -->
       <nav class="hero-nav">
         <div class="nav-links">
-          <router-link to="/" class="nav-link">Главная</router-link>
-          <a href="https://docs.google.com/spreadsheets/d/1120BAXbfgI6YK66DGk-e-Z_ocqXqp4M_Rxp6qHhibek/edit?gid=0#gid=0" target="_blank" class="nav-link">Планета Ресторанов</a>
+          <router-link to="/" class="nav-link">Портал закупок</router-link>
+          <router-link to="/restaurant" class="nav-link">Личный кабинет</router-link>
+          <router-link to="/restaurant/orders/planeta" class="nav-link">Планета Ресторанов</router-link>
           <a href="https://docs.google.com/spreadsheets/d/1dv-s5Rqe9Hgyg1fbPeCWEwh0MaKMNkj7JK_gFyxPDdU/edit?pli=1&gid=0#gid=0" target="_blank" class="nav-link">График поставок</a>
           <a href="https://docs.google.com/spreadsheets/d/1ToILNXjzvBwvyRm8687h-RJrUA3RuffMx3vJuCdF-xQ/edit?gid=0#gid=0" target="_blank" class="nav-link">Контакты поставщиков</a>
         </div>

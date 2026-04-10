@@ -11,6 +11,10 @@
           <span class="db-at-switch"><span class="db-at-knob"></span></span>
           Без группы аналогов <span class="db-at-count">{{ noAnalogCount }}</span>
         </button>
+        <button v-if="incompleteCount" class="db-active-toggle" :class="{ active: showIncomplete }" @click="showIncomplete = !showIncomplete" title="Карточки с незаполненными полями (только среди активных)">
+          <span class="db-at-switch"><span class="db-at-knob"></span></span>
+          Неполные карточки <span class="db-at-count">{{ incompleteCount }}</span>
+        </button>
         <button v-if="!isViewer" class="btn primary" @click="openNew('product')" style="font-size:11px;padding:5px 12px;">+ Товар</button>
         <button v-if="!isViewer" class="btn secondary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт</button>
         <button class="btn secondary" @click="doExportProducts" style="font-size:11px;padding:5px 12px;">Экспорт</button>
@@ -73,6 +77,9 @@
             <span v-if="p.multiplicity > 1">×{{ p.multiplicity }}</span>
             <span v-if="p.is_traceable == 1" class="db-card-traceable-badge">прослеж.</span>
             <span v-if="p.is_active === 0 || p.is_active === '0'" class="db-card-inactive-badge">скрыта</span>
+          </div>
+          <div v-if="showIncomplete && getMissingFields(p).length" class="db-card-missing">
+            Не заполнено: {{ getMissingFields(p).join(', ') }}
           </div>
           <div v-if="!isViewer" class="db-card-btns">
             <button class="db-card-btn" @click.stop="editProduct(p)"><BkIcon name="edit" size="sm"/></button>
@@ -339,6 +346,38 @@ function confirmAction(title, message) {
 const showImportModal = ref(false);
 const showOnlyActive = ref(true);
 const showNoAnalog = ref(false);
+const showIncomplete = ref(false);
+
+const INCOMPLETE_FIELDS = [
+  ['sku', 'артикул'],
+  ['name', 'название'],
+  ['supplier', 'поставщик'],
+  ['unit_of_measure', 'ед.изм.'],
+  ['category', 'хранение'],
+  ['qty_per_box', 'шт/кор'],
+  ['boxes_per_pallet', 'кор/пал'],
+  ['multiplicity', 'кратность'],
+  ['weight_netto', 'нетто'],
+  ['weight_brutto', 'брутто'],
+  ['external_code', 'внеш.код'],
+  ['gtin', 'GTIN'],
+  ['analog_group', 'аналоги'],
+];
+
+function isFieldEmpty(v) {
+  if (v == null) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (typeof v === 'number') return v === 0;
+  return false;
+}
+
+function isProductActive(p) {
+  return p.is_active !== 0 && p.is_active !== '0';
+}
+
+function getMissingFields(p) {
+  return INCOMPLETE_FIELDS.filter(([key]) => isFieldEmpty(p[key])).map(([, label]) => label);
+}
 const expandedGroups = reactive(new Set());
 const renameModal = ref({ show: false, oldName: '', newName: '' });
 let _renameInitial = '';
@@ -394,8 +433,9 @@ function suppSortIcon(key) {
 const filteredProducts = computed(() => {
   const q = searchQuery.value.toLowerCase();
   let list = products.value;
-  if (showOnlyActive.value) list = list.filter(p => p.is_active !== 0 && p.is_active !== '0');
+  if (showOnlyActive.value || showIncomplete.value) list = list.filter(isProductActive);
   if (showNoAnalog.value) list = list.filter(p => !p.analog_group);
+  if (showIncomplete.value) list = list.filter(p => getMissingFields(p).length > 0);
   if (!q) return list;
   return list.filter(p => (p.name||'').toLowerCase().includes(q) || (p.sku||'').toLowerCase().includes(q) || (p.supplier||'').toLowerCase().includes(q));
 });
@@ -412,6 +452,7 @@ const sortedProducts = computed(() => {
 
 const inactiveCount = computed(() => products.value.filter(p => p.is_active === 0 || p.is_active === '0').length);
 const noAnalogCount = computed(() => products.value.filter(p => !p.analog_group).length);
+const incompleteCount = computed(() => products.value.filter(p => isProductActive(p) && getMissingFields(p).length > 0).length);
 
 const filteredSuppliers = computed(() => {
   const q = searchQuery.value.toLowerCase();
@@ -481,6 +522,9 @@ watch(() => route.query, (q) => {
   if (q?.tab === 'recipes') {
     switchToRecipes();
   }
+  if (typeof q?.search === 'string') {
+    searchQuery.value = q.search;
+  }
 });
 
 watch(() => orderStore.settings.legalEntity, () => {
@@ -495,6 +539,7 @@ onMounted(() => {
   if (route.query.tab === 'suppliers') activeTab.value = 'suppliers';
   if (route.query.tab === 'restaurants') switchToRestaurants();
   if (route.query.tab === 'recipes') switchToRecipes();
+  if (typeof route.query.search === 'string') searchQuery.value = route.query.search;
   if (route.query.action === 'new-product') {
     activeTab.value = 'products';
     editCardModal.value = { show: true, product: null };
@@ -700,7 +745,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .db-tab-count { display:inline-block; background:var(--border-light); color:var(--text-muted); font-size:11px; font-weight:700; padding:1px 7px; border-radius:10px; margin-left:4px; }
 .db-tab.active .db-tab-count { background:var(--bk-brown); color:#fff; }
 .db-grid { display:flex; flex-direction:column; gap:4px; }
-.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s; display:flex; align-items:center; gap:10px; }
+.db-card { background:var(--card); border:1px solid var(--border-light); border-radius:6px; padding:7px 12px; cursor:pointer; transition:border-color .15s; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .db-card:hover { border-color:var(--bk-orange); }
 .db-card-top { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
 .db-card-title { display:flex; align-items:baseline; gap:6px; min-width:0; flex:1; }
@@ -733,6 +778,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .analog-item:hover { background:rgba(245,166,35,.04); }
 .db-card-inactive { opacity:0.5; }
 .db-card-inactive-badge { background:#FFEBEE; color:#E57373; font-weight:600; border:1px solid #E57373; }
+.db-card-missing { flex-basis:100%; width:100%; margin-top:4px; padding:4px 7px; font-size:10px; color:#C62828; background:#FFF3E0; border:1px dashed #FFB74D; border-radius:4px; line-height:1.35; }
 .db-card-traceable-badge { background:#FFF9C4; color:#F9A825; font-weight:600; border:1px solid #F9A825; }
 
 /* ═══ Sort bar ═══ */

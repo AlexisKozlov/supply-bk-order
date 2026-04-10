@@ -149,6 +149,40 @@ function roGetLegalEntity($pdo, $restaurantNumber) {
     return 'ООО "Бургер БК"';
 }
 
+/**
+ * Запись события в журнал изменений заказов ресторанов.
+ * Вызывается из всех мест, где меняется состояние ro_orders/ro_order_items.
+ * @param array $e ['order_id', 'restaurant_number', 'delivery_date', 'action',
+ *                  'actor_name', 'actor_type', 'sku', 'product_name',
+ *                  'old_value', 'new_value', 'details' (array|null)]
+ */
+function roLogAudit($pdo, $e) {
+    try {
+        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? null;
+        if ($ip && strpos($ip, ',') !== false) $ip = trim(explode(',', $ip)[0]);
+        $pdo->prepare("INSERT INTO ro_audit_log
+            (order_id, restaurant_number, delivery_date, action, actor_name, actor_type, actor_ip, sku, product_name, old_value, new_value, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([
+                $e['order_id'] ?? null,
+                $e['restaurant_number'] ?? null,
+                $e['delivery_date'] ?? null,
+                $e['action'],
+                $e['actor_name'] ?? null,
+                $e['actor_type'] ?? 'system',
+                $ip,
+                $e['sku'] ?? null,
+                $e['product_name'] ?? null,
+                isset($e['old_value']) && $e['old_value'] !== null ? (string)$e['old_value'] : null,
+                isset($e['new_value']) && $e['new_value'] !== null ? (string)$e['new_value'] : null,
+                isset($e['details']) && $e['details'] !== null ? json_encode($e['details'], JSON_UNESCAPED_UNICODE) : null,
+            ]);
+    } catch (Exception $ex) {
+        // Лог не критичен — не ломаем основной запрос
+        error_log('roLogAudit failed: ' . $ex->getMessage());
+    }
+}
+
 function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
@@ -736,6 +770,16 @@ if ($roAction === 'submit-order' && $method === 'POST') {
     $existingOrder->execute([$session['id'], $rest['restaurant_number'], $deliveryDate]);
     $existing = $existingOrder->fetch();
 
+    // Запоминаем старые позиции для diff в журнале
+    $oldItemsAudit = [];
+    if ($existing) {
+        $oldSt = $pdo->prepare("SELECT sku, product_name, quantity FROM ro_order_items WHERE order_id = ?");
+        $oldSt->execute([$existing['id']]);
+        foreach ($oldSt->fetchAll() as $oi) {
+            $oldItemsAudit[$oi['sku']] = ['name' => $oi['product_name'], 'qty' => floatval($oi['quantity'])];
+        }
+    }
+
     $pdo->beginTransaction();
     try {
         if ($existing) {
@@ -783,6 +827,42 @@ if ($roAction === 'submit-order' && $method === 'POST') {
         $pdo->rollBack();
         roRespond(['error' => 'Ошибка сохранения заказа'], 500);
     }
+
+    // ═══ Журнал: создание/обновление заявки рестораном ═══
+    $newItemsAudit = [];
+    foreach ($items as $it) {
+        $q = floatval($it['quantity'] ?? 0);
+        if ($q <= 0) continue;
+        $newItemsAudit[$it['sku'] ?? ''] = ['name' => $it['product_name'] ?? '', 'qty' => $q];
+    }
+    $diff = ['added' => [], 'changed' => [], 'removed' => []];
+    foreach ($newItemsAudit as $sku => $ni) {
+        if (!isset($oldItemsAudit[$sku])) {
+            $diff['added'][] = ['sku' => $sku, 'name' => $ni['name'], 'qty' => $ni['qty']];
+        } elseif (abs($oldItemsAudit[$sku]['qty'] - $ni['qty']) > 0.001) {
+            $diff['changed'][] = ['sku' => $sku, 'name' => $ni['name'], 'old' => $oldItemsAudit[$sku]['qty'], 'new' => $ni['qty']];
+        }
+    }
+    foreach ($oldItemsAudit as $sku => $oi) {
+        if (!isset($newItemsAudit[$sku])) {
+            $diff['removed'][] = ['sku' => $sku, 'name' => $oi['name'], 'qty' => $oi['qty']];
+        }
+    }
+    roLogAudit($pdo, [
+        'order_id' => $orderId,
+        'restaurant_number' => $rest['restaurant_number'],
+        'delivery_date' => $deliveryDate,
+        'action' => $existing ? 'order_updated' : 'order_created',
+        'actor_name' => "Ресторан {$rest['restaurant_number']}",
+        'actor_type' => 'restaurant',
+        'new_value' => $totalItems . ' поз. / ' . $totalQty . ' кор.',
+        'details' => [
+            'total_items' => $totalItems,
+            'total_qty' => $totalQty,
+            'comment' => $comment,
+            'diff' => $diff,
+        ],
+    ]);
 
     // Уведомление в Telegram о принятой/обновлённой заявке
     try {
@@ -1031,8 +1111,11 @@ if (strpos($roAction, 'admin') === 0) {
         $status = $body['status'] ?? null;
         $deliveryDate = $body['delivery_date'] ?? null;
 
-        // Запоминаем старые позиции для сравнения
+        // Запоминаем старые позиции/состояние для сравнения и аудита
         $oldItems = [];
+        $oldOrderSt = $pdo->prepare("SELECT restaurant_number, delivery_date, status FROM ro_orders WHERE id = ?");
+        $oldOrderSt->execute([$orderId]);
+        $oldOrder = $oldOrderSt->fetch() ?: [];
         if ($items !== null) {
             $oldSt = $pdo->prepare("SELECT sku, product_name, quantity FROM ro_order_items WHERE order_id = ?");
             $oldSt->execute([$orderId]);
@@ -1068,6 +1151,90 @@ if (strpos($roAction, 'admin') === 0) {
         } catch (Exception $e) {
             $pdo->rollBack();
             roRespond(['error' => 'Ошибка сохранения'], 500);
+        }
+
+        // ═══ Журнал: правка заказа закупщиком ═══
+        $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
+        if ($items !== null) {
+            $newItemsAudit = [];
+            foreach ($items as $it) {
+                $q = floatval($it['quantity'] ?? 0);
+                if ($q <= 0) continue;
+                $newItemsAudit[$it['sku'] ?? ''] = ['name' => $it['product_name'] ?? '', 'qty' => $q];
+            }
+            // Добавленные
+            foreach ($newItemsAudit as $sku => $ni) {
+                if (!isset($oldItems[$sku])) {
+                    roLogAudit($pdo, [
+                        'order_id' => $orderId,
+                        'restaurant_number' => $oldOrder['restaurant_number'] ?? null,
+                        'delivery_date' => $oldOrder['delivery_date'] ?? null,
+                        'action' => 'item_added',
+                        'actor_name' => $actorName,
+                        'actor_type' => 'admin',
+                        'sku' => $sku,
+                        'product_name' => $ni['name'],
+                        'new_value' => (string)$ni['qty'],
+                    ]);
+                }
+            }
+            // Изменённые
+            foreach ($newItemsAudit as $sku => $ni) {
+                if (isset($oldItems[$sku]) && abs($oldItems[$sku]['qty'] - $ni['qty']) > 0.001) {
+                    roLogAudit($pdo, [
+                        'order_id' => $orderId,
+                        'restaurant_number' => $oldOrder['restaurant_number'] ?? null,
+                        'delivery_date' => $oldOrder['delivery_date'] ?? null,
+                        'action' => 'item_changed',
+                        'actor_name' => $actorName,
+                        'actor_type' => 'admin',
+                        'sku' => $sku,
+                        'product_name' => $ni['name'],
+                        'old_value' => (string)$oldItems[$sku]['qty'],
+                        'new_value' => (string)$ni['qty'],
+                    ]);
+                }
+            }
+            // Удалённые
+            foreach ($oldItems as $sku => $oi2) {
+                if (!isset($newItemsAudit[$sku])) {
+                    roLogAudit($pdo, [
+                        'order_id' => $orderId,
+                        'restaurant_number' => $oldOrder['restaurant_number'] ?? null,
+                        'delivery_date' => $oldOrder['delivery_date'] ?? null,
+                        'action' => 'item_deleted',
+                        'actor_name' => $actorName,
+                        'actor_type' => 'admin',
+                        'sku' => $sku,
+                        'product_name' => $oi2['name'],
+                        'old_value' => (string)$oi2['qty'],
+                    ]);
+                }
+            }
+        }
+        if ($status && isset($oldOrder['status']) && $oldOrder['status'] !== $status) {
+            roLogAudit($pdo, [
+                'order_id' => $orderId,
+                'restaurant_number' => $oldOrder['restaurant_number'] ?? null,
+                'delivery_date' => $oldOrder['delivery_date'] ?? null,
+                'action' => 'status_changed',
+                'actor_name' => $actorName,
+                'actor_type' => 'admin',
+                'old_value' => $oldOrder['status'],
+                'new_value' => $status,
+            ]);
+        }
+        if ($deliveryDate && isset($oldOrder['delivery_date']) && $oldOrder['delivery_date'] !== $deliveryDate) {
+            roLogAudit($pdo, [
+                'order_id' => $orderId,
+                'restaurant_number' => $oldOrder['restaurant_number'] ?? null,
+                'delivery_date' => $deliveryDate,
+                'action' => 'delivery_date_changed',
+                'actor_name' => $actorName,
+                'actor_type' => 'admin',
+                'old_value' => $oldOrder['delivery_date'],
+                'new_value' => $deliveryDate,
+            ]);
         }
 
         // Уведомляем ресторан в Telegram с деталями изменений
@@ -1142,13 +1309,34 @@ if (strpos($roAction, 'admin') === 0) {
     // --- Удаление заказа закупщиком ---
     if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
         $orderId = (int)$adminParam;
-        // Сохраняем инфо для уведомления до удаления
+        // Сохраняем инфо для уведомления и журнала до удаления
         $orderInfo = $pdo->prepare("SELECT restaurant_number, delivery_date FROM ro_orders WHERE id = ?");
         $orderInfo->execute([$orderId]);
         $oi = $orderInfo->fetch();
 
+        // Запоминаем позиции для журнала
+        $delItemsSt = $pdo->prepare("SELECT sku, product_name, quantity FROM ro_order_items WHERE order_id = ?");
+        $delItemsSt->execute([$orderId]);
+        $delItems = $delItemsSt->fetchAll();
+
         $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?")->execute([$orderId]);
         $pdo->prepare("DELETE FROM ro_orders WHERE id = ?")->execute([$orderId]);
+
+        // ═══ Журнал: удаление заказа целиком ═══
+        if ($oi) {
+            $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
+            $totalQty = array_sum(array_map(fn($r) => floatval($r['quantity']), $delItems));
+            roLogAudit($pdo, [
+                'order_id' => $orderId,
+                'restaurant_number' => $oi['restaurant_number'],
+                'delivery_date' => $oi['delivery_date'],
+                'action' => 'order_deleted',
+                'actor_name' => $actorName,
+                'actor_type' => 'admin',
+                'old_value' => count($delItems) . ' поз. / ' . $totalQty . ' кор.',
+                'details' => ['items' => $delItems],
+            ]);
+        }
 
         // Уведомляем ресторан
         if ($oi) {
@@ -1168,14 +1356,43 @@ if (strpos($roAction, 'admin') === 0) {
     // --- Удаление отдельной позиции из заказа ---
     if ($adminAction === 'item' && $method === 'DELETE' && $adminParam) {
         $itemId = (int)$adminParam;
-        // Проверяем существование
+        // Проверяем существование (сначала по id)
         $check = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id
             FROM ro_order_items oi JOIN ro_orders o ON o.id = oi.order_id WHERE oi.id = ?");
         $check->execute([$itemId]);
         $item = $check->fetch();
+
+        // Фоллбэк: заказ мог быть пересохранён (все позиции пересоздаются с новыми id).
+        // Ищем по паре (order_id, sku) — её передаём в query-параметрах для устойчивости.
+        if (!$item) {
+            $fbOrderId = $_GET['order_id'] ?? null;
+            $fbSku = $_GET['sku'] ?? null;
+            if ($fbOrderId && $fbSku) {
+                $fb = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id
+                    FROM ro_order_items oi JOIN ro_orders o ON o.id = oi.order_id
+                    WHERE oi.order_id = ? AND oi.sku = ?");
+                $fb->execute([$fbOrderId, $fbSku]);
+                $item = $fb->fetch();
+            }
+        }
+
         if (!$item) roRespond(['error' => 'Позиция не найдена'], 404);
 
-        $pdo->prepare("DELETE FROM ro_order_items WHERE id = ?")->execute([$itemId]);
+        $pdo->prepare("DELETE FROM ro_order_items WHERE id = ?")->execute([$item['id']]);
+
+        // ═══ Журнал: удаление одной позиции закупщиком ═══
+        $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
+        roLogAudit($pdo, [
+            'order_id' => $item['order_id'],
+            'restaurant_number' => $item['restaurant_number'],
+            'delivery_date' => $item['delivery_date'],
+            'action' => 'item_deleted',
+            'actor_name' => $actorName,
+            'actor_type' => 'admin',
+            'sku' => $item['sku'],
+            'product_name' => $item['product_name'],
+            'old_value' => (string)$item['quantity'],
+        ]);
 
         // Если в заказе больше нет позиций — удаляем сам заказ
         $remaining = $pdo->prepare("SELECT COUNT(*) FROM ro_order_items WHERE order_id = ?");
@@ -1184,6 +1401,15 @@ if (strpos($roAction, 'admin') === 0) {
         if ((int)$remaining->fetchColumn() === 0) {
             $pdo->prepare("DELETE FROM ro_orders WHERE id = ?")->execute([$item['order_id']]);
             $orderDeleted = true;
+            roLogAudit($pdo, [
+                'order_id' => $item['order_id'],
+                'restaurant_number' => $item['restaurant_number'],
+                'delivery_date' => $item['delivery_date'],
+                'action' => 'order_deleted',
+                'actor_name' => $actorName,
+                'actor_type' => 'admin',
+                'old_value' => 'последняя позиция удалена',
+            ]);
         }
 
         roRespond(['success' => true, 'order_deleted' => $orderDeleted]);
@@ -1588,6 +1814,76 @@ if (strpos($roAction, 'admin') === 0) {
         roRespond(['sessions' => $s->fetchAll()]);
     }
 
+    // ═══ Журнал изменений (общий + по заказу) ═══
+
+    // --- Общий журнал с фильтрами ---
+    if ($adminAction === 'audit' && $method === 'GET' && !$adminParam) {
+        $dateFrom = $_GET['date_from'] ?? null;
+        $dateTo = $_GET['date_to'] ?? null;
+        $restaurant = $_GET['restaurant'] ?? '';
+        $actor = $_GET['actor'] ?? '';
+        $action = $_GET['action'] ?? '';
+        $search = trim($_GET['search'] ?? '');
+        $limit = min((int)($_GET['limit'] ?? 200), 1000);
+        $offset = max((int)($_GET['offset'] ?? 0), 0);
+
+        $where = ['1=1'];
+        $params = [];
+        if ($dateFrom) { $where[] = 'created_at >= ?'; $params[] = $dateFrom . ' 00:00:00'; }
+        if ($dateTo)   { $where[] = 'created_at <= ?'; $params[] = $dateTo   . ' 23:59:59'; }
+        if ($restaurant !== '') { $where[] = 'restaurant_number = ?'; $params[] = (int)$restaurant; }
+        if ($actor !== '')      { $where[] = 'actor_name LIKE ?';     $params[] = '%' . $actor . '%'; }
+        if ($action !== '')     { $where[] = 'action = ?';            $params[] = $action; }
+        if ($search !== '')     {
+            $where[] = '(sku LIKE ? OR product_name LIKE ? OR old_value LIKE ? OR new_value LIKE ?)';
+            $like = '%' . $search . '%';
+            array_push($params, $like, $like, $like, $like);
+        }
+
+        $sql = "SELECT id, order_id, restaurant_number, delivery_date, action, actor_name, actor_type,
+                       sku, product_name, old_value, new_value, details, created_at
+                FROM ro_audit_log
+                WHERE " . implode(' AND ', $where) . "
+                ORDER BY created_at DESC, id DESC
+                LIMIT {$limit} OFFSET {$offset}";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        $rows = $s->fetchAll();
+
+        // Total count для пагинации
+        $countSql = "SELECT COUNT(*) FROM ro_audit_log WHERE " . implode(' AND ', $where);
+        $cs = $pdo->prepare($countSql);
+        $cs->execute($params);
+        $total = (int)$cs->fetchColumn();
+
+        roRespond(['events' => $rows, 'total' => $total, 'limit' => $limit, 'offset' => $offset]);
+    }
+
+    // --- История одного заказа (по order_id или по restaurant+date) ---
+    if ($adminAction === 'audit' && $method === 'GET' && $adminParam) {
+        $orderId = (int)$adminParam;
+        // Пытаемся взять restaurant_number + delivery_date этого заказа
+        // (если он ещё существует), чтобы подтянуть события с null-order_id от удаления
+        $meta = $pdo->prepare("SELECT restaurant_number, delivery_date FROM ro_orders WHERE id = ?");
+        $meta->execute([$orderId]);
+        $m = $meta->fetch();
+
+        $sql = "SELECT id, order_id, restaurant_number, delivery_date, action, actor_name, actor_type,
+                       sku, product_name, old_value, new_value, details, created_at
+                FROM ro_audit_log
+                WHERE order_id = ?";
+        $params = [$orderId];
+        if ($m) {
+            $sql .= " OR (restaurant_number = ? AND delivery_date = ?)";
+            $params[] = $m['restaurant_number'];
+            $params[] = $m['delivery_date'];
+        }
+        $sql .= " ORDER BY created_at DESC, id DESC LIMIT 500";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        roRespond(['events' => $s->fetchAll()]);
+    }
+
     // ═══ Остатки склада ═══
 
     // --- Загрузка остатков из Excel ---
@@ -1635,10 +1931,12 @@ if (strpos($roAction, 'admin') === 0) {
             for ($r = 0; $r < min(10, count($sheetRows)); $r++) {
                 foreach ($sheetRows[$r] as $c => $val) {
                     $v = mb_strtolower(trim((string)$val));
-                    if ($v === 'товар') $colProduct = $c;
+                    if ($v === '') continue;
+                    // «Товар» (точное совпадение — не путать с «Владелец товара»)
+                    if ($v === 'товар' || $v === 'номенклатура' || $v === 'наименование') $colProduct = $c;
                     if (mb_strpos($v, 'владелец') !== false) $colOwner = $c;
-                    // Колонка количества: «Итог», «Итого», «Итого шт.» и т.п.
-                    if (preg_match('/^итог/u', $v)) $colQty = $c;
+                    // Колонка количества: «Итог», «Итого», «Кол-во», «Количество», «Кол-во штук», «Остаток»
+                    if (preg_match('/^итог|^кол[-\s]?во|^количеств|^остаток|штук/u', $v)) $colQty = $c;
                 }
                 if ($colProduct >= 0 && $colQty >= 0) { $headerRow = $r; break; }
             }

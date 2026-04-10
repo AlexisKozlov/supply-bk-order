@@ -77,12 +77,23 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data.suppliers || [];
   }
 
-  async function adminGetStatus(supplierId, date, sessionId) {
+  async function adminGetStatus(supplierId, date) {
     const params = new URLSearchParams({ supplier_id: supplierId });
     if (date) params.set('date', date);
-    if (sessionId) params.set('session_id', sessionId);
     const data = await api(`admin/status?${params}`);
     return data;
+  }
+
+  async function adminGetSettings(supplierId) {
+    const data = await api(`admin/settings?supplier_id=${supplierId}`);
+    return data;
+  }
+
+  async function adminSaveSettings(supplierId, payload) {
+    return api('admin/settings', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, ...payload }),
+    });
   }
 
   async function adminGetOrders(supplierId, dateFrom, dateTo) {
@@ -110,54 +121,6 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return api(`admin/order/${orderId}`, { method: 'DELETE' });
   }
 
-  async function adminCreateSession(supplierId, opts = {}) {
-    return api('admin/session', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'create', supplier_id: supplierId, ...opts }),
-    });
-  }
-
-  async function adminAutoSession(supplierId) {
-    return api('admin/session', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'auto', supplier_id: supplierId }),
-    });
-  }
-
-  async function adminCloseSession(sessionId, supplierId) {
-    return api('admin/session', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'close', session_id: sessionId, supplier_id: supplierId }),
-    });
-  }
-
-  async function adminUpdateSession(sessionId, supplierId, updates) {
-    return api('admin/session', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'update', session_id: sessionId, supplier_id: supplierId, ...updates }),
-    });
-  }
-
-  async function adminReopenSession(sessionId, supplierId) {
-    return api('admin/session', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'reopen', session_id: sessionId, supplier_id: supplierId }),
-    });
-  }
-
-  async function adminDeleteSession(sessionId, supplierId) {
-    return api('admin/session', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'delete', session_id: sessionId, supplier_id: supplierId }),
-    });
-  }
-
-  async function adminGetSessions(supplierId) {
-    const params = supplierId ? `?supplier_id=${supplierId}` : '';
-    const data = await api(`admin/sessions${params}`);
-    return data.sessions || [];
-  }
-
   async function adminGetSchedules(supplierId) {
     const data = await api(`admin/schedules?supplier_id=${supplierId}`);
     return { schedules: data.schedules || [], deadlineRules: data.deadline_rules || [] };
@@ -182,10 +145,17 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
-  async function adminExtendDeadline(sessionId, deliveryDate, deadlineTime) {
+  async function adminExtendDeadline(supplierId, deliveryDate, deadlineTime) {
     return api('admin/extend-deadline', {
       method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, deadline_time: deadlineTime }),
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate, deadline_time: deadlineTime }),
+    });
+  }
+
+  async function adminRemoveDeadlineOverride(supplierId, deliveryDate) {
+    return api('admin/remove-deadline-override', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
     });
   }
 
@@ -222,9 +192,9 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     // Закупщик
     adminGetSuppliers, adminGetStatus, adminGetOrders, adminGetOrder,
     adminUpdateOrder, adminDeleteOrder,
-    adminCreateSession, adminAutoSession, adminCloseSession, adminReopenSession, adminDeleteSession, adminUpdateSession, adminGetSessions,
+    adminGetSettings, adminSaveSettings,
     adminGetSchedules, adminSaveSchedules,
-    adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline,
+    adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride,
     adminGetTemplates, adminSaveTemplates,
     adminUpdateQty, adminGetExport,
   };

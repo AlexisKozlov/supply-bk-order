@@ -7,8 +7,8 @@
 
     <!-- Page tabs -->
     <div class="rom-page-tabs">
-      <button class="rom-page-tab" :class="{ active: pageTab === 'sessions' }" @click="pageTab = 'sessions'">
-        Сессии
+      <button class="rom-page-tab" :class="{ active: pageTab === 'status' }" @click="pageTab = 'status'; loadStatus()">
+        Приём
       </button>
       <button class="rom-page-tab" :class="{ active: pageTab === 'list' }" @click="pageTab = 'list'; loadOrdersList()">
         Список заявок
@@ -32,74 +32,54 @@
       </select>
     </div>
 
-    <!-- ═══ TAB: Сессии ═══ -->
-    <template v-if="pageTab === 'sessions' && currentSupplierId">
-      <!-- Список сессий (если нет открытой) -->
-      <template v-if="!activeSessionId">
-        <div class="rom-export-row">
-          <button class="rom-btn rom-btn-primary" @click="showCreateModal = true">+ Новая сессия</button>
-          <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка /supplier-order</button>
+    <!-- ═══ TAB: Приём ═══ -->
+    <template v-if="pageTab === 'status' && currentSupplierId">
+      <!-- Bar: toggle + settings -->
+      <div class="so-detail-bar">
+        <button class="rom-btn-sm" @click="toggleAccepting" :class="settings.is_accepting_orders ? 'rom-btn-danger' : 'rom-btn-primary'">
+          {{ settings.is_accepting_orders ? '⏸ Приостановить приём' : '▶ Возобновить приём' }}
+        </button>
+        <span class="so-session-status" :class="settings.is_accepting_orders ? 'st-sess-active' : 'st-sess-closed'">
+          {{ settings.is_accepting_orders ? 'Приём включён' : 'Приём приостановлен' }}
+        </span>
+        <div class="so-detail-actions">
+          <label style="font-size:12px;color:#666;">Дедлайн по умолчанию:</label>
+          <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
+          <button class="rom-btn-sm" @click="saveDefaultDeadline" :disabled="!defaultDeadline">Сохранить</button>
+          <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
         </div>
+      </div>
 
-        <div v-if="loadingSessions" class="rom-loading">Загрузка...</div>
-        <div v-else-if="sessions.length === 0" class="rom-empty">
-          Нет сессий. Нажмите «+ Новая сессия» для создания.
-        </div>
-        <div v-else class="so-sessions-list">
-          <div v-for="s in sessions" :key="s.id"
-            class="so-session-card" :class="{ closed: s.status === 'closed' }"
-            @click="openSession(s)">
-            <div class="so-session-header">
-              <span class="so-session-name">{{ formatDateRange(s.week_start, s.week_end) }}</span>
-              <span class="so-session-status" :class="'st-sess-' + s.status">
-                {{ s.status === 'active' ? 'Активна' : 'Закрыта' }}
-              </span>
-            </div>
-            <div class="so-session-meta">
-              Заявок: {{ s.order_count || 0 }} · Дедлайн: {{ s.deadline_time?.substring(0, 5) || '14:00' }}
-              <span v-if="s.created_by"> · {{ s.created_by }}</span>
-            </div>
-          </div>
-        </div>
-      </template>
+      <!-- Pause message input -->
+      <div v-if="!settings.is_accepting_orders" class="rom-date-row" style="background:#fef2f2;padding:10px;border-radius:8px;">
+        <label>Сообщение для ресторанов:</label>
+        <input type="text" v-model="pauseMessage" @change="savePauseMessage" class="rom-input-sm" style="flex:1;min-width:250px" placeholder="Приём заявок временно приостановлен" />
+      </div>
 
-      <!-- Детали сессии -->
-      <template v-else>
-        <div class="so-detail-bar">
-          <button class="rom-btn-sm" @click="closeSessionDetail">← Назад к сессиям</button>
-          <span class="so-detail-name">{{ formatDateRange(activeSessionData?.week_start, activeSessionData?.week_end) }}</span>
-          <span class="so-session-status" :class="'st-sess-' + activeSessionData?.status">
-            {{ activeSessionData?.status === 'active' ? 'Активна' : 'Закрыта' }}
-          </span>
-          <div class="so-detail-actions">
-            <button v-if="activeSessionData?.status === 'active'" class="rom-btn-sm rom-btn-danger" @click="handleCloseSession">Закрыть</button>
-            <button v-if="activeSessionData?.status === 'closed'" class="rom-btn-sm" @click="handleReopenSession">Открыть заново</button>
-            <button class="rom-btn-sm rom-btn-danger" @click="handleDeleteSession">Удалить</button>
-          </div>
-        </div>
-
-        <!-- Deadline -->
-        <div class="rom-date-row">
-          <label>Дедлайн:</label>
-          <input type="time" v-model="sessionDeadline" class="rom-input-sm" style="width:100px" />
-          <button class="rom-btn-sm" @click="updateDeadline" :disabled="!sessionDeadline">Сохранить</button>
-        </div>
-
-        <!-- Date nav -->
-        <div class="rom-date-row">
-          <label>Дата поставки:</label>
-          <div class="so-date-nav">
-            <button v-for="wd in weekDates" :key="wd.date"
-              class="rom-btn-sm" :class="{ 'rom-btn-primary': selectedDate === wd.date }"
-              @click="selectedDate = wd.date; loadStatus()">
-              {{ wd.day_name }} {{ formatDateShort(wd.date) }}
-            </button>
-          </div>
-          <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
-          <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
-            ⏰ Продлить дедлайн
+      <!-- Date nav -->
+      <div class="rom-date-row">
+        <label>Дата поставки:</label>
+        <div class="so-date-nav">
+          <button v-for="wd in weekDates" :key="wd.date"
+            class="rom-btn-sm" :class="{ 'rom-btn-primary': selectedDate === wd.date }"
+            @click="selectedDate = wd.date; loadStatus()">
+            {{ wd.day_name }} {{ formatDateShort(wd.date) }}
           </button>
         </div>
+        <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
+        <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
+          ⏰ Продлить дедлайн
+        </button>
+      </div>
+
+      <!-- Существующие переопределения дедлайна -->
+      <div v-if="deadlineOverrides.length" class="rom-date-row" style="flex-wrap:wrap;gap:6px;">
+        <span style="font-size:12px;color:#666;">Разовые продления:</span>
+        <span v-for="o in deadlineOverrides" :key="o.delivery_date" class="so-override-chip">
+          {{ formatDateShort(o.delivery_date) }} — до {{ o.deadline_time?.substring(0,5) }}
+          <button class="so-override-del" @click="removeOverride(o.delivery_date)" title="Удалить">×</button>
+        </span>
+      </div>
 
         <div v-if="loading" class="rom-loading">Загрузка...</div>
         <template v-else>
@@ -202,7 +182,6 @@
           </div>
           <div v-else class="rom-empty">Нет товаров в шаблоне. Добавьте товары во вкладке «Шаблон товаров».</div>
         </template>
-      </template>
     </template>
 
     <!-- ═══ TAB: Список заявок ═══ -->
@@ -360,36 +339,6 @@
       </div>
     </template>
 
-    <!-- ═══ Modal: Create session ═══ -->
-    <div v-if="showCreateModal" class="rom-modal-overlay" @click.self="showCreateModal = false">
-      <div class="rom-modal">
-        <div class="rom-modal-header">
-          <h3>Новая сессия</h3>
-          <button class="rom-modal-close" @click="showCreateModal = false">✕</button>
-        </div>
-        <div class="rom-modal-body">
-          <div class="so-form-row">
-            <label>Начало недели:</label>
-            <input type="date" v-model="createForm.weekStart" class="rom-input-sm" />
-          </div>
-          <div class="so-form-row">
-            <label>Конец недели:</label>
-            <input type="date" v-model="createForm.weekEnd" class="rom-input-sm" />
-          </div>
-          <div class="so-form-row">
-            <label>Дедлайн подачи:</label>
-            <input type="time" v-model="createForm.deadlineTime" class="rom-input-sm" />
-          </div>
-          <div class="so-form-actions">
-            <button class="rom-btn" @click="showCreateModal = false">Отмена</button>
-            <button class="rom-btn rom-btn-primary" @click="createSession" :disabled="creatingSession">
-              {{ creatingSession ? 'Создание...' : 'Создать' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- ═══ Modal: Order detail ═══ -->
     <div v-if="showOrderModal" class="rom-modal-overlay" @click.self="showOrderModal = false">
       <div class="rom-modal">
@@ -434,31 +383,20 @@ const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'С
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
 const daysShort = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
 
-const pageTab = ref('sessions');
+const pageTab = ref('status');
 const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
 const selectedDate = ref('');
-const session = ref(null);
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const restaurants = ref([]);
 const weekDates = ref([]);
 
-// Sessions
-const loadingSessions = ref(false);
-const sessions = ref([]);
-const activeSessionId = ref(null);
-const activeSessionData = ref(null);
-const sessionDeadline = ref('14:00');
-
-// Create session modal
-const showCreateModal = ref(false);
-const creatingSession = ref(false);
-const createForm = ref({
-  weekStart: getMonday(),
-  weekEnd: getSunday(),
-  deadlineTime: '14:00',
-});
+// Settings (постоянный режим приёма)
+const settings = ref({ is_accepting_orders: 1, default_deadline_time: '14:00:00', pause_message: null });
+const defaultDeadline = ref('14:00');
+const pauseMessage = ref('');
+const deadlineOverrides = ref([]);
 
 // List tab
 const loadingList = ref(false);
@@ -502,27 +440,12 @@ function todayStr(offsetDays = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-function getMonday() {
-  const d = new Date();
-  const day = d.getDay(); // 0=Sun, 1=Mon...
-  const diff = day === 0 ? 1 : (1 - day); // Sun→+1, else back to Mon
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
-
-function getSunday() {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? 7 : (7 - day + 1); // Sun→+7, else forward to Sun
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
-
-// Если supplierId пришёл как проп — загружаем сессии сразу
+// Если supplierId пришёл как проп — сразу загружаем данные
 watch(() => props.supplierId, (val) => {
   if (val) {
     currentSupplierId.value = val;
-    loadSessions();
+    loadSettings();
+    loadStatus();
   }
 }, { immediate: true });
 
@@ -532,7 +455,8 @@ onMounted(async () => {
       allSuppliers.value = await store.adminGetSuppliers();
       if (allSuppliers.value.length === 1) {
         currentSupplierId.value = allSuppliers.value[0].id;
-        await loadSessions();
+        await loadSettings();
+        await loadStatus();
       }
     } catch (e) {
       console.error(e);
@@ -542,50 +466,75 @@ onMounted(async () => {
 
 async function onSupplierChange() {
   if (!currentSupplierId.value) return;
-  activeSessionId.value = null;
-  activeSessionData.value = null;
-  await loadSessions();
+  await loadSettings();
+  await loadStatus();
 }
 
-async function loadSessions() {
+async function loadSettings() {
   if (!currentSupplierId.value) return;
-  loadingSessions.value = true;
   try {
-    sessions.value = await store.adminGetSessions(currentSupplierId.value);
+    const data = await store.adminGetSettings(currentSupplierId.value);
+    settings.value = data.settings || { is_accepting_orders: 1, default_deadline_time: '14:00:00', pause_message: null };
+    defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
+    pauseMessage.value = settings.value.pause_message || '';
+    deadlineOverrides.value = data.overrides || [];
   } catch (e) {
     console.error(e);
-  } finally {
-    loadingSessions.value = false;
   }
 }
 
-function openSession(s) {
-  activeSessionId.value = s.id;
-  activeSessionData.value = s;
-  sessionDeadline.value = (s.deadline_time || '14:00:00').substring(0, 5);
-  selectedDate.value = '';
-  session.value = null;
-  restaurants.value = [];
-  weekDates.value = [];
-  loadStatus();
+async function toggleAccepting() {
+  const next = settings.value.is_accepting_orders ? 0 : 1;
+  if (next === 0 && !confirm('Приостановить приём заявок? Рестораны увидят сообщение о паузе.')) return;
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, {
+      is_accepting_orders: next,
+      default_deadline_time: defaultDeadline.value + ':00',
+      pause_message: pauseMessage.value || null,
+    });
+    await loadSettings();
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
 }
 
-function closeSessionDetail() {
-  activeSessionId.value = null;
-  activeSessionData.value = null;
+async function saveDefaultDeadline() {
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, {
+      is_accepting_orders: settings.value.is_accepting_orders,
+      default_deadline_time: defaultDeadline.value + ':00',
+      pause_message: pauseMessage.value || null,
+    });
+    alert('Дедлайн по умолчанию сохранён');
+    await loadSettings();
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
+}
+
+async function savePauseMessage() {
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, {
+      is_accepting_orders: settings.value.is_accepting_orders,
+      default_deadline_time: defaultDeadline.value + ':00',
+      pause_message: pauseMessage.value || null,
+    });
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
 }
 
 async function loadStatus() {
-  if (!currentSupplierId.value || !activeSessionId.value) return;
+  if (!currentSupplierId.value) return;
   loading.value = true;
   try {
-    const data = await store.adminGetStatus(currentSupplierId.value, selectedDate.value || undefined, activeSessionId.value);
-    session.value = data.session;
+    const data = await store.adminGetStatus(currentSupplierId.value, selectedDate.value || undefined);
     stats.value = data.stats || { total: 0, submitted: 0, pending: 0 };
     restaurants.value = data.restaurants || [];
     products.value = data.products || [];
     orderItems.value = data.order_items || [];
     weekDates.value = data.week_dates || [];
+    if (data.settings) settings.value = data.settings;
     if (data.date) selectedDate.value = data.date;
   } catch (e) {
     console.error(e);
@@ -595,7 +544,7 @@ async function loadStatus() {
 }
 
 async function handleExtendDeadline() {
-  if (!activeSessionId.value || !selectedDate.value) return;
+  if (!selectedDate.value) return;
   const time = prompt('Новое время дедлайна для этой даты (HH:MM):', '15:00');
   if (!time) return;
   if (!/^\d{1,2}:\d{2}$/.test(time)) {
@@ -603,75 +552,21 @@ async function handleExtendDeadline() {
     return;
   }
   try {
-    await store.adminExtendDeadline(activeSessionId.value, selectedDate.value, time);
+    await store.adminExtendDeadline(currentSupplierId.value, selectedDate.value, time);
     alert(`Дедлайн на ${selectedDate.value} продлён до ${time}`);
+    await loadSettings();
     await loadStatus();
   } catch (e) {
     alert('Ошибка: ' + (e.message || 'не удалось продлить дедлайн'));
   }
 }
 
-async function createSession() {
-  if (!currentSupplierId.value) return;
-  creatingSession.value = true;
+async function removeOverride(deliveryDate) {
+  if (!confirm(`Удалить разовое продление дедлайна на ${deliveryDate}?`)) return;
   try {
-    await store.adminCreateSession(currentSupplierId.value, {
-      week_start: createForm.value.weekStart,
-      week_end: createForm.value.weekEnd,
-      deadline_time: createForm.value.deadlineTime + ':00',
-    });
-    showCreateModal.value = false;
-    await loadSessions();
-    // Открываем новую сессию (первая в списке)
-    if (sessions.value.length > 0) {
-      openSession(sessions.value[0]);
-    }
-  } catch (e) {
-    alert('Ошибка: ' + e.message);
-  } finally {
-    creatingSession.value = false;
-  }
-}
-
-async function updateDeadline() {
-  try {
-    await store.adminUpdateSession(activeSessionId.value, currentSupplierId.value, {
-      deadline_time: sessionDeadline.value + ':00',
-    });
-    activeSessionData.value = { ...activeSessionData.value, deadline_time: sessionDeadline.value + ':00' };
-    alert('Дедлайн обновлён');
-  } catch (e) {
-    alert('Ошибка: ' + e.message);
-  }
-}
-
-async function handleCloseSession() {
-  if (!confirm('Закрыть эту сессию? Рестораны не смогут подавать заявки.')) return;
-  try {
-    await store.adminCloseSession(activeSessionId.value, currentSupplierId.value);
-    activeSessionData.value = { ...activeSessionData.value, status: 'closed' };
-    await loadSessions();
-  } catch (e) {
-    alert('Ошибка: ' + e.message);
-  }
-}
-
-async function handleReopenSession() {
-  try {
-    await store.adminReopenSession(activeSessionId.value, currentSupplierId.value);
-    activeSessionData.value = { ...activeSessionData.value, status: 'active' };
-    await loadSessions();
-  } catch (e) {
-    alert('Ошибка: ' + e.message);
-  }
-}
-
-async function handleDeleteSession() {
-  if (!confirm('Удалить сессию и все заявки в ней? Это нельзя отменить.')) return;
-  try {
-    await store.adminDeleteSession(activeSessionId.value, currentSupplierId.value);
-    closeSessionDetail();
-    await loadSessions();
+    await store.adminRemoveDeadlineOverride(currentSupplierId.value, deliveryDate);
+    await loadSettings();
+    await loadStatus();
   } catch (e) {
     alert('Ошибка: ' + e.message);
   }
@@ -1006,7 +901,6 @@ async function saveEdit() {
         sku,
         product_name: prod?.product_name || '',
         product_id: prod?.product_id || '',
-        session_id: activeSessionId.value,
         supplier_id: currentSupplierId.value,
         admin_qty: isNaN(val) ? null : val,
       });
@@ -1330,4 +1224,15 @@ function formatTime(dt) {
 .so-tpl-sku {
   font-size: 11px; color: #8b7355; margin-right: 4px; font-weight: 600;
 }
+
+.so-override-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; background: #fff4e5; color: #b45309;
+  border: 1px solid #fbbf24; border-radius: 12px; font-size: 11px; font-weight: 600;
+}
+.so-override-del {
+  background: none; border: none; color: #b45309; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px;
+}
+.so-override-del:hover { color: #D62300; }
 </style>

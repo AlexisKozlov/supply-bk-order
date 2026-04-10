@@ -969,21 +969,42 @@ try {
         // Дни доставки на завтра (дедлайн подачи = сегодня)
         $tomorrow = (new DateTime('now', $tz))->modify('+1 day')->format('Y-m-d');
 
+        // Не шлём напоминания, если «завтра» выходит за рамки активной сессии
+        // (например, сегодня последний день, а новая неделя ещё не открыта)
+        $tomorrowInSession = $tomorrow >= $roSess['week_start'] && $tomorrow <= $roSess['week_end'];
+
+        // Проверяем, что дата «завтра» явно открыта для приёма заявок
+        $dateOpen = false;
+        if ($tomorrowInSession) {
+            $openChk = $pdo->prepare("SELECT is_open FROM ro_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
+            $openChk->execute([$roSess['id'], $tomorrow]);
+            $dateOpen = (int)$openChk->fetchColumn() === 1;
+        }
+
         // Напоминаем в 8:00 и 12:00
-        if ($currentTime >= '08:00' && $currentTime < '08:15' || $currentTime >= '12:00' && $currentTime < '12:15') {
+        if ($tomorrowInSession && $dateOpen && ($currentTime >= '08:00' && $currentTime < '08:15' || $currentTime >= '12:00' && $currentTime < '12:15')) {
             $reminderType = $currentTime < '09:00' ? 'ro_morning' : 'ro_midday';
 
-            // Рестораны с привязанным Telegram, у которых нет заказа на завтра
+            // День недели «завтра» (1=Пн … 7=Вс)
+            $tomorrowDow = (int)(new DateTime($tomorrow))->format('N');
+
+            // Рестораны с привязанным Telegram, у которых есть доставка в этот день
+            // недели и ещё нет заказа на завтра
             $s = $pdo->prepare("
                 SELECT ru.restaurant_number, ru.telegram_chat_id
                 FROM ro_users ru
                 WHERE ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM restaurants r
+                    JOIN delivery_schedule ds ON ds.restaurant_id = r.id
+                    WHERE r.number = ru.restaurant_number AND r.active = 1 AND ds.day_of_week = ?
+                )
                 AND ru.restaurant_number NOT IN (
                     SELECT o.restaurant_number FROM ro_orders o
                     WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
                 )
             ");
-            $s->execute([$roSess['id'], $tomorrow]);
+            $s->execute([$tomorrowDow, $roSess['id'], $tomorrow]);
             $missing = $s->fetchAll();
 
             foreach ($missing as $m) {

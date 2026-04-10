@@ -68,31 +68,54 @@ const loading = ref(false)
 const searchResults = ref([])
 let searchTimer = null
 
-// Модули
+// Модули — актуальный список, синхронизирован с сайдбаром и роутером
 const modules = [
-  { title: 'Новый заказ', icon: '📦', route: 'order', module: 'order' },
+  // Заказы
+  { title: 'Новый заказ', icon: '📦', route: 'order', module: 'order', keywords: 'заказ new' },
   { title: 'Планирование', icon: '📋', route: 'planning', module: 'planning' },
-  { title: 'Поставки', icon: '🚚', route: 'plan-fact', module: 'plan-fact' },
+  { title: 'Поставки', icon: '🚚', route: 'plan-fact', module: 'plan-fact', keywords: 'план факт' },
   { title: 'История заказов', icon: '📜', route: 'history', module: 'history' },
-  { title: 'База данных', icon: '🗄', route: 'database', module: 'database' },
-  { title: 'Цены и ПСЦ', icon: '💰', route: 'pricing', module: 'pricing' },
-  { title: 'Календарь поставок', icon: '📅', route: 'calendar', module: 'calendar' },
+  { title: 'Корректировки заказов', icon: '✏️', route: 'corrections', module: 'corrections' },
+  // Данные / справочники
+  { title: 'База товаров (база данных)', icon: '🗄', route: 'database', module: 'database', keywords: 'товары поставщики рестораны справочник' },
+  { title: 'Цены и ПСЦ', icon: '💰', route: 'pricing', module: 'pricing', keywords: 'прайс протокол' },
+  { title: 'Календарь', icon: '📅', route: 'calendar', module: 'calendar' },
+  { title: 'Поиск карточек', icon: '🔍', route: 'search-cards', keywords: 'карточка sku' },
+  // Аналитика
   { title: 'Дашборд', icon: '📊', route: 'dashboard', module: 'analytics' },
   { title: 'Аналитика', icon: '📈', route: 'analytics', module: 'analytics' },
   { title: 'Анализ запасов', icon: '📉', route: 'analysis', module: 'analysis' },
-  { title: 'Сроки годности', icon: '⏰', route: 'shelf-life', module: 'shelf-life' },
+  { title: 'Сроки годности', icon: '⏰', route: 'shelf-life', module: 'shelf-life', keywords: 'срок просрочка' },
+  // Логистика / склад
   { title: 'График доставки', icon: '🗓', route: 'delivery-schedule', module: 'delivery-schedule' },
-  { title: 'Сбор остатков', icon: '📋', route: 'stock-collection', module: 'stock-collection' },
-  { title: 'Корректировки заказов', icon: '✏️', route: 'corrections', module: 'corrections' },
-  { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
-  { title: 'Оплаты поставщиков', icon: '💳', route: 'payments', module: 'plan-fact' },
-  { title: 'Планета Ресторанов', icon: '🥬', route: 'veg-admin', module: 'veg' },
-  { title: 'Тендеры', icon: '📑', route: 'tenders', module: 'tenders' },
-  { title: 'Распределение', icon: '📦', route: 'distribution', module: 'distribution' },
+  { title: 'Загрузка машин', icon: '🚛', route: 'truck-loading', module: 'truck-loading', keywords: 'фура грузовик паллеты' },
   { title: 'Калькулятор паллет', icon: '🧮', route: 'pallet-calc', module: 'pallet-calc' },
+  { title: 'Паллетовка склада', icon: '🏭', route: 'pallet-storage', module: 'pallet-storage' },
+  // Остатки
+  { title: 'Сбор остатков', icon: '📝', route: 'stock-collection', module: 'stock-collection' },
+  // Рестораны
+  { title: 'Заказы ресторанов', icon: '🍔', route: 'restaurant-orders', module: 'restaurant-orders', keywords: 'рестораны ро' },
+  { title: 'Отчёт по заказам ресторанов', icon: '📄', route: 'restaurant-report', module: 'restaurant-orders' },
+  { title: 'Реализация ресторанов', icon: '💹', route: 'restaurant-sales', module: 'restaurant-sales', keywords: 'продажи выручка' },
+  { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
+  // Поставщики
+  { title: 'Заявки поставщикам', icon: '🏭', route: 'supplier-orders', module: 'supplier-orders', keywords: 'камако овощи so планета' },
+  { title: 'Оплаты поставщиков', icon: '💳', route: 'payments', module: 'plan-fact' },
+  // Спец
+  { title: 'Тендеры', icon: '📑', route: 'tenders', module: 'tenders' },
+  { title: 'Маркетинг', icon: '🎯', route: 'marketing', module: 'marketing', keywords: 'акция промо' },
+  { title: 'Распределение', icon: '📦', route: 'distribution', module: 'distribution' },
+  { title: 'Распределение дефицита', icon: '⚠️', route: 'deficit', module: 'deficit' },
+  { title: 'Протоколы совещаний', icon: '📋', route: 'protocols', module: 'protocols' },
+  // Администрирование
+  { title: 'Импорт данных', icon: '⬆️', route: 'import', module: 'analysis' },
+  { title: 'Telegram-бот', icon: '🤖', route: 'telegram-admin', module: 'telegram' },
+  { title: 'Админ-панель', icon: '🛠', route: 'admin', requiresAdmin: true },
   { title: 'Настройки аккаунта', icon: '⚙️', route: 'user-settings' },
-  { title: 'Поиск карточек', icon: '🔍', route: 'search-cards' },
-].filter(m => !m.module || userStore.hasAccess(m.module, 'view')).map((m, i) => ({ ...m, group: 'Модули', type: 'route', _key: 'mod_' + i }))
+].filter(m => {
+  if (m.requiresAdmin) return userStore.hasAccess && (userStore.user?.role === 'admin');
+  return !m.module || userStore.hasAccess(m.module, 'view');
+}).map((m, i) => ({ ...m, group: 'Модули', type: 'route', _key: 'mod_' + i }))
 
 const quickActions = computed(() => {
   let idx = 0
@@ -105,8 +128,8 @@ const allResults = computed(() => {
   const q = query.value.toLowerCase().trim()
   if (q.length < 1) return []
 
-  // Модули
-  const mods = modules.filter(m => m.title.toLowerCase().includes(q))
+  // Модули — по заголовку и ключевым словам
+  const mods = modules.filter(m => m.title.toLowerCase().includes(q) || (m.keywords || '').toLowerCase().includes(q))
   items.push(...mods.map(m => ({ ...m })))
 
   // Результаты поиска по БД
@@ -132,20 +155,28 @@ async function search(q) {
   try {
     const escaped = q.replace(/[*%_]/g, '')
 
-    // Поиск товаров
-    const { data: products } = await db.from('products')
-      .select('sku, name, supplier')
-      .or(`sku.ilike.*${escaped}*,name.ilike.*${escaped}*`)
-      .eq('is_active', 1)
-      .limit(5)
-
-    // Поиск поставщиков
-    const { data: suppliers } = await db.from('suppliers')
-      .select('short_name, full_name')
-      .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`)
-      .limit(5)
+    // Параллельно ищем товары, поставщиков и рестораны
+    const [productsRes, suppliersRes, restaurantsRes] = await Promise.allSettled([
+      db.from('products')
+        .select('sku, name, supplier, external_code')
+        .or(`sku.ilike.*${escaped}*,name.ilike.*${escaped}*,external_code.ilike.*${escaped}*`)
+        .eq('is_active', 1)
+        .limit(6),
+      db.from('suppliers')
+        .select('short_name, full_name')
+        .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`)
+        .limit(5),
+      db.from('restaurants')
+        .select('number, city, address, region')
+        .or(`number.ilike.*${escaped}*,city.ilike.*${escaped}*,address.ilike.*${escaped}*`)
+        .eq('active', 1)
+        .limit(5),
+    ])
 
     const results = []
+    const products = productsRes.status === 'fulfilled' ? productsRes.value?.data : []
+    const suppliers = suppliersRes.status === 'fulfilled' ? suppliersRes.value?.data : []
+    const restaurants = restaurantsRes.status === 'fulfilled' ? restaurantsRes.value?.data : []
 
     if (products?.length) {
       results.push(...products.map((p, i) => ({
@@ -168,6 +199,18 @@ async function search(q) {
         type: 'supplier',
         supplier: s.short_name,
         _key: 'sup_' + i,
+      })))
+    }
+
+    if (restaurants?.length) {
+      results.push(...restaurants.map((r, i) => ({
+        title: `Ресторан ${r.number}`,
+        subtitle: [r.city, r.address].filter(Boolean).join(', '),
+        icon: '🍔',
+        group: 'Рестораны',
+        type: 'restaurant',
+        restaurant_number: r.number,
+        _key: 'rest_' + i,
       })))
     }
 
@@ -206,9 +249,11 @@ function go(item) {
   if (item.type === 'route' && item.route) {
     router.push({ name: item.route })
   } else if (item.type === 'product') {
-    router.push({ name: 'order', query: { search: item.sku } })
+    router.push({ name: 'database', query: { search: item.sku } })
   } else if (item.type === 'supplier') {
-    router.push({ name: 'order', query: { supplier: item.supplier } })
+    router.push({ name: 'database', query: { tab: 'suppliers', search: item.supplier } })
+  } else if (item.type === 'restaurant') {
+    router.push({ name: 'database', query: { tab: 'restaurants', search: String(item.restaurant_number) } })
   }
 }
 
