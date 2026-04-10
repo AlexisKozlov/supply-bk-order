@@ -94,6 +94,7 @@
             <th class="rr-th-name" @click="sortTable('product_name')">Товар {{ sortIcon('product_name') }}</th>
             <th class="rr-th-cat" @click="sortTable('category')">Режим {{ sortIcon('category') }}</th>
             <th class="rr-th-num" @click="sortTable('quantity')">Кол-во {{ sortIcon('quantity') }}</th>
+            <th class="rr-th-num" title="Сумма залога">Залог</th>
             <th style="width:90px"></th>
           </tr>
         </thead>
@@ -108,6 +109,7 @@
             </td>
             <td><span class="rr-cat-badge" :class="'cat-' + row.category">{{ row.category }}</span></td>
             <td class="rr-num">{{ fmtNum(row.quantity) }}</td>
+            <td class="rr-num">{{ depositSumFor(row) }}</td>
             <td class="rr-item-actions">
               <button class="rr-action-btn rr-action-goto" @click="goToOrder(row)" title="Открыть заказ">→</button>
               <button class="rr-action-btn rr-action-del" @click="deleteItem(row)" title="Удалить позицию">✕</button>
@@ -118,6 +120,7 @@
           <tr>
             <td colspan="5"><strong>Итого: {{ sortedItemsData.length }} позиций, {{ itemsRestCount }} рест., {{ itemsOrderCount }} заказов</strong></td>
             <td class="rr-num"><strong>{{ fmtNum(itemsTotalQty) }}</strong></td>
+            <td class="rr-num"><strong>{{ itemsTotalDeposit }}</strong></td>
             <td></td>
           </tr>
         </tfoot>
@@ -385,6 +388,23 @@ const sortedItemsData = computed(() => applySorted(filteredData.value));
 const itemsTotalQty = computed(() => sortedItemsData.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
 const itemsRestCount = computed(() => new Set(sortedItemsData.value.map(i => i.restaurant_number)).size);
 const itemsOrderCount = computed(() => new Set(sortedItemsData.value.map(i => i.order_id)).size);
+
+// Сумма залога: цена (за коробку) × количество коробок. Количество в отчёте уже в коробках.
+function depositSumFor(row) {
+  const dp = parseFloat(row.deposit_price) || 0;
+  const qty = parseFloat(row.quantity) || 0;
+  if (!dp || !qty) return '';
+  return (dp * qty).toFixed(2);
+}
+const itemsTotalDeposit = computed(() => {
+  let sum = 0;
+  for (const r of sortedItemsData.value) {
+    const dp = parseFloat(r.deposit_price) || 0;
+    const qty = parseFloat(r.quantity) || 0;
+    if (dp && qty) sum += dp * qty;
+  }
+  return sum > 0 ? sum.toFixed(2) : '';
+});
 
 // ═══ Group: By Product ═══
 const productData = computed(() => {

@@ -468,8 +468,8 @@ function productFullInfo($prod, $entity, $skipHistory = false) {
         }
     }
 
-    // Текущая цена
-    $s = $pdo->prepare("SELECT price, currency, vat_rate, unit_type FROM product_prices WHERE sku COLLATE utf8mb4_general_ci = ? AND legal_entity COLLATE utf8mb4_general_ci = ? LIMIT 1");
+    // Текущая цена (только закупочная)
+    $s = $pdo->prepare("SELECT price, currency, vat_rate, unit_type FROM product_prices WHERE sku = ? AND legal_entity = ? AND price_type = 'purchase' LIMIT 1");
     $s->execute([$sku, $le]);
     $price = $s->fetch();
     if ($price) {
@@ -1220,8 +1220,8 @@ function lookupPrices($question, $entity) {
     foreach ($skus as $sku) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = pp.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = pp.legal_entity COLLATE utf8mb4_general_ci
-                WHERE pp.sku = ?" . $eFilter . " LIMIT 5";
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                WHERE pp.price_type = 'purchase' AND pp.sku = ?" . $eFilter . " LIMIT 5";
         $s = $pdo->prepare($sql); $s->execute(array_merge([$sku], $eParams));
         foreach ($s->fetchAll() as $row) {
             $found = true;
@@ -1236,8 +1236,8 @@ function lookupPrices($question, $entity) {
     foreach ($searchTerms as $term) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = pp.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = pp.legal_entity COLLATE utf8mb4_general_ci
-                WHERE p.name LIKE ?" . $eFilter . " LIMIT 10";
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                WHERE pp.price_type = 'purchase' AND p.name LIKE ?" . $eFilter . " LIMIT 10";
         $s = $pdo->prepare($sql); $s->execute(array_merge(["%{$term}%"], $eParams));
         foreach ($s->fetchAll() as $row) {
             $found = true;

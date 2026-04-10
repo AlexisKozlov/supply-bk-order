@@ -1637,6 +1637,101 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    // ═══ PRICING: импорт залоговых цен (xlsx с листами Сухой/Холод/Мороз) ═══
+    if ($fn === 'import_deposit_prices') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+
+        // rows уже распарсены на фронте: [{external_code, gtin, sku, name, price}]
+        $rows = $body['rows'] ?? [];
+        if (empty($rows)) respond(['error' => 'Пустой список'], 400);
+
+        // Загружаем все активные товары для сопоставления
+        $allProducts = $pdo->query("SELECT sku, supplier, legal_entity, external_code, gtin, name FROM products WHERE is_active = 1")->fetchAll();
+        $bySku = [];
+        $byExt = [];
+        $byGtin = [];
+        foreach ($allProducts as $p) {
+            $key = trim($p['sku']) . '|' . trim($p['legal_entity']);
+            $bySku[$key] = $p;
+            if (!empty($p['external_code'])) $byExt[trim($p['external_code']) . '|' . trim($p['legal_entity'])] = $p;
+            if (!empty($p['gtin'])) $byGtin[trim($p['gtin']) . '|' . trim($p['legal_entity'])] = $p;
+            // Также без юрлица — fallback
+            if (!empty($p['external_code'])) $byExt[trim($p['external_code'])] = $byExt[trim($p['external_code'])] ?? $p;
+            if (!empty($p['gtin'])) $byGtin[trim($p['gtin'])] = $byGtin[trim($p['gtin'])] ?? $p;
+            $bySku[trim($p['sku'])] = $bySku[trim($p['sku'])] ?? $p;
+        }
+
+        // Собираем уникальные (товар → цена) — в файле одна и та же цена повторяется для разных ресторанов
+        $uniquePrices = [];
+        foreach ($rows as $r) {
+            $ec = trim((string)($r['external_code'] ?? ''));
+            $gt = trim((string)($r['gtin'] ?? ''));
+            $sk = trim((string)($r['sku'] ?? ''));
+            $price = floatval($r['price'] ?? 0);
+            if ($price <= 0) continue;
+            // Ключ — комбинация идентификаторов
+            $key = $ec ?: ($gt ?: $sk);
+            if (!$key) continue;
+            if (!isset($uniquePrices[$key])) {
+                $uniquePrices[$key] = ['ec' => $ec, 'gt' => $gt, 'sk' => $sk, 'name' => $r['name'] ?? '', 'price' => $price];
+            }
+        }
+
+        $entities = ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
+        $matched = 0;
+        $skipped = [];
+        $upsert = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
+            VALUES (?, ?, ?, ?, 0, 'box', 'deposit', 'BYN', ?)
+            ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type='box', updated_by=VALUES(updated_by), updated_at=NOW()");
+
+        try {
+            $pdo->beginTransaction();
+            foreach ($uniquePrices as $up) {
+                $matchedAny = false;
+                // Для каждого юрлица пытаемся найти продукт
+                foreach ($entities as $le) {
+                    $product = null;
+                    if ($up['ec']) $product = $byExt[$up['ec'] . '|' . $le] ?? null;
+                    if (!$product && $up['gt']) $product = $byGtin[$up['gt'] . '|' . $le] ?? null;
+                    if (!$product && $up['sk']) $product = $bySku[$up['sk'] . '|' . $le] ?? null;
+                    // Fallback без юрлица
+                    if (!$product && $up['ec']) $product = $byExt[$up['ec']] ?? null;
+                    if (!$product && $up['gt']) $product = $byGtin[$up['gt']] ?? null;
+                    if (!$product && $up['sk']) $product = $bySku[$up['sk']] ?? null;
+                    if (!$product) continue;
+                    $upsert->execute([
+                        $product['sku'],
+                        $product['supplier'] ?? '',
+                        $le,
+                        $up['price'],
+                        $caller['name'] ?? 'admin',
+                    ]);
+                    $matched++;
+                    $matchedAny = true;
+                }
+                if (!$matchedAny) {
+                    $skipped[] = ['external_code' => $up['ec'], 'gtin' => $up['gt'], 'sku' => $up['sk'], 'name' => $up['name'], 'price' => $up['price']];
+                }
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('import_deposit_prices error: ' . $e->getMessage());
+            respond(['error' => 'Ошибка импорта: ' . $e->getMessage()], 500);
+        }
+        auditLog($pdo, 'deposit_prices_imported', 'product_prices', null, $caller['name'], ['matched' => $matched, 'skipped' => count($skipped)]);
+        respond([
+            'success' => true,
+            'matched' => $matched,
+            'unique_products' => count($uniquePrices),
+            'skipped_count' => count($skipped),
+            'skipped' => array_slice($skipped, 0, 100),
+        ]);
+    }
+
     // ═══ PRICING: импорт цен, согласование ПСЦ ═══
     if ($fn === 'import_prices') {
         $caller = getSessionUser($pdo);
@@ -1771,15 +1866,20 @@ if ($endpoint === 'rpc') {
         if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
         if ($caller && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $supplier = $body['supplier'] ?? ($_GET['supplier'] ?? '');
-        $sql = "SELECT pp.id, pp.sku, pp.price, pp.vat_rate, pp.unit_type, pp.currency, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity=?";
+        $sql = "SELECT pp.id, pp.sku, pp.price, pp.vat_rate, pp.unit_type, pp.currency, pp.supplier, pp.agreement_id, pp.updated_at FROM product_prices pp WHERE pp.legal_entity=? AND pp.price_type='purchase'";
         $params = [$le];
         if ($supplier) { $sql .= " AND pp.supplier=?"; $params[] = $supplier; }
         $s = $pdo->prepare($sql); $s->execute($params);
         $rows = $s->fetchAll();
+        // Залоговые цены (отдельная выборка — для колонки «Залог» в прайс-листе)
+        $dep = $pdo->prepare("SELECT sku, price FROM product_prices WHERE legal_entity=? AND price_type='deposit'");
+        $dep->execute([$le]);
+        $depositMap = [];
+        foreach ($dep->fetchAll() as $d) { $depositMap[$d['sku']] = (float)$d['price']; }
         // Получаем курс RUB→BYN
         $rateStmt = $pdo->prepare("SELECT value FROM settings WHERE `key`='rub_to_byn_rate'"); $rateStmt->execute();
         $rate = floatval($rateStmt->fetchColumn() ?: '0.0375');
-        respond(['prices' => $rows, 'rub_to_byn_rate' => $rate]);
+        respond(['prices' => $rows, 'deposit_prices' => $depositMap, 'rub_to_byn_rate' => $rate]);
     }
 
     if ($fn === 'update_exchange_rate') {
@@ -1824,6 +1924,79 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Ошибка удаления'], 500);
         }
         auditLog($pdo, 'agreement_deleted', 'price_agreement', $id, $caller['name'], ['supplier' => $ag['supplier'], 'legal_entity' => $ag['legal_entity']]);
+        respond(['success' => true]);
+    }
+
+    // ═══ PRICING: полный список залоговых цен для вкладки ═══
+    if ($fn === 'get_deposit_prices') {
+        $caller = getSessionUser($pdo);
+        if (!$caller && !checkApiKey($pdo)) respond(['error' => 'Требуется авторизация'], 401);
+        $le = $body['legal_entity'] ?? '';
+        if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
+        if ($caller && !checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        // Товар может не иметь записи в products — показываем имя из products при наличии.
+        $sql = "SELECT pp.id, pp.sku, pp.price, pp.updated_at, pp.updated_by,
+                       COALESCE(p.name, '') AS name,
+                       COALESCE(p.supplier, pp.supplier, '') AS supplier,
+                       COALESCE(p.external_code, '') AS external_code,
+                       COALESCE(p.gtin, '') AS gtin
+                FROM product_prices pp
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                WHERE pp.legal_entity = ? AND pp.price_type = 'deposit'
+                ORDER BY p.name, pp.sku";
+        $s = $pdo->prepare($sql); $s->execute([$le]);
+        respond(['prices' => $s->fetchAll()]);
+    }
+
+    // ═══ PRICING: обновить/удалить залоговую цену конкретного товара ═══
+    if ($fn === 'set_deposit_price') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $perms = resolvePermissions($caller['role'] ?? 'user', $caller['permissions'] ?? null, $ROLE_TEMPLATES);
+        if (($ACCESS_LEVELS[$perms['pricing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
+
+        $sku = trim((string)($body['sku'] ?? ''));
+        $le = trim((string)($body['legal_entity'] ?? ''));
+        $price = isset($body['price']) && $body['price'] !== '' ? floatval($body['price']) : null; // null = удалить
+        $applyToGroup = !empty($body['apply_to_group']); // применять к обоим юрлицам группы BK/VM
+        if (!$sku || !$le) respond(['error' => 'Не указан SKU или юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
+        if ($price !== null && $price <= 0) respond(['error' => 'Цена должна быть > 0'], 400);
+
+        // Определяем список юрлиц
+        $targets = [$le];
+        if ($applyToGroup) {
+            // «Бургер БК» и «Воглия Матта» — одна группа; «Пицца Стар» — отдельно
+            if (stripos($le, 'Пицца') === false) {
+                $targets = ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
+            }
+        }
+
+        // Поставщик товара (для NOT NULL supplier в product_prices)
+        $supStmt = $pdo->prepare("SELECT supplier FROM products WHERE sku = ? AND legal_entity = ? LIMIT 1");
+        $supStmt->execute([$sku, $le]);
+        $supplier = $supStmt->fetchColumn() ?: '';
+
+        try {
+            $pdo->beginTransaction();
+            foreach ($targets as $targetLe) {
+                if ($price === null) {
+                    $pdo->prepare("DELETE FROM product_prices WHERE sku=? AND legal_entity=? AND price_type='deposit'")
+                        ->execute([$sku, $targetLe]);
+                } else {
+                    $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
+                        VALUES (?, ?, ?, ?, 0, 'box', 'deposit', 'BYN', ?)
+                        ON DUPLICATE KEY UPDATE price=VALUES(price), unit_type='box', updated_by=VALUES(updated_by), updated_at=NOW()")
+                        ->execute([$sku, $supplier, $targetLe, $price, $caller['name'] ?? 'admin']);
+                }
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('set_deposit_price error: ' . $e->getMessage());
+            respond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
+        }
+        auditLog($pdo, $price === null ? 'deposit_price_deleted' : 'deposit_price_updated', 'product_prices', null, $caller['name'], ['sku' => $sku, 'price' => $price, 'entities' => $targets]);
         respond(['success' => true]);
     }
 
@@ -1873,7 +2046,7 @@ if ($endpoint === 'rpc') {
         $sql .= " AND " . $leWhere[0];
         $params = array_merge($params, $leParams);
         if ($supplier) { $sql .= " AND p.supplier = ?"; $params[] = $supplier; }
-        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku COLLATE utf8mb4_general_ci = p.sku AND pp.legal_entity COLLATE utf8mb4_general_ci = ?)";
+        $sql .= " AND NOT EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = p.sku AND pp.legal_entity = ? AND pp.price_type = 'purchase')";
         $params[] = $le;
         $sql .= " ORDER BY p.supplier, p.name";
         $s = $pdo->prepare($sql); $s->execute($params);
@@ -4077,7 +4250,7 @@ if ($endpoint === 'rpc') {
 
         // Получаем заказ и поставщика
         $order = $pdo->prepare("SELECT o.id, o.supplier, o.legal_entity, o.created_by,
-            (SELECT SUM(oi.qty_boxes * COALESCE(pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci WHERE oi.order_id = o.id) as total_amount
+            (SELECT SUM(oi.qty_boxes * COALESCE(pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' WHERE oi.order_id = o.id) as total_amount
             FROM orders o WHERE o.id = ?");
         $order->execute([$orderId]);
         $o = $order->fetch();
@@ -4179,14 +4352,14 @@ if ($endpoint === 'rpc') {
         // Сумма (из order_items * product_prices)
         $amtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci
+            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ?");
         $amtSt->execute([$from]);
         $totalAmount = floatval($amtSt->fetchColumn());
 
         $prevAmtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0)
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci
+            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ? AND o.created_at_new < ?");
         $prevAmtSt->execute([$prevFrom, $from]);
         $prevAmount = floatval($prevAmtSt->fetchColumn());
@@ -4219,7 +4392,7 @@ if ($endpoint === 'rpc') {
         // Топ поставщиков
         $topSt = $pdo->prepare("SELECT o.supplier, SUM(oi.qty_boxes * COALESCE(pp.price, 0)) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN product_prices pp ON pp.sku COLLATE utf8mb4_unicode_ci = oi.sku COLLATE utf8mb4_unicode_ci AND pp.legal_entity COLLATE utf8mb4_unicode_ci = o.legal_entity COLLATE utf8mb4_unicode_ci
+            LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
             WHERE o.created_at_new >= ?
             GROUP BY o.supplier ORDER BY total DESC LIMIT 10");
         $topSt->execute([$from]);

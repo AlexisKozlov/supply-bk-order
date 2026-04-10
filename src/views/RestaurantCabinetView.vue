@@ -561,6 +561,7 @@
             <div class="history-meta">
               <span>{{ order.item_count }} поз.</span>
               <span>{{ order.total_qty }} {{ order.source === 'delivery' ? 'кор.' : 'шт.' }}</span>
+              <span v-if="order.total_deposit && parseFloat(order.total_deposit) > 0" title="Сумма залога">Залог: {{ parseFloat(order.total_deposit).toFixed(2) }}</span>
               <span v-if="order.submitted_at" class="history-time">{{ fmtDateTime(order.submitted_at) }}</span>
             </div>
           </div>

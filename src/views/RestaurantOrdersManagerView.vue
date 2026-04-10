@@ -473,6 +473,7 @@
               <span>Коробок: <strong>{{ orderTotals.boxes }}</strong></span>
               <span>Вес: <strong>{{ orderTotals.weight }} кг</strong></span>
               <span>Паллет: <strong>{{ orderTotals.pallets }}</strong></span>
+              <span v-if="orderTotals.deposit">Залог: <strong>{{ orderTotals.deposit }}</strong></span>
             </div>
           </div>
 
@@ -496,7 +497,7 @@
           <div class="rom-modal-scroll">
             <table class="rom-table rom-table-edit" v-if="getDisplayEditItems(editCategory).length">
               <thead>
-                <tr><th>Товар</th><th style="width:70px">Кол-во</th><th style="width:80px">Вес, кг</th><th>Комментарий</th><th></th></tr>
+                <tr><th>Товар</th><th style="width:70px">Кол-во</th><th style="width:80px">Вес, кг</th><th style="width:90px" title="Сумма залога">Залог</th><th>Комментарий</th><th></th></tr>
               </thead>
               <tbody>
                 <tr v-for="(item, idx) in getDisplayEditItems(editCategory)" :key="idx">
@@ -505,6 +506,7 @@
                   </td>
                   <td><input v-model.number="item.quantity" type="number" min="0" step="0.5" class="rom-edit-qty" /></td>
                   <td class="rom-td-center rom-td-weight">{{ itemWeight(item) }}</td>
+                  <td class="rom-td-center rom-td-weight">{{ itemDepositSum(item) }}</td>
                   <td><input v-model="item.comment" type="text" class="rom-edit-comment" /></td>
                   <td><button class="rom-btn-sm rom-btn-danger" @click="removeEditItem(item)">X</button></td>
                 </tr>
@@ -514,7 +516,7 @@
             <div v-else class="rom-no-items">Нет позиций</div>
             <button class="rom-btn-sm rom-btn-add-item" @click="openOrderAddProduct(editCategory)">+ Добавить товар</button>
             <div v-if="getEditItems(editCategory).length" class="rom-cat-summary">
-              {{ catTotals(editCategory).boxes }} кор., {{ catTotals(editCategory).weight }} кг, {{ catTotals(editCategory).pallets }} палл.
+              {{ catTotals(editCategory).boxes }} кор., {{ catTotals(editCategory).weight }} кг, {{ catTotals(editCategory).pallets }} палл.<span v-if="catTotals(editCategory).deposit">, залог {{ catTotals(editCategory).deposit }}</span>
             </div>
           </div>
 
@@ -780,6 +782,16 @@
                   <input type="checkbox" v-model="exportShowTotals" />
                   <span><strong>Итоги по ресторану</strong> (вес и паллеты в первой строке)</span>
                 </label>
+              </div>
+
+              <!-- Единица веса -->
+              <div class="rom-exp-block">
+                <div class="rom-exp-block-title">Единица веса</div>
+                <div class="rom-exp-grouping">
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportWeightUnit === 'g' }" @click="exportWeightUnit = 'g'">Граммы</button>
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportWeightUnit === 'kg' }" @click="exportWeightUnit = 'kg'">Килограммы</button>
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportWeightUnit === 't' }" @click="exportWeightUnit = 't'">Тонны</button>
+                </div>
               </div>
 
               <!-- Фильтры -->
@@ -1365,6 +1377,17 @@ onUnmounted(() => {
 });
 
 // ═══ Unified export modal ═══
+// Единицы веса в Excel: 'g' (граммы), 'kg' (килограммы), 't' (тонны).
+// Веса в БД хранятся в граммах — конвертация локальная.
+const WEIGHT_UNIT_LABELS = { g: 'г', kg: 'кг', t: 'т' };
+function convertWeight(grams, unit) {
+  if (!grams) return '';
+  if (unit === 'kg') return +(grams / 1000).toFixed(2);
+  if (unit === 't') return +(grams / 1_000_000).toFixed(4);
+  return Math.round(grams);
+}
+function weightLabel(unit) { return WEIGHT_UNIT_LABELS[unit] || 'г'; }
+
 // Описание всех доступных колонок выгрузки.
 // key — внутренний ключ; label — заголовок в Excel; width — ширина;
 // subtotal — флаг, что в эту колонку пишется итог по ресторану в первой строке;
@@ -1385,8 +1408,16 @@ const EXPORT_COLUMNS_DEF = [
   { key: 'product_name', label: 'Название товара', width: 50, value: (ctx, item) => item.product_name || '' },
   { key: 'quantity', label: 'Количество', width: 12, value: (ctx, item) => parseFloat(item.quantity) || 0 },
   { key: 'multiplicity', label: 'Кратность', width: 10, value: (ctx, item) => parseFloat(item.multiplicity) || 1 },
-  { key: 'netto', label: 'Нетто (г)', width: 12, value: (ctx, item) => item.weight_netto ? (parseFloat(item.quantity) || 0) * parseFloat(item.weight_netto) : '' },
-  { key: 'brutto', label: 'Брутто (г)', width: 12, value: (ctx, item) => item.weight_brutto ? (parseFloat(item.quantity) || 0) * parseFloat(item.weight_brutto) : '' },
+  { key: 'netto', label: 'Нетто', width: 12, value: (ctx, item) => {
+      if (!item.weight_netto) return '';
+      const grams = (parseFloat(item.quantity) || 0) * parseFloat(item.weight_netto);
+      return convertWeight(grams, ctx.weightUnit);
+    } },
+  { key: 'brutto', label: 'Брутто', width: 12, value: (ctx, item) => {
+      if (!item.weight_brutto) return '';
+      const grams = (parseFloat(item.quantity) || 0) * parseFloat(item.weight_brutto);
+      return convertWeight(grams, ctx.weightUnit);
+    } },
   { key: 'item_pallets', label: 'Палл. товара', width: 12, value: (ctx, item) => {
       const qty = parseFloat(item.quantity) || 0;
       const bpp = parseFloat(item.boxes_per_pallet) || 0;
@@ -1396,12 +1427,17 @@ const EXPORT_COLUMNS_DEF = [
       return p > 0 ? +p.toFixed(2) : '';
     } },
   { key: 'comment', label: 'Комментарий', width: 30, value: (ctx, item) => item.comment || '' },
-  { key: 'rest_weight', label: 'Вес рест. (кг)', width: 14, subtotal: true, value: ctx => ctx.isFirst ? ctx.restWeightKg : '' },
+  { key: 'deposit_price', label: 'Залог. цена (за кор.)', width: 16, value: (ctx, item) => {
+      const dp = parseFloat(item.deposit_price) || 0;
+      return dp > 0 ? +dp.toFixed(2) : '';
+    } },
+  { key: 'rest_weight', label: 'Вес рест.', width: 14, subtotal: true, value: ctx => ctx.isFirst ? ctx.restWeightFormatted : '' },
   { key: 'rest_pallets', label: 'Палл. рест.', width: 12, subtotal: true, value: ctx => ctx.isFirst ? (ctx.restPallets || '') : '' },
+  { key: 'rest_deposit_sum', label: 'Залог рест.', width: 14, subtotal: true, value: ctx => ctx.isFirst ? (ctx.restDepositSum || '') : '' },
 ];
 
 // Колонки по умолчанию (как было до правки)
-const DEFAULT_EXPORT_COLUMNS = ['date', 'order_num', 'rest_num', 'rest_addr', 'delivery_time', 'category', 'external_code', 'gtin', 'product', 'quantity', 'netto', 'brutto', 'item_pallets', 'rest_weight', 'rest_pallets'];
+const DEFAULT_EXPORT_COLUMNS = ['date', 'order_num', 'rest_num', 'rest_addr', 'delivery_time', 'category', 'external_code', 'gtin', 'product', 'quantity', 'netto', 'brutto', 'item_pallets', 'deposit_price', 'rest_weight', 'rest_pallets', 'rest_deposit_sum'];
 
 function getExportColumnDefs(keys) {
   const map = Object.fromEntries(EXPORT_COLUMNS_DEF.map(c => [c.key, c]));
@@ -1423,15 +1459,17 @@ const exportProductSearch = ref('');
 const exportProductCatFilter = ref('');
 const exportShowFilters = ref(false);
 const exportShowTotals = ref(true);
+const exportWeightUnit = ref('kg'); // g | kg | t
 const exportAvailableRestaurants = ref([]);
 const exportAvailableProducts = ref([]);
 const exportSelectedColumns = ref([...DEFAULT_EXPORT_COLUMNS]);
 const EXPORT_COLUMN_PRESETS = {
-  default: { label: 'Стандартный (как раньше)', cols: [...DEFAULT_EXPORT_COLUMNS] },
+  default: { label: 'Стандартный', cols: [...DEFAULT_EXPORT_COLUMNS] },
   minimal: { label: 'Минимальный', cols: ['rest_num', 'rest_addr', 'category', 'product', 'quantity'] },
   full: { label: 'Полный (все колонки)', cols: EXPORT_COLUMNS_DEF.map(c => c.key) },
   warehouse: { label: 'Для склада', cols: ['rest_num', 'rest_addr', 'delivery_time', 'category', 'product', 'quantity', 'item_pallets', 'rest_weight', 'rest_pallets'] },
   traceable: { label: 'С прослеживаемостью', cols: ['rest_num', 'rest_addr', 'category', 'external_code', 'gtin', 'product', 'quantity'] },
+  deposit: { label: 'С залоговыми ценами', cols: ['date', 'rest_num', 'rest_addr', 'category', 'external_code', 'gtin', 'product', 'quantity', 'deposit_price', 'rest_deposit_sum'] },
 };
 let exportData = null;
 
@@ -1624,15 +1662,19 @@ function catTotals(cat) {
   const boxes = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
   const weight = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.weight_brutto) || 0), 0);
   let rawPallets = 0;
+  let deposit = 0;
   for (const item of items) {
     const bpp = parseFloat(item.boxes_per_pallet) || 0;
     const qty = parseFloat(item.quantity) || 0;
     if (bpp > 0) rawPallets += qtyToBoxes(qty, item.multiplicity) / bpp;
+    const dp = parseFloat(item.deposit_price) || 0;
+    if (dp > 0) deposit += dp * qtyToBoxes(qty, item.multiplicity);
   }
   return {
     boxes: boxes.toFixed(0),
     weight: (weight / 1000).toFixed(1),
     pallets: roundPallets(rawPallets),
+    deposit: deposit > 0 ? deposit.toFixed(2) : '',
   };
 }
 
@@ -1643,10 +1685,19 @@ function itemWeight(item) {
   return (qty * brutto / 1000).toFixed(1);
 }
 
+function itemDepositSum(item) {
+  const qty = parseFloat(item.quantity) || 0;
+  const dp = parseFloat(item.deposit_price) || 0;
+  if (!qty || !dp) return '';
+  const sum = dp * qtyToBoxes(qty, item.multiplicity);
+  return sum > 0 ? sum.toFixed(2) : '';
+}
+
 const orderTotals = computed(() => {
   const items = editItems.value.filter(i => (parseFloat(i.quantity) || 0) > 0);
   const boxes = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
   const weight = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.weight_brutto) || 0), 0);
+  let deposit = 0;
   const palletsByCategory = {};
   for (const item of items) {
     const bpp = parseFloat(item.boxes_per_pallet) || 0;
@@ -1655,12 +1706,15 @@ const orderTotals = computed(() => {
       const cat = item.category || 'Сухой';
       palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qtyToBoxes(qty, item.multiplicity) / bpp;
     }
+    const dp = parseFloat(item.deposit_price) || 0;
+    if (dp > 0) deposit += dp * qtyToBoxes(qty, item.multiplicity);
   }
   const pallets = Object.values(palletsByCategory).reduce((s, v) => s + roundPallets(v), 0);
   return {
     boxes: boxes.toFixed(0),
     weight: (weight / 1000).toFixed(1),
     pallets,
+    deposit: deposit > 0 ? deposit.toFixed(2) : '',
   };
 });
 
@@ -1914,8 +1968,14 @@ function addToTemplate(product) {
 }
 
 // ═══ Export helpers ═══
-function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = false, columnKeys = DEFAULT_EXPORT_COLUMNS) {
-  const cols = getExportColumnDefs(columnKeys);
+function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = false, columnKeys = DEFAULT_EXPORT_COLUMNS, weightUnit = 'kg') {
+  const cols = getExportColumnDefs(columnKeys).map(c => {
+    // Подставляем единицу веса в заголовки netto/brutto/rest_weight
+    if (c.key === 'netto') return { ...c, label: `Нетто (${weightLabel(weightUnit)})` };
+    if (c.key === 'brutto') return { ...c, label: `Брутто (${weightLabel(weightUnit)})` };
+    if (c.key === 'rest_weight') return { ...c, label: `Вес рест. (${weightLabel(weightUnit)})` };
+    return c;
+  });
   const rows = [cols.map(c => c.label)];
   const subtotalRows = [];
   const sorted = [...orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
@@ -1928,22 +1988,26 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
 
     // Предварительный расчёт итогов по ресторану
     let restBrutto = 0;
+    let restDeposit = 0;
     const palletsByCategory = {};
     for (const item of oi) {
       const qty = parseFloat(item.quantity) || 0;
       const bpp = parseFloat(item.boxes_per_pallet) || 0;
       const brutto = item.weight_brutto ? qty * parseFloat(item.weight_brutto) : 0;
       restBrutto += brutto;
+      const dp = parseFloat(item.deposit_price) || 0;
+      if (dp > 0) restDeposit += dp * qtyToBoxes(qty, item.multiplicity);
       const cat = item.category || 'Сухой';
       if (bpp > 0) palletsByCategory[cat] = (palletsByCategory[cat] || 0) + qtyToBoxes(qty, item.multiplicity) / bpp;
     }
     const restPallets = Object.values(palletsByCategory).reduce((sum, v) => sum + roundPallets(v), 0);
-    const restWeightKg = restBrutto ? +(restBrutto / 1000).toFixed(1) : '';
+    const restWeightFormatted = restBrutto ? convertWeight(restBrutto, weightUnit) : '';
+    const restDepositSum = restDeposit > 0 ? +restDeposit.toFixed(2) : '';
 
     // Строки товаров — итоги ресторана записываются в первую строку
     let isFirst = true;
     for (const item of oi) {
-      const ctx = { date, ordNum, order, ri, isFirst, restWeightKg, restPallets, showTotals };
+      const ctx = { date, ordNum, order, ri, isFirst, restWeightFormatted, restPallets, restDepositSum, weightUnit, showTotals };
       const row = cols.map(c => {
         // Колонки итогов выводятся только если включены showTotals
         if (c.subtotal && !showTotals) return '';
@@ -1990,7 +2054,7 @@ function buildSingleOrderXlsx(order, items) {
   const wb = XLSX.utils.book_new();
   const restInfo = { [order.restaurant_number]: { city: order.city || '', address: order.address || '', region: order.region || '', delivery_time: '' } };
   const byRest = { [order.restaurant_number]: items.filter(i => (parseFloat(i.quantity) || 0) > 0) };
-  const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value);
+  const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value, false, DEFAULT_EXPORT_COLUMNS, exportWeightUnit.value);
   const ws = XLSX.utils.aoa_to_sheet(rows);
   styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
   XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`);
@@ -2129,6 +2193,7 @@ async function openExportModal() {
   exportProductCatFilter.value = '';
   exportShowFilters.value = false;
   exportShowTotals.value = true;
+  exportWeightUnit.value = 'kg';
   exportSelectedColumns.value = [...DEFAULT_EXPORT_COLUMNS];
   try {
     const data = await store.adminGetExportData('all', selectedDate.value);
@@ -2176,11 +2241,11 @@ async function doUnifiedExport() {
     const totals = exportShowTotals.value;
     // Если итоги выключены — убираем колонки итогов из выбора, чтобы не плодить пустые столбцы
     let columns = [...exportSelectedColumns.value];
-    if (!totals) columns = columns.filter(k => k !== 'rest_weight' && k !== 'rest_pallets');
+    if (!totals) columns = columns.filter(k => k !== 'rest_weight' && k !== 'rest_pallets' && k !== 'rest_deposit_sum');
     if (!columns.length) { toast.warning('Не выбрана ни одна колонка'); return; }
 
     const writeSheet = (orders, byRestArg, name) => {
-      const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows(orders, byRestArg, restInfoMap, selectedDate.value, totals, columns);
+      const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows(orders, byRestArg, restInfoMap, selectedDate.value, totals, columns, exportWeightUnit.value);
       const ws = XLSX.utils.aoa_to_sheet(rows);
       styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
       XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));

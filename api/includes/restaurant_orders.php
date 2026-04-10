@@ -676,11 +676,15 @@ if ($roAction === 'all-history' && $method === 'GET') {
     $limit = min((int)($_GET['limit'] ?? 30), 100);
     $allOrders = [];
 
-    // 1. Основная поставка (ro_orders)
+    // 1. Основная поставка (ro_orders) — с суммой залога
     $s1 = $pdo->prepare("
         SELECT o.id, o.delivery_date, o.status, o.submitted_at,
                (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
-               (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
+               (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty,
+               (SELECT SUM(oi.quantity * COALESCE(pp.price, 0))
+                  FROM ro_order_items oi
+                  LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit'
+                  WHERE oi.order_id = o.id) as total_deposit
         FROM ro_orders o WHERE o.restaurant_number = ?
         ORDER BY o.delivery_date DESC LIMIT {$limit}
     ");
@@ -1094,11 +1098,12 @@ if (strpos($roAction, 'admin') === 0) {
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
-        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
+        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
+                   (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
             FROM ro_order_items oi
             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ?
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
-        $items->execute([$order['legal_entity'], $order['id']]);
+        $items->execute([$order['legal_entity'], $order['legal_entity'], $order['id']]);
 
         $order['items'] = $items->fetchAll();
         roRespond(['order' => $order]);
@@ -1731,7 +1736,10 @@ if (strpos($roAction, 'admin') === 0) {
                 $catWhere = " AND oi.category = ?";
                 $catParams[] = $category;
             }
-            $st = $pdo->prepare("SELECT oi.id, oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment
+            $st = $pdo->prepare("SELECT oi.id, oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
+                       (SELECT pp.price FROM product_prices pp JOIN ro_orders o2 ON o2.id = oi.order_id
+                           WHERE pp.sku = oi.sku AND pp.legal_entity = o2.legal_entity AND pp.price_type = 'deposit'
+                           ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
                 FROM ro_order_items oi WHERE oi.order_id IN ({$ph}){$catWhere} ORDER BY oi.category, oi.product_name");
             $st->execute($catParams);
             $items = $st->fetchAll();
@@ -1780,7 +1788,8 @@ if (strpos($roAction, 'admin') === 0) {
         $allItems = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
-            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable
+            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
+                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
                 LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity

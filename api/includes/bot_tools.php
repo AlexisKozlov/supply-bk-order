@@ -372,7 +372,7 @@ function toolGetPrices($query, $entity) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.currency, pp.vat_rate, pp.unit_type, p.supplier
                 FROM product_prices pp
                 LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
-                WHERE (pp.sku LIKE ? OR p.name LIKE ? OR p.supplier LIKE ?)";
+                WHERE pp.price_type = 'purchase' AND (pp.sku LIKE ? OR p.name LIKE ? OR p.supplier LIKE ?)";
         $params = ["%{$query}%", "%{$query}%", "%{$query}%"];
         if ($entity) { $sql .= " AND pp.legal_entity = ?"; $params[] = $entity; }
         $sql .= " LIMIT 20";

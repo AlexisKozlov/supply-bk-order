@@ -13,6 +13,7 @@
         <div class="pricing-header-btns">
           <button v-if="activeTab === 'prices'" class="btn secondary" @click="exportPriceList" style="font-size:11px;padding:5px 12px;">Экспорт</button>
           <button v-if="!isViewer && activeTab === 'prices'" class="btn primary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт цен</button>
+          <button v-if="!isViewer && (activeTab === 'prices' || activeTab === 'deposits')" class="btn primary" @click="showDepositImportModal = true" style="font-size:11px;padding:5px 12px;" title="Импорт залоговых цен из файла gtin.xlsx">Импорт залога</button>
           <button v-if="!isViewer && activeTab === 'prices'" class="btn secondary" @click="openNewPrice" style="font-size:11px;padding:5px 12px;">+ Цена</button>
           <button v-if="!isViewer && activeTab === 'agreements'" class="btn primary" @click="openNewAgreement" style="font-size:11px;padding:5px 12px;">+ Протокол</button>
         </div>
@@ -26,6 +27,9 @@
       </button>
       <button class="db-tab" :class="{ active: activeTab === 'agreements' }" @click="activeTab = 'agreements'; loadAgreements()">
         <BkIcon name="order" size="sm"/> Протоколы (ПСЦ) <span class="db-tab-count">{{ agreements.length }}</span>
+      </button>
+      <button class="db-tab" :class="{ active: activeTab === 'deposits' }" @click="activeTab = 'deposits'; loadDepositList()">
+        <BkIcon name="pricing" size="sm"/> Залоговые цены <span class="db-tab-count">{{ depositList.length }}</span>
       </button>
       <button class="db-tab" :class="{ active: activeTab === 'dynamics' }" @click="activeTab = 'dynamics'; loadDynamics()">
         <BkIcon name="analytics" size="sm"/> Динамика цен <span class="db-tab-count">{{ dynamicsStats.total }}</span>
@@ -77,6 +81,7 @@
               <th class="col-unit">За</th>
               <th class="col-cur">Вал.</th>
               <th v-if="hasRubPrices" class="col-byn">В BYN</th>
+              <th class="col-price" title="Залоговая цена за коробку">Залог</th>
               <th class="col-vat">НДС</th>
               <th class="col-psc">ПСЦ</th>
               <th class="col-date" @click="toggleSort('updated_at')">Обновлено {{ sortIcon('updated_at') }}</th>
@@ -96,6 +101,10 @@
               <td class="col-unit" data-label="За">{{ unitLabel(p.unit_type) }}</td>
               <td class="col-cur" data-label="Вал."><span class="currency-badge" :class="'cur-' + (p.currency || 'BYN')">{{ p.currency || 'BYN' }}</span></td>
               <td v-if="hasRubPrices" class="col-byn mono" data-label="В BYN">{{ p.currency === 'RUB' ? formatPrice(p.price * rubToBynRate) : '' }}</td>
+              <td class="col-price mono" data-label="Залог" style="color:var(--text-muted);cursor:pointer;" @click.stop="openDepositEdit(p)" :title="isViewer ? '' : 'Изменить залоговую цену'">
+                <span v-if="depositPrices[p.sku]">{{ formatPrice(depositPrices[p.sku]) }}</span>
+                <span v-else-if="!isViewer" style="opacity:0.4;">+</span>
+              </td>
               <td class="col-vat" data-label="НДС">{{ (p.vat_rate ?? 20) }}%</td>
               <td class="col-psc" data-label="ПСЦ">
                 <span v-if="p.agreement_id" class="psc-badge" :title="getAgreementLabel(p.agreement_id)">ПСЦ</span>
@@ -127,6 +136,44 @@
               <td v-if="!filterSupplier" class="text-muted">{{ np.supplier }}</td>
               <td v-if="!isViewer" style="width:60px;text-align:center;">
                 <button class="btn secondary" style="font-size:10px;padding:2px 8px;" @click="openNewPriceForSku(np)">+ Цена</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ЗАЛОГОВЫЕ ЦЕНЫ -->
+    <div v-if="activeTab === 'deposits'">
+      <div v-if="depositLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
+      <div v-else-if="!filteredDeposits.length" style="text-align:center;padding:40px;color:var(--text-muted);">
+        <div>Залоговые цены не найдены</div>
+        <div v-if="!isViewer" style="margin-top:12px;font-size:12px;">Нажмите «Импорт залога» в шапке, чтобы загрузить файл gtin.xlsx</div>
+      </div>
+      <div v-else>
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th class="col-product">Товар</th>
+              <th class="col-supplier">Поставщик</th>
+              <th class="col-price">Залог. цена (за кор.)</th>
+              <th class="col-date">Обновлено</th>
+              <th class="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in filteredDeposits" :key="d.id" @click="!isViewer && openDepositEdit({ sku: d.sku })" :style="!isViewer ? 'cursor:pointer' : ''">
+              <td class="col-product" data-label="Товар">
+                <span class="mono" style="font-weight:600;">{{ d.sku }}</span>
+                <span class="product-name-sub">{{ d.name || '—' }}</span>
+              </td>
+              <td class="col-supplier ellipsis" data-label="Поставщик">{{ d.supplier || '—' }}</td>
+              <td class="col-price mono" data-label="Цена">{{ formatPrice(d.price) }}</td>
+              <td class="col-date text-muted" data-label="Обновлено">{{ formatDate(d.updated_at) }}</td>
+              <td class="col-actions" data-label="">
+                <button v-if="!isViewer" class="db-card-btn db-card-btn-del" @click.stop="deleteDepositRow(d)" title="Удалить">
+                  <BkIcon name="delete" size="sm"/>
+                </button>
               </td>
             </tr>
           </tbody>
@@ -472,6 +519,79 @@
         </div>
       </div>
     </div>
+    <!-- Модалка: Импорт залоговых цен (gtin.xlsx) -->
+    <div v-if="showDepositImportModal" class="modal-overlay">
+      <div class="modal-card" style="max-width:560px;">
+        <h3 style="margin:0 0 8px;">Импорт залоговых цен</h3>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+          Загрузите файл gtin.xlsx (листы «Сухой», «Холод», «Мороз»).
+          Цены будут применены к товарам «Бургер БК» и «Воглия Матта».
+          Сопоставление: по внешнему коду → GTIN → артикулу.
+        </div>
+        <div class="form-group">
+          <label>Файл (.xlsx)</label>
+          <input ref="depositFileInput" type="file" accept=".xlsx,.xls" @change="onDepositFileSelected" style="font-size:12px;" />
+        </div>
+        <div v-if="depositPreview.length" style="margin-top:12px;">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Найдено уникальных товаров: {{ depositPreview.length }}</div>
+          <table class="pricing-table" style="font-size:11px;max-height:200px;">
+            <thead><tr><th>Вн. код</th><th>Товар</th><th class="text-right">Цена</th></tr></thead>
+            <tbody>
+              <tr v-for="(p, i) in depositPreview.slice(0, 15)" :key="i">
+                <td class="mono">{{ p.external_code || '—' }}</td>
+                <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ p.name }}</td>
+                <td class="text-right mono">{{ formatPrice(p.price) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="depositPreview.length > 15" style="font-size:11px;color:var(--text-muted);margin-top:4px;">… и ещё {{ depositPreview.length - 15 }}</div>
+        </div>
+        <div v-if="depositResult" style="margin-top:12px;padding:10px;background:var(--bg-muted);border-radius:6px;font-size:12px;">
+          <div>Сопоставлено: <b>{{ depositResult.matched }}</b> записей (по {{ depositResult.unique_products }} товарам)</div>
+          <div v-if="depositResult.skipped_count">Пропущено: <b>{{ depositResult.skipped_count }}</b> (не найдены в базе)</div>
+          <details v-if="depositResult.skipped?.length" style="margin-top:6px;">
+            <summary style="cursor:pointer;">Показать пропущенные</summary>
+            <div style="max-height:160px;overflow-y:auto;margin-top:6px;">
+              <div v-for="(s, i) in depositResult.skipped" :key="i" style="font-size:11px;padding:2px 0;">
+                {{ s.external_code || s.gtin || s.sku || '—' }} · {{ s.name }} · {{ formatPrice(s.price) }}
+              </div>
+            </div>
+          </details>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+          <button class="btn secondary" @click="closeDepositImport">Закрыть</button>
+          <button class="btn primary" @click="doDepositImport" :disabled="depositImporting || !depositPreview.length">
+            {{ depositImporting ? 'Импорт...' : `Импортировать (${depositPreview.length})` }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Модалка: Редактирование залоговой цены -->
+    <div v-if="depositEdit.show" class="modal-overlay">
+      <div class="modal-card" style="max-width:440px;">
+        <h3 style="margin:0 0 12px;">Залоговая цена</h3>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+          <span class="mono" style="font-weight:600;">{{ depositEdit.sku }}</span>
+          {{ productNames[depositEdit.sku] || '' }}
+        </div>
+        <div class="form-group">
+          <label>Цена за 1 учётную коробку (BYN)</label>
+          <input ref="depositEditInput" type="number" step="0.01" min="0" v-model.number="depositEdit.price" class="form-input" style="width:160px;" />
+        </div>
+        <label class="rom-exp-cb-label" style="margin-top:4px;">
+          <input type="checkbox" v-model="depositEdit.applyToGroup" />
+          <span>Применить к обоим юр. лицам (Бургер БК + Воглия Матта)</span>
+        </label>
+        <div style="display:flex;gap:8px;justify-content:space-between;margin-top:16px;">
+          <button v-if="depositPrices[depositEdit.sku]" class="btn secondary" style="color:#c33;" @click="doDepositDelete" :disabled="depositEdit.saving">Удалить</button>
+          <div style="flex:1"></div>
+          <button class="btn secondary" @click="depositEdit.show = false" :disabled="depositEdit.saving">Отмена</button>
+          <button class="btn primary" @click="doDepositSave" :disabled="depositEdit.saving || !depositEdit.price">
+            {{ depositEdit.saving ? 'Сохранение...' : 'Сохранить' }}
+          </button>
+        </div>
+      </div>
+    </div>
     <!-- Модалка: История цены -->
     <div v-if="showHistoryModal" class="modal-overlay">
       <div class="modal-card" style="max-width:560px;">
@@ -561,6 +681,7 @@ const loading = ref(false);
 
 // Данные
 const prices = ref([]);
+const depositPrices = ref({}); // { sku: price }
 const agreements = ref([]);
 const productNames = ref({}); // sku -> name
 const productUnits = ref({}); // sku -> unit_of_measure ('шт','кг','л')
@@ -608,6 +729,7 @@ async function loadPrices() {
     if (gen !== _loadPricesGen) return; // устаревший запрос
     if (error) { toast.error('Ошибка', error); loadError.value = true; return; }
     prices.value = (data?.prices || []).map(p => ({ ...p, vat_rate: parseFloat(p.vat_rate) || 20 }));
+    depositPrices.value = data?.deposit_prices || {};
     if (data?.rub_to_byn_rate) rubToBynRate.value = parseFloat(data.rub_to_byn_rate);
     await loadProductNames();
   } catch {
@@ -1169,6 +1291,196 @@ async function doImport() {
     await loadPrices();
   } finally {
     importing.value = false;
+  }
+}
+
+// === Импорт залоговых цен (gtin.xlsx) ===
+const showDepositImportModal = ref(false);
+const depositFileInput = ref(null);
+const depositPreview = ref([]);
+const depositResult = ref(null);
+const depositImporting = ref(false);
+
+function closeDepositImport() {
+  showDepositImportModal.value = false;
+  depositPreview.value = [];
+  depositResult.value = null;
+  if (depositFileInput.value) depositFileInput.value.value = '';
+}
+
+async function onDepositFileSelected(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  depositResult.value = null;
+  try {
+    const XLSX = await import('xlsx-js-style');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    // Парсим все листы (Сухой / Холод / Мороз)
+    const uniq = new Map();
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      for (const row of rows) {
+        const keys = Object.keys(row);
+        // Поиск колонок по названию
+        const findKey = (regex) => keys.find(k => regex.test(k));
+        const kExt = findKey(/внешн.*код|external/i);
+        const kGtin = findKey(/gtin/i);
+        const kProd = findKey(/товар|наименование|product/i);
+        const kPrice = findKey(/залог.*цен|цена.*залог|deposit/i);
+        if (!kPrice) continue;
+
+        const ext = String(row[kExt] || '').trim();
+        const gtin = String(row[kGtin] || '').trim();
+        const prodRaw = String(row[kProd] || '').trim();
+        const price = parseFloat(String(row[kPrice] || '0').replace(/[^\d.,\-]/g, '').replace(',', '.'));
+        if (!price || price <= 0) continue;
+
+        // Попытка вытащить SKU из начала названия товара ("051085  Перец ...")
+        let sku = '';
+        const m = prodRaw.match(/^(\d{4,8})\s+/);
+        if (m) sku = m[1];
+        const name = prodRaw.replace(/^\d{4,8}\s+/, '');
+
+        const key = ext || gtin || sku || prodRaw;
+        if (!key) continue;
+        if (!uniq.has(key)) {
+          uniq.set(key, { external_code: ext, gtin, sku, name, price });
+        }
+      }
+    }
+    depositPreview.value = Array.from(uniq.values());
+    if (!depositPreview.value.length) {
+      toast.error('Не найдены данные', 'Проверьте колонки «Внешний код», «GTIN», «Товар», «Залоговая Цена»');
+    }
+  } catch (err) {
+    toast.error('Ошибка чтения файла', err.message);
+  }
+}
+
+async function doDepositImport() {
+  if (depositImporting.value || !depositPreview.value.length) return;
+  depositImporting.value = true;
+  try {
+    const { data, error } = await db.rpc('import_deposit_prices', {
+      rows: depositPreview.value,
+    });
+    if (error) { toast.error('Ошибка импорта', error); return; }
+    depositResult.value = data;
+    toast.success('Импорт завершён', `Сопоставлено ${data?.matched || 0} записей`);
+    await loadPrices();
+    await loadDepositList();
+  } finally {
+    depositImporting.value = false;
+  }
+}
+
+// === Вкладка «Залоговые цены» ===
+const depositList = ref([]);
+const depositLoading = ref(false);
+
+async function loadDepositList() {
+  const le = orderStore.settings.legalEntity;
+  if (!le) return;
+  depositLoading.value = true;
+  try {
+    const { data, error } = await db.rpc('get_deposit_prices', { legal_entity: le });
+    if (error) { toast.error('Ошибка', error); return; }
+    depositList.value = data?.prices || [];
+  } finally {
+    depositLoading.value = false;
+  }
+}
+
+const filteredDeposits = computed(() => {
+  let list = depositList.value;
+  if (filterSupplier.value) list = list.filter(d => d.supplier === filterSupplier.value);
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase();
+    list = list.filter(d =>
+      (d.sku && d.sku.toLowerCase().includes(q)) ||
+      (d.name && d.name.toLowerCase().includes(q)) ||
+      (d.supplier && d.supplier.toLowerCase().includes(q))
+    );
+  }
+  return list;
+});
+
+async function deleteDepositRow(d) {
+  if (!await confirm('Удалить залоговую цену?', `Удалить залоговую цену товара «${d.sku} ${d.name || ''}»?`)) return;
+  const { error } = await db.rpc('set_deposit_price', {
+    sku: d.sku,
+    legal_entity: orderStore.settings.legalEntity,
+    price: null,
+    apply_to_group: true,
+  });
+  if (error) { toast.error('Ошибка', error); return; }
+  toast.success('Залоговая цена удалена');
+  await loadDepositList();
+  await loadPrices();
+}
+
+// === Редактирование одной залоговой цены ===
+const depositEdit = ref({ show: false, sku: '', price: null, applyToGroup: true, saving: false });
+
+function openDepositEdit(p) {
+  if (isViewer.value) return;
+  // Ищем цену либо в depositPrices (мапа из прайс-листа), либо в depositList (вкладка залога)
+  let price = depositPrices.value[p.sku] || null;
+  if (!price) {
+    const row = depositList.value.find(d => d.sku === p.sku);
+    if (row) price = parseFloat(row.price);
+  }
+  depositEdit.value = {
+    show: true,
+    sku: p.sku,
+    price,
+    applyToGroup: true,
+    saving: false,
+  };
+}
+
+async function doDepositSave() {
+  if (depositEdit.value.saving) return;
+  const price = parseFloat(depositEdit.value.price);
+  if (!price || price <= 0) { toast.error('Укажите цену больше 0'); return; }
+  depositEdit.value.saving = true;
+  try {
+    const { error } = await db.rpc('set_deposit_price', {
+      sku: depositEdit.value.sku,
+      legal_entity: orderStore.settings.legalEntity,
+      price,
+      apply_to_group: depositEdit.value.applyToGroup,
+    });
+    if (error) { toast.error('Ошибка', error); return; }
+    toast.success('Залоговая цена сохранена');
+    depositEdit.value.show = false;
+    await loadPrices();
+    await loadDepositList();
+  } finally {
+    depositEdit.value.saving = false;
+  }
+}
+
+async function doDepositDelete() {
+  if (depositEdit.value.saving) return;
+  if (!await confirm('Удалить залоговую цену?', `Удалить залоговую цену товара «${depositEdit.value.sku}»?`)) return;
+  depositEdit.value.saving = true;
+  try {
+    const { error } = await db.rpc('set_deposit_price', {
+      sku: depositEdit.value.sku,
+      legal_entity: orderStore.settings.legalEntity,
+      price: null,
+      apply_to_group: depositEdit.value.applyToGroup,
+    });
+    if (error) { toast.error('Ошибка', error); return; }
+    toast.success('Залоговая цена удалена');
+    depositEdit.value.show = false;
+    await loadPrices();
+    await loadDepositList();
+  } finally {
+    depositEdit.value.saving = false;
   }
 }
 
