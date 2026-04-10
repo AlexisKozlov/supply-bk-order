@@ -139,7 +139,7 @@ if ($endpoint === 'rpc') {
 
     // Артикулы на остатках (для поиска карточек)
     if ($fn === 'get_stock_skus') {
-        $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity WHERE a.legal_entity = ? AND a.stock > 0");
+        $s = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.legal_entity = ? AND a.stock > 0");
         $s->execute(['ООО "Бургер БК"']);
         $rows = $s->fetchAll();
         $result = [];
@@ -1941,7 +1941,7 @@ if ($endpoint === 'rpc') {
                        COALESCE(p.external_code, '') AS external_code,
                        COALESCE(p.gtin, '') AS gtin
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
                 WHERE pp.legal_entity = ? AND pp.price_type = 'deposit'
                 ORDER BY p.name, pp.sku";
         $s = $pdo->prepare($sql); $s->execute([$le]);
@@ -4428,7 +4428,7 @@ if ($endpoint === 'rpc') {
         $leWhere = $le ? " AND a.legal_entity = " . $pdo->quote($le) : '';
         $st = $pdo->query("SELECT a.sku, p.analog_group, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1)), 1) as days_of_stock
             FROM analysis_data a
-            JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity
+            JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0 AND a.stock > 0 AND a.stock / (a.consumption / GREATEST(a.period_days, 1)) <= 5 {$leWhere}
             ORDER BY days_of_stock ASC LIMIT 30");
         $rows = $st->fetchAll();

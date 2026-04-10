@@ -203,8 +203,8 @@
             </button>
           </div>
           <div class="rom-tpl-toolbar-right">
-            <button class="rom-btn" @click="handleImportFromStock">
-              Импортировать из сроков годности
+            <button class="rom-btn" @click="handleImportFromStock" title="Загрузить в шаблон только те товары, у которых есть остаток на складе">
+              Импортировать из остатков склада
             </button>
             <button class="rom-btn rom-btn-primary" @click="saveFullTemplate" :disabled="tplSaving">
               {{ tplSaving ? 'Сохранение...' : 'Сохранить шаблон' }}
@@ -274,6 +274,39 @@
       </div>
 
       <div v-if="stockMessage" class="rom-tpl-msg" :class="{ success: stockMessageOk }">{{ stockMessage }}</div>
+
+      <div v-if="stockUnmatched.length" class="rom-unmatched">
+        <div class="rom-unmatched-header" @click="stockUnmatchedExpanded = !stockUnmatchedExpanded">
+          <span class="rom-unmatched-arrow">{{ stockUnmatchedExpanded ? '▼' : '▶' }}</span>
+          <strong>Не найдено в справочнике: {{ stockUnmatched.length }}</strong>
+          <span class="rom-unmatched-hint">— этих товаров нет в базе, добавьте их вручную</span>
+          <button class="rom-unmatched-copy" @click.stop="copyUnmatched">Копировать</button>
+        </div>
+        <div v-if="stockUnmatchedExpanded" class="rom-unmatched-body">
+          <table class="rom-unmatched-table">
+            <thead>
+              <tr>
+                <th>Внешний код</th>
+                <th>Артикул</th>
+                <th>Название (из Excel)</th>
+                <th>Кол-во</th>
+                <th>Склад</th>
+                <th>Юр. лицо</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(u, i) in stockUnmatched" :key="i">
+                <td class="mono">{{ u.external_code }}</td>
+                <td class="mono">{{ u.sku }}</td>
+                <td>{{ u.name }}</td>
+                <td class="num">{{ u.qty }}</td>
+                <td>{{ u.warehouse }}</td>
+                <td>{{ u.legal_entity }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div class="rom-tpl-tabs">
         <button class="rom-tpl-tab" :class="{ active: stockLegalEntity === stockLE_BK }"
@@ -1230,6 +1263,8 @@ const stockLoading = ref(false);
 const stockMessage = ref('');
 const stockMessageOk = ref(false);
 const stockFileInput = ref(null);
+const stockUnmatched = ref([]); // список товаров из Excel, которые не нашлись в БД
+const stockUnmatchedExpanded = ref(true);
 
 const filteredStockItems = computed(() => {
   let items = stockItems.value;
@@ -1263,6 +1298,19 @@ async function loadStockData() {
   }
 }
 
+function copyUnmatched() {
+  if (!stockUnmatched.value.length) return;
+  const lines = ['Внешний код\tАртикул\tНазвание\tКол-во\tСклад\tЮр. лицо'];
+  stockUnmatched.value.forEach(u => {
+    lines.push([u.external_code, u.sku, u.name, u.qty, u.warehouse, u.legal_entity].join('\t'));
+  });
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    toast.success('Список скопирован');
+  }).catch(() => {
+    toast.error('Не удалось скопировать');
+  });
+}
+
 async function handleStockFile(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -1270,10 +1318,13 @@ async function handleStockFile(event) {
   if (!dateStr) { event.target.value = ''; return; }
   stockUploading.value = true;
   stockMessage.value = '';
+  stockUnmatched.value = [];
   try {
     const result = await store.adminUploadStock(file, dateStr);
     stockMessage.value = `Загружено: ${result.matched} позиций, пропущено: ${result.skipped}`;
     stockMessageOk.value = true;
+    stockUnmatched.value = result.unmatched || [];
+    stockUnmatchedExpanded.value = true;
     stockDates.value = await store.adminGetStockDates();
     stockBalanceDate.value = dateStr;
     if (!stockDeliveryDate.value) stockDeliveryDate.value = selectedDate.value;
@@ -1924,6 +1975,7 @@ async function saveFullTemplate() {
 }
 
 async function handleImportFromStock() {
+  if (!confirm(`Заменить шаблон «${tplCategory.value}» товарами, у которых есть остаток на складе? Текущие позиции в этой категории будут удалены.`)) return;
   try {
     const result = await store.adminImportTemplateFromStock(tplLegalEntity.value, tplCategory.value);
     // Удаляем старые этой категории, добавляем новые
@@ -1935,11 +1987,12 @@ async function handleImportFromStock() {
       multiplicity: parseInt(i.multiplicity) || 1,
     }));
     fullTemplateItems.value.push(...newItems);
-    tplMessage.value = `Импортировано: ${result.count} товаров в "${tplCategory.value}"`;
+    const dateNote = result.balance_date ? ` (остатки на ${result.balance_date})` : '';
+    tplMessage.value = `Импортировано: ${result.count} товаров в «${tplCategory.value}»${dateNote}`;
     tplMessageOk.value = true;
-    setTimeout(() => { tplMessage.value = ''; }, 3000);
+    setTimeout(() => { tplMessage.value = ''; }, 4000);
   } catch (e) {
-    tplMessage.value = e.message;
+    tplMessage.value = e.message || 'Ошибка импорта';
     tplMessageOk.value = false;
   }
 }
@@ -2753,6 +2806,36 @@ async function doUnifiedExport() {
   margin-bottom: 12px; background: #fef2f2; color: #dc2626;
 }
 .rom-tpl-msg.success { background: #ecfdf5; color: #16a34a; }
+.rom-unmatched {
+  border: 1px solid #fbbf24; background: #fffbeb; border-radius: 8px;
+  margin-bottom: 12px; overflow: hidden;
+}
+.rom-unmatched-header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  cursor: pointer; user-select: none; font-size: 13px; color: #92400e;
+}
+.rom-unmatched-header:hover { background: #fef3c7; }
+.rom-unmatched-arrow { width: 12px; font-size: 10px; }
+.rom-unmatched-hint { color: #a16207; font-size: 12px; margin-left: 4px; }
+.rom-unmatched-copy {
+  margin-left: auto; padding: 4px 10px; border: 1px solid #fbbf24;
+  background: #fff; color: #92400e; border-radius: 6px; font-size: 12px;
+  cursor: pointer;
+}
+.rom-unmatched-copy:hover { background: #fef3c7; }
+.rom-unmatched-body { max-height: 320px; overflow-y: auto; border-top: 1px solid #fde68a; }
+.rom-unmatched-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.rom-unmatched-table th, .rom-unmatched-table td {
+  padding: 4px 10px; border-bottom: 1px solid #fde68a; text-align: left;
+}
+.rom-unmatched-table th {
+  background: #fef3c7; color: #92400e; font-weight: 600;
+  position: sticky; top: 0;
+}
+.rom-unmatched-table td.mono { font-family: monospace; }
+.rom-unmatched-table td.num { text-align: right; }
 .rom-sku-label { font-size: 11px; color: #8b7355; margin-right: 4px; }
 .rom-tpl-mult-input {
   width: 60px; padding: 4px 6px; border: 1px solid #e0d5c8;

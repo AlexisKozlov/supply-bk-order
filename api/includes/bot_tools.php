@@ -263,8 +263,7 @@ function toolStockCritical($maxDays, $entity) {
                    COALESCE(p.unit_of_measure, 'шт') as uom,
                    ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci
-                AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0 AND a.stock > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -308,7 +307,7 @@ function toolGetOrders($supplier, $days, $limit, $entity) {
         $s2 = $pdo->prepare("SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, COALESCE(p.unit_of_measure, 'шт') as uom
                 FROM order_items oi
                 LEFT JOIN orders ord ON ord.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
                 WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
@@ -345,7 +344,7 @@ function toolGetDeliveries($supplier, $product, $entity) {
         $itemSql = "SELECT oi.sku, oi.name, oi.qty_boxes, oi.qty_per_box, COALESCE(p.unit_of_measure, 'шт') as uom
                 FROM order_items oi
                 LEFT JOIN orders ord ON ord.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
                 WHERE oi.order_id = ?";
         $itemParams = [$o['id']];
         if ($product) {
@@ -371,7 +370,7 @@ function toolGetPrices($query, $entity) {
         // Поиск цен по товару
         $sql = "SELECT pp.sku, p.name, pp.price, pp.currency, pp.vat_rate, pp.unit_type, p.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
                 WHERE pp.price_type = 'purchase' AND (pp.sku LIKE ? OR p.name LIKE ? OR p.supplier LIKE ?)";
         $params = ["%{$query}%", "%{$query}%", "%{$query}%"];
         if ($entity) { $sql .= " AND pp.legal_entity = ?"; $params[] = $entity; }
@@ -392,7 +391,7 @@ function toolGetPrices($query, $entity) {
     // Последние изменения цен
     $sql = "SELECT ph.sku, p.name, ph.supplier, ph.old_price, ph.new_price, ph.changed_at
             FROM price_history ph
-            LEFT JOIN products p ON p.sku = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci";
+            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity = ph.legal_entity AND p.is_active = 1";
     $params = [];
     if ($entity) { $sql .= " WHERE ph.legal_entity = ?"; $params[] = $entity; }
     $sql .= " ORDER BY ph.changed_at DESC LIMIT 15";

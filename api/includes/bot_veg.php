@@ -767,8 +767,7 @@ function restStockSearch($chatId, $query, $userMsgId = null) {
     $st = $pdo->prepare("
         SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box
         FROM analysis_data a
-        LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = a.sku COLLATE utf8mb4_unicode_ci
-            AND p.legal_entity COLLATE utf8mb4_unicode_ci = a.legal_entity COLLATE utf8mb4_unicode_ci
+        LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
         WHERE a.legal_entity = 'ООО \"Бургер БК\"'
             AND (a.sku LIKE ? OR p.name LIKE ?)
         ORDER BY a.stock DESC

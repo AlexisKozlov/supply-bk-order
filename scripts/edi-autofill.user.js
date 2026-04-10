@@ -1,16 +1,30 @@
 // ==UserScript==
 // @name         EDI CTT — автозаполнение накладной из Excel
 // @namespace    bk-calc
-// @version      0.1.0
+// @version      0.2.0
 // @description  Загружает Excel (gtin.xlsx) и автоматически заполняет 6 полей в диалоге "Добавление товара" на edi.ctt.by
 // @match        https://edi.ctt.by/*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  // Видимый признак, что скрипт запущен — меняем заголовок вкладки.
+  // Если в названии вкладки браузера видно "[EDI ✓]" — значит userscript работает.
+  try {
+    if (!document.title.startsWith('[EDI ✓]')) {
+      document.title = '[EDI ✓] ' + (document.title || 'edi.ctt.by');
+    }
+    // На SPA Angular часто перезаписывает title — следим и возвращаем префикс.
+    setInterval(() => {
+      if (!document.title.startsWith('[EDI ✓]')) {
+        document.title = '[EDI ✓] ' + document.title;
+      }
+    }, 1000);
+  } catch (e) {}
 
   // ---------- состояние ----------
   const state = {
@@ -212,7 +226,8 @@
   }
 
   // ---------- UI панель ----------
-  const panel = (() => {
+  let panelRoot = null; // ссылка на корневой div панели
+  function createPanel() {
     const root = document.createElement('div');
     root.id = 'edi-autofill-panel';
     root.innerHTML = `
@@ -279,7 +294,8 @@
         </table>
       </div>
     `;
-    document.body.appendChild(root);
+    (document.body || document.documentElement).appendChild(root);
+    panelRoot = root;
 
     const $ = sel => root.querySelector(sel);
     let minimized = false;
@@ -383,7 +399,28 @@
         }
       },
     };
-  })();
+  }
+
+  // Дождаться body и создать панель. Если Angular её удалит — пересоздать.
+  let panel = null;
+  function ensurePanel() {
+    if (!document.body) return;
+    if (!panelRoot || !document.body.contains(panelRoot)) {
+      panel = createPanel();
+      log('панель добавлена в DOM');
+    }
+  }
+  // Стартуем с интервалом — body может появиться не сразу.
+  const startIv = setInterval(() => {
+    if (document.body) {
+      ensurePanel();
+      if (panelRoot) {
+        clearInterval(startIv);
+        // Дальше следим раз в секунду — если SPA снесёт панель, вернём её.
+        setInterval(ensurePanel, 1000);
+      }
+    }
+  }, 100);
 
   // ---------- автонаблюдение за открытием диалога ----------
   // Когда открывается "Добавление товара" — ничего не делаем сразу (ждём, пока пользователь

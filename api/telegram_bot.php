@@ -236,7 +236,7 @@ function cmdStock($chatId, $user, $editMsgId = null) {
                    COALESCE(p.unit_of_measure, 'шт') as uom,
                    CASE WHEN a.consumption > 0 THEN ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) ELSE 999 END as days_left
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -275,7 +275,7 @@ function cmdConsumption($chatId, $user, $editMsgId = null) {
 
     $sql = "SELECT a.sku, p.name, a.consumption, a.period_days, COALESCE(p.unit_of_measure, 'шт') as uom
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -314,7 +314,7 @@ function cmdPrices($chatId, $user, $editMsgId = null) {
 
     $sql = "SELECT ph.sku, p.name as product_name, ph.old_price, ph.new_price, ph.changed_by, ph.changed_at, ph.supplier
             FROM price_history ph
-            LEFT JOIN products p ON p.sku = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity = ph.legal_entity AND p.is_active = 1
             WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci)";
     $params = [];
     if ($entity) { $sql .= " AND ph.legal_entity = ?"; $params[] = $entity; }
@@ -523,7 +523,7 @@ function cmdToday($chatId, $user, $editMsgId = null) {
     $overdueOrders = $s->fetchAll();
 
     // 3. Критичные остатки (≤5 дней)
-    $s = $pdo->prepare("SELECT p.name, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci WHERE a.consumption > 0 AND a.stock > 0" . $eFilterA . " HAVING days_left <= 5 ORDER BY days_left ASC LIMIT 10");
+    $s = $pdo->prepare("SELECT p.name, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.consumption > 0 AND a.stock > 0" . $eFilterA . " HAVING days_left <= 5 ORDER BY days_left ASC LIMIT 10");
     $s->execute($params);
     $critItems = $s->fetchAll();
 
@@ -634,9 +634,9 @@ function generateOrdersCsv($entity) {
 
 function generatePricesCsv($entity) {
     global $pdo;
-    $sql = "SELECT pp.sku, p.name, pp.supplier, pp.price, pp.vat_rate, pp.currency, pp.unit_type FROM product_prices pp LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = pp.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = pp.legal_entity COLLATE utf8mb4_general_ci";
+    $sql = "SELECT pp.sku, p.name, pp.supplier, pp.price, pp.vat_rate, pp.currency, pp.unit_type FROM product_prices pp LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1 WHERE pp.price_type = 'purchase'";
     $params = [];
-    if ($entity) { $sql .= " WHERE pp.legal_entity = ?"; $params[] = $entity; }
+    if ($entity) { $sql .= " AND pp.legal_entity = ?"; $params[] = $entity; }
     $sql .= " ORDER BY pp.supplier, p.name";
     $s = $pdo->prepare($sql); $s->execute($params);
     $rows = $s->fetchAll();
@@ -1061,7 +1061,7 @@ function searchCardDirect($chatId, $query, $userMsgId = null, $botMsgId = null) 
         $placeholders = implode(',', array_fill(0, count($allSkus), '?'));
         $params = array_values($allSkus);
         $params[] = 'ООО "Бургер БК"';
-        $st = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = a.sku COLLATE utf8mb4_unicode_ci AND p.legal_entity COLLATE utf8mb4_unicode_ci = a.legal_entity COLLATE utf8mb4_unicode_ci WHERE a.sku IN ({$placeholders}) AND a.legal_entity = ? AND a.stock > 0");
+        $st = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.sku IN ({$placeholders}) AND a.legal_entity = ? AND a.stock > 0");
         $st->execute($params);
         foreach ($st->fetchAll() as $row) {
             $qpb = floatval($row['qty_per_box']) ?: 1;

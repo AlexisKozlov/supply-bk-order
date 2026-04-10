@@ -110,7 +110,7 @@ function gatherContext($user) {
 
     // Низкие остатки (из analysis_data)
     $sql = "SELECT a.sku, p.name, a.stock FROM analysis_data a
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.stock <= 5 AND a.stock >= 0";
     if ($entity) { $sql .= " AND a.legal_entity = ?"; }
     $sql .= " ORDER BY a.stock ASC LIMIT 10";
@@ -141,7 +141,7 @@ function gatherContext($user) {
     // Последние изменения цен (только действующие)
     $sql = "SELECT ph.sku, p.name as product_name, ph.supplier, ph.old_price, ph.new_price, ph.changed_at
             FROM price_history ph
-            LEFT JOIN products p ON p.sku = ph.sku COLLATE utf8mb4_general_ci AND p.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = ph.sku AND p.legal_entity = ph.legal_entity AND p.is_active = 1
             WHERE EXISTS (SELECT 1 FROM product_prices pp WHERE pp.sku = ph.sku COLLATE utf8mb4_general_ci AND pp.legal_entity = ph.legal_entity COLLATE utf8mb4_general_ci)";
     if ($entity) { $sql .= " AND ph.legal_entity = ?"; }
     $sql .= " ORDER BY ph.changed_at DESC LIMIT 10";
@@ -157,7 +157,7 @@ function gatherContext($user) {
 
     // Топ расхода
     $sql = "SELECT a.sku, p.name, a.consumption, a.period_days, COALESCE(p.unit_of_measure, 'шт') as uom FROM analysis_data a
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0";
     if ($entity) { $sql .= " AND a.legal_entity = ?"; }
     $sql .= " ORDER BY (a.consumption / GREATEST(a.period_days, 1)) DESC LIMIT 10";
@@ -591,7 +591,7 @@ function lookupOrders($question, $entity) {
                 COALESCE(p.unit_of_measure, 'шт') as uom
                 FROM order_items oi
                 LEFT JOIN orders ord ON ord.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
                 WHERE oi.order_id = ? ORDER BY oi.name");
         $s2->execute([$o['id']]);
         $items = $s2->fetchAll();
@@ -636,8 +636,7 @@ function lookupStockDays($question, $entity) {
                    COALESCE(p.unit_of_measure, 'шт') as uom,
                    ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left
             FROM analysis_data a
-            LEFT JOIN products p ON p.sku COLLATE utf8mb4_general_ci = a.sku COLLATE utf8mb4_general_ci
-                AND p.legal_entity COLLATE utf8mb4_general_ci = a.legal_entity COLLATE utf8mb4_general_ci
+            LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
             WHERE a.consumption > 0 AND a.stock > 0";
     $params = [];
     if ($entity) { $sql .= " AND a.legal_entity = ?"; $params[] = $entity; }
@@ -1042,7 +1041,7 @@ function lookupDeliveries($question, $entity) {
                                     COALESCE(p.unit_of_measure, 'шт') as uom
                              FROM order_items oi
                              LEFT JOIN orders ord ON ord.id = oi.order_id
-                             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity
+                             LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ord.legal_entity AND p.is_active = 1
                              WHERE oi.order_id IN ({$placeholders})");
         $s2->execute($orderIds);
         $allItems = $s2->fetchAll();
@@ -1220,7 +1219,7 @@ function lookupPrices($question, $entity) {
     foreach ($skus as $sku) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
                 WHERE pp.price_type = 'purchase' AND pp.sku = ?" . $eFilter . " LIMIT 5";
         $s = $pdo->prepare($sql); $s->execute(array_merge([$sku], $eParams));
         foreach ($s->fetchAll() as $row) {
@@ -1236,7 +1235,7 @@ function lookupPrices($question, $entity) {
     foreach ($searchTerms as $term) {
         $sql = "SELECT pp.sku, p.name, pp.price, pp.vat_rate, pp.currency, pp.unit_type, pp.supplier
                 FROM product_prices pp
-                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity
+                LEFT JOIN products p ON p.sku = pp.sku AND p.legal_entity = pp.legal_entity AND p.is_active = 1
                 WHERE pp.price_type = 'purchase' AND p.name LIKE ?" . $eFilter . " LIMIT 10";
         $s = $pdo->prepare($sql); $s->execute(array_merge(["%{$term}%"], $eParams));
         foreach ($s->fetchAll() as $row) {

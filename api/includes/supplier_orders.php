@@ -404,21 +404,38 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             $orderId = $pdo->lastInsertId();
         }
 
-        // Вставляем позиции
-        $insertItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
-        $totalQty = 0;
-        $totalItems = 0;
+        // Агрегируем позиции по SKU — защита от дублей, даже если фронт прислал
+        // один товар несколькими строками.
+        $aggregated = [];
         foreach ($items as $item) {
             $qty = floatval($item['quantity'] ?? 0);
             if ($qty <= 0) continue;
+            $sku = $item['sku'] ?? '';
+            if ($sku === '') continue;
+            if (!isset($aggregated[$sku])) {
+                $aggregated[$sku] = [
+                    'product_id' => $item['product_id'] ?? '',
+                    'sku' => $sku,
+                    'product_name' => $item['product_name'] ?? '',
+                    'quantity' => 0,
+                ];
+            }
+            $aggregated[$sku]['quantity'] += $qty;
+        }
+
+        // Вставляем позиции (UNIQUE KEY order_id+sku гарантирует отсутствие дублей)
+        $insertItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+        $totalQty = 0;
+        $totalItems = 0;
+        foreach ($aggregated as $item) {
             $insertItem->execute([
                 $orderId,
-                $item['product_id'] ?? '',
-                $item['sku'] ?? '',
-                $item['product_name'] ?? '',
-                $qty,
+                $item['product_id'],
+                $item['sku'],
+                $item['product_name'],
+                $item['quantity'],
             ]);
-            $totalQty += $qty;
+            $totalQty += $item['quantity'];
             $totalItems++;
         }
 
@@ -772,12 +789,27 @@ if ($soAction === 'admin') {
         $status = $body['status'] ?? null;
 
         if ($items !== null) {
-            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
-            $insert = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+            // Агрегируем позиции по SKU на случай дублей в payload
+            $aggregated = [];
             foreach ($items as $item) {
                 $qty = floatval($item['quantity'] ?? 0);
                 if ($qty <= 0) continue;
-                $insert->execute([$orderId, $item['product_id'] ?? '', $item['sku'] ?? '', $item['product_name'] ?? '', $qty]);
+                $sku = $item['sku'] ?? '';
+                if ($sku === '') continue;
+                if (!isset($aggregated[$sku])) {
+                    $aggregated[$sku] = [
+                        'product_id' => $item['product_id'] ?? '',
+                        'sku' => $sku,
+                        'product_name' => $item['product_name'] ?? '',
+                        'quantity' => 0,
+                    ];
+                }
+                $aggregated[$sku]['quantity'] += $qty;
+            }
+            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
+            $insert = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+            foreach ($aggregated as $ag) {
+                $insert->execute([$orderId, $ag['product_id'], $ag['sku'], $ag['product_name'], $ag['quantity']]);
             }
         }
 

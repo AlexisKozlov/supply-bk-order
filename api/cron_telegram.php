@@ -248,7 +248,7 @@ if ($hour === 9 && $minute < 5) {
             // Товары с критическим запасом (≤3 дня)
             $critSql = "SELECT p.name, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) AS days_left, p.supplier
                         FROM analysis_data a
-                        LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci
+                        LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1
                         WHERE a.consumption > 0 AND a.stock > 0" . $leFilter . "
                         HAVING days_left <= 3 ORDER BY days_left ASC LIMIT 5";
             $s = $pdo->prepare($critSql);
@@ -568,7 +568,7 @@ if ($dow === 5 && $hour === 17 && $minute < 5) {
 
         // Топ критичных
         if ($critCnt > 0) {
-            $s = $pdo->prepare("SELECT p.name, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku COLLATE utf8mb4_general_ci AND p.legal_entity = a.legal_entity COLLATE utf8mb4_general_ci WHERE a.consumption > 0 AND a.stock > 0" . str_replace('legal_entity', 'a.legal_entity', $leFilter) . " HAVING days_left <= 5 ORDER BY days_left ASC LIMIT 5");
+            $s = $pdo->prepare("SELECT p.name, ROUND(a.stock / (a.consumption / GREATEST(a.period_days, 1))) as days_left FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.consumption > 0 AND a.stock > 0" . str_replace('legal_entity', 'a.legal_entity', $leFilter) . " HAVING days_left <= 5 ORDER BY days_left ASC LIMIT 5");
             $s->execute($entities);
             $critItems = $s->fetchAll();
             if ($critItems) {

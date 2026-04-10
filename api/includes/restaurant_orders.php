@@ -584,7 +584,7 @@ if ($roAction === 'products' && $method === 'GET') {
         // Сначала из шаблона
         $tplQuery = "SELECT t.sku, t.product_name as name, t.category, t.sort_order, p.qty_per_box, p.multiplicity
             FROM ro_templates t
-            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ?
+            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
             WHERE t.legal_entity = ? AND t.is_active = 1";
         $params = [$le, $le];
         if ($category) {
@@ -807,22 +807,43 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             $orderId = $pdo->lastInsertId();
         }
 
-        // Вставляем позиции
-        $insertItem = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
-        $totalQty = 0;
-        $totalItems = 0;
+        // Агрегируем позиции по SKU — если один товар пришёл несколькими строками,
+        // складываем количество и объединяем комментарии в одну запись.
+        $aggregated = [];
         foreach ($items as $item) {
             $qty = floatval($item['quantity'] ?? 0);
             if ($qty <= 0) continue;
+            $sku = $item['sku'] ?? '';
+            if ($sku === '') continue;
+            if (!isset($aggregated[$sku])) {
+                $aggregated[$sku] = [
+                    'sku' => $sku,
+                    'product_name' => $item['product_name'] ?? '',
+                    'category' => $item['category'] ?? 'Сухой',
+                    'quantity' => 0,
+                    'comment' => $item['comment'] ?? null,
+                ];
+            }
+            $aggregated[$sku]['quantity'] += $qty;
+            if (!empty($item['comment']) && empty($aggregated[$sku]['comment'])) {
+                $aggregated[$sku]['comment'] = $item['comment'];
+            }
+        }
+
+        // Вставляем позиции (UNIQUE KEY на order_id+sku гарантирует отсутствие дублей)
+        $insertItem = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
+        $totalQty = 0;
+        $totalItems = 0;
+        foreach ($aggregated as $item) {
             $insertItem->execute([
                 $orderId,
-                $item['sku'] ?? '',
-                $item['product_name'] ?? '',
-                $item['category'] ?? 'Сухой',
-                $qty,
-                $item['comment'] ?? null,
+                $item['sku'],
+                $item['product_name'],
+                $item['category'],
+                $item['quantity'],
+                $item['comment'],
             ]);
-            $totalQty += $qty;
+            $totalQty += $item['quantity'];
             $totalItems++;
         }
 
@@ -1035,7 +1056,7 @@ if (strpos($roAction, 'admin') === 0) {
                            ELSE 0 END) as raw_pallets
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
                 WHERE oi.order_id IN ({$ph})
                 GROUP BY oi.order_id, oi.category
             ");
@@ -1101,7 +1122,7 @@ if (strpos($roAction, 'admin') === 0) {
         $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
                    (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
             FROM ro_order_items oi
-            LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ?
+            LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ? AND p.is_active = 1
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
         $items->execute([$order['legal_entity'], $order['legal_entity'], $order['id']]);
 
@@ -1132,13 +1153,32 @@ if (strpos($roAction, 'admin') === 0) {
         $pdo->beginTransaction();
         try {
             if ($items !== null) {
-                // Обновляем позиции
+                // Обновляем позиции с агрегацией по SKU (на случай, если фронт
+                // прислал один и тот же товар несколькими строками).
                 $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?")->execute([$orderId]);
-                $insert = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
+                $aggregated = [];
                 foreach ($items as $item) {
                     $qty = floatval($item['quantity'] ?? 0);
                     if ($qty <= 0) continue;
-                    $insert->execute([$orderId, $item['sku'] ?? '', $item['product_name'] ?? '', $item['category'] ?? 'Сухой', $qty, $item['comment'] ?? null]);
+                    $sku = $item['sku'] ?? '';
+                    if ($sku === '') continue;
+                    if (!isset($aggregated[$sku])) {
+                        $aggregated[$sku] = [
+                            'sku' => $sku,
+                            'product_name' => $item['product_name'] ?? '',
+                            'category' => $item['category'] ?? 'Сухой',
+                            'quantity' => 0,
+                            'comment' => $item['comment'] ?? null,
+                        ];
+                    }
+                    $aggregated[$sku]['quantity'] += $qty;
+                    if (!empty($item['comment']) && empty($aggregated[$sku]['comment'])) {
+                        $aggregated[$sku]['comment'] = $item['comment'];
+                    }
+                }
+                $insert = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
+                foreach ($aggregated as $ag) {
+                    $insert->execute([$orderId, $ag['sku'], $ag['product_name'], $ag['category'], $ag['quantity'], $ag['comment']]);
                 }
             }
 
@@ -1533,7 +1573,7 @@ if (strpos($roAction, 'admin') === 0) {
 
         $q = "SELECT t.*, COALESCE(p.multiplicity, 1) as multiplicity
             FROM ro_templates t
-            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ?
+            LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
             WHERE t.legal_entity = ?";
         $params = [$le, $le];
         if ($category) { $q .= " AND t.category = ?"; $params[] = $category; }
@@ -1570,19 +1610,32 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         if ($action === 'import-from-stock') {
-            // Импорт из stock_malling
+            // Импорт из ro_stock_balances (вкладка «Остатки склада»).
+            // Берём последнюю загруженную дату остатков для данного юр. лица
+            // и только те позиции, у которых есть остаток (quantity > 0),
+            // а категория товара совпадает с выбранной.
             $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
             $category = $body['category'] ?? '';
 
+            // Последняя дата остатков для юрлица
+            $dateStmt = $pdo->prepare("SELECT MAX(balance_date) FROM ro_stock_balances WHERE legal_entity = ?");
+            $dateStmt->execute([$le]);
+            $latestDate = $dateStmt->fetchColumn();
+            if (!$latestDate) {
+                roRespond(['error' => 'Нет данных об остатках склада для «' . $le . '». Сначала загрузите файл остатков на вкладке «Остатки склада».'], 400);
+            }
+
             $s = $pdo->prepare("
-                SELECT DISTINCT p.sku, p.name as product_name
-                FROM stock_malling sm
-                JOIN products p ON p.legal_entity = ? AND p.is_active = 1
-                  AND (sm.product_name LIKE CONCAT(p.sku, ' %') OR p.name = sm.product_name OR p.sku = sm.product_name)
-                WHERE p.category = ?
+                SELECT DISTINCT p.sku, p.name AS product_name, COALESCE(p.multiplicity, 1) AS multiplicity
+                FROM ro_stock_balances sb
+                JOIN products p ON p.sku = sb.sku AND p.legal_entity = sb.legal_entity AND p.is_active = 1
+                WHERE sb.legal_entity = ?
+                  AND sb.balance_date = ?
+                  AND sb.quantity > 0
+                  AND p.category = ?
                 ORDER BY p.name
             ");
-            $s->execute([$le, $category]);
+            $s->execute([$le, $latestDate, $category]);
             $products = $s->fetchAll();
 
             // Сохраняем как шаблон
@@ -1592,7 +1645,7 @@ if (strpos($roAction, 'admin') === 0) {
                 $insert->execute([$le, $category, $p['sku'], $p['product_name'], $i]);
             }
 
-            roRespond(['success' => true, 'count' => count($products), 'items' => $products]);
+            roRespond(['success' => true, 'count' => count($products), 'items' => $products, 'balance_date' => $latestDate]);
         }
 
         roRespond(['error' => 'Unknown action'], 400);
@@ -1792,7 +1845,7 @@ if (strpos($roAction, 'admin') === 0) {
                        (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity
+                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
                 WHERE oi.order_id IN ({$ph}) ORDER BY oi.category, oi.product_name");
             $items->execute($orderIds);
             $allItems = $items->fetchAll();
@@ -1920,6 +1973,7 @@ if (strpos($roAction, 'admin') === 0) {
         $matched = 0;
         $skipped = 0;
         $rows = [];
+        $unmatchedMap = []; // ключ: extCode|sku → ['external_code','sku','name','qty','warehouse','legal_entity']
 
         foreach ($xlsx->sheetNames() as $sheetIdx => $sheetName) {
             // Определяем тип склада (пропускаем листы с примерами заказов)
@@ -1971,6 +2025,7 @@ if (strpos($roAction, 'admin') === 0) {
                 if (!preg_match('/^(\S+)\s*-\s*(\S+)\s+(.+)$/', $productStr, $m)) continue;
                 $extCode = trim($m[1]);
                 $sku = trim($m[2]);
+                $excelName = trim($m[3]);
 
                 // Сопоставляем: сначала по SKU, потом по внешнему коду
                 $foundProduct = $productsBySku[$sku] ?? $productsByExtCode[$extCode] ?? null;
@@ -1985,6 +2040,19 @@ if (strpos($roAction, 'admin') === 0) {
                     $matched++;
                 } else {
                     $skipped++;
+                    $umKey = $extCode . '|' . $sku . '|' . $legalEntity;
+                    if (isset($unmatchedMap[$umKey])) {
+                        $unmatchedMap[$umKey]['qty'] += $qty;
+                    } else {
+                        $unmatchedMap[$umKey] = [
+                            'external_code' => $extCode,
+                            'sku' => $sku,
+                            'name' => $excelName,
+                            'qty' => $qty,
+                            'warehouse' => $warehouse,
+                            'legal_entity' => $legalEntity,
+                        ];
+                    }
                 }
             }
         }
@@ -1998,7 +2066,17 @@ if (strpos($roAction, 'admin') === 0) {
             }
         }
 
-        roRespond(['success' => true, 'matched' => $matched, 'skipped' => $skipped, 'date' => $balanceDate]);
+        $unmatched = array_values($unmatchedMap);
+        usort($unmatched, function ($a, $b) {
+            return strcmp($a['name'], $b['name']);
+        });
+        roRespond([
+            'success' => true,
+            'matched' => $matched,
+            'skipped' => $skipped,
+            'date' => $balanceDate,
+            'unmatched' => $unmatched,
+        ]);
     }
 
     // --- Остатки с учётом заказов ---
