@@ -432,7 +432,7 @@
               </div>
               <pre v-if="auditExpanded[ev.id] && ev.details" class="rom-audit-details">{{ fmtAuditDetails(ev.details) }}</pre>
             </div>
-            <button v-if="ev.order_id" class="rom-audit-goto" @click="goToAuditOrder(ev)" title="Открыть заказ">→</button>
+            <button v-if="ev.delivery_date" class="rom-audit-goto" @click="goToAuditOrder(ev)" title="К заказам на эту дату">→</button>
           </div>
         </div>
 
@@ -1160,10 +1160,11 @@ function toggleAuditDetails(id) {
 }
 
 function goToAuditOrder(ev) {
-  if (!ev.order_id) return;
+  // Уходим из модалок, если они были открыты, и возвращаемся на главный список заказов
+  showOrderModal.value = false;
+  showOrderHistoryModal.value = false;
   pageTab.value = 'orders';
-  // Передаём дату поставки в основную вкладку, чтобы открыть соответствующий день
-  if (ev.delivery_date) {
+  if (ev?.delivery_date) {
     selectedDate.value = ev.delivery_date;
     loadStatus();
   }

@@ -860,34 +860,72 @@ if ($roAction === 'submit-order' && $method === 'POST') {
         if ($q <= 0) continue;
         $newItemsAudit[$it['sku'] ?? ''] = ['name' => $it['product_name'] ?? '', 'qty' => $q];
     }
-    $diff = ['added' => [], 'changed' => [], 'removed' => []];
-    foreach ($newItemsAudit as $sku => $ni) {
-        if (!isset($oldItemsAudit[$sku])) {
-            $diff['added'][] = ['sku' => $sku, 'name' => $ni['name'], 'qty' => $ni['qty']];
-        } elseif (abs($oldItemsAudit[$sku]['qty'] - $ni['qty']) > 0.001) {
-            $diff['changed'][] = ['sku' => $sku, 'name' => $ni['name'], 'old' => $oldItemsAudit[$sku]['qty'], 'new' => $ni['qty']];
+    $actorNameRo = "Ресторан {$rest['restaurant_number']}";
+    if (!$existing) {
+        // Создание — одна запись-сводка (как раньше)
+        roLogAudit($pdo, [
+            'order_id' => $orderId,
+            'restaurant_number' => $rest['restaurant_number'],
+            'delivery_date' => $deliveryDate,
+            'action' => 'order_created',
+            'actor_name' => $actorNameRo,
+            'actor_type' => 'restaurant',
+            'new_value' => $totalItems . ' поз. / ' . $totalQty . ' кор.',
+            'details' => [
+                'total_items' => $totalItems,
+                'total_qty' => $totalQty,
+                'comment' => $comment,
+            ],
+        ]);
+    } else {
+        // Обновление — построчный diff, чтобы в журнале были видны конкретные изменения
+        foreach ($newItemsAudit as $sku => $ni) {
+            if (!isset($oldItemsAudit[$sku])) {
+                roLogAudit($pdo, [
+                    'order_id' => $orderId,
+                    'restaurant_number' => $rest['restaurant_number'],
+                    'delivery_date' => $deliveryDate,
+                    'action' => 'item_added',
+                    'actor_name' => $actorNameRo,
+                    'actor_type' => 'restaurant',
+                    'sku' => $sku,
+                    'product_name' => $ni['name'],
+                    'new_value' => (string)$ni['qty'],
+                ]);
+            }
+        }
+        foreach ($newItemsAudit as $sku => $ni) {
+            if (isset($oldItemsAudit[$sku]) && abs($oldItemsAudit[$sku]['qty'] - $ni['qty']) > 0.001) {
+                roLogAudit($pdo, [
+                    'order_id' => $orderId,
+                    'restaurant_number' => $rest['restaurant_number'],
+                    'delivery_date' => $deliveryDate,
+                    'action' => 'item_changed',
+                    'actor_name' => $actorNameRo,
+                    'actor_type' => 'restaurant',
+                    'sku' => $sku,
+                    'product_name' => $ni['name'],
+                    'old_value' => (string)$oldItemsAudit[$sku]['qty'],
+                    'new_value' => (string)$ni['qty'],
+                ]);
+            }
+        }
+        foreach ($oldItemsAudit as $sku => $oi) {
+            if (!isset($newItemsAudit[$sku])) {
+                roLogAudit($pdo, [
+                    'order_id' => $orderId,
+                    'restaurant_number' => $rest['restaurant_number'],
+                    'delivery_date' => $deliveryDate,
+                    'action' => 'item_deleted',
+                    'actor_name' => $actorNameRo,
+                    'actor_type' => 'restaurant',
+                    'sku' => $sku,
+                    'product_name' => $oi['name'],
+                    'old_value' => (string)$oi['qty'],
+                ]);
+            }
         }
     }
-    foreach ($oldItemsAudit as $sku => $oi) {
-        if (!isset($newItemsAudit[$sku])) {
-            $diff['removed'][] = ['sku' => $sku, 'name' => $oi['name'], 'qty' => $oi['qty']];
-        }
-    }
-    roLogAudit($pdo, [
-        'order_id' => $orderId,
-        'restaurant_number' => $rest['restaurant_number'],
-        'delivery_date' => $deliveryDate,
-        'action' => $existing ? 'order_updated' : 'order_created',
-        'actor_name' => "Ресторан {$rest['restaurant_number']}",
-        'actor_type' => 'restaurant',
-        'new_value' => $totalItems . ' поз. / ' . $totalQty . ' кор.',
-        'details' => [
-            'total_items' => $totalItems,
-            'total_qty' => $totalQty,
-            'comment' => $comment,
-            'diff' => $diff,
-        ],
-    ]);
 
     // Уведомление в Telegram о принятой/обновлённой заявке
     try {

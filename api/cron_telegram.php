@@ -37,6 +37,14 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
 ]);
 $pdo->exec("SET SESSION max_statement_time = 30");
 
+// Тихие часы: 22:00–09:00 по Минску — никакие уведомления не отправляем.
+// Выходим до всех проверок, чтобы дедуп не пометил неотправленные сообщения как доставленные.
+$__nowHour = (int)(new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H');
+if ($__nowHour < 9 || $__nowHour >= 22) {
+    echo "Quiet hours, skipping\n";
+    exit;
+}
+
 function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
     global $BOT_TOKEN;
     $url = "https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage";
