@@ -434,6 +434,98 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
     ]);
 }
 
+// --- Данные активного сбора остатков для ресторана (товары + его значения) ---
+if ($roAction === 'stock-collection-data' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
+    $group = getEntityGroup($le);
+    $where = ["sc.status = 'active'"];
+    if ($group === 'PS') {
+        $where[] = "sc.legal_entity LIKE '%Пицца Стар%'";
+    } else {
+        $where[] = "(sc.legal_entity LIKE '%Бургер БК%' OR sc.legal_entity LIKE '%Воглия Матта%')";
+    }
+    $s = $pdo->prepare("SELECT id, name, created_at FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY id DESC LIMIT 1");
+    $s->execute();
+    $coll = $s->fetch();
+    if (!$coll) roRespond(['active' => false]);
+
+    // Товары сбора
+    $p = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
+    $p->execute([$coll['id']]);
+    $products = $p->fetchAll();
+
+    // Ранее сохранённые значения этого ресторана
+    $d = $pdo->prepare("SELECT product_id, stock, submitted_at FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ?");
+    $d->execute([$coll['id'], $rest['restaurant_number']]);
+    $values = [];
+    $lastSubmittedAt = null;
+    foreach ($d->fetchAll() as $row) {
+        $values[(int)$row['product_id']] = (float)$row['stock'];
+        if (!$lastSubmittedAt || $row['submitted_at'] > $lastSubmittedAt) {
+            $lastSubmittedAt = $row['submitted_at'];
+        }
+    }
+
+    roRespond([
+        'active' => true,
+        'collection' => [
+            'id' => (int)$coll['id'],
+            'name' => $coll['name'],
+        ],
+        'products' => $products,
+        'values' => $values,
+        'last_submitted_at' => $lastSubmittedAt,
+    ]);
+}
+
+// --- Сохранение остатков ресторана (из личного кабинета) ---
+if ($roAction === 'stock-collection-submit' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $collId = intval($body['collection_id'] ?? 0);
+    $items = $body['items'] ?? [];
+    if ($collId <= 0) roRespond(['error' => 'Не указан сбор'], 400);
+    if (!is_array($items)) roRespond(['error' => 'Некорректные данные'], 400);
+
+    // Проверяем, что сбор активен и принадлежит юрлицу ресторана
+    $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
+    $group = getEntityGroup($le);
+    $check = $pdo->prepare("SELECT id, legal_entity FROM stock_collections WHERE id = ? AND status = 'active'");
+    $check->execute([$collId]);
+    $coll = $check->fetch();
+    if (!$coll) roRespond(['error' => 'Сбор не найден или уже закрыт'], 404);
+    $collGroup = getEntityGroup($coll['legal_entity']);
+    if ($collGroup !== $group) roRespond(['error' => 'Сбор не для вашего юрлица'], 403);
+
+    // Загружаем допустимые product_id для этой коллекции
+    $validPids = $pdo->prepare("SELECT id FROM stock_collection_products WHERE collection_id = ?");
+    $validPids->execute([$collId]);
+    $allowedSet = array_flip(array_column($validPids->fetchAll(), 'id'));
+
+    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW()) ON DUPLICATE KEY UPDATE stock = VALUES(stock), submitted_at = NOW()");
+    $pdo->beginTransaction();
+    try {
+        $saved = 0;
+        foreach ($items as $item) {
+            $pid = intval($item['product_id'] ?? 0);
+            $sv = floatval($item['stock'] ?? 0);
+            if ($sv < 0 || $sv > 999999) continue;
+            if ($pid > 0 && isset($allowedSet[$pid])) {
+                $ins->execute([$collId, $pid, $rest['restaurant_number'], $sv]);
+                $saved++;
+            }
+        }
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log('ro stock-collection-submit error: ' . $e->getMessage());
+        roRespond(['error' => 'Ошибка сохранения'], 500);
+    }
+    roRespond(['success' => true, 'saved' => $saved]);
+}
+
 // --- Привязка Telegram: генерация токена ---
 if ($roAction === 'telegram-link' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
@@ -1929,8 +2021,9 @@ if (strpos($roAction, 'admin') === 0) {
 
         $where = ['1=1'];
         $params = [];
-        if ($dateFrom) { $where[] = 'created_at >= ?'; $params[] = $dateFrom . ' 00:00:00'; }
-        if ($dateTo)   { $where[] = 'created_at <= ?'; $params[] = $dateTo   . ' 23:59:59'; }
+        // Фильтр по дате поставки — то, что обычно ищут («все события по заказам на дату X»).
+        if ($dateFrom) { $where[] = 'delivery_date >= ?'; $params[] = $dateFrom; }
+        if ($dateTo)   { $where[] = 'delivery_date <= ?'; $params[] = $dateTo; }
         if ($restaurant !== '') { $where[] = 'restaurant_number = ?'; $params[] = (int)$restaurant; }
         if ($actor !== '')      { $where[] = 'actor_name LIKE ?';     $params[] = '%' . $actor . '%'; }
         if ($action !== '')     { $where[] = 'action = ?';            $params[] = $action; }

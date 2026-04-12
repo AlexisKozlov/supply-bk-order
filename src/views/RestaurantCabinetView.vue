@@ -25,14 +25,14 @@
       <div class="sb-label">Заказы</div>
       <!-- Основная поставка -->
       <button class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'delivery' }"
-        @click="switchTab('orders'); orderSubTab = 'delivery'">
+        @click="switchTab('orders', 'delivery')">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5a2 2 0 01-2 2h-1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
         Основная поставка
         <span v-if="deliveryBadge" class="sb-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
       </button>
       <!-- Планета Ресторанов -->
       <button class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'planeta' }"
-        @click="switchTab('orders'); switchOrderSub('planeta')">
+        @click="switchTab('orders', 'planeta')">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></span>
         Планета Ресторанов
         <span v-if="planetaBadge" class="sb-badge" :class="planetaBadge.type">{{ planetaBadge.text }}</span>
@@ -40,7 +40,7 @@
       <!-- Поставщики (Камако и др.) -->
       <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'sup_' + sup.id }"
-        @click="switchTab('orders'); switchOrderSub('sup_' + sup.id)">
+        @click="switchTab('orders', 'sup_' + sup.id)">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg></span>
         {{ sup.name }}
         <span v-if="supplierBadge(sup)" class="sb-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
@@ -48,7 +48,7 @@
       <!-- История заказов -->
       <button class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'history' }"
-        @click="switchTab('orders'); switchOrderSub('history')">
+        @click="switchTab('orders', 'history')">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></span>
         История
       </button>
@@ -263,6 +263,10 @@
               <input v-model="delSearchQuery" type="text" placeholder="Поиск по названию или артикулу..." class="input-search" />
               <button v-if="delSearchQuery" class="search-clear" @click="delSearchQuery = ''">&times;</button>
               <button class="btn btn-sm btn-outline" @click="delShowAddModal = true">+ Добавить</button>
+              <button class="btn btn-sm btn-outline" :disabled="delLoadingTemplate" @click="delLoadFullTemplate" title="Дозагрузить все товары из шаблона">
+                <span v-if="delLoadingTemplate" class="cab-spin cab-spin-sm"></span>
+                Загрузить шаблон
+              </button>
               <button class="btn btn-sm btn-green" @click="delExportExcel">Excel</button>
             </div>
 
@@ -570,21 +574,56 @@
 
     <!-- ══════ TAB: Сбор остатков ══════ -->
     <section v-if="activeTab === 'stock' && !globalLoading" class="cab-section">
-      <div v-if="!stockCollection.active" class="cab-empty-card">
+      <div v-if="stockLoading" class="cab-empty-card">
+        <p>Загрузка…</p>
+      </div>
+      <div v-else-if="!stockCollection.active" class="cab-empty-card">
         <h2>Нет активного сбора</h2>
         <p>Сейчас сбор остатков не проводится.</p>
       </div>
-      <div v-else class="stock-card">
-        <h2>{{ stockCollection.collection?.name }}</h2>
-        <p v-if="stockCollection.collection?.submitted">
-          Вы уже отправили данные ({{ stockCollection.collection.submitted_count }} из {{ stockCollection.collection.total_products }} позиций).
-        </p>
-        <p v-else>Необходимо заполнить {{ stockCollection.collection?.total_products }} позиций.</p>
-        <a v-if="stockCollection.collection?.token"
-          :href="'/stock-form/' + stockCollection.collection.token"
-          target="_blank" class="btn btn-primary btn-lg stock-link">
-          {{ stockCollection.collection?.submitted ? 'Изменить данные' : 'Заполнить остатки' }}
-        </a>
+      <div v-else class="stock-inline">
+        <div class="stock-inline-head">
+          <h2>{{ stockCollection.collection?.name }}</h2>
+          <p v-if="stockLastSubmittedAt" class="stock-inline-sub">
+            Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}
+          </p>
+          <p v-else class="stock-inline-sub">Заполните остатки по всем позициям и нажмите «Сохранить».</p>
+        </div>
+        <div v-if="!stockProducts.length" class="cab-empty-card">
+          <p>В сборе пока нет товаров.</p>
+        </div>
+        <div v-else class="stock-inline-list">
+          <div v-for="p in stockProducts" :key="p.id" class="stock-row">
+            <div class="stock-row-main">
+              <div class="stock-row-name">{{ p.product_name }}</div>
+              <div v-if="p.note" class="stock-row-note">{{ p.note }}</div>
+            </div>
+            <div class="stock-row-input">
+              <input
+                type="number"
+                inputmode="decimal"
+                min="0"
+                step="any"
+                v-model="stockValues[p.id]"
+                class="stock-input"
+                placeholder="0"
+              />
+              <span class="stock-row-unit">{{ stockUnitShort(p.unit) }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="stockError" class="error-msg">{{ stockError }}</div>
+        <div class="stock-inline-actions">
+          <button
+            class="btn btn-primary btn-lg"
+            :disabled="stockSaving || !stockProducts.length || !stockDirty"
+            @click="submitStockInline"
+          >
+            <span v-if="stockSaving" class="cab-spin cab-spin-sm"></span>
+            {{ stockLastSubmittedAt ? 'Сохранить изменения' : 'Сохранить' }}
+          </button>
+          <span v-if="stockSavedFlash" class="stock-saved-flash">Сохранено ✓</span>
+        </div>
       </div>
     </section>
 
@@ -652,6 +691,39 @@
 
       <button class="btn btn-danger-outline btn-lg logout-full" @click="handleLogout">Выйти из аккаунта</button>
     </section>
+
+    <!-- Info modal (шаблон / прочие уведомления) -->
+    <div v-if="infoModal.show" class="modal-overlay" @click.self="infoModal.show = false">
+      <div class="cab-modal cab-modal-info">
+        <div class="cab-modal-head">
+          <h2>{{ infoModal.title }}</h2>
+          <button class="cab-modal-close" @click="infoModal.show = false">&times;</button>
+        </div>
+        <div class="cab-modal-body">
+          <p class="cab-info-text" :class="{ 'cab-info-error': infoModal.type === 'error' }">{{ infoModal.message }}</p>
+          <div class="cab-info-actions">
+            <button class="btn btn-primary" @click="infoModal.show = false">Хорошо</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm modal -->
+    <div v-if="confirmModal.show" class="modal-overlay" @click.self="confirmModalCancel">
+      <div class="cab-modal cab-modal-info">
+        <div class="cab-modal-head">
+          <h2>{{ confirmModal.title }}</h2>
+          <button class="cab-modal-close" @click="confirmModalCancel">&times;</button>
+        </div>
+        <div class="cab-modal-body">
+          <p class="cab-info-text">{{ confirmModal.message }}</p>
+          <div class="cab-info-actions cab-info-actions-two">
+            <button class="btn btn-outline" @click="confirmModalCancel">{{ confirmModal.cancelText }}</button>
+            <button class="btn" :class="confirmModal.danger ? 'btn-danger-outline' : 'btn-primary'" @click="confirmModalOk">{{ confirmModal.okText }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Add product modal -->
     <div v-if="delShowAddModal" class="modal-overlay" @click.self="delShowAddModal = false">
@@ -760,6 +832,22 @@ const suppliers = ref([]);
 
 // ═══ Stock collection ═══
 const stockCollection = reactive({ active: false, collection: null });
+const stockProducts = ref([]);
+const stockValues = reactive({}); // product_id -> string/number
+const stockLastSubmittedAt = ref(null);
+const stockLoading = ref(false);
+const stockSaving = ref(false);
+const stockError = ref('');
+const stockSavedFlash = ref(false);
+const stockDirty = computed(() => {
+  for (const p of stockProducts.value) {
+    const saved = stockSavedSnapshot[p.id];
+    const current = stockValues[p.id];
+    if ((saved ?? '') !== (current ?? '')) return true;
+  }
+  return false;
+});
+const stockSavedSnapshot = reactive({}); // последние сохранённые значения
 
 // ═══ Telegram ═══
 const tgStatus = reactive({ linked: false, chat_id: null });
@@ -814,7 +902,7 @@ const urgentItems = computed(() => {
       key: 'del', type: 'warn',
       icon: '&#128230;', title: `Основная поставка: ${openDays.length} дн. без заявки`,
       subtitle: openDays.map(d => d.day_name).join(', '),
-      action: () => { switchTab('orders'); orderSubTab.value = 'delivery'; if (openDays[0]) delSelectDay(openDays[0].date); },
+      action: async () => { await switchTab('orders', 'delivery'); if (openDays[0]) delSelectDay(openDays[0].date); },
     });
   }
   // Veg
@@ -825,7 +913,7 @@ const urgentItems = computed(() => {
         key: 'veg', type: 'green',
         icon: '&#127811;', title: 'Планета Ресторанов: заявка не подана',
         subtitle: `${openVeg} дн. доставки`,
-        action: () => { switchTab('orders'); switchOrderSub('planeta'); },
+        action: () => switchTab('orders', 'planeta'),
       });
     }
   }
@@ -837,7 +925,7 @@ const urgentItems = computed(() => {
         key: 'sup_' + sup.id, type: 'orange',
         icon: '&#128230;', title: `${sup.name}: ${openDates.length} дн. без заявки`,
         subtitle: openDates.map(d => d.delivery_day_name).join(', '),
-        action: () => { switchTab('orders'); orderSubTab.value = 'sup_' + sup.id; },
+        action: () => switchTab('orders', 'sup_' + sup.id),
       });
     }
   }
@@ -885,6 +973,41 @@ const delWasEdited = ref(false);
 const delEditTimeLeft = ref('');
 let delEditTimerInterval = null;
 const delShowAddModal = ref(false);
+const delLoadingTemplate = ref(false);
+const infoModal = reactive({ show: false, title: '', message: '', type: 'info' });
+function showInfo(title, message, type = 'info') {
+  infoModal.title = title;
+  infoModal.message = message;
+  infoModal.type = type;
+  infoModal.show = true;
+}
+
+const confirmModal = reactive({ show: false, title: '', message: '', okText: 'Подтвердить', cancelText: 'Отмена', danger: false, resolve: null });
+function showConfirm(title, message, opts = {}) {
+  // Если уже открыта — отменяем предыдущий промис
+  if (confirmModal.show && confirmModal.resolve) confirmModal.resolve(false);
+  return new Promise(resolve => {
+    confirmModal.title = title;
+    confirmModal.message = message;
+    confirmModal.okText = opts.okText || 'Подтвердить';
+    confirmModal.cancelText = opts.cancelText || 'Отмена';
+    confirmModal.danger = !!opts.danger;
+    confirmModal.resolve = resolve;
+    confirmModal.show = true;
+  });
+}
+function confirmModalOk() {
+  const r = confirmModal.resolve;
+  confirmModal.show = false;
+  confirmModal.resolve = null;
+  if (r) r(true);
+}
+function confirmModalCancel() {
+  const r = confirmModal.resolve;
+  confirmModal.show = false;
+  confirmModal.resolve = null;
+  if (r) r(false);
+}
 const delAddSearch = ref('');
 const delAddResults = ref([]);
 const delAddLoading = ref(false);
@@ -1046,6 +1169,48 @@ async function delLoadCategoryProducts(category) {
   } finally { delProductsLoading.value = false; }
 }
 
+// Дозагрузка всех товаров шаблона (по всем категориям). Добавляются только те,
+// которых ещё нет в заказе — с количеством 0.
+async function delLoadFullTemplate() {
+  delLoadingTemplate.value = true;
+  try {
+    let added = 0;
+    for (const cat of delCategories) {
+      const products = await roStore.loadProducts(cat);
+      const existing = new Set(delOrderItems.value.filter(i => i.category === cat).map(i => i.sku));
+      for (const p of products) {
+        if (existing.has(p.sku)) continue;
+        delOrderItems.value.push({
+          sku: p.sku,
+          product_name: p.name || p.product_name,
+          category: p.category || cat,
+          quantity: 0,
+          comment: '',
+          multiplicity: parseInt(p.multiplicity) || 1,
+          _added: false,
+          _multError: false,
+        });
+        existing.add(p.sku);
+        added++;
+      }
+    }
+    // Пересортируем: сначала с количеством, потом без, по категориям
+    delOrderItems.value.sort((a, b) => {
+      if (a.category !== b.category) return delCategories.indexOf(a.category) - delCategories.indexOf(b.category);
+      return (a.quantity > 0 ? 0 : 1) - (b.quantity > 0 ? 0 : 1);
+    });
+    if (added === 0) {
+      showInfo('Шаблон', 'Все товары из шаблона уже есть в заказе.');
+    } else {
+      showInfo('Шаблон загружен', `Добавлено товаров: ${added}. Осталось только проставить количества.`);
+    }
+  } catch (e) {
+    showInfo('Ошибка', e.message || 'Не удалось загрузить шаблон', 'error');
+  } finally {
+    delLoadingTemplate.value = false;
+  }
+}
+
 async function delHandleSubmit() {
   delSubmitting.value = true; delSubmitError.value = '';
   try {
@@ -1083,7 +1248,11 @@ function delUpdateEditTimeLeft() {
   delEditTimeLeft.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 function delGoToNextDay() { delShowSuccess.value = false; clearInterval(delEditTimerInterval); const idx = roStore.deliveryDays.findIndex(d => d.date === delSelectedDate.value); const next = roStore.deliveryDays[idx + 1]; if (next) delSelectDay(next.date); }
-function delClearOrder() { if (!confirm('Очистить все количества?')) return; for (const item of delOrderItems.value) { item.quantity = 0; item.comment = ''; item._multError = false; } }
+async function delClearOrder() {
+  const ok = await showConfirm('Очистить заказ', 'Очистить все количества?', { okText: 'Очистить', danger: true });
+  if (!ok) return;
+  for (const item of delOrderItems.value) { item.quantity = 0; item.comment = ''; item._multError = false; }
+}
 function delRemoveItem(item) { const idx = delOrderItems.value.indexOf(item); if (idx >= 0) delOrderItems.value.splice(idx, 1); }
 
 async function delHandleRepeat(sourceOrderId) {
@@ -1215,7 +1384,8 @@ async function vegSubmit() {
 }
 
 async function vegSkipDelivery() {
-  if (!confirm('Подтвердить, что поставка от «Планета Ресторанов» не нужна на эти дни?')) return;
+  const ok = await showConfirm('Отказ от поставки', 'Подтвердить, что поставка от «Планета Ресторанов» не нужна на эти дни?', { okText: 'Не нужна', danger: true });
+  if (!ok) return;
   // Заполняем нулями все активные дни
   for (const del of vegDeliveries.value) {
     if (del.expired) continue;
@@ -1295,12 +1465,13 @@ async function supHandleSubmit(sup) {
     const dateInfo = supCurrentDateInfo(sup);
     const result = await soStore.submitOrder(sup.id, supSelectedDates[sup.id], dateInfo?.order_date || '', items);
     if (result.success) { supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) }; supShowSuccess.value = true; suppliers.value = await soStore.loadSuppliers(); }
-  } catch (e) { alert(e.message || 'Ошибка отправки'); }
+  } catch (e) { showInfo('Ошибка', e.message || 'Ошибка отправки', 'error'); }
   finally { supSubmitting[sup.id] = false; }
 }
 
 async function supSkipDelivery(sup) {
-  if (!confirm(`Подтвердить, что поставка от «${sup.name}» на эту дату не нужна?`)) return;
+  const ok = await showConfirm('Отказ от поставки', `Подтвердить, что поставка от «${sup.name}» на эту дату не нужна?`, { okText: 'Не нужна', danger: true });
+  if (!ok) return;
   supSubmitting[sup.id] = true;
   try {
     // Сбрасываем все количества в форме
@@ -1322,36 +1493,43 @@ async function supSkipDelivery(sup) {
       supShowSuccess.value = true;
       suppliers.value = await soStore.loadSuppliers();
     }
-  } catch (e) { alert(e.message || 'Ошибка отправки'); }
+  } catch (e) { showInfo('Ошибка', e.message || 'Ошибка отправки', 'error'); }
   finally { supSubmitting[sup.id] = false; }
 }
 
 // ═══ Общее ═══
-function switchTab(tab) {
+async function switchTab(tab, subTab) {
   // Защита от случайного переключения при несохранённых изменениях
   if (activeTab.value === 'orders' && tab !== 'orders') {
-    if (delHasUnsavedChanges.value && !confirm('В заказе есть несохранённые изменения. Перейти на другую вкладку?')) return;
-    if (vegEditing.value && !confirm('Заявка «Планета Ресторанов» не сохранена. Перейти на другую вкладку?')) return;
+    if (delHasUnsavedChanges.value) {
+      const ok = await showConfirm('Несохранённые изменения', 'В заказе есть несохранённые изменения. Перейти на другую вкладку?', { okText: 'Перейти' });
+      if (!ok) return;
+    }
+    if (vegEditing.value) {
+      const ok = await showConfirm('Несохранённые изменения', 'Заявка «Планета Ресторанов» не сохранена. Перейти на другую вкладку?', { okText: 'Перейти' });
+      if (!ok) return;
+    }
   }
   if (activeTab.value === 'profile' && tab !== 'profile') {
-    if ((pwOld.value || pwNew.value) && !confirm('Вы начали менять пароль. Перейти на другую вкладку?')) return;
+    if (pwOld.value || pwNew.value) {
+      const ok = await showConfirm('Смена пароля', 'Вы начали менять пароль. Перейти на другую вкладку?', { okText: 'Перейти' });
+      if (!ok) return;
+    }
   }
   activeTab.value = tab;
-  if (tab === 'orders' && orderSubTab.value === 'planeta' && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
-  if (tab === 'orders' && !historyOrders.value.length && orderSubTab.value === 'history') loadHistory();
-}
-function switchOrderSub(sub) {
-  orderSubTab.value = sub;
-  if (sub === 'planeta' && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
-  if (sub === 'history' && !historyOrders.value.length) loadHistory();
-  // Автовыбор ближайшей даты при открытии вкладки поставщика
-  if (sub.startsWith('sup_')) {
-    const supId = sub.slice(4);
-    const sup = suppliers.value.find(s => String(s.id) === String(supId));
-    if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+  if (subTab) orderSubTab.value = subTab;
+  if (tab === 'orders') {
+    const sub = subTab || orderSubTab.value;
+    if (sub === 'planeta' && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
+    if (sub === 'history' && !historyOrders.value.length) loadHistory();
+    if (sub && sub.startsWith('sup_')) {
+      const supId = sub.slice(4);
+      const sup = suppliers.value.find(s => String(s.id) === String(supId));
+      if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+    }
   }
+  if (tab === 'stock' && stockCollection.active) loadStockInline();
 }
-
 // ═══ Синхронизация табов с роутом (URL) ═══
 function applyRouteToState() {
   const name = route.name;
@@ -1467,11 +1645,16 @@ async function tgGetCode() {
   finally { tgLinkLoading.value = false; }
 }
 async function tgUnlink() {
-  if (!confirm('Отключить Telegram?')) return;
+  const ok = await showConfirm('Telegram', 'Отключить Telegram?', { okText: 'Отключить', danger: true });
+  if (!ok) return;
   try {
     await roStore.telegramUnlink();
     tgStatus.linked = false; tgStatus.chat_id = null; tgLinkCode.value = '';
   } catch {}
+}
+
+function stockUnitShort(u) {
+  return { boxes: 'кор.', kg: 'кг', liters: 'л' }[u] || 'шт.';
 }
 
 // Stock collection check
@@ -1480,7 +1663,65 @@ async function checkStockCollection() {
     const data = await roStore.getStockCollectionStatus();
     stockCollection.active = data.active;
     stockCollection.collection = data.collection || null;
+    // Если пользователь уже на вкладке остатков — подгружаем форму
+    if (stockCollection.active && activeTab.value === 'stock' && !stockProducts.value.length) {
+      loadStockInline();
+    }
   } catch {}
+}
+
+async function loadStockInline() {
+  stockLoading.value = true;
+  stockError.value = '';
+  try {
+    const data = await roStore.getStockCollectionData();
+    if (!data.active) {
+      stockCollection.active = false;
+      stockProducts.value = [];
+      return;
+    }
+    stockCollection.active = true;
+    stockCollection.collection = { ...(stockCollection.collection || {}), ...data.collection };
+    stockProducts.value = data.products || [];
+    // Заполняем поля ранее сохранёнными значениями
+    for (const k of Object.keys(stockValues)) delete stockValues[k];
+    for (const k of Object.keys(stockSavedSnapshot)) delete stockSavedSnapshot[k];
+    for (const p of stockProducts.value) {
+      const v = data.values?.[p.id];
+      stockValues[p.id] = v != null ? String(v) : '';
+      stockSavedSnapshot[p.id] = stockValues[p.id];
+    }
+    stockLastSubmittedAt.value = data.last_submitted_at || null;
+  } catch (e) {
+    stockError.value = e.message || 'Ошибка загрузки';
+  } finally {
+    stockLoading.value = false;
+  }
+}
+
+async function submitStockInline() {
+  if (!stockCollection.collection?.id) return;
+  stockError.value = '';
+  stockSaving.value = true;
+  try {
+    const items = stockProducts.value
+      .map(p => ({ product_id: p.id, stock: parseFloat(stockValues[p.id] || 0) || 0 }))
+      .filter(it => !isNaN(it.stock));
+    await roStore.submitStockCollection(stockCollection.collection.id, items);
+    // Обновляем снапшот и время сохранения
+    for (const p of stockProducts.value) {
+      stockSavedSnapshot[p.id] = stockValues[p.id];
+    }
+    stockLastSubmittedAt.value = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    stockSavedFlash.value = true;
+    setTimeout(() => { stockSavedFlash.value = false; }, 2000);
+    // Обновляем счётчик в дашборд-карточке
+    checkStockCollection();
+  } catch (e) {
+    stockError.value = e.message || 'Не удалось сохранить';
+  } finally {
+    stockSaving.value = false;
+  }
 }
 
 function onBeforeUnload(e) {
@@ -1929,6 +2170,24 @@ tr.del-err { background: #fef2f2; }
 .stock-card p { color: #8b7355; font-size: 14px; margin: 0; }
 .stock-link { display: inline-flex; margin-top: 16px; }
 
+/* Inline stock form */
+.stock-inline { background: white; border-radius: 18px; padding: 20px; margin: 0 0 16px; border: 1px solid #EDE8E3; }
+.stock-inline-head { padding-bottom: 12px; border-bottom: 1px solid #F2EDE8; margin-bottom: 12px; }
+.stock-inline-head h2 { color: #502314; margin: 0 0 4px; font-size: 18px; }
+.stock-inline-sub { color: #8b7355; font-size: 13px; margin: 0; }
+.stock-inline-list { display: flex; flex-direction: column; gap: 0; }
+.stock-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid #F7F2EC; }
+.stock-row:last-child { border-bottom: none; }
+.stock-row-main { flex: 1; min-width: 0; }
+.stock-row-name { color: #502314; font-size: 14px; font-weight: 600; line-height: 1.25; }
+.stock-row-note { color: #8b7355; font-size: 11px; margin-top: 2px; }
+.stock-row-input { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.stock-input { width: 80px; padding: 8px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 16px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
+.stock-input:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
+.stock-row-unit { font-size: 12px; color: #8b7355; font-weight: 500; min-width: 28px; }
+.stock-inline-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #F2EDE8; }
+.stock-saved-flash { color: #16a34a; font-size: 13px; font-weight: 600; }
+
 /* Profile */
 .profile-card { background: white; border-radius: 18px; padding: 20px; margin-bottom: 12px; display: flex; border: 1px solid #EDE8E3; }
 .profile-header { display: flex; align-items: center; gap: 12px; }
@@ -1966,6 +2225,11 @@ tr.del-err { background: #fef2f2; }
 .cab-modal-close { background: none; border: none; cursor: pointer; font-size: 20px; color: #B0A090; transition: color 0.15s; }
 .cab-modal-close:hover { color: #502314; }
 .cab-modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
+.cab-modal-info { max-width: 380px; }
+.cab-info-text { color: #502314; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
+.cab-info-text.cab-info-error { color: #b91c1c; }
+.cab-info-actions { display: flex; justify-content: flex-end; }
+.cab-info-actions-two { gap: 8px; }
 .modal-search { width: 50%; min-width: 200px; margin-bottom: 12px; }
 .add-list { display: flex; flex-direction: column; gap: 4px; }
 .add-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid #f5f0eb; }

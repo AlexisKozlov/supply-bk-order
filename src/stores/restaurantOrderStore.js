@@ -353,10 +353,22 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api('stock-collection-status');
   }
 
+  async function getStockCollectionData() {
+    return await api('stock-collection-data');
+  }
+
+  async function submitStockCollection(collectionId, items) {
+    return await api('stock-collection-submit', {
+      method: 'POST',
+      body: JSON.stringify({ collection_id: collectionId, items }),
+    });
+  }
+
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
     login, loginByTelegram, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
-    loadAllHistory, changePassword, getTelegramStatus, telegramLink, telegramUnlink, getStockCollectionStatus,
+    loadAllHistory, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
+    getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,

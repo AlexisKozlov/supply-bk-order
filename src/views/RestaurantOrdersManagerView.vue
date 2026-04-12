@@ -359,9 +359,10 @@
     <template v-if="pageTab === 'audit'">
       <div class="rom-audit-wrap">
         <div class="rom-audit-filters">
-          <input type="date" v-model="auditFilters.dateFrom" @change="loadAuditLog" class="rom-input rom-input-sm" />
+          <label class="rom-audit-filter-label">Дата поставки:</label>
+          <input type="date" v-model="auditFilters.dateFrom" @change="loadAuditLog" class="rom-input rom-input-sm" title="Дата поставки от" />
           <span>—</span>
-          <input type="date" v-model="auditFilters.dateTo" @change="loadAuditLog" class="rom-input rom-input-sm" />
+          <input type="date" v-model="auditFilters.dateTo" @change="loadAuditLog" class="rom-input rom-input-sm" title="Дата поставки до" />
           <input type="text" v-model="auditFilters.restaurant" @input="debouncedAuditSearch" placeholder="№ рест." class="rom-input rom-input-sm" style="width:80px" />
           <input type="text" v-model="auditFilters.actor" @input="debouncedAuditSearch" placeholder="Кто изменил…" class="rom-input rom-input-sm" style="width:150px" />
           <select v-model="auditFilters.action" @change="loadAuditLog" class="rom-input rom-input-sm">
@@ -423,16 +424,33 @@
                 <template v-else-if="ev.action === 'status_changed' || ev.action === 'delivery_date_changed'">
                   <span>{{ ev.old_value || '—' }} → <b>{{ ev.new_value || '—' }}</b></span>
                 </template>
-                <template v-else-if="ev.new_value || ev.old_value">
+                <template v-else-if="(ev.new_value || ev.old_value) && ev.action !== 'order_created'">
                   <span>{{ ev.new_value || ev.old_value }}</span>
                 </template>
-                <button v-if="ev.details" class="rom-audit-details-btn" @click="toggleAuditDetails(ev.id)">
-                  {{ auditExpanded[ev.id] ? 'скрыть' : 'подробнее' }}
-                </button>
               </div>
-              <pre v-if="auditExpanded[ev.id] && ev.details" class="rom-audit-details">{{ fmtAuditDetails(ev.details) }}</pre>
+              <!-- Старые записи order_updated: раскрытый diff из details -->
+              <div v-if="auditDiffList(ev)" class="rom-audit-diff-list">
+                <div v-for="(row, idx) in auditDiffList(ev)" :key="idx" class="rom-audit-diff-row" :class="'diff-' + row.kind">
+                  <span class="rom-audit-diff-mark">
+                    <template v-if="row.kind === 'added'">+</template>
+                    <template v-else-if="row.kind === 'removed'">−</template>
+                    <template v-else>↻</template>
+                  </span>
+                  <span class="rom-audit-sku">{{ row.sku }}</span>
+                  <span>{{ row.name }}</span>
+                  <template v-if="row.kind === 'changed'">
+                    <span class="rom-audit-arrow">{{ fmtAuditNum(row.old) }} → <b>{{ fmtAuditNum(row.new) }}</b></span>
+                  </template>
+                  <template v-else-if="row.kind === 'added'">
+                    <span class="rom-audit-add">+{{ fmtAuditNum(row.qty) }}</span>
+                  </template>
+                  <template v-else>
+                    <span class="rom-audit-del">было {{ fmtAuditNum(row.qty) }}</span>
+                  </template>
+                </div>
+              </div>
             </div>
-            <button v-if="ev.delivery_date" class="rom-audit-goto" @click="goToAuditOrder(ev)" title="К заказам на эту дату">→</button>
+            <button v-if="ev.order_id || ev.delivery_date" class="rom-audit-goto" @click="goToAuditOrder(ev)" title="Открыть заказ">→</button>
           </div>
         </div>
 
@@ -609,9 +627,29 @@
                       <span class="rom-audit-add">+{{ fmtAuditNum(ev.new_value) }}</span>
                     </template>
                   </template>
-                  <template v-else-if="ev.new_value || ev.old_value">
+                  <template v-else-if="(ev.new_value || ev.old_value) && ev.action !== 'order_created'">
                     <span>{{ ev.old_value || '—' }} → <b>{{ ev.new_value || '—' }}</b></span>
                   </template>
+                </div>
+                <div v-if="auditDiffList(ev)" class="rom-audit-diff-list">
+                  <div v-for="(row, idx) in auditDiffList(ev)" :key="idx" class="rom-audit-diff-row" :class="'diff-' + row.kind">
+                    <span class="rom-audit-diff-mark">
+                      <template v-if="row.kind === 'added'">+</template>
+                      <template v-else-if="row.kind === 'removed'">−</template>
+                      <template v-else>↻</template>
+                    </span>
+                    <span class="rom-audit-sku">{{ row.sku }}</span>
+                    <span>{{ row.name }}</span>
+                    <template v-if="row.kind === 'changed'">
+                      <span class="rom-audit-arrow">{{ fmtAuditNum(row.old) }} → <b>{{ fmtAuditNum(row.new) }}</b></span>
+                    </template>
+                    <template v-else-if="row.kind === 'added'">
+                      <span class="rom-audit-add">+{{ fmtAuditNum(row.qty) }}</span>
+                    </template>
+                    <template v-else>
+                      <span class="rom-audit-del">было {{ fmtAuditNum(row.qty) }}</span>
+                    </template>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1108,7 +1146,10 @@ const AUDIT_PAGE_SIZE = 200;
 let auditOffset = 0;
 
 async function loadAuditLog(append = false) {
-  if (!append) {
+  // append === true передаётся только из loadMoreAuditLog. При вызове из @change/@click
+  // сюда прилетает Event-объект — его трактуем как обычную (полную) загрузку.
+  const isAppend = append === true;
+  if (!isAppend) {
     auditOffset = 0;
     auditEvents.value = [];
   }
@@ -1124,7 +1165,7 @@ async function loadAuditLog(append = false) {
       limit: AUDIT_PAGE_SIZE,
       offset: auditOffset,
     });
-    if (append) auditEvents.value.push(...(data.events || []));
+    if (isAppend) auditEvents.value.push(...(data.events || []));
     else auditEvents.value = data.events || [];
     auditTotal.value = data.total || 0;
     auditLastRefresh.value = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -1159,14 +1200,21 @@ function toggleAuditDetails(id) {
   auditExpanded[id] = !auditExpanded[id];
 }
 
-function goToAuditOrder(ev) {
-  // Уходим из модалок, если они были открыты, и возвращаемся на главный список заказов
-  showOrderModal.value = false;
+async function goToAuditOrder(ev) {
+  // Закрываем модалку истории (если была открыта из редактора), переключаемся на вкладку заказов
   showOrderHistoryModal.value = false;
   pageTab.value = 'orders';
   if (ev?.delivery_date) {
     selectedDate.value = ev.delivery_date;
-    loadStatus();
+    await loadStatus();
+  }
+  // Открываем сам заказ, если он ещё существует
+  if (ev?.order_id) {
+    try {
+      await viewOrder(ev.order_id);
+    } catch (e) {
+      // заказ мог быть удалён — остаёмся на списке
+    }
   }
 }
 
@@ -1223,6 +1271,29 @@ function fmtAuditDetails(d) {
   } catch {
     return String(d);
   }
+}
+
+// Парсим details и вытаскиваем читаемый diff для старых записей order_updated
+function parseAuditDetails(d) {
+  if (!d) return null;
+  try {
+    return typeof d === 'string' ? JSON.parse(d) : d;
+  } catch {
+    return null;
+  }
+}
+
+function auditDiffList(ev) {
+  // При создании заказа список позиций не показываем — только метку «Заказ создан»
+  if (ev.action === 'order_created') return null;
+  const parsed = parseAuditDetails(ev.details);
+  if (!parsed || !parsed.diff) return null;
+  const diff = parsed.diff;
+  const rows = [];
+  (diff.added || []).forEach(x => rows.push({ kind: 'added', sku: x.sku, name: x.name, qty: x.qty }));
+  (diff.changed || []).forEach(x => rows.push({ kind: 'changed', sku: x.sku, name: x.name, old: x.old, new: x.new }));
+  (diff.removed || []).forEach(x => rows.push({ kind: 'removed', sku: x.sku, name: x.name, qty: x.qty }));
+  return rows.length ? rows : null;
 }
 
 // Автообновление каждые 30 сек, пока вкладка открыта и включён чекбокс
@@ -3024,6 +3095,7 @@ async function doUnifiedExport() {
   border-radius: 10px; margin-bottom: 10px;
 }
 .rom-audit-filters .rom-input-sm { padding: 5px 8px; font-size: 12px; }
+.rom-audit-filter-label { font-size: 12px; color: #6b5d4c; font-weight: 600; }
 .rom-audit-auto { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #6b5d4c; cursor: pointer; user-select: none; }
 
 .rom-audit-stats { font-size: 12px; color: #8b7355; padding: 0 4px 8px; }
@@ -3078,6 +3150,21 @@ async function doUnifiedExport() {
 .rom-audit-arrow b { color: #502314; }
 .rom-audit-del { color: #dc2626; font-size: 11px; }
 .rom-audit-add { color: #16a34a; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.rom-audit-diff-list { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; padding-left: 0; }
+.rom-audit-diff-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 12px; color: #4b5563;
+  padding: 2px 6px; border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+.rom-audit-diff-row.diff-added { background: #f0fdf4; border-left-color: #16a34a; }
+.rom-audit-diff-row.diff-changed { background: #fffbeb; border-left-color: #f59e0b; }
+.rom-audit-diff-row.diff-removed { background: #fef2f2; border-left-color: #dc2626; }
+.rom-audit-diff-mark { font-weight: 700; width: 12px; text-align: center; }
+.diff-added .rom-audit-diff-mark { color: #16a34a; }
+.diff-changed .rom-audit-diff-mark { color: #f59e0b; }
+.diff-removed .rom-audit-diff-mark { color: #dc2626; }
 
 .rom-audit-details-btn {
   background: none; border: none; color: #8b7355; cursor: pointer;

@@ -621,23 +621,41 @@ if ($soAction === 'admin') {
 
         $settings = soGetSupplierSettings($pdo, $supplierId);
 
-        // Если дата не указана, берём ближайший день поставки >= сегодня
+        // Если дата не указана: открываем поставку, соответствующую сегодняшнему
+        // дню подачи заявок. Если сегодня не день заказа — берём ближайший следующий
+        // день заказа и его поставку.
         if (!$date) {
             $tz = new DateTimeZone('Europe/Minsk');
             $now = new DateTime('now', $tz);
             $todayDow = (int)$now->format('N');
-            $s = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1 ORDER BY delivery_day");
+            $s = $pdo->prepare("SELECT DISTINCT order_day, delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1 ORDER BY order_day, delivery_day");
             $s->execute([$supplierId]);
-            $deliveryDays = array_column($s->fetchAll(), 'delivery_day');
-            $targetDow = null;
-            foreach ($deliveryDays as $dd) {
-                if ((int)$dd >= $todayDow) { $targetDow = (int)$dd; break; }
+            $pairs = $s->fetchAll();
+
+            $targetOrderDow = null;
+            $targetDeliveryDow = null;
+            // Сначала ищем пары с order_day >= сегодня
+            foreach ($pairs as $p) {
+                if ((int)$p['order_day'] >= $todayDow) {
+                    $targetOrderDow = (int)$p['order_day'];
+                    $targetDeliveryDow = (int)$p['delivery_day'];
+                    break;
+                }
             }
-            if ($targetDow === null && !empty($deliveryDays)) $targetDow = (int)$deliveryDays[0];
-            if ($targetDow !== null) {
-                $diff = $targetDow - $todayDow;
-                if ($diff < 0) $diff += 7;
-                $date = (clone $now)->modify("+{$diff} days")->format('Y-m-d');
+            // Если всё позади — берём первую пару (следующая неделя)
+            if ($targetOrderDow === null && !empty($pairs)) {
+                $targetOrderDow = (int)$pairs[0]['order_day'];
+                $targetDeliveryDow = (int)$pairs[0]['delivery_day'];
+            }
+
+            if ($targetOrderDow !== null) {
+                // сколько дней до дня заказа
+                $orderDiff = $targetOrderDow - $todayDow;
+                if ($orderDiff < 0) $orderDiff += 7;
+                // сколько дней от дня заказа до дня поставки (0..6)
+                $delivDiff = $targetDeliveryDow - $targetOrderDow;
+                if ($delivDiff < 0) $delivDiff += 7;
+                $date = (clone $now)->modify('+' . ($orderDiff + $delivDiff) . ' days')->format('Y-m-d');
             } else {
                 $date = date('Y-m-d');
             }
