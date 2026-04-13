@@ -337,6 +337,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, i
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -479,7 +480,8 @@ function searchImportRecipe(q, rowIndex) {
   activeMatchRow.value = rowIndex ?? -1;
   if (q.length < 2) { importSearchResults.value = []; return; }
   _importSearchTimer = setTimeout(async () => {
-    const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(20);
+    const groupCode = getEntityGroupCode(activity.value.legal_entity || legalEntity.value);
+    const { data } = await db.from('recipes').select('id, code, name, legal_entity_group').eq('legal_entity_group', groupCode).ilike('name', `*${q}*`).order('name', { ascending: true }).limit(20);
     importSearchResults.value = data || [];
   }, 200);
 }
@@ -760,7 +762,7 @@ async function importDishesFromFile(e) {
     const prefixes = [...new Set(choiceSubs.map(c => c.sub.name))];
     let groupsMap = {};
     if (prefixes.length) {
-      const { data: gd } = await db.rpc('get_recipe_groups', { prefixes });
+      const { data: gd } = await db.rpc('get_recipe_groups', { prefixes, legal_entity: activity.value.legal_entity || legalEntity.value });
       groupsMap = gd || {};
     }
 
@@ -1086,7 +1088,7 @@ async function loadIngredients() {
   if (cached === names.sort().join(',') && ingredientsData.value.length) return;
   ingredientsLoading.value = true;
   try {
-    const { data, error } = await db.rpc('get_recipe_ingredients', { dish_names: names });
+    const { data, error } = await db.rpc('get_recipe_ingredients', { dish_names: names, legal_entity: activity.value.legal_entity || legalEntity.value });
     if (error) { toast.error('Ошибка', error); return; }
     ingredientsData.value = data?.recipes || [];
   } finally { ingredientsLoading.value = false; }
@@ -1173,7 +1175,8 @@ function onSubModalSearch() {
   if (q.length < 2) { subModal.results = []; return; }
   subModal.loading = true;
   subModal.timer = setTimeout(async () => {
-    const { data } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(50);
+    const groupCode = getEntityGroupCode(activity.value.legal_entity || legalEntity.value);
+    const { data } = await db.from('recipes').select('id, code, name, legal_entity_group').eq('legal_entity_group', groupCode).ilike('name', `*${q}*`).order('name', { ascending: true }).limit(50);
     subModal.results = data || [];
     subModal.loading = false;
   }, 250);
@@ -1221,7 +1224,8 @@ function onItemSearch(ii, val) {
   if (q.length < 2) { search.results = []; return; }
   search.timer = setTimeout(async () => {
     // Search recipes by name (use direct ilike filter on name column)
-    const { data: recipes } = await db.from('recipes').select('id, code, name').ilike('name', `*${q}*`).order('name', { ascending: true }).limit(30);
+    const groupCode = getEntityGroupCode(activity.value.legal_entity || legalEntity.value);
+    const { data: recipes } = await db.from('recipes').select('id, code, name, legal_entity_group').eq('legal_entity_group', groupCode).ilike('name', `*${q}*`).order('name', { ascending: true }).limit(30);
     if (search.index === ii) search.results = (recipes || []).map(r => ({ id: r.id, sku: r.code, name: r.name, _type: 'recipe' }));
   }, 250);
 }

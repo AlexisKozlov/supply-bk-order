@@ -2378,13 +2378,17 @@ if ($endpoint === 'rpc') {
         if (($ACCESS_LEVELS[$perms['marketing'] ?? 'none'] ?? 0) < $ACCESS_LEVELS['edit']) respond(['error' => 'Недостаточно прав'], 403);
 
         $recipes = $body['recipes'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (empty($recipes)) respond(['error' => 'Нет данных для импорта'], 400);
+
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
 
         $pdo->beginTransaction();
         try {
-            // Очистить старые рецептуры
-            $pdo->exec("DELETE FROM recipe_ingredients");
-            $pdo->exec("DELETE FROM recipes");
+            // Очистить старые рецептуры ТОЛЬКО этого юрлица (не трогаем чужие)
+            $pdo->prepare("DELETE ri FROM recipe_ingredients ri JOIN recipes r ON r.id = ri.recipe_id WHERE r.legal_entity_group = ?")
+                ->execute([$group]);
+            $pdo->prepare("DELETE FROM recipes WHERE legal_entity_group = ?")->execute([$group]);
 
             $imported = 0;
             foreach ($recipes as $r) {
@@ -2395,8 +2399,8 @@ if ($endpoint === 'rpc') {
                 $brutto = $r['brutto'] ?? null;
                 $qty = $r['qty'] ?? null;
 
-                $pdo->prepare("INSERT INTO recipes (code, name, thk, brutto_total, qty_total) VALUES (?, ?, ?, ?, ?)")
-                    ->execute([$code, $name, $thk, $brutto, $qty]);
+                $pdo->prepare("INSERT INTO recipes (code, name, thk, legal_entity_group, brutto_total, qty_total) VALUES (?, ?, ?, ?, ?, ?)")
+                    ->execute([$code, $name, $thk, $group, $brutto, $qty]);
                 $recipeId = $pdo->lastInsertId();
 
                 foreach (($r['ingredients'] ?? []) as $i => $ing) {
@@ -2423,18 +2427,21 @@ if ($endpoint === 'rpc') {
 
         $dishNames = $body['dish_names'] ?? [];
         $dishCodes = $body['dish_codes'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (empty($dishNames) && empty($dishCodes)) respond(['error' => 'Не указаны блюда'], 400);
+
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
 
         $recipes = [];
         if (!empty($dishCodes)) {
             $ph = implode(',', array_fill(0, count($dishCodes), '?'));
-            $s = $pdo->prepare("SELECT * FROM recipes WHERE code IN ($ph)");
-            $s->execute($dishCodes);
+            $s = $pdo->prepare("SELECT * FROM recipes WHERE code IN ($ph) AND legal_entity_group = ?");
+            $s->execute(array_merge($dishCodes, [$group]));
             $recipes = $s->fetchAll();
         } elseif (!empty($dishNames)) {
             $ph = implode(',', array_fill(0, count($dishNames), '?'));
-            $s = $pdo->prepare("SELECT * FROM recipes WHERE name IN ($ph)");
-            $s->execute($dishNames);
+            $s = $pdo->prepare("SELECT * FROM recipes WHERE name IN ($ph) AND legal_entity_group = ?");
+            $s->execute(array_merge($dishNames, [$group]));
             $recipes = $s->fetchAll();
         }
 
@@ -2629,10 +2636,15 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $prefixes = $body['prefixes'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (empty($prefixes)) respond(['error' => 'Не указаны префиксы'], 400);
 
-        // Загрузить все ручные группы с ключевыми словами
-        $allGroups = $pdo->query("SELECT id, name, keywords FROM recipe_groups")->fetchAll(PDO::FETCH_ASSOC);
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+
+        // Загрузить все ручные группы с ключевыми словами (только этого юрлица)
+        $s = $pdo->prepare("SELECT id, name, keywords FROM recipe_groups WHERE legal_entity_group = ?");
+        $s->execute([$group]);
+        $allGroups = $s->fetchAll(PDO::FETCH_ASSOC);
 
         // Нормализация для сравнения: lowercase, убрать лишние пробелы, пробелы вокруг точек/запятых
         function normGroupKey($s) {
@@ -2661,14 +2673,14 @@ if ($endpoint === 'rpc') {
             }
 
             if ($matchedGroup) {
-                // Вернуть рецептуры из ручной группы
-                $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? ORDER BY r.name");
-                $s->execute([$matchedGroup['id']]);
+                // Вернуть рецептуры из ручной группы (рецепты тоже фильтруем по юрлицу)
+                $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? AND r.legal_entity_group = ? ORDER BY r.name");
+                $s->execute([$matchedGroup['id'], $group]);
                 $result[$prefix] = $s->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 // Автоматический подбор по префиксу
-                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name LIKE ? ORDER BY name");
-                $s->execute([$prefix . '%']);
+                $s = $pdo->prepare("SELECT id, code, name FROM recipes WHERE name LIKE ? AND legal_entity_group = ? ORDER BY name");
+                $s->execute([$prefix . '%', $group]);
                 $result[$prefix] = $s->fetchAll(PDO::FETCH_ASSOC);
             }
         }
@@ -2683,15 +2695,26 @@ if ($endpoint === 'rpc') {
         $name = trim($body['name'] ?? '');
         $keywords = $body['keywords'] ?? [];
         $recipeIds = $body['recipe_ids'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (!$name) respond(['error' => 'Укажите название группы'], 400);
+
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
 
         $pdo->beginTransaction();
         try {
             if ($id) {
+                // Проверяем, что группа принадлежит этому юрлицу
+                $chk = $pdo->prepare("SELECT legal_entity_group FROM recipe_groups WHERE id = ?");
+                $chk->execute([$id]);
+                $existing = $chk->fetchColumn();
+                if ($existing && $existing !== $group) {
+                    $pdo->rollBack();
+                    respond(['error' => 'Группа принадлежит другому юрлицу'], 403);
+                }
                 $pdo->prepare("UPDATE recipe_groups SET name=?, keywords=? WHERE id=?")->execute([$name, json_encode($keywords, JSON_UNESCAPED_UNICODE), $id]);
                 $pdo->prepare("DELETE FROM recipe_group_items WHERE group_id=?")->execute([$id]);
             } else {
-                $pdo->prepare("INSERT INTO recipe_groups (name, keywords) VALUES (?, ?)")->execute([$name, json_encode($keywords, JSON_UNESCAPED_UNICODE)]);
+                $pdo->prepare("INSERT INTO recipe_groups (name, keywords, legal_entity_group) VALUES (?, ?, ?)")->execute([$name, json_encode($keywords, JSON_UNESCAPED_UNICODE), $group]);
                 $id = $pdo->lastInsertId();
             }
             if (!empty($recipeIds)) {
@@ -2718,11 +2741,15 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_recipe_groups_list') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        $groups = $pdo->query("SELECT g.id, g.name, g.keywords, COUNT(gi.id) as recipe_count FROM recipe_groups g LEFT JOIN recipe_group_items gi ON gi.group_id = g.id GROUP BY g.id ORDER BY g.name")->fetchAll(PDO::FETCH_ASSOC);
-        // Для каждой группы загрузить рецептуры
+        $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $s = $pdo->prepare("SELECT g.id, g.name, g.keywords, COUNT(gi.id) as recipe_count FROM recipe_groups g LEFT JOIN recipe_group_items gi ON gi.group_id = g.id WHERE g.legal_entity_group = ? GROUP BY g.id ORDER BY g.name");
+        $s->execute([$group]);
+        $groups = $s->fetchAll(PDO::FETCH_ASSOC);
+        // Для каждой группы загрузить рецептуры (только этого юрлица)
         foreach ($groups as &$g) {
-            $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? ORDER BY r.name");
-            $s->execute([$g['id']]);
+            $s = $pdo->prepare("SELECT r.id, r.code, r.name FROM recipe_group_items gi JOIN recipes r ON r.id = gi.recipe_id WHERE gi.group_id = ? AND r.legal_entity_group = ? ORDER BY r.name");
+            $s->execute([$g['id'], $group]);
             $g['recipes'] = $s->fetchAll(PDO::FETCH_ASSOC);
             $g['keywords'] = json_decode($g['keywords'] ?: '[]', true);
         }

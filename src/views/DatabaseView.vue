@@ -312,6 +312,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroup } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
 import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
@@ -531,6 +532,7 @@ watch(() => orderStore.settings.legalEntity, () => {
   if (activeTab.value === 'products' || activeTab.value === 'analogs') loadProducts();
   if (activeTab.value === 'suppliers' || activeTab.value === 'analogs') loadSuppliers();
   if (activeTab.value === 'restaurants') { restaurantStore.invalidate(); restaurantStore.load(orderStore.settings.legalEntity); }
+  if (activeTab.value === 'recipes') { recipes.value = []; loadRecipes(); }
 });
 
 onMounted(() => {
@@ -651,14 +653,23 @@ async function loadRecipes() {
   const myId = ++_recLoadId;
   loading.value = true;
   try {
-    const { data, error } = await db.from('recipes').select('id, code, name, thk').order('name');
+    const groupCode = getEntityGroupCode(orderStore.settings.legalEntity);
+    const { data, error } = await db.from('recipes')
+      .select('id, code, name, thk, legal_entity_group')
+      .eq('legal_entity_group', groupCode)
+      .order('name');
     if (myId !== _recLoadId) return;
     if (error) { toast.error('Ошибка загрузки рецептур', ''); return; }
-    // Подсчёт ингредиентов
+    // Подсчёт ингредиентов (только для рецептов текущего юрлица)
+    const recipeIds = new Set((data || []).map(r => r.id));
     const { data: counts } = await db.from('recipe_ingredients').select('recipe_id');
     if (myId !== _recLoadId) return;
     const countMap = {};
-    if (counts) counts.forEach(c => { countMap[c.recipe_id] = (countMap[c.recipe_id] || 0) + 1; });
+    if (counts) counts.forEach(c => {
+      if (recipeIds.has(c.recipe_id)) {
+        countMap[c.recipe_id] = (countMap[c.recipe_id] || 0) + 1;
+      }
+    });
     recipes.value = (data || []).map(r => ({ ...r, ingredients_count: countMap[r.id] || 0 }));
   } finally { if (myId === _recLoadId) loading.value = false; }
 }

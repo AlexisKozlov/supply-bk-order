@@ -190,6 +190,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatDate, applyEntityFilter } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -298,12 +299,18 @@ async function loadRecipes() {
   if (recipes.value.length) return; // already loaded
   recipesLoading.value = true;
   try {
-    const { data: recs } = await db.from('recipes').select('id, code, name, thk').order('name', { ascending: true });
+    const groupCode = getEntityGroupCode(legalEntity.value);
+    const { data: recs } = await db.from('recipes')
+      .select('id, code, name, thk, legal_entity_group')
+      .eq('legal_entity_group', groupCode)
+      .order('name', { ascending: true });
     if (!recs?.length) { recipes.value = []; return; }
-    // Load all ingredients in one query
+    // Load all ingredients in one query, фильтруем только по этим рецептам
+    const recipeIdSet = new Set(recs.map(r => r.id));
     const { data: ings } = await db.from('recipe_ingredients').select('id, recipe_id, sku, name, brutto, qty').order('sort_order', { ascending: true }).limit(10000);
     const ingMap = {};
     for (const i of (ings || [])) {
+      if (!recipeIdSet.has(i.recipe_id)) continue;
       if (!ingMap[i.recipe_id]) ingMap[i.recipe_id] = [];
       ingMap[i.recipe_id].push(i);
     }
@@ -319,7 +326,7 @@ const groupModal = ref({ show: false, id: null, name: '', keywords: [], newKeywo
 async function loadGroups() {
   groupsLoading.value = true;
   try {
-    const { data } = await db.rpc('get_recipe_groups_list');
+    const { data } = await db.rpc('get_recipe_groups_list', { legal_entity: legalEntity.value });
     groups.value = data || [];
   } finally { groupsLoading.value = false; }
 }
@@ -357,7 +364,7 @@ const groupRecipeOptions = computed(() => {
 async function saveGroup() {
   const { id, name, keywords, selectedRecipes } = groupModal.value;
   try {
-    const { error } = await db.rpc('save_recipe_group', { id, name: name.trim(), keywords, recipe_ids: selectedRecipes });
+    const { error } = await db.rpc('save_recipe_group', { id, name: name.trim(), keywords, recipe_ids: selectedRecipes, legal_entity: legalEntity.value });
     if (error) throw error;
     groupModal.value.show = false;
     toast.success('Сохранено');
@@ -408,7 +415,8 @@ async function importRecipes(e) {
     }
 
     if (!parsed.length) { toast.error('Не найдено блюд', 'Проверьте формат файла'); return; }
-    const { data, error } = await db.rpc('import_recipes', { recipes: parsed });
+    if (!confirm(`Заменить все рецептуры юрлица «${legalEntity.value}» на импортируемые (${parsed.length} блюд)? Рецептуры других юрлиц не пострадают.`)) return;
+    const { data, error } = await db.rpc('import_recipes', { recipes: parsed, legal_entity: legalEntity.value });
     if (error) { toast.error('Ошибка импорта', error); return; }
     toast.success('Импортировано', `${data.imported} блюд`);
     recipes.value = []; // force reload
@@ -522,7 +530,14 @@ async function importCoupons(e) {
 }
 
 onMounted(() => { loadActivities(); });
-watch(legalEntity, () => { activities.value = []; loadActivities(); });
+watch(legalEntity, () => {
+  activities.value = [];
+  recipes.value = [];
+  groups.value = [];
+  loadActivities();
+  if (viewMode.value === 'recipes') loadRecipes();
+  if (viewMode.value === 'groups') loadGroups();
+});
 </script>
 
 <style scoped>
