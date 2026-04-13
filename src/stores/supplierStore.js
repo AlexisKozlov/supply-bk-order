@@ -1,28 +1,19 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { db, orVal } from '@/lib/apiClient.js';
-import { getEntityGroup as _getGroup } from '@/lib/utils.js';
-
-function getEntityGroup(legalEntity) {
-  const entities = _getGroup(legalEntity);
-  const cacheKey = entities.length === 1 ? entities[0] : 'BK_VM';
-  return { cacheKey, entities };
-}
+import { db } from '@/lib/apiClient.js';
+import { getEntityGroupCode, applyEntityGroupFilter } from '@/lib/utils.js';
 
 // Кеш активных поставщиков (по данным товаров) — обновляется не чаще раза в 5 минут
 const _activeSuppliersCache = {};
 const ACTIVE_CACHE_TTL = 5 * 60 * 1000;
 
-async function loadActiveSuppliers(entities, cacheKey) {
+async function loadActiveSuppliers(legalEntity) {
+  const cacheKey = getEntityGroupCode(legalEntity);
   const cached = _activeSuppliersCache[cacheKey];
   if (cached && (Date.now() - cached.ts < ACTIVE_CACHE_TTL)) return cached.data;
 
   let prodQuery = db.from('products').select('supplier').eq('is_active', 1);
-  if (entities.length === 1) {
-    prodQuery = prodQuery.eq('legal_entity', entities[0]);
-  } else {
-    prodQuery = prodQuery.or(entities.map(e => orVal('legal_entity', 'eq', e)).join(','));
-  }
+  prodQuery = applyEntityGroupFilter(prodQuery, legalEntity);
   const { data: activeProducts } = await prodQuery;
   const set = new Set((activeProducts || []).map(p => p.supplier).filter(Boolean));
   _activeSuppliersCache[cacheKey] = { data: set, ts: Date.now() };
@@ -36,7 +27,7 @@ export const useSupplierStore = defineStore('supplier', () => {
 
   async function loadSuppliers(legalEntity) {
     if (!legalEntity) return [];
-    const { cacheKey, entities } = getEntityGroup(legalEntity);
+    const cacheKey = getEntityGroupCode(legalEntity);
 
     if (suppliersByEntity.value[cacheKey]) return suppliersByEntity.value[cacheKey];
     if (_loadPromises[cacheKey]) return _loadPromises[cacheKey];
@@ -49,11 +40,7 @@ export const useSupplierStore = defineStore('supplier', () => {
           .select('short_name, full_name, whatsapp, telegram, viber, email, dlt, doc')
           .order('short_name');
 
-        if (entities.length === 1) {
-          query = query.eq('legal_entity', entities[0]);
-        } else {
-          query = query.or(entities.map(e => orVal('legal_entity', 'eq', e)).join(','));
-        }
+        query = applyEntityGroupFilter(query, legalEntity);
 
         const { data, error } = await query;
 
@@ -69,7 +56,7 @@ export const useSupplierStore = defineStore('supplier', () => {
           }
 
           // Фильтрация по активным товарам (с кешем)
-          const activeSuppliers = await loadActiveSuppliers(entities, cacheKey);
+          const activeSuppliers = await loadActiveSuppliers(legalEntity);
           const filtered = unique.filter(s => activeSuppliers.has(s.short_name));
 
           suppliersByEntity.value[cacheKey] = filtered;
@@ -86,13 +73,13 @@ export const useSupplierStore = defineStore('supplier', () => {
   }
 
   function getSuppliersForEntity(legalEntity) {
-    const { cacheKey } = getEntityGroup(legalEntity);
+    const cacheKey = getEntityGroupCode(legalEntity);
     return suppliersByEntity.value[cacheKey] || [];
   }
 
   function invalidate(legalEntity) {
     if (legalEntity) {
-      const { cacheKey } = getEntityGroup(legalEntity);
+      const cacheKey = getEntityGroupCode(legalEntity);
       delete suppliersByEntity.value[cacheKey];
     } else {
       suppliersByEntity.value = {};

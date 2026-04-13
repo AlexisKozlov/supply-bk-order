@@ -86,7 +86,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter } from '@/lib/utils.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -166,7 +166,7 @@ async function save() {
       // Переименование — обновляем products.supplier
       if (!error && oldShortName.value && oldShortName.value !== payload.short_name) {
         let renameQuery = db.from('products').update({ supplier: payload.short_name }).eq('supplier', oldShortName.value);
-        renameQuery = applyEntityFilter(renameQuery, payload.legal_entity);
+        renameQuery = applyEntityGroupFilter(renameQuery, payload.legal_entity);
         await renameQuery;
         toast.info('Связи обновлены', `${oldShortName.value} → ${payload.short_name}`);
       }

@@ -1,12 +1,14 @@
-import { getEntityGroup } from '@/lib/legalEntities.js';
+import { getEntityGroup, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { orVal } from '@/lib/apiClient.js';
 
 // Re-export для обратной совместимости (другие модули импортируют из utils)
-export { getEntityGroup };
+export { getEntityGroup, getEntityGroupCode };
 
 /**
- * Применяет фильтр юр. лица к db query.
- * Использует .or() вместо .in() т.к. PHP бэкенд удаляет пробелы из значений в in.()
+ * Применяет фильтр юр. лица к db query по текстовой колонке legal_entity.
+ * Используется для таблиц с данными (orders, analysis_data, stock_1c и т.п.),
+ * где каждая запись хранит полное название юрлица.
+ * .or() вместо .in() — PHP бэкенд удаляет пробелы из значений в in.()
  */
 export function applyEntityFilter(query, legalEntity, column = 'legal_entity') {
   const group = getEntityGroup(legalEntity);
@@ -14,6 +16,16 @@ export function applyEntityFilter(query, legalEntity, column = 'legal_entity') {
     return query.eq(column, group[0]);
   }
   return query.or(group.map(e => orVal(column, 'eq', e)).join(','));
+}
+
+/**
+ * Применяет фильтр группы юрлиц к db query по колонке legal_entity_group.
+ * Используется для справочников (products, suppliers, restaurants),
+ * которые делятся не на конкретное юрлицо, а на группу: BK_VM или PS.
+ * Быстрее applyEntityFilter: один .eq() вместо .or() по двум значениям.
+ */
+export function applyEntityGroupFilter(query, legalEntity, column = 'legal_entity_group') {
+  return query.eq(column, getEntityGroupCode(legalEntity));
 }
 
 export function daysBetween(date1, date2) {

@@ -671,7 +671,7 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter } from '@/lib/utils.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import AbcXyzPanel from '@/views/AbcXyzView.vue';
 
@@ -1110,7 +1110,7 @@ async function createOrderFromForecast() {
   let productMap = {};
   if (skus.length) {
     let prodQuery = db.from('products').select('*').in('sku', skus);
-    prodQuery = applyEntityFilter(prodQuery, orderStore.settings.legalEntity);
+    prodQuery = applyEntityGroupFilter(prodQuery, orderStore.settings.legalEntity);
     const { data: products } = await prodQuery;
     if (products) productMap = Object.fromEntries(products.map(p => [p.sku, p]));
   }

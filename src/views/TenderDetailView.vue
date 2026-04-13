@@ -443,7 +443,7 @@
 import { ref, reactive, computed, onMounted, nextTick, inject, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
-import { formatDate, applyEntityFilter } from '@/lib/utils.js';
+import { formatDate, applyEntityGroupFilter } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -609,7 +609,7 @@ async function pickProduct(item, product, idx) {
     const analogGroup = prodData?.[0]?.analog_group;
     if (analogGroup) {
       let aq = db.from('products').select('sku').eq('analog_group', analogGroup);
-      aq = applyEntityFilter(aq, le);
+      aq = applyEntityGroupFilter(aq, le);
       const { data: analogProducts } = await aq;
       if (analogProducts?.length) {
         skusToQuery = analogProducts.map(p => p.sku);
@@ -666,7 +666,7 @@ async function reloadConsumption() {
     const groupToSkus = new Map();
     if (groups.size) {
       let aq = db.from('products').select('sku, analog_group').in('analog_group', [...groups]);
-      aq = applyEntityFilter(aq, le);
+      aq = applyEntityGroupFilter(aq, le);
       const { data: analogProducts } = await aq;
       for (const p of (analogProducts || [])) {
         if (!groupToSkus.has(p.analog_group)) groupToSkus.set(p.analog_group, []);

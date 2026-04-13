@@ -289,7 +289,7 @@ import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useDraftStore } from '@/stores/draftStore.js'
 import { useConfirm } from '@/composables/useConfirm.js'
-import { applyEntityFilter, formatDate, formatDateShort } from '@/lib/utils.js'
+import { applyEntityGroupFilter, formatDate, formatDateShort } from '@/lib/utils.js'
 import BkIcon from '@/components/ui/BkIcon.vue'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
@@ -441,7 +441,7 @@ watch(legalEntity, () => {
 async function loadSuppliers() {
   try {
     let query = db.from('suppliers').select('short_name').order('short_name')
-    query = applyEntityFilter(query, legalEntity.value)
+    query = applyEntityGroupFilter(query, legalEntity.value)
     const { data } = await query
     if (data) suppliers.value = data.map(s => s.short_name)
   } catch { /* ошибка не блокирует основную загрузку */ }

@@ -4,7 +4,7 @@
  */
 
 import { db } from './apiClient.js';
-import { toLocalDateStr, applyEntityFilter } from './utils.js';
+import { toLocalDateStr, applyEntityGroupFilter } from './utils.js';
 
 export const ANALYTICS_VERSION = 2;
 const PALETTE = [
@@ -370,7 +370,7 @@ export async function getForecastData(legalEntity) {
   // Для справочников (products) — общий фильтр по группе юрлиц
   let productsQuery = db.from('products')
     .select('sku, name, qty_per_box, supplier, analog_group, unit_of_measure');
-  productsQuery = applyEntityFilter(productsQuery, legalEntity);
+  productsQuery = applyEntityGroupFilter(productsQuery, legalEntity);
 
   // Реализация ресторанов за 365 дней (для сезонности и прогноза)
   const start365 = new Date(now); start365.setDate(start365.getDate() - 365);

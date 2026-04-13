@@ -109,7 +109,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, applyEntityGroupFilter } from '@/lib/utils.js';
 import OrderRow from './OrderRow.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
@@ -211,7 +211,7 @@ async function loadSupplierProducts() {
   if (!sup) { allSupplierProducts.value = []; return; }
   try {
     let q = db.from('products').select('*').eq('supplier', sup);
-    q = applyEntityFilter(q, settings.value.legalEntity);
+    q = applyEntityGroupFilter(q, settings.value.legalEntity);
     const { data } = await q;
     allSupplierProducts.value = data || [];
   } catch { allSupplierProducts.value = []; }

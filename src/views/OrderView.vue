@@ -281,7 +281,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityFilter } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter } from '@/lib/utils.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
@@ -520,7 +520,7 @@ onMounted(async () => {
     supplierLoading.value = true;
     try {
       let pq = db.from('products').select('*').eq('supplier', sup).eq('is_active', 1);
-      pq = applyEntityFilter(pq, orderStore.settings.legalEntity);
+      pq = applyEntityGroupFilter(pq, orderStore.settings.legalEntity);
       const { data } = await pq;
       (data || []).forEach(p => orderStore.addItem(p, true));
       await orderStore.restoreItemOrder();
@@ -660,7 +660,7 @@ async function onSupplierChange(e) {
   const myGen = ++_supplierLoadGen;
   try {
     let pq2 = db.from('products').select('*').eq('supplier', newSupplier).eq('is_active', 1);
-    pq2 = applyEntityFilter(pq2, orderStore.settings.legalEntity);
+    pq2 = applyEntityGroupFilter(pq2, orderStore.settings.legalEntity);
     const { data } = await pq2;
     if (myGen !== _supplierLoadGen) return; // пользователь уже сменил поставщика
     (data || []).forEach(p => orderStore.addItem(p, true));

@@ -145,7 +145,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter } from '@/lib/utils.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -247,7 +247,7 @@ function tryClose() {
 
 async function loadSuppliers() {
   let query = db.from('suppliers').select('short_name').order('short_name');
-  query = applyEntityFilter(query, form.value.legal_entity);
+  query = applyEntityGroupFilter(query, form.value.legal_entity);
   const { data } = await query;
   supplierOptions.value = (data || []).map(s => s.short_name);
 }
@@ -279,7 +279,7 @@ async function onSupplierCreated() {
   // Выбираем последнего созданного (он будет последним по алфавиту или найдём новый)
   // Получим самого нового поставщика для текущего юр. лица
   let q = db.from('suppliers').select('short_name').order('created_at', { ascending: false }).limit(1);
-  q = applyEntityFilter(q, form.value.legal_entity);
+  q = applyEntityGroupFilter(q, form.value.legal_entity);
   const { data } = await q;
   if (data && data.length) {
     form.value.supplier = data[0].short_name;

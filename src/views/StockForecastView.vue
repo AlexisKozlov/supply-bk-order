@@ -278,7 +278,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { db } from '@/lib/apiClient.js'
-import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js'
+import { applyEntityGroupFilter, toLocalDateStr } from '@/lib/utils.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
 
@@ -321,7 +321,7 @@ async function loadData() {
     const entity = orderStore.settings.legalEntity
 
     let pq = db.from('products').select('sku, name, analog_group, supplier, category')
-    pq = applyEntityFilter(pq, entity)
+    pq = applyEntityGroupFilter(pq, entity)
     const { data: products } = await pq
     productsData.value = products || []
 

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { reactive, ref, computed, watch, toRaw } from 'vue';
 import { calculateItem, calculateBufferItem } from '@/lib/calculations.js';
-import { getQpb, getMultiplicity, applyEntityFilter } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, applyEntityGroupFilter } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
@@ -254,7 +254,7 @@ export const useOrderStore = defineStore('order', () => {
     let productMap = {};
     if (skus.length > 0) {
       let prodQuery = db.from('products').select('*').in('sku', skus);
-      prodQuery = applyEntityFilter(prodQuery, legalEntity);
+      prodQuery = applyEntityGroupFilter(prodQuery, legalEntity);
       const { data: productsData } = await prodQuery;
       if (myRequestId !== _loadRequestId) return; // Новый вызов перехватил — выходим
       if (productsData) productMap = Object.fromEntries(productsData.map(p => [p.sku, p]));

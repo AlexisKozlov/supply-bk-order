@@ -675,7 +675,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
+import { applyEntityGroupFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -776,7 +776,7 @@ async function loadProductNames() {
   if (!skus.length) return;
   // Загружаем все продукты для юрлица и кэшируем имена
   const query = db.from('products').select('sku,name,unit_of_measure');
-  const { data } = await applyEntityFilter(query, le);
+  const { data } = await applyEntityGroupFilter(query, le);
   const map = {};
   const umap = {};
   if (data) {
@@ -925,7 +925,7 @@ async function onPriceSupplierChange(keepSku = false) {
   const le = orderStore.settings.legalEntity;
   if (!le) return;
   const query = db.from('products').select('sku,name,unit_of_measure').eq('supplier', sup);
-  const { data } = await applyEntityFilter(query, le);
+  const { data } = await applyEntityGroupFilter(query, le);
   supplierProducts.value = (data || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   // Обновить кэш единиц измерения
   if (data) for (const p of data) productUnits.value[p.sku] = p.unit_of_measure || 'шт';
@@ -1045,7 +1045,7 @@ async function loadAgProducts(supplier, agreementId) {
   try {
     const le = orderStore.settings.legalEntity;
     const query = db.from('products').select('sku,name,unit_of_measure').eq('supplier', supplier);
-    const { data } = await applyEntityFilter(query, le);
+    const { data } = await applyEntityGroupFilter(query, le);
     // Загрузить текущие цены этого протокола (при редактировании)
     let existingPrices = {};
     if (agreementId) {

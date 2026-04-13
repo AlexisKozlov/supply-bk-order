@@ -20,10 +20,20 @@ export const ENTITY_SHORT_NAMES = {
 /**
  * Группы для справочников (товары, поставщики).
  * БК и ВМ — одна группа, ПС — отдельная.
+ * Возвращает массив юрлиц — для старой логики фильтрации через .or() по колонке legal_entity.
  */
 export function getEntityGroup(legalEntity) {
   if (legalEntity === 'ООО "Пицца Стар"') return ['ООО "Пицца Стар"'];
   return ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
+}
+
+/**
+ * Код группы юрлиц для новой колонки legal_entity_group (таблицы products, suppliers, restaurants).
+ * Возвращает 'BK_VM' | 'PS'.
+ */
+export function getEntityGroupCode(legalEntity) {
+  if (legalEntity && legalEntity.includes('Пицца Стар')) return 'PS';
+  return 'BK_VM';
 }
 
 /**

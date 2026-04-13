@@ -5,7 +5,7 @@
  */
 
 import { db } from '@/lib/apiClient.js';
-import { debug, getQpb, applyEntityFilter } from '@/lib/utils.js';
+import { debug, getQpb, applyEntityGroupFilter } from '@/lib/utils.js';
 import { ENTITY_IMPORT_MAP } from '@/lib/legalEntities.js';
 
 const LEGAL_ENTITY_MAP = ENTITY_IMPORT_MAP;
@@ -23,7 +23,7 @@ async function loadAnalogMap(itemSkus, legalEntity) {
   let prodQuery = db.from('products')
     .select('sku,name,analog_group')
     .in('sku', skuList);
-  if (legalEntity) prodQuery = applyEntityFilter(prodQuery, legalEntity);
+  if (legalEntity) prodQuery = applyEntityGroupFilter(prodQuery, legalEntity);
   const { data: products } = await prodQuery;
 
   if (!products?.length) return null;
@@ -44,7 +44,7 @@ async function loadAnalogMap(itemSkus, legalEntity) {
   let analogQuery = db.from('products')
     .select('sku,name,analog_group,qty_per_box')
     .neq('analog_group', '');
-  if (legalEntity) analogQuery = applyEntityFilter(analogQuery, legalEntity);
+  if (legalEntity) analogQuery = applyEntityGroupFilter(analogQuery, legalEntity);
   const { data: allAnalogProducts } = await analogQuery;
   const groupProducts = (allAnalogProducts || []).filter(p => groups.has(p.analog_group));
 

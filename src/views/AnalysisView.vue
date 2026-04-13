@@ -341,7 +341,7 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
-import { applyEntityFilter } from '@/lib/utils.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { importFromFile } from '@/lib/importStock.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -463,7 +463,7 @@ async function loadProducts() {
   try {
     let q = db.from('products')
       .select('id, sku, name, analog_group, supplier, qty_per_box, category');
-    q = applyEntityFilter(q, orderStore.settings.legalEntity);
+    q = applyEntityGroupFilter(q, orderStore.settings.legalEntity);
     const { data, error } = await q;
     if (myRequestId !== _loadRequestId) return;
     if (error) { toast.error('Ошибка', 'Не удалось загрузить товары'); loadError.value = true; return; }

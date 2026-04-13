@@ -499,7 +499,7 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
-import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityGroupFilter, toLocalDateStr } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
@@ -629,7 +629,7 @@ async function loadSupplierProducts() {
   if (!sup) { allSupplierProducts.value = []; return; }
   try {
     let q = db.from('products').select('*').eq('supplier', sup);
-    q = applyEntityFilter(q, orderStore.settings.legalEntity);
+    q = applyEntityGroupFilter(q, orderStore.settings.legalEntity);
     const { data } = await q;
     allSupplierProducts.value = data || [];
   } catch { allSupplierProducts.value = []; }
@@ -1182,7 +1182,7 @@ async function createOrderFromPeriod(pi) {
   let productMap = {};
   if (skus.length) {
     let prodQuery = db.from('products').select('*').in('sku', skus);
-    prodQuery = applyEntityFilter(prodQuery, orderStore.settings.legalEntity);
+    prodQuery = applyEntityGroupFilter(prodQuery, orderStore.settings.legalEntity);
     const { data: products } = await prodQuery;
     if (products) productMap = Object.fromEntries(products.map(p => [p.sku, p]));
   }

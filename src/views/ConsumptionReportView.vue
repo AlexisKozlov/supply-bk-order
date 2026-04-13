@@ -112,7 +112,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { db } from '@/lib/apiClient.js'
-import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js'
+import { applyEntityGroupFilter, toLocalDateStr } from '@/lib/utils.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useUserStore } from '@/stores/userStore.js'
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue'
@@ -196,7 +196,7 @@ async function loadData() {
     const entity = orderStore.settings.legalEntity
 
     let q = db.from('products').select('sku, name, analog_group, qty_per_box')
-    q = applyEntityFilter(q, entity)
+    q = applyEntityGroupFilter(q, entity)
     const { data: products } = await q
 
     const skus = (products || []).map(p => p.sku).filter(Boolean)
