@@ -676,7 +676,7 @@
                 <span :style="r.is_admin ? 'color:#2E7D32' : ''">{{ r.created_by }}{{ r.is_admin ? ' (вы)' : '' }}</span>
                 <span>{{ formatBugDate(r.created_at) }}</span>
               </div>
-              <div class="fb-msg-text" v-html="renderMsgContent(r.message)"></div>
+              <div class="fb-msg-text" v-html="renderMsgContent(r.message)" @click="onBugMsgClick"></div>
             </div>
           </div>
 
@@ -1816,13 +1816,39 @@ async function updateBugStatus(r) {
 const bugChatScroll = ref(null);
 const bugReplyImages = ref([]);
 
+function onBugMsgClick(e) {
+  const t = e.target;
+  if (t && t.tagName === 'IMG' && t.dataset.bugImg === '1') {
+    window.open(t.src, '_blank', 'noopener');
+  }
+}
+
 function renderMsgContent(msg) {
   if (!msg) return '';
-  const escaped = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return escaped.replace(/\[img:(.*?)\]/g, (_, path) => {
-    const src = apiBase + '/' + path + '?token=' + sessionToken;
-    return '<img src="' + src + '" class="fb-msg-img" onclick="window.open(this.src)" />';
-  });
+  // Экранируем всё, включая кавычки — чтобы нельзя было вырваться из src="..."
+  const escapeHtml = (s) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  // Идём по оригинальному тексту, собираем результат из экранированных кусков
+  const re = /\[img:([^\]]*?)\]/g;
+  let result = '';
+  let lastIdx = 0;
+  let m;
+  while ((m = re.exec(msg)) !== null) {
+    result += escapeHtml(msg.slice(lastIdx, m.index));
+    const raw = m[1] || '';
+    // Белый список: только пути uploads/... с безопасными символами
+    if (/^uploads\/[a-zA-Z0-9_\-/.]+$/.test(raw) && !raw.includes('..')) {
+      const src = escapeHtml(apiBase + '/' + raw + '?token=' + sessionToken);
+      result += '<img src="' + src + '" class="fb-msg-img" data-bug-img="1" />';
+    }
+    lastIdx = m.index + m[0].length;
+  }
+  result += escapeHtml(msg.slice(lastIdx));
+  return result;
 }
 
 async function uploadBugImage(file) {

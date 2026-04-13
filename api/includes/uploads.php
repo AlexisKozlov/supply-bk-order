@@ -5,6 +5,13 @@
  *   $pdo, $endpoint, $subpoint, $parts, $method, $ROLE_TEMPLATES, $ACCESS_LEVELS
  */
 
+// Санитайзер имени файла для заголовка Content-Disposition: убирает кавычки и
+// управляющие символы (CR/LF), чтобы исключить инъекцию HTTP-заголовков.
+function sanitizeHeaderFilename($name) {
+    $name = preg_replace('/[\x00-\x1F\x7F"\\\\]/', '', (string)$name);
+    return mb_substr($name, 0, 255);
+}
+
 // ═══ DELETE ACT ═══
 if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
     if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);
@@ -90,14 +97,16 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'acts' && isset($parts[2]))
         $safeName = str_replace(['%', '_'], ['\\%', '\\_'], $filename);
         $actS = $pdo->prepare("SELECT legal_entity FROM orders WHERE act_file LIKE ? ESCAPE '\\\\'"); $actS->execute(['%' . $safeName]);
         $actRow = $actS->fetch();
-        if ($actRow && !checkLegalEntityAccess($caller, $actRow['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
+        // Файл-сирота (нет записи в orders) — не отдаём, чтобы нельзя было скачать угаданное имя
+        if (!$actRow) respond(['error' => 'Файл не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $actRow['legal_entity'])) respond(['error' => 'Нет доступа'], 403);
     }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
     $mime = finfo_file($finfo, $filepath);
     finfo_close($finfo);
     $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $filename) . '"');
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($filename) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -168,6 +177,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'psc' && isset($parts[2])) 
         $fchk = $pdo->prepare("SELECT legal_entity FROM price_agreements WHERE file_path LIKE ? ESCAPE '\\\\'");
         $fchk->execute(['%' . $safeName]);
         $fle = $fchk->fetchColumn();
+        if ($fle === false) respond(['error' => 'Файл не найден'], 404);
         if ($fle && !checkLegalEntityAccess($caller, $fle)) respond(['error' => 'Нет доступа'], 403);
     }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -175,7 +185,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'psc' && isset($parts[2])) 
     finfo_close($finfo);
     $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $filename) . '"');
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($filename) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -266,6 +276,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'tenders' && isset($parts[2
         $fchk = $pdo->prepare("SELECT t.legal_entity FROM tender_files tf JOIN tenders t ON tf.tender_id=t.id WHERE tf.file_path=?");
         $fchk->execute([$filename]);
         $fle = $fchk->fetchColumn();
+        if ($fle === false) respond(['error' => 'Файл не найден'], 404);
         if ($fle && !checkLegalEntityAccess($caller, $fle)) respond(['error' => 'Нет доступа'], 403);
     }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -278,7 +289,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'tenders' && isset($parts[2
         $origName = $nm->fetchColumn() ?: $filename;
     }
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $origName) . '"');
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($origName) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -344,7 +355,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'protocols' && isset($parts
     $origName = $filename;
     if (isset($_GET['download'])) { $nm = $pdo->prepare("SELECT file_name FROM meeting_protocol_files WHERE file_path=?"); $nm->execute([$filename]); $origName = $nm->fetchColumn() ?: $filename; }
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $origName) . '"');
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($origName) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -430,6 +441,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'marketing' && isset($parts
         $fchk = $pdo->prepare("SELECT a.legal_entity FROM marketing_activity_files f JOIN marketing_activities a ON f.activity_id=a.id WHERE f.file_path=?");
         $fchk->execute([$filename]);
         $fle = $fchk->fetchColumn();
+        if ($fle === false) respond(['error' => 'Файл не найден'], 404);
         if ($fle && !checkLegalEntityAccess($caller, $fle)) respond(['error' => 'Нет доступа'], 403);
     }
     $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -442,7 +454,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'marketing' && isset($parts
         $origName = $nm->fetchColumn() ?: $filename;
     }
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"', '', $origName) . '"');
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($origName) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;
@@ -489,7 +501,7 @@ if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'bugs' && isset($parts[2]))
     $mime = finfo_file($finfo, $filepath);
     finfo_close($finfo);
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: inline; filename="' . str_replace('"', '', $filename) . '"');
+    header('Content-Disposition: inline; filename="' . sanitizeHeaderFilename($filename) . '"');
     header('Content-Length: ' . filesize($filepath));
     readfile($filepath);
     exit;

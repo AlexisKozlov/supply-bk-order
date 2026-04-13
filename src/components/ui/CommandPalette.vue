@@ -227,9 +227,17 @@ watch(query, (q) => {
 })
 
 function highlight(text) {
-  if (!query.value || query.value.length < 2) return text
+  // Сначала экранируем сам текст — он может прийти из БД (имя товара/поставщика)
+  // и содержать символы вроде < > & ", которые нельзя отдавать в v-html «как есть».
+  const escaped = String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  if (!query.value || query.value.length < 2) return escaped
   const q = query.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return text.replace(new RegExp(`(${q})`, 'gi'), '<mark>$1</mark>')
+  return escaped.replace(new RegExp(`(${q})`, 'gi'), '<mark>$1</mark>')
 }
 
 function move(dir) {

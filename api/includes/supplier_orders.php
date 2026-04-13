@@ -792,6 +792,10 @@ if ($soAction === 'admin') {
         $s->execute([$adminParam]);
         $order = $s->fetch();
         if (!$order) soRespond(['error' => 'Заявка не найдена'], 404);
+        // Проверка доступа к юр. лицу заявки
+        if ($sessionUser && !checkLegalEntityAccess($sessionUser, $order['legal_entity'] ?? '')) {
+            soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
 
         $items = $pdo->prepare("SELECT * FROM so_order_items WHERE order_id = ? ORDER BY product_name");
         $items->execute([$order['id']]);
@@ -805,6 +809,17 @@ if ($soAction === 'admin') {
         $orderId = (int)$adminParam;
         $items = $body['items'] ?? null;
         $status = $body['status'] ?? null;
+
+        // Проверка доступа к юр. лицу заявки
+        if ($sessionUser) {
+            $leSt = $pdo->prepare("SELECT legal_entity FROM so_orders WHERE id = ?");
+            $leSt->execute([$orderId]);
+            $orderLE = $leSt->fetchColumn();
+            if ($orderLE === false) soRespond(['error' => 'Заявка не найдена'], 404);
+            if (!checkLegalEntityAccess($sessionUser, $orderLE ?: '')) {
+                soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+            }
+        }
 
         if ($items !== null) {
             // Агрегируем позиции по SKU на случай дублей в payload
@@ -995,9 +1010,14 @@ if ($soAction === 'admin') {
     if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
         $orderId = (int)$adminParam;
         // Сохраняем инфо до удаления
-        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
+        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, o.legal_entity, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
         $oi->execute([$orderId]);
         $orderInfo = $oi->fetch();
+        if (!$orderInfo) soRespond(['error' => 'Заявка не найдена'], 404);
+        // Проверка доступа к юр. лицу заявки
+        if ($sessionUser && !checkLegalEntityAccess($sessionUser, $orderInfo['legal_entity'] ?? '')) {
+            soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
 
         $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
         $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$orderId]);

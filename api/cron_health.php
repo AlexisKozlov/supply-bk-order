@@ -1,6 +1,8 @@
 <?php
 // Cron: проверка здоровья сервера
 // Запуск каждые 2 минуты в crontab
+// Запрещено запускать через HTTP — внутри есть shell_exec.
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
 $envFile = __DIR__ . '/.env';
 if (!file_exists($envFile)) exit;

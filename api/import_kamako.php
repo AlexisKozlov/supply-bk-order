@@ -3,6 +3,7 @@
  * Импорт графика доставок Камако из Excel в so_supplier_schedules
  * Запуск: php api/import_kamako.php
  */
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
 // Загрузка .env
 $envFile = __DIR__ . '/.env';

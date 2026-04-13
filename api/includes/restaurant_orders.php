@@ -1248,6 +1248,10 @@ if (strpos($roAction, 'admin') === 0) {
         $s->execute([$adminParam]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
+        // Проверка доступа к юр. лицу заказа: закупщик одной группы не должен видеть чужие заказы
+        if ($sessionUser && !checkLegalEntityAccess($sessionUser, $order['legal_entity'] ?? '')) {
+            roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
 
         $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
                    (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
@@ -1269,9 +1273,13 @@ if (strpos($roAction, 'admin') === 0) {
 
         // Запоминаем старые позиции/состояние для сравнения и аудита
         $oldItems = [];
-        $oldOrderSt = $pdo->prepare("SELECT restaurant_number, delivery_date, status FROM ro_orders WHERE id = ?");
+        $oldOrderSt = $pdo->prepare("SELECT restaurant_number, delivery_date, status, legal_entity FROM ro_orders WHERE id = ?");
         $oldOrderSt->execute([$orderId]);
         $oldOrder = $oldOrderSt->fetch() ?: [];
+        // Проверка доступа к юр. лицу заказа
+        if ($sessionUser && $oldOrder && !checkLegalEntityAccess($sessionUser, $oldOrder['legal_entity'] ?? '')) {
+            roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
         if ($items !== null) {
             $oldSt = $pdo->prepare("SELECT sku, product_name, quantity FROM ro_order_items WHERE order_id = ?");
             $oldSt->execute([$orderId]);
@@ -1485,9 +1493,14 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
         $orderId = (int)$adminParam;
         // Сохраняем инфо для уведомления и журнала до удаления
-        $orderInfo = $pdo->prepare("SELECT restaurant_number, delivery_date FROM ro_orders WHERE id = ?");
+        $orderInfo = $pdo->prepare("SELECT restaurant_number, delivery_date, legal_entity FROM ro_orders WHERE id = ?");
         $orderInfo->execute([$orderId]);
         $oi = $orderInfo->fetch();
+        if (!$oi) roRespond(['error' => 'Заказ не найден'], 404);
+        // Проверка доступа к юр. лицу заказа
+        if ($sessionUser && !checkLegalEntityAccess($sessionUser, $oi['legal_entity'] ?? '')) {
+            roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
 
         // Запоминаем позиции для журнала
         $delItemsSt = $pdo->prepare("SELECT sku, product_name, quantity FROM ro_order_items WHERE order_id = ?");

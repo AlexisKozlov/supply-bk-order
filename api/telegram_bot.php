@@ -26,14 +26,19 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 
-// Проверка секретного токена вебхука
+// Проверка секретного токена вебхука — обязательная.
+// Без этого любой из интернета мог бы слать боту поддельные сообщения
+// от лица любого пользователя и выполнять команды.
 $webhookSecret = $_ENV['TELEGRAM_WEBHOOK_SECRET'] ?? '';
-if ($webhookSecret !== '') {
-    $headerSecret = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
-    if (!hash_equals($webhookSecret, $headerSecret)) {
-        http_response_code(403);
-        exit;
-    }
+if (!$webhookSecret) {
+    error_log('[TelegramBot] TELEGRAM_WEBHOOK_SECRET не задан в .env — webhook отключён');
+    http_response_code(500);
+    exit;
+}
+$headerSecret = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
+if (!hash_equals($webhookSecret, $headerSecret)) {
+    http_response_code(403);
+    exit;
 }
 
 $input = json_decode(file_get_contents('php://input'), true);

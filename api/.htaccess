@@ -1,0 +1,10 @@
+# Защита чувствительных файлов от прямого доступа через веб.
+# Дублирует то, что обычно делает nginx (location ~ /\. { deny all; }),
+# на случай если приложение когда-нибудь будет развёрнуто под apache.
+<FilesMatch "^\.|\.(env|ini|disabled|bak|backup|sql|log|sh|md|json|lock)$">
+    Require all denied
+    Deny from all
+</FilesMatch>
+
+# Никаких индексов директории
+Options -Indexes

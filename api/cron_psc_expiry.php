@@ -9,6 +9,7 @@
  *  - за 7 дней
  *  - в день окончания
  */
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
 // Загрузка .env
 $envFile = __DIR__ . '/.env';
