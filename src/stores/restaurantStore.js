@@ -89,7 +89,7 @@ export const useRestaurantStore = defineStore('restaurant', () => {
       if (!rSched) continue;
       for (const [day, s] of rSched) {
         if (day >= 1 && day <= 6) {
-          map.get(day)?.push({ ...r, delivery_time: s.delivery_time, schedule_notes: s.notes });
+          map.get(day)?.push({ ...r, delivery_time: s.delivery_time, dough_time: s.dough_time, schedule_notes: s.notes });
         }
       }
     }
@@ -143,62 +143,70 @@ export const useRestaurantStore = defineStore('restaurant', () => {
     }
   }
 
-  async function saveScheduleCell(restaurantId, dayOfWeek, deliveryTime) {
+  // Сохранение одной ячейки расписания. field = 'delivery_time' (основная
+  // доставка) или 'dough_time' (тесто для ПС-ресторанов).
+  // Строка удаляется, только когда оба времени пусты.
+  async function saveScheduleCell(restaurantId, dayOfWeek, value, field = 'delivery_time') {
     if (dayOfWeek < 1 || dayOfWeek > 6) throw new Error('Invalid day_of_week');
+    if (field !== 'delivery_time' && field !== 'dough_time') throw new Error('Invalid field');
     const rid = String(restaurantId);
     const existing = schedule.value.find(s => String(s.restaurant_id) === rid && Number(s.day_of_week) === dayOfWeek);
     const meta = _meta();
-    const oldTime = existing?.delivery_time || '';
-    const newTime = deliveryTime?.trim() || '';
+    const oldValue = existing?.[field] || '';
+    const newValue = value?.trim() || '';
 
-    if (!newTime) {
+    // Определяем противоположное время — оно влияет на решение о DELETE
+    const otherField = field === 'delivery_time' ? 'dough_time' : 'delivery_time';
+    const otherValue = existing?.[otherField] || '';
+
+    if (!newValue && !otherValue) {
       if (existing) {
         const { error } = await db.from('delivery_schedule').delete().eq('id', existing.id);
         if (error) throw new Error(error);
         schedule.value = schedule.value.filter(s => s.id !== existing.id);
       }
     } else if (existing) {
-      const { data, error } = await db.from('delivery_schedule').update({
-        delivery_time: newTime, ...meta,
-      }).eq('id', existing.id);
+      const patch = { [field]: newValue || null, ...meta };
+      const { error } = await db.from('delivery_schedule').update(patch).eq('id', existing.id);
       if (error) throw new Error(error);
-      Object.assign(existing, { delivery_time: newTime, ...meta });
+      Object.assign(existing, patch);
     } else {
-      const { data, error } = await db.from('delivery_schedule').insert({
+      const insert = {
         restaurant_id: restaurantId,
         day_of_week: dayOfWeek,
-        delivery_time: newTime,
+        delivery_time: field === 'delivery_time' ? newValue : null,
+        dough_time:    field === 'dough_time'    ? newValue : null,
         ...meta,
-      });
+      };
+      const { data, error } = await db.from('delivery_schedule').insert(insert);
       if (error) throw new Error(error);
-      // data может быть объектом или массивом — нормализуем
       const record = Array.isArray(data) ? data[0] : data;
       if (record && record.id) {
         schedule.value.push(record);
       } else {
-        // Если API не вернул данные, перезагружаем
         const currentGroup = loadedGroup.value;
         invalidate();
         await _doLoad(currentGroup, _loadId);
       }
     }
 
-    // Аудит-лог (не блокирует основное действие)
-    if (oldTime !== newTime) {
+    // Аудит-лог
+    if (oldValue !== newValue) {
       const rest = restaurants.value.find(r => String(r.id) === rid);
       const rSched = scheduleByRestaurant.value.get(rid);
       const fullSchedule = {};
       for (let d = 1; d <= 6; d++) {
         fullSchedule[DAY_SHORT[d]] = rSched?.get(d)?.delivery_time || '';
       }
+      const dayLabel = (DAY_NAMES[dayOfWeek] || `День ${dayOfWeek}`) + (field === 'dough_time' ? ' (тесто)' : '');
       await _auditLog(restaurantId, 'schedule_updated', rest?.number || restaurantId,
-        [{ label: DAY_NAMES[dayOfWeek] || `День ${dayOfWeek}`, from: oldTime || '—', to: newTime || '—' }],
+        [{ label: dayLabel, from: oldValue || '—', to: newValue || '—' }],
         { full_schedule: fullSchedule });
     }
   }
 
   // Только поля таблицы restaurants (без лишних из restaurantsByDay)
-  const restaurantFields = ['id', 'number', 'address', 'city', 'region', 'notes', 'sort_order', 'legal_entity_group'];
+  const restaurantFields = ['id', 'number', 'dodo_is_number', 'address', 'city', 'region', 'notes', 'sort_order', 'legal_entity_group'];
 
   async function saveRestaurant(restaurant) {
     // Убираем лишние поля (delivery_time, schedule_notes и т.д.)

@@ -85,11 +85,12 @@
                 :key="d.num"
                 class="pf-mtd pf-mtd-center ds-td-day"
                 :class="{
-                  'ds-td-has': getTime(r, d.num),
+                  'ds-td-has': getTime(r, d.num) || getDough(r, d.num),
                   'ds-td-editing': editingCell?.rid === r.id && editingCell?.day === d.num,
                   'ds-td-drop-target': dragState && dragState.rid === r.id && dragState.overDay === d.num && dragState.fromDay !== d.num,
+                  'ds-td-ps': isPSGroup,
                 }"
-                @dblclick="isEditing && startEdit(r, d.num)"
+                @dblclick="isEditing && startEdit(r, d.num, 'delivery_time')"
                 @dragover.prevent="isEditing && onDragOver($event, r, d.num)"
                 @dragleave="onDragLeave"
                 @drop.prevent="isEditing && onDrop(r, d.num)"
@@ -103,6 +104,27 @@
                     @keydown.escape.prevent="cancelEdit"
                     placeholder="10:00-14:00"
                   />
+                </template>
+                <template v-else-if="isPSGroup">
+                  <!-- ПС: две строки — основная доставка и тесто -->
+                  <div class="ds-ps-cell">
+                    <span
+                      v-if="getTime(r, d.num)"
+                      class="ds-time-chip ds-chip-main"
+                      :draggable="isEditing"
+                      @dragstart="onDragStart($event, r, d.num)"
+                      @dragend="onDragEnd"
+                      @dblclick.stop="isEditing && startEdit(r, d.num, 'delivery_time')"
+                    >{{ getTime(r, d.num) }}</span>
+                    <span v-else class="ds-time-empty" @dblclick.stop="isEditing && startEdit(r, d.num, 'delivery_time')">—</span>
+                    <span
+                      v-if="getDough(r, d.num)"
+                      class="ds-time-chip ds-chip-dough"
+                      title="Тесто"
+                      @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')"
+                    >🥖 {{ getDough(r, d.num) }}</span>
+                    <span v-else class="ds-time-empty ds-dough-empty" title="Тесто" @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')">🥖 —</span>
+                  </div>
                 </template>
                 <template v-else>
                   <span
@@ -231,10 +253,16 @@
             <button class="modal-close" @click="tryCloseRestaurant"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="ds-modal-body">
-            <label class="ds-label">
-              <span class="ds-label-text">Номер</span>
-              <input v-model="editingRestaurant.number" type="text" />
-            </label>
+            <div style="display:flex;gap:10px;">
+              <label class="ds-label" style="flex:1;">
+                <span class="ds-label-text">Номер</span>
+                <input v-model="editingRestaurant.number" type="text" />
+              </label>
+              <label v-if="isPSGroup" class="ds-label" style="flex:1;">
+                <span class="ds-label-text">№ ДОДО ИС</span>
+                <input v-model="editingRestaurant.dodo_is_number" type="number" />
+              </label>
+            </div>
             <label class="ds-label">
               <span class="ds-label-text">Адрес</span>
               <input v-model="editingRestaurant.address" type="text" />
@@ -386,6 +414,17 @@ function getTime(restaurant, day) {
   const s = rSched.get(day);
   return s?.delivery_time || '';
 }
+function getDough(restaurant, day) {
+  const rSched = store.scheduleByRestaurant.get(String(restaurant.id));
+  if (!rSched) return '';
+  const s = rSched.get(day);
+  return s?.dough_time || '';
+}
+// ПС-группа: показываем колонку «тесто» дополнительно к основной доставке
+const isPSGroup = computed(() => {
+  const le = orderStore.settings.legalEntity || '';
+  return le.includes('Пицца Стар');
+});
 
 function deliveryCount(restaurant) {
   const rSched = store.scheduleByRestaurant.get(String(restaurant.id));
@@ -420,12 +459,14 @@ function dayRestaurants(day) {
 const editingCell = ref(null);
 let savingEdit = false;
 
-function startEdit(restaurant, day) {
+function startEdit(restaurant, day, field = 'delivery_time') {
   if (!isEditing.value) return;
+  const currentValue = field === 'dough_time' ? getDough(restaurant, day) : getTime(restaurant, day);
   editingCell.value = {
     rid: restaurant.id,
     day,
-    value: getTime(restaurant, day),
+    field,
+    value: currentValue,
     restaurantId: restaurant.id,
   };
   nextTick(() => {
@@ -437,12 +478,14 @@ function startEdit(restaurant, day) {
 async function saveEdit() {
   if (!editingCell.value || savingEdit) return;
   savingEdit = true;
-  const { restaurantId, day, value } = editingCell.value;
-  const oldValue = getTime({ id: restaurantId }, day);
+  const { restaurantId, day, value, field } = editingCell.value;
+  const oldValue = field === 'dough_time'
+    ? getDough({ id: restaurantId }, day)
+    : getTime({ id: restaurantId }, day);
   editingCell.value = null;
   if (value === oldValue) { savingEdit = false; return; }
   try {
-    await store.saveScheduleCell(restaurantId, day, value);
+    await store.saveScheduleCell(restaurantId, day, value, field);
   } catch (e) {
     toastStore.error('Ошибка сохранения');
   } finally {
@@ -903,6 +946,21 @@ function formatLastUpdate(upd) {
   cursor: grabbing;
 }
 .ds-time-empty { color: #D5D0CA; font-size: 10px; }
+
+/* ПС: двухуровневая ячейка (основная доставка + тесто) */
+.ds-td-ps { padding: 4px 2px !important; vertical-align: middle; }
+.ds-ps-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  justify-content: center;
+}
+.ds-ps-cell .ds-time-chip { font-size: 10px; padding: 1px 4px; }
+.ds-ps-cell .ds-chip-main { background: #A5D6A7; color: #1B5E20; }
+.ds-ps-cell .ds-chip-dough { background: #FFE0B2; color: #6b4f3a; }
+.ds-ps-cell .ds-dough-empty { font-size: 9px; color: #e0d5c8; }
 
 /* Drop target */
 .ds-td-drop-target {
