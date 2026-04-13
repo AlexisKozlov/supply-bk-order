@@ -45,7 +45,7 @@ const imports = computed(() => [
   },
   {
     key: 'sales', icon: '🍽', title: 'Реализация ресторанов',
-    desc: 'Данные продаж из Qlik / 1С',
+    desc: `Данные продаж из Qlik / 1С (${orderStore.settings.legalEntity || 'выберите юрлицо'})`,
     lastUpdate: lastUpdates.value.sales,
     action: () => pickFile('sales'),
   },
@@ -58,7 +58,7 @@ const imports = computed(() => [
 ])
 
 function pickFile(type) {
-  if (type === 'analysis' && !orderStore.settings.legalEntity) {
+  if ((type === 'analysis' || type === 'sales') && !orderStore.settings.legalEntity) {
     toast.error('Не выбрано юрлицо', 'Выберите юр. лицо в боковом меню')
     return
   }
@@ -104,6 +104,7 @@ async function uploadFile(type, file) {
       toast.success('Загружено', `${items.length} позиций для «${le}»`)
 
     } else if (type === 'sales') {
+      const le = orderStore.settings.legalEntity
       // Загружаем карту артикул→группа аналогов
       const { data: prods } = await db.from('products').select('sku, analog_group').neq('analog_group', '')
       const skuToGroup = {}
@@ -112,13 +113,13 @@ async function uploadFile(type, file) {
       const items = result.items || result
       const skuMapped = result.skuMapped || 0
       if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные'); return }
-      toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…`)
+      toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей в «${le}»…`)
       for (let i = 0; i < items.length; i += 10000) {
         const isLast = i + 10000 >= items.length
-        const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast })
+        const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast, legal_entity: le })
         if (error) { toast.error('Ошибка', error); return }
       }
-      toast.success('Загружено', `${items.length.toLocaleString('ru')} записей реализации` + (skuMapped ? `, ${skuMapped} по артикулу` : ''))
+      toast.success('Загружено', `${items.length.toLocaleString('ru')} записей реализации в «${le}»` + (skuMapped ? `, ${skuMapped} по артикулу` : ''))
 
     } else if (type === 'shelf') {
       // Идентично ShelfLifeView: parseStockMalling → replace_stock_malling
@@ -140,9 +141,14 @@ async function uploadFile(type, file) {
 
 async function loadLastUpdates() {
   try {
+    const le = orderStore.settings.legalEntity
+    const analysisQuery = db.from('analysis_data').select('updated_at').order('updated_at', { ascending: false }).limit(1)
+    const salesQuery = le
+      ? db.from('restaurant_sales').select('created_at').eq('legal_entity', le).order('created_at', { ascending: false }).limit(1)
+      : db.from('restaurant_sales').select('created_at').order('created_at', { ascending: false }).limit(1)
     const [a, s, sh] = await Promise.all([
-      db.from('analysis_data').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-      db.from('restaurant_sales').select('created_at').order('created_at', { ascending: false }).limit(1),
+      analysisQuery,
+      salesQuery,
       db.from('stock_malling').select('uploaded_at').order('uploaded_at', { ascending: false }).limit(1),
     ])
     const fmt = (d) => d ? new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null

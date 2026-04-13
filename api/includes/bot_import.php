@@ -267,14 +267,18 @@ function botHandleImport($chatId, $fileId, $importType, $user) {
             sendMessage($chatId, "❌ Не удалось распознать данные реализации.\n\nНужны колонки: Группа аналогов, Дата, Продажи/Расход.");
             return;
         }
-        // Идентично replace_restaurant_sales на сайте — upsert в транзакции
+        if (!$entity) {
+            sendMessage($chatId, "❌ Не выбрано юрлицо. Переключите через /entity.");
+            return;
+        }
+        // Идентично replace_restaurant_sales на сайте — upsert в транзакции, с юрлицом
         $pdo->beginTransaction();
         try {
-            $ins = $pdo->prepare("INSERT INTO restaurant_sales (sale_date, analog_group, quantity, restaurant_count) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), restaurant_count = VALUES(restaurant_count)");
+            $ins = $pdo->prepare("INSERT INTO restaurant_sales (sale_date, legal_entity, analog_group, quantity, restaurant_count) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), restaurant_count = VALUES(restaurant_count)");
             $cnt = 0;
             foreach ($items as $item) {
                 if (!$item['sale_date'] || !$item['analog_group']) continue;
-                $ins->execute([$item['sale_date'], $item['analog_group'], $item['quantity'], $item['restaurant_count']]);
+                $ins->execute([$item['sale_date'], $entity, $item['analog_group'], $item['quantity'], $item['restaurant_count']]);
                 $cnt++;
             }
             $pdo->commit();
@@ -283,7 +287,7 @@ function botHandleImport($chatId, $fileId, $importType, $user) {
             sendMessage($chatId, "❌ Ошибка: " . $e->getMessage());
             return;
         }
-        sendMessage($chatId, "✅ <b>Реализация загружена</b>\n\nЗаписей: <b>{$cnt}</b>", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
+        sendMessage($chatId, "✅ <b>Реализация загружена</b>\n\nЗаписей: <b>{$cnt}</b>\nЮрлицо: {$entity}", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
 
     } elseif ($importType === 'analysis') {
         $items = botParseAnalysis($rows);

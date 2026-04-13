@@ -847,8 +847,9 @@ async function checkSalesVsConsumption() {
     const uniqueGroups = [...new Set(Object.values(groupsMap))];
     if (!uniqueGroups.length) return;
 
-    // Загружаем реализацию за 30 дней
-    const lastDateR = await db.from('restaurant_sales').select('sale_date').order('sale_date', { ascending: false }).limit(1);
+    // Загружаем реализацию за 30 дней (только текущее юрлицо)
+    const le = orderStore.settings.legalEntity;
+    const lastDateR = await db.from('restaurant_sales').select('sale_date').eq('legal_entity', le).order('sale_date', { ascending: false }).limit(1);
     const lastDate = lastDateR.data?.[0]?.sale_date;
     if (!lastDate) return;
 
@@ -858,6 +859,7 @@ async function checkSalesVsConsumption() {
 
     const { data: sales } = await db.from('restaurant_sales')
       .select('analog_group, quantity')
+      .eq('legal_entity', le)
       .gte('sale_date', cutStr)
       .in('analog_group', uniqueGroups)
       .limit(15000);
@@ -995,6 +997,7 @@ async function loadTrends() {
       const batch = groupList.slice(i, i + 50);
       const { data: sales, error } = await db.from('restaurant_sales')
         .select('sale_date, analog_group, quantity')
+        .eq('legal_entity', orderStore.settings.legalEntity)
         .gte('sale_date', dateFrom)
         .in('analog_group', batch)
         .limit(500000);

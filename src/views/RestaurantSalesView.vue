@@ -204,6 +204,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { parseSalesFile } from '@/lib/salesImport.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
@@ -211,6 +212,7 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 const props = defineProps({ embedded: { type: Boolean, default: false } });
 
 const userStore = useUserStore();
+const orderStore = useOrderStore();
 const toast = useToastStore();
 const isViewer = computed(() => !userStore.hasAccess('analysis', 'edit'));
 
@@ -247,6 +249,7 @@ async function loadData() {
 
     const { data, error } = await db.from('restaurant_sales')
       .select('sale_date, analog_group, quantity, restaurant_count')
+      .eq('legal_entity', orderStore.settings.legalEntity)
       .gte('sale_date', cutStr)
       .order('sale_date', { ascending: true })
       .limit(50000);
@@ -480,6 +483,7 @@ const paginatedGroups = computed(() =>
 function toggleExpand(name) { expanded.value = expanded.value === name ? null : name; }
 
 watch(period, () => { page.value = 1; expanded.value = null; loadData(); });
+watch(() => orderStore.settings.legalEntity, () => { page.value = 1; expanded.value = null; loadData(); });
 watch(searchQuery, () => { page.value = 1; });
 watch(sortKey, () => { page.value = 1; });
 watch(supplierFilter, () => { page.value = 1; });
@@ -525,10 +529,11 @@ async function onFileSelected(e) {
     const items = result.items || result;
     const skuMapped = result.skuMapped || 0;
     if (!items.length) { toast.error('Ошибка', 'Не удалось распознать данные'); return; }
-    toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей…` + (skuMapped ? ` (${skuMapped} по артикулу)` : ''));
+    if (!confirm(`Загрузить ${items.length} записей реализации в юрлицо «${orderStore.settings.legalEntity}»? Существующие записи этого юрлица за совпадающие даты будут обновлены, другие юрлица не пострадают.`)) return;
+    toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей в «${orderStore.settings.legalEntity}»…` + (skuMapped ? ` (${skuMapped} по артикулу)` : ''));
     for (let i = 0; i < items.length; i += 10000) {
       const isLast = i + 10000 >= items.length;
-      const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast });
+      const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast, legal_entity: orderStore.settings.legalEntity });
       if (error) { toast.error('Ошибка', error); return; }
     }
     toast.success('Готово', `Загружено ${items.length.toLocaleString('ru')} записей` + (skuMapped ? `, ${skuMapped} привязано по артикулу` : ''));

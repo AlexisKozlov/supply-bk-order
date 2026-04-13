@@ -1181,14 +1181,18 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Недостаточно прав'], 403);
         }
         $items = $body['items'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (!is_array($items)) respond(['error' => 'Позиции должны быть массивом'], 400);
         if (empty($items)) respond(['error' => 'Список позиций пуст'], 400);
         if (count($items) > 500000) respond(['error' => 'Слишком много записей (макс. 500 000)'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        // Проверяем, что у пользователя есть доступ к этому юрлицу
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         try {
             $pdo->beginTransaction();
-            // Upsert: обновляем если уже есть запись за эту дату и группу
-            $stmt = $pdo->prepare("INSERT INTO `restaurant_sales` (`sale_date`, `analog_group`, `quantity`, `restaurant_count`)
-                VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE `quantity`=VALUES(`quantity`), `restaurant_count`=VALUES(`restaurant_count`)");
+            // Upsert: обновляем если уже есть запись за эту дату, группу и юрлицо
+            $stmt = $pdo->prepare("INSERT INTO `restaurant_sales` (`sale_date`, `legal_entity`, `analog_group`, `quantity`, `restaurant_count`)
+                VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `quantity`=VALUES(`quantity`), `restaurant_count`=VALUES(`restaurant_count`)");
             $inserted = 0;
             foreach ($items as $item) {
                 $date = $item['sale_date'] ?? null;
@@ -1196,11 +1200,11 @@ if ($endpoint === 'rpc') {
                 $qty = $item['quantity'] ?? 0;
                 $rc = $item['restaurant_count'] ?? 0;
                 if (!$date || !$group) continue;
-                $stmt->execute([$date, $group, $qty, $rc]);
+                $stmt->execute([$date, $legalEntity, $group, $qty, $rc]);
                 $inserted++;
             }
             $pdo->commit();
-            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted]);
+            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted, 'legal_entity' => $legalEntity]);
             // TODO: уведомление в Telegram временно отключено
             // if (!empty($body['notify'])) {
             //     notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
@@ -2564,7 +2568,9 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $recipeIds = $body['recipe_ids'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (empty($recipeIds)) respond(['error' => 'Не указаны блюда'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
         $ph = implode(',', array_fill(0, count($recipeIds), '?'));
 
         // Загрузить ингредиенты всех блюд → найти analog_group для каждого
@@ -2605,18 +2611,18 @@ if ($endpoint === 'rpc') {
             }
 
             $qty = 0;
-            // Ищем реализацию уникальных ингредиентов в restaurant_sales
+            // Ищем реализацию уникальных ингредиентов в restaurant_sales (только выбранного юрлица)
             if (!empty($uniqueAGs)) {
                 $ph3 = implode(',', array_fill(0, count($uniqueAGs), '?'));
-                $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group IN ($ph3)");
-                $s->execute($uniqueAGs);
+                $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group IN ($ph3) AND legal_entity = ?");
+                $s->execute(array_merge($uniqueAGs, [$legalEntity]));
                 $qty = floatval($s->fetchColumn() ?: 0);
             }
-            // Fallback: analysis_data
+            // Fallback: analysis_data (тоже по юрлицу)
             if ($qty <= 0 && !empty($uniqueAGs)) {
                 $ph3 = implode(',', array_fill(0, count($uniqueAGs), '?'));
-                $s = $pdo->prepare("SELECT SUM(ad.consumption) as qty FROM analysis_data ad JOIN products p ON p.sku = ad.sku WHERE p.analog_group IN ($ph3)");
-                $s->execute($uniqueAGs);
+                $s = $pdo->prepare("SELECT SUM(ad.consumption) as qty FROM analysis_data ad JOIN products p ON p.sku = ad.sku WHERE p.analog_group IN ($ph3) AND ad.legal_entity = ?");
+                $s->execute(array_merge($uniqueAGs, [$legalEntity]));
                 $qty = floatval($s->fetchColumn() ?: 0);
             }
 
@@ -3723,18 +3729,24 @@ if ($endpoint === 'rpc') {
     // ═══ Распределение новинок (dist_*) ═══
 
     if ($fn === 'dist_get_sessions') {
-        $s = $pdo->query("SELECT * FROM dist_sessions ORDER BY created_at DESC");
+        $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $s = $pdo->prepare("SELECT * FROM dist_sessions WHERE legal_entity_group = ? ORDER BY created_at DESC");
+        $s->execute([$group]);
         respond($s->fetchAll());
     }
 
     if ($fn === 'dist_create_session') {
         $name = trim($body['name'] ?? '');
         $products = $body['products'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (!$name) respond(['error' => 'Название обязательно'], 400);
         if (empty($products)) respond(['error' => 'Добавьте хотя бы один товар'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        $group = getEntityGroup($legalEntity);
         $caller = getSessionUser($pdo);
-        $s = $pdo->prepare("INSERT INTO dist_sessions (name, created_by) VALUES (?, ?)");
-        $s->execute([$name, $caller['name'] ?? 'unknown']);
+        $s = $pdo->prepare("INSERT INTO dist_sessions (name, legal_entity_group, created_by) VALUES (?, ?, ?)");
+        $s->execute([$name, $group, $caller['name'] ?? 'unknown']);
         $sessionId = $pdo->lastInsertId();
         $ins = $pdo->prepare("INSERT INTO dist_session_products (session_id, product_id, custom_name, custom_sku, default_qty, unit, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
         foreach ($products as $i => $p) {
@@ -3776,6 +3788,7 @@ if ($endpoint === 'rpc') {
         $s->execute([$id]);
         $session = $s->fetch();
         if (!$session) respond(['error' => 'Сессия не найдена'], 404);
+        $sessionGroup = $session['legal_entity_group'] ?: 'BK_VM';
         // Товары сессии с данными из справочника
         $s = $pdo->prepare("SELECT sp.id, sp.product_id, sp.custom_name, sp.custom_sku, sp.default_qty, sp.unit, sp.sort_order,
             COALESCE(sp.custom_name, p.name) as product_name, COALESCE(sp.custom_sku, p.sku) as article, p.supplier
@@ -3794,16 +3807,10 @@ if ($endpoint === 'rpc') {
             $s->execute($spIds);
             $entries = $s->fetchAll();
         }
-        // Рестораны (дедупликация: BK_VM приоритет)
-        $s = $pdo->query("SELECT id, number, address, city, region, legal_entity_group FROM restaurants WHERE active=1 ORDER BY FIELD(legal_entity_group,'BK_VM','PS'), CAST(number AS UNSIGNED)");
-        $allRests = $s->fetchAll();
-        $restaurants = [];
-        $seen = [];
-        foreach ($allRests as $r) {
-            $n = $r['number'];
-            if (!isset($seen[$n])) { $seen[$n] = true; $restaurants[] = $r; }
-        }
-        usort($restaurants, function($a,$b){ return intval($a['number']) - intval($b['number']); });
+        // Рестораны — только той же группы, что и сессия
+        $s = $pdo->prepare("SELECT id, number, address, city, region, legal_entity_group FROM restaurants WHERE active=1 AND legal_entity_group = ? ORDER BY CAST(number AS UNSIGNED)");
+        $s->execute([$sessionGroup]);
+        $restaurants = $s->fetchAll();
         // Дни доставки для каждого ресторана
         $restIds = array_column($restaurants, 'id');
         $deliveryDays = [];

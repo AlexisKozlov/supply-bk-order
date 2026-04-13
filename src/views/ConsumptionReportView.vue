@@ -226,6 +226,7 @@ async function loadData() {
     const { data: metaRows } = await db
       .from('restaurant_sales')
       .select('sale_date')
+      .eq('legal_entity', entity)
       .order('sale_date', { ascending: false })
       .limit(1)
 
@@ -243,6 +244,7 @@ async function loadData() {
     const { data: sales } = await db
       .from('restaurant_sales')
       .select('analog_group, quantity, sale_date')
+      .eq('legal_entity', entity)
       .gte('sale_date', cutoffStr)
       .limit(50000)
 

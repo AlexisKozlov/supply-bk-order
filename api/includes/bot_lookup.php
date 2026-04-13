@@ -443,13 +443,15 @@ function productFullInfo($prod, $entity, $skipHistory = false) {
         $info .= "  Остаток/расход: нет данных\n";
     }
 
-    // Реализация ресторанов (по группе аналогов)
+    // Реализация ресторанов (по группе аналогов), фильтр по юрлицу товара
     if (!empty($prod['analog_group'])) {
-        $lastDateS = $pdo->query("SELECT MAX(sale_date) FROM restaurant_sales")->fetchColumn();
+        $lastDateS = $pdo->prepare("SELECT MAX(sale_date) FROM restaurant_sales WHERE legal_entity = ?");
+        $lastDateS->execute([$le]);
+        $lastDateS = $lastDateS->fetchColumn();
         if ($lastDateS) {
             $cut30 = date('Y-m-d', strtotime($lastDateS . ' -29 days'));
-            $sR = $pdo->prepare("SELECT ROUND(SUM(quantity)) as total, ROUND(AVG(quantity)) as avg_day, ROUND(AVG(restaurant_count)) as avg_rc, MAX(sale_date) as last_sale FROM restaurant_sales WHERE analog_group = ? AND sale_date >= ?");
-            $sR->execute([$prod['analog_group'], $cut30]);
+            $sR = $pdo->prepare("SELECT ROUND(SUM(quantity)) as total, ROUND(AVG(quantity)) as avg_day, ROUND(AVG(restaurant_count)) as avg_rc, MAX(sale_date) as last_sale FROM restaurant_sales WHERE analog_group = ? AND sale_date >= ? AND legal_entity = ?");
+            $sR->execute([$prod['analog_group'], $cut30, $le]);
             $sales = $sR->fetch();
             if ($sales && $sales['total'] > 0) {
                 $info .= "  Реализация (30д): {$sales['total']} (ср. {$sales['avg_day']}/день, {$sales['avg_rc']} рест.)\n";
@@ -1263,7 +1265,9 @@ function lookupSales($question, $entity) {
     }
     if (!$isSalesQ) return '';
 
-    $lastDate = $pdo->query("SELECT MAX(sale_date) FROM restaurant_sales")->fetchColumn();
+    $lastDateS = $pdo->prepare("SELECT MAX(sale_date) FROM restaurant_sales WHERE legal_entity = ?");
+    $lastDateS->execute([$entity]);
+    $lastDate = $lastDateS->fetchColumn();
     if (!$lastDate) return '';
 
     $context = "\n== РЕАЛИЗАЦИЯ РЕСТОРАНОВ ==\n";
@@ -1293,10 +1297,10 @@ function lookupSales($question, $entity) {
             $s = $pdo->prepare("
                 SELECT analog_group, ROUND(SUM(quantity)) as total, ROUND(AVG(quantity)) as avg_day,
                        ROUND(AVG(restaurant_count)) as avg_rc, COUNT(DISTINCT sale_date) as days_cnt
-                FROM restaurant_sales WHERE analog_group LIKE ? AND sale_date >= ?
+                FROM restaurant_sales WHERE analog_group LIKE ? AND sale_date >= ? AND legal_entity = ?
                 GROUP BY analog_group HAVING total > 0 ORDER BY total DESC LIMIT 5
             ");
-            $s->execute(["%{$term}%", $cut30]);
+            $s->execute(["%{$term}%", $cut30, $entity]);
             $groups = $s->fetchAll();
             foreach ($groups as $g) {
                 $found = true;
@@ -1308,10 +1312,10 @@ function lookupSales($question, $entity) {
     // Топ-10 по объёму (всегда добавляем для контекста)
     $s = $pdo->prepare("
         SELECT analog_group, ROUND(SUM(quantity)) as total, ROUND(AVG(quantity)) as avg_day
-        FROM restaurant_sales WHERE sale_date >= ?
+        FROM restaurant_sales WHERE sale_date >= ? AND legal_entity = ?
         GROUP BY analog_group HAVING total > 0 ORDER BY total DESC LIMIT 10
     ");
-    $s->execute([$cut30]);
+    $s->execute([$cut30, $entity]);
     $top = $s->fetchAll();
     if ($top) {
         $found = true;
@@ -1329,11 +1333,11 @@ function lookupSales($question, $entity) {
         SELECT analog_group,
                SUM(CASE WHEN sale_date >= ? THEN quantity ELSE 0 END) as cur,
                SUM(CASE WHEN sale_date >= ? AND sale_date < ? THEN quantity ELSE 0 END) as prev
-        FROM restaurant_sales WHERE sale_date >= ?
+        FROM restaurant_sales WHERE sale_date >= ? AND legal_entity = ?
         GROUP BY analog_group HAVING cur > 0 AND prev > 0
         ORDER BY (cur - prev) / prev DESC
     ");
-    $s->execute([$cut14, $cut28, $cut14, $cut28]);
+    $s->execute([$cut14, $cut28, $cut14, $cut28, $entity]);
     $all = $s->fetchAll();
     if ($all) {
         $context .= "\nБольше всего выросли за 2 недели:\n";

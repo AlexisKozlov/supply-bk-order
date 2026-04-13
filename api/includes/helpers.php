@@ -346,7 +346,7 @@ function auditLog($pdo, $action, $entityType, $entityId, $userName, $details = n
 // Таблицы, в которых есть поле legal_entity и нужна проверка доступа
 // Таблицы с колонкой legal_entity — для автоматической фильтрации по юрлицу
 // order_items и item_order НЕ включены: у них нет legal_entity, доступ контролируется через родительскую таблицу orders
-$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary','marketing_activities'];
+$ENTITY_TABLES = ['orders','plans','analysis_data','stock_1c','product_adu','notifications','deficit_sessions','deficit_tokens','stock_collections','price_agreements','product_prices','price_history','tenders','bug_reports','plt_deliveries','plt_daily_stock','plt_summary','marketing_activities','restaurant_sales'];
 
 function resolvePermissions($role, $permissionsJson, $templates) {
     $base = $templates[$role] ?? $templates['user'];

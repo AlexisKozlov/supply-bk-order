@@ -518,31 +518,39 @@ if (!empty($expiringItems)) {
 }
 
 // ═══ 7. Новые данные реализации ресторанов (restaurant_sales) ═══
-// Таблица restaurant_sales не имеет legal_entity — отправляем всем подписчикам
-$recentSales = $pdo->query("
-    SELECT COUNT(*) as cnt, COUNT(DISTINCT analog_group) as groups_cnt,
+// Теперь у таблицы есть legal_entity — уведомляем только тех, у кого доступ к нужному юрлицу
+$recentSalesByEntity = $pdo->query("
+    SELECT legal_entity, COUNT(*) as cnt, COUNT(DISTINCT analog_group) as groups_cnt,
            MAX(sale_date) as last_date
     FROM restaurant_sales
     WHERE created_at > NOW() - INTERVAL 10 MINUTE
-")->fetch();
+    GROUP BY legal_entity
+")->fetchAll();
 
-if ($recentSales && $recentSales['cnt'] > 0) {
+foreach ($recentSalesByEntity as $recentSales) {
+    if (!$recentSales['cnt']) continue;
+    $entity = $recentSales['legal_entity'];
     $users = $pdo->query("
-        SELECT u.name, u.telegram_chat_id
+        SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
         JOIN telegram_settings ts ON ts.user_name = u.name
         WHERE u.telegram_chat_id IS NOT NULL AND ts.restaurant_sales = 1
     ")->fetchAll();
 
     $text = "🍽 <b>Новые данные реализации</b>\n\n";
+    $text .= "Юрлицо: <b>" . htmlspecialchars($entity, ENT_QUOTES) . "</b>\n";
     $text .= "Загружено записей: <b>{$recentSales['cnt']}</b>\n";
     $text .= "Групп товаров: <b>{$recentSales['groups_cnt']}</b>\n";
     $text .= "Последняя дата: <b>{$recentSales['last_date']}</b>";
     foreach ($users as $user) {
-        // Проверяем, не отправляли ли уже (защита от дублей при перекрытии интервалов крона)
-        if (wasNotified($pdo, 'restaurant_sales', 'all', $user['telegram_chat_id'], 600)) continue;
+        // У пользователя должен быть доступ к этому юрлицу
+        $le = ($user['legal_entities'] && is_string($user['legal_entities'])) ? json_decode($user['legal_entities'], true) : [];
+        if (!$le || !in_array($entity, $le, true)) continue;
+        // Защита от дублей (ключ включает юрлицо)
+        $key = 'entity_' . md5($entity);
+        if (wasNotified($pdo, 'restaurant_sales', $key, $user['telegram_chat_id'], 600)) continue;
         tgSend($user['telegram_chat_id'], $text);
-        logNotification($pdo, 'restaurant_sales', 'all', $user['telegram_chat_id']);
+        logNotification($pdo, 'restaurant_sales', $key, $user['telegram_chat_id']);
         $sent++;
     }
 }

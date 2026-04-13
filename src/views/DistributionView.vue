@@ -299,7 +299,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, reactive, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -495,10 +495,22 @@ function fmtDate(d) {
 // ═══ Load ═══
 onMounted(() => loadSessions());
 
+// При смене юрлица: закрываем открытую сессию (если она не той группы) и перезагружаем список
+watch(() => orderStore.settings.legalEntity, async () => {
+  if (activeSession.value) {
+    stopAutoRefresh();
+    activeSession.value = null;
+    sessionData.value = null;
+    for (const key in entriesMap) delete entriesMap[key];
+    for (const key in notesMap) delete notesMap[key];
+  }
+  await loadSessions();
+});
+
 async function loadSessions() {
   loading.value = true;
   try {
-    const { data } = await db.rpc('dist_get_sessions', {});
+    const { data } = await db.rpc('dist_get_sessions', { legal_entity: orderStore.settings.legalEntity });
     sessions.value = data || [];
   } catch (e) { console.warn('[dist]', e); }
   finally { loading.value = false; }
@@ -725,6 +737,7 @@ async function createSession() {
   try {
     const { data } = await db.rpc('dist_create_session', {
       name: newName.value.trim(),
+      legal_entity: orderStore.settings.legalEntity,
       products: newProducts.value.map(p => ({
         product_id: p.product_id || null,
         custom_name: p.custom_name || null,

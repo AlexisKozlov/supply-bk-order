@@ -1903,6 +1903,7 @@ async function loadTrends() {
       const batch = groupList.slice(i, i + 50);
       const { data: sales } = await db.from('restaurant_sales')
         .select('sale_date, analog_group, quantity')
+        .eq('legal_entity', orderStore.settings.legalEntity)
         .gte('sale_date', dateFrom)
         .in('analog_group', batch)
         .limit(500000);

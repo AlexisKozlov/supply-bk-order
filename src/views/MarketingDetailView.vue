@@ -1140,7 +1140,7 @@ async function calcShares(ii) {
     item.sub_items.forEach(s => s.share = Math.round(share * 10000) / 10000);
     return;
   }
-  const { data, error } = await db.rpc('calc_dish_shares', { recipe_ids: recipeIds });
+  const { data, error } = await db.rpc('calc_dish_shares', { recipe_ids: recipeIds, legal_entity: activity.value.legal_entity || legalEntity.value });
   if (error) { toast.error('Ошибка', error); return; }
   const sharesMap = {};
   for (const s of (data?.shares || [])) sharesMap[s.recipe_id] = s.share;
