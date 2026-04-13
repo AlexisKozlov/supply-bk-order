@@ -104,13 +104,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
+
+const orderStore = useOrderStore();
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -164,14 +167,15 @@ function recurrenceLabel(r) {
 
 async function loadProtocols() {
   loading.value = true;
-  const { data, error } = await db.rpc('get_protocols');
+  const { data, error } = await db.rpc('get_protocols', { legal_entity: orderStore.settings.legalEntity });
   if (!error && data) protocols.value = data;
+  else if (error) protocols.value = [];
   loading.value = false;
 }
 
 async function loadSeries() {
-  const { data } = await db.rpc('get_protocol_series');
-  if (data) seriesList.value = data;
+  const { data } = await db.rpc('get_protocol_series', { legal_entity: orderStore.settings.legalEntity });
+  seriesList.value = data || [];
 }
 
 function openProtocol(id) { router.push({ name: 'protocol-detail', params: { id } }); }
@@ -196,6 +200,7 @@ async function saveSeries() {
   const { error } = await db.rpc('save_protocol_series', {
     id: editingSeriesId.value || 0,
     name: seriesForm.value.name,
+    legal_entity: orderStore.settings.legalEntity,
     recurrence: seriesForm.value.recurrence,
     agenda_template: agendaTemplate,
   });
@@ -213,6 +218,12 @@ async function deleteSeries(s) {
 }
 
 onMounted(async () => {
+  await Promise.all([loadProtocols(), loadSeries()]);
+});
+
+watch(() => orderStore.settings.legalEntity, async () => {
+  protocols.value = [];
+  seriesList.value = [];
   await Promise.all([loadProtocols(), loadSeries()]);
 });
 </script>

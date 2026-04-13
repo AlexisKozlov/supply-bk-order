@@ -183,7 +183,10 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, inject } fr
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+
+const orderStore = useOrderStore();
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 
@@ -348,6 +351,7 @@ async function save() {
     series_id: protocol.value.series_id,
     meeting_date: protocol.value.meeting_date,
     topic: protocol.value.topic,
+    legal_entity: protocol.value.legal_entity || orderStore.settings.legalEntity,
     participants: protocol.value.participants,
     questions: protocol.value.questions,
     notes: protocol.value.notes,
@@ -480,7 +484,7 @@ onMounted(async () => {
   document.addEventListener('click', closePickerOnOutsideClick);
   const [usersRes, seriesRes] = await Promise.all([
     db.rpc('get_users_list_short'),
-    db.rpc('get_protocol_series'),
+    db.rpc('get_protocol_series', { legal_entity: orderStore.settings.legalEntity }),
   ]);
   if (usersRes.data) allUsers.value = usersRes.data;
   if (seriesRes.data) seriesList.value = seriesRes.data;

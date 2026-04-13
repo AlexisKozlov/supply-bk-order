@@ -4689,7 +4689,11 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_protocols') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        $s = $pdo->query("SELECT p.*, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id) as decisions_count, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id AND d.status = 'done') as decisions_done, s.name as series_name FROM meeting_protocols p LEFT JOIN meeting_protocol_series s ON s.id = p.series_id ORDER BY p.meeting_date DESC, p.created_at DESC LIMIT 500");
+        $legalEntity = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        $s = $pdo->prepare("SELECT p.*, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id) as decisions_count, (SELECT COUNT(*) FROM protocol_decisions d WHERE d.protocol_id = p.id AND d.status = 'done') as decisions_done, s.name as series_name FROM meeting_protocols p LEFT JOIN meeting_protocol_series s ON s.id = p.series_id WHERE p.legal_entity = ? ORDER BY p.meeting_date DESC, p.created_at DESC LIMIT 500");
+        $s->execute([$legalEntity]);
         respond($s->fetchAll());
     }
 
@@ -4702,6 +4706,7 @@ if ($endpoint === 'rpc') {
         $s->execute([$id]);
         $proto = $s->fetch();
         if (!$proto) respond(['error' => 'Протокол не найден'], 404);
+        if (!checkLegalEntityAccess($caller, $proto['legal_entity'] ?? null)) respond(['error' => 'Нет доступа'], 403);
         // Решения
         $d = $pdo->prepare("SELECT * FROM protocol_decisions WHERE protocol_id = ? ORDER BY id");
         $d->execute([$id]);
@@ -4742,7 +4747,11 @@ if ($endpoint === 'rpc') {
         $seriesId = $body['series_id'] ?: null;
         $status = $body['status'] ?? 'draft';
         $decisions = $body['decisions'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (!$topic) respond(['error' => 'Укажите тему совещания'], 400);
+        // Для нового протокола юрлицо обязательно; для существующего — сохраняем исходное
+        if (!$id && !$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!$id && !checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
 
         try {
             $pdo->beginTransaction();
@@ -4750,8 +4759,8 @@ if ($endpoint === 'rpc') {
                 $pdo->prepare("UPDATE meeting_protocols SET series_id=?, meeting_date=?, topic=?, participants=?, questions=?, notes=?, status=?, updated_at=NOW() WHERE id=?")
                     ->execute([$seriesId, $meetingDate, $topic, json_encode($participants, JSON_UNESCAPED_UNICODE), $questions, $notes, $status, $id]);
             } else {
-                $pdo->prepare("INSERT INTO meeting_protocols (series_id, meeting_date, topic, participants, questions, notes, status, created_by) VALUES (?,?,?,?,?,?,?,?)")
-                    ->execute([$seriesId, $meetingDate, $topic, json_encode($participants, JSON_UNESCAPED_UNICODE), $questions, $notes, $status, $caller['name']]);
+                $pdo->prepare("INSERT INTO meeting_protocols (series_id, meeting_date, topic, legal_entity, participants, questions, notes, status, created_by) VALUES (?,?,?,?,?,?,?,?,?)")
+                    ->execute([$seriesId, $meetingDate, $topic, $legalEntity, json_encode($participants, JSON_UNESCAPED_UNICODE), $questions, $notes, $status, $caller['name']]);
                 $id = $pdo->lastInsertId();
             }
             // Синхронизируем решения
@@ -4847,7 +4856,10 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_protocol_series') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        $s = $pdo->query("SELECT s.*, (SELECT COUNT(*) FROM meeting_protocols p WHERE p.series_id = s.id) as protocols_count FROM meeting_protocol_series s ORDER BY s.name");
+        $legalEntity = $body['legal_entity'] ?? $_GET['legal_entity'] ?? null;
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        $s = $pdo->prepare("SELECT s.*, (SELECT COUNT(*) FROM meeting_protocols p WHERE p.series_id = s.id) as protocols_count FROM meeting_protocol_series s WHERE s.legal_entity = ? ORDER BY s.name");
+        $s->execute([$legalEntity]);
         respond($s->fetchAll());
     }
 
@@ -4862,12 +4874,15 @@ if ($endpoint === 'rpc') {
         $name = trim($body['name'] ?? '');
         $recurrence = $body['recurrence'] ?? 'weekly';
         $agendaTemplate = $body['agenda_template'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (!$name) respond(['error' => 'Укажите название серии'], 400);
+        if (!$id && !$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!$id && !checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
         $agendaJson = json_encode($agendaTemplate, JSON_UNESCAPED_UNICODE);
         if ($id) {
             $pdo->prepare("UPDATE meeting_protocol_series SET name=?, recurrence=?, agenda_template=? WHERE id=?")->execute([$name, $recurrence, $agendaJson, $id]);
         } else {
-            $pdo->prepare("INSERT INTO meeting_protocol_series (name, recurrence, agenda_template, created_by) VALUES (?,?,?,?)")->execute([$name, $recurrence, $agendaJson, $caller['name']]);
+            $pdo->prepare("INSERT INTO meeting_protocol_series (name, legal_entity, recurrence, agenda_template, created_by) VALUES (?,?,?,?,?)")->execute([$name, $legalEntity, $recurrence, $agendaJson, $caller['name']]);
             $id = $pdo->lastInsertId();
         }
         respond(['success' => true, 'id' => $id]);
