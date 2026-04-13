@@ -1000,12 +1000,14 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import * as XLSX from 'xlsx-js-style';
 
 const store = useRestaurantOrderStore();
+const orderStore = useOrderStore();
 const toast = useToastStore();
 
 const loading = ref(true);
@@ -1171,6 +1173,7 @@ async function loadAuditLog(append = false) {
       actor: auditFilters.actor || undefined,
       action: auditFilters.action || undefined,
       search: auditFilters.search || undefined,
+      legalEntity: orderStore.settings.legalEntity || undefined,
       limit: AUDIT_PAGE_SIZE,
       offset: auditOffset,
     });
@@ -1508,6 +1511,12 @@ watch(() => route.query.t, async () => {
   }
 });
 
+// Смена юрлица в сайдбаре — перезагрузка списка ресторанов и журнала
+watch(() => orderStore.settings.legalEntity, () => {
+  loadStatus();
+  if (pageTab.value === 'audit') loadAuditLog();
+});
+
 function onBeforeUnload(e) {
   if (hasUnsavedChanges()) {
     e.preventDefault();
@@ -1691,7 +1700,7 @@ function setTomorrow() {
 async function loadStatus() {
   loading.value = true;
   try {
-    const data = await store.adminGetStatus(selectedDate.value);
+    const data = await store.adminGetStatus(selectedDate.value, orderStore.settings.legalEntity);
     session.value = data.session;
     restaurants.value = data.restaurants || [];
     stats.value = data.stats || { total: 0, submitted: 0, pending: 0 };

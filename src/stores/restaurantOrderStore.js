@@ -143,8 +143,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   }
 
   // === Admin (для закупщиков) ===
-  async function adminGetStatus(date) {
-    return await api(`admin/status?date=${date}`);
+  async function adminGetStatus(date, legalEntity = null) {
+    const params = new URLSearchParams({ date });
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    return await api(`admin/status?${params}`);
   }
 
   async function adminGetOrder(orderId) {
@@ -293,6 +295,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     if (filters.actor) params.set('actor', filters.actor);
     if (filters.action) params.set('action', filters.action);
     if (filters.search) params.set('search', filters.search);
+    if (filters.legalEntity) params.set('legal_entity', filters.legalEntity);
     if (filters.limit) params.set('limit', filters.limit);
     if (filters.offset) params.set('offset', filters.offset);
     return await api(`admin/audit?${params}`);

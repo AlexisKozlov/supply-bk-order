@@ -228,11 +228,22 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats } from '@/lib/shelfLifeImport.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const userStore = useUserStore();
+const orderStore = useOrderStore();
 const toastStore = useToastStore();
+
+// Короткое имя юрлица (в customer-поле таблицы): «ООО "Бургер БК"» → «Бургер БК»
+function entityToCustomer(entity) {
+  if (!entity) return '';
+  if (entity.includes('Пицца Стар')) return 'Пицца Стар';
+  if (entity.includes('Воглия Матта')) return 'Воглия Матта';
+  if (entity.includes('Бургер БК')) return 'Бургер БК';
+  return '';
+}
 
 const allData = ref([]);
 const loading = ref(true);
@@ -241,7 +252,9 @@ const uploading = ref(false);
 const uploadedAt = ref(null);
 const uploadedBy = ref('');
 
-const filterCustomer = ref('');
+// По умолчанию фильтр настроен на юрлицо из боковой панели, чтобы не показывать
+// чужие данные при переключении. «Все» включается кнопкой вручную.
+const filterCustomer = ref(entityToCustomer(orderStore.settings.legalEntity));
 const filterWarehouse = ref('');
 const searchQuery = ref('');
 const activeFilter = ref('');
@@ -708,6 +721,10 @@ async function handleUpload() {
 }
 
 onMounted(loadData);
+// При смене юрлица в сайдбаре переключаем фильтр, если он не был «Все».
+watch(() => orderStore.settings.legalEntity, (v) => {
+  filterCustomer.value = entityToCustomer(v);
+});
 </script>
 
 <style scoped>

@@ -2349,11 +2349,18 @@ function corrSubmitBatch($chatId) {
     $sub = $subSt->fetch();
     $submitterName = $sub ? ($sub['first_name'] ?: ('@' . $sub['username'])) : null;
 
+    // Определяем группу юрлиц ресторана (для фильтра в админке)
+    $restGroup = ((int)$state['rest'] >= 1000) ? 'PS' : 'BK_VM';
+    $restGroupStmt = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+    $restGroupStmt->execute([(int)$state['rest']]);
+    $restGroupRow = $restGroupStmt->fetchColumn();
+    if ($restGroupRow) $restGroup = $restGroupRow;
+
     // INSERT всех позиций
     $corrIds = [];
-    $ins = $pdo->prepare("INSERT INTO order_corrections (restaurant_number, restaurant_chat_id, submitter_name, delivery_date, action, product_sku, product_name, quantity, unit_of_measure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $ins = $pdo->prepare("INSERT INTO order_corrections (restaurant_number, restaurant_chat_id, legal_entity_group, submitter_name, delivery_date, action, product_sku, product_name, quantity, unit_of_measure) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     foreach ($state['items'] as $item) {
-        $ins->execute([$state['rest'], $chatId, $submitterName, $state['date'], $item['action'], $item['sku'], $item['product_name'], $item['qty'], $item['unit'] ?? 'кор.']);
+        $ins->execute([$state['rest'], $chatId, $restGroup, $submitterName, $state['date'], $item['action'], $item['sku'], $item['product_name'], $item['qty'], $item['unit'] ?? 'кор.']);
         $corrIds[] = $pdo->lastInsertId();
     }
 

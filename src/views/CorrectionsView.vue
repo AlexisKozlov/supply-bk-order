@@ -123,10 +123,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { db } from '@/lib/apiClient.js'
-import { formatRestaurantNumber } from '@/lib/legalEntities.js'
+import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
+import { useOrderStore } from '@/stores/orderStore.js'
+
+const orderStore = useOrderStore()
 
 const toastStore = useToastStore()
 const tab = ref('requests')
@@ -180,7 +183,8 @@ function debounceLoad() { clearTimeout(loadTimer); loadTimer = setTimeout(loadCo
 async function loadCorrections() {
   loading.value = true
   try {
-    let query = db.from('order_corrections').select('*').order('created_at', { ascending: false }).limit(500)
+    const groupCode = getEntityGroupCode(orderStore.settings.legalEntity)
+    let query = db.from('order_corrections').select('*').eq('legal_entity_group', groupCode).order('created_at', { ascending: false }).limit(500)
     if (statusFilter.value) query = query.eq('status', statusFilter.value)
     if (restFilter.value.trim()) query = query.eq('restaurant_number', restFilter.value.trim())
     const { data } = await query
@@ -265,6 +269,7 @@ function fmtDateTime(d) {
 function fmtQty(q) { const n = parseFloat(q); return n % 1 === 0 ? n.toFixed(0) : n.toFixed(1) }
 
 onMounted(loadCorrections)
+watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 </script>
 
 <style scoped>

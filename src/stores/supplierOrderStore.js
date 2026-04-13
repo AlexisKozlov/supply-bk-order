@@ -72,8 +72,10 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
 
   // ═══ Для закупщиков (admin) ═══
 
-  async function adminGetSuppliers() {
-    const data = await api('admin/suppliers');
+  async function adminGetSuppliers(legalEntity = null) {
+    const params = new URLSearchParams();
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    const data = await api(`admin/suppliers${params.toString() ? '?' + params : ''}`);
     return data.suppliers || [];
   }
 

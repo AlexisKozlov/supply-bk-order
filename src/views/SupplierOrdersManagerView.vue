@@ -303,8 +303,7 @@
       <div class="rom-date-row">
         <label>Юрлицо:</label>
         <select v-model="templateLe" @change="loadTemplates" class="rom-select">
-          <option value='ООО "Бургер БК"'>Бургер БК</option>
-          <option value='ООО "Воглия Матта"'>Воглия Матта</option>
+          <option v-for="e in LEGAL_ENTITIES" :key="e" :value="e">{{ ENTITY_SHORT_NAMES[e] || e }}</option>
         </select>
         <button class="rom-btn-sm" @click="importFromProducts">Импорт из справочника</button>
         <button class="rom-btn-sm rom-btn-primary" @click="saveTemplates" :disabled="savingTemplates">
@@ -372,13 +371,15 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { useOrderStore } from '@/stores/orderStore.js';
+import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 
 const props = defineProps({
   supplierId: { type: String, default: '' },
 });
 
 const store = useSupplierOrderStore();
+const orderStore = useOrderStore();
 
 const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ', 7: 'ВС' };
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
@@ -419,7 +420,7 @@ for (let d = 1; d <= 7; d++) {
 const loadingTemplates = ref(false);
 const savingTemplates = ref(false);
 const templates = ref([]);
-const templateLe = ref('ООО "Бургер БК"');
+const templateLe = ref(orderStore.settings.legalEntity || 'ООО "Бургер БК"');
 
 // Order modal
 const showOrderModal = ref(false);
@@ -453,7 +454,7 @@ watch(() => props.supplierId, (val) => {
 onMounted(async () => {
   if (!props.supplierId) {
     try {
-      allSuppliers.value = await store.adminGetSuppliers();
+      allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
       if (allSuppliers.value.length === 1) {
         currentSupplierId.value = allSuppliers.value[0].id;
         await loadSettings();
@@ -462,6 +463,23 @@ onMounted(async () => {
     } catch (e) {
       console.error(e);
     }
+  }
+});
+
+// При смене юрлица — сбрасываем выбранного поставщика и перезагружаем
+watch(() => orderStore.settings.legalEntity, async () => {
+  if (props.supplierId) return; // если передан явно — не трогаем
+  currentSupplierId.value = '';
+  templates.value = [];
+  try {
+    allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
+    if (allSuppliers.value.length === 1) {
+      currentSupplierId.value = allSuppliers.value[0].id;
+      await loadSettings();
+      await loadStatus();
+    }
+  } catch (e) {
+    console.error(e);
   }
 });
 

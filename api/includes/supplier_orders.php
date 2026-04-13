@@ -577,17 +577,20 @@ if ($soAction === 'admin') {
 
     // --- Список поставщиков с активными расписаниями ---
     if ($adminAction === 'suppliers' && $method === 'GET') {
-        $s = $pdo->query("
+        $legalEntity = $_GET['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $s = $pdo->prepare("
             SELECT s.id, s.short_name, s.full_name,
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
                    COALESCE(sst.is_accepting_orders, 1) as is_accepting_orders
             FROM suppliers s
             JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
             LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-            WHERE s.is_active = 1
+            WHERE s.is_active = 1 AND s.legal_entity_group = ?
             GROUP BY s.id
             ORDER BY s.short_name
         ");
+        $s->execute([$entityGroup]);
         soRespond(['suppliers' => $s->fetchAll()]);
     }
 

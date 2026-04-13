@@ -1155,12 +1155,17 @@ if (strpos($roAction, 'admin') === 0) {
     // --- Статус заявок ---
     if ($adminAction === 'status' && $method === 'GET') {
         $date = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
+        $legalEntity = $_GET['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+
         $session = roGetActiveSession($pdo);
         if (!$session) roRespond(['session' => null, 'orders' => []]);
 
         $deadlineStatus = roGetDeadlineStatus($pdo, $session['id'], $date);
 
-        // Все активные рестораны с расписанием на этот день
+        // Все активные рестораны группы юрлиц с расписанием на этот день.
+        // JOIN с ro_orders также привязан к legal_entity_group, чтобы заказ
+        // БК-ресторана с номером 1 не показался в списке ПС-ресторанов.
         $dow = (int)(new DateTime($date))->format('N');
         $rests = $pdo->prepare("
             SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
@@ -1171,11 +1176,15 @@ if (strpos($roAction, 'admin') === 0) {
                    (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
             FROM restaurants r
             JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ?
-            LEFT JOIN ro_orders o ON o.restaurant_number = r.number AND o.session_id = ? AND o.delivery_date = ?
-            WHERE r.active = 1
+            LEFT JOIN ro_orders o
+                ON o.restaurant_number = r.number
+                AND o.session_id = ?
+                AND o.delivery_date = ?
+                AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = r.legal_entity_group
+            WHERE r.active = 1 AND r.legal_entity_group = ?
             ORDER BY r.region, r.number
         ");
-        $rests->execute([$dow, $session['id'], $date]);
+        $rests->execute([$dow, $session['id'], $date, $entityGroup]);
         $restaurants = $rests->fetchAll();
 
         // Подгружаем вес и паллеты для всех заказов
@@ -2039,35 +2048,49 @@ if (strpos($roAction, 'admin') === 0) {
         $actor = $_GET['actor'] ?? '';
         $action = $_GET['action'] ?? '';
         $search = trim($_GET['search'] ?? '');
+        $legalEntity = $_GET['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
         $limit = min((int)($_GET['limit'] ?? 200), 1000);
         $offset = max((int)($_GET['offset'] ?? 0), 0);
 
         $where = ['1=1'];
         $params = [];
         // Фильтр по дате поставки — то, что обычно ищут («все события по заказам на дату X»).
-        if ($dateFrom) { $where[] = 'delivery_date >= ?'; $params[] = $dateFrom; }
-        if ($dateTo)   { $where[] = 'delivery_date <= ?'; $params[] = $dateTo; }
-        if ($restaurant !== '') { $where[] = 'restaurant_number = ?'; $params[] = (int)$restaurant; }
-        if ($actor !== '')      { $where[] = 'actor_name LIKE ?';     $params[] = '%' . $actor . '%'; }
-        if ($action !== '')     { $where[] = 'action = ?';            $params[] = $action; }
+        if ($dateFrom) { $where[] = 'al.delivery_date >= ?'; $params[] = $dateFrom; }
+        if ($dateTo)   { $where[] = 'al.delivery_date <= ?'; $params[] = $dateTo; }
+        if ($restaurant !== '') { $where[] = 'al.restaurant_number = ?'; $params[] = (int)$restaurant; }
+        if ($actor !== '')      { $where[] = 'al.actor_name LIKE ?';     $params[] = '%' . $actor . '%'; }
+        if ($action !== '')     { $where[] = 'al.action = ?';            $params[] = $action; }
         if ($search !== '')     {
-            $where[] = '(sku LIKE ? OR product_name LIKE ? OR old_value LIKE ? OR new_value LIKE ?)';
+            $where[] = '(al.sku LIKE ? OR al.product_name LIKE ? OR al.old_value LIKE ? OR al.new_value LIKE ?)';
             $like = '%' . $search . '%';
             array_push($params, $like, $like, $like, $like);
         }
+        // Фильтр по группе юрлиц: событие относится либо к заказу этой группы,
+        // либо к ресторану этой группы (для событий без order_id).
+        if ($entityGroup) {
+            $where[] = "((o.legal_entity IS NOT NULL AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?) OR (al.order_id IS NULL AND r.legal_entity_group = ?))";
+            $params[] = $entityGroup;
+            $params[] = $entityGroup;
+        }
 
-        $sql = "SELECT id, order_id, restaurant_number, delivery_date, action, actor_name, actor_type,
-                       sku, product_name, old_value, new_value, details, created_at
-                FROM ro_audit_log
+        $sql = "SELECT al.id, al.order_id, al.restaurant_number, al.delivery_date, al.action, al.actor_name, al.actor_type,
+                       al.sku, al.product_name, al.old_value, al.new_value, al.details, al.created_at
+                FROM ro_audit_log al
+                LEFT JOIN ro_orders o ON o.id = al.order_id
+                LEFT JOIN restaurants r ON r.number = al.restaurant_number AND r.active = 1
                 WHERE " . implode(' AND ', $where) . "
-                ORDER BY created_at DESC, id DESC
+                ORDER BY al.created_at DESC, al.id DESC
                 LIMIT {$limit} OFFSET {$offset}";
         $s = $pdo->prepare($sql);
         $s->execute($params);
         $rows = $s->fetchAll();
 
         // Total count для пагинации
-        $countSql = "SELECT COUNT(*) FROM ro_audit_log WHERE " . implode(' AND ', $where);
+        $countSql = "SELECT COUNT(*) FROM ro_audit_log al
+                     LEFT JOIN ro_orders o ON o.id = al.order_id
+                     LEFT JOIN restaurants r ON r.number = al.restaurant_number AND r.active = 1
+                     WHERE " . implode(' AND ', $where);
         $cs = $pdo->prepare($countSql);
         $cs->execute($params);
         $total = (int)$cs->fetchColumn();
