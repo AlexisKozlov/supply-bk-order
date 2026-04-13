@@ -60,7 +60,19 @@ function tgSend($chatId, $text, $disablePreview = false, $replyMarkup = null) {
         CURLOPT_TIMEOUT => 10,
     ]);
     $result = curl_exec($ch);
+    $curlErr = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    if ($result === false || $curlErr) {
+        error_log("[tgSend] curl error chat={$chatId}: " . ($curlErr ?: 'unknown'));
+        return false;
+    }
+    $data = json_decode($result, true);
+    if (!is_array($data) || empty($data['ok'])) {
+        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
+        error_log("[tgSend] Telegram error chat={$chatId} http={$httpCode}: {$desc}");
+        return false;
+    }
     return $result;
 }
 
@@ -92,7 +104,19 @@ function tgSendDocument($chatId, $filename, $content, $caption = '', $mime = 'ap
         CURLOPT_TIMEOUT => 30,
     ]);
     $result = curl_exec($ch);
+    $curlErr = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    if ($result === false || $curlErr) {
+        error_log("[tgSendDocument] curl error chat={$chatId} file={$filename}: " . ($curlErr ?: 'unknown'));
+        return false;
+    }
+    $data = json_decode($result, true);
+    if (!is_array($data) || empty($data['ok'])) {
+        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
+        error_log("[tgSendDocument] Telegram error chat={$chatId} file={$filename} http={$httpCode}: {$desc}");
+        return false;
+    }
     return $result;
 }
 
@@ -1435,9 +1459,12 @@ try {
                     $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
                     $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
                     $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
+                    $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
                     foreach ($subs as $sub) {
-                        tgSend($sub['telegram_chat_id'], $caption, true);
-                        $sent++;
+                        $ok = tgSend($sub['telegram_chat_id'], $caption, true);
+                        $type = $ok !== false ? 'so_summary_sent' : 'so_summary_fail';
+                        $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+                        if ($ok !== false) $sent++;
                     }
                     $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
                         ->execute([$dedupKey]);
@@ -1531,9 +1558,12 @@ try {
                     }
                 }
 
+                $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
                 foreach ($subs as $sub) {
-                    tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
-                    $sent++;
+                    $ok = tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
+                    $type = $ok !== false ? 'so_summary_sent' : 'so_summary_fail';
+                    $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+                    if ($ok !== false) $sent++;
                 }
 
                 $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
@@ -1835,9 +1865,12 @@ try {
                     }
                 }
 
+                $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
                 foreach ($vegSubs as $sub) {
-                    tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
-                    $sent++;
+                    $ok = tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
+                    $type = $ok !== false ? 'veg_summary_sent' : 'veg_summary_fail';
+                    $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+                    if ($ok !== false) $sent++;
                 }
 
                 $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('veg_summary', '', 0, ?)")
