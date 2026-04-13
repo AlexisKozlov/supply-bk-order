@@ -583,12 +583,14 @@ if ($soAction === 'admin') {
     if ($adminAction === 'suppliers' && $method === 'GET') {
         $legalEntity = $_GET['legal_entity'] ?? null;
         $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        // LEFT JOIN — чтобы новые поставщики без графиков тоже попадали
+        // в список (иначе их невозможно выбрать и настроить им расписание).
         $s = $pdo->prepare("
             SELECT s.id, s.short_name, s.full_name, s.legal_entity, s.legal_entity_group,
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
                    COALESCE(sst.is_accepting_orders, 1) as is_accepting_orders
             FROM suppliers s
-            JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+            LEFT JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
             LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
             WHERE s.is_active = 1 AND s.legal_entity_group = ?
             GROUP BY s.id
