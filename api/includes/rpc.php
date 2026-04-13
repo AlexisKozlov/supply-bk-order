@@ -1188,23 +1188,26 @@ if ($endpoint === 'rpc') {
         if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
         // Проверяем, что у пользователя есть доступ к этому юрлицу
         if (!checkLegalEntityAccess($caller, $legalEntity)) respond(['error' => 'Нет доступа к юр. лицу'], 403);
+        // Реализация хранится на уровне группы (BK_VM/PS), а не конкретного юрлица —
+        // для БК+ВМ это одна и та же выгрузка из 1С.
+        $group = getEntityGroup($legalEntity);
         try {
             $pdo->beginTransaction();
-            // Upsert: обновляем если уже есть запись за эту дату, группу и юрлицо
-            $stmt = $pdo->prepare("INSERT INTO `restaurant_sales` (`sale_date`, `legal_entity`, `analog_group`, `quantity`, `restaurant_count`)
+            // Upsert: обновляем если уже есть запись за эту дату, товарную группу и группу юрлиц
+            $stmt = $pdo->prepare("INSERT INTO `restaurant_sales` (`sale_date`, `legal_entity_group`, `analog_group`, `quantity`, `restaurant_count`)
                 VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `quantity`=VALUES(`quantity`), `restaurant_count`=VALUES(`restaurant_count`)");
             $inserted = 0;
             foreach ($items as $item) {
                 $date = $item['sale_date'] ?? null;
-                $group = $item['analog_group'] ?? null;
+                $ag = $item['analog_group'] ?? null;
                 $qty = $item['quantity'] ?? 0;
                 $rc = $item['restaurant_count'] ?? 0;
-                if (!$date || !$group) continue;
-                $stmt->execute([$date, $legalEntity, $group, $qty, $rc]);
+                if (!$date || !$ag) continue;
+                $stmt->execute([$date, $group, $ag, $qty, $rc]);
                 $inserted++;
             }
             $pdo->commit();
-            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted, 'legal_entity' => $legalEntity]);
+            auditLog($pdo, 'data_imported', 'import', null, $caller['name'], ['type' => 'restaurant_sales', 'count' => $inserted, 'legal_entity_group' => $group]);
             // TODO: уведомление в Telegram временно отключено
             // if (!empty($body['notify'])) {
             //     notifyTelegramRestaurantSales($pdo, $caller['name'], $items, $inserted);
@@ -2611,11 +2614,11 @@ if ($endpoint === 'rpc') {
             }
 
             $qty = 0;
-            // Ищем реализацию уникальных ингредиентов в restaurant_sales (только выбранного юрлица)
+            // Ищем реализацию уникальных ингредиентов в restaurant_sales (по группе юрлиц)
             if (!empty($uniqueAGs)) {
                 $ph3 = implode(',', array_fill(0, count($uniqueAGs), '?'));
-                $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group IN ($ph3) AND legal_entity = ?");
-                $s->execute(array_merge($uniqueAGs, [$legalEntity]));
+                $s = $pdo->prepare("SELECT SUM(quantity) as qty FROM restaurant_sales WHERE analog_group IN ($ph3) AND legal_entity_group = ?");
+                $s->execute(array_merge($uniqueAGs, [getEntityGroup($legalEntity)]));
                 $qty = floatval($s->fetchColumn() ?: 0);
             }
             // Fallback: analysis_data (тоже по юрлицу)

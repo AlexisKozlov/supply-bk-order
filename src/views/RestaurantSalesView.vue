@@ -206,6 +206,7 @@ import { parseSalesFile } from '@/lib/salesImport.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { getEntityGroupCode, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 
@@ -249,7 +250,7 @@ async function loadData() {
 
     const { data, error } = await db.from('restaurant_sales')
       .select('sale_date, analog_group, quantity, restaurant_count')
-      .eq('legal_entity', orderStore.settings.legalEntity)
+      .eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity))
       .gte('sale_date', cutStr)
       .order('sale_date', { ascending: true })
       .limit(50000);
@@ -529,8 +530,9 @@ async function onFileSelected(e) {
     const items = result.items || result;
     const skuMapped = result.skuMapped || 0;
     if (!items.length) { toast.error('Ошибка', 'Не удалось распознать данные'); return; }
-    if (!confirm(`Загрузить ${items.length} записей реализации в юрлицо «${orderStore.settings.legalEntity}»? Существующие записи этого юрлица за совпадающие даты будут обновлены, другие юрлица не пострадают.`)) return;
-    toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей в «${orderStore.settings.legalEntity}»…` + (skuMapped ? ` (${skuMapped} по артикулу)` : ''));
+    const groupLabel = getEntityGroupCode(orderStore.settings.legalEntity) === 'PS' ? 'Пицца Стар' : 'Бургер БК + Воглия Матта';
+    if (!confirm(`Загрузить ${items.length} записей реализации в «${groupLabel}»? БК и ВМ используют общие данные, поэтому будут обновлены записи всей группы. Другая группа юрлиц не пострадает.`)) return;
+    toast.info('Загрузка', `Отправляю ${items.length.toLocaleString('ru')} записей в «${groupLabel}»…` + (skuMapped ? ` (${skuMapped} по артикулу)` : ''));
     for (let i = 0; i < items.length; i += 10000) {
       const isLast = i + 10000 >= items.length;
       const { error } = await db.rpc('replace_restaurant_sales', { items: items.slice(i, i + 10000), notify: isLast, legal_entity: orderStore.settings.legalEntity });

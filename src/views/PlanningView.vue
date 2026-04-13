@@ -500,7 +500,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
 import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityGroupFilter, toLocalDateStr } from '@/lib/utils.js';
-import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
+import { DEFAULT_ENTITY, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
@@ -1899,11 +1899,12 @@ async function loadTrends() {
     const dateFrom = toLocalDateStr(dLoad);
     const groupList = [...groups];
     let allSales = [];
+    const planGroupCode = getEntityGroupCode(orderStore.settings.legalEntity);
     for (let i = 0; i < groupList.length; i += 50) {
       const batch = groupList.slice(i, i + 50);
       const { data: sales } = await db.from('restaurant_sales')
         .select('sale_date, analog_group, quantity')
-        .eq('legal_entity', orderStore.settings.legalEntity)
+        .eq('legal_entity_group', planGroupCode)
         .gte('sale_date', dateFrom)
         .in('analog_group', batch)
         .limit(500000);

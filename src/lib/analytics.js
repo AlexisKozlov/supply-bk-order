@@ -5,6 +5,7 @@
 
 import { db } from './apiClient.js';
 import { toLocalDateStr, applyEntityGroupFilter } from './utils.js';
+import { getEntityGroupCode } from './legalEntities.js';
 
 export const ANALYTICS_VERSION = 2;
 const PALETTE = [
@@ -372,11 +373,11 @@ export async function getForecastData(legalEntity) {
     .select('sku, name, qty_per_box, supplier, analog_group, unit_of_measure');
   productsQuery = applyEntityGroupFilter(productsQuery, legalEntity);
 
-  // Реализация ресторанов за 365 дней (для сезонности и прогноза, только текущего юрлица)
+  // Реализация ресторанов за 365 дней (для сезонности и прогноза, по группе юрлиц)
   const start365 = new Date(now); start365.setDate(start365.getDate() - 365);
   let salesQuery = db.from('restaurant_sales')
     .select('sale_date, analog_group, quantity, restaurant_count')
-    .eq('legal_entity', legalEntity)
+    .eq('legal_entity_group', getEntityGroupCode(legalEntity))
     .gte('sale_date', toLocalDateStr(start365))
     .order('sale_date', { ascending: true })
     .limit(500000);

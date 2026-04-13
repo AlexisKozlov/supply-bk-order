@@ -271,14 +271,15 @@ function botHandleImport($chatId, $fileId, $importType, $user) {
             sendMessage($chatId, "❌ Не выбрано юрлицо. Переключите через /entity.");
             return;
         }
-        // Идентично replace_restaurant_sales на сайте — upsert в транзакции, с юрлицом
+        // Идентично replace_restaurant_sales на сайте — upsert в транзакции, с группой юрлиц
+        $group = getEntityGroup($entity);
         $pdo->beginTransaction();
         try {
-            $ins = $pdo->prepare("INSERT INTO restaurant_sales (sale_date, legal_entity, analog_group, quantity, restaurant_count) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), restaurant_count = VALUES(restaurant_count)");
+            $ins = $pdo->prepare("INSERT INTO restaurant_sales (sale_date, legal_entity_group, analog_group, quantity, restaurant_count) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), restaurant_count = VALUES(restaurant_count)");
             $cnt = 0;
             foreach ($items as $item) {
                 if (!$item['sale_date'] || !$item['analog_group']) continue;
-                $ins->execute([$item['sale_date'], $entity, $item['analog_group'], $item['quantity'], $item['restaurant_count']]);
+                $ins->execute([$item['sale_date'], $group, $item['analog_group'], $item['quantity'], $item['restaurant_count']]);
                 $cnt++;
             }
             $pdo->commit();

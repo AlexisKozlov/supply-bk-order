@@ -518,18 +518,20 @@ if (!empty($expiringItems)) {
 }
 
 // ═══ 7. Новые данные реализации ресторанов (restaurant_sales) ═══
-// Теперь у таблицы есть legal_entity — уведомляем только тех, у кого доступ к нужному юрлицу
-$recentSalesByEntity = $pdo->query("
-    SELECT legal_entity, COUNT(*) as cnt, COUNT(DISTINCT analog_group) as groups_cnt,
+// Реализация хранится по группе юрлиц (BK_VM/PS) — уведомляем тех, у кого
+// хотя бы одно юрлицо входит в обновлённую группу.
+$recentSalesByGroup = $pdo->query("
+    SELECT legal_entity_group, COUNT(*) as cnt, COUNT(DISTINCT analog_group) as groups_cnt,
            MAX(sale_date) as last_date
     FROM restaurant_sales
     WHERE created_at > NOW() - INTERVAL 10 MINUTE
-    GROUP BY legal_entity
+    GROUP BY legal_entity_group
 ")->fetchAll();
 
-foreach ($recentSalesByEntity as $recentSales) {
+foreach ($recentSalesByGroup as $recentSales) {
     if (!$recentSales['cnt']) continue;
-    $entity = $recentSales['legal_entity'];
+    $group = $recentSales['legal_entity_group'];
+    $groupLabel = $group === 'PS' ? 'Пицца Стар' : 'Бургер БК + Воглия Матта';
     $users = $pdo->query("
         SELECT u.name, u.telegram_chat_id, u.legal_entities
         FROM users u
@@ -538,16 +540,20 @@ foreach ($recentSalesByEntity as $recentSales) {
     ")->fetchAll();
 
     $text = "🍽 <b>Новые данные реализации</b>\n\n";
-    $text .= "Юрлицо: <b>" . htmlspecialchars($entity, ENT_QUOTES) . "</b>\n";
+    $text .= "Юрлица: <b>" . htmlspecialchars($groupLabel, ENT_QUOTES) . "</b>\n";
     $text .= "Загружено записей: <b>{$recentSales['cnt']}</b>\n";
     $text .= "Групп товаров: <b>{$recentSales['groups_cnt']}</b>\n";
     $text .= "Последняя дата: <b>{$recentSales['last_date']}</b>";
     foreach ($users as $user) {
-        // У пользователя должен быть доступ к этому юрлицу
+        // У пользователя должно быть хотя бы одно юрлицо из этой группы
         $le = ($user['legal_entities'] && is_string($user['legal_entities'])) ? json_decode($user['legal_entities'], true) : [];
-        if (!$le || !in_array($entity, $le, true)) continue;
-        // Защита от дублей (ключ включает юрлицо)
-        $key = 'entity_' . md5($entity);
+        if (!$le) continue;
+        $hasAny = false;
+        foreach ($le as $userLe) {
+            if (getEntityGroup($userLe) === $group) { $hasAny = true; break; }
+        }
+        if (!$hasAny) continue;
+        $key = 'group_' . $group;
         if (wasNotified($pdo, 'restaurant_sales', $key, $user['telegram_chat_id'], 600)) continue;
         tgSend($user['telegram_chat_id'], $text);
         logNotification($pdo, 'restaurant_sales', $key, $user['telegram_chat_id']);

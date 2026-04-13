@@ -282,6 +282,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter } from '@/lib/utils.js';
+import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
@@ -847,9 +848,9 @@ async function checkSalesVsConsumption() {
     const uniqueGroups = [...new Set(Object.values(groupsMap))];
     if (!uniqueGroups.length) return;
 
-    // Загружаем реализацию за 30 дней (только текущее юрлицо)
-    const le = orderStore.settings.legalEntity;
-    const lastDateR = await db.from('restaurant_sales').select('sale_date').eq('legal_entity', le).order('sale_date', { ascending: false }).limit(1);
+    // Загружаем реализацию за 30 дней (только текущая группа юрлиц — БК+ВМ или ПС)
+    const groupCode = getEntityGroupCode(orderStore.settings.legalEntity);
+    const lastDateR = await db.from('restaurant_sales').select('sale_date').eq('legal_entity_group', groupCode).order('sale_date', { ascending: false }).limit(1);
     const lastDate = lastDateR.data?.[0]?.sale_date;
     if (!lastDate) return;
 
@@ -859,7 +860,7 @@ async function checkSalesVsConsumption() {
 
     const { data: sales } = await db.from('restaurant_sales')
       .select('analog_group, quantity')
-      .eq('legal_entity', le)
+      .eq('legal_entity_group', groupCode)
       .gte('sale_date', cutStr)
       .in('analog_group', uniqueGroups)
       .limit(15000);
@@ -993,11 +994,12 @@ async function loadTrends() {
     const dateFrom = toLocalDateStr(dLoad);
     const groupList = [...groups];
     let allSales = [];
+    const trendsGroupCode = getEntityGroupCode(orderStore.settings.legalEntity);
     for (let i = 0; i < groupList.length; i += 50) {
       const batch = groupList.slice(i, i + 50);
       const { data: sales, error } = await db.from('restaurant_sales')
         .select('sale_date, analog_group, quantity')
-        .eq('legal_entity', orderStore.settings.legalEntity)
+        .eq('legal_entity_group', trendsGroupCode)
         .gte('sale_date', dateFrom)
         .in('analog_group', batch)
         .limit(500000);

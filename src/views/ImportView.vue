@@ -26,6 +26,7 @@ import { db } from '@/lib/apiClient.js'
 import { parseFile } from '@/lib/importStock.js'
 import { parseStockMalling } from '@/lib/shelfLifeImport.js'
 import { parseSalesFile } from '@/lib/salesImport.js'
+import { getEntityGroupCode } from '@/lib/legalEntities.js'
 import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
 import { useUserStore } from '@/stores/userStore.js'
@@ -144,7 +145,7 @@ async function loadLastUpdates() {
     const le = orderStore.settings.legalEntity
     const analysisQuery = db.from('analysis_data').select('updated_at').order('updated_at', { ascending: false }).limit(1)
     const salesQuery = le
-      ? db.from('restaurant_sales').select('created_at').eq('legal_entity', le).order('created_at', { ascending: false }).limit(1)
+      ? db.from('restaurant_sales').select('created_at').eq('legal_entity_group', getEntityGroupCode(le)).order('created_at', { ascending: false }).limit(1)
       : db.from('restaurant_sales').select('created_at').order('created_at', { ascending: false }).limit(1)
     const [a, s, sh] = await Promise.all([
       analysisQuery,
