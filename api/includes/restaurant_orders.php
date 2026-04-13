@@ -2103,14 +2103,20 @@ if (strpos($roAction, 'admin') === 0) {
         $xlsx = \Shuchkin\SimpleXLSX::parse($filePath);
         if (!$xlsx) roRespond(['error' => 'Не удалось прочитать Excel файл'], 400);
 
-        // Загружаем все товары из БД для сопоставления
-        $productsStmt = $pdo->query("SELECT sku, external_code, name FROM products WHERE is_active = 1");
+        // Загружаем все товары из БД для сопоставления (включая неактивные/«невидимые» карточки).
+        // ORDER BY is_active DESC: активные идут первыми и занимают ключ, неактивные заполняют
+        // только те ключи, которых у активных нет — это исключает перетирание активных карточек.
+        $productsStmt = $pdo->query("SELECT sku, external_code, name FROM products ORDER BY is_active DESC, id ASC");
         $productsBySku = [];
         $productsByExtCode = [];
         foreach ($productsStmt->fetchAll() as $p) {
-            $productsBySku[trim($p['sku'])] = $p;
-            if (!empty($p['external_code'])) {
-                $productsByExtCode[trim($p['external_code'])] = $p;
+            $sku = trim($p['sku']);
+            if ($sku !== '' && !isset($productsBySku[$sku])) {
+                $productsBySku[$sku] = $p;
+            }
+            $ext = trim($p['external_code'] ?? '');
+            if ($ext !== '' && !isset($productsByExtCode[$ext])) {
+                $productsByExtCode[$ext] = $p;
             }
         }
 

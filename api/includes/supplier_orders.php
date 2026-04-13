@@ -519,6 +519,26 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         // Уведомление не критично — игнорируем ошибку
     }
 
+    // Аудит
+    try {
+        $supNameForLog = $supplierName ?? null;
+        $isSkipForLog = !empty($isSkip);
+        $actionLog = $isSkipForLog
+            ? 'so_order_skipped'
+            : ($existingOrder ? 'so_order_updated' : 'so_order_submitted');
+        auditLog($pdo, $actionLog, 'supplier_order', $orderId,
+            'Ресторан ' . $rest['restaurant_number'],
+            [
+                'legal_entity' => $rest['legal_entity'] ?? '',
+                'supplier_id' => (int)$supplierId,
+                'supplier' => $supNameForLog,
+                'delivery_date' => $deliveryDate,
+                'items_count' => $totalItems,
+                'total_qty' => $totalQty,
+            ]
+        );
+    } catch (Exception $e) { /* не критично */ }
+
     soRespond([
         'success' => true,
         'order_id' => (int)$orderId,
@@ -865,6 +885,21 @@ if ($soAction === 'admin') {
                 "✏️ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} изменена ({$updatedBy}).");
         }
 
+        // Аудит
+        try {
+            $leSt2 = $pdo->prepare("SELECT legal_entity FROM so_orders WHERE id = ?");
+            $leSt2->execute([$orderId]);
+            $leForLog = $leSt2->fetchColumn() ?: '';
+            auditLog($pdo, 'so_order_edited', 'supplier_order', $orderId, $updatedBy, [
+                'legal_entity' => $leForLog,
+                'supplier' => $orderInfo['supplier_name'] ?? null,
+                'delivery_date' => $orderInfo['delivery_date'] ?? null,
+                'restaurant_number' => $orderInfo['restaurant_number'] ?? null,
+                'items_updated' => $items !== null,
+                'status' => $status ?? null,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
+
         soRespond(['success' => true]);
     }
 
@@ -887,7 +922,7 @@ if ($soAction === 'admin') {
         if ($itemId) {
             // Получаем текущее состояние ДО обновления
             $cur = $pdo->prepare("
-                SELECT oi.product_name, oi.sku, oi.quantity, oi.admin_qty,
+                SELECT oi.order_id, oi.product_name, oi.sku, oi.quantity, oi.admin_qty,
                        o.restaurant_number, o.delivery_date, s.short_name as supplier_name
                 FROM so_order_items oi
                 JOIN so_orders o ON o.id = oi.order_id
@@ -898,6 +933,7 @@ if ($soAction === 'admin') {
             $info = $cur->fetch();
             if ($info) {
                 $oldVal = ($info['admin_qty'] !== null) ? (float)$info['admin_qty'] : (float)$info['quantity'];
+                $orderId = (int)$info['order_id'];
                 $notify = [
                     'restaurant_number' => $info['restaurant_number'],
                     'supplier_name' => $info['supplier_name'],
@@ -1003,6 +1039,22 @@ if ($soAction === 'admin') {
             }
         }
 
+        // Аудит ручной правки количества
+        if ($notify) {
+            try {
+                $byName = $sessionUser ? ($sessionUser['name'] ?? 'закупщик') : 'закупщик';
+                auditLog($pdo, 'so_qty_adjusted', 'supplier_order', $orderId ?? null, $byName, [
+                    'supplier' => $notify['supplier_name'] ?? null,
+                    'restaurant_number' => $notify['restaurant_number'] ?? null,
+                    'delivery_date' => $notify['delivery_date'] ?? null,
+                    'sku' => $notify['sku'] ?? null,
+                    'product_name' => $notify['product_name'] ?? null,
+                    'old_val' => $notify['old_val'] ?? null,
+                    'new_val' => $notify['new_val'] ?? null,
+                ]);
+            } catch (Exception $e) { /* не критично */ }
+        }
+
         soRespond(['success' => true, 'reload' => !empty($reload)]);
     }
 
@@ -1022,15 +1074,26 @@ if ($soAction === 'admin') {
         $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
         $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$orderId]);
 
+        $by = $sessionUser ? $sessionUser['name'] : 'admin';
+
         // Уведомляем ресторан
         if ($orderInfo) {
             $dowNames = [0=>'Вс',1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
             $dow = (int)date('w', strtotime($orderInfo['delivery_date']));
             $dateStr = ($dowNames[$dow] ?? '') . ', ' . date('d.m', strtotime($orderInfo['delivery_date']));
-            $by = $sessionUser ? $sessionUser['name'] : 'admin';
             roNotifyRestaurant($pdo, $orderInfo['restaurant_number'],
                 "❌ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} удалена ({$by}).");
         }
+
+        // Аудит
+        try {
+            auditLog($pdo, 'so_order_deleted', 'supplier_order', $orderId, $by, [
+                'legal_entity' => $orderInfo['legal_entity'] ?? '',
+                'supplier' => $orderInfo['supplier_name'] ?? null,
+                'delivery_date' => $orderInfo['delivery_date'] ?? null,
+                'restaurant_number' => $orderInfo['restaurant_number'] ?? null,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
 
         soRespond(['success' => true]);
     }

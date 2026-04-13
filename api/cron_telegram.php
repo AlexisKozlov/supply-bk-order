@@ -1101,25 +1101,39 @@ try {
         $supName = $sup['short_name'];
         $defaultDeadlineTime = $sup['default_deadline_time'];
 
-        // Пары (ресторан, дни), у которых есть привязанный Telegram
+        // Все расписания поставщика: ресторан + дни заказа/доставки
         $schStmt = $pdo->prepare("
             SELECT ss.restaurant_id, ss.order_day, ss.delivery_day,
-                   r.number AS restaurant_number, ru.telegram_chat_id
+                   r.number AS restaurant_number
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-            JOIN ro_users ru ON ru.restaurant_number = r.number
-                 AND ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
             WHERE ss.supplier_id = ? AND ss.is_active = 1
         ");
         $schStmt->execute([$supId]);
         $schRows = $schStmt->fetchAll();
 
-        // Группируем по ресторану
+        // Группируем по ресторану, chat_id резолвим ниже (ro_users → veg_telegram_subs)
         $byRest = [];
+        $chatIdLookup = $pdo->prepare("
+            SELECT telegram_chat_id FROM ro_users
+            WHERE restaurant_number = ? AND telegram_chat_id > 0 AND is_active = 1
+            LIMIT 1
+        ");
+        $chatIdFallback = $pdo->prepare("
+            SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? LIMIT 1
+        ");
         foreach ($schRows as $s) {
             $rn = $s['restaurant_number'];
             if (!isset($byRest[$rn])) {
-                $byRest[$rn] = ['chat_id' => $s['telegram_chat_id'], 'schedule' => []];
+                // Резолвим chat_id: сначала ro_users, иначе veg_telegram_subs
+                $chatIdLookup->execute([$rn]);
+                $cid = $chatIdLookup->fetchColumn();
+                if (!$cid) {
+                    $chatIdFallback->execute([$rn]);
+                    $cid = $chatIdFallback->fetchColumn();
+                }
+                if (!$cid) continue; // ресторан без привязки — пропускаем
+                $byRest[$rn] = ['chat_id' => $cid, 'schedule' => []];
             }
             $byRest[$rn]['schedule'][] = [
                 'order_day' => (int)$s['order_day'],
@@ -1262,9 +1276,13 @@ try {
             $redirect = "/restaurant/orders/supplier/{$supId}";
             $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
 
-            $keyboard = ['inline_keyboard' => [
-                [['text' => '📝 Открыть заявку', 'url' => $url]],
-            ]];
+            // Кнопка «Подать в боте» — показывается только если дедлайн ещё не истёк
+            $rows = [];
+            if ($reminderType !== 'expired') {
+                $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
+            }
+            $rows[] = [['text' => '🌐 Открыть на сайте', 'url' => $url]];
+            $keyboard = ['inline_keyboard' => $rows];
 
             tgSend($chatId, $msgText, true, $keyboard);
             $sent++;

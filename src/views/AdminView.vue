@@ -449,6 +449,18 @@
             <div class="adm-stat-value">{{ statsData.users_count ?? 0 }}</div>
             <div class="adm-stat-label">Пользователей</div>
           </div>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.ro_orders_total ?? 0 }}</div>
+            <div class="adm-stat-label">Заказов ресторанов</div>
+          </div>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.so_orders_total ?? 0 }}</div>
+            <div class="adm-stat-label">Заявок поставщикам</div>
+          </div>
+          <div class="adm-stat-card">
+            <div class="adm-stat-value">{{ statsData.price_agreements_total ?? 0 }}</div>
+            <div class="adm-stat-label">Протоколов цен</div>
+          </div>
         </div>
 
         <div class="adm-stats-blocks">
@@ -1005,6 +1017,7 @@ const auditCategories = [
   { value: 'correction', label: 'Корректировки' },
   { value: 'import', label: 'Импорт данных' },
   { value: 'veg', label: 'Планета Ресторанов' },
+  { value: 'supplier_order', label: 'Заявки поставщикам' },
   { value: 'stock_collection', label: 'Сбор остатков' },
   { value: 'distribution', label: 'Распределение' },
   { value: 'system', label: 'Система' },
@@ -1038,6 +1051,10 @@ const AUDIT_ACTION_LABELS = {
   data_imported: 'Импорт', recipe_imported: 'Импорт рецептур',
   // Овощи
   veg_session_created: 'Сессия создана', veg_order_updated: 'Заявка изменена', veg_order_submitted: 'Заявка подана',
+  // Заявки поставщикам (so_*)
+  so_order_submitted: 'Заявка подана', so_order_updated: 'Заявка обновлена',
+  so_order_skipped: 'Поставка не нужна', so_order_edited: 'Изменена закупщиком',
+  so_order_deleted: 'Удалена', so_qty_adjusted: 'Правка количества',
   // Сбор остатков
   stock_collection_created: 'Создан', collection_created: 'Создан', collection_closed: 'Закрыт',
   // Распределение
@@ -1050,7 +1067,7 @@ const AUDIT_ENTITY_LABELS = {
   user: 'Пользователь', price_agreement: 'Протокол цен',
   marketing: 'Маркетинг', tender: 'Тендер',
   correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
-  import: 'Импорт', veg: 'Планета Ресторанов', system: 'Система',
+  import: 'Импорт', veg: 'Планета Ресторанов', supplier_order: 'Заявка поставщику', system: 'Система',
 };
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }
@@ -1901,22 +1918,24 @@ function autoResizeReply(e) {
 }
 
 async function sendBugReply() {
+  if (!bugDetail.value?.id) return;
   const text = bugReplyText.value.trim();
   const images = bugReplyImages.value.filter(x => x.path).map(x => x.path);
   if (!text && !images.length) return;
   if (bugReplySending.value) return;
   bugReplySending.value = true;
   try {
-    // Соединяем текст + изображения в одно сообщение
     let msg = text;
     if (images.length) {
       const imgTags = images.map(p => '[img:' + p + ']').join(' ');
       msg = msg ? msg + '\n' + imgTags : imgTags;
     }
-    await db.rpc('reply_bug_report', { report_id: bugDetail.value.id, message: msg });
+    const reportId = bugDetail.value.id;
+    const { error } = await db.rpc('reply_bug_report', { report_id: reportId, message: msg });
+    if (error) { toast.error('Не удалось отправить', error); return; }
     bugReplyText.value = '';
     bugReplyImages.value = [];
-    const { data } = await db.rpc('get_bug_report', { id: bugDetail.value.id });
+    const { data } = await db.rpc('get_bug_report', { id: reportId });
     if (data) {
       bugDetail.value = data.report;
       bugReplies.value = data.replies || [];
@@ -1968,7 +1987,7 @@ async function bugPoll() {
         if (d2.replies?.length > oldCount) scrollChatToBottom();
       }
     }
-  } catch {}
+  } catch (e) { console.warn('[admin] bugPoll error:', e); }
 }
 
 function startBugPoll() {

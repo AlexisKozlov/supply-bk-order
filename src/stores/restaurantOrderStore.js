@@ -85,6 +85,13 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
 
   function logout() {
     api('logout', { method: 'POST' }).catch(() => {});
+    logoutLocal();
+  }
+
+  // Локальный выход: чистит только клиентское состояние, не обращаясь к серверу.
+  // Нужен при входе по tg_token — чтобы не убить активную сессию того же ресторана
+  // на другом устройстве (сервер сам перезапишет session_token в tg-auth).
+  function logoutLocal() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REST_KEY);
     restaurant.value = null;
@@ -366,7 +373,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
 
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
-    login, loginByTelegram, validate, logout, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
+    login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetOrder, adminUpdateOrder,

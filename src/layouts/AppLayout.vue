@@ -50,24 +50,57 @@
         </template>
       </template>
 
-      <!-- Инструменты — ряд иконок -->
+      <!-- Инструменты — группы с переключателем режима -->
       <template v-if="toolsItems.some(t => userStore.hasAccess(t.module, 'view') && isModuleVisible(t.module, t.route))">
-        <div class="sidebar-section" v-if="!sidebarCollapsed">Инструменты</div>
-        <div class="sidebar-tools-row" :class="{ 'sidebar-tools-row-collapsed': sidebarCollapsed }">
-          <template v-for="item in toolsItems" :key="item.route">
-            <router-link
-              v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module, item.route)"
-              :to="{ name: item.route }"
-              class="sidebar-tool-icon"
-              :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
-              :title="item.label + (isPinned(item.route) ? ' ⭐' : ' (ПКМ — закрепить)')"
-              @contextmenu.prevent="togglePin(item.route)"
-            >
-              <BkIcon :name="item.icon" size="sm" light/>
-              <span v-if="badgeCounts[item.module]" class="sidebar-badge">{{ badgeCounts[item.module] }}</span>
-            </router-link>
-          </template>
+        <div class="sidebar-section sidebar-section-tools" v-if="!sidebarCollapsed">
+          <span>Инструменты</span>
+          <button
+            class="sidebar-tools-toggle"
+            :class="{ active: toolsExpanded }"
+            @click="toggleToolsExpanded"
+            :title="toolsExpanded ? 'Показать только иконки' : 'Показать с названиями'"
+          >
+            <BkIcon name="menu" size="sm" light/>
+          </button>
         </div>
+        <template v-for="group in toolsGroups" :key="group.title">
+          <template v-if="group.items.some(t => userStore.hasAccess(t.module, 'view') && isModuleVisible(t.module, t.route))">
+            <div class="sidebar-subsection" v-if="!sidebarCollapsed">{{ group.title }}</div>
+            <!-- Режим «с названиями» (только когда сайдбар не свёрнут) -->
+            <nav v-if="toolsExpanded && !sidebarCollapsed" class="sidebar-nav">
+              <template v-for="item in group.items" :key="item.route">
+                <router-link
+                  v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module, item.route)"
+                  :to="{ name: item.route }"
+                  class="sidebar-item"
+                  :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
+                  :title="isPinned(item.route) ? item.label + ' ⭐' : item.label + ' (ПКМ — закрепить)'"
+                  @contextmenu.prevent="togglePin(item.route)"
+                >
+                  <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
+                  <span>{{ item.label }}</span>
+                  <span v-if="badgeCounts[item.module]" class="sidebar-badge sidebar-badge-inline">{{ badgeCounts[item.module] }}</span>
+                </router-link>
+              </template>
+            </nav>
+            <!-- Режим «иконки» -->
+            <div v-else class="sidebar-tools-row" :class="{ 'sidebar-tools-row-collapsed': sidebarCollapsed }">
+              <template v-for="item in group.items" :key="item.route">
+                <router-link
+                  v-if="userStore.hasAccess(item.module, 'view') && isModuleVisible(item.module, item.route)"
+                  :to="{ name: item.route }"
+                  class="sidebar-tool-icon"
+                  :class="{ active: currentRoute === item.route || (currentRoute || '').startsWith(item.route + '-') }"
+                  :title="item.label + (isPinned(item.route) ? ' ⭐' : ' (ПКМ — закрепить)')"
+                  @contextmenu.prevent="togglePin(item.route)"
+                >
+                  <BkIcon :name="item.icon" size="sm" light/>
+                  <span v-if="badgeCounts[item.module]" class="sidebar-badge">{{ badgeCounts[item.module] }}</span>
+                </router-link>
+              </template>
+            </div>
+          </template>
+        </template>
       </template>
 
       <template v-if="userStore.isAdmin || userStore.hasAccess('telegram', 'view')">
@@ -412,27 +445,41 @@ const sidebarSections = [
   ]},
 ];
 
-const toolsItems = [
-  { module: 'analytics', route: 'dashboard', icon: 'home', label: 'Дашборд' },
-  { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
-  { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
-  { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
-  { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
-  { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
-  { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
-  { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
-  { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
-  { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
-  { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
-  { module: 'pallet-storage', route: 'pallet-storage', icon: 'warehouse', label: 'Паллетовка склада' },
-  { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
-  { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
-  { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
-  { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
-  { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
-  { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
-  { module: 'truck-loading', route: 'truck-loading', icon: 'truck', label: 'Загрузка машин' },
+const toolsGroups = [
+  { title: 'Аналитика', items: [
+    { module: 'analytics', route: 'dashboard', icon: 'home', label: 'Дашборд' },
+    { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
+    { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
+    { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
+    { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
+  ]},
+  { title: 'Склад и логистика', items: [
+    { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
+    { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
+    { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
+    { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
+    { module: 'truck-loading', route: 'truck-loading', icon: 'truck', label: 'Загрузка машин' },
+    { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
+    { module: 'pallet-storage', route: 'pallet-storage', icon: 'warehouse', label: 'Паллетовка склада' },
+  ]},
+  { title: 'Поставщики', items: [
+    { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
+    { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
+    { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
+    { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
+    { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
+  ]},
+  { title: 'Рестораны', items: [
+    { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
+    { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
+  ]},
 ];
+const toolsItems = toolsGroups.flatMap(g => g.items);
+const toolsExpanded = ref(localStorage.getItem('bk_tools_expanded') === 'true');
+function toggleToolsExpanded() {
+  toolsExpanded.value = !toolsExpanded.value;
+  localStorage.setItem('bk_tools_expanded', toolsExpanded.value ? 'true' : 'false');
+}
 
 // ═══ Вкладки (tabs) ═══
 const MAX_TABS = 7;
@@ -1007,11 +1054,49 @@ function confirmLogout() {
 }
 
 /* ═══ Tools row (иконки в ряд) ═══ */
+.sidebar-section-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+.sidebar-tools-toggle {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: all 0.15s;
+}
+.sidebar-tools-toggle:hover {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.9);
+}
+.sidebar-tools-toggle.active {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.95);
+}
+.sidebar-subsection {
+  padding: 6px 14px 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: rgba(255,255,255,0.38);
+  flex-shrink: 0;
+  text-transform: none;
+}
+.sidebar-badge-inline {
+  position: static;
+  margin-left: auto;
+}
 .sidebar-tools-row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 2px 10px 8px;
+  padding: 2px 10px 4px;
 }
 .sidebar-tools-row-collapsed {
   flex-direction: column;

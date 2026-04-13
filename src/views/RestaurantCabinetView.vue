@@ -430,17 +430,35 @@
                   </div>
                 </div>
               </template>
-              <div v-if="del.expired && vegHasPrevData(del.date)" class="prev-data">
-                <div class="prev-data-title">Предыдущий заказ:</div>
-                <div v-for="prod in vegInfo.products" :key="'prev-' + prod.id" class="prev-data-row">
-                  <span>{{ prod.product_name }}</span>
-                  <strong v-if="vegPrevInfo(del.date, prod)">{{ vegPrevInfo(del.date, prod).qty }} {{ vegUnitShort(prod.unit) }}</strong>
-                  <span v-else>—</span>
+              <template v-if="del.expired">
+                <div v-if="vegDayHasData(del.date)" class="prev-data">
+                  <div class="prev-data-title">
+                    <template v-if="vegDayAllZeros(del.date)">Поставка не нужна</template>
+                    <template v-else>Ваша заявка:</template>
+                  </div>
+                  <template v-if="!vegDayAllZeros(del.date)">
+                    <div v-for="prod in vegInfo.products" :key="'sent-' + prod.id + '-' + del.date" class="prev-data-row">
+                      <span>{{ prod.product_name }}</span>
+                      <strong v-if="parseFloat(vegOrderValues[del.date + '_' + prod.id]) > 0">{{ vegOrderValues[del.date + '_' + prod.id] }} {{ vegUnitShort(prod.unit) }}</strong>
+                      <span v-else>—</span>
+                    </div>
+                  </template>
                 </div>
-              </div>
+                <div v-else class="prev-data">
+                  <div class="prev-data-title">Заявка не подана</div>
+                </div>
+                <div v-if="vegHasPrevData(del.date)" class="prev-data">
+                  <div class="prev-data-title">Предыдущий заказ:</div>
+                  <div v-for="prod in vegInfo.products" :key="'prev-' + prod.id + '-' + del.date" class="prev-data-row">
+                    <span>{{ prod.product_name }}</span>
+                    <strong v-if="vegPrevInfo(del.date, prod)">{{ vegPrevInfo(del.date, prod).qty }} {{ vegUnitShort(prod.unit) }}</strong>
+                    <span v-else>—</span>
+                  </div>
+                </div>
+              </template>
             </div>
 
-            <div class="submit-area" v-if="vegDeliveries.some(d => !d.expired)">
+            <div class="submit-area" v-if="vegDeliveries[vegActiveDay] && !vegDeliveries[vegActiveDay].expired">
               <div v-if="vegHasMultErrors" class="error-msg">Исправьте кратность</div>
               <div class="submit-buttons-row">
                 <button v-if="vegEditing" class="btn btn-outline btn-lg" @click="vegEditing = false; vegSubmitted = true">Отмена</button>
@@ -1360,12 +1378,6 @@ async function vegLoadData() {
     vegAllExisting.value = existing;
     vegPrevSessionOrders.value = prevRes.data?.orders || [];
     for (const o of existing) { const key = o.delivery_date + '_' + o.product_id; if (key in vegOrderValues) { const q = vegOrderQty(o); vegOrderValues[key] = !isNaN(q) ? String(q) : ''; } }
-    // Считаем «отправлено» только если ВСЕ открытые дни имеют данные
-    const openDays = vegDeliveries.value.filter(d => !d.expired);
-    if (openDays.length > 0) {
-      const allDaysFilled = openDays.every(d => vegDayHasData(d.date));
-      if (allDaysFilled) vegSubmitted.value = true;
-    }
   } catch { vegNoSession.value = true; }
   finally { vegLoading.value = false; }
 }
@@ -1384,14 +1396,13 @@ async function vegSubmit() {
 }
 
 async function vegSkipDelivery() {
-  const ok = await showConfirm('Отказ от поставки', 'Подтвердить, что поставка от «Планета Ресторанов» не нужна на эти дни?', { okText: 'Не нужна', danger: true });
+  const del = vegDeliveries.value[vegActiveDay.value];
+  if (!del || del.expired) return;
+  const dayLabel = vegFmtDeliveryDate(del.date);
+  const ok = await showConfirm('Отказ от поставки', `Подтвердить, что поставка от «Планета Ресторанов» на ${dayLabel} не нужна?`, { okText: 'Не нужна', danger: true });
   if (!ok) return;
-  // Заполняем нулями все активные дни
-  for (const del of vegDeliveries.value) {
-    if (del.expired) continue;
-    for (const prod of (vegInfo.value?.products || [])) {
-      vegOrderValues[del.date + '_' + prod.id] = '0';
-    }
+  for (const prod of (vegInfo.value?.products || [])) {
+    vegOrderValues[del.date + '_' + prod.id] = '0';
   }
   await vegSubmit();
 }
@@ -1499,22 +1510,27 @@ async function supSkipDelivery(sup) {
 
 // ═══ Общее ═══
 async function switchTab(tab, subTab) {
-  // Защита от случайного переключения при несохранённых изменениях
-  if (activeTab.value === 'orders' && tab !== 'orders') {
-    if (delHasUnsavedChanges.value) {
-      const ok = await showConfirm('Несохранённые изменения', 'В заказе есть несохранённые изменения. Перейти на другую вкладку?', { okText: 'Перейти' });
-      if (!ok) return;
-    }
-    if (vegEditing.value) {
-      const ok = await showConfirm('Несохранённые изменения', 'Заявка «Планета Ресторанов» не сохранена. Перейти на другую вкладку?', { okText: 'Перейти' });
-      if (!ok) return;
-    }
+  const curTab = activeTab.value;
+  const curSub = orderSubTab.value;
+  const nextTab = tab;
+  const nextSub = (tab === 'orders') ? (subTab || orderSubTab.value) : null;
+
+  // Определяем, какую под-вкладку пользователь реально покидает
+  const leavingDelivery = curTab === 'orders' && curSub === 'delivery' && !(nextTab === 'orders' && nextSub === 'delivery');
+  const leavingPlaneta = curTab === 'orders' && curSub === 'planeta' && !(nextTab === 'orders' && nextSub === 'planeta');
+  const leavingProfile = curTab === 'profile' && nextTab !== 'profile';
+
+  if (leavingDelivery && delHasUnsavedChanges.value) {
+    const ok = await showConfirm('Несохранённые изменения', 'В заказе есть несохранённые изменения. Перейти на другую вкладку?', { okText: 'Перейти' });
+    if (!ok) return;
   }
-  if (activeTab.value === 'profile' && tab !== 'profile') {
-    if (pwOld.value || pwNew.value) {
-      const ok = await showConfirm('Смена пароля', 'Вы начали менять пароль. Перейти на другую вкладку?', { okText: 'Перейти' });
-      if (!ok) return;
-    }
+  if (leavingPlaneta && vegEditing.value) {
+    const ok = await showConfirm('Несохранённые изменения', 'Заявка «Планета Ресторанов» не сохранена. Перейти на другую вкладку?', { okText: 'Перейти' });
+    if (!ok) return;
+  }
+  if (leavingProfile && (pwOld.value || pwNew.value)) {
+    const ok = await showConfirm('Смена пароля', 'Вы начали менять пароль. Перейти на другую вкладку?', { okText: 'Перейти' });
+    if (!ok) return;
   }
   activeTab.value = tab;
   if (subTab) orderSubTab.value = subTab;
@@ -1739,8 +1755,10 @@ onMounted(async () => {
   if (tgTokenParam) {
     const redirectQ = route.query.redirect;
     const redirectPath = (typeof redirectQ === 'string' && /^\/restaurant(\/|$)/.test(redirectQ)) ? redirectQ : null;
-    // Сбрасываем старую сессию (другого ресторана)
-    roStore.logout();
+    // Сбрасываем старую сессию ТОЛЬКО локально. Если позвать обычный logout(),
+    // он дернёт /api/ro/logout и убьёт session_token на сервере — а это та же запись,
+    // которую используют открытые вкладки других устройств. Tg-auth сам перезапишет session_token ниже.
+    roStore.logoutLocal();
     try {
       const result = await roStore.loginByTelegram(tgTokenParam);
       if (!result.success) {
@@ -1751,13 +1769,9 @@ onMounted(async () => {
       router.replace({ name: 'restaurant-order-login' });
       return;
     }
-    // Чистим query, идём на нужный путь
-    if (redirectPath) {
-      router.replace(redirectPath);
-    } else {
-      router.replace({ name: 'restaurant-cabinet' });
-    }
-    return; // onMounted перезапустится после router.replace
+    // Убираем tg_token из URL, уходим на целевой путь. Компонент при этом НЕ перемонтируется,
+    // поэтому продолжаем инициализацию ниже — иначе данные не загрузятся и экран будет пустым.
+    router.replace(redirectPath || { name: 'restaurant-cabinet' });
   }
   if (!roStore.isAuthenticated) {
     const valid = await roStore.validate();

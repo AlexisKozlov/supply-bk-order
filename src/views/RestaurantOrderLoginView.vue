@@ -160,8 +160,9 @@ function safeRedirect(target) {
 
 async function handleTgLogin(tgToken, redirectTarget) {
   tgLoading.value = true;
-  // Очищаем предыдущую сессию (если был залогинен другой ресторан)
-  store.logout();
+  // Очищаем предыдущее состояние локально, не дергая серверный logout:
+  // иначе убьётся session_token активной сессии того же ресторана на другом устройстве.
+  store.logoutLocal();
   try {
     const result = await store.loginByTelegram(tgToken);
     if (result.success) {
