@@ -3273,6 +3273,8 @@ if ($endpoint === 'rpc') {
         $uname = $authUserName ?: ($body['user_name'] ?? '');
         $dateFrom = $body['date_from'] ?? null;
         $dateTo = $body['date_to'] ?? null;
+        $legalEntity = $body['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
         if (!$name || empty($products)) respond(['error' => 'Не все параметры указаны'], 400);
         if (count($products) > 200) respond(['error' => 'Слишком много товаров (макс. 200)'], 400);
         // Валидация дат
@@ -3280,8 +3282,8 @@ if ($endpoint === 'rpc') {
         if ($dateTo && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) $dateTo = null;
         $pdo->beginTransaction();
         try {
-            $s = $pdo->prepare("INSERT INTO veg_sessions (name, date_from, date_to, created_by) VALUES (?, ?, ?, ?)");
-            $s->execute([$name, $dateFrom, $dateTo, $uname]);
+            $s = $pdo->prepare("INSERT INTO veg_sessions (name, date_from, date_to, legal_entity_group, created_by) VALUES (?, ?, ?, ?, ?)");
+            $s->execute([$name, $dateFrom, $dateTo, $entityGroup, $uname]);
             $sessId = $pdo->lastInsertId();
             $ins = $pdo->prepare("INSERT INTO veg_session_products (session_id, product_name, unit, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?)");
             foreach ($products as $i => $p) {

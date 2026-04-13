@@ -473,10 +473,13 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import { toLocalDateStr } from '@/lib/utils.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';
+
+const orderStore = useOrderStore();
 
 const props = defineProps({
   embedded: { type: Boolean, default: false },
@@ -700,11 +703,13 @@ function shortName(name) {
 
 // ═══ Sessions ═══
 onMounted(loadSessions);
+watch(() => orderStore.settings.legalEntity, () => { sessions.value = []; activeSession.value = null; loadSessions(); });
 
 async function loadSessions() {
   loading.value = true;
   try {
-    const { data } = await db.from('veg_sessions').select('*').order('created_at.desc').limit(50);
+    const groupCode = getEntityGroupCode(orderStore.settings.legalEntity);
+    const { data } = await db.from('veg_sessions').select('*').eq('legal_entity_group', groupCode).order('created_at.desc').limit(50);
     sessions.value = data || [];
   } catch (e) { console.warn('[veg] load sessions', e); }
   finally { loading.value = false; }
@@ -720,6 +725,7 @@ async function createSession() {
       name,
       date_from: createDateFrom.value || null,
       date_to: createDateTo.value || null,
+      legal_entity: orderStore.settings.legalEntity,
       products: prods.map(p => ({ name: p.name.trim(), unit: p.unit, multiplicity: p.multiplicity ? parseFloat(String(p.multiplicity).replace(',', '.')) : null })),
       day_config: createDayConfig.value.filter(c => c.restaurants.length),
       user_name: userStore.currentUser?.name,
