@@ -9,6 +9,7 @@ api/.env
 api/api/
 nohup.out
 *.xlsx
+!public/templates/*.xlsx
 .claude/
 api/uploads/
 public/mockups/

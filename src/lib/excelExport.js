@@ -204,34 +204,43 @@ export async function exportToExcel(items, settings, priceMap) {
 export async function exportProductsToExcel(products, legalEntity) {
   const XLSX = await import('xlsx-js-style');
 
+  // Заголовки синхронизированы с ImportCardsModal.vue → COLUMN_MAP,
+  // чтобы экспортированный файл можно было отредактировать и залить обратно.
   const headerRow = [
-    'Артикул', 'Товар', 'Поставщик', 'Шт/кор', 'Кор/пал',
-    'Ед. измерения', 'Кратность', 'Группа аналогов', 'Хранение',
-    'Внешний код', 'Нетто (г)', 'Брутто (г)', 'Прослеживаемость', 'Видимость',
+    'Артикул', 'Внешний код', 'Штрихкод', 'Наименование', 'Поставщик',
+    'Коэффициент единицы для отчетов', 'Единица хранения',
+    'Количество кор. в паллете', 'Кратность',
+    'Вес нетто (кг)', 'Вес брутто (кг)',
+    'Прослеживаемый', 'Активная',
+    'Группа аналогов', 'Хранение',
   ];
 
   const dataRows = products.map(p => [
     p.sku || '',
+    p.external_code || '',
+    p.gtin || '',
     p.name || '',
     p.supplier || '',
     p.qty_per_box || '',
-    p.boxes_per_pallet || '',
     p.unit_of_measure || 'шт',
+    p.boxes_per_pallet || '',
     p.multiplicity || '',
-    p.analog_group || '',
-    p.category || '',
-    p.external_code || '',
     p.weight_netto || '',
     p.weight_brutto || '',
     (p.is_traceable === 1 || p.is_traceable === '1') ? 'Да' : 'Нет',
     (p.is_active === 0 || p.is_active === '0') ? 'Нет' : 'Да',
+    p.analog_group || '',
+    p.category || '',
   ]);
 
   const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
   ws['!cols'] = [
-    { wch: 14 }, { wch: 45 }, { wch: 25 }, { wch: 8 }, { wch: 8 },
-    { wch: 12 }, { wch: 10 }, { wch: 25 }, { wch: 12 },
-    { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 },
+    { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 45 }, { wch: 25 },
+    { wch: 14 }, { wch: 12 },
+    { wch: 14 }, { wch: 10 },
+    { wch: 12 }, { wch: 12 },
+    { wch: 14 }, { wch: 10 },
+    { wch: 25 }, { wch: 12 },
   ];
 
   const wb = XLSX.utils.book_new();

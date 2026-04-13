@@ -15,7 +15,7 @@
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">или перетащите его сюда</div>
           </div>
           <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.6;">
-            <b>Ожидаемые колонки:</b> Артикул, Наименование, Поставщик, Коэффициент единицы для отчетов, Единица хранения, Количество кор. в паллете, Количество штук в блоке, Количество блоков в коробе, Активная, Группа аналогов, Хранение
+            <b>Ожидаемые колонки:</b> Артикул, Внешний код, Штрихкод, Наименование, Поставщик, Коэффициент единицы для отчетов, Единица хранения, Количество кор. в паллете, Количество штук в блоке, Количество блоков в коробе, Вес нетто, Вес брутто, Прослеживаемый, Активная, Группа аналогов, Хранение
           </div>
           <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none;" @change="onFileSelected" />
         </div>
@@ -159,6 +159,13 @@ const result = ref({ added: 0, duplicates: 0, inactive: 0, errors: 0 });
 
 const COLUMN_MAP = {
   'артикул':                           'sku',
+  'внешний код':                       'external_code',
+  'внутренний код':                    'external_code',
+  'код 1с':                            'external_code',
+  'штрихкод':                          'gtin',
+  'штрих-код':                         'gtin',
+  'gtin':                              'gtin',
+  'ean':                               'gtin',
   'наименование':                      'raw_name',
   'поставщик':                         'supplier',
   'коэффициент единицы для отчетов':   'qty_per_box',
@@ -172,6 +179,13 @@ const COLUMN_MAP = {
   'количество штук в блоке':           'block_qty',
   'количество блоков в коробе':        'case_blocks',
   'кратность':                         'multiplicity_direct',
+  'вес нетто (кг)':                    'weight_netto',
+  'вес нетто':                         'weight_netto',
+  'вес брутто (кг)':                   'weight_brutto',
+  'вес брутто':                        'weight_brutto',
+  'прослеживаемый':                    'is_traceable',
+  'прослеживаемость':                  'is_traceable',
+  'маркировка':                        'is_traceable',
   'активная':                          'active',
   'видимость':                         'active',
   'группа аналогов (new)':             'analog_group',
@@ -357,6 +371,20 @@ async function parseExcel(file) {
     const analogGroup = colIdx.analog_group !== undefined ? String(r[colIdx.analog_group] || '').trim() : '';
     const category = colIdx.category !== undefined ? String(r[colIdx.category] || '').trim() : '';
 
+    // Дополнительные поля (внешний код, штрихкод, вес, прослеживаемость)
+    const externalCode = colIdx.external_code !== undefined ? String(r[colIdx.external_code] || '').trim() : '';
+    const gtin = colIdx.gtin !== undefined ? String(r[colIdx.gtin] || '').trim() : '';
+    const weightNetto = colIdx.weight_netto !== undefined
+      ? parseFloat(String(r[colIdx.weight_netto]).replace(',', '.')) || null : null;
+    const weightBrutto = colIdx.weight_brutto !== undefined
+      ? parseFloat(String(r[colIdx.weight_brutto]).replace(',', '.')) || null : null;
+    // Прослеживаемый: «да/yes/1/+» → 1, иначе → 0 (или не трогаем если колонки нет)
+    let isTraceable = null;
+    if (colIdx.is_traceable !== undefined) {
+      const v = String(r[colIdx.is_traceable] || '').trim().toLowerCase();
+      isTraceable = (v === 'да' || v === 'yes' || v === '1' || v === '+') ? 1 : 0;
+    }
+
     const row = {
       sku,
       name,
@@ -369,6 +397,11 @@ async function parseExcel(file) {
       category: category || null,
       legal_entity: props.legalEntity,
     };
+    if (externalCode) row.external_code = externalCode;
+    if (gtin) row.gtin = gtin;
+    if (weightNetto !== null) row.weight_netto = weightNetto;
+    if (weightBrutto !== null) row.weight_brutto = weightBrutto;
+    if (isTraceable !== null) row.is_traceable = isTraceable;
 
     row._status = classifyRow(row);
     rows.push(row);
