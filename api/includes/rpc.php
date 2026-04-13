@@ -3359,7 +3359,7 @@ if ($endpoint === 'rpc') {
         $s->execute([$sessId]);
         $products = $s->fetchAll();
         // Заявки
-        $s2 = $pdo->prepare("SELECT id, product_id, restaurant_number, delivery_date, quantity, admin_note, admin_qty, submitted_at FROM veg_orders WHERE session_id = ? ORDER BY restaurant_number, delivery_date");
+        $s2 = $pdo->prepare("SELECT id, product_id, restaurant_number, delivery_date, quantity, admin_note, admin_qty, submitted_at, source FROM veg_orders WHERE session_id = ? ORDER BY restaurant_number, delivery_date");
         $s2->execute([$sessId]);
         $orders = $s2->fetchAll();
         // Пометки по ресторанам
@@ -3645,6 +3645,34 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Ошибка сохранения'], 500);
         }
         respond(['success' => true]);
+    }
+    if ($fn === 'veg_get_summary_subscribers') {
+        $s = $pdo->query("
+            SELECT u.name, u.telegram_chat_id, COALESCE(ts.veg_deadline_summary, 0) AS subscribed
+            FROM users u
+            LEFT JOIN telegram_settings ts ON ts.user_name = u.name
+            WHERE u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id > 0
+            ORDER BY u.name
+        ");
+        $rows = $s->fetchAll();
+        foreach ($rows as &$r) { $r['subscribed'] = (int)$r['subscribed']; }
+        respond($rows);
+    }
+    if ($fn === 'veg_set_summary_subscriber') {
+        $name = trim($body['name'] ?? '');
+        $on = !empty($body['subscribed']) ? 1 : 0;
+        if ($name === '') respond(['error' => 'Не указано имя'], 400);
+        try {
+            $upd = $pdo->prepare("UPDATE telegram_settings SET veg_deadline_summary = ? WHERE user_name = ?");
+            $upd->execute([$on, $name]);
+            if ($upd->rowCount() === 0) {
+                $ins = $pdo->prepare("INSERT INTO telegram_settings (user_name, veg_deadline_summary) VALUES (?, ?)");
+                $ins->execute([$name, $on]);
+            }
+            respond(['success' => true]);
+        } catch (Exception $e) {
+            respond(['error' => 'Ошибка сохранения'], 500);
+        }
     }
     if ($fn === 'veg_get_schedule_all') {
         $s = $pdo->prepare("SELECT restaurant_number, day_of_week FROM veg_delivery_days ORDER BY restaurant_number, day_of_week");

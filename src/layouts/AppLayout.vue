@@ -450,11 +450,11 @@ const toolsGroups = [
     { module: 'analytics', route: 'dashboard', icon: 'home', label: 'Дашборд' },
     { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
     { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
-    { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
     { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
   ]},
   { title: 'Склад и логистика', items: [
     { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
+    { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
     { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
     { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
     { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
@@ -467,11 +467,11 @@ const toolsGroups = [
     { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
     { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
     { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
-    { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   ]},
   { title: 'Рестораны', items: [
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
     { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
+    { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   ]},
 ];
 const toolsItems = toolsGroups.flatMap(g => g.items);

@@ -153,7 +153,7 @@
                     <td
                       v-for="prod in sessionData.products" :key="prod.id + dd"
                       class="veg-td-qty"
-                      :class="{ 'veg-td-no-delivery': !restHasDeliveryOnDate(row.number, dd), 'veg-td-refused': restDayAllZeros(row.number, dd) }"
+                      :class="{ 'veg-td-no-delivery': !restHasDeliveryOnDate(row.number, dd), 'veg-td-refused': restDayAllZeros(row.number, dd), 'veg-td-auto': isCellAutoPrev(row.number, dd, prod.id) }"
                       @dblclick="startEdit(row.number, dd, prod.id)"
                     >
                       <template v-if="editCell === `${row.number}_${dd}_${prod.id}`">
@@ -170,6 +170,9 @@
                       <template v-else>
                         <span v-if="getCellAdmin(row.number, dd, prod.id) !== null" class="veg-qty-admin" :title="'Исходное: ' + getCellQty(row.number, dd, prod.id)">
                           {{ getCellAdmin(row.number, dd, prod.id) }}
+                        </span>
+                        <span v-else-if="isCellAutoPrev(row.number, dd, prod.id) && getCellQty(row.number, dd, prod.id) !== ''" class="veg-qty veg-qty-auto" title="Подставлено автоматически из предыдущего заказа">
+                          {{ getCellQty(row.number, dd, prod.id) }}
                         </span>
                         <span v-else-if="getCellQty(row.number, dd, prod.id) !== ''" class="veg-qty">
                           {{ getCellQty(row.number, dd, prod.id) }}
@@ -216,6 +219,23 @@
     <!-- SCHEDULE TAB -->
     <template v-if="tab === 'schedule'">
       <div class="veg-schedule">
+        <!-- Подписчики на сводку после дедлайна -->
+        <div class="veg-deadlines-block" style="margin-bottom:16px;">
+          <h3 class="veg-section-title">Сводка после дедлайна — кому слать</h3>
+          <p class="veg-schedule-hint">
+            После прохождения дедлайна бот пришлёт этим пользователям Excel-файл со сводкой по ресторанам.
+            Рестораны, не подавшие заявку, получают автоматически подставленный предыдущий заказ (помечены оранжевым).
+          </p>
+          <div v-if="summarySubsLoading" class="veg-empty" style="padding:8px;">Загрузка...</div>
+          <div v-else class="veg-summary-subs-list">
+            <label v-for="sub in summarySubs" :key="sub.name" class="veg-summary-sub-row">
+              <input type="checkbox" :checked="!!sub.subscribed" @change="toggleSummarySub(sub)" />
+              <span>{{ sub.name }}</span>
+            </label>
+            <div v-if="!summarySubs.length" class="veg-schedule-hint">Нет пользователей с привязанным Telegram.</div>
+          </div>
+        </div>
+
         <!-- Дедлайны -->
         <div class="veg-deadlines-block">
           <h3 class="veg-section-title">Дедлайны заказа</h3>
@@ -635,6 +655,27 @@ async function saveDeadlines() {
   finally { deadlineSaving.value = false; }
 }
 
+// Подписчики на сводку после дедлайна
+const summarySubs = ref([]);
+const summarySubsLoading = ref(false);
+async function loadSummarySubs() {
+  summarySubsLoading.value = true;
+  try {
+    const { data } = await db.rpc('veg_get_summary_subscribers', {});
+    summarySubs.value = Array.isArray(data) ? data : [];
+  } catch { summarySubs.value = []; }
+  finally { summarySubsLoading.value = false; }
+}
+async function toggleSummarySub(sub) {
+  const newVal = !sub.subscribed;
+  try {
+    const { data } = await db.rpc('veg_set_summary_subscriber', { name: sub.name, subscribed: newVal });
+    if (data?.error) { toast.show(data.error, 'error'); return; }
+    sub.subscribed = newVal ? 1 : 0;
+    toast.show(newVal ? 'Подписан' : 'Отписан');
+  } catch { toast.show('Ошибка сохранения', 'error'); }
+}
+
 // Confirm
 const confirmModal = ref(null);
 
@@ -1032,6 +1073,11 @@ function getCellAdmin(restNum, date, prodId) {
   return v === Math.floor(v) ? Math.floor(v) : v;
 }
 
+function isCellAutoPrev(restNum, date, prodId) {
+  const o = orderLookup.value[`${restNum}_${date}_${prodId}`];
+  return !!(o && o.source === 'auto_prev');
+}
+
 function getPrevDayQty(restNum, date, prodId) {
   // Не показываем предыдущую заявку для дней, когда у ресторана нет доставки
   if (!restHasDeliveryOnDate(restNum, date)) return null;
@@ -1386,6 +1432,8 @@ async function exportExcel() {
 const allRestaurantsForSchedule = ref([]);
 
 async function loadSchedule() {
+  // Подписчиков на сводку подгружаем всегда — они могли измениться
+  loadSummarySubs();
   if (Object.keys(scheduleMap).length && allRestaurantsForSchedule.value.length) return;
   scheduleLoading.value = true;
   try {
@@ -1611,8 +1659,13 @@ async function saveScheduleAll() {
 .veg-td-qty { text-align: center; cursor: pointer; min-width: 60px; }
 .veg-td-no-delivery { background: #f0f0f0 !important; cursor: default !important; opacity: 0.4; }
 .veg-td-refused { background: #FFF3E0 !important; }
+.veg-td-auto { background: #FFE0B2 !important; }
 .veg-qty { font-weight: 700; color: #333; }
 .veg-qty-admin { font-weight: 800; color: #D62700; }
+.veg-qty-auto { color: #E65100; }
+.veg-summary-subs-list { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 8px 0; }
+.veg-summary-sub-row { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none; }
+.veg-summary-sub-row input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
 .veg-qty-empty { color: #ccc; font-size: 14px; }
 .veg-prev-day { display: block; font-size: 10px; color: #7E57C2; font-weight: 600; line-height: 1; margin-top: 2px; white-space: nowrap; }
 .veg-auto-refresh { cursor: pointer; display: flex; align-items: center; padding: 4px; }

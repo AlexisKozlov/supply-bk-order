@@ -14,6 +14,7 @@
           <button v-if="activeTab === 'prices'" class="btn secondary" @click="exportPriceList" style="font-size:11px;padding:5px 12px;">Экспорт</button>
           <button v-if="!isViewer && activeTab === 'prices'" class="btn primary" @click="showImportModal = true" style="font-size:11px;padding:5px 12px;">Импорт цен</button>
           <button v-if="!isViewer && (activeTab === 'prices' || activeTab === 'deposits')" class="btn primary" @click="showDepositImportModal = true" style="font-size:11px;padding:5px 12px;" title="Импорт залоговых цен из файла gtin.xlsx">Импорт залога</button>
+          <button v-if="!isViewer && activeTab === 'deposits'" class="btn secondary" @click="openNewDeposit" style="font-size:11px;padding:5px 12px;">+ Залог</button>
           <button v-if="!isViewer && activeTab === 'prices'" class="btn secondary" @click="openNewPrice" style="font-size:11px;padding:5px 12px;">+ Цена</button>
           <button v-if="!isViewer && activeTab === 'agreements'" class="btn primary" @click="openNewAgreement" style="font-size:11px;padding:5px 12px;">+ Протокол</button>
         </div>
@@ -148,7 +149,10 @@
       <div v-if="depositLoading" style="text-align:center;padding:40px;"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!filteredDeposits.length" style="text-align:center;padding:40px;color:var(--text-muted);">
         <div>Залоговые цены не найдены</div>
-        <div v-if="!isViewer" style="margin-top:12px;font-size:12px;">Нажмите «Импорт залога» в шапке, чтобы загрузить файл gtin.xlsx</div>
+        <div v-if="!isViewer" style="margin-top:12px;font-size:12px;">
+          Нажмите «Импорт залога», чтобы загрузить файл gtin.xlsx,
+          или <a href="#" @click.prevent="openNewDeposit" style="color:var(--bk-red);text-decoration:underline;">добавьте вручную</a>.
+        </div>
       </div>
       <div v-else>
         <table class="pricing-table">
@@ -570,23 +574,49 @@
     <div v-if="depositEdit.show" class="modal-overlay">
       <div class="modal-card" style="max-width:440px;">
         <h3 style="margin:0 0 12px;">Залоговая цена</h3>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-          <span class="mono" style="font-weight:600;">{{ depositEdit.sku }}</span>
-          {{ productNames[depositEdit.sku] || '' }}
+        <!-- Поиск товара (когда SKU ещё не выбран) -->
+        <div v-if="!depositEdit.sku" class="form-group" style="position:relative;">
+          <label>Товар</label>
+          <input
+            ref="depositSearchInput"
+            v-model="depositEdit.skuQuery"
+            class="form-input"
+            placeholder="Артикул или название..."
+            @input="onDepositSkuInput"
+            @focus="onDepositSkuInput"
+            @blur="hideDepositHintsDelayed"
+            autocomplete="off"
+          />
+          <div v-if="depositEdit.skuHints?.length" class="sku-hints">
+            <div v-for="h in depositEdit.skuHints" :key="h.sku" class="sku-hint" @mousedown.prevent="selectDepositSkuHint(h)">
+              <span class="mono" style="font-weight:600;">{{ h.sku }}</span> <span style="color:var(--text-muted);">{{ h.name }}</span>
+            </div>
+          </div>
+          <div v-if="depositEdit.skuQuery && depositEdit.skuQuery.length >= 2 && !depositEdit.skuHints?.length && !depositEdit.searching" style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+            Ничего не найдено
+          </div>
+        </div>
+        <!-- Выбранный товар -->
+        <div v-else style="font-size:12px;color:var(--text-muted);margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;">
+            <span class="mono" style="font-weight:600;">{{ depositEdit.sku }}</span>
+            {{ productNames[depositEdit.sku] || depositEdit.skuName || '' }}
+          </div>
+          <button v-if="depositEdit.canChangeSku" class="btn secondary" style="font-size:10px;padding:2px 8px;" @click="clearDepositSku">Сменить</button>
         </div>
         <div class="form-group">
           <label>Цена за 1 учётную коробку (BYN)</label>
-          <input ref="depositEditInput" type="number" step="0.01" min="0" v-model.number="depositEdit.price" class="form-input" style="width:160px;" />
+          <input ref="depositEditInput" type="number" step="0.01" min="0" v-model.number="depositEdit.price" class="form-input" style="width:160px;" :disabled="!depositEdit.sku" />
         </div>
         <label class="rom-exp-cb-label" style="margin-top:4px;">
           <input type="checkbox" v-model="depositEdit.applyToGroup" />
           <span>Применить к обоим юр. лицам (Бургер БК + Воглия Матта)</span>
         </label>
         <div style="display:flex;gap:8px;justify-content:space-between;margin-top:16px;">
-          <button v-if="depositPrices[depositEdit.sku]" class="btn secondary" style="color:#c33;" @click="doDepositDelete" :disabled="depositEdit.saving">Удалить</button>
+          <button v-if="depositEdit.sku && depositPrices[depositEdit.sku]" class="btn secondary" style="color:#c33;" @click="doDepositDelete" :disabled="depositEdit.saving">Удалить</button>
           <div style="flex:1"></div>
           <button class="btn secondary" @click="depositEdit.show = false" :disabled="depositEdit.saving">Отмена</button>
-          <button class="btn primary" @click="doDepositSave" :disabled="depositEdit.saving || !depositEdit.price">
+          <button class="btn primary" @click="doDepositSave" :disabled="depositEdit.saving || !depositEdit.price || !depositEdit.sku">
             {{ depositEdit.saving ? 'Сохранение...' : 'Сохранить' }}
           </button>
         </div>
@@ -642,7 +672,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
@@ -1422,7 +1452,10 @@ async function deleteDepositRow(d) {
 }
 
 // === Редактирование одной залоговой цены ===
-const depositEdit = ref({ show: false, sku: '', price: null, applyToGroup: true, saving: false });
+const depositEdit = ref({ show: false, sku: '', skuName: '', price: null, applyToGroup: true, saving: false, skuQuery: '', skuHints: [], searching: false, canChangeSku: false });
+const depositSearchInput = ref(null);
+let depositSearchTimer = null;
+let depositHideHintsTimer = null;
 
 function openDepositEdit(p) {
   if (isViewer.value) return;
@@ -1435,10 +1468,77 @@ function openDepositEdit(p) {
   depositEdit.value = {
     show: true,
     sku: p.sku,
+    skuName: productNames.value[p.sku] || '',
     price,
     applyToGroup: true,
     saving: false,
+    skuQuery: '',
+    skuHints: [],
+    searching: false,
+    canChangeSku: false,
   };
+}
+
+function openNewDeposit() {
+  if (isViewer.value) return;
+  depositEdit.value = {
+    show: true,
+    sku: '',
+    skuName: '',
+    price: null,
+    applyToGroup: true,
+    saving: false,
+    skuQuery: '',
+    skuHints: [],
+    searching: false,
+    canChangeSku: true,
+  };
+  nextTick(() => {
+    if (depositSearchInput.value) depositSearchInput.value.focus();
+  });
+}
+
+function onDepositSkuInput() {
+  clearTimeout(depositSearchTimer);
+  const q = (depositEdit.value.skuQuery || '').trim();
+  if (q.length < 2) { depositEdit.value.skuHints = []; return; }
+  depositEdit.value.searching = true;
+  depositSearchTimer = setTimeout(async () => {
+    const results = await searchProducts(q, '');
+    depositEdit.value.skuHints = (results || []).slice(0, 8);
+    depositEdit.value.searching = false;
+  }, 250);
+}
+
+function selectDepositSkuHint(h) {
+  depositEdit.value.sku = h.sku;
+  depositEdit.value.skuName = h.name || '';
+  depositEdit.value.skuHints = [];
+  depositEdit.value.skuQuery = '';
+  if (h.name && !productNames.value[h.sku]) productNames.value[h.sku] = h.name;
+  // Подхватываем уже существующую залоговую цену, если есть
+  const existing = depositPrices.value[h.sku] || null;
+  if (existing) depositEdit.value.price = parseFloat(existing);
+  nextTick(() => {
+    const input = document.querySelector('input[ref="depositEditInput"]');
+    if (input) input.focus();
+  });
+}
+
+function clearDepositSku() {
+  depositEdit.value.sku = '';
+  depositEdit.value.skuName = '';
+  depositEdit.value.skuQuery = '';
+  depositEdit.value.skuHints = [];
+  depositEdit.value.price = null;
+  nextTick(() => {
+    if (depositSearchInput.value) depositSearchInput.value.focus();
+  });
+}
+
+function hideDepositHintsDelayed() {
+  clearTimeout(depositHideHintsTimer);
+  depositHideHintsTimer = setTimeout(() => { depositEdit.value.skuHints = []; }, 150);
 }
 
 async function doDepositSave() {

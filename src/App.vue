@@ -15,6 +15,7 @@
     </div>
   </Transition>
   <ToastContainer />
+  <UpdatePrompt />
 </template>
 
 <script setup>
@@ -24,6 +25,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { serverDown } from '@/lib/apiClient.js';
 import ToastContainer from '@/components/ui/ToastContainer.vue';
 import MaintenanceScreen from '@/components/MaintenanceScreen.vue';
+import UpdatePrompt from '@/components/UpdatePrompt.vue';
 
 const userStore = useUserStore();
 const router = useRouter();

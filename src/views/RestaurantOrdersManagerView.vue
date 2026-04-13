@@ -317,6 +317,10 @@
 
       <div class="rom-stock-filter-row">
         <input v-model="stockFilter" type="text" placeholder="Фильтр по названию или артикулу..." class="rom-input rom-tpl-filter-input" />
+        <select v-model="stockSupplierFilter" class="rom-input" style="max-width:220px;">
+          <option value="">Все поставщики</option>
+          <option v-for="s in stockSuppliers" :key="s" :value="s">{{ s }}</option>
+        </select>
         <label class="rom-stock-checkbox"><input type="checkbox" v-model="stockShowDeficit" /> Только дефицит</label>
         <span class="rom-stock-summary" v-if="stockItems.length">
           Всего: {{ stockItems.length }} · Дефицит: {{ stockItems.filter(i => i.remaining < 0).length }}
@@ -328,6 +332,7 @@
           <thead>
             <tr>
               <th>Товар</th>
+              <th>Поставщик</th>
               <th>Склад</th>
               <th class="rom-th-right">Остаток</th>
               <th class="rom-th-right">Заказано</th>
@@ -338,6 +343,7 @@
             <tr v-for="(item, idx) in filteredStockItems" :key="item.sku + item.legal_entity"
               :class="{ 'rom-row-deficit': item.remaining < 0 }">
               <td><span class="rom-sku-label">{{ item.sku }}</span> {{ item.product_name }}</td>
+              <td>{{ item.supplier || '—' }}</td>
               <td>{{ item.warehouse }}</td>
               <td class="rom-td-right">{{ item.stock_qty }}</td>
               <td class="rom-td-right">{{ item.ordered_qty || '' }}</td>
@@ -1329,7 +1335,16 @@ const stockLegalEntity = ref(stockLE_BK);
 const stockDates = ref([]);
 const stockItems = ref([]);
 const stockFilter = ref('');
+const stockSupplierFilter = ref('');
 const stockShowDeficit = ref(false);
+
+const stockSuppliers = computed(() => {
+  const set = new Set();
+  for (const it of stockItems.value) {
+    if (it.supplier) set.add(it.supplier);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
+});
 const stockUploading = ref(false);
 const stockLoading = ref(false);
 const stockMessage = ref('');
@@ -1341,6 +1356,9 @@ const stockUnmatchedExpanded = ref(true);
 const filteredStockItems = computed(() => {
   let items = stockItems.value;
   if (stockShowDeficit.value) items = items.filter(i => i.remaining < 0);
+  if (stockSupplierFilter.value) {
+    items = items.filter(i => i.supplier === stockSupplierFilter.value);
+  }
   if (stockFilter.value) {
     const q = stockFilter.value.toLowerCase();
     items = items.filter(i => i.product_name.toLowerCase().includes(q) || i.sku.includes(q));

@@ -1545,6 +1545,310 @@ try {
     error_log('[cron_telegram] so summary error: ' . $e->getMessage());
 }
 
+// ═══ ПЛАНЕТА РЕСТОРАНОВ (veg_*): сводка закупщикам после дедлайна ═══
+// После прохождения дедлайна (не более 20 мин назад) — для ресторанов,
+// которые не подали заявку, автоматически подставляем их предыдущий заказ
+// (source='auto_prev'), затем шлём подписчикам Excel-файл со сводкой.
+try {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+
+    // Подписчики (telegram_settings.veg_deadline_summary = 1)
+    $vegSubs = $pdo->query("
+        SELECT u.name, u.telegram_chat_id
+        FROM users u
+        JOIN telegram_settings ts ON ts.user_name = u.name
+        WHERE u.telegram_chat_id IS NOT NULL AND ts.veg_deadline_summary = 1
+    ")->fetchAll();
+
+    if ($vegSubs) {
+        // Активные сессии
+        $vegSessions = $pdo->query("SELECT id, name, date_from, date_to FROM veg_sessions WHERE status = 'active'")->fetchAll();
+        $vegDeadlineRules = $pdo->query("SELECT delivery_dow, deadline_dow, deadline_time FROM veg_deadline_rules")->fetchAll();
+        $rulesByDow = [];
+        foreach ($vegDeadlineRules as $rule) {
+            $rulesByDow[(int)$rule['delivery_dow']] = $rule;
+        }
+
+        foreach ($vegSessions as $sess) {
+            $sessId = (int)$sess['id'];
+
+            // Даты доставки в пределах сессии
+            $dateFromObj = new DateTime($sess['date_from'], $tz);
+            $dateToObj = new DateTime($sess['date_to'], $tz);
+            $deliveryDates = [];
+            for ($d = clone $dateFromObj; $d <= $dateToObj; $d->modify('+1 day')) {
+                $deliveryDates[] = $d->format('Y-m-d');
+            }
+
+            foreach ($deliveryDates as $deliveryDate) {
+                $deliveryDowIso = (int)(new DateTime($deliveryDate, $tz))->format('N'); // 1..7
+                $rule = $rulesByDow[$deliveryDowIso] ?? null;
+                if (!$rule) continue; // на этот день поставок нет
+
+                // Вычисляем дату и время дедлайна
+                $deadlineDow = (int)$rule['deadline_dow'];
+                $deadlineTime = $rule['deadline_time'];
+                $deadlineDateObj = new DateTime($deliveryDate, $tz);
+                $diff = $deliveryDowIso - $deadlineDow;
+                if ($diff <= 0) $diff += 7;
+                $deadlineDateObj->modify("-{$diff} days");
+                $tp = explode(':', $deadlineTime);
+                $deadline = clone $deadlineDateObj;
+                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
+
+                // Окно: дедлайн прошёл не более 20 мин назад
+                if ($minutesSince < 0 || $minutesSince > 20) continue;
+
+                // Дедупликация
+                $dedupKey = "veg_summary_{$sessId}_{$deliveryDate}";
+                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
+                $dup->execute([$dedupKey]);
+                if ($dup->fetch()) continue;
+
+                // Товары сессии
+                $prodStmt = $pdo->prepare("SELECT id, product_name, unit, sort_order FROM veg_session_products WHERE session_id = ? ORDER BY sort_order, id");
+                $prodStmt->execute([$sessId]);
+                $sessionProducts = $prodStmt->fetchAll();
+                if (!$sessionProducts) continue;
+                $productById = [];
+                foreach ($sessionProducts as $p) { $productById[(int)$p['id']] = $p; }
+
+                // Рестораны, которым положена поставка в этот день (по veg_delivery_days)
+                // day_of_week в БД: 0=Вс..6=Сб. ISO: 1=Пн..7=Вс. Переводим.
+                $dayOfWeekDb = $deliveryDowIso === 7 ? 0 : $deliveryDowIso;
+                $expStmt = $pdo->prepare("
+                    SELECT DISTINCT r.number, r.region, r.city, r.address
+                    FROM veg_delivery_days vdd
+                    JOIN restaurants r ON r.number = vdd.restaurant_number AND r.active = 1
+                    WHERE vdd.day_of_week = ?
+                    ORDER BY r.city, CAST(r.number AS UNSIGNED)
+                ");
+                $expStmt->execute([$dayOfWeekDb]);
+                $expectedRests = $expStmt->fetchAll();
+                if (!$expectedRests) continue;
+
+                // Уже поданные заказы для этой даты + сессии
+                $ordStmt = $pdo->prepare("
+                    SELECT restaurant_number, product_id, quantity, admin_qty, source
+                    FROM veg_orders
+                    WHERE session_id = ? AND delivery_date = ?
+                ");
+                $ordStmt->execute([$sessId, $deliveryDate]);
+                $existingByRest = []; // rest_num => [product_id => row]
+                foreach ($ordStmt->fetchAll() as $row) {
+                    $rn = $row['restaurant_number'];
+                    if (!isset($existingByRest[$rn])) $existingByRest[$rn] = [];
+                    $existingByRest[$rn][(int)$row['product_id']] = $row;
+                }
+
+                // Для ресторанов без заказа — пытаемся подставить предыдущий
+                $insStmt = $pdo->prepare("
+                    INSERT INTO veg_orders (session_id, product_id, restaurant_number, delivery_date, quantity, source, submitted_at)
+                    VALUES (?, ?, ?, ?, ?, 'auto_prev', NOW())
+                ");
+                $autoRestaurants = []; // rest_num => true
+                foreach ($expectedRests as $r) {
+                    $rn = $r['number'];
+                    if (isset($existingByRest[$rn])) continue; // уже подал
+
+                    // 1) Ищем предыдущий заказ в текущей сессии (раньше по дате)
+                    $prevByProd = [];
+                    $ps = $pdo->prepare("
+                        SELECT product_id, quantity, admin_qty, delivery_date
+                        FROM veg_orders
+                        WHERE session_id = ? AND restaurant_number = ? AND delivery_date < ?
+                          AND source IS NULL
+                        ORDER BY delivery_date DESC
+                    ");
+                    $ps->execute([$sessId, $rn, $deliveryDate]);
+                    $prevRows = $ps->fetchAll();
+                    if ($prevRows) {
+                        $lastDate = $prevRows[0]['delivery_date'];
+                        foreach ($prevRows as $pr) {
+                            if ($pr['delivery_date'] !== $lastDate) break;
+                            $pid = (int)$pr['product_id'];
+                            if (!isset($prevByProd[$pid])) {
+                                $qty = ($pr['admin_qty'] !== null && $pr['admin_qty'] !== '') ? (float)$pr['admin_qty'] : (float)$pr['quantity'];
+                                $prevByProd[$pid] = $qty;
+                            }
+                        }
+                    }
+
+                    // 2) Если в текущей сессии нет — ищем в предыдущих сессиях (до 5)
+                    if (!$prevByProd) {
+                        $prevSessStmt = $pdo->prepare("SELECT id FROM veg_sessions WHERE id < ? ORDER BY id DESC LIMIT 5");
+                        $prevSessStmt->execute([$sessId]);
+                        while ($prevSessRow = $prevSessStmt->fetch()) {
+                            $po = $pdo->prepare("
+                                SELECT vo.product_id, vo.quantity, vo.admin_qty, vo.delivery_date, vsp.product_name
+                                FROM veg_orders vo
+                                JOIN veg_session_products vsp ON vsp.id = vo.product_id
+                                WHERE vo.session_id = ? AND vo.restaurant_number = ?
+                                  AND vo.source IS NULL
+                                ORDER BY vo.delivery_date DESC
+                            ");
+                            $po->execute([$prevSessRow['id'], $rn]);
+                            $prevItems = $po->fetchAll();
+                            if (!$prevItems) continue;
+                            $lastDate = $prevItems[0]['delivery_date'];
+                            // Мапим по названию товара → к id товара текущей сессии
+                            $nameToQty = [];
+                            foreach ($prevItems as $pi) {
+                                if ($pi['delivery_date'] !== $lastDate) break;
+                                $name = $pi['product_name'];
+                                if (!isset($nameToQty[$name])) {
+                                    $qty = ($pi['admin_qty'] !== null && $pi['admin_qty'] !== '') ? (float)$pi['admin_qty'] : (float)$pi['quantity'];
+                                    $nameToQty[$name] = $qty;
+                                }
+                            }
+                            foreach ($sessionProducts as $sp) {
+                                if (isset($nameToQty[$sp['product_name']])) {
+                                    $prevByProd[(int)$sp['id']] = $nameToQty[$sp['product_name']];
+                                }
+                            }
+                            if ($prevByProd) break;
+                        }
+                    }
+
+                    // Если нашли хоть что-то — вставляем записи со всех товаров текущей сессии
+                    if ($prevByProd) {
+                        $pdo->beginTransaction();
+                        try {
+                            foreach ($sessionProducts as $sp) {
+                                $pid = (int)$sp['id'];
+                                $qty = $prevByProd[$pid] ?? 0;
+                                $insStmt->execute([$sessId, $pid, $rn, $deliveryDate, $qty]);
+                            }
+                            $pdo->commit();
+                            $autoRestaurants[$rn] = true;
+                            if (!isset($existingByRest[$rn])) $existingByRest[$rn] = [];
+                            foreach ($sessionProducts as $sp) {
+                                $pid = (int)$sp['id'];
+                                $existingByRest[$rn][$pid] = [
+                                    'quantity' => $prevByProd[$pid] ?? 0,
+                                    'admin_qty' => null,
+                                    'source' => 'auto_prev',
+                                ];
+                            }
+                        } catch (Exception $e) {
+                            $pdo->rollBack();
+                            error_log('[cron_telegram] veg auto-prev insert error: ' . $e->getMessage());
+                        }
+                    }
+                }
+
+                // Формируем payload для Node-генератора
+                $productsOut = [];
+                foreach ($sessionProducts as $sp) {
+                    $productsOut[] = [
+                        'id' => (int)$sp['id'],
+                        'name' => $sp['product_name'],
+                        'unit' => $sp['unit'],
+                    ];
+                }
+                $restaurantsOut = [];
+                foreach ($expectedRests as $r) {
+                    $rn = $r['number'];
+                    $restaurantsOut[] = [
+                        'number' => (int)$rn,
+                        'city' => $r['city'] ?: '',
+                        'region' => $r['region'] ?: '',
+                        'address' => $r['address'] ?: '',
+                        'submitted' => isset($existingByRest[$rn]),
+                        'auto' => isset($autoRestaurants[$rn]),
+                    ];
+                }
+                $itemsOut = new stdClass();
+                $colTotals = [];
+                foreach ($sessionProducts as $sp) { $colTotals[(int)$sp['id']] = 0; }
+                foreach ($existingByRest as $rn => $pmap) {
+                    foreach ($pmap as $pid => $row) {
+                        $qty = isset($row['admin_qty']) && $row['admin_qty'] !== null && $row['admin_qty'] !== ''
+                            ? (float)$row['admin_qty']
+                            : (float)$row['quantity'];
+                        $isAdmin = isset($row['admin_qty']) && $row['admin_qty'] !== null && $row['admin_qty'] !== '';
+                        $itemsOut->{"{$rn}_{$pid}"} = [
+                            'qty' => $qty,
+                            'is_admin' => $isAdmin,
+                        ];
+                        if (isset($colTotals[$pid])) $colTotals[$pid] += $qty;
+                    }
+                }
+
+                $dayNamesShort = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+                $dayShort = $dayNamesShort[$deliveryDowIso] ?? '';
+                $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+
+                $payload = [
+                    'session_name' => $sess['name'],
+                    'delivery_date_fmt' => "{$dateFmt} ({$dayShort})",
+                    'sheet_name' => 'Планета Ресторанов',
+                    'products' => $productsOut,
+                    'restaurants' => $restaurantsOut,
+                    'items' => $itemsOut,
+                ];
+
+                $tmpJson = tempnam(sys_get_temp_dir(), 'veg_json_');
+                $tmpXlsx = tempnam(sys_get_temp_dir(), 'veg_xlsx_') . '.xlsx';
+                file_put_contents($tmpJson, json_encode($payload, JSON_UNESCAPED_UNICODE));
+                $scriptPath = escapeshellarg(__DIR__ . '/../scripts/build_veg_order_xlsx.mjs');
+                $cmd = 'node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1';
+                exec($cmd, $outLines, $rc);
+                @unlink($tmpJson);
+                if ($rc !== 0 || !file_exists($tmpXlsx)) {
+                    error_log('[cron_telegram] veg summary: node generator failed (rc=' . $rc . '): ' . implode("\n", $outLines));
+                    @unlink($tmpXlsx);
+                    continue;
+                }
+                $xlsxBinary = file_get_contents($tmpXlsx);
+                @unlink($tmpXlsx);
+
+                $submittedCount = 0; $manualCount = 0; $autoCount = 0;
+                foreach ($restaurantsOut as $r) {
+                    if ($r['submitted']) {
+                        $submittedCount++;
+                        if ($r['auto']) $autoCount++;
+                        else $manualCount++;
+                    }
+                }
+                $missingCount = count($expectedRests) - $submittedCount;
+                $filename = "Планета Ресторанов {$dateFmt}.xlsx";
+                $caption = "🥬 <b>Планета Ресторанов — сводка</b>\n";
+                $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n\n";
+                $caption .= "✅ Подали: <b>{$manualCount}</b>\n";
+                if ($autoCount > 0) $caption .= "🟠 Авто (прошлая): <b>{$autoCount}</b>\n";
+                if ($missingCount > 0) $caption .= "❌ Без заказа: <b>{$missingCount}</b>\n";
+                arsort($colTotals);
+                $topProducts = array_slice($colTotals, 0, 5, true);
+                if ($topProducts) {
+                    $caption .= "\n📊 <b>Итого по товарам:</b>\n";
+                    foreach ($topProducts as $pid => $tot) {
+                        if ($tot <= 0) continue;
+                        $name = $productById[$pid]['product_name'] ?? '';
+                        $unit = ($productById[$pid]['unit'] ?? '') === 'pcs' ? 'шт' : 'кг';
+                        $caption .= "• " . htmlspecialchars($name, ENT_QUOTES) . " — <b>" . rtrim(rtrim(number_format($tot, 2, '.', ''), '0'), '.') . "</b> {$unit}\n";
+                    }
+                    if (count($colTotals) > 5) {
+                        $caption .= "… и ещё " . (count($colTotals) - 5) . " позиций в файле";
+                    }
+                }
+
+                foreach ($vegSubs as $sub) {
+                    tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
+                    $sent++;
+                }
+
+                $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('veg_summary', '', 0, ?)")
+                    ->execute([$dedupKey]);
+            }
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] veg summary error: ' . $e->getMessage());
+}
+
 // Очистка старых записей дедупликации (старше 7 дней)
 try {
     $pdo->exec("DELETE FROM tg_notification_log WHERE sent_at < NOW() - INTERVAL 7 DAY");

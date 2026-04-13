@@ -2246,6 +2246,25 @@ if (strpos($roAction, 'admin') === 0) {
         }
         $balances = $s->fetchAll();
 
+        // Карта поставщиков: sku|legal_entity -> supplier (активные карточки приоритетнее)
+        $supplierMap = [];
+        $supplierBySku = [];
+        $balanceSkus = array_values(array_unique(array_column($balances, 'sku')));
+        if (!empty($balanceSkus)) {
+            $ph = implode(',', array_fill(0, count($balanceSkus), '?'));
+            $qs = $pdo->prepare("SELECT sku, supplier, legal_entity FROM products WHERE sku IN ($ph) ORDER BY is_active DESC, id ASC");
+            $qs->execute($balanceSkus);
+            foreach ($qs->fetchAll() as $row) {
+                $mk = $row['sku'] . '|' . $row['legal_entity'];
+                if (!isset($supplierMap[$mk]) && !empty($row['supplier'])) {
+                    $supplierMap[$mk] = $row['supplier'];
+                }
+                if (!isset($supplierBySku[$row['sku']]) && !empty($row['supplier'])) {
+                    $supplierBySku[$row['sku']] = $row['supplier'];
+                }
+            }
+        }
+
         // Суммарные заказы от даты остатков+1 до выбранной даты, с разбивкой по юрлицу
         // Ресторан 3 = Воглия Матта, остальные = Бургер БК
         $s2 = $pdo->prepare("
@@ -2272,9 +2291,11 @@ if (strpos($roAction, 'admin') === 0) {
             $key = $b['sku'] . '|' . $le;
             $orderedQty = $orders[$key] ?? 0;
             $seenSkus[$key] = true;
+            $supplier = $supplierMap[$key] ?? $supplierBySku[$b['sku']] ?? '';
             $items[] = [
                 'sku' => $b['sku'],
                 'product_name' => $b['product_name'],
+                'supplier' => $supplier,
                 'warehouse' => $b['warehouse'],
                 'legal_entity' => $le,
                 'stock_qty' => $stockQty,
@@ -2288,8 +2309,8 @@ if (strpos($roAction, 'admin') === 0) {
             if (isset($seenSkus[$key])) continue;
             list($sku, $le) = explode('|', $key);
             if ($legalEntity && $le !== $legalEntity) continue;
-            // Получаем название товара из БД
-            $ps = $pdo->prepare("SELECT name, category FROM products WHERE sku = ? LIMIT 1");
+            // Получаем название товара из БД (активная карточка приоритетнее)
+            $ps = $pdo->prepare("SELECT name, category, supplier FROM products WHERE sku = ? ORDER BY is_active DESC, id ASC LIMIT 1");
             $ps->execute([$sku]);
             $prod = $ps->fetch();
             $prodName = $prod ? $prod['name'] : $sku;
@@ -2302,6 +2323,7 @@ if (strpos($roAction, 'admin') === 0) {
             $items[] = [
                 'sku' => $sku,
                 'product_name' => $prodName,
+                'supplier' => $prod['supplier'] ?? '',
                 'warehouse' => $warehouse,
                 'legal_entity' => $le,
                 'stock_qty' => 0,
