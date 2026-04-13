@@ -166,10 +166,10 @@
               <div v-if="hasErrors" class="so-error-msg">Исправьте количество (кратность / минимум)</div>
               <button
                 class="ro-submit-btn"
-                :disabled="filledCount === 0 || submitting || hasErrors"
+                :disabled="submitting || hasErrors"
                 @click="handleSubmit"
               >
-                {{ submitting ? 'Отправка...' : (currentDateInfo?.order ? 'Обновить заявку' : 'Отправить заявку') }}
+                {{ submitButtonLabel }}
               </button>
             </div>
           </div>
@@ -208,6 +208,14 @@ const currentDateInfo = computed(() => {
 
 const filledCount = computed(() => Object.values(quantities.value).filter(v => v > 0).length);
 const filledTotal = computed(() => Object.values(quantities.value).reduce((s, v) => s + (v > 0 ? v : 0), 0));
+
+const submitButtonLabel = computed(() => {
+  if (submitting.value) return 'Отправка...';
+  if (filledCount.value === 0) {
+    return currentDateInfo.value?.order ? 'Обновить: поставка не нужна' : 'Отправить: поставка не нужна';
+  }
+  return currentDateInfo.value?.order ? 'Обновить заявку' : 'Отправить заявку';
+});
 
 function multError(p) {
   const m = parseFloat(p.multiplicity);
@@ -321,6 +329,7 @@ async function handleSubmit() {
       selectedDeliveryDate.value,
       currentDateInfo.value?.order_date || '',
       items,
+      { skipDelivery: items.length === 0 },
     );
 
     if (result.success) {
