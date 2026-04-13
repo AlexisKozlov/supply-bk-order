@@ -58,9 +58,10 @@
             <div class="ro-input-wrap">
               <input
                 v-model="restaurantNumber"
-                type="number"
-                inputmode="numeric"
-                placeholder="Например: 24"
+                type="text"
+                inputmode="text"
+                autocapitalize="characters"
+                placeholder="Например: 24 или PS01"
                 required
                 autofocus
                 :disabled="loading"
@@ -138,6 +139,7 @@
 import { ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { parseRestaurantInput } from '@/lib/legalEntities.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -213,12 +215,23 @@ watch(() => route.query.tg_token, (newToken) => {
   }
 });
 
+// Преобразуем ввод вида '24' или 'PS01' в числовой номер для сервера
+function parsedRestNumber() {
+  const p = parseRestaurantInput(restaurantNumber.value);
+  return p ? p.number : null;
+}
+
 async function handleLogin() {
   error.value = '';
   sessionConflict.value = false;
+  const restNum = parsedRestNumber();
+  if (!restNum) {
+    error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
+    return;
+  }
   loading.value = true;
   try {
-    const result = await store.login(parseInt(restaurantNumber.value), password.value);
+    const result = await store.login(restNum, password.value);
     if (result.success) {
       router.push({ name: 'restaurant-cabinet' });
     } else if (result.active_session) {
@@ -236,9 +249,14 @@ async function handleLogin() {
 
 async function forceLogin() {
   error.value = '';
+  const restNum = parsedRestNumber();
+  if (!restNum) {
+    error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
+    return;
+  }
   loading.value = true;
   try {
-    const result = await store.login(parseInt(restaurantNumber.value), password.value, true);
+    const result = await store.login(restNum, password.value, true);
     if (result.success) {
       router.push({ name: 'restaurant-cabinet' });
     } else {

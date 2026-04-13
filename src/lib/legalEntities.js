@@ -37,6 +37,49 @@ export function getEntityGroupCode(legalEntity) {
 }
 
 /**
+ * Красивое отображение номера ресторана.
+ * Для Пицца Стар (PS) номера в базе лежат в диапазоне 1001+, а в интерфейсе
+ * показываются как 'PS01', 'PS02' и т.п. Для БК+ВМ — обычное число.
+ * group: 'BK_VM' | 'PS' — если не задан, определяем по числу (1000+ = PS).
+ */
+export function formatRestaurantNumber(number, group = null) {
+  const n = parseInt(number, 10);
+  if (!Number.isFinite(n)) return '';
+  const g = group || (n >= 1000 ? 'PS' : 'BK_VM');
+  if (g === 'PS') {
+    const inGroup = n - 1000;
+    return 'PS' + String(inGroup).padStart(2, '0');
+  }
+  return String(n);
+}
+
+/**
+ * Обратная операция: принимает текст от пользователя и возвращает
+ * число для базы. Понимает 'PS01', 'ps1', '1001', '1', ' 24 '.
+ * Возвращает { number, group } или null, если не распознано.
+ */
+export function parseRestaurantInput(input) {
+  if (input == null) return null;
+  const s = String(input).trim().toUpperCase();
+  if (!s) return null;
+  // 'PS01', 'PS1', 'PS-1', 'PS 1'
+  const psMatch = s.match(/^PS[\s\-]?0*(\d{1,3})$/);
+  if (psMatch) {
+    const inGroup = parseInt(psMatch[1], 10);
+    if (!inGroup) return null;
+    return { number: 1000 + inGroup, group: 'PS' };
+  }
+  // Чистое число
+  const numMatch = s.match(/^0*(\d+)$/);
+  if (numMatch) {
+    const n = parseInt(numMatch[1], 10);
+    if (!n) return null;
+    return { number: n, group: n >= 1000 ? 'PS' : 'BK_VM' };
+  }
+  return null;
+}
+
+/**
  * Маппинг названий из Excel-файлов → стандартное юрлицо (ключи в нижнем регистре).
  */
 export const ENTITY_IMPORT_MAP = {

@@ -763,8 +763,8 @@
             <div v-if="usersLoading" class="rom-no-items">Загрузка...</div>
             <div v-else-if="!filteredUsers.length" class="rom-no-items">Ничего не найдено</div>
             <div v-else class="rom-users-list">
-              <div v-for="u in filteredUsers" :key="u.restaurant_number" class="rom-user-row">
-                <span class="rom-user-num">№{{ u.restaurant_number }}</span>
+              <div v-for="u in filteredUsers" :key="(u.legal_entity_group || 'BK_VM') + '-' + u.restaurant_number" class="rom-user-row">
+                <span class="rom-user-num">№{{ formatRestaurantNumber(u.restaurant_number, u.legal_entity_group) }}</span>
                 <span class="rom-user-addr">
                   <span class="rom-user-addr-main">{{ u.city || '—' }} {{ u.address || '' }}</span>
                   <span class="rom-user-addr-le">{{ shortLegalEntity(u.legal_entity) }}</span>
@@ -1002,6 +1002,7 @@ import { useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import * as XLSX from 'xlsx-js-style';
 
 const store = useRestaurantOrderStore();
@@ -1076,8 +1077,10 @@ const filteredUsers = computed(() => {
   return usersList.value.filter(u => {
     if (q) {
       const num = String(u.restaurant_number || '');
+      // Ищем и по числу в БД, и по красивому имени вида 'PS01'
+      const pretty = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group).toLowerCase();
       const addr = ((u.city || '') + ' ' + (u.address || '')).toLowerCase();
-      if (!num.includes(q) && !addr.includes(q)) return false;
+      if (!num.includes(q) && !pretty.includes(q) && !addr.includes(q)) return false;
     }
     if (st === 'ready' && !(u.has_password && u.is_active)) return false;
     if (st === 'nopwd' && u.has_password) return false;
@@ -1996,13 +1999,14 @@ async function handleBulkCreate() {
 
 async function handleSetPassword(u) {
   const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
-  const pass = prompt(`${verb} для ресторана ${u.restaurant_number}:`);
+  const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
+  const pass = prompt(`${verb} для ресторана ${label}:`);
   if (!pass) return;
   usersBusy.value = true;
   try {
     // adminCreateUser делает INSERT … ON DUPLICATE KEY UPDATE — то же самое, что reset.
     await store.adminCreateUser(u.restaurant_number, pass);
-    toast.success('Готово', `Пароль ресторана ${u.restaurant_number} сохранён`);
+    toast.success('Готово', `Пароль ресторана ${label} сохранён`);
     await reloadUsers();
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -2013,7 +2017,8 @@ async function handleSetPassword(u) {
 
 async function handleToggleUser(u) {
   const next = u.is_active ? 0 : 1;
-  if (next === 0 && !confirm(`Отключить учётку ресторана ${u.restaurant_number}? Он не сможет войти.`)) return;
+  const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
+  if (next === 0 && !confirm(`Отключить учётку ресторана ${label}? Он не сможет войти.`)) return;
   usersBusy.value = true;
   try {
     await store.adminToggleUser(u.restaurant_number, next);

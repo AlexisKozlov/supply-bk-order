@@ -25,6 +25,39 @@ function applyEntityTextFilter($group, &$where, &$params, $column = 'legal_entit
     foreach ($entities as $e) $params[] = $e;
 }
 
+// Красивое отображение номера ресторана в интерфейсе.
+// PS-рестораны в БД хранятся в диапазоне 1001+, но показываются как 'PS01', 'PS02'.
+// Для BK_VM — обычное число. Если группа не задана — определяем по значению (1000+ = PS).
+function formatRestaurantNumber($number, $group = null) {
+    $n = (int)$number;
+    if ($n <= 0) return '';
+    if ($group === null) $group = ($n >= 1000) ? 'PS' : 'BK_VM';
+    if ($group === 'PS') {
+        return 'PS' . str_pad((string)($n - 1000), 2, '0', STR_PAD_LEFT);
+    }
+    return (string)$n;
+}
+
+// Парсер пользовательского ввода в номер ресторана для БД.
+// Понимает 'PS01', 'ps1', '1001', '24', ' 24 '. Возвращает ['number' => int, 'group' => string]
+// или null, если не распознано.
+function parseRestaurantInput($input) {
+    if ($input === null) return null;
+    $s = trim(strtoupper((string)$input));
+    if ($s === '') return null;
+    if (preg_match('/^PS[\s\-]?0*(\d{1,3})$/', $s, $m)) {
+        $inGroup = (int)$m[1];
+        if ($inGroup <= 0) return null;
+        return ['number' => 1000 + $inGroup, 'group' => 'PS'];
+    }
+    if (preg_match('/^0*(\d+)$/', $s, $m)) {
+        $n = (int)$m[1];
+        if ($n <= 0) return null;
+        return ['number' => $n, 'group' => ($n >= 1000) ? 'PS' : 'BK_VM'];
+    }
+    return null;
+}
+
 // Оставлено для обратной совместимости со старым кодом, который мог
 // ожидать формат с LIKE-шаблонами. Новый код должен пользоваться
 // getEntityGroup() и фильтровать по колонке legal_entity_group.
