@@ -89,8 +89,10 @@ import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
+import { useOrderStore } from '@/stores/orderStore.js'
 
 const toastStore = useToastStore()
+const orderStore = useOrderStore()
 const statusFilter = ref('open')
 const conversations = ref([])
 const loadingConvs = ref(false)
@@ -107,7 +109,10 @@ let pollTimer = null
 async function loadConversations() {
   loadingConvs.value = true
   try {
-    const { data } = await db.rpc('chat_get_conversations', { status: statusFilter.value })
+    const { data } = await db.rpc('chat_get_conversations', {
+      status: statusFilter.value,
+      legal_entity: orderStore.settings.legalEntity,
+    })
     conversations.value = data || []
     // Обновляем selectedConv если выбран
     if (selectedId.value) {
@@ -231,6 +236,14 @@ function startPoll() {
 onMounted(() => {
   loadConversations()
   startPoll()
+})
+
+// Смена юрлица в сайдбаре — перезагрузить диалоги
+watch(() => orderStore.settings.legalEntity, () => {
+  selectedId.value = null
+  selectedConv.value = null
+  messages.value = []
+  loadConversations()
 })
 
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })

@@ -4559,11 +4559,22 @@ if ($endpoint === 'rpc') {
 
     if ($fn === 'chat_get_conversations') {
         $status = $body['status'] ?? 'open';
-        $st = $pdo->prepare("SELECT cc.*,
+        $legalEntity = $body['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
+        $where = ['cc.status = ?'];
+        $params = [$status];
+        if ($entityGroup) {
+            $where[] = 'cc.legal_entity_group = ?';
+            $params[] = $entityGroup;
+        }
+        $sql = "SELECT cc.*,
             (SELECT COUNT(*) FROM chat_messages cm WHERE cm.conversation_id = cc.id AND cm.is_read = 0 AND cm.direction = 'from_restaurant') as unread_count,
             (SELECT cm2.message_text FROM chat_messages cm2 WHERE cm2.conversation_id = cc.id ORDER BY cm2.id DESC LIMIT 1) as last_message
-            FROM chat_conversations cc WHERE cc.status = ? ORDER BY cc.last_message_at DESC LIMIT 100");
-        $st->execute([$status]);
+            FROM chat_conversations cc
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY cc.last_message_at DESC LIMIT 100";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
         respond($st->fetchAll());
     }
 

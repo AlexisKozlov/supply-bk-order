@@ -77,10 +77,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { db } from '@/lib/apiClient.js'
+import { useOrderStore } from '@/stores/orderStore.js'
 import { useToastStore } from '@/stores/toastStore.js'
+
+const orderStore = useOrderStore()
 
 const toast = useToastStore()
 const router = useRouter()
@@ -95,7 +98,7 @@ const editPayDate = ref('')
 async function load() {
   loading.value = true
   try {
-    let q = db.from('supplier_payments').select('*').order('payment_date')
+    let q = db.from('supplier_payments').select('*').eq('legal_entity', orderStore.settings.legalEntity).order('payment_date')
     if (statusFilter.value) q = q.eq('status', statusFilter.value)
     const { data } = await q
     payments.value = data || []
@@ -181,6 +184,7 @@ function fmtDateTime(d) {
 function fmtAmount(v) { return Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 0 }) }
 
 onMounted(load)
+watch(() => orderStore.settings.legalEntity, () => load())
 </script>
 
 <style scoped>

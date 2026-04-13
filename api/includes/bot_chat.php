@@ -66,8 +66,16 @@ function chatProcessMessage($chatId, $text, $restNum, $userMsgId, $from, $photoF
     $convId = $st->fetchColumn();
 
     if (!$convId) {
-        $ins = $pdo->prepare("INSERT INTO chat_conversations (restaurant_number, restaurant_chat_id, restaurant_name, last_message_at) VALUES (?, ?, ?, NOW())");
-        $ins->execute([$restNum, $chatId, $senderName]);
+        // Определяем группу юрлиц ресторана — через таблицу restaurants.
+        // Если записи нет (чат с неизвестным номером) — fallback по значению
+        // номера: PS-рестораны живут в диапазоне 1000+.
+        $restGroupStmt = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+        $restGroupStmt->execute([(int)$restNum]);
+        $restGroup = $restGroupStmt->fetchColumn();
+        if (!$restGroup) $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+
+        $ins = $pdo->prepare("INSERT INTO chat_conversations (restaurant_number, restaurant_chat_id, restaurant_name, legal_entity_group, last_message_at) VALUES (?, ?, ?, ?, NOW())");
+        $ins->execute([$restNum, $chatId, $senderName, $restGroup]);
         $convId = $pdo->lastInsertId();
     } else {
         $pdo->prepare("UPDATE chat_conversations SET last_message_at = NOW(), restaurant_name = ? WHERE id = ?")->execute([$senderName, $convId]);
