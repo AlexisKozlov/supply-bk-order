@@ -529,7 +529,7 @@
         <h3 style="margin:0 0 8px;">Импорт залоговых цен</h3>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
           Загрузите файл gtin.xlsx (листы «Сухой», «Холод», «Мороз»).
-          Цены будут применены к товарам «Бургер БК» и «Воглия Матта».
+          Цены будут применены к товарам группы <b>{{ groupEntitiesShort }}</b>.
           Сопоставление: по внешнему коду → GTIN → артикулу.
         </div>
         <div class="form-group">
@@ -608,9 +608,9 @@
           <label>Цена за 1 учётную коробку (BYN)</label>
           <input ref="depositEditInput" type="number" step="0.01" min="0" v-model.number="depositEdit.price" class="form-input" style="width:160px;" :disabled="!depositEdit.sku" />
         </div>
-        <label class="rom-exp-cb-label" style="margin-top:4px;">
+        <label v-if="hasMultipleEntitiesInGroup" class="rom-exp-cb-label" style="margin-top:4px;">
           <input type="checkbox" v-model="depositEdit.applyToGroup" />
-          <span>Применить к обоим юр. лицам (Бургер БК + Воглия Матта)</span>
+          <span>Применить ко всем юр. лицам группы ({{ groupEntitiesShort }})</span>
         </label>
         <div style="display:flex;gap:8px;justify-content:space-between;margin-top:16px;">
           <button v-if="depositEdit.sku && depositPrices[depositEdit.sku]" class="btn secondary" style="color:#c33;" @click="doDepositDelete" :disabled="depositEdit.saving">Удалить</button>
@@ -676,6 +676,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
+import { getEntityGroup } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
@@ -744,6 +745,16 @@ async function onRateChange(e) {
 const supplierNames = computed(() => {
   const list = supplierStore.getSuppliersForEntity(orderStore.settings.legalEntity);
   return list.map(s => s.short_name);
+});
+
+// Список юрлиц текущей группы (напр. БК+ВМ для BK_VM, или только ПС для PS).
+// Нужен, чтобы скрывать чекбокс «Применить к обоим» в одноэлементных группах
+// и выводить правильный текст в диалогах импорта.
+const currentGroupEntities = computed(() => getEntityGroup(orderStore.settings.legalEntity));
+const hasMultipleEntitiesInGroup = computed(() => currentGroupEntities.value.length > 1);
+const groupEntitiesShort = computed(() => {
+  const map = { 'ООО "Бургер БК"': 'Бургер БК', 'ООО "Воглия Матта"': 'Воглия Матта', 'ООО "Пицца Стар"': 'Пицца Стар' };
+  return currentGroupEntities.value.map(e => map[e] || e).join(' + ');
 });
 
 // Загрузка данных
@@ -1395,6 +1406,7 @@ async function doDepositImport() {
   try {
     const { data, error } = await db.rpc('import_deposit_prices', {
       rows: depositPreview.value,
+      legal_entity: orderStore.settings.legalEntity,
     });
     if (error) { toast.error('Ошибка импорта', error); return; }
     depositResult.value = data;

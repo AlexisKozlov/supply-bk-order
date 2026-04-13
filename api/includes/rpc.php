@@ -1654,6 +1654,15 @@ if ($endpoint === 'rpc') {
         $rows = $body['rows'] ?? [];
         if (empty($rows)) respond(['error' => 'Пустой список'], 400);
 
+        // Юрлицо, из-под которого вызван импорт — определяет группу (BK_VM | PS).
+        // Если фронт не прислал — берём первое юрлицо пользователя (fallback).
+        $le = trim((string)($body['legal_entity'] ?? ''));
+        if (!$le) {
+            $userEntities = $caller['legal_entities'] ?? [];
+            $le = is_array($userEntities) && count($userEntities) ? $userEntities[0] : 'ООО "Бургер БК"';
+        }
+        if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа к юрлицу'], 403);
+
         // Загружаем все активные товары для сопоставления
         $allProducts = $pdo->query("SELECT sku, supplier, legal_entity, external_code, gtin, name FROM products WHERE is_active = 1")->fetchAll();
         $bySku = [];
@@ -1686,7 +1695,8 @@ if ($endpoint === 'rpc') {
             }
         }
 
-        $entities = ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
+        // Список юрлиц в группе выбранного юрлица: для БК/ВМ — оба, для ПС — только ПС
+        $entities = getEntitiesInGroup(getEntityGroup($le));
         $matched = 0;
         $skipped = [];
         $upsert = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
@@ -1969,14 +1979,9 @@ if ($endpoint === 'rpc') {
         if (!checkLegalEntityAccess($caller, $le)) respond(['error' => 'Нет доступа'], 403);
         if ($price !== null && $price <= 0) respond(['error' => 'Цена должна быть > 0'], 400);
 
-        // Определяем список юрлиц
-        $targets = [$le];
-        if ($applyToGroup) {
-            // «Бургер БК» и «Воглия Матта» — одна группа; «Пицца Стар» — отдельно
-            if (stripos($le, 'Пицца') === false) {
-                $targets = ['ООО "Бургер БК"', 'ООО "Воглия Матта"'];
-            }
-        }
+        // Определяем список юрлиц: если просили применить к группе — берём список
+        // всех юрлиц из соответствующей группы (BK_VM или PS).
+        $targets = $applyToGroup ? getEntitiesInGroup(getEntityGroup($le)) : [$le];
 
         // Поставщик товара (для NOT NULL supplier в product_prices)
         $supStmt = $pdo->prepare("SELECT supplier FROM products WHERE sku = ? AND legal_entity = ? LIMIT 1");

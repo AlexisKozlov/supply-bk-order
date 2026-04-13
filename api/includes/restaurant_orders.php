@@ -141,8 +141,19 @@ function roCanEdit($pdo, $sessionId, $deliveryDate) {
     return $now->format('H:i:s') < $deadlines['edit_until'];
 }
 
-function roGetLegalEntity($pdo, $restaurantNumber) {
-    // Ресторан 3 = Воглия Матта, остальные = Бургер БК
+function roGetLegalEntity($pdo, $restaurantNumber, $group = null) {
+    // Если группу не передали — смотрим её в таблице restaurants.
+    // Может быть до двух записей (одна в BK_VM, одна в PS) — берём первую;
+    // пока PS-рестораны не заведены, это безопасно.
+    if ($group === null) {
+        $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+        $s->execute([(int)$restaurantNumber]);
+        $group = $s->fetchColumn() ?: 'BK_VM';
+    }
+    if ($group === 'PS') {
+        return 'ООО "Пицца Стар"';
+    }
+    // Группа BK_VM: исторически ресторан 3 = Воглия Матта, остальные = Бургер БК
     if ((int)$restaurantNumber === 3) {
         return 'ООО "Воглия Матта"';
     }
@@ -400,11 +411,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
     // Ищем активные сборы для юрлица ресторана
     $where = ["sc.status = 'active'"];
     $params = [];
-    if ($group === 'PS') {
-        $where[] = "sc.legal_entity LIKE '%Пицца Стар%'";
-    } else {
-        $where[] = "(sc.legal_entity LIKE '%Бургер БК%' OR sc.legal_entity LIKE '%Воглия Матта%')";
-    }
+    applyEntityTextFilter($group, $where, $params, 'sc.legal_entity');
     $sql = "SELECT sc.id, sc.name, sc.created_at,
                 (SELECT COUNT(DISTINCT scd.product_id) FROM stock_collection_data scd
                  JOIN stock_collection_products scp ON scp.id = scd.product_id AND scp.collection_id = sc.id
@@ -412,7 +419,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
                 (SELECT COUNT(*) FROM stock_collection_products scp2 WHERE scp2.collection_id = sc.id) as total_products
             FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY sc.id DESC LIMIT 1";
     $s = $pdo->prepare($sql);
-    $s->execute([$rest['restaurant_number']]);
+    $s->execute(array_merge([$rest['restaurant_number']], $params));
     $collection = $s->fetch();
     if (!$collection) {
         roRespond(['active' => false]);
@@ -441,13 +448,10 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
     $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
     $group = getEntityGroup($le);
     $where = ["sc.status = 'active'"];
-    if ($group === 'PS') {
-        $where[] = "sc.legal_entity LIKE '%Пицца Стар%'";
-    } else {
-        $where[] = "(sc.legal_entity LIKE '%Бургер БК%' OR sc.legal_entity LIKE '%Воглия Матта%')";
-    }
+    $params = [];
+    applyEntityTextFilter($group, $where, $params, 'sc.legal_entity');
     $s = $pdo->prepare("SELECT id, name, created_at FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY id DESC LIMIT 1");
-    $s->execute();
+    $s->execute($params);
     $coll = $s->fetch();
     if (!$coll) roRespond(['active' => false]);
 
@@ -1797,12 +1801,16 @@ if (strpos($roAction, 'admin') === 0) {
     // --- Управление учётками ресторанов ---
     // Источник истины — справочник ресторанов. ro_users только хранит пароль/сессию.
     if ($adminAction === 'users' && $method === 'GET') {
+        // В выборку включаем legal_entity_group ресторана — нужно, чтобы
+        // подставить правильное юрлицо (особенно для Пицца Стар, где у ресторана
+        // может совпадать номер с БК).
         $s = $pdo->query("
             SELECT
                 r.number AS restaurant_number,
-                MIN(r.region) AS region,
-                MIN(r.city) AS city,
-                MIN(r.address) AS address,
+                r.legal_entity_group,
+                r.region,
+                r.city,
+                r.address,
                 ru.id,
                 ru.legal_entity,
                 ru.is_active,
@@ -1812,14 +1820,13 @@ if (strpos($roAction, 'admin') === 0) {
             FROM restaurants r
             LEFT JOIN ro_users ru ON ru.restaurant_number = r.number
             WHERE r.active = 1
-            GROUP BY r.number, ru.id, ru.legal_entity, ru.is_active, ru.last_login_at, ru.telegram_chat_id, has_password
-            ORDER BY r.number
+            ORDER BY r.legal_entity_group, r.number
         ");
         $rows = $s->fetchAll();
         // Подставим юрлицо для тех, у кого ещё нет учётки
         foreach ($rows as &$row) {
             if (empty($row['legal_entity'])) {
-                $row['legal_entity'] = roGetLegalEntity($pdo, $row['restaurant_number']);
+                $row['legal_entity'] = roGetLegalEntity($pdo, $row['restaurant_number'], $row['legal_entity_group']);
             }
             $row['is_active'] = (int)($row['is_active'] ?? 1);
             $row['has_password'] = (int)$row['has_password'];

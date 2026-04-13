@@ -1060,12 +1060,19 @@ function searchCardDirect($chatId, $query, $userMsgId = null, $botMsgId = null) 
     }
     $allSkus = array_unique(array_filter($allSkus));
 
-    // Проверяем какие артикулы есть на остатках (analysis_data, только БК)
+    // Проверяем какие артикулы есть на остатках (analysis_data, юрлицо пользователя бота).
+    // Если пользователь не привязан (анонимный режим карточек) — по умолчанию БК.
+    $stockEntity = 'ООО "Бургер БК"';
+    $cardUser = getUser($chatId);
+    if ($cardUser) {
+        $ue = getUserEntity($cardUser);
+        if ($ue) $stockEntity = $ue;
+    }
     $inStock = [];
     if ($allSkus) {
         $placeholders = implode(',', array_fill(0, count($allSkus), '?'));
         $params = array_values($allSkus);
-        $params[] = 'ООО "Бургер БК"';
+        $params[] = $stockEntity;
         $st = $pdo->prepare("SELECT a.sku, p.name, a.stock, COALESCE(p.qty_per_box, 1) as qty_per_box FROM analysis_data a LEFT JOIN products p ON p.sku = a.sku AND p.legal_entity = a.legal_entity AND p.is_active = 1 WHERE a.sku IN ({$placeholders}) AND a.legal_entity = ? AND a.stock > 0");
         $st->execute($params);
         foreach ($st->fetchAll() as $row) {
