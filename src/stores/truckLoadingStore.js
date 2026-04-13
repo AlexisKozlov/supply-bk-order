@@ -32,6 +32,8 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
   const groupBy = ref('restaurant');
   const loading = ref(false);
   const saving = ref(false);
+  // Фильтры по юрлицам. Если массив пустой — показываем все.
+  const entityFilter = ref([]);
 
   // --- Computed ---
 
@@ -47,9 +49,19 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     return keys;
   });
 
+  function passesEntityFilter(order) {
+    if (!entityFilter.value.length) return true;
+    return entityFilter.value.includes(order.legal_entity);
+  }
+
   const unassignedItems = computed(() => {
     const result = [];
     for (const order of orders.value) {
+      if (!passesEntityFilter(order)) continue;
+      const commonOrderFields = {
+        legal_entity: order.legal_entity,
+        legal_entity_group: order.legal_entity_group,
+      };
       if (groupBy.value === 'restaurant') {
         if (assignedKeys.value.has(`order_${order.order_id}`)) continue;
         result.push({
@@ -64,6 +76,7 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
           weight_kg: order.total_weight,
           categories: order.categories,
           label: `Рест. ${order.restaurant_number}`,
+          ...commonOrderFields,
         });
       } else if (groupBy.value === 'category') {
         for (const [cat, data] of Object.entries(order.categories || {})) {
@@ -79,6 +92,7 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
             pallets: data.pallets,
             weight_kg: data.weight,
             label: `Рест. ${order.restaurant_number} — ${cat}`,
+            ...commonOrderFields,
           });
         }
       } else {
@@ -99,6 +113,7 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
             sku: item.sku,
             product_name: item.product_name,
             quantity: item.quantity,
+            ...commonOrderFields,
           });
         }
       }
@@ -106,10 +121,29 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     return result;
   });
 
+  // Список всех юрлиц, по которым есть заказы на дату (для UI-фильтра)
+  const availableEntities = computed(() => {
+    const seen = new Map();
+    for (const o of orders.value) {
+      if (!o.legal_entity) continue;
+      if (!seen.has(o.legal_entity)) {
+        seen.set(o.legal_entity, {
+          legal_entity: o.legal_entity,
+          legal_entity_group: o.legal_entity_group || 'BK_VM',
+          orders_count: 0,
+        });
+      }
+      seen.get(o.legal_entity).orders_count++;
+    }
+    return [...seen.values()];
+  });
+
+  const filteredOrders = computed(() => orders.value.filter(passesEntityFilter));
+
   const totalStats = computed(() => ({
-    orders: orders.value.length,
-    pallets: orders.value.reduce((s, o) => s + (o.total_pallets || 0), 0),
-    weight: orders.value.reduce((s, o) => s + (o.total_weight || 0), 0),
+    orders: filteredOrders.value.length,
+    pallets: filteredOrders.value.reduce((s, o) => s + (o.total_pallets || 0), 0),
+    weight: filteredOrders.value.reduce((s, o) => s + (o.total_weight || 0), 0),
   }));
 
   // --- Утилиты режимов хранения ---
@@ -360,11 +394,14 @@ export const useTruckLoadingStore = defineStore('truckLoading', () => {
     groupBy,
     loading,
     saving,
+    entityFilter,
 
     // Computed
     assignedKeys,
     unassignedItems,
     totalStats,
+    availableEntities,
+    filteredOrders,
 
     // Утилиты
     categoryToMode,

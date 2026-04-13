@@ -91,7 +91,7 @@
             <!-- Фильтры -->
             <div class="tl-filters" v-if="store.orders.length">
               <div class="tl-filter-row">
-                <input type="text" v-model="filterRestaurant" placeholder="Ресторан №" class="tl-filter-input" />
+                <input type="text" v-model="filterRestaurant" placeholder="Ресторан № (1, PS01…)" class="tl-filter-input" />
                 <div class="tl-filter-cats">
                   <button class="tl-filter-cat" :class="{ active: !filterCategory }" @click="filterCategory = ''">Все</button>
                   <button class="tl-filter-cat cat-dry" :class="{ active: filterCategory === 'Сухой' }" @click="filterCategory = filterCategory === 'Сухой' ? '' : 'Сухой'">Сухой</button>
@@ -99,52 +99,77 @@
                   <button class="tl-filter-cat cat-frozen" :class="{ active: filterCategory === 'Мороз' }" @click="filterCategory = filterCategory === 'Мороз' ? '' : 'Мороз'">Мороз</button>
                 </div>
               </div>
+              <div v-if="store.availableEntities.length > 1" class="tl-filter-row tl-filter-entities">
+                <span class="tl-filter-label">Юрлицо:</span>
+                <button class="tl-filter-entity" :class="{ active: !store.entityFilter.length }" @click="clearEntityFilter">Все</button>
+                <button
+                  v-for="e in store.availableEntities" :key="e.legal_entity"
+                  class="tl-filter-entity"
+                  :class="[{ active: store.entityFilter.includes(e.legal_entity) }, 'tl-entity-' + e.legal_entity_group.toLowerCase()]"
+                  @click="toggleEntityFilter(e.legal_entity)"
+                >
+                  {{ entityShortName(e.legal_entity) }}
+                  <span class="tl-filter-entity-count">{{ e.orders_count }}</span>
+                </button>
+              </div>
             </div>
 
             <div v-if="!filteredItems.length" class="tl-empty-section">
               {{ store.unassignedItems.length ? 'Ничего не найдено' : 'Все заказы распределены' }}
             </div>
 
-            <!-- groupBy = restaurant -->
-            <template v-if="store.groupBy === 'restaurant'">
-              <div v-for="item in filteredItems" :key="item.key"
-                class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
-                <div class="tl-card-header">
-                  <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
-                  <span class="tl-card-city">{{ item.city }}</span>
-                </div>
-                <div class="tl-card-stats">
-                  <span v-for="(data, cat) in item.categories" :key="cat"
-                    class="tl-cat-badge" :class="'cat-' + catClass(cat)">
-                    {{ cat }}: {{ data.pallets }}п / {{ (+data.weight).toFixed(0) }}кг
-                  </span>
-                </div>
-                <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
+            <!-- Визуальное разделение по юрлицам: шапка → карточки -->
+            <template v-for="grp in groupedFilteredItems" :key="grp.legal_entity">
+              <div class="tl-entity-header" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()">
+                <span class="tl-entity-badge">{{ entityShortName(grp.legal_entity) }}</span>
+                <span class="tl-entity-name">{{ grp.legal_entity }}</span>
+                <span class="tl-entity-count">{{ grp.items.length }}</span>
               </div>
-            </template>
 
-            <!-- groupBy = category -->
-            <template v-else-if="store.groupBy === 'category'">
-              <div v-for="item in filteredItems" :key="item.key"
-                class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
-                <div class="tl-card-header">
-                  <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
-                  <span class="tl-cat-badge" :class="'cat-' + catClass(item.category)">{{ item.category }}</span>
+              <!-- groupBy = restaurant -->
+              <template v-if="store.groupBy === 'restaurant'">
+                <div v-for="item in grp.items" :key="item.key"
+                  class="tl-card" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()"
+                  draggable="true" @dragstart="onDragStart($event, item)">
+                  <div class="tl-card-header">
+                    <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
+                    <span class="tl-card-city">{{ item.city }}</span>
+                  </div>
+                  <div class="tl-card-stats">
+                    <span v-for="(data, cat) in item.categories" :key="cat"
+                      class="tl-cat-badge" :class="'cat-' + catClass(cat)">
+                      {{ cat }}: {{ data.pallets }}п / {{ (+data.weight).toFixed(0) }}кг
+                    </span>
+                  </div>
+                  <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
                 </div>
-                <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
-              </div>
-            </template>
+              </template>
 
-            <!-- groupBy = item -->
-            <template v-else>
-              <div v-for="item in filteredItems" :key="item.key"
-                class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
-                <div class="tl-card-header">
-                  <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
-                  <span class="tl-card-sku">{{ item.sku }} {{ item.product_name }}</span>
+              <!-- groupBy = category -->
+              <template v-else-if="store.groupBy === 'category'">
+                <div v-for="item in grp.items" :key="item.key"
+                  class="tl-card" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()"
+                  draggable="true" @dragstart="onDragStart($event, item)">
+                  <div class="tl-card-header">
+                    <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
+                    <span class="tl-cat-badge" :class="'cat-' + catClass(item.category)">{{ item.category }}</span>
+                  </div>
+                  <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
                 </div>
-                <div class="tl-card-total">{{ item.quantity }} шт. | {{ fmtPallets(item.pallets) }} палл.</div>
-              </div>
+              </template>
+
+              <!-- groupBy = item -->
+              <template v-else>
+                <div v-for="item in grp.items" :key="item.key"
+                  class="tl-card" :class="'tl-entity-' + grp.legal_entity_group.toLowerCase()"
+                  draggable="true" @dragstart="onDragStart($event, item)">
+                  <div class="tl-card-header">
+                    <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
+                    <span class="tl-card-sku">{{ item.sku }} {{ item.product_name }}</span>
+                  </div>
+                  <div class="tl-card-total">{{ item.quantity }} шт. | {{ fmtPallets(item.pallets) }} палл.</div>
+                </div>
+              </template>
             </template>
           </div>
 
@@ -272,7 +297,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useTruckLoadingStore } from '@/stores/truckLoadingStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { exportTruckLoading } from '@/lib/truckLoadingExport.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { formatRestaurantNumber, parseRestaurantInput, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 
 const store = useTruckLoadingStore();
 const toast = useToastStore();
@@ -295,6 +320,19 @@ const showAddTruck = ref(false);
 const filterCategory = ref('');       // '' = все, 'Сухой', 'Холод', 'Мороз'
 const filterRestaurant = ref('');     // поиск по номеру ресторана
 
+// Фильтр по юрлицам хранится в сторе, чтобы он пережил переход со вкладки
+// и влиял на статистику сверху.
+function toggleEntityFilter(entity) {
+  const idx = store.entityFilter.indexOf(entity);
+  if (idx >= 0) store.entityFilter.splice(idx, 1);
+  else store.entityFilter.push(entity);
+}
+function clearEntityFilter() { store.entityFilter.splice(0); }
+
+function entityShortName(entity) {
+  return ENTITY_SHORT_NAMES[entity] || entity;
+}
+
 const filteredItems = computed(() => {
   let items = store.unassignedItems;
   const cat = filterCategory.value;
@@ -310,10 +348,35 @@ const filteredItems = computed(() => {
   }
 
   if (rest) {
-    items = items.filter(item => String(item.restaurant_number).includes(rest));
+    // Поддерживаем и сырой номер (1, 1001), и PS-формат (PS01)
+    const parsed = parseRestaurantInput(rest);
+    if (parsed) {
+      items = items.filter(item => String(item.restaurant_number) === String(parsed.number));
+    } else {
+      items = items.filter(item => String(item.restaurant_number).includes(rest));
+    }
   }
 
   return items;
+});
+
+// Группировка отображаемых карточек по юрлицу — нужна для визуального
+// разделения Бургер БК / Воглия Матта / Пицца Стар в списке.
+const ENTITY_ORDER = ['ООО "Бургер БК"', 'ООО "Воглия Матта"', 'ООО "Пицца Стар"'];
+const groupedFilteredItems = computed(() => {
+  const map = new Map();
+  for (const item of filteredItems.value) {
+    const le = item.legal_entity || 'Без юрлица';
+    if (!map.has(le)) map.set(le, { legal_entity: le, legal_entity_group: item.legal_entity_group || 'BK_VM', items: [] });
+    map.get(le).items.push(item);
+  }
+  const groups = [...map.values()];
+  groups.sort((a, b) => {
+    const ia = ENTITY_ORDER.indexOf(a.legal_entity);
+    const ib = ENTITY_ORDER.indexOf(b.legal_entity);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+  return groups;
 });
 
 // --- Format helpers ---
@@ -925,6 +988,91 @@ onMounted(async () => {
   background: #7c3aed;
   border-color: #7c3aed;
 }
+
+/* Entity filters (legal entity) */
+.tl-filter-entities {
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.tl-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b4f3a;
+  margin-right: 4px;
+}
+.tl-filter-entity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid #e0d5c8;
+  border-radius: 14px;
+  background: white;
+  color: #502314;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tl-filter-entity:hover { border-color: #D62300; }
+.tl-filter-entity.active {
+  background: #D62300;
+  border-color: #D62300;
+  color: white;
+}
+.tl-filter-entity.tl-entity-ps.active {
+  background: #0e7490;
+  border-color: #0e7490;
+}
+.tl-filter-entity-count {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.08);
+}
+.tl-filter-entity.active .tl-filter-entity-count {
+  background: rgba(255,255,255,0.28);
+}
+
+/* Заголовок группы юрлица перед карточками */
+.tl-entity-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff2e0;
+  border-left: 4px solid #D62300;
+  font-size: 12px;
+  color: #502314;
+}
+.tl-entity-header:first-child { margin-top: 0; }
+.tl-entity-header.tl-entity-ps {
+  background: #ecfeff;
+  border-left-color: #0e7490;
+}
+.tl-entity-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #D62300;
+  color: white;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+.tl-entity-header.tl-entity-ps .tl-entity-badge { background: #0e7490; }
+.tl-entity-name { flex: 1; font-weight: 600; }
+.tl-entity-count {
+  font-weight: 700;
+  color: #8b7355;
+}
+
+/* Карточка окрашена под юрлицо — тонкая цветная полоса слева */
+.tl-card.tl-entity-bk_vm { border-left: 4px solid #D62300; }
+.tl-card.tl-entity-ps { border-left: 4px solid #0e7490; }
 
 /* Cards (unassigned) */
 .tl-card {

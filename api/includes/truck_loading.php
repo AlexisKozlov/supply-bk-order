@@ -125,14 +125,19 @@ function tlGetOrdersForDate($pdo, $date) {
 
     $sessionId = $session['id'];
 
-    // Все заказы на дату (не черновики)
+    // Все заказы на дату (не черновики). JOIN с restaurants через группу юрлиц,
+    // чтобы не путать БК-ресторан и ПС-ресторан с одинаковым номером.
     $s = $pdo->prepare("
-        SELECT o.id as order_id, o.restaurant_number, o.status,
+        SELECT o.id as order_id, o.restaurant_number, o.status, o.legal_entity,
+               CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END AS legal_entity_group,
                r.city, r.address, r.region
         FROM ro_orders o
-        LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
+        LEFT JOIN restaurants r
+            ON r.number = o.restaurant_number
+            AND r.active = 1
+            AND r.legal_entity_group = CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END
         WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
-        ORDER BY o.restaurant_number
+        ORDER BY FIELD(o.legal_entity, 'ООО \"Бургер БК\"', 'ООО \"Воглия Матта\"', 'ООО \"Пицца Стар\"'), o.restaurant_number
     ");
     $s->execute([$sessionId, $date]);
     $orders = $s->fetchAll();
@@ -225,6 +230,8 @@ function tlGetOrdersForDate($pdo, $date) {
         $result[] = [
             'order_id' => (int)$orderId,
             'restaurant_number' => (int)$order['restaurant_number'],
+            'legal_entity' => $order['legal_entity'] ?? '',
+            'legal_entity_group' => $order['legal_entity_group'] ?? 'BK_VM',
             'city' => $order['city'] ?? '',
             'address' => $order['address'] ?? '',
             'region' => $order['region'] ?? '',
