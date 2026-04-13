@@ -53,6 +53,7 @@
         <thead>
           <tr>
             <th class="pf-mth pf-mth-center" style="width:36px;">№</th>
+            <th v-if="isPSGroup" class="pf-mth pf-mth-center" style="width:48px;" title="Номер в системе 1С Додо">ДОДО ИС</th>
             <th class="pf-mth ds-th-addr">Адрес</th>
             <th class="pf-mth pf-mth-center ds-th-cnt">Дн</th>
             <th v-for="d in dayNames" :key="d.num" class="pf-mth pf-mth-center ds-th-day">
@@ -75,7 +76,8 @@
               :key="r.id"
               class="pf-mrow"
             >
-              <td class="pf-mtd pf-mtd-center ds-td-num">{{ r.number }}</td>
+              <td class="pf-mtd pf-mtd-center ds-td-num">{{ displayNumber(r) }}</td>
+              <td v-if="isPSGroup" class="pf-mtd pf-mtd-center ds-td-num">{{ r.dodo_is_number || '—' }}</td>
               <td class="pf-mtd ds-td-addr" :class="{ 'ds-td-addr-editable': isEditing }" @dblclick="startEditRestaurant(r)">{{ r.address }}</td>
               <td class="pf-mtd pf-mtd-center ds-td-cnt">
                 <span class="ds-cnt-badge">{{ deliveryCount(r) }}</span>
@@ -106,13 +108,13 @@
                   />
                 </template>
                 <template v-else-if="isPSGroup">
-                  <!-- ПС: две строки — основная доставка и тесто -->
+                  <!-- ПС: два чипа в ряд — основная доставка и тесто -->
                   <div class="ds-ps-cell">
                     <span
                       v-if="getTime(r, d.num)"
                       class="ds-time-chip ds-chip-main"
                       :draggable="isEditing"
-                      @dragstart="onDragStart($event, r, d.num)"
+                      @dragstart="onDragStart($event, r, d.num, 'delivery_time')"
                       @dragend="onDragEnd"
                       @dblclick.stop="isEditing && startEdit(r, d.num, 'delivery_time')"
                     >{{ getTime(r, d.num) }}</span>
@@ -120,6 +122,9 @@
                     <span
                       v-if="getDough(r, d.num)"
                       class="ds-time-chip ds-chip-dough"
+                      :draggable="isEditing"
+                      @dragstart="onDragStart($event, r, d.num, 'dough_time')"
+                      @dragend="onDragEnd"
                       title="Тесто"
                       @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')"
                     >🥖 {{ getDough(r, d.num) }}</span>
@@ -351,7 +356,10 @@ const dayNames = [
   { num: 6, short: 'СБ', full: 'Суббота' },
 ];
 
-const colCount = computed(() => 3 + dayNames.length + 1); // №, Адрес, Дн, 6 дней, Комментарий
+const colCount = computed(() => {
+  // №, [ДОДО ИС для ПС], Адрес, Дн, 6 дней, Комментарий
+  return 3 + dayNames.length + 1 + (isPSGroup.value ? 1 : 0);
+});
 
 function onKey(e) {
   if (e.key === 'Escape') {
@@ -425,6 +433,13 @@ const isPSGroup = computed(() => {
   const le = orderStore.settings.legalEntity || '';
   return le.includes('Пицца Стар');
 });
+
+// Отображаемый номер: для ПС — «чистый» додовский номер (1..50),
+// для БК+ВМ — как есть.
+function displayNumber(r) {
+  if (r.legal_entity_group === 'PS' && r.number >= 1000) return r.number - 1000;
+  return r.number;
+}
 
 function deliveryCount(restaurant) {
   const rSched = store.scheduleByRestaurant.get(String(restaurant.id));
@@ -551,11 +566,11 @@ function onPointerUp() {
   clearTimeout(longPressTimer);
 }
 
-function onDragStart(e, restaurant, day) {
+function onDragStart(e, restaurant, day, field = 'delivery_time') {
   if (!isEditing.value) { e.preventDefault(); return; }
   clearTimeout(longPressTimer);
-  const time = getTime(restaurant, day);
-  dragState.value = { rid: restaurant.id, fromDay: day, time, overDay: null };
+  const time = field === 'dough_time' ? getDough(restaurant, day) : getTime(restaurant, day);
+  dragState.value = { rid: restaurant.id, fromDay: day, time, field, overDay: null };
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', time);
   e.target.classList.add('ds-chip-dragging');
@@ -573,15 +588,17 @@ function onDragLeave() {
 
 async function onDrop(restaurant, toDay) {
   if (!dragState.value || dragState.value.rid !== restaurant.id || dragging.value) return;
-  const { fromDay, time } = dragState.value;
+  const { fromDay, time, field } = dragState.value;
   dragState.value = null;
   if (fromDay === toDay || !time) return;
 
   dragging.value = true;
   try {
-    await store.saveScheduleCell(restaurant.id, toDay, time);
-    await store.saveScheduleCell(restaurant.id, fromDay, '');
-    toastStore.success(`${dayNames.find(d => d.num === fromDay)?.short} → ${dayNames.find(d => d.num === toDay)?.short}`);
+    // Переносим именно то поле, которое тащили (основная или тесто)
+    await store.saveScheduleCell(restaurant.id, toDay, time, field);
+    await store.saveScheduleCell(restaurant.id, fromDay, '', field);
+    const label = field === 'dough_time' ? ' (тесто)' : '';
+    toastStore.success(`${dayNames.find(d => d.num === fromDay)?.short} → ${dayNames.find(d => d.num === toDay)?.short}${label}`);
   } catch (e) {
     console.error('Drag move error:', e);
     toastStore.error('Ошибка переноса');
@@ -947,20 +964,20 @@ function formatLastUpdate(upd) {
 }
 .ds-time-empty { color: #D5D0CA; font-size: 10px; }
 
-/* ПС: двухуровневая ячейка (основная доставка + тесто) */
-.ds-td-ps { padding: 4px 2px !important; vertical-align: middle; }
+/* ПС: ячейка с двумя чипами (основная доставка + тесто) рядом */
+.ds-td-ps { padding: 4px 3px !important; vertical-align: middle; }
 .ds-ps-cell {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 2px;
-  min-height: 34px;
+  gap: 4px;
   justify-content: center;
+  flex-wrap: nowrap;
 }
-.ds-ps-cell .ds-time-chip { font-size: 10px; padding: 1px 4px; }
+.ds-ps-cell .ds-time-chip { font-size: 10px; padding: 1px 5px; white-space: nowrap; }
 .ds-ps-cell .ds-chip-main { background: #A5D6A7; color: #1B5E20; }
 .ds-ps-cell .ds-chip-dough { background: #FFE0B2; color: #6b4f3a; }
-.ds-ps-cell .ds-dough-empty { font-size: 9px; color: #e0d5c8; }
+.ds-ps-cell .ds-dough-empty { font-size: 9px; color: #e0d5c8; padding: 1px 3px; }
 
 /* Drop target */
 .ds-td-drop-target {
