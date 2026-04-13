@@ -2048,7 +2048,7 @@ if ($endpoint === 'rpc') {
         $params = [];
         $sql = "SELECT p.sku, p.name, p.supplier FROM products p WHERE p.is_active = 1";
         $leWhere = []; $leParams = [];
-        applyEntityGroupFilter($le, $leWhere, $leParams, 'p.legal_entity');
+        applyEntityGroupFilter($le, $leWhere, $leParams, 'p.legal_entity_group');
         $sql .= " AND " . $leWhere[0];
         $params = array_merge($params, $leParams);
         if ($supplier) { $sql .= " AND p.supplier = ?"; $params[] = $supplier; }

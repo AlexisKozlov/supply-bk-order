@@ -135,8 +135,8 @@ if ($sessionUser && $sessionUser['role'] !== 'admin' && in_array($table, $TENDER
 
 // Белый список полей, доступных для фильтрации через GET-параметры
 $filterWhitelist = [
-    'products'    => ['id','sku','name','supplier','legal_entity','is_active','analog_group','category','is_traceable'],
-    'suppliers'   => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','country'],
+    'products'    => ['id','sku','name','supplier','legal_entity','legal_entity_group','is_active','analog_group','category','is_traceable'],
+    'suppliers'   => ['id','short_name','full_name','legal_entity','legal_entity_group','is_active','dlt','doc','country'],
     'orders'      => ['id','supplier','legal_entity','delivery_date','created_at','created_by','unit','received_at'],
     'order_items' => ['id','order_id','sku','name'],
     'plans'       => ['id','supplier','legal_entity','created_at'],
@@ -199,8 +199,8 @@ $writeWhitelist = [
     'orders'       => ['id','supplier','legal_entity','delivery_date','delivery_date_2','unit','note','items','details','created_by','created_at','updated_at','cda_mode','safety_coef','act_file','received_at','received_by','today_date','safety_days','period_days','has_transit','show_stock_column','ttn_date'],
     'order_items'  => ['id','order_id','sku','name','qty_boxes','qty_per_box','boxes_per_pallet','multiplicity','consumption_period','stock','transit','final_order','manual_override','unit_of_measure','received_qty','analog_group','category','sort_order'],
     'plans'        => ['id','supplier','legal_entity','data','created_by','updated_by','created_at','updated_at','notes','period_type','period_count','items','start_date','planning_date','consumption_period_days','input_unit','note'],
-    'products'     => ['id','sku','name','supplier','qty_per_box','boxes_per_pallet','unit_of_measure','legal_entity','multiplicity','analog_group','is_active','category','weight_netto','weight_brutto','external_code','gtin','is_traceable'],
-    'suppliers'    => ['id','short_name','full_name','legal_entity','is_active','dlt','doc','palletization','notes','schedule','whatsapp','telegram','viber','email','country','payment_delay_days'],
+    'products'     => ['id','sku','name','supplier','qty_per_box','boxes_per_pallet','unit_of_measure','legal_entity','legal_entity_group','multiplicity','analog_group','is_active','category','weight_netto','weight_brutto','external_code','gtin','is_traceable'],
+    'suppliers'    => ['id','short_name','full_name','legal_entity','legal_entity_group','is_active','dlt','doc','palletization','notes','schedule','whatsapp','telegram','viber','email','country','payment_delay_days'],
     'notifications'=> ['id','type','title','message','target_user','entity_type','entity_id','legal_entity','created_by','created_at','read_by','deleted_by'],
     'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','note','doc_type','file_name','file_path','created_by','approved_by','created_at'],
     'product_prices'   => ['id','sku','supplier','legal_entity','price','vat_rate','unit_type','currency','agreement_id','updated_by','updated_at'],
