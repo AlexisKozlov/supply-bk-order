@@ -523,7 +523,8 @@ body {
 .content-area > .order-view,
 .content-area > .planning-view,
 .content-area > .calendar-view,
-.content-area > .analysis-view {
+.content-area > .analysis-view,
+.content-area > .tl-page {
   overflow: hidden;
   scrollbar-gutter: auto;
 }

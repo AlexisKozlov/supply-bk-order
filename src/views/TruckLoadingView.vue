@@ -98,6 +98,11 @@
                   <button class="tl-filter-cat cat-cold" :class="{ active: filterCategory === 'Холод' }" @click="filterCategory = filterCategory === 'Холод' ? '' : 'Холод'">Холод</button>
                   <button class="tl-filter-cat cat-frozen" :class="{ active: filterCategory === 'Мороз' }" @click="filterCategory = filterCategory === 'Мороз' ? '' : 'Мороз'">Мороз</button>
                 </div>
+                <button class="tl-filter-more" :class="{ active: showAdvancedFilters }" @click="showAdvancedFilters = !showAdvancedFilters" title="Больше фильтров">
+                  Фильтры
+                  <span v-if="activeFiltersCount" class="tl-filter-more-count">{{ activeFiltersCount }}</span>
+                  <span class="tl-filter-more-chev">{{ showAdvancedFilters ? '▴' : '▾' }}</span>
+                </button>
               </div>
               <div v-if="store.availableEntities.length > 1" class="tl-filter-row tl-filter-entities">
                 <span class="tl-filter-label">Юрлицо:</span>
@@ -111,6 +116,41 @@
                   {{ entityShortName(e.legal_entity) }}
                   <span class="tl-filter-entity-count">{{ e.orders_count }}</span>
                 </button>
+              </div>
+              <div v-if="showAdvancedFilters" class="tl-filter-advanced">
+                <div class="tl-filter-field">
+                  <label>Город</label>
+                  <select v-model="filterCity" class="tl-filter-select">
+                    <option value="">Все</option>
+                    <option v-for="c in availableCities" :key="c" :value="c">{{ c }}</option>
+                  </select>
+                </div>
+                <div class="tl-filter-field">
+                  <label>Регион</label>
+                  <select v-model="filterRegion" class="tl-filter-select">
+                    <option value="">Все</option>
+                    <option v-for="r in availableRegions" :key="r" :value="r">{{ r }}</option>
+                  </select>
+                </div>
+                <div class="tl-filter-field tl-filter-field-range">
+                  <label>Паллеты</label>
+                  <div class="tl-filter-range">
+                    <input type="number" v-model="filterMinPallets" placeholder="от" min="0" step="0.5" class="tl-filter-num" />
+                    <span>–</span>
+                    <input type="number" v-model="filterMaxPallets" placeholder="до" min="0" step="0.5" class="tl-filter-num" />
+                  </div>
+                </div>
+                <div class="tl-filter-field">
+                  <label>Сортировка</label>
+                  <select v-model="sortBy" class="tl-filter-select">
+                    <option value="restaurant">По номеру ресторана</option>
+                    <option value="pallets-desc">Больше паллет сначала</option>
+                    <option value="pallets-asc">Меньше паллет сначала</option>
+                    <option value="weight-desc">Тяжелее сначала</option>
+                    <option value="city">По городу</option>
+                  </select>
+                </div>
+                <button class="tl-filter-reset" @click="resetFilters" :disabled="!activeFiltersCount && sortBy === 'restaurant'">Сбросить</button>
               </div>
             </div>
 
@@ -319,6 +359,46 @@ const showAddTruck = ref(false);
 // Filters
 const filterCategory = ref('');       // '' = все, 'Сухой', 'Холод', 'Мороз'
 const filterRestaurant = ref('');     // поиск по номеру ресторана
+const filterCity = ref('');           // точный город
+const filterRegion = ref('');         // точный регион
+const filterMinPallets = ref('');     // минимум паллет
+const filterMaxPallets = ref('');     // максимум паллет
+const sortBy = ref('restaurant');     // restaurant | pallets-desc | pallets-asc | weight-desc | city
+const showAdvancedFilters = ref(false);
+
+function resetFilters() {
+  filterCategory.value = '';
+  filterRestaurant.value = '';
+  filterCity.value = '';
+  filterRegion.value = '';
+  filterMinPallets.value = '';
+  filterMaxPallets.value = '';
+  sortBy.value = 'restaurant';
+  clearEntityFilter();
+}
+
+// Уникальные города и регионы из текущих заказов — для селектов
+const availableCities = computed(() => {
+  const set = new Set();
+  for (const o of store.filteredOrders) if (o.city) set.add(o.city);
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+});
+const availableRegions = computed(() => {
+  const set = new Set();
+  for (const o of store.filteredOrders) if (o.region) set.add(o.region);
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+});
+const activeFiltersCount = computed(() => {
+  let n = 0;
+  if (filterCategory.value) n++;
+  if (filterRestaurant.value.trim()) n++;
+  if (filterCity.value) n++;
+  if (filterRegion.value) n++;
+  if (filterMinPallets.value) n++;
+  if (filterMaxPallets.value) n++;
+  if (store.entityFilter.length) n++;
+  return n;
+});
 
 // Фильтр по юрлицам хранится в сторе, чтобы он пережил переход со вкладки
 // и влиял на статистику сверху.
@@ -337,6 +417,10 @@ const filteredItems = computed(() => {
   let items = store.unassignedItems;
   const cat = filterCategory.value;
   const rest = filterRestaurant.value.trim();
+  const city = filterCity.value;
+  const region = filterRegion.value;
+  const minP = parseFloat(filterMinPallets.value);
+  const maxP = parseFloat(filterMaxPallets.value);
 
   if (cat) {
     items = items.filter(item => {
@@ -357,7 +441,26 @@ const filteredItems = computed(() => {
     }
   }
 
-  return items;
+  if (city) items = items.filter(item => item.city === city);
+  if (region) items = items.filter(item => item.region === region);
+  if (!Number.isNaN(minP)) items = items.filter(item => (parseFloat(item.pallets) || 0) >= minP);
+  if (!Number.isNaN(maxP)) items = items.filter(item => (parseFloat(item.pallets) || 0) <= maxP);
+
+  // Сортировка
+  const arr = [...items];
+  if (sortBy.value === 'pallets-desc') {
+    arr.sort((a, b) => (parseFloat(b.pallets) || 0) - (parseFloat(a.pallets) || 0));
+  } else if (sortBy.value === 'pallets-asc') {
+    arr.sort((a, b) => (parseFloat(a.pallets) || 0) - (parseFloat(b.pallets) || 0));
+  } else if (sortBy.value === 'weight-desc') {
+    arr.sort((a, b) => (parseFloat(b.weight_kg) || 0) - (parseFloat(a.weight_kg) || 0));
+  } else if (sortBy.value === 'city') {
+    arr.sort((a, b) => (a.city || '').localeCompare(b.city || '', 'ru') || (parseInt(a.restaurant_number) || 0) - (parseInt(b.restaurant_number) || 0));
+  } else {
+    // по умолчанию — по номеру ресторана
+    arr.sort((a, b) => (parseInt(a.restaurant_number) || 0) - (parseInt(b.restaurant_number) || 0));
+  }
+  return arr;
 });
 
 // Группировка отображаемых карточек по юрлицу — нужна для визуального
@@ -562,6 +665,10 @@ onMounted(async () => {
 <style scoped>
 .tl-page {
   padding: 20px 28px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
 /* Toolbar */
@@ -572,6 +679,7 @@ onMounted(async () => {
   margin-bottom: 16px;
   flex-wrap: wrap;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .tl-toolbar h1 {
@@ -607,6 +715,7 @@ onMounted(async () => {
   gap: 0;
   margin-bottom: 20px;
   border-bottom: 2px solid #e0d5c8;
+  flex-shrink: 0;
 }
 
 .tl-page-tab {
@@ -764,6 +873,7 @@ onMounted(async () => {
   background: #f5f0eb;
   border-radius: 10px;
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 
 .tl-stat {
@@ -802,6 +912,7 @@ onMounted(async () => {
   gap: 12px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .tl-controls-left {
@@ -874,21 +985,36 @@ onMounted(async () => {
   font-weight: 600;
 }
 
-/* Columns layout */
+/* Columns layout — обе колонки фиксированы по высоте экрана, скроллятся внутри себя */
 .tl-columns {
   display: flex;
   gap: 20px;
-  align-items: flex-start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .tl-left {
   flex: 0 0 40%;
-  min-height: 200px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
 }
 
 .tl-right {
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
 }
 
 .tl-section-header {
@@ -988,6 +1114,96 @@ onMounted(async () => {
   background: #7c3aed;
   border-color: #7c3aed;
 }
+
+/* Кнопка «больше фильтров» */
+.tl-filter-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 1.5px solid #e0d5c8;
+  border-radius: 6px;
+  background: white;
+  color: #502314;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tl-filter-more:hover { border-color: #D62300; }
+.tl-filter-more.active {
+  background: #fff2e0;
+  border-color: #D62300;
+  color: #D62300;
+}
+.tl-filter-more-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  background: #D62300;
+  color: white;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+.tl-filter-more-chev { font-size: 10px; opacity: 0.7; }
+
+.tl-filter-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #fbf7f2;
+  border: 1.5px solid #e0d5c8;
+  border-radius: 8px;
+}
+.tl-filter-field { display: flex; flex-direction: column; gap: 3px; }
+.tl-filter-field label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b7355;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tl-filter-select {
+  padding: 5px 8px;
+  border: 1.5px solid #e0d5c8;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #502314;
+  background: white;
+  outline: none;
+  min-width: 140px;
+}
+.tl-filter-select:focus { border-color: #D62300; }
+.tl-filter-range { display: flex; align-items: center; gap: 6px; color: #8b7355; }
+.tl-filter-num {
+  width: 60px;
+  padding: 5px 6px;
+  border: 1.5px solid #e0d5c8;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #502314;
+  background: white;
+  outline: none;
+}
+.tl-filter-num:focus { border-color: #D62300; }
+.tl-filter-reset {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1.5px solid #e0d5c8;
+  border-radius: 6px;
+  background: white;
+  color: #8b7355;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tl-filter-reset:hover:not(:disabled) { border-color: #D62300; color: #D62300; }
+.tl-filter-reset:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Entity filters (legal entity) */
 .tl-filter-entities {
