@@ -170,7 +170,7 @@
           </div>
           <div v-if="showMissing" class="sc-missing-list">
             <span v-for="r in missingRestaurants" :key="r.number" class="sc-missing-tag">
-              {{ r.number }}<template v-if="r.city"> · {{ r.city }}</template>
+              {{ formatRestaurantNumber(r.number, r.legal_entity_group) }}<template v-if="r.city"> · {{ r.city }}</template>
             </span>
           </div>
         </div>
@@ -446,6 +446,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';

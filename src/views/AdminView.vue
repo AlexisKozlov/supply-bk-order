@@ -302,7 +302,7 @@
             </div>
 
             <div v-if="log.details?.supplier" class="adm-audit-ctx">{{ log.details.supplier }}</div>
-            <div v-if="log.details?.restaurant_number" class="adm-audit-ctx">Ресторан {{ log.details.restaurant_number }}</div>
+            <div v-if="log.details?.restaurant_number" class="adm-audit-ctx">Ресторан {{ formatRestaurantNumber(log.details.restaurant_number) }}</div>
 
             <div v-if="log.details?.param_changes?.length" class="adm-audit-params">
               <span v-for="(pc, pi) in log.details.param_changes" :key="pi" class="adm-audit-param-chip">
@@ -858,7 +858,7 @@ import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
-import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES, formatRestaurantNumber } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const router = useRouter();

@@ -176,7 +176,7 @@
                   <template v-else>—</template>
                 </td>
                 <td class="rom-td-actions" @click.stop>
-                  <button v-if="r.order_id" class="rom-btn-sm rom-btn-export-sm" @click="quickExportOrder(r.order_id, r.number)" title="Скачать Excel">
+                  <button v-if="r.order_id" class="rom-btn-sm rom-btn-export-sm" @click="quickExportOrder(r.order_id, r.number, r.legal_entity_group)" title="Скачать Excel">
                     ⬇
                   </button>
                 </td>
@@ -410,7 +410,7 @@
               <div class="rom-audit-head">
                 <span class="rom-audit-action">{{ auditActionLabel(ev.action) }}</span>
                 <span class="rom-audit-actor" :class="'actor-' + ev.actor_type">{{ ev.actor_name || '—' }}</span>
-                <span v-if="ev.restaurant_number" class="rom-audit-rest">Рест. {{ ev.restaurant_number }}</span>
+                <span v-if="ev.restaurant_number" class="rom-audit-rest">Рест. {{ formatRestaurantNumber(ev.restaurant_number, ev.legal_entity_group) }}</span>
                 <span v-if="ev.delivery_date" class="rom-audit-deliv">на {{ fmtAuditDate(ev.delivery_date) }}</span>
               </div>
               <div class="rom-audit-detail">
@@ -504,7 +504,7 @@
       <div class="rom-modal rom-modal-lg rom-modal-fixed">
         <!-- Фиксированная шапка -->
         <div class="rom-modal-header">
-          <h2>Заказ ресторана {{ editingOrder?.restaurant_number }}</h2>
+          <h2>Заказ ресторана {{ formatRestaurantNumber(editingOrder?.restaurant_number, editingOrder?.legal_entity_group) }}</h2>
           <button class="rom-modal-close" @click="closeOrderModal">X</button>
         </div>
 
@@ -1539,7 +1539,7 @@ function weightLabel(unit) { return WEIGHT_UNIT_LABELS[unit] || 'г'; }
 const EXPORT_COLUMNS_DEF = [
   { key: 'date', label: 'Дата доставки', width: 14, value: ctx => ctx.date },
   { key: 'order_num', label: '№ заказа', width: 12, value: ctx => ctx.ordNum },
-  { key: 'rest_num', label: '№ ресторана', width: 10, value: ctx => ctx.order.restaurant_number },
+  { key: 'rest_num', label: '№ ресторана', width: 10, value: ctx => formatRestaurantNumber(ctx.order.restaurant_number, ctx.order.legal_entity_group) },
   { key: 'rest_addr', label: 'Адрес ресторана', width: 40, value: ctx => ctx.ri.address || ctx.ri.city || '' },
   { key: 'rest_city', label: 'Город', width: 16, value: ctx => ctx.ri.city || '' },
   { key: 'rest_region', label: 'Регион', width: 12, value: ctx => ctx.ri.region || '' },
@@ -1946,7 +1946,7 @@ async function changeDeliveryDate() {
 
 async function handleDeleteOrder(order) {
   if (!order?.id) return;
-  if (!confirm(`Удалить заказ ресторана ${order.restaurant_number}?`)) return;
+  if (!confirm(`Удалить заказ ресторана ${formatRestaurantNumber(order.restaurant_number, order.legal_entity_group)}?`)) return;
   saving.value = true;
   try {
     await store.adminDeleteOrder(order.id);
@@ -2205,23 +2205,26 @@ function buildSingleOrderXlsx(order, items) {
   const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value, false, DEFAULT_EXPORT_COLUMNS, exportWeightUnit.value);
   const ws = XLSX.utils.aoa_to_sheet(rows);
   styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
-  XLSX.utils.book_append_sheet(wb, ws, `Рест ${order.restaurant_number}`);
+  const prettyRest = formatRestaurantNumber(order.restaurant_number, order.legal_entity_group);
+  XLSX.utils.book_append_sheet(wb, ws, `Рест ${prettyRest}`);
   return wb;
 }
 
 function exportSingleOrder(order) {
   if (!order || !editItems.value.length) return;
   const wb = buildSingleOrderXlsx(order, editItems.value);
-  XLSX.writeFile(wb, `Заказ_рест_${order.restaurant_number}_${order.delivery_date}.xlsx`);
+  const prettyRest = formatRestaurantNumber(order.restaurant_number, order.legal_entity_group);
+  XLSX.writeFile(wb, `Заказ_рест_${prettyRest}_${order.delivery_date}.xlsx`);
 }
 
-async function quickExportOrder(orderId, restaurantNumber) {
+async function quickExportOrder(orderId, restaurantNumber, legalEntityGroup) {
   try {
     const order = await store.adminGetOrder(orderId);
     const items = (order.items || []).map(i => ({ ...i, quantity: parseFloat(i.quantity) || 0 }));
     if (!items.length) { toast.warning('Заказ пуст'); return; }
     const wb = buildSingleOrderXlsx(order, items);
-    XLSX.writeFile(wb, `Заказ_рест_${restaurantNumber}_${selectedDate.value}.xlsx`);
+    const prettyRest = formatRestaurantNumber(restaurantNumber, legalEntityGroup);
+    XLSX.writeFile(wb, `Заказ_рест_${prettyRest}_${selectedDate.value}.xlsx`);
   } catch (e) {
     toast.error('Ошибка', e.message);
   }
@@ -2406,14 +2409,16 @@ async function doUnifiedExport() {
       for (const order of sorted) {
         const oi = byRest[order.restaurant_number] || [];
         if (!oi.length) continue;
-        writeSheet([order], { [order.restaurant_number]: oi }, `Рест ${order.restaurant_number}`);
+        const prettyRest = formatRestaurantNumber(order.restaurant_number, order.legal_entity_group);
+        writeSheet([order], { [order.restaurant_number]: oi }, `Рест ${prettyRest}`);
       }
     } else if (exportGrouping.value === 'restaurants') {
       const sorted = [...filteredOrders].sort((a, b) => a.restaurant_number - b.restaurant_number);
       for (const order of sorted) {
         const oi = byRest[order.restaurant_number] || [];
         if (!oi.length) continue;
-        writeSheet([order], { [order.restaurant_number]: oi }, `Рест ${order.restaurant_number}`);
+        const prettyRest = formatRestaurantNumber(order.restaurant_number, order.legal_entity_group);
+        writeSheet([order], { [order.restaurant_number]: oi }, `Рест ${prettyRest}`);
       }
     } else if (exportGrouping.value === 'categories') {
       for (const cat of ['Сухой', 'Холод', 'Мороз']) {

@@ -70,9 +70,9 @@
       <div class="sb-spacer"></div>
       <div class="sb-rest" :class="{ active: activeTab === 'profile' }">
         <button class="sb-rest-main" @click="switchTab('profile')" title="Открыть профиль">
-          <div class="sb-avatar">{{ roStore.restaurant?.number }}</div>
+          <div class="sb-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
           <div class="sb-rest-info">
-            <div class="sb-rest-name">Ресторан {{ roStore.restaurant?.number }}</div>
+            <div class="sb-rest-name">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
             <div class="sb-rest-addr">{{ restaurantAddress }}</div>
           </div>
         </button>
@@ -91,7 +91,7 @@
       <div class="cab-topbar">
         <div>
           <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'stock' ? 'Остатки' : 'Профиль' }}</div>
-          <div class="cab-topbar-sub">Ресторан {{ roStore.restaurant?.number }} · {{ restaurantAddress }}</div>
+          <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
       </div>
 
@@ -649,9 +649,9 @@
     <section v-if="activeTab === 'profile' && !globalLoading" class="cab-section">
       <div class="profile-card">
         <div class="profile-header">
-          <div class="profile-avatar">{{ roStore.restaurant?.number }}</div>
+          <div class="profile-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
           <div>
-            <h2>Ресторан {{ roStore.restaurant?.number }}</h2>
+            <h2>Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</h2>
             <p>{{ restaurantAddress }}</p>
             <p class="profile-le">{{ roStore.restaurant?.legal_entity }}</p>
           </div>
@@ -821,6 +821,7 @@ import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -1303,8 +1304,9 @@ async function delExportExcel() {
   const sH = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '502314' } }, alignment: { horizontal: 'center' } };
   for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = sH; }
   ws['!cols'] = [{ wch: 40 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, ws, `Заказ ${roStore.restaurant?.number}`.slice(0, 31));
-  XLSX.writeFile(wb, `Заказ_${roStore.restaurant?.number}_${delSelectedDate.value}.xlsx`);
+  const prettyNum = formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group);
+  XLSX.utils.book_append_sheet(wb, ws, `Заказ ${prettyNum}`.slice(0, 31));
+  XLSX.writeFile(wb, `Заказ_${prettyNum}_${delSelectedDate.value}.xlsx`);
 }
 
 // ═══ Планета Ресторанов (veg) ═══

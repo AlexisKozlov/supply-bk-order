@@ -128,7 +128,7 @@
               <tbody>
                 <tr v-for="r in filteredRestaurants" :key="r.number" :class="{ 'rom-row-submitted': r.order_status, 'so-row-skip': isSkipOrder(r) }">
                   <td class="so-td-rest">
-                    <span class="rom-td-num">{{ r.number }}</span>
+                    <span class="rom-td-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
                     <span class="so-rest-addr">{{ r.city || r.region }}{{ r.address ? ', ' + r.address : '' }}</span>
                   </td>
                   <td>
@@ -211,7 +211,7 @@
           </thead>
           <tbody>
             <tr v-for="o in ordersList" :key="o.id">
-              <td class="rom-td-num">{{ o.restaurant_number }}</td>
+              <td class="rom-td-num">{{ formatRestaurantNumber(o.restaurant_number, o.legal_entity_group) }}</td>
               <td>{{ o.address }}</td>
               <td>{{ formatDate(o.delivery_date) }}</td>
               <td>{{ formatDate(o.order_date) }}</td>
@@ -281,7 +281,7 @@
               <tbody>
                 <tr v-for="r in filteredScheduleRestaurants" :key="r.id">
                   <td class="so-grid-rest-cell">
-                    <span class="so-grid-num">{{ r.number }}</span>
+                    <span class="so-grid-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
                     <span class="so-grid-addr">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
                   </td>
                   <td v-for="d in 7" :key="d" class="so-grid-check" @click="toggleScheduleDay(r, d)">
@@ -343,7 +343,7 @@
     <div v-if="showOrderModal" class="rom-modal-overlay" @click.self="showOrderModal = false">
       <div class="rom-modal">
         <div class="rom-modal-header">
-          <h3>Заявка #{{ viewedOrder?.id }} — Рест. {{ viewedOrder?.restaurant_number }}</h3>
+          <h3>Заявка #{{ viewedOrder?.id }} — Рест. {{ formatRestaurantNumber(viewedOrder?.restaurant_number, viewedOrder?.legal_entity_group) }}</h3>
           <button class="rom-modal-close" @click="showOrderModal = false">✕</button>
         </div>
         <div class="rom-modal-body" v-if="viewedOrder">
@@ -372,6 +372,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const props = defineProps({
   supplierId: { type: String, default: '' },

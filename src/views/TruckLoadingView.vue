@@ -110,7 +110,7 @@
               <div v-for="item in filteredItems" :key="item.key"
                 class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
                 <div class="tl-card-header">
-                  <span class="tl-card-num">{{ item.restaurant_number }}</span>
+                  <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
                   <span class="tl-card-city">{{ item.city }}</span>
                 </div>
                 <div class="tl-card-stats">
@@ -128,7 +128,7 @@
               <div v-for="item in filteredItems" :key="item.key"
                 class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
                 <div class="tl-card-header">
-                  <span class="tl-card-num">{{ item.restaurant_number }}</span>
+                  <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
                   <span class="tl-cat-badge" :class="'cat-' + catClass(item.category)">{{ item.category }}</span>
                 </div>
                 <div class="tl-card-total">{{ fmtPallets(item.pallets) }} палл. | {{ (+item.weight_kg).toFixed(0) }} кг</div>
@@ -140,7 +140,7 @@
               <div v-for="item in filteredItems" :key="item.key"
                 class="tl-card" draggable="true" @dragstart="onDragStart($event, item)">
                 <div class="tl-card-header">
-                  <span class="tl-card-num">{{ item.restaurant_number }}</span>
+                  <span class="tl-card-num">{{ formatRestaurantNumber(item.restaurant_number, item.legal_entity_group) }}</span>
                   <span class="tl-card-sku">{{ item.sku }} {{ item.product_name }}</span>
                 </div>
                 <div class="tl-card-total">{{ item.quantity }} шт. | {{ fmtPallets(item.pallets) }} палл.</div>
@@ -199,7 +199,7 @@
                 <div v-for="(a, aIdx) in truck.assignments" :key="aIdx"
                   class="tl-assigned-card"
                   draggable="true" @dragstart="onDragStartFromTruck($event, tIdx, aIdx, a)">
-                  <span class="tl-assigned-rest">{{ a.restaurant_number }}</span>
+                  <span class="tl-assigned-rest">{{ formatRestaurantNumber(a.restaurant_number, a.legal_entity_group) }}</span>
                   <span class="tl-assigned-cat" v-if="a.category" :class="'cat-' + catClass(a.category)">{{ a.category }}</span>
                   <span class="tl-assigned-stats">{{ fmtPallets(a.pallets) }}п | {{ (+a.weight_kg).toFixed(0) }}кг</span>
                   <button class="tl-btn-unassign" @click="store.unassign(tIdx, aIdx)">&#10005;</button>
@@ -272,6 +272,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useTruckLoadingStore } from '@/stores/truckLoadingStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { exportTruckLoading } from '@/lib/truckLoadingExport.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const store = useTruckLoadingStore();
 const toast = useToastStore();

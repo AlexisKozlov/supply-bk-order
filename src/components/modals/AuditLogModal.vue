@@ -17,7 +17,7 @@
                 <span class="audit-date">{{ formatDate(log.created_at) }}</span>
               </div>
               <!-- Restaurant number -->
-              <div v-if="log.details?.restaurant_number" class="audit-restaurant-num">Ресторан {{ log.details.restaurant_number }}</div>
+              <div v-if="log.details?.restaurant_number" class="audit-restaurant-num">Ресторан {{ formatRestaurantNumber(log.details.restaurant_number) }}</div>
               <!-- Param changes -->
               <div v-if="log.details?.param_changes?.length" class="audit-params">
                 <span v-for="(pc, pi) in log.details.param_changes" :key="pc.label + pi" class="audit-param-chip">
@@ -77,6 +77,7 @@
 import { onMounted, onUnmounted } from 'vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { formatDateTime as formatDate } from '@/lib/utils.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const props = defineProps({
   show: { type: Boolean, default: false },

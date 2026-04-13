@@ -103,7 +103,8 @@ function cmdVegStats($chatId, $msgId) {
         foreach ($subsByRest as $restNum => $restSubs) {
             $cnt = count($restSubs);
             $addr = isset($restInfo[$restNum]) ? mb_substr($restInfo[$restNum]['address'] ?: $restInfo[$restNum]['city'], 0, 30) : '';
-            $text .= "  {$restNum} ({$cnt} чел.) — {$addr}\n";
+            $prettyRn = formatRestaurantNumber($restNum);
+            $text .= "  {$prettyRn} ({$cnt} чел.) — {$addr}\n";
         }
         $text .= "\n";
     }
@@ -118,7 +119,8 @@ function cmdVegStats($chatId, $msgId) {
                 break;
             }
             $addr = mb_substr($r['address'] ?: $r['city'], 0, 30);
-            $text .= "  {$r['number']} — {$addr}\n";
+            $prettyRn = formatRestaurantNumber($r['number']);
+            $text .= "  {$prettyRn} — {$addr}\n";
             $shown++;
         }
     }
@@ -157,7 +159,7 @@ function vegShowMySubs($chatId, $msgId = null) {
 
     if ($subs) {
         $restNums = array_column($subs, 'restaurant_number');
-        $restList = implode(', ', $restNums);
+        $restList = implode(', ', array_map('formatRestaurantNumber', $restNums));
 
         // Статистика для приветствия
         $activeSc = $pdo->query("SELECT id, name FROM stock_collections WHERE status = 'active' LIMIT 1")->fetch();
@@ -876,7 +878,8 @@ function restScSelectRest($chatId, $msgId, $collectionId) {
     foreach ($subs as $sub) {
         $done = isset($filledSet[$sub['restaurant_number']]) ? ' ✅' : '';
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 30);
-        $btns[] = [['text' => "🏪 {$sub['restaurant_number']} — {$addr}{$done}", 'callback_data' => "sc_rest_{$collectionId}_{$sub['restaurant_number']}"]];
+        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}{$done}", 'callback_data' => "sc_rest_{$collectionId}_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_sc_start']];
     editMessage($chatId, $msgId, "📋 <b>{$colName}</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
@@ -917,7 +920,7 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
 
     $text = "📋 <b>{$colName}</b>\n";
-    $text .= "🏪 Ресторан <b>{$restNum}</b>\n";
+    $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n";
 
     if (!empty($existing)) {
@@ -1030,7 +1033,7 @@ function restScProcessInput($chatId, $text, $userMsgId) {
     @unlink($dataFile);
 
     $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
-    $confirmText = "✅ <b>Остатки сохранены!</b>\n🏪 Ресторан <b>{$restNum}</b>\n─────────────────────\n";
+    $confirmText = "✅ <b>Остатки сохранены!</b>\n🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n─────────────────────\n";
     foreach ($products as $i => $p) {
         $u = $unitLabels[$p['unit']] ?? $p['unit'];
         $v = rtrim(rtrim(number_format($values[$i], 2, '.', ''), '0'), '.');
@@ -1107,7 +1110,8 @@ function vegShowSubsManage($chatId, $msgId) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
-        $btns[] = [['text' => "❌ {$sub['restaurant_number']} — {$addr}", 'callback_data' => "veg_unsub_{$sub['restaurant_number']}"]];
+        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $btns[] = [['text' => "❌ {$prettyRest} — {$addr}", 'callback_data' => "veg_unsub_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -1212,7 +1216,8 @@ function vegShowMyOrders($chatId, $msgId) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
-        $btns[] = [['text' => "🏪 {$sub['restaurant_number']} — {$addr}", 'callback_data' => "veg_orders_rest_{$sub['restaurant_number']}"]];
+        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => "veg_orders_rest_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -1311,13 +1316,13 @@ function vegShowHistory($chatId, $msgId, $restNum) {
     $sessions = $s->fetchAll();
 
     if (!$sessions) {
-        editMessage($chatId, $msgId, "📜 <b>История — рест. {$restNum}</b>\n\n<i>Нет прошлых заявок.</i>", ['inline_keyboard' => [
+        editMessage($chatId, $msgId, "📜 <b>История — рест. " . formatRestaurantNumber($restNum) . "</b>\n\n<i>Нет прошлых заявок.</i>", ['inline_keyboard' => [
             [['text' => '◂ Назад', 'callback_data' => "veg_orders_rest_{$restNum}"]],
         ]]);
         return;
     }
 
-    $text = "📜 <b>История — рест. {$restNum}</b>\n\n";
+    $text = "📜 <b>История — рест. " . formatRestaurantNumber($restNum) . "</b>\n\n";
     $text .= "Последние сессии:\n";
     $btns = [];
     foreach ($sessions as $sess) {
@@ -1400,7 +1405,8 @@ function vegStartOrder($chatId, $msgId = null) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: '', 0, 30);
-        $btns[] = [['text' => "🏪 {$sub['restaurant_number']} — {$addr}", 'callback_data' => "vegord_rest_{$sub['restaurant_number']}"]];
+        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => "vegord_rest_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     if ($msgId) editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -1530,7 +1536,8 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
         $dateFmt = date('d.m', strtotime($deliveryDate));
         $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
         $dow = (int)date('N', strtotime($deliveryDate));
-        $text = "📋 <b>Заявка: рест. {$restNum}</b>\n";
+        $prettyRn = formatRestaurantNumber($restNum);
+        $text = "📋 <b>Заявка: рест. {$prettyRn}</b>\n";
         $text .= "📅 {$dayNames[$dow]} {$dateFmt}\n";
         $text .= "⏰ <i>Дедлайн прошёл — изменить нельзя</i>\n";
         $text .= "─────────────────────\n";
@@ -1635,7 +1642,7 @@ function vegOrderShowProducts($chatId, $msgId, $restNum, $deliveryDate) {
     $dow = (int)date('N', strtotime($deliveryDate));
     $dayName = $dayNames[$dow] ?? '';
 
-    $text = "🥬 <b>Заявка: рест. {$restNum}</b>\n";
+    $text = "🥬 <b>Заявка: рест. " . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "📅 {$dayName} {$dateFmt}\n";
     $text .= "─────────────────────\n";
 
@@ -1746,7 +1753,7 @@ function vegOrderSkipDay($chatId, $msgId, $restNum, $deliveryDate) {
     @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
 
     $dateFmt = date('d.m', strtotime($deliveryDate));
-    $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>{$restNum}</b>\n📅 Доставка: {$dateFmt}\n\n";
+    $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n📅 Доставка: {$dateFmt}\n\n";
     $msg .= "<i>Все товары: 0 (поставка не нужна)</i>";
 
     editMessage($chatId, $msgId, $msg, ['inline_keyboard' => [
@@ -1841,7 +1848,7 @@ function vegOrderProcessInput($chatId, $text, $mode) {
     }
 
     $dateFmt = date('d.m', strtotime($deliveryDate));
-    $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>{$restNum}</b>\n📅 Доставка: {$dateFmt}\n\n";
+    $msg = "✅ <b>Заявка сохранена!</b>\n\n🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n📅 Доставка: {$dateFmt}\n\n";
     if (empty($resultLines)) {
         $msg .= "<i>Все товары: 0 (ничего не нужно)</i>";
     } else {
@@ -2054,7 +2061,8 @@ function corrShowHistory($chatId, $msgId, $page = 0) {
             $uom = $c['unit_of_measure'] ?: 'кор.';
             $name = mb_substr($c['product_name'], 0, 25);
             $reviewDate = $c['reviewed_at'] ? date('d.m H:i', strtotime($c['reviewed_at'])) : '';
-            $text .= "{$si} Р-н <b>{$c['restaurant_number']}</b> {$dateFmt} | {$actionLabel} {$name} " . corrFmtQty($c['quantity']) . " {$uom}";
+            $prettyRest = formatRestaurantNumber($c['restaurant_number']);
+            $text .= "{$si} Р-н <b>{$prettyRest}</b> {$dateFmt} | {$actionLabel} {$name} " . corrFmtQty($c['quantity']) . " {$uom}";
             if ($c['reviewer_name']) $text .= " — {$c['reviewer_name']}";
             $text .= " <i>{$reviewDate}</i>\n";
         }
@@ -2100,7 +2108,8 @@ function corrStart($chatId, $msgId) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
-        $btns[] = [['text' => "🏪 {$sub['restaurant_number']} — {$addr}", 'callback_data' => "corr_rest_{$sub['restaurant_number']}"]];
+        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => "corr_rest_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, "✏️ <b>Корректировка заказа</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
@@ -2263,7 +2272,7 @@ function corrProcessTextInput($chatId, $text, $mode, $userMsgId = null) {
         // Сводка
         $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
         $dow = (int)(new DateTime($state['date']))->format('N');
-        $summary = "📋 <b>Корректировка: рест. {$state['rest']}</b>\n";
+        $summary = "📋 <b>Корректировка: рест. " . formatRestaurantNumber($state['rest']) . "</b>\n";
         $summary .= "📅 {$dayNames[$dow]} " . date('d.m', strtotime($state['date'])) . "\n";
         $summary .= "─────────────────────\n";
         foreach ($items as $item) {
@@ -2424,7 +2433,7 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
     $from = $submitterName ? " ({$submitterName})" : '';
 
     $text = "📦 <b>Корректировка заказа</b>\n";
-    $text .= "🏪 Ресторан <b>{$restNum}</b>{$from} | {$dateFmt}\n";
+    $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>{$from} | {$dateFmt}\n";
     $text .= "─────────────────────\n";
 
     $pendingIds = [];
@@ -2566,7 +2575,8 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $dateFmt = $dayNames[$dow] . ' ' . date('d.m', strtotime($first['delivery_date']));
 
     $text = "📋 <b>Результат корректировки заказа</b>\n";
-    $text .= "🏪 Ресторан <b>{$first['restaurant_number']}</b> | Доставка: {$dateFmt}\n";
+    $prettyFirstRest = formatRestaurantNumber($first['restaurant_number']);
+    $text .= "🏪 Ресторан <b>{$prettyFirstRest}</b> | Доставка: {$dateFmt}\n";
     $text .= "─────────────────────\n";
     foreach ($items as $c) {
         $uom = $c['unit_of_measure'] ?: 'кор.';
@@ -2697,7 +2707,8 @@ function restRoOrders($chatId, $msgId) {
     $statusIcons = ['submitted' => '✅', 'edited' => '📝', 'draft' => '📋', 'locked' => '🔒'];
 
     foreach ($restNums as $rn) {
-        $text .= "🏪 <b>Ресторан {$rn}:</b>\n";
+        $prettyRn = formatRestaurantNumber($rn);
+        $text .= "🏪 <b>Ресторан {$prettyRn}:</b>\n";
         if (isset($byRest[$rn])) {
             foreach ($byRest[$rn] as $o) {
                 $dow = (int)(new DateTime($o['delivery_date']))->format('N');
@@ -2818,12 +2829,13 @@ function restRoSendLogins($chatId, $msgId) {
         }
 
         $addr = $u['city'] . ($u['address'] ? ', ' . $u['address'] : '');
+        $prettyRn = formatRestaurantNumber($rn);
         $msgText = "🛒 <b>Заказы ресторанов — новая система</b>\n";
         $msgText .= "━━━━━━━━━━━━━━━━━━━━\n\n";
         $msgText .= "Для подачи заявок используйте веб-форму:\n\n";
-        $msgText .= "🏪 Ресторан: <b>{$rn}</b> ({$addr})\n";
+        $msgText .= "🏪 Ресторан: <b>{$prettyRn}</b> ({$addr})\n";
         $msgText .= "🔗 Ссылка: {$siteUrl}/restaurant\n";
-        $msgText .= "👤 Логин: <b>{$rn}</b>\n";
+        $msgText .= "👤 Логин: <b>{$prettyRn}</b>\n";
         $msgText .= "🔑 Пароль выдаёт отдел закупок\n\n";
         $msgText .= "⏰ Дедлайн подачи заявки: <b>до 10:00</b> (день перед доставкой)\n";
 

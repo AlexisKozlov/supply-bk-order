@@ -20,7 +20,7 @@
             @click="selectConversation(c)"
           >
             <div class="chat-conv-top">
-              <span class="chat-conv-rest">🏪 {{ c.restaurant_number }}</span>
+              <span class="chat-conv-rest">🏪 {{ formatRestaurantNumber(c.restaurant_number) }}</span>
               <span v-if="c.restaurant_name" class="chat-conv-name">{{ c.restaurant_name }}</span>
               <span v-if="c.unread_count > 0" class="chat-unread-badge">{{ c.unread_count }}</span>
             </div>
@@ -36,7 +36,7 @@
           <div class="chat-main-header">
             <div style="display:flex;align-items:center;gap:8px;">
               <button class="chat-back-btn" @click="selectedConv = null; selectedId = null">←</button>
-              <strong>🏪 Ресторан {{ selectedConv.restaurant_number }}</strong>
+              <strong>🏪 Ресторан {{ formatRestaurantNumber(selectedConv.restaurant_number) }}</strong>
               <span v-if="selectedConv.restaurant_name" class="chat-header-name">· {{ selectedConv.restaurant_name }}</span>
               <span class="chat-status-badge" :class="selectedConv.status">{{ selectedConv.status === 'open' ? 'Открыт' : 'Закрыт' }}</span>
             </div>
@@ -87,6 +87,7 @@
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
 
 const toastStore = useToastStore()

@@ -42,7 +42,7 @@ function roGetRestaurantSession($pdo) {
     if (!$token) return null;
     $s = $pdo->prepare("
         SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.session_active_until,
-               r.region, r.city, r.address
+               r.region, r.city, r.address, r.legal_entity_group
         FROM ro_users ru
         LEFT JOIN restaurants r ON r.number = ru.restaurant_number AND r.active = 1
         WHERE ru.session_token = ? AND ru.is_active = 1
@@ -263,7 +263,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
 
-    $r = $pdo->prepare("SELECT number, region, city, address FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+    $r = $pdo->prepare("SELECT number, region, city, address, legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
     $r->execute([$restNum]);
     $rest = $r->fetch();
 
@@ -273,6 +273,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         'restaurant' => [
             'number' => $restNum,
             'legal_entity' => $user['legal_entity'],
+            'legal_entity_group' => $rest['legal_entity_group'] ?? 'BK_VM',
             'region' => $rest['region'] ?? '',
             'city' => $rest['city'] ?? '',
             'address' => $rest['address'] ?? '',
@@ -335,7 +336,7 @@ if ($roAction === 'login' && $method === 'POST') {
         ->execute([$token, $activeUntil, $user['id']]);
 
     // Инфо о ресторане
-    $r = $pdo->prepare("SELECT number, region, city, address FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+    $r = $pdo->prepare("SELECT number, region, city, address, legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
     $r->execute([$restNum]);
     $rest = $r->fetch();
 
@@ -345,6 +346,7 @@ if ($roAction === 'login' && $method === 'POST') {
         'restaurant' => [
             'number' => $restNum,
             'legal_entity' => $user['legal_entity'],
+            'legal_entity_group' => $rest['legal_entity_group'] ?? 'BK_VM',
             'region' => $rest['region'] ?? '',
             'city' => $rest['city'] ?? '',
             'address' => $rest['address'] ?? '',
@@ -361,6 +363,7 @@ if ($roAction === 'validate' && $method === 'POST') {
     roRespond(['valid' => true, 'restaurant' => [
         'number' => $rest['restaurant_number'],
         'legal_entity' => $rest['legal_entity'],
+        'legal_entity_group' => $rest['legal_entity_group'] ?? 'BK_VM',
         'region' => $rest['region'] ?? '',
         'city' => $rest['city'] ?? '',
         'address' => $rest['address'] ?? '',

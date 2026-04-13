@@ -57,6 +57,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/userStore.js'
 import { db } from '@/lib/apiClient.js'
+import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -167,7 +168,7 @@ async function search(q) {
         .or(`short_name.ilike.*${escaped}*,full_name.ilike.*${escaped}*`)
         .limit(5),
       db.from('restaurants')
-        .select('number, city, address, region')
+        .select('number, city, address, region, legal_entity_group')
         .or(`number.ilike.*${escaped}*,city.ilike.*${escaped}*,address.ilike.*${escaped}*`)
         .eq('active', 1)
         .limit(5),
@@ -204,7 +205,7 @@ async function search(q) {
 
     if (restaurants?.length) {
       results.push(...restaurants.map((r, i) => ({
-        title: `Ресторан ${r.number}`,
+        title: `Ресторан ${formatRestaurantNumber(r.number, r.legal_entity_group)}`,
         subtitle: [r.city, r.address].filter(Boolean).join(', '),
         icon: '🍔',
         group: 'Рестораны',

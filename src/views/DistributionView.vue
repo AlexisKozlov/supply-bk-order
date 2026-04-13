@@ -130,7 +130,7 @@
           <tbody>
             <tr v-for="(rest, ri) in filteredRestaurants" :key="rest.number" :class="{ 'row-alt': ri % 2 === 1 }">
               <td class="td-rest">
-                <span class="rest-num">{{ rest.number }}</span>
+                <span class="rest-num">{{ formatRestaurantNumber(rest.number, rest.legal_entity_group) }}</span>
                 <span class="rest-addr">{{ rest.address }}</span>
                 <span v-if="isVM(rest)" class="rest-vm">ВМ</span>
               </td>
@@ -301,6 +301,7 @@
 <script setup>
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 

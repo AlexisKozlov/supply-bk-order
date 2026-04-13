@@ -101,7 +101,7 @@
         <tbody>
           <tr v-for="row in sortedItemsData" :key="row.id" class="rr-item-row">
             <td>{{ fmtDate(row.delivery_date) }}</td>
-            <td><strong>{{ row.restaurant_number }}</strong></td>
+            <td><strong>{{ formatRestaurantNumber(row.restaurant_number, row.legal_entity_group) }}</strong></td>
             <td class="rr-city">{{ row.city }}</td>
             <td>
               <span class="rr-sku">{{ row.sku }}</span> {{ row.product_name }}
@@ -175,7 +175,7 @@
         </thead>
         <tbody>
           <tr v-for="row in sortedRestData" :key="row.number">
-            <td><strong>{{ row.number }}</strong></td>
+            <td><strong>{{ formatRestaurantNumber(row.number, row.legal_entity_group) }}</strong></td>
             <td>{{ row.city }}</td>
             <td class="rr-num">{{ fmtNum(row.totalQty) }}</td>
             <td class="rr-num">{{ row.itemCount }}</td>
@@ -286,7 +286,7 @@
     <!-- Диалог подтверждения удаления -->
     <div v-if="deleteConfirm" class="rr-overlay" @click.self="deleteConfirm = null">
       <div class="rr-confirm">
-        <p>Удалить <strong>{{ deleteConfirm.sku }} {{ deleteConfirm.product_name }}</strong> ({{ deleteConfirm.quantity }} кор.) из заказа ресторана <strong>{{ deleteConfirm.restaurant_number }}</strong> на {{ fmtDate(deleteConfirm.delivery_date) }}?</p>
+        <p>Удалить <strong>{{ deleteConfirm.sku }} {{ deleteConfirm.product_name }}</strong> ({{ deleteConfirm.quantity }} кор.) из заказа ресторана <strong>{{ formatRestaurantNumber(deleteConfirm.restaurant_number, deleteConfirm.legal_entity_group) }}</strong> на {{ fmtDate(deleteConfirm.delivery_date) }}?</p>
         <div class="rr-confirm-btns">
           <button class="rr-btn rr-btn-danger" @click="confirmDelete" :disabled="deleting">{{ deleting ? 'Удаление...' : 'Удалить' }}</button>
           <button class="rr-btn rr-btn-outline" @click="deleteConfirm = null">Отмена</button>
@@ -302,6 +302,7 @@ import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { EXCEL_HEADER_STYLE } from '@/lib/roUtils.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const store = useRestaurantOrderStore();
 const toast = useToastStore();
@@ -569,14 +570,14 @@ async function exportExcel() {
 
   // Sheet 2: По ресторанам
   const restRows = [['Ресторан', 'Город', 'Коробок', 'Позиций', 'Заказов']];
-  for (const r of sortedRestData.value) restRows.push([r.number, r.city, r.totalQty, r.itemCount, r.orderCount]);
+  for (const r of sortedRestData.value) restRows.push([formatRestaurantNumber(r.number, r.legal_entity_group), r.city, r.totalQty, r.itemCount, r.orderCount]);
   const ws2 = XLSX.utils.aoa_to_sheet(restRows);
   for (let c = 0; c < 5; c++) { const cell = ws2[XLSX.utils.encode_cell({ r: 0, c })]; if (cell) cell.s = hStyle; }
   ws2['!cols'] = [{ wch: 10 }, { wch: 20 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
   XLSX.utils.book_append_sheet(wb, ws2, 'По ресторанам');
 
   // Sheet 3: Кросс-таблица
-  const crossHead = ['Артикул', 'Товар', ...crossRestaurants.value.map(r => `Рест ${r}`), 'Итого'];
+  const crossHead = ['Артикул', 'Товар', ...crossRestaurants.value.map(r => `Рест ${formatRestaurantNumber(r)}`), 'Итого'];
   const crossRows = [crossHead];
   for (const r of crossData.value) {
     crossRows.push([r.sku, r.name, ...crossRestaurants.value.map(rest => r.byRest[rest] || ''), r.total]);

@@ -43,7 +43,7 @@
           </thead>
           <tbody>
             <tr v-for="g in groupedCorrections" :key="g.key" :class="'row-' + g.overallStatus">
-              <td class="col-rest"><strong>{{ g.restaurant_number }}</strong></td>
+              <td class="col-rest"><strong>{{ formatRestaurantNumber(g.restaurant_number, g.legal_entity_group) }}</strong></td>
               <td class="col-date">{{ g.dateLabel }}</td>
               <td class="col-items">
                 <div v-for="c in g.items" :key="c.id" class="corr-item-line">
@@ -125,6 +125,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
 
 const toastStore = useToastStore()

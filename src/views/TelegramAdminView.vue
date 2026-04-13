@@ -187,7 +187,7 @@
             <details class="tga-details" style="border:none;padding:0;margin:0;">
               <summary>Не подавшие рестораны ({{ vegMissingRests.length }})</summary>
               <div class="tga-details-body" style="font-size:13px;color:var(--text-muted);">
-                {{ vegMissingRests.map(r => r.number).join(', ') }}
+                {{ vegMissingRests.map(r => formatRestaurantNumber(r.number, r.legal_entity_group)).join(', ') }}
               </div>
             </details>
           </div>
@@ -362,7 +362,7 @@
             </thead>
             <tbody>
               <tr v-for="r in filteredVegRests" :key="r.number" :class="{ 'tga-row-muted': !r.subCount }">
-                <td><b>{{ r.number }}</b></td>
+                <td><b>{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</b></td>
                 <td>{{ r.address || '—' }}</td>
                 <td>{{ r.city || '—' }}</td>
                 <td :class="r.subCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
@@ -475,7 +475,7 @@
           <tbody>
             <tr v-for="(r, i) in filteredReminderLog" :key="i">
               <td>{{ formatDate(r.sent_at) }}</td>
-              <td><b>{{ r.restaurant_number }}</b></td>
+              <td><b>{{ formatRestaurantNumber(r.restaurant_number, r.legal_entity_group) }}</b></td>
               <td>{{ r.address || r.city || '—' }}</td>
               <td>{{ formatDateShort(r.delivery_date) }}</td>
               <td>
@@ -588,6 +588,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
+import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
 
 const userStore = useUserStore()
@@ -840,7 +841,7 @@ const vegUniqueSubscribers = computed(() => {
         notify_stock_sessions: s.notify_stock_sessions,
       }
     }
-    map[s.chat_id].restaurants.push(s.restaurant_number)
+    map[s.chat_id].restaurants.push(formatRestaurantNumber(s.restaurant_number))
   }
   return Object.values(map)
 })

@@ -37,6 +37,8 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
 ]);
 $pdo->exec("SET SESSION max_statement_time = 30");
 
+require_once __DIR__ . '/includes/legal_entities.php';
+
 // Тихие часы: 22:00–09:00 по Минску — никакие уведомления не отправляем.
 // Выходим до всех проверок, чтобы дедуп не пометил неотправленные сообщения как доставленные.
 $__nowHour = (int)(new DateTime('now', new DateTimeZone('Europe/Minsk')))->format('H');
@@ -747,7 +749,7 @@ try {
             $text = "📋 <b>Напоминание: сбор остатков</b>\n";
             $text .= "─────────────────────\n";
             $text .= "📝 {$sc['name']}\n";
-            $text .= "🏪 Ресторан <b>{$sub['restaurant_number']}</b>\n\n";
+            $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($sub['restaurant_number']) . "</b>\n\n";
             $text .= "Вы ещё не заполнили остатки.\nПожалуйста, заполните через бот.";
 
             $keyboard = json_encode(['inline_keyboard' => [
@@ -885,9 +887,10 @@ try {
 
                     // Ссылка теперь в inline-кнопке, убираем из текста
 
+                    $prettyRestNum = formatRestaurantNumber($restNum);
                     if ($reminderType === 'expired') {
                         $msgText = "⚠️ <b>Дедлайн заявки на овощи истёк!</b>\n\n";
-                        $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                        $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                         $msgText .= "📅 Доставка: {$dayName} ({$deliveryDate})\n\n";
                         $msgText .= "Заявка не была подана. Заказ будет выполнен по предыдущей заявке.";
 
@@ -941,7 +944,7 @@ try {
                         // кнопки добавляются ниже
                     } elseif ($reminderType === 'evening') {
                         $msgText = "🌙 <b>Напоминание: заявка на овощи</b>\n\n";
-                        $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                        $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                         $msgText .= "📅 Доставка: {$dayName} ({$deliveryDate})\n";
                         $msgText .= "⏳ Дедлайн завтра: <b>{$deadlineFmt}</b>\n\n";
                         $msgText .= "Не забудьте подать заявку!";
@@ -950,7 +953,7 @@ try {
                         $timeLabels = ['3h'=>'3 часа','2h'=>'2 часа','1h'=>'1 час','30m'=>'30 минут'];
                         $timeLabel = $timeLabels[$reminderType] ?? $reminderType;
                         $msgText = "⏰ <b>Напоминание: заявка на овощи</b>\n\n";
-                        $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                        $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                         $msgText .= "📅 Доставка: {$dayName} ({$deliveryDate})\n";
                         $msgText .= "⏳ До дедлайна: <b>{$timeLabel}</b> (до {$deadlineFmt})\n\n";
                         $msgText .= "Заявка ещё не подана! Пожалуйста, заполните заявку.";
@@ -1081,7 +1084,7 @@ try {
                 $timeLeft = $currentTime < '09:00' ? 'до 10:00' : 'до 13:00';
                 $dateFormatted = (new DateTime($tomorrow))->format('d.m');
                 $text = "⏰ <b>Напоминание</b>\n\n";
-                $text .= "Ресторан <b>{$m['restaurant_number']}</b>: не подана заявка на <b>{$dateFormatted}</b>.\n";
+                $text .= "Ресторан <b>" . formatRestaurantNumber($m['restaurant_number']) . "</b>: не подана заявка на <b>{$dateFormatted}</b>.\n";
                 $text .= "Дедлайн: {$timeLeft}.\n\n";
 
                 // Генерируем токен для быстрого входа (с привязкой к ресторану из напоминания)
@@ -1268,15 +1271,16 @@ try {
             $dayNames = [1=>'понедельник',2=>'вторник',3=>'среду',4=>'четверг',5=>'пятницу',6=>'субботу',7=>'воскресенье'];
             $dayName = $dayNames[$nextDelivery['dow']] ?? '';
 
+            $prettyRestNum = formatRestaurantNumber($restNum);
             if ($reminderType === 'expired') {
                 $msgText = "⚠️ <b>Дедлайн заявки истёк!</b>\n\n";
-                $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
                 $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n\n";
                 $msgText .= "Заявка не была подана.";
             } elseif ($reminderType === 'evening') {
                 $msgText = "🌙 <b>Напоминание: заявка поставщику</b>\n\n";
-                $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
                 $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n";
                 $msgText .= "⏳ Дедлайн завтра: <b>{$deadlineFmt}</b>\n\n";
@@ -1285,7 +1289,7 @@ try {
                 $timeLabels = ['3h' => '3 часа', '2h' => '2 часа', '1h' => '1 час', '30m' => '30 минут'];
                 $timeLabel = $timeLabels[$reminderType] ?? $reminderType;
                 $msgText = "⏰ <b>Напоминание: заявка поставщику</b>\n\n";
-                $msgText .= "🏪 Ресторан <b>{$restNum}</b>\n";
+                $msgText .= "🏪 Ресторан <b>{$prettyRestNum}</b>\n";
                 $msgText .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
                 $msgText .= "📅 Доставка в {$dayName} ({$deliveryDate})\n";
                 $msgText .= "⏳ До дедлайна: <b>{$timeLabel}</b> (до {$deadlineFmt})\n\n";

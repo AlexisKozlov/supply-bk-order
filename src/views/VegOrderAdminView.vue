@@ -144,7 +144,7 @@
               <tbody>
                 <tr v-for="row in filteredRows" :key="row.number" :class="{ 'veg-row-missing': !row.hasData }">
                   <td class="veg-td-rest">
-                    <span class="veg-rest-num">{{ row.number }}</span>
+                    <span class="veg-rest-num">{{ formatRestaurantNumber(row.number, row.legal_entity_group) }}</span>
                     <span class="veg-rest-addr">{{ row.city }}{{ row.address ? ', ' + row.address : '' }}</span>
                     <span v-if="row.isVM" class="veg-vm-badge">ВМ</span>
                     <button v-if="row.hasData" class="veg-del-row" :title="visibleDates.length === 1 ? 'Удалить заявку на ' + fmtShortDate(visibleDates[0]) : 'Удалить все заявки'" @click.stop="confirmDeleteOrders(row.number)">×</button>
@@ -200,7 +200,7 @@
             <h3>Не ответили ({{ missingRestaurants.length }})</h3>
             <div class="veg-missing-list">
               <span v-for="r in missingRestaurants" :key="r.number" class="veg-missing-item">
-                {{ r.number }}{{ r.city ? ' (' + r.city + ')' : '' }}
+                {{ formatRestaurantNumber(r.number, r.legal_entity_group) }}{{ r.city ? ' (' + r.city + ')' : '' }}
               </span>
             </div>
           </div>
@@ -279,7 +279,7 @@
               <tbody>
                 <tr v-for="r in filteredScheduleRestaurants" :key="r.number">
                   <td class="veg-td-rest-sch">
-                    <span class="veg-rest-num">{{ r.number }}</span>
+                    <span class="veg-rest-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
                     <span class="veg-rest-addr">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
                   </td>
                   <td v-for="d in 7" :key="d" class="veg-td-check" @click="toggleScheduleDay(r.number, d)">
@@ -325,7 +325,7 @@
               </thead>
               <tbody>
                 <tr v-for="r in sortedStats" :key="r.number" :class="{ 'veg-stat-bad': r.rate < 50, 'veg-stat-warn': r.rate >= 50 && r.rate < 80 }">
-                  <td class="veg-td-num">{{ r.number }}</td>
+                  <td class="veg-td-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</td>
                   <td>{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</td>
                   <td class="veg-td-rate"><strong>{{ r.rate }}%</strong></td>
                   <td class="veg-td-num">{{ r.participated }}/{{ r.total }}</td>
@@ -440,7 +440,7 @@
           <div class="veg-day-config-rests">
             <label v-for="r in dayConfigFilteredRests" :key="r.number" class="veg-day-config-rest-item">
               <input type="checkbox" :checked="dayConfigModal.selected.includes(String(r.number))" @change="toggleDayConfigRest(String(r.number))" />
-              <span>{{ r.number }}</span>
+              <span>{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
               <span class="veg-day-config-rest-name">{{ r.name || r.address || '' }}</span>
             </label>
           </div>
@@ -476,6 +476,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import { toLocalDateStr } from '@/lib/utils.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const props = defineProps({
   embedded: { type: Boolean, default: false },
@@ -840,7 +841,7 @@ function copyText(txt) {
 // Copy missing restaurants
 const copiedMissing = ref(false);
 function copyMissingRestaurants() {
-  const nums = missingRestaurants.value.map(r => r.number).join(', ');
+  const nums = missingRestaurants.value.map(r => formatRestaurantNumber(r.number, r.legal_entity_group)).join(', ');
   const text = `Нет заявок Планета Ресторанов: ${nums}`;
   navigator.clipboard.writeText(text);
   copiedMissing.value = true;

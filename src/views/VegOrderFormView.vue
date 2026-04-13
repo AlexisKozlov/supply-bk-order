@@ -35,14 +35,14 @@
           <select v-model="selectedRestaurant" class="sf-select" :class="{ filled: selectedRestaurant }" @change="onRestaurantChange">
             <option value="">Нажмите для выбора</option>
             <option v-for="r in restaurants" :key="r.number" :value="r.number">
-              {{ r.number }} — {{ r.city ? r.city + ', ' : '' }}{{ r.address || '' }}
+              {{ formatRestaurantNumber(r.number, r.legal_entity_group) }} — {{ r.city ? r.city + ', ' : '' }}{{ r.address || '' }}
             </option>
           </select>
         </div>
         <div v-else-if="restaurants.length === 1" class="sf-field sf-field-rest-fixed">
           <div class="sf-rest-fixed-label">Ресторан</div>
           <div class="sf-rest-fixed-value">
-            <strong>{{ restaurants[0].number }}</strong>
+            <strong>{{ formatRestaurantNumber(restaurants[0].number, restaurants[0].legal_entity_group) }}</strong>
             <span>{{ restaurants[0].city }}{{ restaurants[0].address ? ', ' + restaurants[0].address : '' }}</span>
           </div>
         </div>
@@ -304,6 +304,7 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const route = useRoute();
 const token = route.params.token;
