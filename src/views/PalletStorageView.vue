@@ -1,7 +1,7 @@
 <template>
   <div class="ps-view">
     <div class="ps-header">
-      <h1 class="page-title">Паллетовка склада</h1>
+      <h1 class="page-title">Паллетовка склада <span class="ps-entity-badge">{{ shortEntity }}</span></h1>
       <div class="ps-header-right">
         <label class="btn primary" style="cursor:pointer;">
           <BkIcon name="import" size="sm" /> Импорт справочника
@@ -154,14 +154,18 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const userStore = useUserStore();
+const orderStore = useOrderStore();
 const toast = useToastStore();
+const shortEntity = computed(() => ENTITY_SHORT_NAMES[orderStore.settings.legalEntity] || orderStore.settings.legalEntity);
 
 const tab = ref('calc');
 const loading = ref(false);
@@ -177,7 +181,7 @@ const sortVersion = ref(0); // инкрементируется только п�
 async function loadData() {
   loading.value = true;
   try {
-    const { data, error } = await db.rpc('calc_pallet_occupancy');
+    const { data, error } = await db.rpc('calc_pallet_occupancy', { legal_entity: orderStore.settings.legalEntity });
     if (error) throw error;
     calcData.value = (data || []).map(r => ({
       ...r,
@@ -365,9 +369,12 @@ async function importRef(e) {
     }
 
     if (!items.length) { toast.error('Не найдено товаров'); return; }
-    const { error } = await db.rpc('import_pallet_reference', { items });
+    const le = orderStore.settings.legalEntity;
+    if (!le) { toast.error('Не выбрано юрлицо'); return; }
+    if (!confirm(`Импортировать ${items.length} товаров в справочник юрлица «${le}»? Записи других юрлиц не пострадают.`)) return;
+    const { error } = await db.rpc('import_pallet_reference', { items, legal_entity: le });
     if (error) throw error;
-    toast.success(`Импортировано ${items.length} товаров`);
+    toast.success(`Импортировано ${items.length} товаров в «${le}»`);
     await loadData();
   } catch (err) {
     console.error(err);
@@ -376,11 +383,13 @@ async function importRef(e) {
 }
 
 onMounted(() => { loadData(); });
+watch(() => orderStore.settings.legalEntity, () => { loadData(); });
 </script>
 
 <style scoped>
 .ps-view { padding: 0; }
 .ps-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.ps-entity-badge { display: inline-block; margin-left: 8px; padding: 3px 10px; border-radius: 12px; background: #fff2e0; color: #D62300; font-size: 12px; font-weight: 700; vertical-align: middle; }
 .ps-header-right { display: flex; align-items: center; gap: 8px; }
 .ps-tabs { display: inline-flex; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
 .ps-tab { padding: 6px 16px; font-size: 13px; font-weight: 600; border: none; background: none; cursor: pointer; color: var(--text-muted); transition: all .15s; }

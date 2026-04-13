@@ -2770,11 +2770,14 @@ if ($endpoint === 'rpc') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $items = $body['items'] ?? [];
+        $legalEntity = $body['legal_entity'] ?? null;
         if (empty($items)) respond(['error' => 'Нет данных'], 400);
+        if (!$legalEntity) respond(['error' => 'Не указано юр. лицо'], 400);
+        $group = getEntityGroup($legalEntity);
         $pdo->beginTransaction();
         try {
-            $st = $pdo->prepare("INSERT INTO pallet_reference (name, storage_category, sku, pieces_per_block, blocks_per_box, boxes_per_pallet, pieces_per_pallet, box_length_mm, box_height_mm, box_width_mm, pallet_height_m, cell_coefficient)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            $st = $pdo->prepare("INSERT INTO pallet_reference (legal_entity_group, name, storage_category, sku, pieces_per_block, blocks_per_box, boxes_per_pallet, pieces_per_pallet, box_length_mm, box_height_mm, box_width_mm, pallet_height_m, cell_coefficient)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE storage_category=VALUES(storage_category), sku=VALUES(sku), pieces_per_block=VALUES(pieces_per_block), blocks_per_box=VALUES(blocks_per_box), boxes_per_pallet=VALUES(boxes_per_pallet), pieces_per_pallet=VALUES(pieces_per_pallet), box_length_mm=VALUES(box_length_mm), box_height_mm=VALUES(box_height_mm), box_width_mm=VALUES(box_width_mm), pallet_height_m=VALUES(pallet_height_m), cell_coefficient=VALUES(cell_coefficient)");
             $count = 0;
             foreach ($items as $it) {
@@ -2799,6 +2802,7 @@ if ($endpoint === 'rpc') {
                     else $coeff = 1.0;
                 }
                 $st->execute([
+                    $group,
                     $name, $it['storage_category'] ?? null, $it['sku'] ?? null,
                     $ppb ?: null, $bpb, $bpp ?: null, $ppp ?: null,
                     $L ?: null, $H ?: null, $W ?: null,
@@ -2820,7 +2824,10 @@ if ($endpoint === 'rpc') {
     if ($fn === 'get_pallet_reference') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        $st = $pdo->query("SELECT * FROM pallet_reference ORDER BY storage_category, name");
+        $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $st = $pdo->prepare("SELECT * FROM pallet_reference WHERE legal_entity_group = ? ORDER BY storage_category, name");
+        $st->execute([$group]);
         respond($st->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -2842,8 +2849,12 @@ if ($endpoint === 'rpc') {
     if ($fn === 'calc_pallet_occupancy') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
-        // Справочник
-        $ref = $pdo->query("SELECT * FROM pallet_reference ORDER BY storage_category, name")->fetchAll(PDO::FETCH_ASSOC);
+        $legalEntity = $_GET['legal_entity'] ?? $body['legal_entity'] ?? null;
+        $group = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        // Справочник — только выбранного юрлица
+        $s = $pdo->prepare("SELECT * FROM pallet_reference WHERE legal_entity_group = ? ORDER BY storage_category, name");
+        $s->execute([$group]);
+        $ref = $s->fetchAll(PDO::FETCH_ASSOC);
 
         // Расчёт: справочник + ручной ввод коробок
         // Высота неполной паллеты пропорциональна заполнению

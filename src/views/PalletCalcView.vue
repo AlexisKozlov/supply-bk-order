@@ -4,9 +4,7 @@
     <div class="plt-top">
       <h1 class="plt-title">Калькулятор паллет</h1>
       <div class="plt-top-right">
-        <select v-model="legalEntity" class="plt-select" @change="onEntityChange">
-          <option v-for="e in entities" :key="e" :value="e">{{ shortName(e) }}</option>
-        </select>
+        <span class="plt-entity-badge">{{ shortName(legalEntity) }}</span>
       </div>
     </div>
 
@@ -458,16 +456,23 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import { toLocalDateStr } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 
 const userStore = useUserStore();
+const orderStore = useOrderStore();
 const toastStore = useToastStore();
 
 const entities = LEGAL_ENTITIES;
-const legalEntity = ref(userStore.currentUser?.legal_entity || entities[0]);
+// Юрлицо берём из глобального сайдбара (orderStore), локального переключателя нет —
+// иначе данные расходятся с выбором в боковой панели.
+const legalEntity = computed({
+  get: () => orderStore.settings.legalEntity,
+  set: (v) => { orderStore.settings.legalEntity = v; },
+});
 const tab = ref('calculator');
 const tabs = [
   { key: 'calculator', label: 'Калькулятор' },
@@ -1698,6 +1703,10 @@ function onEntityChange() {
 }
 
 watch(calcDate, () => loadDateDeliveries());
+// Синхронизация с боковой панелью: при смене юрлица перезагружаем всё состояние модуля
+watch(() => orderStore.settings.legalEntity, () => {
+  onEntityChange();
+});
 
 onMounted(async () => {
   await loadAllProducts();
@@ -1708,6 +1717,7 @@ onMounted(async () => {
 <style scoped>
 .plt { padding: 20px 24px; }
 .plt-top { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.plt-entity-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; background: #fff2e0; color: #D62300; font-size: 13px; font-weight: 700; }
 .plt-title { font-size: 22px; font-weight: 700; color: #502314; margin: 0; }
 .plt-top-right { margin-left: auto; }
 
