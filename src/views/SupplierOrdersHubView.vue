@@ -2,9 +2,19 @@
   <div class="so-hub">
     <div class="so-hub-header">
       <h1>Заявки поставщикам</h1>
-      <button class="so-hub-connect-btn" @click="showConnectModal = true">
-        + Подключить поставщика
-      </button>
+      <div class="so-hub-header-actions">
+        <button
+          v-if="selectedType === 'so' && selectedId"
+          class="so-hub-disconnect-btn"
+          @click="disconnectSelected"
+          :disabled="disconnecting"
+        >
+          {{ disconnecting ? 'Отключение...' : 'Отключить поставщика' }}
+        </button>
+        <button class="so-hub-connect-btn" @click="showConnectModal = true">
+          + Подключить поставщика
+        </button>
+      </div>
     </div>
 
     <div v-if="suppliers.length" class="so-hub-pills">
@@ -53,10 +63,36 @@ const suppliers = ref([]);
 const selectedId = ref('');
 const selectedType = ref('');
 const showConnectModal = ref(false);
+const disconnecting = ref(false);
 
 async function onConnected(supplier) {
   await loadList();
   if (supplier?.id) selectSupplier(supplier.id);
+}
+
+async function disconnectSelected() {
+  if (!selectedId.value) return;
+  const sup = suppliers.value.find(s => s.id === selectedId.value);
+  if (!sup) return;
+  const ok = confirm(
+    `Отключить поставщика «${sup.name}» от модуля заявок?\n\n` +
+    `Расписания, шаблоны и настройки сохранятся — при повторном подключении ` +
+    `всё вернётся. Рестораны перестанут видеть этого поставщика в своём кабинете.`
+  );
+  if (!ok) return;
+  disconnecting.value = true;
+  try {
+    await soStore.adminDisconnectSupplier(selectedId.value);
+    // Сбрасываем выбор и перезагружаем список
+    selectedId.value = '';
+    selectedType.value = '';
+    sessionStorage.removeItem(storageKey());
+    await loadList();
+  } catch (e) {
+    alert('Ошибка отключения: ' + (e.message || e));
+  } finally {
+    disconnecting.value = false;
+  }
 }
 
 function selectSupplier(id) {
@@ -131,6 +167,12 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
   font-size: 22px;
   color: #502314;
 }
+.so-hub-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .so-hub-connect-btn {
   padding: 9px 18px;
   border-radius: 8px;
@@ -144,6 +186,23 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
   transition: all 0.15s;
 }
 .so-hub-connect-btn:hover { background: #b51e00; }
+.so-hub-disconnect-btn {
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: white;
+  color: #6b4f3a;
+  border: 1.5px solid #e0d5c8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.so-hub-disconnect-btn:hover:not(:disabled) {
+  border-color: #d97706;
+  color: #d97706;
+}
+.so-hub-disconnect-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .so-hub-pills {
   display: flex;
