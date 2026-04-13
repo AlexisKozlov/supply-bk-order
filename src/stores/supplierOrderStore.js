@@ -79,6 +79,30 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data.suppliers || [];
   }
 
+  // Список поставщиков группы юрлиц, ещё НЕ подключённых к SO-модулю
+  async function adminGetAvailableSuppliers(legalEntity) {
+    const params = new URLSearchParams();
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    const data = await api(`admin/available-suppliers?${params}`);
+    return data.suppliers || [];
+  }
+
+  // Подключение поставщика к SO-модулю одним запросом (мастер)
+  async function adminRegisterSupplier(payload) {
+    return api('admin/register-supplier', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Отключение (not delete) — просто снимает флаг so_enabled
+  async function adminDisconnectSupplier(supplierId) {
+    return api('admin/disconnect-supplier', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId }),
+    });
+  }
+
   async function adminGetStatus(supplierId, date) {
     const params = new URLSearchParams({ supplier_id: supplierId });
     if (date) params.set('date', date);
@@ -192,7 +216,8 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     // Ресторан
     loadSuppliers, loadProducts, loadMyOrder, loadMyOrders, submitOrder,
     // Закупщик
-    adminGetSuppliers, adminGetStatus, adminGetOrders, adminGetOrder,
+    adminGetSuppliers, adminGetAvailableSuppliers, adminRegisterSupplier, adminDisconnectSupplier,
+    adminGetStatus, adminGetOrders, adminGetOrder,
     adminUpdateOrder, adminDeleteOrder,
     adminGetSettings, adminSaveSettings,
     adminGetSchedules, adminSaveSchedules,

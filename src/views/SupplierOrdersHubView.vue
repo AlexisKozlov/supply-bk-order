@@ -2,6 +2,9 @@
   <div class="so-hub">
     <div class="so-hub-header">
       <h1>Заявки поставщикам</h1>
+      <button class="so-hub-connect-btn" @click="showConnectModal = true">
+        + Подключить поставщика
+      </button>
     </div>
 
     <div v-if="suppliers.length" class="so-hub-pills">
@@ -19,10 +22,16 @@
     <VegOrderAdminView v-if="selectedType === 'veg'" embedded />
     <SupplierOrdersManagerView v-else-if="selectedType === 'so' && selectedId" :supplier-id="selectedId" />
     <div v-else-if="!suppliers.length" class="so-hub-empty">
-      Для юрлица «{{ orderStore.settings.legalEntity }}» пока не заведено ни одного поставщика.<br>
-      Создайте поставщика в разделе «Справочник → Поставщики».
+      Для юрлица «{{ orderStore.settings.legalEntity }}» пока не подключено ни одного поставщика к приёму заявок.<br>
+      Нажмите <b>«+ Подключить поставщика»</b>, чтобы настроить график, шаблон товаров и дедлайны.
     </div>
     <div v-else class="so-hub-empty">Выберите поставщика</div>
+
+    <SupplierConnectModal
+      v-if="showConnectModal"
+      @close="showConnectModal = false"
+      @connected="onConnected"
+    />
   </div>
 </template>
 
@@ -30,6 +39,7 @@
 import { ref, onMounted, watch } from 'vue';
 import VegOrderAdminView from '@/views/VegOrderAdminView.vue';
 import SupplierOrdersManagerView from '@/views/SupplierOrdersManagerView.vue';
+import SupplierConnectModal from '@/components/modals/SupplierConnectModal.vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -42,6 +52,12 @@ const userStore = useUserStore();
 const suppliers = ref([]);
 const selectedId = ref('');
 const selectedType = ref('');
+const showConnectModal = ref(false);
+
+async function onConnected(supplier) {
+  await loadList();
+  if (supplier?.id) selectSupplier(supplier.id);
+}
 
 function selectSupplier(id) {
   selectedId.value = id;
@@ -102,11 +118,32 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
 <style scoped>
 .so-hub { padding: 20px; }
 
+.so-hub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
 .so-hub-header h1 {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 22px;
   color: #502314;
 }
+.so-hub-connect-btn {
+  padding: 9px 18px;
+  border-radius: 8px;
+  background: #D62300;
+  color: white;
+  border: 1.5px solid #D62300;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.so-hub-connect-btn:hover { background: #b51e00; }
 
 .so-hub-pills {
   display: flex;

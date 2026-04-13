@@ -583,8 +583,8 @@ if ($soAction === 'admin') {
     if ($adminAction === 'suppliers' && $method === 'GET') {
         $legalEntity = $_GET['legal_entity'] ?? null;
         $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
-        // LEFT JOIN — чтобы новые поставщики без графиков тоже попадали
-        // в список (иначе их невозможно выбрать и настроить им расписание).
+        // Показываем только подключённых к SO-модулю поставщиков (so_enabled=1),
+        // остальные доступны через мастер «+ Подключить поставщика».
         $s = $pdo->prepare("
             SELECT s.id, s.short_name, s.full_name, s.legal_entity, s.legal_entity_group,
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
@@ -592,12 +592,167 @@ if ($soAction === 'admin') {
             FROM suppliers s
             LEFT JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
             LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-            WHERE s.is_active = 1 AND s.legal_entity_group = ?
+            WHERE s.is_active = 1 AND s.so_enabled = 1 AND s.legal_entity_group = ?
             GROUP BY s.id
             ORDER BY s.short_name
         ");
         $s->execute([$entityGroup]);
         soRespond(['suppliers' => $s->fetchAll()]);
+    }
+
+    // --- Список поставщиков группы, ещё НЕ подключённых к SO-модулю ---
+    // Используется в мастере «Подключить поставщика»: выпадающий список
+    // среди тех, кого можно активировать.
+    if ($adminAction === 'available-suppliers' && $method === 'GET') {
+        $legalEntity = $_GET['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $s = $pdo->prepare("
+            SELECT id, short_name, full_name, legal_entity, legal_entity_group
+            FROM suppliers
+            WHERE is_active = 1 AND so_enabled = 0 AND legal_entity_group = ?
+            ORDER BY short_name
+        ");
+        $s->execute([$entityGroup]);
+        soRespond(['suppliers' => $s->fetchAll()]);
+    }
+
+    // --- Отключение поставщика от SO-модуля (не удаление, просто скрыть) ---
+    if ($adminAction === 'disconnect-supplier' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
+        soRespond(['success' => true]);
+    }
+
+    // --- Подключение поставщика к SO-модулю (мастер) ---
+    // Принимает всё в одном запросе: расписание, шаблон товаров,
+    // дедлайны, режим приёма, подписчиков-получателей уведомлений.
+    // Сохраняет всё в транзакции и ставит so_enabled = 1.
+    if ($adminAction === 'register-supplier' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+
+        // Проверим, что поставщик существует и активен
+        $sup = $pdo->prepare("SELECT id, short_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ? AND is_active = 1");
+        $sup->execute([$supplierId]);
+        $supplier = $sup->fetch();
+        if (!$supplier) soRespond(['error' => 'Поставщик не найден'], 404);
+
+        // Валидация входных данных
+        $schedules     = $body['schedules']     ?? []; // [{restaurant_id, order_day, delivery_day}]
+        $templates     = $body['templates']     ?? []; // [{legal_entity, items: [{sku, product_name, multiplicity, min_qty, sort_order}]}]
+        $deadlineRules = $body['deadline_rules'] ?? []; // [{delivery_dow, deadline_dow, deadline_time}]
+        $acceptance    = $body['acceptance']    ?? ['is_accepting_orders' => 1, 'default_deadline_time' => '14:00:00', 'pause_message' => null];
+        $notifyUsers   = $body['notify_users']  ?? []; // [user_name, ...]
+
+        $updatedBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+
+        try {
+            $pdo->beginTransaction();
+
+            // 1) Активируем флаг
+            $pdo->prepare("UPDATE suppliers SET so_enabled = 1 WHERE id = ?")->execute([$supplierId]);
+
+            // 2) Настройки приёма заявок
+            $acceptingFlag  = !empty($acceptance['is_accepting_orders']) ? 1 : 0;
+            $defaultDeadline = $acceptance['default_deadline_time'] ?? '14:00:00';
+            $pauseMessage    = $acceptance['pause_message'] ?? null;
+            $pdo->prepare("
+                INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, default_deadline_time, pause_message, updated_by)
+                VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    is_accepting_orders = VALUES(is_accepting_orders),
+                    default_deadline_time = VALUES(default_deadline_time),
+                    pause_message = VALUES(pause_message),
+                    updated_at = NOW(),
+                    updated_by = VALUES(updated_by)
+            ")->execute([$supplierId, $acceptingFlag, $defaultDeadline, $pauseMessage, $updatedBy]);
+
+            // 3) Расписание (деактивируем старые, вставляем новые)
+            $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")
+                ->execute([$updatedBy, $supplierId]);
+            if (!empty($schedules)) {
+                $schUp = $pdo->prepare("
+                    INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?, 1, NOW(), ?)
+                    ON DUPLICATE KEY UPDATE delivery_day = VALUES(delivery_day), is_active = 1, updated_at = NOW(), updated_by = VALUES(updated_by)
+                ");
+                foreach ($schedules as $sch) {
+                    $restId = (int)($sch['restaurant_id'] ?? 0);
+                    if (!$restId) continue;
+                    $schUp->execute([
+                        $supplierId, $restId,
+                        (int)($sch['order_day'] ?? 1),
+                        (int)($sch['delivery_day'] ?? 2),
+                        $updatedBy,
+                    ]);
+                }
+            }
+
+            // 4) Правила дедлайнов
+            $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
+            if (!empty($deadlineRules)) {
+                $drIns = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
+                foreach ($deadlineRules as $rule) {
+                    $dow = (int)($rule['delivery_dow'] ?? 0);
+                    if (!$dow) continue;
+                    $drIns->execute([
+                        $supplierId, $dow,
+                        (int)($rule['deadline_dow'] ?? $dow),
+                        $rule['deadline_time'] ?? '14:00:00',
+                    ]);
+                }
+            }
+
+            // 5) Шаблоны товаров — per legal_entity (одна группа → может быть несколько юрлиц, напр. БК+ВМ)
+            if (!empty($templates)) {
+                foreach ($templates as $tpl) {
+                    $le = $tpl['legal_entity'] ?? null;
+                    if (!$le) continue;
+                    $items = $tpl['items'] ?? [];
+                    $pdo->prepare("DELETE FROM so_templates WHERE supplier_id = ? AND legal_entity = ?")
+                        ->execute([$supplierId, $le]);
+                    if (!empty($items)) {
+                        $tIns = $pdo->prepare("INSERT INTO so_templates (supplier_id, legal_entity, sku, product_name, multiplicity, min_qty, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
+                        foreach ($items as $i => $it) {
+                            $sku = trim($it['sku'] ?? '');
+                            $pname = trim($it['product_name'] ?? '');
+                            if (!$sku || !$pname) continue;
+                            $tIns->execute([
+                                $supplierId, $le, $sku, $pname,
+                                isset($it['multiplicity']) && $it['multiplicity'] !== '' ? floatval($it['multiplicity']) : null,
+                                isset($it['min_qty']) && $it['min_qty'] !== '' ? floatval($it['min_qty']) : null,
+                                (int)($it['sort_order'] ?? $i),
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            // 6) Подписчики-уведомления — сохраняем в telegram_settings.so_deadline_summary для выбранных пользователей
+            //    (так уже устроены другие уведомления модуля)
+            if (!empty($notifyUsers) && is_array($notifyUsers)) {
+                // Сбрасываем флаг у всех, затем включаем только у выбранных — чтобы при
+                // переподключении старые получатели не остались висеть.
+                // NB: это глобальный флаг «получать сводки по SO», общий для всех поставщиков.
+                $pdo->prepare("UPDATE telegram_settings SET so_deadline_summary = 0")->execute();
+                if (count($notifyUsers) > 0) {
+                    $ph = implode(',', array_fill(0, count($notifyUsers), '?'));
+                    $pdo->prepare("
+                        INSERT INTO telegram_settings (user_name, so_deadline_summary)
+                        SELECT u.name, 1 FROM users u WHERE u.name IN ($ph)
+                        ON DUPLICATE KEY UPDATE so_deadline_summary = 1
+                    ")->execute($notifyUsers);
+                }
+            }
+
+            $pdo->commit();
+            soRespond(['success' => true, 'supplier' => $supplier]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            error_log('register-supplier error: ' . $e->getMessage());
+            soRespond(['error' => 'Ошибка подключения: ' . $e->getMessage()], 500);
+        }
     }
 
     // --- Настройки поставщика (GET) ---
