@@ -303,7 +303,7 @@
       <div class="rom-date-row">
         <label>Юрлицо:</label>
         <select v-model="templateLe" @change="loadTemplates" class="rom-select">
-          <option v-for="e in LEGAL_ENTITIES" :key="e" :value="e">{{ ENTITY_SHORT_NAMES[e] || e }}</option>
+          <option v-for="e in templateEntities" :key="e" :value="e">{{ ENTITY_SHORT_NAMES[e] || e }}</option>
         </select>
         <button class="rom-btn-sm" @click="importFromProducts">Импорт из справочника</button>
         <button class="rom-btn-sm rom-btn-primary" @click="saveTemplates" :disabled="savingTemplates">
@@ -422,6 +422,23 @@ const savingTemplates = ref(false);
 const templates = ref([]);
 const templateLe = ref(orderStore.settings.legalEntity || 'ООО "Бургер БК"');
 
+// Группа юрлиц текущего поставщика (BK_VM | PS). Определяется из списка
+// поставщиков: он уже отфильтрован backend'ом по группе юрлица сайдбара.
+const currentSupplierGroup = computed(() => {
+  const sup = allSuppliers.value.find(s => s.id === currentSupplierId.value);
+  if (sup?.legal_entity_group) return sup.legal_entity_group;
+  // Fallback: берём группу из сайдбара, т.к. список поставщиков уже сужен
+  return orderStore.settings.legalEntity?.includes('Пицца Стар') ? 'PS' : 'BK_VM';
+});
+
+// Юрлица, доступные в переключателе шаблонов: только те, что входят в
+// группу поставщика. Для BK_VM — БК+ВМ, для PS — только Пицца Стар.
+const templateEntities = computed(() => {
+  const group = currentSupplierGroup.value;
+  if (group === 'PS') return LEGAL_ENTITIES.filter(e => e.includes('Пицца Стар'));
+  return LEGAL_ENTITIES.filter(e => !e.includes('Пицца Стар'));
+});
+
 // Order modal
 const showOrderModal = ref(false);
 const viewedOrder = ref(null);
@@ -485,6 +502,11 @@ watch(() => orderStore.settings.legalEntity, async () => {
 
 async function onSupplierChange() {
   if (!currentSupplierId.value) return;
+  // Подгоняем выбор юрлица в шаблонах под группу поставщика — чтобы
+  // при переключении между БК/ПС поставщиками не осталось чужого юрлица.
+  if (!templateEntities.value.includes(templateLe.value)) {
+    templateLe.value = templateEntities.value[0] || templateLe.value;
+  }
   await loadSettings();
   await loadStatus();
 }
@@ -658,14 +680,15 @@ async function loadRestaurantsForSchedule() {
   scheduleGridLoading.value = true;
   try {
     const token = localStorage.getItem('bk_session_token') || '';
-    const res = await fetch('/api/restaurants?select=id,number,city,address,region&active=eq.1&order=number.asc&limit=500', {
+    // Рестораны только той же группы юрлиц, что и поставщик —
+    // ПС-поставщик видит только ПС-рестораны, БК-поставщик — БК+ВМ.
+    const group = currentSupplierGroup.value;
+    const res = await fetch(`/api/restaurants?select=id,number,city,address,region,legal_entity_group&active=eq.1&legal_entity_group=eq.${group}&order=number.asc&limit=500`, {
       headers: { 'X-Session-Token': token, 'X-API-Key': token },
     });
     const data = await res.json();
     const allRests = (data.data || data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number));
-    // Убираем дубли по номеру (оставляем первый)
-    const seen = new Set();
-    scheduleRestaurants.value = allRests.filter(r => { if (seen.has(r.number)) return false; seen.add(r.number); return true; });
+    scheduleRestaurants.value = allRests;
     // Заполняем сетку из текущих schedules
     for (const r of scheduleRestaurants.value) scheduleGrid[r.id] = {};
     for (const s of schedules.value) {

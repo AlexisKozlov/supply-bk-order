@@ -139,14 +139,18 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $rest = soGetRestaurantSession($pdo);
     if (!$rest) soRespond(['error' => 'Не авторизован'], 401);
 
+    // Группа юрлиц ресторана — показываем только поставщиков своей группы,
+    // даже если вдруг появится запись в so_supplier_schedules с чужим поставщиком.
+    $restGroup = getEntityGroup($rest['legal_entity'] ?? '');
+
     $s = $pdo->prepare("
         SELECT DISTINCT s.id, s.short_name, s.full_name
         FROM so_supplier_schedules ss
         JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1
-        WHERE ss.restaurant_id = ? AND ss.is_active = 1
+        WHERE ss.restaurant_id = ? AND ss.is_active = 1 AND s.legal_entity_group = ?
         ORDER BY s.short_name
     ");
-    $s->execute([$rest['restaurant_id']]);
+    $s->execute([$rest['restaurant_id'], $restGroup]);
     $suppliers = $s->fetchAll();
 
     // Для каждого поставщика — график, настройки, ближайшие поставки
@@ -580,7 +584,7 @@ if ($soAction === 'admin') {
         $legalEntity = $_GET['legal_entity'] ?? null;
         $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
         $s = $pdo->prepare("
-            SELECT s.id, s.short_name, s.full_name,
+            SELECT s.id, s.short_name, s.full_name, s.legal_entity, s.legal_entity_group,
                    COUNT(DISTINCT ss.restaurant_id) as restaurant_count,
                    COALESCE(sst.is_accepting_orders, 1) as is_accepting_orders
             FROM suppliers s
