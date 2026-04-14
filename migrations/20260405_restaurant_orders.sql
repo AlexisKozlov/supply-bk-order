@@ -7,6 +7,7 @@
 CREATE TABLE IF NOT EXISTS ro_users (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   restaurant_number SMALLINT UNSIGNED NOT NULL,
+  legal_entity_group VARCHAR(20) NOT NULL DEFAULT 'BK_VM',
   password_hash   VARCHAR(255) NOT NULL,
   legal_entity    VARCHAR(100) NOT NULL DEFAULT 'ООО "Бургер БК"',
   is_active       TINYINT(1) NOT NULL DEFAULT 1,
@@ -14,7 +15,8 @@ CREATE TABLE IF NOT EXISTS ro_users (
   last_login_at   TIMESTAMP NULL,
   session_token   VARCHAR(64) NULL,
   session_active_until TIMESTAMP NULL,
-  UNIQUE KEY uq_ro_users_rest (restaurant_number),
+  UNIQUE KEY uq_ro_users_rest_group (restaurant_number, legal_entity_group),
+  KEY idx_ro_users_group_active (legal_entity_group, is_active),
   INDEX idx_ro_users_token (session_token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

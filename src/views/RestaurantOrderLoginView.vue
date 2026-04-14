@@ -245,22 +245,21 @@ watch(() => route.query.tg_token, (newToken) => {
 });
 
 // Преобразуем ввод вида '24' или 'PS01' в числовой номер для сервера
-function parsedRestNumber() {
-  const p = parseRestaurantInput(restaurantNumber.value);
-  return p ? p.number : null;
+function parsedRestaurant() {
+  return parseRestaurantInput(restaurantNumber.value);
 }
 
 async function handleLogin() {
   error.value = '';
   sessionConflict.value = false;
-  const restNum = parsedRestNumber();
-  if (!restNum) {
+  const parsed = parsedRestaurant();
+  if (!parsed?.number) {
     error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
     return;
   }
   loading.value = true;
   try {
-    const result = await store.login(restNum, password.value);
+    const result = await store.login(parsed.number, password.value, parsed.group);
     if (result.success) {
       router.push({ name: 'restaurant-cabinet' });
     } else if (result.active_session) {
@@ -278,14 +277,14 @@ async function handleLogin() {
 
 async function forceLogin() {
   error.value = '';
-  const restNum = parsedRestNumber();
-  if (!restNum) {
+  const parsed = parsedRestaurant();
+  if (!parsed?.number) {
     error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
     return;
   }
   loading.value = true;
   try {
-    const result = await store.login(restNum, password.value, true);
+    const result = await store.login(parsed.number, password.value, parsed.group, true);
     if (result.success) {
       router.push({ name: 'restaurant-cabinet' });
     } else {

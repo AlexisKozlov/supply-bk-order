@@ -408,13 +408,14 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
 
     // Кнопка «Через сайт» — открывает заявку Камако в личном кабинете ресторана
     // Доступна, только если у ресторана есть активная учётка
-    $checkUser = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
-    $checkUser->execute([$restNum]);
+    $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+    $checkUser = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $checkUser->execute([$restNum, $restGroup]);
     if ($checkUser->fetch()) {
         $tgToken = bin2hex(random_bytes(32));
         // Сохраняем выбранный ресторан в токене — иначе при двух+ подписках tg-auth возьмёт первый
-        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
-            ->execute([$tgToken, $chatId, $restNum]);
+        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
+            ->execute([$tgToken, $chatId, $restNum, $restGroup]);
         $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
         $redirect = '/restaurant/orders/supplier/' . urlencode($supplierId);
         $webUrl = "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode($redirect);

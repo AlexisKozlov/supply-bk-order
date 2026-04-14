@@ -55,10 +55,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
-  async function login(restaurantNumber, password, force = false) {
+  async function login(restaurantNumber, password, legalEntityGroup = null, force = false) {
     const data = await api('login', {
       method: 'POST',
-      body: JSON.stringify({ restaurant_number: restaurantNumber, password, force }),
+      body: JSON.stringify({ restaurant_number: restaurantNumber, password, legal_entity_group: legalEntityGroup, force }),
     });
     if (data.success) {
       localStorage.setItem(TOKEN_KEY, data.token);
@@ -240,10 +240,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.users || [];
   }
 
-  async function adminCreateUser(restaurantNumber, password) {
+  async function adminCreateUser(restaurantNumber, legalEntityGroup, password) {
     return await api('admin/users', {
       method: 'POST',
-      body: JSON.stringify({ action: 'create', restaurant_number: restaurantNumber, password }),
+      body: JSON.stringify({ action: 'create', restaurant_number: restaurantNumber, legal_entity_group: legalEntityGroup, password }),
     });
   }
 
@@ -254,17 +254,17 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
-  async function adminToggleUser(restaurantNumber, isActive) {
+  async function adminToggleUser(restaurantNumber, legalEntityGroup, isActive) {
     return await api('admin/users', {
       method: 'POST',
-      body: JSON.stringify({ action: 'toggle', restaurant_number: restaurantNumber, is_active: isActive }),
+      body: JSON.stringify({ action: 'toggle', restaurant_number: restaurantNumber, legal_entity_group: legalEntityGroup, is_active: isActive }),
     });
   }
 
-  async function adminResetPassword(restaurantNumber, password) {
+  async function adminResetPassword(restaurantNumber, legalEntityGroup, password) {
     return await api('admin/users', {
       method: 'POST',
-      body: JSON.stringify({ action: 'reset-password', restaurant_number: restaurantNumber, password }),
+      body: JSON.stringify({ action: 'reset-password', restaurant_number: restaurantNumber, legal_entity_group: legalEntityGroup, password }),
     });
   }
 

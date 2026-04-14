@@ -563,7 +563,19 @@
                   <td class="rom-edit-product" @click="openReplaceProduct(item)" title="Нажмите, чтобы заменить товар">
                     <span class="rom-edit-sku">{{ item.sku }}</span> {{ item.product_name }}
                   </td>
-                  <td><input v-model.number="item.quantity" type="number" min="0" step="0.5" class="rom-edit-qty" /></td>
+                  <td>
+                    <input
+                      v-model.number="item.quantity"
+                      type="number"
+                      min="0"
+                      :step="parseFloat(item.multiplicity) > 1 ? item.multiplicity : 0.5"
+                      class="rom-edit-qty"
+                      :class="{ 'rom-edit-qty-err': editItemHasMultError(item) }"
+                    />
+                    <div v-if="editItemHasMultError(item)" class="rom-edit-mult-hint">
+                      Кратность {{ formatEditNumber(item.multiplicity) }}
+                    </div>
+                  </td>
                   <td class="rom-td-center rom-td-weight">{{ itemWeight(item) }}</td>
                   <td class="rom-td-center rom-td-weight">{{ itemDepositSum(item) }}</td>
                   <td><input v-model="item.comment" type="text" class="rom-edit-comment" /></td>
@@ -579,6 +591,10 @@
             </div>
           </div>
 
+          <div v-if="editHasMultErrors" class="rom-edit-error-box">
+            Исправьте кратность. Например: {{ editMultiplicityErrorText }}
+          </div>
+
           <!-- Фиксированный подвал с кнопками -->
           <div class="rom-modal-footer-fixed">
             <button class="rom-btn rom-btn-danger" @click="handleDeleteOrder(editingOrder)" :disabled="saving">
@@ -591,7 +607,7 @@
             <button class="rom-btn rom-btn-export" @click="exportSingleOrder(editingOrder)">
               Excel
             </button>
-            <button class="rom-btn rom-btn-primary" @click="saveEditedOrder" :disabled="saving">
+            <button class="rom-btn rom-btn-primary" @click="saveEditedOrder" :disabled="saving || editHasMultErrors">
               {{ saving ? 'Сохранение...' : 'Сохранить изменения' }}
             </button>
           </div>
@@ -1811,6 +1827,31 @@ function qtyToBoxes(qty, mult) {
   return m > 1 ? qty / m : qty;
 }
 
+function hasMultiplicityViolation(qty, mult) {
+  const q = parseFloat(qty) || 0;
+  const m = parseFloat(mult) || 1;
+  if (q <= 0 || m <= 1) return false;
+  return Math.abs(q / m - Math.round(q / m)) > 0.0001;
+}
+
+function editItemHasMultError(item) {
+  return hasMultiplicityViolation(item.quantity, item.multiplicity);
+}
+
+function formatEditNumber(value) {
+  const num = parseFloat(value);
+  if (!Number.isFinite(num)) return String(value || '');
+  return Math.abs(num - Math.round(num)) < 0.0001 ? String(Math.round(num)) : String(parseFloat(num.toFixed(3)));
+}
+
+const editMultiplicityErrors = computed(() => editItems.value.filter(item => editItemHasMultError(item)));
+const editHasMultErrors = computed(() => editMultiplicityErrors.value.length > 0);
+const editMultiplicityErrorText = computed(() => {
+  if (!editMultiplicityErrors.value.length) return '';
+  const item = editMultiplicityErrors.value[0];
+  return `${item.sku} ${item.product_name}: количество ${formatEditNumber(item.quantity)} должно быть кратно ${formatEditNumber(item.multiplicity)}`;
+});
+
 // Округление паллет: дробная часть ≤ 0.2 → вниз, > 0.2 → вверх.
 // Но если товар есть (raw > 0), минимум — 1 паллета.
 function roundPallets(raw) {
@@ -1910,17 +1951,20 @@ function doOrderAddSearch() {
 }
 
 function pickOrderProduct(product) {
+  const multiplicity = parseInt(product.multiplicity) || 1;
   if (replacingItem.value) {
     replacingItem.value.sku = product.sku;
     replacingItem.value.product_name = product.name || product.product_name;
     replacingItem.value.category = product.category || replacingItem.value.category;
+    replacingItem.value.multiplicity = multiplicity;
     replacingItem.value = null;
   } else {
     editItems.value.push({
       sku: product.sku,
       product_name: product.name || product.product_name,
       category: product.category || 'Сухой',
-      quantity: 1,
+      quantity: multiplicity > 1 ? multiplicity : 1,
+      multiplicity,
       comment: '',
     });
   }
@@ -2024,7 +2068,7 @@ async function handleSetPassword(u) {
   usersBusy.value = true;
   try {
     // adminCreateUser делает INSERT … ON DUPLICATE KEY UPDATE — то же самое, что reset.
-    await store.adminCreateUser(u.restaurant_number, pass);
+    await store.adminCreateUser(u.restaurant_number, u.legal_entity_group, pass);
     toast.success('Готово', `Пароль ресторана ${label} сохранён`);
     await reloadUsers();
   } catch (e) {
@@ -2040,7 +2084,7 @@ async function handleToggleUser(u) {
   if (next === 0 && !confirm(`Отключить учётку ресторана ${label}? Он не сможет войти.`)) return;
   usersBusy.value = true;
   try {
-    await store.adminToggleUser(u.restaurant_number, next);
+    await store.adminToggleUser(u.restaurant_number, u.legal_entity_group, next);
     u.is_active = next;
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -2864,6 +2908,17 @@ async function doUnifiedExport() {
 .rom-edit-qty {
   width: 70px; padding: 4px 6px; border: 1px solid #e0d5c8;
   border-radius: 6px; font-size: 13px; text-align: center;
+}
+.rom-edit-qty-err { border-color: #D62300; background: #fff5f5; color: #9f1239; }
+.rom-edit-mult-hint { margin-top: 4px; font-size: 11px; color: #D62300; text-align: center; }
+.rom-edit-error-box {
+  margin: 10px 18px 0;
+  padding: 10px 12px;
+  border: 1px solid #f5c2c7;
+  border-radius: 10px;
+  background: #fff5f5;
+  color: #9f1239;
+  font-size: 13px;
 }
 .rom-edit-comment {
   width: 100%; padding: 4px 6px; border: 1px solid #e0d5c8;

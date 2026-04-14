@@ -1113,7 +1113,19 @@ const deliveryBadge = computed(() => {
 });
 
 function delGetCategoryItemCount(cat) { return delOrderItems.value.filter(i => i.category === cat && i.quantity > 0).length; }
-function delCheckMultiplicity(item) { const m = item.multiplicity || 1; const q = parseFloat(item.quantity) || 0; item._multError = m > 1 && q > 0 && q % m !== 0; }
+function delDateToLocalYmd(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+function delCheckMultiplicity(item) {
+  const m = parseFloat(item.multiplicity) || 1;
+  const q = parseFloat(item.quantity) || 0;
+  item.multiplicity = m;
+  item._multError = m > 1 && q > 0 && Math.abs(q / m - Math.round(q / m)) > 0.0001;
+}
+function delRefreshMultiplicityErrors() { for (const item of delOrderItems.value) delCheckMultiplicity(item); }
 
 async function delSelectDay(date) {
   delSelectedDate.value = date;
@@ -1127,9 +1139,10 @@ async function delSelectDay(date) {
   if (order) {
     delExistingOrder.value = order;
     delOrderComment.value = order.comment || '';
-    delOrderItems.value = order.items.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: parseFloat(i.quantity) || 0, comment: i.comment || '', multiplicity: 1, _added: false, _multError: false }));
+    delOrderItems.value = order.items.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: parseFloat(i.quantity) || 0, comment: i.comment || '', multiplicity: parseFloat(i.multiplicity) || 1, _added: false, _multError: false }));
   } else { delOrderItems.value = []; }
   for (const cat of delCategories) { if (!delOrderItems.value.some(i => i.category === cat)) await delLoadCategoryProducts(cat); }
+  delRefreshMultiplicityErrors();
   delOrderItems.value.sort((a, b) => { if (a.category !== b.category) return delCategories.indexOf(a.category) - delCategories.indexOf(b.category); return (a.quantity > 0 ? 0 : 1) - (b.quantity > 0 ? 0 : 1); });
 
   // Восстановление черновика, если он есть и заказ ещё можно редактировать
@@ -1142,10 +1155,14 @@ async function delSelectDay(date) {
         if (dItem.quantity !== existing.quantity || (dItem.comment || '') !== (existing.comment || '')) {
           existing.quantity = dItem.quantity;
           existing.comment = dItem.comment || '';
+          if (dItem.multiplicity) existing.multiplicity = parseFloat(dItem.multiplicity) || existing.multiplicity || 1;
+          delCheckMultiplicity(existing);
           restored++;
         }
       } else if (dItem.quantity > 0) {
-        delOrderItems.value.push({ sku: dItem.sku, product_name: dItem.product_name, category: dItem.category || 'Сухой', quantity: dItem.quantity, comment: dItem.comment || '', multiplicity: dItem.multiplicity || 1, _added: true, _multError: false });
+        const newItem = { sku: dItem.sku, product_name: dItem.product_name, category: dItem.category || 'Сухой', quantity: dItem.quantity, comment: dItem.comment || '', multiplicity: parseFloat(dItem.multiplicity) || 1, _added: true, _multError: false };
+        delCheckMultiplicity(newItem);
+        delOrderItems.value.push(newItem);
         restored++;
       }
     }
@@ -1295,7 +1312,7 @@ function delUpdateEditTimeLeft() {
   if (!deliveryDate) { delEditTimeLeft.value = ''; return; }
   const orderDate = new Date(deliveryDate + 'T00:00:00');
   orderDate.setDate(orderDate.getDate() - 1);
-  const orderDateStr = orderDate.toISOString().slice(0, 10);
+  const orderDateStr = delDateToLocalYmd(orderDate);
   // Собираем дедлайн в минском времени (UTC+3)
   const dlMinsk = new Date(`${orderDateStr}T${editUntil}+03:00`);
   const now = new Date();
@@ -1314,7 +1331,22 @@ function delRemoveItem(item) { const idx = delOrderItems.value.indexOf(item); if
 async function delHandleRepeat(sourceOrderId) {
   try {
     const result = await roStore.repeatOrder(sourceOrderId, delSelectedDate.value);
-    if (result.items) { for (const item of result.items) { const existing = delOrderItems.value.find(i => i.sku === item.sku); if (existing) { existing.quantity = parseFloat(item.quantity) || 0; existing.comment = item.comment || ''; } else { delOrderItems.value.push({ sku: item.sku, product_name: item.product_name, category: item.category, quantity: parseFloat(item.quantity) || 0, comment: item.comment || '', multiplicity: 1, _added: true, _multError: false }); } } }
+    if (result.items) {
+      for (const item of result.items) {
+        const existing = delOrderItems.value.find(i => i.sku === item.sku);
+        if (existing) {
+          existing.quantity = parseFloat(item.quantity) || 0;
+          existing.comment = item.comment || '';
+          existing.multiplicity = parseFloat(item.multiplicity) || existing.multiplicity || 1;
+          delCheckMultiplicity(existing);
+        } else {
+          const newItem = { sku: item.sku, product_name: item.product_name, category: item.category, quantity: parseFloat(item.quantity) || 0, comment: item.comment || '', multiplicity: parseFloat(item.multiplicity) || 1, _added: true, _multError: false };
+          delCheckMultiplicity(newItem);
+          delOrderItems.value.push(newItem);
+        }
+      }
+      delRefreshMultiplicityErrors();
+    }
   } catch (e) { delSubmitError.value = e.message || 'Ошибка'; }
 }
 
@@ -1828,7 +1860,7 @@ onMounted(async () => {
     applyRouteToState();
     // Auto-select first delivery day
     if (roStore.deliveryDays.length) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = delDateToLocalYmd(new Date());
       const nearest = roStore.deliveryDays.find(d => d.date >= today && d.deadline_status !== 'closed') || roStore.deliveryDays.find(d => d.date >= today) || roStore.deliveryDays[0];
       if (nearest) delSelectDay(nearest.date);
     }

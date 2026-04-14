@@ -1850,16 +1850,17 @@ if (isset($input['callback_query'])) {
         }
         $restNum = $restSub['restaurant_number'];
         // Проверяем ro_users
-        $ru = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
-        $ru->execute([$restNum]);
+        $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+        $ru = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+        $ru->execute([$restNum, $restGroup]);
         if (!$ru->fetch()) {
             sendMessage($chatId, "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок.");
             exit;
         }
         // Генерируем одноразовый токен (с явной привязкой к выбранному ресторану)
         $token = bin2hex(random_bytes(32));
-        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
-            ->execute([$token, $chatId, $restNum]);
+        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
+            ->execute([$token, $chatId, $restNum, $restGroup]);
         $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
         $url = "{$siteUrl}/restaurant?tg_token={$token}";
         $btns = [
@@ -2371,14 +2372,15 @@ $text = trim($msg['text'] ?? '');
 // 6-значный код — привязка аккаунта ресторана к Telegram
 if (preg_match('/^\d{6}$/', $text)) {
     $code = $text;
-    $s = $pdo->prepare("SELECT id, telegram_chat_id FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
     $s->execute([$code]);
     $tok = $s->fetch();
-    if ($tok && $tok['telegram_chat_id'] < 0) {
-        $restNum = abs($tok['telegram_chat_id']);
+    if ($tok && (int)($tok['telegram_chat_id'] ?? 0) === 0 && !empty($tok['restaurant_number'])) {
+        $restNum = (int)$tok['restaurant_number'];
+        $restGroup = ($tok['legal_entity_group'] ?? '') === 'PS' ? 'PS' : 'BK_VM';
         // Привязываем
-        $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND is_active = 1")
-            ->execute([$chatId, $restNum]);
+        $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1")
+            ->execute([$chatId, $restNum, $restGroup]);
         $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ?")->execute([$tok['id']]);
         sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан №{$restNum} успешно привязан к вашему Telegram.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
     } else {

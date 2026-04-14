@@ -42,10 +42,8 @@ function soGetRestaurantSession($pdo) {
     $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
     if (!$token) return null;
     $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.session_active_until,
-               r.id as restaurant_id, r.region, r.city, r.address
+        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until
         FROM ro_users ru
-        LEFT JOIN restaurants r ON r.number = ru.restaurant_number AND r.active = 1
         WHERE ru.session_token = ? AND ru.is_active = 1
     ");
     $s->execute([$token]);
@@ -55,6 +53,14 @@ function soGetRestaurantSession($pdo) {
     // Продлеваем сессию при каждом запросе (сброс таймера неактивности)
     $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
         ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
+    $rest = roGetRestaurantRow($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
+    $user['restaurant_id'] = isset($rest['id']) ? (int)$rest['id'] : null;
+    $user['region'] = $rest['region'] ?? '';
+    $user['city'] = $rest['city'] ?? '';
+    $user['address'] = $rest['address'] ?? '';
+    if (empty($user['legal_entity_group']) && !empty($rest['legal_entity_group'])) {
+        $user['legal_entity_group'] = $rest['legal_entity_group'];
+    }
     return $user;
 }
 

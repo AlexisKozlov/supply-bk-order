@@ -161,7 +161,7 @@
                 <div class="login-form-sub">Введите номер ресторана и пароль</div>
                 <div class="login-field">
                   <label>Номер ресторана</label>
-                  <input v-model="roNumber" type="number" inputmode="numeric" placeholder="Например: 24" :disabled="loginLoading" @keydown.enter="roPasswordInput?.focus()" />
+                  <input v-model="roNumber" type="text" inputmode="text" placeholder="Например: 24 или PS01" :disabled="loginLoading" @keydown.enter="roPasswordInput?.focus()" />
                 </div>
                 <div class="login-field">
                   <label>Пароль</label>
@@ -225,6 +225,7 @@ import { useCanvasParticles } from '@/composables/useCanvasParticles.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
 import { svgIcons } from '@/lib/homeIcons.js';
+import { parseRestaurantInput } from '@/lib/legalEntities.js';
 
 
 const router = useRouter();
@@ -529,7 +530,13 @@ async function doRoLogin() {
   loginError.value = '';
   loginLoading.value = true;
   try {
-    const result = await roStore.login(parseInt(roNumber.value), roPassword.value, roForceLogin.value);
+    const parsed = parseRestaurantInput(roNumber.value);
+    if (!parsed?.number) {
+      loginError.value = 'Неверный номер ресторана. Пример: 24 или PS01';
+      roForceLogin.value = false;
+      return;
+    }
+    const result = await roStore.login(parsed.number, roPassword.value, parsed.group, roForceLogin.value);
     if (result.success) {
       roForceLogin.value = false;
       showLoginModal.value = false;

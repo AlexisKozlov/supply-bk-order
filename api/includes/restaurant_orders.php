@@ -37,14 +37,34 @@ function roRespond($data, $code = 200) {
     exit;
 }
 
+function roInferGroupFromRestaurantNumber($restaurantNumber) {
+    return ((int)$restaurantNumber >= 1000) ? 'PS' : 'BK_VM';
+}
+
+function roNormalizeLegalEntityGroup($group, $restaurantNumber = null) {
+    $g = strtoupper(trim((string)$group));
+    if ($g === 'PS' || $g === 'BK_VM') return $g;
+    return roInferGroupFromRestaurantNumber($restaurantNumber);
+}
+
+function roGetRestaurantRow($pdo, $restaurantNumber, $group = null) {
+    $resolvedGroup = roNormalizeLegalEntityGroup($group, $restaurantNumber);
+    $s = $pdo->prepare("
+        SELECT id, number, region, city, address, legal_entity_group
+        FROM restaurants
+        WHERE number = ? AND active = 1 AND legal_entity_group = ?
+        LIMIT 1
+    ");
+    $s->execute([(int)$restaurantNumber, $resolvedGroup]);
+    return $s->fetch() ?: null;
+}
+
 function roGetRestaurantSession($pdo) {
     $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
     if (!$token) return null;
     $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.session_active_until,
-               r.region, r.city, r.address, r.legal_entity_group
+        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until
         FROM ro_users ru
-        LEFT JOIN restaurants r ON r.number = ru.restaurant_number AND r.active = 1
         WHERE ru.session_token = ? AND ru.is_active = 1
     ");
     $s->execute([$token]);
@@ -57,6 +77,13 @@ function roGetRestaurantSession($pdo) {
     // Продлеваем сессию при каждом запросе (сброс таймера неактивности)
     $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
         ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
+    $rest = roGetRestaurantRow($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
+    $user['region'] = $rest['region'] ?? '';
+    $user['city'] = $rest['city'] ?? '';
+    $user['address'] = $rest['address'] ?? '';
+    if (empty($user['legal_entity_group']) && !empty($rest['legal_entity_group'])) {
+        $user['legal_entity_group'] = $rest['legal_entity_group'];
+    }
     return $user;
 }
 
@@ -290,9 +317,15 @@ function roLogAudit($pdo, $e) {
 function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
+    $group = func_num_args() >= 4 ? roNormalizeLegalEntityGroup(func_get_arg(3), $restaurantNumber) : null;
     // Ищем telegram_chat_id из ro_users или veg_telegram_subs
-    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND telegram_chat_id > 0");
-    $s->execute([$restaurantNumber]);
+    if ($group) {
+        $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND telegram_chat_id > 0");
+        $s->execute([(int)$restaurantNumber, $group]);
+    } else {
+        $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND telegram_chat_id > 0");
+        $s->execute([(int)$restaurantNumber]);
+    }
     $chatId = $s->fetchColumn();
     if (!$chatId) {
         $s2 = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? LIMIT 1");
@@ -326,6 +359,71 @@ function roAggregateOrderItems($items) {
         }
     }
     return $aggregated;
+}
+
+function roHasMultiplicityViolation($qty, $multiplicity) {
+    $qty = floatval($qty);
+    $multiplicity = floatval($multiplicity);
+    if ($qty <= 0 || $multiplicity <= 1) return false;
+    $ratio = $qty / $multiplicity;
+    return abs($ratio - round($ratio)) > 0.0001;
+}
+
+function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
+    if (!$legalEntity || empty($aggregatedItems)) return [];
+    $skus = array_values(array_unique(array_filter(array_keys($aggregatedItems), fn($sku) => $sku !== '')));
+    if (empty($skus)) return [];
+
+    $ph = implode(',', array_fill(0, count($skus), '?'));
+    $params = array_merge([$legalEntity], $skus);
+    $s = $pdo->prepare("
+        SELECT sku, name, COALESCE(multiplicity, 1) AS multiplicity
+        FROM products
+        WHERE legal_entity = ?
+          AND is_active = 1
+          AND sku IN ({$ph})
+    ");
+    $s->execute($params);
+
+    $productMap = [];
+    foreach ($s->fetchAll() as $row) {
+        $productMap[$row['sku']] = $row;
+    }
+
+    $violations = [];
+    foreach ($aggregatedItems as $sku => $item) {
+        $product = $productMap[$sku] ?? null;
+        $multiplicity = floatval($product['multiplicity'] ?? 1);
+        $quantity = floatval($item['quantity'] ?? 0);
+        if (!roHasMultiplicityViolation($quantity, $multiplicity)) continue;
+        $violations[] = [
+            'sku' => $sku,
+            'product_name' => $product['name'] ?? ($item['product_name'] ?? ''),
+            'quantity' => $quantity,
+            'multiplicity' => $multiplicity,
+        ];
+    }
+
+    return $violations;
+}
+
+function roFormatMultiplicityValue($value) {
+    $num = floatval($value);
+    if (abs($num - round($num)) < 0.0001) return (string)intval(round($num));
+    return rtrim(rtrim(number_format($num, 3, '.', ''), '0'), '.');
+}
+
+function roRespondMultiplicityError($violations) {
+    if (empty($violations)) return;
+    $first = $violations[0];
+    $message = 'Товар ' . $first['sku'] . ' «' . $first['product_name'] . '»: количество '
+        . roFormatMultiplicityValue($first['quantity'])
+        . ' должно быть кратно '
+        . roFormatMultiplicityValue($first['multiplicity']);
+    if (count($violations) > 1) {
+        $message .= '. Некратных позиций: ' . count($violations);
+    }
+    roRespond(['error' => $message], 400);
 }
 
 function roGetSessionUserGroups($sessionUser) {
@@ -363,11 +461,12 @@ function roEnsureGroupAccess($sessionUser, $group) {
     }
 }
 
-function roEnsureRestaurantAccess($pdo, $sessionUser, $restaurantNumber) {
+function roEnsureRestaurantAccess($pdo, $sessionUser, $restaurantNumber, $group = null) {
+    $resolvedGroup = roNormalizeLegalEntityGroup($group, $restaurantNumber);
     if (!$sessionUser) return;
     if (($sessionUser['role'] ?? '') === 'admin') return;
-    $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-    $s->execute([(int)$restaurantNumber]);
+    $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND legal_entity_group = ? AND active = 1 LIMIT 1");
+    $s->execute([(int)$restaurantNumber, $resolvedGroup]);
     $group = $s->fetchColumn();
     if (!$group) {
         roRespond(['error' => 'Ресторан не найден'], 404);
@@ -403,7 +502,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     }
 
     // Ищем токен
-    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
     $s->execute([$tgToken]);
     $tgAuth = $s->fetch();
     if (!$tgAuth) {
@@ -425,10 +524,11 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         }
         $restNum = $sub['restaurant_number'];
     }
+    $restGroup = roNormalizeLegalEntityGroup($tgAuth['legal_entity_group'] ?? null, $restNum);
 
     // Проверяем, есть ли учётка ресторана
-    $s = $pdo->prepare("SELECT id, restaurant_number, legal_entity FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
-    $s->execute([$restNum]);
+    $s = $pdo->prepare("SELECT id, restaurant_number, legal_entity, legal_entity_group FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $s->execute([$restNum, $restGroup]);
     $user = $s->fetch();
     if (!$user) {
         roRespond(['success' => false, 'error' => "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок."]);
@@ -440,9 +540,10 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
 
-    $r = $pdo->prepare("SELECT number, region, city, address, legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-    $r->execute([$restNum]);
-    $rest = $r->fetch();
+    $rest = roGetRestaurantRow($pdo, $restNum, $restGroup);
+    if (!$rest) {
+        roRespond(['success' => false, 'error' => "Ресторан {$restNum} не найден или отключён"]);
+    }
 
     roRespond([
         'success' => true,
@@ -450,7 +551,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         'restaurant' => [
             'number' => $restNum,
             'legal_entity' => $user['legal_entity'],
-            'legal_entity_group' => $rest['legal_entity_group'] ?? 'BK_VM',
+            'legal_entity_group' => $rest['legal_entity_group'] ?? $restGroup,
             'region' => $rest['region'] ?? '',
             'city' => $rest['city'] ?? '',
             'address' => $rest['address'] ?? '',
@@ -461,6 +562,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
 // --- Логин ---
 if ($roAction === 'login' && $method === 'POST') {
     $restNum = intval($body['restaurant_number'] ?? 0);
+    $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
     $password = $body['password'] ?? '';
     $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
@@ -472,8 +574,8 @@ if ($roAction === 'login' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Слишком много попыток. Подождите 10 минут'], 429);
     }
 
-    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, session_token, session_active_until, last_login_at FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
-    $s->execute([$restNum]);
+    $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, session_token, session_active_until, last_login_at FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $s->execute([$restNum, $restGroup]);
     $user = $s->fetch();
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
@@ -513,9 +615,10 @@ if ($roAction === 'login' && $method === 'POST') {
         ->execute([$token, $activeUntil, $user['id']]);
 
     // Инфо о ресторане
-    $r = $pdo->prepare("SELECT number, region, city, address, legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-    $r->execute([$restNum]);
-    $rest = $r->fetch();
+    $rest = roGetRestaurantRow($pdo, $restNum, $restGroup);
+    if (!$rest) {
+        roRespond(['success' => false, 'error' => "Ресторан {$restNum} не найден или отключён"]);
+    }
 
     roRespond([
         'success' => true,
@@ -523,7 +626,7 @@ if ($roAction === 'login' && $method === 'POST') {
         'restaurant' => [
             'number' => $restNum,
             'legal_entity' => $user['legal_entity'],
-            'legal_entity_group' => $rest['legal_entity_group'] ?? 'BK_VM',
+            'legal_entity_group' => $rest['legal_entity_group'] ?? $restGroup,
             'region' => $rest['region'] ?? '',
             'city' => $rest['city'] ?? '',
             'address' => $rest['address'] ?? '',
@@ -551,8 +654,8 @@ if ($roAction === 'validate' && $method === 'POST') {
 if ($roAction === 'logout' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if ($rest) {
-        $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE restaurant_number = ?")
-            ->execute([$rest['restaurant_number']]);
+        $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
+            ->execute([$rest['id']]);
     }
     roRespond(['success' => true]);
 }
@@ -570,8 +673,8 @@ if ($roAction === 'change-password' && $method === 'POST') {
     if (!$oldPass || !$newPass) roRespond(['error' => 'Заполните оба поля'], 400);
     if (mb_strlen($newPass) < 4) roRespond(['error' => 'Новый пароль слишком короткий (минимум 4 символа)'], 400);
     // Проверяем старый пароль
-    $s = $pdo->prepare("SELECT id, password_hash FROM ro_users WHERE restaurant_number = ? AND is_active = 1");
-    $s->execute([$rest['restaurant_number']]);
+    $s = $pdo->prepare("SELECT id, password_hash FROM ro_users WHERE id = ? AND is_active = 1");
+    $s->execute([$rest['id']]);
     $user = $s->fetch();
     if (!$user || !password_verify($oldPass, $user['password_hash'])) {
         recordFailedLogin($pdo, $clientIp, "ro_chpass_{$rest['restaurant_number']}");
@@ -715,8 +818,8 @@ if ($roAction === 'telegram-link' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
     // Проверяем, привязан ли уже Telegram
-    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ?");
-    $s->execute([$rest['restaurant_number']]);
+    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE id = ?");
+    $s->execute([$rest['id']]);
     $user = $s->fetch();
     if ($user && $user['telegram_chat_id']) {
         roRespond(['already_linked' => true, 'chat_id' => $user['telegram_chat_id']]);
@@ -724,11 +827,8 @@ if ($roAction === 'telegram-link' && $method === 'POST') {
     // Генерируем токен привязки (6-значный код)
     $code = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
     // Сохраняем в ro_tg_tokens (переиспользуем таблицу)
-    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, expires_at, used) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
-        ->execute([$code, 0]); // chat_id=0, т.к. пока не знаем; token = код
-    // Запоминаем restaurant_number для этого кода
-    $pdo->prepare("UPDATE ro_tg_tokens SET telegram_chat_id = ? WHERE token = ? AND used = 0")
-        ->execute([-$rest['restaurant_number'], $code]); // используем отрицательное число как маркер «это код привязки»
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
+        ->execute([$code, 0, (string)$rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM']);
     roRespond(['success' => true, 'code' => $code, 'expires_in' => 600]);
 }
 
@@ -736,8 +836,8 @@ if ($roAction === 'telegram-link' && $method === 'POST') {
 if ($roAction === 'telegram-unlink' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    $pdo->prepare("UPDATE ro_users SET telegram_chat_id = NULL WHERE restaurant_number = ?")
-        ->execute([$rest['restaurant_number']]);
+    $pdo->prepare("UPDATE ro_users SET telegram_chat_id = NULL WHERE id = ?")
+        ->execute([$rest['id']]);
     roRespond(['success' => true]);
 }
 
@@ -745,8 +845,8 @@ if ($roAction === 'telegram-unlink' && $method === 'POST') {
 if ($roAction === 'telegram-status' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ?");
-    $s->execute([$rest['restaurant_number']]);
+    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE id = ?");
+    $s->execute([$rest['id']]);
     $user = $s->fetch();
     roRespond(['linked' => !empty($user['telegram_chat_id']), 'chat_id' => $user['telegram_chat_id'] ?? null]);
 }
@@ -911,8 +1011,15 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
 
     if (!$order) roRespond(['order' => null]);
 
-    $items = $pdo->prepare("SELECT sku, product_name, category, quantity, comment FROM ro_order_items WHERE order_id = ? ORDER BY category, product_name");
-    $items->execute([$order['id']]);
+    $items = $pdo->prepare("
+        SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
+               COALESCE(p.multiplicity, 1) AS multiplicity
+        FROM ro_order_items oi
+        LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ? AND p.is_active = 1
+        WHERE oi.order_id = ?
+        ORDER BY oi.category, oi.product_name
+    ");
+    $items->execute([$rest['legal_entity'], $order['id']]);
 
     roRespond([
         'order' => [
@@ -1053,6 +1160,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
 
     $aggregated = roAggregateOrderItems($items);
     if (empty($aggregated)) roRespond(['error' => 'Заказ пуст'], 400);
+    roRespondMultiplicityError(roFindMultiplicityViolations($pdo, $rest['legal_entity'], $aggregated));
 
     // Проверяем: есть ли уже заказ?
     $existingOrder = $pdo->prepare("SELECT id, status, submitted_at FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
@@ -1247,7 +1355,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             $msg = mb_substr($msg, 0, 3900) . "\n\n…(сообщение обрезано)";
         }
 
-        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg);
+        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg, $rest['legal_entity_group'] ?? 'BK_VM');
     } catch (Exception $e) {
         // Уведомление не критично — игнорируем ошибку
     }
@@ -1272,9 +1380,11 @@ if ($roAction === 'repeat-order' && $method === 'POST') {
 
     // Получаем позиции исходного заказа
     $s = $pdo->prepare("
-        SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment
+        SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
+               COALESCE(p.multiplicity, 1) AS multiplicity
         FROM ro_order_items oi
         JOIN ro_orders o ON o.id = oi.order_id
+        LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
         WHERE o.id = ? AND o.restaurant_number = ?
     ");
     $s->execute([$sourceOrderId, $rest['restaurant_number']]);
@@ -1473,32 +1583,17 @@ if (strpos($roAction, 'admin') === 0) {
             }
         }
 
+        $aggregated = $items !== null ? roAggregateOrderItems($items) : [];
+        if ($items !== null) {
+            roRespondMultiplicityError(roFindMultiplicityViolations($pdo, $oldOrder['legal_entity'] ?? '', $aggregated));
+        }
+
         $pdo->beginTransaction();
         try {
             if ($items !== null) {
                 // Обновляем позиции с агрегацией по SKU (на случай, если фронт
                 // прислал один и тот же товар несколькими строками).
                 $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?")->execute([$orderId]);
-                $aggregated = [];
-                foreach ($items as $item) {
-                    $qty = floatval($item['quantity'] ?? 0);
-                    if ($qty <= 0) continue;
-                    $sku = $item['sku'] ?? '';
-                    if ($sku === '') continue;
-                    if (!isset($aggregated[$sku])) {
-                        $aggregated[$sku] = [
-                            'sku' => $sku,
-                            'product_name' => $item['product_name'] ?? '',
-                            'category' => $item['category'] ?? 'Сухой',
-                            'quantity' => 0,
-                            'comment' => $item['comment'] ?? null,
-                        ];
-                    }
-                    $aggregated[$sku]['quantity'] += $qty;
-                    if (!empty($item['comment']) && empty($aggregated[$sku]['comment'])) {
-                        $aggregated[$sku]['comment'] = $item['comment'];
-                    }
-                }
                 $insert = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
                 foreach ($aggregated as $ag) {
                     $insert->execute([$orderId, $ag['sku'], $ag['product_name'], $ag['category'], $ag['quantity'], $ag['comment']]);
@@ -1664,7 +1759,7 @@ if (strpos($roAction, 'admin') === 0) {
                 $msg .= "\n📅 Дата доставки изменена на {$newDateStr}";
             }
 
-            roNotifyRestaurant($pdo, $restNum, $msg);
+            roNotifyRestaurant($pdo, $restNum, $msg, getEntityGroup($oldOrder['legal_entity'] ?? '') === 'PS' ? 'PS' : 'BK_VM');
         }
 
         roRespond(['success' => true]);
@@ -1716,7 +1811,8 @@ if (strpos($roAction, 'admin') === 0) {
             $restNum = $oi['restaurant_number'];
             $by = $sessionUser ? $sessionUser['name'] : 'admin';
             roNotifyRestaurant($pdo, $restNum,
-                "❌ Ресторан {$restNum} — заказ на {$dateStr} удалён ({$by}). Если это ошибка — свяжитесь с нами.");
+                "❌ Ресторан {$restNum} — заказ на {$dateStr} удалён ({$by}). Если это ошибка — свяжитесь с нами.",
+                getEntityGroup($oi['legal_entity'] ?? '') === 'PS' ? 'PS' : 'BK_VM');
         }
 
         roRespond(['success' => true]);
@@ -2046,7 +2142,9 @@ if (strpos($roAction, 'admin') === 0) {
                 ru.telegram_chat_id,
                 CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password
             FROM restaurants r
-            LEFT JOIN ro_users ru ON ru.restaurant_number = r.number
+            LEFT JOIN ro_users ru
+                   ON ru.restaurant_number = r.number
+                  AND ru.legal_entity_group COLLATE utf8mb4_general_ci = r.legal_entity_group
             WHERE " . implode(' AND ', $usersWhere) . "
             ORDER BY r.legal_entity_group, r.number
         ");
@@ -2069,17 +2167,18 @@ if (strpos($roAction, 'admin') === 0) {
 
         if ($action === 'create') {
             $restNum = (int)($body['restaurant_number'] ?? 0);
+            $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
             $password = $body['password'] ?? '';
             if (!$restNum || !$password) roRespond(['error' => 'Не указан номер или пароль'], 400);
-            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
 
-            $le = roGetLegalEntity($pdo, $restNum);
+            $le = roGetLegalEntity($pdo, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
 
-            $pdo->prepare("INSERT INTO ro_users (restaurant_number, password_hash, legal_entity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1")
-                ->execute([$restNum, $hash, $le]);
+            $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1")
+                ->execute([$restNum, $restGroup, $hash, $le]);
 
-            roRespond(['success' => true, 'restaurant_number' => $restNum]);
+            roRespond(['success' => true, 'restaurant_number' => $restNum, 'legal_entity_group' => $restGroup]);
         }
 
         if ($action === 'create-bulk') {
@@ -2091,23 +2190,23 @@ if (strpos($roAction, 'admin') === 0) {
             if (!$password) roRespond(['error' => 'Не указан пароль'], 400);
 
             $hash = password_hash($password, PASSWORD_BCRYPT);
-            $rests = $pdo->query("SELECT DISTINCT number FROM restaurants WHERE active = 1 ORDER BY number");
+            $restsWhere = ["active = 1"];
+            $restsParams = [];
+            roApplyAllowedGroupsSql($sessionUser, $restsWhere, $restsParams, 'legal_entity_group');
+            $restsSql = "SELECT number, legal_entity_group FROM restaurants WHERE " . implode(' AND ', $restsWhere) . " ORDER BY legal_entity_group, number";
+            $rests = $pdo->prepare($restsSql);
+            $rests->execute($restsParams);
             $changed = 0;
-            $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, password_hash, legal_entity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1");
-            $check = $pdo->prepare("SELECT password_hash FROM ro_users WHERE restaurant_number = ?");
-            $allowedGroups = roGetSessionUserGroups($sessionUser);
+            $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, legal_entity_group, password_hash, legal_entity) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1");
+            $check = $pdo->prepare("SELECT password_hash FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ?");
             foreach ($rests->fetchAll() as $r) {
-                if ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
-                    $restLe = roGetLegalEntity($pdo, $r['number']);
-                    if (!in_array(getEntityGroup($restLe), $allowedGroups, true)) continue;
-                }
                 if ($mode === 'missing') {
-                    $check->execute([$r['number']]);
+                    $check->execute([$r['number'], $r['legal_entity_group']]);
                     $existing = $check->fetchColumn();
                     if ($existing) continue;
                 }
-                $le = roGetLegalEntity($pdo, $r['number']);
-                $insert->execute([$r['number'], $hash, $le]);
+                $le = roGetLegalEntity($pdo, $r['number'], $r['legal_entity_group']);
+                $insert->execute([$r['number'], $r['legal_entity_group'], $hash, $le]);
                 $changed++;
             }
             roRespond(['success' => true, 'created' => $changed, 'mode' => $mode]);
@@ -2115,19 +2214,21 @@ if (strpos($roAction, 'admin') === 0) {
 
         if ($action === 'toggle') {
             $restNum = (int)($body['restaurant_number'] ?? 0);
+            $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
             $active = (int)($body['is_active'] ?? 1);
-            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum);
-            $pdo->prepare("UPDATE ro_users SET is_active = ? WHERE restaurant_number = ?")->execute([$active, $restNum]);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
+            $pdo->prepare("UPDATE ro_users SET is_active = ? WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$active, $restNum, $restGroup]);
             roRespond(['success' => true]);
         }
 
         if ($action === 'reset-password') {
             $restNum = (int)($body['restaurant_number'] ?? 0);
+            $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
             $password = $body['password'] ?? '';
             if (!$restNum || !$password) roRespond(['error' => 'Не указан номер или пароль'], 400);
-            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
-            $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ?")->execute([$hash, $restNum]);
+            $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$hash, $restNum, $restGroup]);
             roRespond(['success' => true]);
         }
 

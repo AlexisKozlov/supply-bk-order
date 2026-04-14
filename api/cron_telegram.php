@@ -1072,20 +1072,24 @@ try {
             // Рестораны с привязанным Telegram, у которых есть доставка в этот день
             // недели и ещё нет заказа на завтра
             $s = $pdo->prepare("
-                SELECT ru.restaurant_number, ru.telegram_chat_id
+                SELECT ru.restaurant_number, ru.legal_entity_group, ru.telegram_chat_id
                 FROM ro_users ru
                 WHERE ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
+                AND ru.legal_entity_group = ?
                 AND EXISTS (
                     SELECT 1 FROM restaurants r
                     JOIN delivery_schedule ds ON ds.restaurant_id = r.id
-                    WHERE r.number = ru.restaurant_number AND r.active = 1 AND ds.day_of_week = ?
+                    WHERE r.number = ru.restaurant_number
+                      AND r.legal_entity_group = ru.legal_entity_group COLLATE utf8mb4_general_ci
+                      AND r.active = 1
+                      AND ds.day_of_week = ?
                 )
                 AND ru.restaurant_number NOT IN (
                     SELECT o.restaurant_number FROM ro_orders o
                     WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
                 )
             ");
-            $s->execute([$tomorrowDow, $roSess['id'], $tomorrow]);
+            $s->execute([$roSess['legal_entity_group'] ?? 'BK_VM', $tomorrowDow, $roSess['id'], $tomorrow]);
             $missing = $s->fetchAll();
 
             foreach ($missing as $m) {
@@ -1103,8 +1107,8 @@ try {
 
                 // Генерируем токен для быстрого входа (с привязкой к ресторану из напоминания)
                 $token = bin2hex(random_bytes(32));
-                $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
-                    ->execute([$token, $m['telegram_chat_id'], $m['restaurant_number']]);
+                $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
+                    ->execute([$token, $m['telegram_chat_id'], $m['restaurant_number'], $m['legal_entity_group'] ?: 'BK_VM']);
                 $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
 
                 $btns = ['inline_keyboard' => [
@@ -1145,7 +1149,7 @@ try {
         // Все расписания поставщика: ресторан + дни заказа/доставки
         $schStmt = $pdo->prepare("
             SELECT ss.restaurant_id, ss.order_day, ss.delivery_day,
-                   r.number AS restaurant_number
+                   r.number AS restaurant_number, r.legal_entity_group
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ? AND ss.is_active = 1
@@ -1157,7 +1161,7 @@ try {
         $byRest = [];
         $chatIdLookup = $pdo->prepare("
             SELECT telegram_chat_id FROM ro_users
-            WHERE restaurant_number = ? AND telegram_chat_id > 0 AND is_active = 1
+            WHERE restaurant_number = ? AND legal_entity_group = ? AND telegram_chat_id > 0 AND is_active = 1
             LIMIT 1
         ");
         $chatIdFallback = $pdo->prepare("
@@ -1167,7 +1171,7 @@ try {
             $rn = $s['restaurant_number'];
             if (!isset($byRest[$rn])) {
                 // Резолвим chat_id: сначала ro_users, иначе veg_telegram_subs
-                $chatIdLookup->execute([$rn]);
+                $chatIdLookup->execute([$rn, $s['legal_entity_group'] ?: 'BK_VM']);
                 $cid = $chatIdLookup->fetchColumn();
                 if (!$cid) {
                     $chatIdFallback->execute([$rn]);
@@ -1312,8 +1316,9 @@ try {
 
             // Токен быстрого входа → страница поставщика в кабинете
             $token = bin2hex(random_bytes(32));
-            $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, expires_at, used) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)")
-                ->execute([$token, $chatId, $restNum]);
+            $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+            $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)")
+                ->execute([$token, $chatId, $restNum, $restGroup]);
 
             $redirect = "/restaurant/orders/supplier/{$supId}";
             $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
