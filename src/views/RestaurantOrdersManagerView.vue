@@ -313,6 +313,8 @@
           @click="stockLegalEntity = stockLE_BK; loadStockData()">Бургер БК</button>
         <button class="rom-tpl-tab" :class="{ active: stockLegalEntity === stockLE_VM }"
           @click="stockLegalEntity = stockLE_VM; loadStockData()">Воглия Матта</button>
+        <button class="rom-tpl-tab" :class="{ active: stockLegalEntity === stockLE_PS }"
+          @click="stockLegalEntity = stockLE_PS; loadStockData()">Пицца Стар</button>
       </div>
 
       <div class="rom-stock-filter-row">
@@ -1321,7 +1323,7 @@ watch([pageTab, auditAutoRefresh], ([tab, auto]) => {
 
 // Templates (full page)
 const tplCategory = ref('Сухой');
-const tplLegalEntity = ref('ООО "Бургер БК"');
+const tplLegalEntity = computed(() => orderStore.settings.legalEntity || 'ООО "Бургер БК"');
 const fullTemplateItems = ref([]);
 const tplFilter = ref('');
 const tplMessage = ref('');
@@ -1337,7 +1339,8 @@ const stockBalanceDate = ref('');
 const stockDeliveryDate = ref('');
 const stockLE_BK = 'ООО "Бургер БК"';
 const stockLE_VM = 'ООО "Воглия Матта"';
-const stockLegalEntity = ref(stockLE_BK);
+const stockLE_PS = 'ООО "Пицца Стар"';
+const stockLegalEntity = ref(orderStore.settings.legalEntity || stockLE_BK);
 const stockDates = ref([]);
 const stockItems = ref([]);
 const stockFilter = ref('');
@@ -1515,6 +1518,7 @@ watch(() => route.query.t, async () => {
 watch(() => orderStore.settings.legalEntity, () => {
   loadStatus();
   if (pageTab.value === 'audit') loadAuditLog();
+  if (pageTab.value === 'templates') loadFullTemplates();
 });
 
 function onBeforeUnload(e) {
@@ -1714,7 +1718,7 @@ async function loadStatus() {
 
 async function handleAutoSession() {
   try {
-    const result = await store.adminAutoSession();
+    const result = await store.adminAutoSession(orderStore.settings.legalEntity || undefined);
     if (result.success) {
       await loadStatus();
     }
@@ -1726,7 +1730,7 @@ async function handleAutoSession() {
 async function handleToggleDate(open) {
   if (!session.value) return;
   try {
-    await store.adminToggleDate(session.value.id, selectedDate.value, open);
+    await store.adminToggleDate(session.value.id, selectedDate.value, open, orderStore.settings.legalEntity || undefined);
     toast.success(open ? 'Приём заявок открыт' : 'Приём заявок закрыт');
     await loadStatus();
   } catch (e) {
@@ -1745,7 +1749,13 @@ async function saveDeadlineExtend() {
   if (!session.value) return;
   deadlineSaving.value = true;
   try {
-    await store.adminExtendDeadline(session.value.id, selectedDate.value, deadlineSoft.value + ':00', deadlineHard.value + ':00');
+    await store.adminExtendDeadline(
+      session.value.id,
+      selectedDate.value,
+      deadlineSoft.value + ':00',
+      deadlineHard.value + ':00',
+      orderStore.settings.legalEntity || undefined
+    );
     showDeadlineModal.value = false;
     toast.success('Дедлайн продлён');
     await loadStatus();
@@ -2356,7 +2366,7 @@ async function openExportModal() {
   exportWeightUnit.value = 'kg';
   exportSelectedColumns.value = [...DEFAULT_EXPORT_COLUMNS];
   try {
-    const data = await store.adminGetExportData('all', selectedDate.value);
+    const data = await store.adminGetExportData('all', selectedDate.value, orderStore.settings.legalEntity || undefined);
     exportData = data;
     // Build available restaurants
     const restMap = {};

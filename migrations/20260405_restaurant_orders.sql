@@ -23,10 +23,12 @@ CREATE TABLE IF NOT EXISTS ro_sessions (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   week_start      DATE NOT NULL,
   week_end        DATE NOT NULL,
+  legal_entity_group VARCHAR(20) NOT NULL DEFAULT 'BK_VM',
   status          ENUM('active','closed','cancelled') NOT NULL DEFAULT 'active',
   created_by      VARCHAR(100) NULL,
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_ro_sessions_week (week_start)
+  UNIQUE KEY uq_ro_sessions_group_week (legal_entity_group, week_start),
+  KEY idx_ro_sessions_group_status (legal_entity_group, status, week_end)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Заказ ресторана (один на ресторан + дату достав��и)
@@ -76,6 +78,7 @@ CREATE TABLE IF NOT EXISTS ro_deadline_overrides (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   session_id      INT UNSIGNED NOT NULL,
   delivery_date   DATE NOT NULL,
+  is_open         TINYINT(1) NOT NULL DEFAULT 1,
   soft_deadline   TIME NOT NULL DEFAULT '10:00:00',
   hard_deadline   TIME NOT NULL DEFAULT '13:00:00',
   created_by      VARCHAR(100) NOT NULL,

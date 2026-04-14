@@ -53,7 +53,7 @@
         <thead>
           <tr>
             <th class="pf-mth pf-mth-center" style="width:36px;">№</th>
-            <th v-if="isPSGroup" class="pf-mth pf-mth-center" style="width:48px;" title="Номер в системе 1С Додо">ДОДО ИС</th>
+            <th v-if="isPSGroup" class="pf-mth pf-mth-center" style="width:48px;" title="Номер в системе 1С Додо">ИС</th>
             <th class="pf-mth ds-th-addr">Адрес</th>
             <th class="pf-mth pf-mth-center ds-th-cnt">Дн</th>
             <th v-for="d in dayNames" :key="d.num" class="pf-mth pf-mth-center ds-th-day">
@@ -127,8 +127,8 @@
                       @dragend="onDragEnd"
                       title="Тесто"
                       @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')"
-                    >🥖 {{ getDough(r, d.num) }}</span>
-                    <span v-else class="ds-time-empty ds-dough-empty" title="Тесто" @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')">🥖 —</span>
+                    >{{ getDough(r, d.num) }}</span>
+                    <span v-else class="ds-time-empty ds-dough-empty" title="Тесто" @dblclick.stop="isEditing && startEdit(r, d.num, 'dough_time')">—</span>
                   </div>
                 </template>
                 <template v-else>
@@ -189,7 +189,10 @@
         <div v-for="d in dayNames" :key="d.num" class="ds-col">
           <div class="ds-col-header">
             <span class="ds-col-day">{{ d.short }}</span>
-            <span class="ds-col-count">{{ dayRestaurants(d.num).length }}</span>
+            <div class="ds-col-header-meta">
+              <span class="ds-col-count">{{ dayMainCount(d.num) }}</span>
+              <span v-if="isPSGroup && dayDoughCount(d.num)" class="ds-col-subcount">тесто {{ dayDoughCount(d.num) }}</span>
+            </div>
           </div>
           <div class="ds-col-body">
             <div v-if="!dayRestaurants(d.num).length" class="ds-col-empty">—</div>
@@ -200,12 +203,23 @@
               @dblclick="isEditing && startEditRestaurant(item)"
             >
               <span class="ds-col-item-num">{{ item.number }}</span>
-              <span class="ds-col-item-addr">{{ item.address }}</span>
-              <span
-                class="ds-col-item-time"
-                :class="{ 'ds-col-item-time-edit': isEditing }"
-                @dblclick.stop="isEditing && startCardEdit(item, d.num)"
-              >{{ item.delivery_time || '—' }}</span>
+              <div class="ds-col-item-content">
+                <span class="ds-col-item-addr">{{ item.address }}</span>
+                <div class="ds-col-item-lines">
+                  <span
+                    v-if="item.delivery_time"
+                    class="ds-col-item-time"
+                    :class="{ 'ds-col-item-time-edit': isEditing }"
+                    @dblclick.stop="isEditing && startCardEdit(item, d.num, 'delivery_time')"
+                  >{{ item.delivery_time }}</span>
+                  <span
+                    v-if="item.dough_time"
+                    class="ds-col-item-dough"
+                    :class="{ 'ds-col-item-dough-edit': isEditing }"
+                    @dblclick.stop="isEditing && startCardEdit(item, d.num, 'dough_time')"
+                  >Тесто: {{ item.dough_time }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -217,7 +231,7 @@
       <div v-if="cardEditing" class="modal" @click.self="tryCloseCard">
         <div class="modal-box" style="max-width: 360px;">
           <div class="modal-header">
-            <h2>Время доставки</h2>
+            <h2>{{ cardEditing?.field === 'dough_time' ? 'Время теста' : 'Время доставки' }}</h2>
             <button class="modal-close" @click="tryCloseCard"><BkIcon name="close" size="sm"/></button>
           </div>
           <div class="ds-modal-body">
@@ -227,7 +241,7 @@
             </div>
             <div class="ds-edit-day">{{ cardEditing.dayLabel }}</div>
             <label class="ds-label">
-              <span class="ds-label-text">Время</span>
+              <span class="ds-label-text">{{ cardEditing?.field === 'dough_time' ? 'Время теста' : 'Время доставки' }}</span>
               <input
                 v-model="cardEditing.value"
                 type="text"
@@ -236,7 +250,7 @@
                 autofocus
               />
             </label>
-            <div class="ds-edit-hint">Оставьте пустым, чтобы убрать доставку</div>
+            <div class="ds-edit-hint">Оставьте пустым, чтобы убрать это время</div>
           </div>
           <div class="ds-modal-footer">
             <div class="ds-modal-footer-right">
@@ -470,6 +484,14 @@ function dayRestaurants(day) {
   return list;
 }
 
+function dayMainCount(day) {
+  return dayRestaurants(day).filter(item => item.delivery_time).length;
+}
+
+function dayDoughCount(day) {
+  return dayRestaurants(day).filter(item => item.dough_time).length;
+}
+
 // ═══ Inline edit (table — dblclick) ═══
 const editingCell = ref(null);
 let savingEdit = false;
@@ -649,15 +671,16 @@ const cardEditing = ref(null);
 let _cardSnapshot = '';
 const showCardConfirm = ref(false);
 
-function startCardEdit(item, dayNum) {
+function startCardEdit(item, dayNum, field = 'delivery_time') {
   if (!isEditing.value) return;
   const day = dayNum || selectedDay.value;
   const d = dayNames.find(d => d.num === day);
   cardEditing.value = {
     restaurant: item,
     day,
+    field,
     dayLabel: d?.full || '',
-    value: item.delivery_time || '',
+    value: field === 'dough_time' ? (item.dough_time || '') : (item.delivery_time || ''),
   };
   _cardSnapshot = cardEditing.value.value;
 }
@@ -672,10 +695,10 @@ function tryCloseCard() {
 
 async function saveCardEdit() {
   if (!cardEditing.value) return;
-  const { restaurant, day, value } = cardEditing.value;
+  const { restaurant, day, value, field } = cardEditing.value;
   cardEditing.value = null;
   try {
-    await store.saveScheduleCell(restaurant.id, day, value);
+    await store.saveScheduleCell(restaurant.id, day, value, field);
     store.invalidate();
     store.load(orderStore.settings.legalEntity);
   } catch (e) {
@@ -1061,11 +1084,22 @@ function formatLastUpdate(upd) {
   font-weight: 700; font-size: 11px;
   letter-spacing: 0.3px;
 }
+.ds-col-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .ds-col-count {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 16px; height: 15px; border-radius: 8px;
   background: var(--bk-orange); color: #fff;
   font-size: 9px; font-weight: 800; padding: 0 4px;
+}
+.ds-col-subcount {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  white-space: nowrap;
 }
 .ds-col-body {
   padding: 3px;
@@ -1081,6 +1115,7 @@ function formatLastUpdate(upd) {
   border-bottom: 1px solid var(--border-light, #f0ebe5);
   transition: background 0.1s;
   display: flex; align-items: center; gap: 4px;
+  min-width: 0;
 }
 .ds-col-item:last-child { border-bottom: none; }
 .ds-col-item:hover { background: #FFF8F0; }
@@ -1095,11 +1130,26 @@ function formatLastUpdate(upd) {
   padding-right: 4px;
   margin-right: 2px;
 }
+.ds-col-item-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
 .ds-col-item-addr {
   font-size: 10px; font-weight: 500; color: var(--text-secondary);
   line-height: 1.2;
   flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ds-col-item-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
 }
 .ds-col-item-time {
   display: inline-block;
@@ -1112,6 +1162,19 @@ function formatLastUpdate(upd) {
 }
 .ds-col-item-time-edit { cursor: pointer; }
 .ds-col-item-time-edit:hover { background: #81C784; }
+.ds-col-item-dough {
+  display: inline-block;
+  background: #FFE0B2;
+  color: #6b4f3a;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-weight: 700;
+  font-size: 9px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.ds-col-item-dough-edit { cursor: pointer; }
+.ds-col-item-dough-edit:hover { background: #FFD39B; }
 
 /* ═══ Modal ═══ */
 .ds-modal-body { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -1290,20 +1353,29 @@ function formatLastUpdate(upd) {
     padding: 5px 8px !important; font-size: 13px !important;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
+  .ds-col-header-meta { gap: 8px !important; }
   .ds-col-count {
     background: none !important; color: #fff !important;
     min-width: auto !important; height: auto !important; font-size: 14px !important;
     font-weight: 900 !important;
     border: none !important; border-radius: 0 !important;
   }
+  .ds-col-subcount {
+    font-size: 11px !important;
+    color: rgba(255,255,255,0.9) !important;
+  }
   .ds-col-body { padding: 2px 4px !important; gap: 0 !important; }
   .ds-col-item {
     padding: 3px 4px !important; border-color: #ddd !important;
     gap: 5px !important;
+    align-items: flex-start !important;
   }
   .ds-col-item-num {
     font-size: 15px !important; font-weight: 600 !important; color: #000 !important;
     font-family: 'Plus Jakarta Sans', sans-serif !important;
+  }
+  .ds-col-item-content {
+    gap: 3px !important;
   }
   .ds-col-item-addr {
     font-size: 13px !important; color: #333 !important; font-weight: 600 !important;
@@ -1311,6 +1383,13 @@ function formatLastUpdate(upd) {
   .ds-col-item-time {
     font-size: 13px !important; padding: 1px 5px !important;
     background: #A5D6A7 !important; color: #1B5E20 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .ds-col-item-dough {
+    font-size: 12px !important;
+    padding: 1px 5px !important;
+    background: #FFE0B2 !important;
+    color: #6b4f3a !important;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .ds-col-empty { padding: 8px 0 !important; font-size: 12px !important; }

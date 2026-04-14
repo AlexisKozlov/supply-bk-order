@@ -1,5 +1,5 @@
 <template>
-  <div class="ro-login-page">
+  <div class="ro-login-page" :class="loginBrand.themeClass">
     <!-- Декоративный фон -->
     <div class="ro-bg-circles">
       <div class="ro-circle ro-circle-1"></div>
@@ -18,12 +18,12 @@
             <circle cx="16" cy="32" r="10" fill="#FF8733"/>
             <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
             <circle cx="24" cy="24" r="8.5" fill="#502314"/>
-            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
+            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ loginBrand.logoLetter }}</text>
           </svg>
         </div>
         <div>
-          <div class="ro-brand-title">Supply Department</div>
-          <div class="ro-brand-subtitle">Система заказов ресторанов</div>
+          <div class="ro-brand-title">{{ loginBrand.title }}</div>
+          <div class="ro-brand-subtitle">{{ loginBrand.subtitle }}</div>
         </div>
       </div>
 
@@ -129,14 +129,14 @@
       </div>
 
       <div class="ro-login-footer">
-        Supply Department &middot; Личный кабинет ресторана
+        {{ loginBrand.footer }}
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { parseRestaurantInput } from '@/lib/legalEntities.js';
@@ -153,6 +153,35 @@ const showPassword = ref(false);
 const sessionConflict = ref(false);
 const sessionConflictAgo = ref('');
 const tgLoading = ref(false);
+
+const loginBrand = computed(() => {
+  const parsed = parseRestaurantInput(restaurantNumber.value);
+  if (parsed?.group === 'PS') {
+    return {
+      title: 'Pizza Star Supply Portal',
+      subtitle: 'Личный кабинет ресторана Pizza Star',
+      footer: 'Pizza Star Supply Portal · Личный кабинет ресторана',
+      logoLetter: 'P',
+      themeClass: 'ro-theme-ps',
+    };
+  }
+  if (parsed?.group === 'BK_VM') {
+    return {
+      title: 'Burger King Supply Portal',
+      subtitle: 'Личный кабинет ресторана Burger King',
+      footer: 'Burger King Supply Portal · Личный кабинет ресторана',
+      logoLetter: 'B',
+      themeClass: 'ro-theme-bk',
+    };
+  }
+  return {
+    title: 'Supply Portal',
+    subtitle: 'Личный кабинет ресторана',
+    footer: 'Supply Portal · Личный кабинет ресторана',
+    logoLetter: 'S',
+    themeClass: 'ro-theme-neutral',
+  };
+});
 
 function safeRedirect(target) {
   // Разрешаем только локальные пути под /restaurant/ — защита от open-redirect
@@ -283,6 +312,14 @@ async function forceLogin() {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   position: relative;
   overflow: hidden;
+}
+
+.ro-login-page.ro-theme-ps {
+  background: linear-gradient(135deg, #3b1f12 0%, #8a2d12 45%, #f16a21 100%);
+}
+
+.ro-login-page.ro-theme-neutral {
+  background: linear-gradient(135deg, #4b3a2f 0%, #7a5a45 45%, #c7773b 100%);
 }
 
 /* Декоративные круги */

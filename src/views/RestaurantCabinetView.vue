@@ -1,5 +1,5 @@
 <template>
-  <div class="cab">
+  <div class="cab" :class="cabBrand.themeClass">
     <!-- ══════ Sidebar ══════ -->
     <aside class="cab-sidebar">
       <div class="sb-brand">
@@ -8,12 +8,12 @@
             <circle cx="16" cy="16" r="10" fill="#D62300"/><circle cx="32" cy="16" r="10" fill="#F5A623"/>
             <circle cx="16" cy="32" r="10" fill="#FF8733"/><circle cx="32" cy="32" r="10" fill="#FFD54F"/>
             <circle cx="24" cy="24" r="8.5" fill="#502314"/>
-            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
+            <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ cabBrand.logoLetter }}</text>
           </svg>
         </div>
         <div>
-          <div class="sb-brand-text">Supply Portal</div>
-          <div class="sb-brand-sub">Burger King</div>
+          <div class="sb-brand-text">{{ cabBrand.title }}</div>
+          <div class="sb-brand-sub">{{ cabBrand.subtitle }}</div>
         </div>
       </div>
 
@@ -31,7 +31,7 @@
         <span v-if="deliveryBadge" class="sb-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
       </button>
       <!-- Планета Ресторанов -->
-      <button class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'planeta' }"
+      <button v-if="canUseVeg" class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'planeta' }"
         @click="switchTab('orders', 'planeta')">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></span>
         Планета Ресторанов
@@ -61,7 +61,7 @@
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
       </template>
-      <router-link :to="{ name: 'search-cards' }" target="_blank" class="sb-item sb-item-link">
+      <router-link v-if="canUseCardSearch" :to="{ name: 'search-cards' }" target="_blank" class="sb-item sb-item-link">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></span>
         Поиск карточек
         <span class="sb-item-ext" title="Откроется в новой вкладке">↗</span>
@@ -139,7 +139,7 @@
             <span class="dash-action-icon">&#128230;</span>
             <span>Заказы</span>
           </button>
-          <a class="dash-action" href="/search-cards" target="_blank">
+          <a v-if="canUseCardSearch" class="dash-action" href="/search-cards" target="_blank">
             <span class="dash-action-icon">&#128269;</span>
             <span>Карточки</span>
           </a>
@@ -343,7 +343,7 @@
       </div>
 
       <!-- ── Планета Ресторанов ── -->
-      <div v-if="orderSubTab === 'planeta'">
+      <div v-if="canUseVeg && orderSubTab === 'planeta'">
         <div v-if="vegLoading" class="mini-loader"><div class="cab-spin"></div></div>
         <div v-else-if="vegNoSession" class="cab-empty-card">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
@@ -830,6 +830,26 @@ const soStore = useSupplierOrderStore();
 
 const globalLoading = ref(true);
 const activeTab = ref('dashboard');
+const cabBrand = computed(() => {
+  const group = roStore.restaurant?.legal_entity_group;
+  if (group === 'PS') {
+    return {
+      title: 'Pizza Star Supply Portal',
+      subtitle: 'Pizza Star',
+      logoLetter: 'P',
+      themeClass: 'cab-theme-ps',
+    };
+  }
+  return {
+    title: 'Burger King Supply Portal',
+    subtitle: 'Burger King',
+    logoLetter: 'B',
+    themeClass: 'cab-theme-bk',
+  };
+});
+const isPizzaStarCabinet = computed(() => roStore.restaurant?.legal_entity_group === 'PS');
+const canUseVeg = computed(() => !isPizzaStarCabinet.value);
+const canUseCardSearch = computed(() => !isPizzaStarCabinet.value);
 
 // Адрес без дублирования города
 const restaurantAddress = computed(() => {
@@ -894,7 +914,7 @@ const dashOrdersSubmitted = computed(() => {
     total += (sup.available_dates || []).filter(d => !!d.order).length;
   }
   // Планета — считаем как 1 поданную, если ресторан отправил
-  if (vegInfo.value && vegSubmitted.value) total += 1;
+  if (canUseVeg.value && vegInfo.value && vegSubmitted.value) total += 1;
   return total;
 });
 const dashOrdersPending = computed(() => {
@@ -905,7 +925,7 @@ const dashOrdersPending = computed(() => {
     total += (sup.available_dates || []).filter(d => d.deadline_status === 'open' && !d.order).length;
   }
   // Планета: 1, если есть открытые дни и ничего не подано
-  if (vegInfo.value && !vegSubmitted.value) {
+  if (canUseVeg.value && vegInfo.value && !vegSubmitted.value) {
     const openVeg = vegDeliveries.value.filter(d => !d.expired).length;
     if (openVeg > 0) total += 1;
   }
@@ -925,7 +945,7 @@ const urgentItems = computed(() => {
     });
   }
   // Veg
-  if (vegInfo.value && !vegSubmitted.value) {
+  if (canUseVeg.value && vegInfo.value && !vegSubmitted.value) {
     const openVeg = vegDeliveries.value.filter(d => !d.expired).length;
     if (openVeg) {
       items.push({
@@ -1068,9 +1088,19 @@ const delFilteredItems = computed(() => {
 const delTotalItems = computed(() => delOrderItems.value.filter(i => i.quantity > 0).length);
 const delTotalQty = computed(() => delOrderItems.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
 const delHasMultErrors = computed(() => delOrderItems.value.some(i => i._multError && i.quantity > 0));
+function delSerializeState() {
+  return JSON.stringify({
+    items: delOrderItems.value.map(i => ({
+      s: i.sku,
+      q: i.quantity,
+      c: i.comment || '',
+    })),
+    comment: delOrderComment.value || '',
+  });
+}
 const delHasUnsavedChanges = computed(() => {
   if (!delSavedSnapshot.value) return false;
-  return JSON.stringify(delOrderItems.value.map(i => ({ s: i.sku, q: i.quantity }))) !== delSavedSnapshot.value;
+  return delSerializeState() !== delSavedSnapshot.value;
 });
 
 const deliveryBadge = computed(() => {
@@ -1130,7 +1160,7 @@ async function delSelectDay(date) {
     }
   }
 
-  delSavedSnapshot.value = JSON.stringify(delOrderItems.value.map(i => ({ s: i.sku, q: i.quantity })));
+  delSavedSnapshot.value = delSerializeState();
 }
 
 // ═══ Автосохранение черновика основной поставки ═══
@@ -1233,13 +1263,20 @@ async function delLoadFullTemplate() {
 async function delHandleSubmit() {
   delSubmitting.value = true; delSubmitError.value = '';
   try {
-    const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: i.quantity }));
+    const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({
+      sku: i.sku,
+      product_name: i.product_name,
+      category: i.category,
+      quantity: i.quantity,
+      comment: i.comment || '',
+    }));
     if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
     const result = await roStore.submitOrder(delSelectedDate.value, items, delOrderComment.value || null);
     if (result.success) {
       delClearDraft(delSelectedDate.value);
       delWasEdited.value = !!delExistingOrder.value;
       delExistingOrder.value = { id: result.order_id };
+      delSavedSnapshot.value = delSerializeState();
       roStore.loadMyInfo();
       delShowSuccess.value = true;
       delStartEditTimer();
@@ -1515,7 +1552,8 @@ async function switchTab(tab, subTab) {
   const curTab = activeTab.value;
   const curSub = orderSubTab.value;
   const nextTab = tab;
-  const nextSub = (tab === 'orders') ? (subTab || orderSubTab.value) : null;
+  const requestedSub = (tab === 'orders') ? (subTab || orderSubTab.value) : null;
+  const nextSub = (requestedSub === 'planeta' && !canUseVeg.value) ? 'delivery' : requestedSub;
 
   // Определяем, какую под-вкладку пользователь реально покидает
   const leavingDelivery = curTab === 'orders' && curSub === 'delivery' && !(nextTab === 'orders' && nextSub === 'delivery');
@@ -1535,9 +1573,13 @@ async function switchTab(tab, subTab) {
     if (!ok) return;
   }
   activeTab.value = tab;
-  if (subTab) orderSubTab.value = subTab;
   if (tab === 'orders') {
-    const sub = subTab || orderSubTab.value;
+    orderSubTab.value = nextSub || 'delivery';
+  } else if (subTab) {
+    orderSubTab.value = subTab;
+  }
+  if (tab === 'orders') {
+    const sub = nextSub || orderSubTab.value;
     if (sub === 'planeta' && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
     if (sub === 'history' && !historyOrders.value.length) loadHistory();
     if (sub && sub.startsWith('sup_')) {
@@ -1559,8 +1601,8 @@ function applyRouteToState() {
     orderSubTab.value = 'delivery';
   } else if (name === 'restaurant-orders-planeta') {
     activeTab.value = 'orders';
-    orderSubTab.value = 'planeta';
-    if (!vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
+    orderSubTab.value = canUseVeg.value ? 'planeta' : 'delivery';
+    if (canUseVeg.value && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
   } else if (name === 'restaurant-orders-history') {
     activeTab.value = 'orders';
     orderSubTab.value = 'history';
@@ -1589,7 +1631,7 @@ function syncStateToRoute() {
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery') target = { name: 'restaurant-orders-delivery' };
-    else if (sub === 'planeta') target = { name: 'restaurant-orders-planeta' };
+    else if (sub === 'planeta' && canUseVeg.value) target = { name: 'restaurant-orders-planeta' };
     else if (sub === 'history') target = { name: 'restaurant-orders-history' };
     else if (sub && sub.startsWith('sup_')) {
       target = { name: 'restaurant-orders-supplier', params: { supplierId: sub.slice(4) } };
@@ -1796,7 +1838,7 @@ onMounted(async () => {
     loadHistory();
     checkStockCollection();
     loadTgStatus();
-    vegLoadData();
+    if (canUseVeg.value) vegLoadData();
   } finally { globalLoading.value = false; }
 });
 
@@ -1807,6 +1849,7 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 /* ═══ Base ═══ */
 .cab { min-height: 100vh; background: #F5F0EB; font-family: 'Inter', system-ui, -apple-system, sans-serif; box-sizing: border-box; display: flex; }
 .cab *, .cab *::before, .cab *::after { box-sizing: border-box; }
+.cab.cab-theme-ps { background: #faf2eb; }
 
 /* ═══ Sidebar ═══ */
 .cab-sidebar {
@@ -1814,6 +1857,7 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
   display: flex; flex-direction: column; padding: 20px 10px;
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
 }
+.cab.cab-theme-ps .cab-sidebar { background: #6f2a14; }
 .sb-brand { display: flex; align-items: center; gap: 11px; padding: 6px 10px; margin-bottom: 24px; }
 .sb-logo { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; backdrop-filter: blur(4px); }
 .sb-brand-text { font-size: 14px; font-weight: 800; color: white; letter-spacing: -0.3px; }

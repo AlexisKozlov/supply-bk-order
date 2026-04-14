@@ -1,5 +1,5 @@
 <template>
-  <div class="sf-page">
+  <div class="sf-page" :class="stockBrand.themeClass">
     <!-- Header -->
     <div class="sf-brand">
       <svg class="sf-logo" width="36" height="36" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
@@ -8,9 +8,9 @@
         <circle cx="16" cy="32" r="10" fill="#FF8733"/>
         <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
         <circle cx="24" cy="24" r="8.5" fill="#502314"/>
-        <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
+        <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ stockBrand.logoLetter }}</text>
       </svg>
-      <div class="sf-brand-text">Портал закупок</div>
+      <div class="sf-brand-text">{{ stockBrand.title }}</div>
     </div>
 
     <!-- Main form -->
@@ -36,7 +36,7 @@
           <select v-model="selectedRestaurant" class="sf-select" :class="{ filled: selectedRestaurant }">
             <option value="">Нажмите для выбора</option>
             <option v-for="r in restaurants" :key="r.number" :value="r.number">
-              {{ r.number }} — {{ r.address || r.city || '' }}
+              {{ formatRestaurantNumber(r.number, r.legal_entity_group) }} — {{ r.address || r.city || '' }}
             </option>
           </select>
         </div>
@@ -102,7 +102,7 @@
           </svg>
         </div>
         <h2>Отправлено!</h2>
-        <div class="sf-success-rest">Ресторан {{ selectedRestaurant }}</div>
+        <div class="sf-success-rest">Ресторан {{ selectedRestaurantLabel }}</div>
         <div class="sf-success-details">
           <div v-for="prod in info.products" :key="prod.id" class="sf-success-item">
             <span>{{ prod.product_name }}</span>
@@ -120,7 +120,7 @@
         <div class="sf-header">
           <div class="sf-badge" style="background: #FF8733;">Редактирование</div>
           <h1>Изменить остатки</h1>
-          <p class="sf-entity">Ресторан {{ selectedRestaurant }}</p>
+          <p class="sf-entity">Ресторан {{ selectedRestaurantLabel }}</p>
         </div>
         <div class="sf-edit-timer">Осталось {{ editTimeFormatted }}</div>
         <div v-for="prod in info.products" :key="prod.id" class="sf-product">
@@ -168,7 +168,7 @@
     </div>
 
     <!-- Footer -->
-    <div class="sf-footer">Burger King Supply Portal</div>
+    <div class="sf-footer">{{ stockBrand.footer }}</div>
   </div>
 </template>
 
@@ -176,6 +176,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
+import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
 const route = useRoute();
 const token = route.params.token;
@@ -197,6 +198,42 @@ const submittedRestaurants = ref([]);
 const alreadySubmitted = computed(() =>
   selectedRestaurant.value && submittedRestaurants.value.includes(String(selectedRestaurant.value))
 );
+
+function resolveBrandByLegalEntity(legalEntity) {
+  const value = String(legalEntity || '').toLowerCase();
+  if (value.includes('пицца стар') || value.includes('додо')) {
+    return {
+      title: 'Pizza Star Supply Portal',
+      footer: 'Pizza Star Supply Portal',
+      logoLetter: 'P',
+      themeClass: 'sf-theme-ps',
+    };
+  }
+  if (value) {
+    return {
+      title: 'Burger King Supply Portal',
+      footer: 'Burger King Supply Portal',
+      logoLetter: 'B',
+      themeClass: 'sf-theme-bk',
+    };
+  }
+  return {
+    title: 'Supply Portal',
+    footer: 'Supply Portal',
+    logoLetter: 'S',
+    themeClass: 'sf-theme-neutral',
+  };
+}
+
+const stockBrand = computed(() => resolveBrandByLegalEntity(info.value?.legal_entity));
+const selectedRestaurantInfo = computed(() =>
+  restaurants.value.find(r => String(r.number) === String(selectedRestaurant.value)) || null
+);
+const selectedRestaurantLabel = computed(() => {
+  const current = selectedRestaurantInfo.value;
+  if (!current) return selectedRestaurant.value;
+  return formatRestaurantNumber(current.number, current.legal_entity_group);
+});
 
 // Edit timer (5 min)
 const editing = ref(false);
@@ -280,6 +317,8 @@ async function submitEdit() {
   padding: 0 16px 32px;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
+.sf-page.sf-theme-ps { background: linear-gradient(180deg, #5b2412 0%, #7f3517 45%, #b54d1f 100%); }
+.sf-page.sf-theme-neutral { background: linear-gradient(180deg, #4b3a2f 0%, #6f5645 45%, #8d6a55 100%); }
 
 /* Brand header */
 .sf-brand {

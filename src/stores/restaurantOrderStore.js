@@ -161,44 +161,47 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
-  async function adminCreateSession(weekStart, weekEnd) {
+  async function adminCreateSession(weekStart, weekEnd, legalEntity = null) {
     return await api('admin/session', {
       method: 'POST',
-      body: JSON.stringify({ action: 'create', week_start: weekStart, week_end: weekEnd }),
+      body: JSON.stringify({ action: 'create', week_start: weekStart, week_end: weekEnd, legal_entity: legalEntity }),
     });
   }
 
-  async function adminAutoSession() {
+  async function adminAutoSession(legalEntity = null) {
     return await api('admin/session', {
       method: 'POST',
-      body: JSON.stringify({ action: 'auto' }),
+      body: JSON.stringify({ action: 'auto', legal_entity: legalEntity }),
     });
   }
 
-  async function adminCloseSession(sessionId) {
+  async function adminCloseSession(sessionId, legalEntity = null) {
     return await api('admin/session', {
       method: 'POST',
-      body: JSON.stringify({ action: 'close', session_id: sessionId }),
+      body: JSON.stringify({ action: 'close', session_id: sessionId, legal_entity: legalEntity }),
     });
   }
 
-  async function adminToggleDate(sessionId, deliveryDate, isOpen) {
+  async function adminToggleDate(sessionId, deliveryDate, isOpen, legalEntity = null) {
     return await api('admin/toggle-date', {
       method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, is_open: isOpen }),
+      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, is_open: isOpen, legal_entity: legalEntity }),
     });
   }
 
-  async function adminGetOpenDates(sessionId) {
-    const params = sessionId ? `?session_id=${sessionId}` : '';
-    const data = await api(`admin/open-dates${params}`);
+  async function adminGetOpenDates(sessionId, legalEntity = null) {
+    const params = new URLSearchParams();
+    if (sessionId) params.set('session_id', sessionId);
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    const qs = params.toString() ? `?${params}` : '';
+    const data = await api(`admin/open-dates${qs}`);
     return data.dates || [];
   }
 
-  async function adminExtendDeadline(sessionId, deliveryDate, soft, hard) {
+  async function adminExtendDeadline(sessionId, deliveryDate, soft, hard, legalEntity = null) {
     return await api('admin/extend-deadline', {
       method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, soft_deadline: soft, hard_deadline: hard }),
+      body: JSON.stringify({ session_id: sessionId, delivery_date: deliveryDate, soft_deadline: soft, hard_deadline: hard, legal_entity: legalEntity }),
     });
   }
 
@@ -269,8 +272,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api(`admin/order/${orderId}`, { method: 'DELETE' });
   }
 
-  async function adminGetExportData(format, date) {
-    return await api(`admin/export/${format}?date=${date}`);
+  async function adminGetExportData(format, date, legalEntity = null) {
+    const params = new URLSearchParams({ date });
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    return await api(`admin/export/${format}?${params}`);
   }
 
   async function adminGetSessions() {

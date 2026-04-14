@@ -60,8 +60,78 @@ function roGetRestaurantSession($pdo) {
     return $user;
 }
 
-function roGetActiveSession($pdo) {
-    $s = $pdo->query("SELECT * FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1");
+function roGetActiveSession($pdo, $group = 'BK_VM') {
+    $group = $group ?: 'BK_VM';
+    if (!roSessionsSupportGroups($pdo)) {
+        if ($group !== 'BK_VM') return null;
+        $s = $pdo->query("
+            SELECT *,
+                   'BK_VM' AS effective_legal_entity_group
+            FROM ro_sessions
+            WHERE status = 'active'
+              AND week_end >= CURDATE()
+            ORDER BY week_start DESC
+            LIMIT 1
+        ");
+        $session = $s->fetch() ?: null;
+        if ($session) $session['legal_entity_group'] = 'BK_VM';
+        return $session;
+    }
+    if ($group === 'BK_VM') {
+        $s = $pdo->prepare("
+            SELECT *,
+                   CASE
+                       WHEN legal_entity_group IS NULL OR legal_entity_group = '' THEN 'BK_VM'
+                       ELSE legal_entity_group
+                   END AS effective_legal_entity_group
+            FROM ro_sessions
+            WHERE (legal_entity_group = ? OR legal_entity_group IS NULL OR legal_entity_group = '')
+              AND status = 'active'
+              AND week_end >= CURDATE()
+            ORDER BY week_start DESC
+            LIMIT 1
+        ");
+        $s->execute([$group]);
+    } else {
+        $s = $pdo->prepare("
+            SELECT *,
+                   legal_entity_group AS effective_legal_entity_group
+            FROM ro_sessions
+            WHERE legal_entity_group = ?
+              AND status = 'active'
+              AND week_end >= CURDATE()
+            ORDER BY week_start DESC
+            LIMIT 1
+        ");
+        $s->execute([$group]);
+    }
+    $session = $s->fetch() ?: null;
+    if ($session && empty($session['legal_entity_group']) && !empty($session['effective_legal_entity_group'])) {
+        $session['legal_entity_group'] = $session['effective_legal_entity_group'];
+    }
+    return $session;
+}
+
+function roSessionsSupportGroups($pdo) {
+    static $supported = null;
+    if ($supported !== null) return $supported;
+    try {
+        $s = $pdo->query("SHOW COLUMNS FROM ro_sessions LIKE 'legal_entity_group'");
+        $supported = (bool)$s->fetch();
+    } catch (Exception $e) {
+        $supported = false;
+    }
+    return $supported;
+}
+
+function roGetSessionById($pdo, $sessionId) {
+    if (!roSessionsSupportGroups($pdo)) {
+        $s = $pdo->prepare("SELECT *, 'BK_VM' AS legal_entity_group FROM ro_sessions WHERE id = ? LIMIT 1");
+        $s->execute([(int)$sessionId]);
+        return $s->fetch() ?: null;
+    }
+    $s = $pdo->prepare("SELECT * FROM ro_sessions WHERE id = ? LIMIT 1");
+    $s->execute([(int)$sessionId]);
     return $s->fetch() ?: null;
 }
 
@@ -160,6 +230,29 @@ function roGetLegalEntity($pdo, $restaurantNumber, $group = null) {
     return 'ООО "Бургер БК"';
 }
 
+function roGetTodayMinsk() {
+    $tz = new DateTimeZone('Europe/Minsk');
+    return (new DateTime('now', $tz))->format('Y-m-d');
+}
+
+function roRestaurantHasDeliveryDate($pdo, $restaurantNumber, $legalEntityGroup, $deliveryDate) {
+    if (!$deliveryDate) return false;
+    $dow = (int)(new DateTime($deliveryDate))->format('N');
+    $group = $legalEntityGroup ?: 'BK_VM';
+    $s = $pdo->prepare("
+        SELECT 1
+        FROM delivery_schedule ds
+        JOIN restaurants r ON r.id = ds.restaurant_id
+        WHERE r.number = ?
+          AND r.active = 1
+          AND r.legal_entity_group = ?
+          AND ds.day_of_week = ?
+        LIMIT 1
+    ");
+    $s->execute([(int)$restaurantNumber, $group, $dow]);
+    return (bool)$s->fetchColumn();
+}
+
 /**
  * Запись события в журнал изменений заказов ресторанов.
  * Вызывается из всех мест, где меняется состояние ro_orders/ro_order_items.
@@ -209,6 +302,90 @@ function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     if ($chatId) {
         sendTelegramMessage($botToken, $chatId, $message);
     }
+}
+
+function roAggregateOrderItems($items) {
+    $aggregated = [];
+    foreach ($items as $item) {
+        $qty = floatval($item['quantity'] ?? 0);
+        if ($qty <= 0) continue;
+        $sku = trim((string)($item['sku'] ?? ''));
+        if ($sku === '') continue;
+        if (!isset($aggregated[$sku])) {
+            $aggregated[$sku] = [
+                'sku' => $sku,
+                'product_name' => $item['product_name'] ?? '',
+                'category' => $item['category'] ?? 'Сухой',
+                'quantity' => 0,
+                'comment' => $item['comment'] ?? null,
+            ];
+        }
+        $aggregated[$sku]['quantity'] += $qty;
+        if (!empty($item['comment']) && empty($aggregated[$sku]['comment'])) {
+            $aggregated[$sku]['comment'] = $item['comment'];
+        }
+    }
+    return $aggregated;
+}
+
+function roGetSessionUserGroups($sessionUser) {
+    if (!$sessionUser) return [];
+    if (($sessionUser['role'] ?? '') === 'admin') return ['BK_VM', 'PS'];
+    $userEntities = $sessionUser['legal_entities'] ?? '';
+    if (is_string($userEntities)) {
+        $userEntities = json_decode($userEntities, true);
+    }
+    if (!is_array($userEntities) || empty($userEntities)) return [];
+    $groups = [];
+    foreach ($userEntities as $entity) {
+        $group = getEntityGroup($entity);
+        if ($group && !in_array($group, $groups, true)) $groups[] = $group;
+    }
+    return $groups;
+}
+
+function roGetAllowedLegalEntities($sessionUser) {
+    $entities = [];
+    foreach (roGetSessionUserGroups($sessionUser) as $group) {
+        foreach (getEntitiesInGroup($group) as $entity) {
+            if (!in_array($entity, $entities, true)) $entities[] = $entity;
+        }
+    }
+    return $entities;
+}
+
+function roEnsureGroupAccess($sessionUser, $group) {
+    if (!$sessionUser) return;
+    if (($sessionUser['role'] ?? '') === 'admin') return;
+    $allowed = roGetSessionUserGroups($sessionUser);
+    if (!$group || !in_array($group, $allowed, true)) {
+        roRespond(['error' => 'Нет доступа к данным этого юрлица'], 403);
+    }
+}
+
+function roEnsureRestaurantAccess($pdo, $sessionUser, $restaurantNumber) {
+    if (!$sessionUser) return;
+    if (($sessionUser['role'] ?? '') === 'admin') return;
+    $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+    $s->execute([(int)$restaurantNumber]);
+    $group = $s->fetchColumn();
+    if (!$group) {
+        roRespond(['error' => 'Ресторан не найден'], 404);
+    }
+    roEnsureGroupAccess($sessionUser, $group);
+}
+
+function roApplyAllowedGroupsSql($sessionUser, &$where, &$params, $expr) {
+    if (!$sessionUser) return;
+    if (($sessionUser['role'] ?? '') === 'admin') return;
+    $groups = roGetSessionUserGroups($sessionUser);
+    if (empty($groups)) {
+        $where[] = '1=0';
+        return;
+    }
+    $ph = implode(',', array_fill(0, count($groups), '?'));
+    $where[] = "{$expr} IN ({$ph})";
+    foreach ($groups as $group) $params[] = $group;
 }
 
 // ═══ Публичные маршруты (ресторанная авторизация) ═══
@@ -436,7 +613,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
         'collection' => [
             'id' => (int)$collection['id'],
             'name' => $collection['name'],
-            'submitted' => (int)$collection['submitted_count'] > 0,
+            'submitted' => ((int)$collection['total_products'] > 0) && ((int)$collection['submitted_count'] >= (int)$collection['total_products']),
             'submitted_count' => (int)$collection['submitted_count'],
             'total_products' => (int)$collection['total_products'],
             'token' => $tok['token'] ?? null,
@@ -579,7 +756,8 @@ if ($roAction === 'my-info' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
 
-    $session = roGetActiveSession($pdo);
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $session = roGetActiveSession($pdo, $group);
     if (!$session) {
         roRespond(['session' => null, 'delivery_days' => []]);
     }
@@ -590,9 +768,10 @@ if ($roAction === 'my-info' && $method === 'GET') {
         FROM delivery_schedule ds
         JOIN restaurants r ON r.id = ds.restaurant_id
         WHERE r.number = ? AND r.active = 1
+          AND r.legal_entity_group = ?
         ORDER BY ds.day_of_week
     ");
-    $ds->execute([$rest['restaurant_number']]);
+    $ds->execute([$rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM']);
     $schedule = $ds->fetchAll();
 
     // Формируем дни доставки в рамках сессии (может быть несколько недель)
@@ -621,7 +800,7 @@ if ($roAction === 'my-info' && $method === 'GET') {
             $order = $os->fetch();
 
             $dateOpen = roIsDateOpen($pdo, $session['id'], $dateStr);
-            $today = date('Y-m-d');
+            $today = roGetTodayMinsk();
 
             // Показываем дату если: приём открыт ИЛИ уже есть заказ ИЛИ дата сегодня/в будущем
             // (даже если приём закрыт — ресторан должен видеть свой график)
@@ -723,7 +902,7 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
 
     $date = $roParam;
-    $session = roGetActiveSession($pdo);
+    $session = roGetActiveSession($pdo, $rest['legal_entity_group'] ?? 'BK_VM');
     if (!$session) roRespond(['order' => null]);
 
     $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at, updated_by, comment FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
@@ -859,14 +1038,21 @@ if ($roAction === 'submit-order' && $method === 'POST') {
     if (!$deliveryDate) roRespond(['error' => 'Не указана дата доставки'], 400);
     if (empty($items)) roRespond(['error' => 'Заказ пуст'], 400);
 
-    $session = roGetActiveSession($pdo);
+    $session = roGetActiveSession($pdo, $rest['legal_entity_group'] ?? 'BK_VM');
     if (!$session) roRespond(['error' => 'Нет активной сессии приёма заявок'], 400);
+
+    if (!roRestaurantHasDeliveryDate($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM', $deliveryDate)) {
+        roRespond(['error' => 'На эту дату у ресторана не запланирована поставка'], 400);
+    }
 
     // Проверяем дедлайн
     $dlStatus = roGetDeadlineStatus($pdo, $session['id'], $deliveryDate);
     if ($dlStatus['status'] === 'closed' || $dlStatus['status'] === 'not_open') {
         roRespond(['error' => 'Приём заявок на эту дату закрыт'], 403);
     }
+
+    $aggregated = roAggregateOrderItems($items);
+    if (empty($aggregated)) roRespond(['error' => 'Заказ пуст'], 400);
 
     // Проверяем: есть ли уже заказ?
     $existingOrder = $pdo->prepare("SELECT id, status, submitted_at FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
@@ -906,29 +1092,6 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             $orderId = $pdo->lastInsertId();
         }
 
-        // Агрегируем позиции по SKU — если один товар пришёл несколькими строками,
-        // складываем количество и объединяем комментарии в одну запись.
-        $aggregated = [];
-        foreach ($items as $item) {
-            $qty = floatval($item['quantity'] ?? 0);
-            if ($qty <= 0) continue;
-            $sku = $item['sku'] ?? '';
-            if ($sku === '') continue;
-            if (!isset($aggregated[$sku])) {
-                $aggregated[$sku] = [
-                    'sku' => $sku,
-                    'product_name' => $item['product_name'] ?? '',
-                    'category' => $item['category'] ?? 'Сухой',
-                    'quantity' => 0,
-                    'comment' => $item['comment'] ?? null,
-                ];
-            }
-            $aggregated[$sku]['quantity'] += $qty;
-            if (!empty($item['comment']) && empty($aggregated[$sku]['comment'])) {
-                $aggregated[$sku]['comment'] = $item['comment'];
-            }
-        }
-
         // Вставляем позиции (UNIQUE KEY на order_id+sku гарантирует отсутствие дублей)
         $insertItem = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
         $totalQty = 0;
@@ -954,10 +1117,8 @@ if ($roAction === 'submit-order' && $method === 'POST') {
 
     // ═══ Журнал: создание/обновление заявки рестораном ═══
     $newItemsAudit = [];
-    foreach ($items as $it) {
-        $q = floatval($it['quantity'] ?? 0);
-        if ($q <= 0) continue;
-        $newItemsAudit[$it['sku'] ?? ''] = ['name' => $it['product_name'] ?? '', 'qty' => $q];
+    foreach ($aggregated as $sku => $it) {
+        $newItemsAudit[$sku] = ['name' => $it['product_name'] ?? '', 'qty' => floatval($it['quantity'] ?? 0)];
     }
     $actorNameRo = "Ресторан {$rest['restaurant_number']}";
     if (!$existing) {
@@ -1033,7 +1194,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
 
         // Группируем позиции по категориям
         $byCat = [];
-        foreach ($items as $it) {
+        foreach ($aggregated as $it) {
             $q = floatval($it['quantity'] ?? 0);
             if ($q <= 0) continue;
             $cat = $it['category'] ?? 'Сухой';
@@ -1156,9 +1317,16 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'status' && $method === 'GET') {
         $date = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
         $legalEntity = $_GET['legal_entity'] ?? null;
-        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
+        if ($entityGroup) {
+            roEnsureGroupAccess($sessionUser, $entityGroup);
+        } else {
+            $allowedGroups = roGetSessionUserGroups($sessionUser);
+            $entityGroup = $allowedGroups[0] ?? 'BK_VM';
+            roEnsureGroupAccess($sessionUser, $entityGroup);
+        }
 
-        $session = roGetActiveSession($pdo);
+        $session = roGetActiveSession($pdo, $entityGroup);
         if (!$session) roRespond(['session' => null, 'orders' => []]);
 
         $deadlineStatus = roGetDeadlineStatus($pdo, $session['id'], $date);
@@ -1246,6 +1414,7 @@ if (strpos($roAction, 'admin') === 0) {
                 'id' => (int)$session['id'],
                 'week_start' => $session['week_start'],
                 'week_end' => $session['week_end'],
+                'legal_entity_group' => $session['legal_entity_group'] ?? $entityGroup,
             ],
             'date' => $date,
             'deadline_status' => $deadlineStatus,
@@ -1260,7 +1429,7 @@ if (strpos($roAction, 'admin') === 0) {
 
     // --- Детали заказа ---
     if ($adminAction === 'order' && $method === 'GET' && $adminParam) {
-        $s = $pdo->prepare("SELECT o.*, r.city, r.address, r.region FROM ro_orders o LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END) WHERE o.id = ?");
+        $s = $pdo->prepare("SELECT o.*, r.city, r.address, r.region FROM ro_orders o LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) WHERE o.id = ?");
         $s->execute([$adminParam]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
@@ -1356,10 +1525,8 @@ if (strpos($roAction, 'admin') === 0) {
         $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
         if ($items !== null) {
             $newItemsAudit = [];
-            foreach ($items as $it) {
-                $q = floatval($it['quantity'] ?? 0);
-                if ($q <= 0) continue;
-                $newItemsAudit[$it['sku'] ?? ''] = ['name' => $it['product_name'] ?? '', 'qty' => $q];
+            foreach (roAggregateOrderItems($items) as $sku => $it) {
+                $newItemsAudit[$sku] = ['name' => $it['product_name'] ?? '', 'qty' => floatval($it['quantity'] ?? 0)];
             }
             // Добавленные
             foreach ($newItemsAudit as $sku => $ni) {
@@ -1453,10 +1620,8 @@ if (strpos($roAction, 'admin') === 0) {
             // Формируем список изменений
             if ($items !== null) {
                 $newItems = [];
-                foreach ($items as $item) {
-                    $qty = floatval($item['quantity'] ?? 0);
-                    if ($qty <= 0) continue;
-                    $newItems[$item['sku'] ?? ''] = ['name' => $item['product_name'] ?? '', 'qty' => $qty];
+                foreach (roAggregateOrderItems($items) as $sku => $item) {
+                    $newItems[$sku] = ['name' => $item['product_name'] ?? '', 'qty' => floatval($item['quantity'] ?? 0)];
                 }
 
                 $changes = [];
@@ -1561,7 +1726,7 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'item' && $method === 'DELETE' && $adminParam) {
         $itemId = (int)$adminParam;
         // Проверяем существование (сначала по id)
-        $check = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id
+        $check = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id, o.legal_entity
             FROM ro_order_items oi JOIN ro_orders o ON o.id = oi.order_id WHERE oi.id = ?");
         $check->execute([$itemId]);
         $item = $check->fetch();
@@ -1572,7 +1737,7 @@ if (strpos($roAction, 'admin') === 0) {
             $fbOrderId = $_GET['order_id'] ?? null;
             $fbSku = $_GET['sku'] ?? null;
             if ($fbOrderId && $fbSku) {
-                $fb = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id
+                $fb = $pdo->prepare("SELECT oi.id, oi.sku, oi.product_name, oi.quantity, o.restaurant_number, o.delivery_date, o.id as order_id, o.legal_entity
                     FROM ro_order_items oi JOIN ro_orders o ON o.id = oi.order_id
                     WHERE oi.order_id = ? AND oi.sku = ?");
                 $fb->execute([$fbOrderId, $fbSku]);
@@ -1581,6 +1746,9 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         if (!$item) roRespond(['error' => 'Позиция не найдена'], 404);
+        if ($sessionUser && !checkLegalEntityAccess($sessionUser, $item['legal_entity'] ?? '')) {
+            roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        }
 
         $pdo->prepare("DELETE FROM ro_order_items WHERE id = ?")->execute([$item['id']]);
 
@@ -1622,17 +1790,37 @@ if (strpos($roAction, 'admin') === 0) {
     // --- Управление сессией ---
     if ($adminAction === 'session' && $method === 'POST') {
         $action = $body['action'] ?? 'create';
+        $entityGroup = $body['legal_entity_group'] ?? null;
+        if (!$entityGroup) {
+            $legalEntity = $body['legal_entity'] ?? null;
+            $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
+        }
+        if (!$entityGroup) {
+            $allowedGroups = roGetSessionUserGroups($sessionUser);
+            $entityGroup = $allowedGroups[0] ?? 'BK_VM';
+        }
+        roEnsureGroupAccess($sessionUser, $entityGroup);
 
         if ($action === 'create') {
             $weekStart = $body['week_start'] ?? date('Y-m-d', strtotime('monday this week'));
             $weekEnd = $body['week_end'] ?? date('Y-m-d', strtotime('saturday this week'));
             $createdBy = $sessionUser ? $sessionUser['name'] : 'system';
 
-            // Закрываем старые сессии
-            $pdo->exec("UPDATE ro_sessions SET status = 'closed' WHERE status = 'active'");
+            if (roSessionsSupportGroups($pdo)) {
+                // Закрываем старые сессии только этой группы
+                $pdo->prepare("UPDATE ro_sessions SET status = 'closed' WHERE status = 'active' AND legal_entity_group = ?")
+                    ->execute([$entityGroup]);
 
-            $pdo->prepare("INSERT INTO ro_sessions (week_start, week_end, created_by) VALUES (?, ?, ?)")
-                ->execute([$weekStart, $weekEnd, $createdBy]);
+                $pdo->prepare("INSERT INTO ro_sessions (week_start, week_end, legal_entity_group, created_by) VALUES (?, ?, ?, ?)")
+                    ->execute([$weekStart, $weekEnd, $entityGroup, $createdBy]);
+            } else {
+                if ($entityGroup !== 'BK_VM') {
+                    roRespond(['error' => 'Для Пицца Стар нужно сначала применить миграцию базы'], 400);
+                }
+                $pdo->exec("UPDATE ro_sessions SET status = 'closed' WHERE status = 'active'");
+                $pdo->prepare("INSERT INTO ro_sessions (week_start, week_end, created_by) VALUES (?, ?, ?)")
+                    ->execute([$weekStart, $weekEnd, $createdBy]);
+            }
 
             roRespond(['success' => true, 'session_id' => (int)$pdo->lastInsertId()]);
         }
@@ -1640,6 +1828,9 @@ if (strpos($roAction, 'admin') === 0) {
         if ($action === 'close') {
             $sessionId = $body['session_id'] ?? null;
             if ($sessionId) {
+                $session = roGetSessionById($pdo, $sessionId);
+                if (!$session) roRespond(['error' => 'Сессия не найдена'], 404);
+                roEnsureGroupAccess($sessionUser, $session['legal_entity_group'] ?? 'BK_VM');
                 $pdo->prepare("UPDATE ro_sessions SET status = 'closed' WHERE id = ?")->execute([$sessionId]);
             }
             roRespond(['success' => true]);
@@ -1647,14 +1838,22 @@ if (strpos($roAction, 'admin') === 0) {
 
         if ($action === 'auto') {
             // Автосоздание: если нет активной — создаём на текущую неделю
-            $existing = roGetActiveSession($pdo);
+            $existing = roGetActiveSession($pdo, $entityGroup);
             if ($existing) {
                 roRespond(['success' => true, 'session' => $existing, 'created' => false]);
             }
             $weekStart = date('Y-m-d', strtotime('monday this week'));
             $weekEnd = date('Y-m-d', strtotime('saturday this week'));
-            $pdo->prepare("INSERT INTO ro_sessions (week_start, week_end, created_by) VALUES (?, ?, 'auto')")
-                ->execute([$weekStart, $weekEnd]);
+            if (roSessionsSupportGroups($pdo)) {
+                $pdo->prepare("INSERT INTO ro_sessions (week_start, week_end, legal_entity_group, created_by) VALUES (?, ?, ?, 'auto')")
+                    ->execute([$weekStart, $weekEnd, $entityGroup]);
+            } else {
+                if ($entityGroup !== 'BK_VM') {
+                    roRespond(['error' => 'Для Пицца Стар нужно сначала применить миграцию базы'], 400);
+                }
+                $pdo->prepare("INSERT INTO ro_sessions (week_start, week_end, created_by) VALUES (?, ?, 'auto')")
+                    ->execute([$weekStart, $weekEnd]);
+            }
             $newSession = $pdo->prepare("SELECT * FROM ro_sessions WHERE id = ?");
             $newSession->execute([$pdo->lastInsertId()]);
             roRespond(['success' => true, 'session' => $newSession->fetch(), 'created' => true]);
@@ -1671,19 +1870,17 @@ if (strpos($roAction, 'admin') === 0) {
         $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
 
         if (!$sessionId || !$date) roRespond(['error' => 'Не указана сессия или дата'], 400);
+        $session = roGetSessionById($pdo, $sessionId);
+        if (!$session) roRespond(['error' => 'Сессия не найдена'], 404);
+        roEnsureGroupAccess($sessionUser, $session['legal_entity_group'] ?? 'BK_VM');
 
         // Если открываем дату за пределами сессии — расширяем сессию
         if ($isOpen) {
-            $sess = $pdo->prepare("SELECT week_start, week_end FROM ro_sessions WHERE id = ?");
-            $sess->execute([$sessionId]);
-            $sessData = $sess->fetch();
-            if ($sessData) {
-                if ($date < $sessData['week_start']) {
-                    $pdo->prepare("UPDATE ro_sessions SET week_start = ? WHERE id = ?")->execute([$date, $sessionId]);
-                }
-                if ($date > $sessData['week_end']) {
-                    $pdo->prepare("UPDATE ro_sessions SET week_end = ? WHERE id = ?")->execute([$date, $sessionId]);
-                }
+            if ($date < $session['week_start']) {
+                $pdo->prepare("UPDATE ro_sessions SET week_start = ? WHERE id = ?")->execute([$date, $sessionId]);
+            }
+            if ($date > $session['week_end']) {
+                $pdo->prepare("UPDATE ro_sessions SET week_end = ? WHERE id = ?")->execute([$date, $sessionId]);
             }
         }
 
@@ -1699,10 +1896,20 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'open-dates' && $method === 'GET') {
         $sessionId = $_GET['session_id'] ?? null;
         if (!$sessionId) {
-            $session = roGetActiveSession($pdo);
+            $legalEntity = $_GET['legal_entity'] ?? null;
+            $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
+            if (!$entityGroup) {
+                $allowedGroups = roGetSessionUserGroups($sessionUser);
+                $entityGroup = $allowedGroups[0] ?? 'BK_VM';
+            }
+            roEnsureGroupAccess($sessionUser, $entityGroup);
+            $session = roGetActiveSession($pdo, $entityGroup);
             $sessionId = $session ? $session['id'] : null;
         }
         if (!$sessionId) roRespond(['dates' => []]);
+        $session = roGetSessionById($pdo, $sessionId);
+        if (!$session) roRespond(['dates' => []]);
+        roEnsureGroupAccess($sessionUser, $session['legal_entity_group'] ?? 'BK_VM');
 
         $s = $pdo->prepare("SELECT delivery_date, is_open, soft_deadline, hard_deadline FROM ro_deadline_overrides WHERE session_id = ? ORDER BY delivery_date");
         $s->execute([$sessionId]);
@@ -1718,6 +1925,9 @@ if (strpos($roAction, 'admin') === 0) {
         $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
 
         if (!$sessionId || !$date) roRespond(['error' => 'Не указана сессия или дата'], 400);
+        $session = roGetSessionById($pdo, $sessionId);
+        if (!$session) roRespond(['error' => 'Сессия не найдена'], 404);
+        roEnsureGroupAccess($sessionUser, $session['legal_entity_group'] ?? 'BK_VM');
 
         $pdo->prepare("INSERT INTO ro_deadline_overrides (session_id, delivery_date, is_open, soft_deadline, hard_deadline, created_by) VALUES (?, ?, 1, ?, ?, ?) ON DUPLICATE KEY UPDATE soft_deadline = VALUES(soft_deadline), hard_deadline = VALUES(hard_deadline), created_by = VALUES(created_by)")
             ->execute([$sessionId, $date, $softDeadline, $hardDeadline, $createdBy]);
@@ -1729,6 +1939,7 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'templates' && $method === 'GET') {
         $le = $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
         $category = $_GET['category'] ?? null;
+        roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
         $q = "SELECT t.*, COALESCE(p.multiplicity, 1) as multiplicity
             FROM ro_templates t
@@ -1749,6 +1960,7 @@ if (strpos($roAction, 'admin') === 0) {
             $items = $body['items'] ?? [];
             $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
             $category = $body['category'] ?? '';
+            roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
             if (!$category) roRespond(['error' => 'Не указана категория'], 400);
 
@@ -1775,6 +1987,7 @@ if (strpos($roAction, 'admin') === 0) {
             // а категория товара совпадает с выбранной.
             $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
             $category = $body['category'] ?? '';
+            roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
             // Последняя дата остатков для юрлица
             $dateStmt = $pdo->prepare("SELECT MAX(balance_date) FROM ro_stock_balances WHERE legal_entity = ?");
@@ -1816,7 +2029,10 @@ if (strpos($roAction, 'admin') === 0) {
         // В выборку включаем legal_entity_group ресторана — нужно, чтобы
         // подставить правильное юрлицо (особенно для Пицца Стар, где у ресторана
         // может совпадать номер с БК).
-        $s = $pdo->query("
+        $usersWhere = ["r.active = 1"];
+        $usersParams = [];
+        roApplyAllowedGroupsSql($sessionUser, $usersWhere, $usersParams, "r.legal_entity_group");
+        $s = $pdo->prepare("
             SELECT
                 r.number AS restaurant_number,
                 r.legal_entity_group,
@@ -1831,9 +2047,10 @@ if (strpos($roAction, 'admin') === 0) {
                 CASE WHEN ru.password_hash IS NULL OR ru.password_hash = '' THEN 0 ELSE 1 END AS has_password
             FROM restaurants r
             LEFT JOIN ro_users ru ON ru.restaurant_number = r.number
-            WHERE r.active = 1
+            WHERE " . implode(' AND ', $usersWhere) . "
             ORDER BY r.legal_entity_group, r.number
         ");
+        $s->execute($usersParams);
         $rows = $s->fetchAll();
         // Подставим юрлицо для тех, у кого ещё нет учётки
         foreach ($rows as &$row) {
@@ -1854,6 +2071,7 @@ if (strpos($roAction, 'admin') === 0) {
             $restNum = (int)($body['restaurant_number'] ?? 0);
             $password = $body['password'] ?? '';
             if (!$restNum || !$password) roRespond(['error' => 'Не указан номер или пароль'], 400);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum);
 
             $le = roGetLegalEntity($pdo, $restNum);
             $hash = password_hash($password, PASSWORD_BCRYPT);
@@ -1877,7 +2095,12 @@ if (strpos($roAction, 'admin') === 0) {
             $changed = 0;
             $insert = $pdo->prepare("INSERT INTO ro_users (restaurant_number, password_hash, legal_entity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), legal_entity = VALUES(legal_entity), is_active = 1");
             $check = $pdo->prepare("SELECT password_hash FROM ro_users WHERE restaurant_number = ?");
+            $allowedGroups = roGetSessionUserGroups($sessionUser);
             foreach ($rests->fetchAll() as $r) {
+                if ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+                    $restLe = roGetLegalEntity($pdo, $r['number']);
+                    if (!in_array(getEntityGroup($restLe), $allowedGroups, true)) continue;
+                }
                 if ($mode === 'missing') {
                     $check->execute([$r['number']]);
                     $existing = $check->fetchColumn();
@@ -1893,6 +2116,7 @@ if (strpos($roAction, 'admin') === 0) {
         if ($action === 'toggle') {
             $restNum = (int)($body['restaurant_number'] ?? 0);
             $active = (int)($body['is_active'] ?? 1);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum);
             $pdo->prepare("UPDATE ro_users SET is_active = ? WHERE restaurant_number = ?")->execute([$active, $restNum]);
             roRespond(['success' => true]);
         }
@@ -1901,6 +2125,7 @@ if (strpos($roAction, 'admin') === 0) {
             $restNum = (int)($body['restaurant_number'] ?? 0);
             $password = $body['password'] ?? '';
             if (!$restNum || !$password) roRespond(['error' => 'Не указан номер или пароль'], 400);
+            roEnsureRestaurantAccess($pdo, $sessionUser, $restNum);
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ?")->execute([$hash, $restNum]);
             roRespond(['success' => true]);
@@ -1919,6 +2144,7 @@ if (strpos($roAction, 'admin') === 0) {
 
         $where = ["o.delivery_date BETWEEN ? AND ?", "o.status != 'draft'"];
         $params = [$dateFrom, $dateTo];
+        roApplyAllowedGroupsSql($sessionUser, $where, $params, "(CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)");
 
         if ($status) {
             $where[] = "o.status = ?";
@@ -1961,10 +2187,28 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         // Список ресторанов для фильтра
-        $restList = $pdo->query("SELECT DISTINCT o.restaurant_number FROM ro_orders o WHERE o.status != 'draft' ORDER BY o.restaurant_number")->fetchAll(PDO::FETCH_COLUMN);
+        $restWhere = ["o.status != 'draft'"];
+        $restParams = [];
+        roApplyAllowedGroupsSql($sessionUser, $restWhere, $restParams, "(CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)");
+        $restSql = "SELECT DISTINCT o.restaurant_number FROM ro_orders o WHERE " . implode(' AND ', $restWhere) . " ORDER BY o.restaurant_number";
+        $restStmt = $pdo->prepare($restSql);
+        $restStmt->execute($restParams);
+        $restList = $restStmt->fetchAll(PDO::FETCH_COLUMN);
 
         // Список сессий
-        $sessions = $pdo->query("SELECT id, week_start, week_end, status FROM ro_sessions ORDER BY id DESC LIMIT 20")->fetchAll();
+        if (roSessionsSupportGroups($pdo)) {
+            $sessionsWhere = [];
+            $sessionsParams = [];
+            roApplyAllowedGroupsSql($sessionUser, $sessionsWhere, $sessionsParams, 'legal_entity_group');
+            $sessionsSql = "SELECT id, week_start, week_end, status, legal_entity_group FROM ro_sessions";
+            if (!empty($sessionsWhere)) $sessionsSql .= " WHERE " . implode(' AND ', $sessionsWhere);
+            $sessionsSql .= " ORDER BY id DESC LIMIT 20";
+            $sessStmt = $pdo->prepare($sessionsSql);
+            $sessStmt->execute($sessionsParams);
+            $sessions = $sessStmt->fetchAll();
+        } else {
+            $sessions = $pdo->query("SELECT id, week_start, week_end, status, 'BK_VM' AS legal_entity_group FROM ro_sessions ORDER BY id DESC LIMIT 20")->fetchAll();
+        }
 
         roRespond([
             'date_from' => $dateFrom,
@@ -1980,12 +2224,21 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'export' && $method === 'GET') {
         $format = $adminParam ?? 'summary'; // summary, per-restaurant, all
         $date = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
-        $session = roGetActiveSession($pdo);
+        $legalEntity = $_GET['legal_entity'] ?? null;
+        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
+        if ($entityGroup) {
+            roEnsureGroupAccess($sessionUser, $entityGroup);
+        } else {
+            $allowedGroups = roGetSessionUserGroups($sessionUser);
+            $entityGroup = $allowedGroups[0] ?? 'BK_VM';
+            roEnsureGroupAccess($sessionUser, $entityGroup);
+        }
+        $session = roGetActiveSession($pdo, $entityGroup);
         if (!$session) roRespond(['error' => 'Нет активной сессии'], 400);
 
         // Получаем все заказы на дату
         $dow = (int)(new DateTime($date))->format('N');
-        $orders = $pdo->prepare("
+        $ordersSql = "
             SELECT o.id, o.restaurant_number, o.status, o.submitted_at, o.legal_entity,
                    r.region, r.city, r.address,
                    ds.delivery_time
@@ -1993,9 +2246,18 @@ if (strpos($roAction, 'admin') === 0) {
             LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
             LEFT JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ?
             WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
-            ORDER BY o.restaurant_number
-        ");
-        $orders->execute([$dow, $session['id'], $date]);
+        ";
+        $ordersParams = [$dow, $session['id'], $date];
+        if ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+            $allowedGroups = roGetSessionUserGroups($sessionUser);
+            if (empty($allowedGroups)) roRespond(['error' => 'Нет доступа к данным этого юрлица'], 403);
+            $ph = implode(',', array_fill(0, count($allowedGroups), '?'));
+            $ordersSql .= " AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) IN ({$ph})";
+            $ordersParams = array_merge($ordersParams, $allowedGroups);
+        }
+        $ordersSql .= " ORDER BY o.restaurant_number";
+        $orders = $pdo->prepare($ordersSql);
+        $orders->execute($ordersParams);
         $ordersList = $orders->fetchAll();
 
         // Все позиции
@@ -2025,6 +2287,7 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'products' && $method === 'GET') {
         $search = $_GET['search'] ?? '';
         $le = $_GET['legal_entity'] ?? '';
+        if ($le) roEnsureGroupAccess($sessionUser, getEntityGroup($le));
         if (!$search || strlen($search) < 2 || !$le) roRespond(['products' => []]);
         $like = "%{$search}%";
         $s = $pdo->prepare("SELECT sku, name, category, qty_per_box, multiplicity FROM products WHERE legal_entity = ? AND is_active = 1 AND (name LIKE ? OR sku LIKE ?) ORDER BY name LIMIT 50");
@@ -2034,8 +2297,18 @@ if (strpos($roAction, 'admin') === 0) {
 
     // --- Список всех сессий ---
     if ($adminAction === 'sessions' && $method === 'GET') {
-        $s = $pdo->query("SELECT * FROM ro_sessions ORDER BY week_start DESC LIMIT 20");
-        roRespond(['sessions' => $s->fetchAll()]);
+        if (roSessionsSupportGroups($pdo)) {
+            $where = [];
+            $params = [];
+            roApplyAllowedGroupsSql($sessionUser, $where, $params, 'legal_entity_group');
+            $sql = "SELECT * FROM ro_sessions";
+            if (!empty($where)) $sql .= " WHERE " . implode(' AND ', $where);
+            $sql .= " ORDER BY week_start DESC LIMIT 20";
+            $s = $pdo->prepare($sql);
+            $s->execute($params);
+            roRespond(['sessions' => $s->fetchAll()]);
+        }
+        roRespond(['sessions' => $pdo->query("SELECT *, 'BK_VM' AS legal_entity_group FROM ro_sessions ORDER BY week_start DESC LIMIT 20")->fetchAll()]);
     }
 
     // ═══ Журнал изменений (общий + по заказу) ═══
@@ -2052,6 +2325,9 @@ if (strpos($roAction, 'admin') === 0) {
         $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
         $limit = min((int)($_GET['limit'] ?? 200), 1000);
         $offset = max((int)($_GET['offset'] ?? 0), 0);
+        if ($entityGroup) {
+            roEnsureGroupAccess($sessionUser, $entityGroup);
+        }
 
         $where = ['1=1'];
         $params = [];
@@ -2072,6 +2348,20 @@ if (strpos($roAction, 'admin') === 0) {
             $where[] = "((o.legal_entity IS NOT NULL AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?) OR (al.order_id IS NULL AND r.legal_entity_group = ?))";
             $params[] = $entityGroup;
             $params[] = $entityGroup;
+        } elseif ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+            $allowedGroups = roGetSessionUserGroups($sessionUser);
+            if (empty($allowedGroups)) {
+                $where[] = '1=0';
+            } else {
+                $ph = implode(',', array_fill(0, count($allowedGroups), '?'));
+                $where[] = "(
+                    (o.legal_entity IS NOT NULL AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) IN ({$ph}))
+                    OR
+                    (al.order_id IS NULL AND r.legal_entity_group IN ({$ph}))
+                )";
+                foreach ($allowedGroups as $group) $params[] = $group;
+                foreach ($allowedGroups as $group) $params[] = $group;
+            }
         }
 
         $sql = "SELECT al.id, al.order_id, al.restaurant_number, al.delivery_date, al.action, al.actor_name, al.actor_type,
@@ -2103,9 +2393,19 @@ if (strpos($roAction, 'admin') === 0) {
         $orderId = (int)$adminParam;
         // Пытаемся взять restaurant_number + delivery_date этого заказа
         // (если он ещё существует), чтобы подтянуть события с null-order_id от удаления
-        $meta = $pdo->prepare("SELECT restaurant_number, delivery_date FROM ro_orders WHERE id = ?");
+        $meta = $pdo->prepare("SELECT restaurant_number, delivery_date, legal_entity FROM ro_orders WHERE id = ?");
         $meta->execute([$orderId]);
         $m = $meta->fetch();
+        if ($m && $sessionUser && !checkLegalEntityAccess($sessionUser, $m['legal_entity'] ?? '')) {
+            roRespond(['error' => 'Нет доступа к этому заказу'], 403);
+        } elseif (!$m && $sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+            $auditMeta = $pdo->prepare("SELECT restaurant_number FROM ro_audit_log WHERE order_id = ? ORDER BY id DESC LIMIT 1");
+            $auditMeta->execute([$orderId]);
+            $auditRestaurant = $auditMeta->fetchColumn();
+            if ($auditRestaurant) {
+                roEnsureRestaurantAccess($pdo, $sessionUser, $auditRestaurant);
+            }
+        }
 
         $sql = "SELECT id, order_id, restaurant_number, delivery_date, action, actor_name, actor_type,
                        sku, product_name, old_value, new_value, details, created_at
@@ -2130,6 +2430,11 @@ if (strpos($roAction, 'admin') === 0) {
         if (empty($_FILES['file'])) roRespond(['error' => 'Файл не загружен'], 400);
         $balanceDate = $_POST['balance_date'] ?? '';
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $balanceDate)) roRespond(['error' => 'Неверный формат даты'], 400);
+        $allowedEntities = roGetAllowedLegalEntities($sessionUser);
+        $isFullAdmin = !$sessionUser || (($sessionUser['role'] ?? '') === 'admin');
+        if (!$isFullAdmin && empty($allowedEntities)) {
+            roRespond(['error' => 'Нет доступа к загрузке остатков'], 403);
+        }
 
         require_once __DIR__ . '/../lib/SimpleXLSX.php';
         $filePath = $_FILES['file']['tmp_name'];
@@ -2200,8 +2505,13 @@ if (strpos($roAction, 'admin') === 0) {
                     $legalEntity = 'ООО "Воглия Матта"';
                 } elseif (mb_strpos($ownerStr, 'бургер') !== false) {
                     $legalEntity = 'ООО "Бургер БК"';
+                } elseif (mb_strpos($ownerStr, 'пицца стар') !== false || mb_strpos($ownerStr, 'додо') !== false) {
+                    $legalEntity = 'ООО "Пицца Стар"';
                 } else {
                     continue; // пропускаем ДоДо, Сбарро и т.д.
+                }
+                if (!$isFullAdmin && !in_array($legalEntity, $allowedEntities, true)) {
+                    continue;
                 }
 
                 // Парсим: "внешний_код - SKU Название"
@@ -2242,7 +2552,13 @@ if (strpos($roAction, 'admin') === 0) {
 
         // Вставляем в БД
         if (!empty($rows)) {
-            $pdo->prepare("DELETE FROM ro_stock_balances WHERE balance_date = ?")->execute([$balanceDate]);
+            if ($isFullAdmin) {
+                $pdo->prepare("DELETE FROM ro_stock_balances WHERE balance_date = ?")->execute([$balanceDate]);
+            } else {
+                $ph = implode(',', array_fill(0, count($allowedEntities), '?'));
+                $deleteParams = array_merge([$balanceDate], $allowedEntities);
+                $pdo->prepare("DELETE FROM ro_stock_balances WHERE balance_date = ? AND legal_entity IN ({$ph})")->execute($deleteParams);
+            }
             $stmt = $pdo->prepare("INSERT INTO ro_stock_balances (sku, product_name, quantity, warehouse, legal_entity, balance_date) VALUES (?, ?, ?, ?, ?, ?)");
             foreach ($rows as $row) {
                 $stmt->execute(array_values($row));
@@ -2268,14 +2584,32 @@ if (strpos($roAction, 'admin') === 0) {
         $deliveryDate = $_GET['delivery_date'] ?? '';
         $legalEntity = $_GET['legal_entity'] ?? '';
         if (!$balanceDate || !$deliveryDate) roRespond(['error' => 'Не указаны даты'], 400);
+        if ($legalEntity) {
+            roEnsureGroupAccess($sessionUser, getEntityGroup($legalEntity));
+        }
 
         // Остатки на дату (с фильтром по юрлицу если указано)
         if ($legalEntity) {
             $s = $pdo->prepare("SELECT sku, product_name, quantity, warehouse, legal_entity FROM ro_stock_balances WHERE balance_date = ? AND legal_entity = ? ORDER BY warehouse, product_name");
             $s->execute([$balanceDate, $legalEntity]);
         } else {
-            $s = $pdo->prepare("SELECT sku, product_name, quantity, warehouse, legal_entity FROM ro_stock_balances WHERE balance_date = ? ORDER BY legal_entity, warehouse, product_name");
-            $s->execute([$balanceDate]);
+            $balanceWhere = ['balance_date = ?'];
+            $balanceParams = [$balanceDate];
+            if ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+                $allowedEntities = roGetAllowedLegalEntities($sessionUser);
+                if (empty($allowedEntities)) {
+                    roRespond(['items' => [], 'balance_date' => $balanceDate, 'delivery_date' => $deliveryDate]);
+                }
+                $ph = implode(',', array_fill(0, count($allowedEntities), '?'));
+                $balanceWhere[] = "legal_entity IN ({$ph})";
+                foreach ($allowedEntities as $entity) $balanceParams[] = $entity;
+            }
+            $sql = "SELECT sku, product_name, quantity, warehouse, legal_entity
+                    FROM ro_stock_balances
+                    WHERE " . implode(' AND ', $balanceWhere) . "
+                    ORDER BY legal_entity, warehouse, product_name";
+            $s = $pdo->prepare($sql);
+            $s->execute($balanceParams);
         }
         $balances = $s->fetchAll();
 
@@ -2298,19 +2632,35 @@ if (strpos($roAction, 'admin') === 0) {
             }
         }
 
-        // Суммарные заказы от даты остатков+1 до выбранной даты, с разбивкой по юрлицу
-        // Ресторан 3 = Воглия Матта, остальные = Бургер БК
+        // Суммарные заказы от даты остатков+1 до выбранной даты, с разбивкой по реальному юрлицу заказа.
+        $ordersWhere = [
+            'o.delivery_date > ?',
+            'o.delivery_date <= ?',
+            "o.status IN ('submitted','edited','locked')",
+        ];
+        $ordersParams = [$balanceDate, $deliveryDate];
+        if ($legalEntity) {
+            $ordersWhere[] = 'o.legal_entity = ?';
+            $ordersParams[] = $legalEntity;
+        } elseif ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+            $allowedEntities = roGetAllowedLegalEntities($sessionUser);
+            if (empty($allowedEntities)) {
+                roRespond(['items' => [], 'balance_date' => $balanceDate, 'delivery_date' => $deliveryDate]);
+            }
+            $ph = implode(',', array_fill(0, count($allowedEntities), '?'));
+            $ordersWhere[] = "o.legal_entity IN ({$ph})";
+            foreach ($allowedEntities as $entity) $ordersParams[] = $entity;
+        }
         $s2 = $pdo->prepare("
             SELECT oi.sku,
-                   CASE WHEN o.restaurant_number = 3 THEN 'ООО \"Воглия Матта\"' ELSE 'ООО \"Бургер БК\"' END as real_legal_entity,
+                   o.legal_entity AS real_legal_entity,
                    SUM(oi.quantity) as total_ordered
             FROM ro_order_items oi
             JOIN ro_orders o ON o.id = oi.order_id
-            WHERE o.delivery_date > ? AND o.delivery_date <= ?
-              AND o.status IN ('submitted','edited','locked')
+            WHERE " . implode(' AND ', $ordersWhere) . "
             GROUP BY oi.sku, real_legal_entity
         ");
-        $s2->execute([$balanceDate, $deliveryDate]);
+        $s2->execute($ordersParams);
         $orders = [];
         foreach ($s2->fetchAll() as $row) {
             $orders[$row['sku'] . '|' . $row['real_legal_entity']] = (float)$row['total_ordered'];
