@@ -834,14 +834,14 @@ const cabBrand = computed(() => {
   const group = roStore.restaurant?.legal_entity_group;
   if (group === 'PS') {
     return {
-      title: 'Pizza Star Supply Portal',
+      title: 'Supply Portal',
       subtitle: 'Pizza Star',
       logoLetter: 'P',
       themeClass: 'cab-theme-ps',
     };
   }
   return {
-    title: 'Burger King Supply Portal',
+    title: 'Supply Portal',
     subtitle: 'Burger King',
     logoLetter: 'B',
     themeClass: 'cab-theme-bk',
@@ -1878,6 +1878,20 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 </script>
 
 <style scoped>
+@font-face {
+  font-family: 'Flame';
+  src: url('/Flame-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Flame';
+  src: url('/Flame-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-display: swap;
+}
+
 /* ═══ Base ═══ */
 .cab { min-height: 100vh; background: #F5F0EB; font-family: 'Inter', system-ui, -apple-system, sans-serif; box-sizing: border-box; display: flex; }
 .cab *, .cab *::before, .cab *::after { box-sizing: border-box; }
@@ -1892,8 +1906,8 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .cab.cab-theme-ps .cab-sidebar { background: #6f2a14; }
 .sb-brand { display: flex; align-items: center; gap: 11px; padding: 6px 10px; margin-bottom: 24px; }
 .sb-logo { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; backdrop-filter: blur(4px); }
-.sb-brand-text { font-size: 14px; font-weight: 800; color: white; letter-spacing: -0.3px; }
-.sb-brand-sub { font-size: 9px; color: rgba(255,255,255,0.3); font-weight: 500; margin-top: 1px; letter-spacing: 0.5px; text-transform: uppercase; }
+.sb-brand-text { font-size: 14px; font-weight: 400; color: white; letter-spacing: 0.2px; font-family: 'Flame', 'Inter', sans-serif; line-height: 1.05; }
+.sb-brand-sub { font-size: 9px; color: rgba(255,255,255,0.42); font-weight: 600; margin-top: 3px; letter-spacing: 1.1px; text-transform: uppercase; }
 .sb-label { font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 1.5px; padding: 0 12px; margin: 18px 0 6px; }
 .sb-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 11px; border: none; background: transparent; color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.18s; width: 100%; text-align: left; }
 .sb-item:hover { background: rgba(255,255,255,0.12); color: white; }

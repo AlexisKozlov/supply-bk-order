@@ -126,7 +126,7 @@
               <col style="width:32%">
               <col style="width:110px">
               <col style="width:240px">
-              <col style="width:80px">
+              <col style="width:110px">
               <col style="width:200px">
               <col style="width:46px">
             </colgroup>
@@ -167,7 +167,7 @@
                   <span v-else class="rom-dim">—</span>
                 </td>
                 <td class="rom-td-time">
-                  {{ r.submitted_at ? formatTime(r.submitted_at) : '—' }}
+                  {{ r.submitted_at ? formatDateTime(r.submitted_at) : '—' }}
                 </td>
                 <td class="rom-td-edited" :title="r.updated_by ? formatDateTime(r.updated_at) + ' (' + r.updated_by + ')' : ''">
                   <template v-if="r.updated_by">

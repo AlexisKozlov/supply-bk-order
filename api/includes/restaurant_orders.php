@@ -1190,7 +1190,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             // Удаляем старые позиции
             $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?")->execute([$orderId]);
             // Обновляем статус и комментарий
-            $pdo->prepare("UPDATE ro_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), updated_by = ?, comment = ? WHERE id = ?")
+            $pdo->prepare("UPDATE ro_orders SET status = 'submitted', updated_at = NOW(), updated_by = ?, comment = ? WHERE id = ?")
                 ->execute(["Ресторан {$rest['restaurant_number']}", $comment, $orderId]);
         } else {
             // Создаём новый заказ
