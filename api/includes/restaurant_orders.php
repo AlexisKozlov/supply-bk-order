@@ -20,7 +20,7 @@
  *   PATCH  ro/admin/order/:id      — редактировать заказ
  *   POST   ro/admin/session        — создать/управлять сессией
  *   POST   ro/admin/extend-deadline — продлить дедлайн
- *   GET    ro/admin/export/:format — Excel-экспорт
+ *   GET    ro/admin/export/:format — выгрузка заказов (Excel / JSON)
  *   GET    ro/admin/templates      — шаблоны
  *   POST   ro/admin/templates      — сохранить шаблон
  *   POST   ro/admin/users          — управление учётками ресторанов
@@ -137,6 +137,27 @@ function roGetActiveSession($pdo, $group = 'BK_VM') {
         $session['legal_entity_group'] = $session['effective_legal_entity_group'];
     }
     return $session;
+}
+
+function roFormatCttRestaurantLabel($restaurantNumber, $city, $address) {
+    $number = (int)$restaurantNumber;
+    $city = trim((string)$city);
+    $address = trim((string)$address);
+    if ($address === '') return (string)$number;
+    if ($city !== '' && mb_strtolower($city) !== 'минск' && mb_stripos($address, $city) === false) {
+        return $number . ' — г. ' . $city . ', ' . $address;
+    }
+    return $number . ' — ' . $address;
+}
+
+function roFormatCttWeight($weightBruttoGrams) {
+    $kg = ((float)$weightBruttoGrams) / 1000;
+    $formatted = rtrim(rtrim(number_format($kg, 6, '.', ''), '0'), '.');
+    return $formatted !== '' ? $formatted : '0';
+}
+
+function roGetCttPrefixByGroup($group) {
+    return strtoupper((string)$group) === 'PS' ? 'DODO' : 'BK';
 }
 
 function roSessionsSupportGroups($pdo) {
@@ -1040,16 +1061,20 @@ if ($roAction === 'my-orders' && $method === 'GET') {
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
 
     $limit = min((int)($_GET['limit'] ?? 20), 50);
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $where = ["o.restaurant_number = ?"];
+    $params = [$rest['restaurant_number']];
+    applyEntityTextFilter($group, $where, $params, 'o.legal_entity');
     $s = $pdo->prepare("
         SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.updated_at,
                (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
                (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
         FROM ro_orders o
-        WHERE o.restaurant_number = ?
+        WHERE " . implode(' AND ', $where) . "
         ORDER BY o.delivery_date DESC
         LIMIT {$limit}
     ");
-    $s->execute([$rest['restaurant_number']]);
+    $s->execute($params);
     roRespond(['orders' => $s->fetchAll()]);
 }
 
@@ -1058,6 +1083,9 @@ if ($roAction === 'all-history' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
     $rn = $rest['restaurant_number'];
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $entities = getEntitiesInGroup($group);
+    $entityPh = implode(',', array_fill(0, count($entities), '?'));
     $limit = min((int)($_GET['limit'] ?? 30), 100);
     $allOrders = [];
 
@@ -1070,10 +1098,10 @@ if ($roAction === 'all-history' && $method === 'GET') {
                   FROM ro_order_items oi
                   LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit'
                   WHERE oi.order_id = o.id) as total_deposit
-        FROM ro_orders o WHERE o.restaurant_number = ?
+        FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
         ORDER BY o.delivery_date DESC LIMIT {$limit}
     ");
-    $s1->execute([$rn]);
+    $s1->execute(array_merge([$rn], $entities));
     foreach ($s1->fetchAll() as $r) {
         $r['source'] = 'delivery';
         $r['source_name'] = 'Основная поставка';
@@ -1088,10 +1116,10 @@ if ($roAction === 'all-history' && $method === 'GET') {
                (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
         FROM so_orders o
         LEFT JOIN suppliers s ON s.id = o.supplier_id
-        WHERE o.restaurant_number = ?
+        WHERE o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
         ORDER BY o.delivery_date DESC LIMIT {$limit}
     ");
-    $s2->execute([$rn]);
+    $s2->execute(array_merge([$rn], $entities));
     foreach ($s2->fetchAll() as $r) {
         $r['source'] = 'supplier';
         $r['source_name'] = $r['supplier_name'] ?: 'Поставщик';
@@ -1108,10 +1136,11 @@ if ($roAction === 'all-history' && $method === 'GET') {
         FROM veg_orders vo
         JOIN veg_sessions vs ON vs.id = vo.session_id
         WHERE vo.restaurant_number = ? AND vo.quantity > 0
+          AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
         GROUP BY vo.session_id, vo.delivery_date
         ORDER BY vo.delivery_date DESC LIMIT {$limit}
     ");
-    $s3->execute([$rn]);
+    $s3->execute([$rn, $group]);
     foreach ($s3->fetchAll() as $r) {
         $allOrders[] = [
             'id' => 'veg_' . $r['session_id'] . '_' . $r['delivery_date'],
@@ -2321,9 +2350,9 @@ if (strpos($roAction, 'admin') === 0) {
         ]);
     }
 
-    // --- Excel-экспорт ---
+    // --- Выгрузка заказов ---
     if ($adminAction === 'export' && $method === 'GET') {
-        $format = $adminParam ?? 'summary'; // summary, per-restaurant, all
+        $format = $adminParam ?? 'summary'; // summary, per-restaurant, all, ctt-json
         $date = $_GET['date'] ?? date('Y-m-d', strtotime('+1 day'));
         $legalEntity = $_GET['legal_entity'] ?? null;
         $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
@@ -2367,13 +2396,63 @@ if (strpos($roAction, 'admin') === 0) {
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
             $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
-                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
+                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price,
+                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' ORDER BY pp.updated_at DESC LIMIT 1) AS purchase_price
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
                 LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
-                WHERE oi.order_id IN ({$ph}) ORDER BY oi.category, oi.product_name");
+                WHERE oi.order_id IN ({$ph}) AND oi.quantity > 0 ORDER BY oi.category, oi.product_name");
             $items->execute($orderIds);
             $allItems = $items->fetchAll();
+        }
+
+        if ($format === 'ctt-json') {
+            $cttPrefix = roGetCttPrefixByGroup($entityGroup);
+            $ordersById = [];
+            foreach ($ordersList as $order) {
+                $ordersById[(int)$order['id']] = $order;
+            }
+
+            $cttItems = [];
+            $skippedMissingGtin = 0;
+            $missingPurchasePrice = 0;
+            foreach ($allItems as $item) {
+                $gtin = trim((string)($item['gtin'] ?? ''));
+                if ($gtin === '') {
+                    $skippedMissingGtin++;
+                    continue;
+                }
+                $order = $ordersById[(int)$item['order_id']] ?? null;
+                if (!$order) continue;
+                $restaurantNumber = (int)$order['restaurant_number'];
+                $price = round((float)($item['purchase_price'] ?? 0), 2);
+                if ($price <= 0) {
+                    $missingPurchasePrice++;
+                }
+                $cttItems[] = [
+                    'o' => $cttPrefix . '-' . $restaurantNumber,
+                    'r' => roFormatCttRestaurantLabel($restaurantNumber, $order['city'] ?? '', $order['address'] ?? ''),
+                    's' => trim((string)($item['category'] ?? '')),
+                    'g' => $gtin,
+                    'n' => trim((string)($item['product_name'] ?? '')),
+                    'q' => (string)(0 + (float)($item['quantity'] ?? 0)),
+                    'w' => roFormatCttWeight($item['weight_brutto'] ?? 0),
+                    'p' => $price,
+                ];
+            }
+
+            usort($cttItems, static function ($a, $b) {
+                return [$a['o'], $a['s'], $a['n']] <=> [$b['o'], $b['s'], $b['n']];
+            });
+
+            roRespond([
+                'date' => $date,
+                'format' => $format,
+                'filename' => 'data-' . strtolower($cttPrefix) . '-' . $date . '.json',
+                'items' => $cttItems,
+                'skipped_missing_gtin' => $skippedMissingGtin,
+                'missing_purchase_price' => $missingPurchasePrice,
+            ]);
         }
 
         roRespond([

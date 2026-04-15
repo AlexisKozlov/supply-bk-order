@@ -99,9 +99,16 @@
     <div v-if="globalLoading" class="cab-loader">
       <div class="cab-spin"></div>
     </div>
+    <section v-else-if="globalError" class="cab-section">
+      <div class="cab-empty-card">
+        <h2>Не удалось открыть кабинет</h2>
+        <p>{{ globalError }}</p>
+        <button class="btn btn-primary" @click="retryCabinetLoad">Повторить</button>
+      </div>
+    </section>
 
     <!-- ══════ TAB: Дашборд ══════ -->
-    <section v-if="activeTab === 'dashboard' && !globalLoading" class="cab-section">
+    <section v-if="activeTab === 'dashboard' && !globalLoading && !globalError" class="cab-section">
       <!-- Срочные карточки -->
       <div v-if="urgentItems.length" class="dash-urgent">
         <div v-for="item in urgentItems" :key="item.key" class="dash-card" :class="'dash-card--' + item.type" @click="item.action">
@@ -171,7 +178,7 @@
     </section>
 
     <!-- ══════ TAB: Заказы ══════ -->
-    <section v-if="activeTab === 'orders' && !globalLoading" class="cab-section cab-section-orders">
+    <section v-if="activeTab === 'orders' && !globalLoading && !globalError" class="cab-section cab-section-orders">
       <!-- ── Основная поставка ── -->
       <div v-if="orderSubTab === 'delivery'">
         <div v-if="!roStore.sessionInfo" class="cab-empty-card">
@@ -572,6 +579,7 @@
       <!-- История в заказах -->
       <div v-if="orderSubTab === 'history'" class="history-list">
         <div v-if="historyLoading" class="mini-loader"><div class="cab-spin"></div></div>
+        <div v-else-if="historyError" class="cab-empty-card"><p>{{ historyError }}</p></div>
         <div v-else-if="!historyOrders.length" class="cab-empty-card"><h2>Нет заказов</h2></div>
         <div v-else>
           <div v-for="order in historyOrders" :key="order.id" class="history-card">
@@ -591,7 +599,7 @@
     </section>
 
     <!-- ══════ TAB: Сбор остатков ══════ -->
-    <section v-if="activeTab === 'stock' && !globalLoading" class="cab-section">
+    <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section">
       <div v-if="stockLoading" class="cab-empty-card">
         <p>Загрузка…</p>
       </div>
@@ -646,7 +654,7 @@
     </section>
 
     <!-- ══════ TAB: Профиль ══════ -->
-    <section v-if="activeTab === 'profile' && !globalLoading" class="cab-section">
+    <section v-if="activeTab === 'profile' && !globalLoading && !globalError" class="cab-section">
       <div class="profile-card">
         <div class="profile-header">
           <div class="profile-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
@@ -670,6 +678,7 @@
         </div>
         <div v-else class="profile-tg-unlinked">
           <p>Подключите Telegram для уведомлений о дедлайнах и быстрого входа.</p>
+          <div v-if="tgError" class="error-msg">{{ tgError }}</div>
           <div v-if="tgLinkCode" class="tg-code-box">
             <p>Отправьте этот код боту <a href="https://t.me/supplyportal_bot" target="_blank">@supplyportal_bot</a>:</p>
             <div class="tg-code">{{ tgLinkCode }}</div>
@@ -829,6 +838,7 @@ const roStore = useRestaurantOrderStore();
 const soStore = useSupplierOrderStore();
 
 const globalLoading = ref(true);
+const globalError = ref('');
 const activeTab = ref('dashboard');
 const cabBrand = computed(() => {
   const group = roStore.restaurant?.legal_entity_group;
@@ -892,6 +902,7 @@ const stockSavedSnapshot = reactive({}); // последние сохранён�
 const tgStatus = reactive({ linked: false, chat_id: null });
 const tgLinkCode = ref('');
 const tgLinkLoading = ref(false);
+const tgError = ref('');
 
 // ═══ Password ═══
 const pwOld = ref('');
@@ -904,6 +915,7 @@ const pwLoading = ref(false);
 // ═══ History ═══
 const historyLoading = ref(false);
 const historyOrders = ref([]);
+const historyError = ref('');
 
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
@@ -1011,6 +1023,7 @@ const delOrderComment = ref('');
 const delWasEdited = ref(false);
 const delEditTimeLeft = ref('');
 let delEditTimerInterval = null;
+let delSelectRequestId = 0;
 const delShowAddModal = ref(false);
 const delLoadingTemplate = ref(false);
 const infoModal = reactive({ show: false, title: '', message: '', type: 'info' });
@@ -1053,6 +1066,7 @@ const delAddLoading = ref(false);
 const delAddSearchInput = ref(null);
 let delAddTimer = null;
 const delSavedSnapshot = ref('');
+const supLoadRequestId = reactive({});
 
 const delCurrentDay = computed(() => roStore.deliveryDays.find(d => d.date === delSelectedDate.value));
 // Дни: новая дата (поздняя) слева, старые (ранние) справа
@@ -1098,6 +1112,16 @@ function delSerializeState() {
     comment: delOrderComment.value || '',
   });
 }
+function delSerializeSnapshot(items, comment) {
+  return JSON.stringify({
+    items: items.map(i => ({
+      s: i.sku,
+      q: i.quantity,
+      c: i.comment || '',
+    })),
+    comment: comment || '',
+  });
+}
 const delHasUnsavedChanges = computed(() => {
   if (!delSavedSnapshot.value) return false;
   return delSerializeState() !== delSavedSnapshot.value;
@@ -1128,6 +1152,7 @@ function delCheckMultiplicity(item) {
 function delRefreshMultiplicityErrors() { for (const item of delOrderItems.value) delCheckMultiplicity(item); }
 
 async function delSelectDay(date) {
+  const requestId = ++delSelectRequestId;
   delSelectedDate.value = date;
   delExistingOrder.value = null;
   delSubmitError.value = '';
@@ -1135,49 +1160,82 @@ async function delSelectDay(date) {
   delActiveCategory.value = 'Сухой';
   delOrderComment.value = '';
   delDraftRestoreNotice.value = '';
-  const order = await roStore.loadMyOrder(date);
-  if (order) {
-    delExistingOrder.value = order;
-    delOrderComment.value = order.comment || '';
-    delOrderItems.value = order.items.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: parseFloat(i.quantity) || 0, comment: i.comment || '', multiplicity: parseFloat(i.multiplicity) || 1, _added: false, _multError: false }));
-  } else { delOrderItems.value = []; }
-  for (const cat of delCategories) { if (!delOrderItems.value.some(i => i.category === cat)) await delLoadCategoryProducts(cat); }
-  delRefreshMultiplicityErrors();
-  delOrderItems.value.sort((a, b) => { if (a.category !== b.category) return delCategories.indexOf(a.category) - delCategories.indexOf(b.category); return (a.quantity > 0 ? 0 : 1) - (b.quantity > 0 ? 0 : 1); });
+  try {
+    const order = await roStore.loadMyOrder(date);
+    if (requestId !== delSelectRequestId || delSelectedDate.value !== date) return;
 
-  // Восстановление черновика, если он есть и заказ ещё можно редактировать
-  const draft = delLoadDraft(date);
-  if (draft && (delCanSubmit.value || delCanEdit.value)) {
-    let restored = 0;
-    for (const dItem of (draft.items || [])) {
-      const existing = delOrderItems.value.find(i => i.sku === dItem.sku);
-      if (existing) {
-        if (dItem.quantity !== existing.quantity || (dItem.comment || '') !== (existing.comment || '')) {
-          existing.quantity = dItem.quantity;
-          existing.comment = dItem.comment || '';
-          if (dItem.multiplicity) existing.multiplicity = parseFloat(dItem.multiplicity) || existing.multiplicity || 1;
-          delCheckMultiplicity(existing);
+    const nextExistingOrder = order || null;
+    let nextOrderComment = order?.comment || '';
+    const nextItems = order
+      ? order.items.map(i => ({ sku: i.sku, product_name: i.product_name, category: i.category, quantity: parseFloat(i.quantity) || 0, comment: i.comment || '', multiplicity: parseFloat(i.multiplicity) || 1, _added: false, _multError: false }))
+      : [];
+
+    for (const cat of delCategories) {
+      if (nextItems.some(i => i.category === cat)) continue;
+      const products = await roStore.loadProducts(cat);
+      if (requestId !== delSelectRequestId || delSelectedDate.value !== date) return;
+      const existing = new Set(nextItems.filter(i => i.category === cat).map(i => i.sku));
+      nextItems.push(...products
+        .filter(p => !existing.has(p.sku))
+        .map(p => ({ sku: p.sku, product_name: p.name || p.product_name, category: p.category || cat, quantity: 0, comment: '', multiplicity: parseInt(p.multiplicity) || 1, _added: false, _multError: false })));
+    }
+
+    for (const item of nextItems) delCheckMultiplicity(item);
+    nextItems.sort((a, b) => {
+      if (a.category !== b.category) return delCategories.indexOf(a.category) - delCategories.indexOf(b.category);
+      return (a.quantity > 0 ? 0 : 1) - (b.quantity > 0 ? 0 : 1);
+    });
+
+    const draft = delLoadDraft(date);
+    const dayInfo = roStore.deliveryDays.find(d => d.date === date);
+    const canSubmit = ['open', 'warning'].includes(dayInfo?.deadline_status);
+    const canEdit = !!(dayInfo?.can_edit && nextExistingOrder);
+    let restoreNotice = '';
+    if (draft && (canSubmit || canEdit)) {
+      let restored = 0;
+      for (const dItem of (draft.items || [])) {
+        const existing = nextItems.find(i => i.sku === dItem.sku);
+        if (existing) {
+          if (dItem.quantity !== existing.quantity || (dItem.comment || '') !== (existing.comment || '')) {
+            existing.quantity = dItem.quantity;
+            existing.comment = dItem.comment || '';
+            if (dItem.multiplicity) existing.multiplicity = parseFloat(dItem.multiplicity) || existing.multiplicity || 1;
+            delCheckMultiplicity(existing);
+            restored++;
+          }
+        } else if (dItem.quantity > 0) {
+          const newItem = { sku: dItem.sku, product_name: dItem.product_name, category: dItem.category || 'Сухой', quantity: dItem.quantity, comment: dItem.comment || '', multiplicity: parseFloat(dItem.multiplicity) || 1, _added: true, _multError: false };
+          delCheckMultiplicity(newItem);
+          nextItems.push(newItem);
           restored++;
         }
-      } else if (dItem.quantity > 0) {
-        const newItem = { sku: dItem.sku, product_name: dItem.product_name, category: dItem.category || 'Сухой', quantity: dItem.quantity, comment: dItem.comment || '', multiplicity: parseFloat(dItem.multiplicity) || 1, _added: true, _multError: false };
-        delCheckMultiplicity(newItem);
-        delOrderItems.value.push(newItem);
+      }
+      if (draft.comment && draft.comment !== nextOrderComment) {
+        nextOrderComment = draft.comment;
         restored++;
       }
+      if (restored > 0) {
+        const ts = draft.savedAt ? new Date(draft.savedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+        restoreNotice = `Восстановлен черновик от ${ts}`;
+      }
     }
-    if (draft.comment && draft.comment !== delOrderComment.value) {
-      delOrderComment.value = draft.comment;
-      restored++;
-    }
-    if (restored > 0) {
-      const ts = draft.savedAt ? new Date(draft.savedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-      delDraftRestoreNotice.value = `Восстановлен черновик от ${ts}`;
-      setTimeout(() => { delDraftRestoreNotice.value = ''; }, 8000);
-    }
-  }
 
-  delSavedSnapshot.value = delSerializeState();
+    if (requestId !== delSelectRequestId || delSelectedDate.value !== date) return;
+    delExistingOrder.value = nextExistingOrder;
+    delOrderComment.value = nextOrderComment;
+    delOrderItems.value = nextItems;
+    delDraftRestoreNotice.value = restoreNotice;
+    if (restoreNotice) {
+      setTimeout(() => {
+        if (delSelectedDate.value === date && delDraftRestoreNotice.value === restoreNotice) delDraftRestoreNotice.value = '';
+      }, 8000);
+    }
+    delSavedSnapshot.value = delSerializeSnapshot(nextItems, nextOrderComment);
+  } catch (e) {
+    if (requestId !== delSelectRequestId || delSelectedDate.value !== date) return;
+    delOrderItems.value = [];
+    delSubmitError.value = e.message || 'Не удалось загрузить заказ на выбранную дату';
+  }
 }
 
 // ═══ Автосохранение черновика основной поставки ═══
@@ -1294,9 +1352,13 @@ async function delHandleSubmit() {
       delWasEdited.value = !!delExistingOrder.value;
       delExistingOrder.value = { id: result.order_id };
       delSavedSnapshot.value = delSerializeState();
-      roStore.loadMyInfo();
       delShowSuccess.value = true;
       delStartEditTimer();
+      try { await roStore.loadMyInfo(); } catch {}
+      try { await loadHistory(); } catch {}
+      try {
+        delPreviousOrders.value = (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited');
+      } catch {}
     }
   } catch (e) { delSubmitError.value = e.message || 'Ошибка'; }
   finally { delSubmitting.value = false; }
@@ -1461,7 +1523,11 @@ async function vegSubmit() {
     const submittedDates = vegDeliveries.value.filter(d => !d.expired).map(d => d.date);
     const { data } = await db.rpc('veg_submit_order', { restaurant_number: roStore.restaurant?.number, items, submitted_dates: submittedDates });
     if (data?.error) { vegError.value = data.error === 'session_closed' ? 'Сессия закрыта' : data.error; }
-    else { vegSubmitted.value = true; vegEditing.value = false; }
+    else {
+      vegSubmitted.value = true;
+      vegEditing.value = false;
+      try { await loadHistory(); } catch {}
+    }
   } catch { vegError.value = 'Ошибка при отправке'; }
   finally { vegSubmitting.value = false; }
 }
@@ -1494,15 +1560,19 @@ function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; r
 function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(' '); const d = new Date(date + 'T00:00:00'); const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' }); return (time || '') + ', ' + label; }
 
 async function supSelectDate(sup, dateInfo) {
+  const nextRequestId = (supLoadRequestId[sup.id] || 0) + 1;
+  supLoadRequestId[sup.id] = nextRequestId;
   supSelectedDates[sup.id] = dateInfo.delivery_date;
   supProductsLoading[sup.id] = true;
-  supQuantities[sup.id] = {};
-  supAdminEdits[sup.id] = {};
-  supIsSkipOrder[sup.id] = false;
+  const nextQuantities = {};
+  const nextAdminEdits = {};
+  let nextIsSkip = false;
   try {
-    supProducts[sup.id] = await soStore.loadProducts(sup.id);
+    const products = await soStore.loadProducts(sup.id);
+    if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
     if (dateInfo.order) {
       const order = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date);
+      if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
       const itemCount = order?.items?.length || 0;
       if (itemCount > 0) {
         for (const item of order.items) {
@@ -1510,22 +1580,35 @@ async function supSelectDate(sup, dateInfo) {
           const adminQ = (item.admin_qty !== null && item.admin_qty !== undefined && item.admin_qty !== '')
             ? parseFloat(item.admin_qty) : null;
           // Эффективное значение: правка закупщика, если есть, иначе исходное
-          supQuantities[sup.id][item.sku] = adminQ !== null ? adminQ : orig;
+          nextQuantities[item.sku] = adminQ !== null ? adminQ : orig;
           // Помечаем правку, если значение реально изменилось
           if (adminQ !== null && Math.abs(adminQ - orig) > 0.001) {
-            supAdminEdits[sup.id][item.sku] = { original: orig, edited: adminQ };
+            nextAdminEdits[item.sku] = { original: orig, edited: adminQ };
           }
         }
       } else {
         // Заявка есть, но позиций нет → «Поставка не нужна»: ставим нули во все поля
-        supIsSkipOrder[sup.id] = true;
-        for (const p of (supProducts[sup.id] || [])) {
-          supQuantities[sup.id][p.sku] = 0;
+        nextIsSkip = true;
+        for (const p of products) {
+          nextQuantities[p.sku] = 0;
         }
       }
     }
-  } catch (e) { console.error('Ошибка загрузки:', e); }
-  finally { supProductsLoading[sup.id] = false; }
+    if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
+    supProducts[sup.id] = products;
+    supQuantities[sup.id] = nextQuantities;
+    supAdminEdits[sup.id] = nextAdminEdits;
+    supIsSkipOrder[sup.id] = nextIsSkip;
+  } catch (e) {
+    if (supLoadRequestId[sup.id] !== nextRequestId) return;
+    supProducts[sup.id] = [];
+    supQuantities[sup.id] = {};
+    supAdminEdits[sup.id] = {};
+    supIsSkipOrder[sup.id] = false;
+    showInfo('Ошибка', e.message || 'Не удалось загрузить заявку поставщика', 'error');
+  } finally {
+    if (supLoadRequestId[sup.id] === nextRequestId) supProductsLoading[sup.id] = false;
+  }
 }
 
 function supAdminEditInfo(supId, sku) {
@@ -1546,7 +1629,12 @@ async function supHandleSubmit(sup) {
     const items = (supProducts[sup.id] || []).filter(p => supQuantities[sup.id][p.sku] > 0).map(p => ({ product_id: p.product_id || p.id || '', sku: p.sku, product_name: p.product_name || p.name || '', quantity: supQuantities[sup.id][p.sku] }));
     const dateInfo = supCurrentDateInfo(sup);
     const result = await soStore.submitOrder(sup.id, supSelectedDates[sup.id], dateInfo?.order_date || '', items);
-    if (result.success) { supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) }; supShowSuccess.value = true; suppliers.value = await soStore.loadSuppliers(); }
+    if (result.success) {
+      supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) };
+      supShowSuccess.value = true;
+      try { suppliers.value = await soStore.loadSuppliers(); } catch {}
+      try { await loadHistory(); } catch {}
+    }
   } catch (e) { showInfo('Ошибка', e.message || 'Ошибка отправки', 'error'); }
   finally { supSubmitting[sup.id] = false; }
 }
@@ -1573,7 +1661,8 @@ async function supSkipDelivery(sup) {
     if (result.success) {
       supSuccessInfo.value = { supplier_name: sup.name, delivery_date: supSelectedDates[sup.id], total_items: 0, total_qty: 0, skipped: true };
       supShowSuccess.value = true;
-      suppliers.value = await soStore.loadSuppliers();
+      try { suppliers.value = await soStore.loadSuppliers(); } catch {}
+      try { await loadHistory(); } catch {}
     }
   } catch (e) { showInfo('Ошибка', e.message || 'Ошибка отправки', 'error'); }
   finally { supSubmitting[sup.id] = false; }
@@ -1701,8 +1790,12 @@ function handleLogout() { roStore.logout(); router.replace({ name: 'restaurant-o
 
 async function loadHistory() {
   historyLoading.value = true;
+  historyError.value = '';
   try { historyOrders.value = await roStore.loadAllHistory(50); }
-  catch { historyOrders.value = []; }
+  catch (e) {
+    historyOrders.value = [];
+    historyError.value = e.message || 'Не удалось загрузить историю заказов';
+  }
   finally { historyLoading.value = false; }
 }
 
@@ -1722,18 +1815,24 @@ async function changePassword() {
 
 // Telegram
 async function loadTgStatus() {
+  tgError.value = '';
   try {
     const data = await roStore.getTelegramStatus();
     tgStatus.linked = data.linked; tgStatus.chat_id = data.chat_id;
-  } catch {}
+  } catch (e) {
+    tgError.value = e.message || 'Не удалось получить статус Telegram';
+  }
 }
 async function tgGetCode() {
+  tgError.value = '';
   tgLinkLoading.value = true;
   try {
     const data = await roStore.telegramLink();
     if (data.already_linked) { tgStatus.linked = true; return; }
     if (data.code) tgLinkCode.value = data.code;
-  } catch {}
+  } catch (e) {
+    tgError.value = e.message || 'Не удалось получить код привязки';
+  }
   finally { tgLinkLoading.value = false; }
 }
 async function tgUnlink() {
@@ -1742,7 +1841,10 @@ async function tgUnlink() {
   try {
     await roStore.telegramUnlink();
     tgStatus.linked = false; tgStatus.chat_id = null; tgLinkCode.value = '';
-  } catch {}
+    tgError.value = '';
+  } catch (e) {
+    tgError.value = e.message || 'Не удалось отключить Telegram';
+  }
 }
 
 function stockUnitShort(u) {
@@ -1759,7 +1861,11 @@ async function checkStockCollection() {
     if (stockCollection.active && activeTab.value === 'stock' && !stockProducts.value.length) {
       loadStockInline();
     }
-  } catch {}
+  } catch (e) {
+    if (activeTab.value === 'stock') {
+      stockError.value = e.message || 'Не удалось проверить сбор остатков';
+    }
+  }
 }
 
 async function loadStockInline() {
@@ -1823,6 +1929,39 @@ function onBeforeUnload(e) {
   }
 }
 
+async function loadCabinetData() {
+  globalError.value = '';
+  await roStore.loadMyInfo();
+  try {
+    suppliers.value = await soStore.loadSuppliers();
+  } catch (e) {
+    suppliers.value = [];
+    showInfo('Поставщики', e.message || 'Не удалось загрузить список поставщиков', 'error');
+  }
+  applyRouteToState();
+  if (roStore.deliveryDays.length) {
+    const today = delDateToLocalYmd(new Date());
+    const nearest = roStore.deliveryDays.find(d => d.date >= today && d.deadline_status !== 'closed') || roStore.deliveryDays.find(d => d.date >= today) || roStore.deliveryDays[0];
+    if (nearest) await delSelectDay(nearest.date);
+  }
+  delPreviousOrders.value = (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited');
+  await loadHistory();
+  await checkStockCollection();
+  await loadTgStatus();
+  if (canUseVeg.value) await vegLoadData();
+}
+
+async function retryCabinetLoad() {
+  globalLoading.value = true;
+  try {
+    await loadCabinetData();
+  } catch (e) {
+    globalError.value = e.message || 'Ошибка загрузки кабинета';
+  } finally {
+    globalLoading.value = false;
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('beforeunload', onBeforeUnload);
   // Если в URL есть tg_token — это переход из бота, надо переавторизоваться
@@ -1854,23 +1993,9 @@ onMounted(async () => {
     if (!valid) { router.replace({ name: 'restaurant-order-login' }); return; }
   }
   try {
-    await roStore.loadMyInfo();
-    try { suppliers.value = await soStore.loadSuppliers(); } catch (e) { console.warn('Поставщики:', e); }
-    // Применяем активный роут (например, при заходе по прямой ссылке /restaurant/orders/supplier/1)
-    applyRouteToState();
-    // Auto-select first delivery day
-    if (roStore.deliveryDays.length) {
-      const today = delDateToLocalYmd(new Date());
-      const nearest = roStore.deliveryDays.find(d => d.date >= today && d.deadline_status !== 'closed') || roStore.deliveryDays.find(d => d.date >= today) || roStore.deliveryDays[0];
-      if (nearest) delSelectDay(nearest.date);
-    }
-    const orders = await roStore.loadMyOrders(5);
-    delPreviousOrders.value = orders.filter(o => o.status === 'submitted' || o.status === 'edited');
-    // Background loads
-    loadHistory();
-    checkStockCollection();
-    loadTgStatus();
-    if (canUseVeg.value) vegLoadData();
+    await loadCabinetData();
+  } catch (e) {
+    globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally { globalLoading.value = false; }
 });
 

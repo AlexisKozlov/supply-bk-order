@@ -124,6 +124,47 @@ function soCheckDeadline($pdo, $supplierId, $deliveryDate) {
     return ['status' => 'closed', 'deadline' => $deadlineStr];
 }
 
+function soDeadlineTimeLabel($deadline) {
+    if (!$deadline) return '';
+    $parts = explode(' ', (string)$deadline, 2);
+    if (count($parts) === 2 && preg_match('/^\d{2}:\d{2}/', $parts[1])) {
+        return substr($parts[1], 0, 5);
+    }
+    return preg_match('/^\d{2}:\d{2}/', (string)$deadline) ? substr((string)$deadline, 0, 5) : '';
+}
+
+function soRestaurantHasDeliveryDate($pdo, $restaurantId, $supplierId, $deliveryDate) {
+    if (!$restaurantId || !$supplierId || !$deliveryDate) return false;
+    $sch = $pdo->prepare("
+        SELECT order_day, delivery_day
+        FROM so_supplier_schedules
+        WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
+    ");
+    $sch->execute([(int)$supplierId, (int)$restaurantId]);
+    $schedule = $sch->fetchAll();
+    if (!$schedule) return false;
+
+    $tz = new DateTimeZone('Europe/Minsk');
+    $today = new DateTime('now', $tz);
+    $today->setTime(0, 0, 0);
+    $weekStart = clone $today;
+    $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
+
+    foreach ($schedule as $sc) {
+        $orderDow = (int)$sc['order_day'];
+        $deliveryDow = (int)$sc['delivery_day'];
+        for ($w = 0; $w < 2; $w++) {
+            $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+            if ($deliveryDow <= $orderDow) {
+                $deliveryDateObj->modify('+7 days');
+            }
+            if ($deliveryDateObj < $today) continue;
+            if ($deliveryDateObj->format('Y-m-d') === $deliveryDate) return true;
+        }
+    }
+    return false;
+}
+
 // ═══ Парсинг маршрута ═══
 
 $soParts = explode('/', $uri);
@@ -316,8 +357,11 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
     $supplierId = $soParam1;
     $deliveryDate = $soParam2;
 
-    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
-    $s->execute([$supplierId, $rest['restaurant_number'], $deliveryDate]);
+    $group = getEntityGroup($rest['legal_entity'] ?? '');
+    $entities = getEntitiesInGroup($group);
+    $ph = implode(',', array_fill(0, count($entities), '?'));
+    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity IN ({$ph})");
+    $s->execute(array_merge([$supplierId, $rest['restaurant_number'], $deliveryDate], $entities));
     $order = $s->fetch();
 
     if (!$order) soRespond(['order' => null]);
@@ -344,8 +388,16 @@ if ($soAction === 'my-orders' && $method === 'GET') {
     $supplierId = $_GET['supplier_id'] ?? '';
     $limit = min((int)($_GET['limit'] ?? 20), 50);
 
+    $group = getEntityGroup($rest['legal_entity'] ?? '');
     $where = "o.restaurant_number = ?";
     $params = [$rest['restaurant_number']];
+    $whereParts = [];
+    $entityParams = [];
+    applyEntityTextFilter($group, $whereParts, $entityParams, 'o.legal_entity');
+    if (!empty($whereParts)) {
+        $where .= " AND " . implode(' AND ', $whereParts);
+        $params = array_merge($params, $entityParams);
+    }
     if ($supplierId) {
         $where .= " AND o.supplier_id = ?";
         $params[] = $supplierId;
@@ -392,12 +444,20 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     // Проверяем дедлайн (по дате доставки)
     $dlStatus = soCheckDeadline($pdo, $supplierId, $deliveryDate);
     if ($dlStatus['status'] === 'closed') {
-        soRespond(['error' => 'Приём заявок на эту дату закрыт (дедлайн ' . substr($dlStatus['deadline'], 0, 5) . ')'], 403);
+        $deadlineTime = soDeadlineTimeLabel($dlStatus['deadline']);
+        soRespond(['error' => 'Приём заявок на эту дату закрыт' . ($deadlineTime ? " (дедлайн {$deadlineTime})" : '')], 403);
+    }
+
+    if (!soRestaurantHasDeliveryDate($pdo, $rest['restaurant_id'] ?? null, $supplierId, $deliveryDate)) {
+        soRespond(['error' => 'На эту дату у ресторана нет поставки от этого поставщика'], 403);
     }
 
     // Проверяем: есть ли уже заявка?
-    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
-    $existing->execute([$supplierId, $rest['restaurant_number'], $deliveryDate]);
+    $group = getEntityGroup($rest['legal_entity'] ?? '');
+    $entities = getEntitiesInGroup($group);
+    $ph = implode(',', array_fill(0, count($entities), '?'));
+    $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity IN ({$ph})");
+    $existing->execute(array_merge([$supplierId, $rest['restaurant_number'], $deliveryDate], $entities));
     $existingOrder = $existing->fetch();
 
     $pdo->beginTransaction();

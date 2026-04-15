@@ -19,7 +19,23 @@ function buildHeaders() {
 async function api(path, opts = {}) {
   const url = `${API_BASE}/${path}`;
   const res = await fetch(url, { headers: buildHeaders(), ...opts });
-  const data = await res.json();
+  const text = await res.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (res.status === 401 && !path.startsWith('admin')) {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(REST_KEY);
+        if (window.location.pathname.startsWith('/ro') || window.location.pathname.startsWith('/restaurant')) {
+          window.location.href = '/restaurant/login';
+        }
+        throw new Error('Сессия завершена');
+      }
+      throw new Error(`Ошибка сервера (${res.status})`);
+    }
+  }
   // При 401 — сессия невалидна, выкидываем на логин
   if (res.status === 401 && !path.startsWith('admin')) {
     localStorage.removeItem(TOKEN_KEY);
@@ -29,7 +45,7 @@ async function api(path, opts = {}) {
     }
     throw new Error('Сессия завершена');
   }
-  if (!res.ok && data.error) throw new Error(data.error);
+  if (!res.ok) throw new Error(data.error || `Ошибка сервера (${res.status})`);
   return data;
 }
 
@@ -72,7 +88,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     try {
       const data = await api('validate', { method: 'POST' });
       if (!data.valid) {
-        logout();
+        logoutLocal();
         return false;
       }
       restaurant.value = data.restaurant;

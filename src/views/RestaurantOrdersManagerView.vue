@@ -62,6 +62,9 @@
           <button v-if="session && isDateOpen" class="rom-btn" @click="handleExtendDeadline">
             Продлить дедлайн
           </button>
+          <button class="rom-btn rom-btn-export" @click="downloadCttJson" :disabled="cttJsonExporting || exportExporting || !session" title="Скачать JSON для CTT">
+            {{ cttJsonExporting ? 'JSON...' : 'JSON' }}
+          </button>
           <button class="rom-btn rom-btn-export" @click="openExportModal" :disabled="exportExporting">
             Excel
           </button>
@@ -1620,6 +1623,7 @@ function getExportColumnDefs(keys) {
 const showExportModal = ref(false);
 const exportLoading = ref(false);
 const exportExporting = ref(false);
+const cttJsonExporting = ref(false);
 const exportGrouping = ref('list');
 const exportFilterCategories = ref(new Set(['Сухой', 'Холод', 'Мороз']));
 const exportFilterRegions = ref(new Set(['Минск', 'Регионы']));
@@ -2290,6 +2294,42 @@ async function quickExportOrder(orderId, restaurantNumber, legalEntityGroup) {
     XLSX.writeFile(wb, `Заказ_рест_${prettyRest}_${selectedDate.value}.xlsx`);
   } catch (e) {
     toast.error('Ошибка', e.message);
+  }
+}
+
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadCttJson() {
+  cttJsonExporting.value = true;
+  try {
+    const data = await store.adminGetExportData('ctt-json', selectedDate.value, orderStore.settings.legalEntity || undefined);
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) {
+      toast.warning('Нет данных', 'Для этой даты нет позиций для JSON-выгрузки');
+      return;
+    }
+    downloadJsonFile(data.filename || `data-dodo-${selectedDate.value}.json`, items);
+    toast.success('JSON скачан', `Позиций: ${items.length}`);
+    if (data.skipped_missing_gtin) {
+      toast.warning('Часть строк пропущена', `Без GTIN: ${data.skipped_missing_gtin}`);
+    }
+    if (data.missing_purchase_price) {
+      toast.warning('Есть товары без цены', `С нулевой закупочной ценой: ${data.missing_purchase_price}`);
+    }
+  } catch (e) {
+    toast.error('Ошибка выгрузки', e.message);
+  } finally {
+    cttJsonExporting.value = false;
   }
 }
 
