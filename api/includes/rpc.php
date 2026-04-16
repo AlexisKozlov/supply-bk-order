@@ -5355,6 +5355,32 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    if ($fn === 'survey_response_delete') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $responseId = intval($body['id'] ?? 0);
+        $surveyId = intval($body['survey_id'] ?? 0);
+        if (!$responseId) respond(['error' => 'id required'], 400);
+
+        $stmt = $pdo->prepare("
+            SELECT id, survey_id
+            FROM survey_responses
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$responseId]);
+        $response = $stmt->fetch();
+        if (!$response) respond(['error' => 'Ответ не найден'], 404);
+        if ($surveyId && (int)$response['survey_id'] !== $surveyId) {
+            respond(['error' => 'Ответ не относится к этому опросу'], 400);
+        }
+
+        $pdo->prepare("DELETE FROM survey_responses WHERE id = ?")->execute([$responseId]);
+        respond(['success' => true]);
+    }
+
     if ($fn === 'survey_delete') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);

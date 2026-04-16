@@ -184,6 +184,7 @@
                     <th>Ответы</th>
                     <th>Комментарий</th>
                     <th>Когда</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,6 +200,16 @@
                     </td>
                     <td>{{ response.comment || '—' }}</td>
                     <td>{{ formatDate(response.submitted_at) }}</td>
+                    <td class="result-actions">
+                      <button
+                        v-if="canManageResponses"
+                        class="btn secondary danger small-btn"
+                        :disabled="deletingResponseId === Number(response.id)"
+                        @click="deleteResponse(response)"
+                      >
+                        {{ deletingResponseId === Number(response.id) ? 'Удаление...' : 'Удалить ответ' }}
+                      </button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -274,6 +285,7 @@ const saving = ref(false)
 const sending = ref(false)
 const closing = ref(false)
 const deleting = ref(false)
+const deletingResponseId = ref(null)
 
 const message = ref({ text: '', ok: true })
 
@@ -282,6 +294,7 @@ const canEditDraft = computed(() => userStore.hasAccess('surveys', 'edit') && (i
 const canSendSurvey = computed(() => userStore.hasAccess('surveys', 'edit') && !isCreating.value && form.value.status === 'draft')
 const canCloseSurvey = computed(() => userStore.hasAccess('surveys', 'edit') && !isCreating.value && form.value.status === 'active')
 const canDeleteSurvey = computed(() => userStore.hasAccess('surveys', 'full') && !isCreating.value)
+const canManageResponses = computed(() => userStore.hasAccess('surveys', 'edit') && !isCreating.value)
 
 function setMessage(text, ok = true) {
   message.value = { text, ok }
@@ -446,6 +459,24 @@ async function deleteSurvey() {
     setMessage(e.message || 'Не удалось удалить опрос', false)
   } finally {
     deleting.value = false
+  }
+}
+
+async function deleteResponse(response) {
+  if (!canManageResponses.value || !response?.id || !form.value.id) return
+  const restaurantLabel = formatRestaurantNumber(response.restaurant_number, response.legal_entity_group)
+  if (!confirm(`Удалить ответ ресторана ${restaurantLabel}? После этого ресторан сможет ответить заново.`)) return
+
+  deletingResponseId.value = Number(response.id)
+  clearMessage()
+  try {
+    await db.rpc('survey_response_delete', { id: response.id, survey_id: form.value.id })
+    await loadSurveys(form.value.id)
+    setMessage(`Ответ ресторана ${restaurantLabel} удалён.`)
+  } catch (e) {
+    setMessage(e.message || 'Не удалось удалить ответ', false)
+  } finally {
+    deletingResponseId.value = null
   }
 }
 
@@ -757,6 +788,11 @@ onMounted(() => {
 .results-table-wrap {
   overflow-x: auto;
   margin-top: 14px;
+}
+
+.result-actions {
+  white-space: nowrap;
+  text-align: right;
 }
 
 .results-table {

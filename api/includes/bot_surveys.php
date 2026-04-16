@@ -53,10 +53,10 @@ function surveyGetChatRestaurants($chatId, $group) {
         FROM ro_users ru
         LEFT JOIN restaurants r
           ON r.number = ru.restaurant_number
-         AND r.legal_entity_group = ru.legal_entity_group
+         AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = ru.legal_entity_group COLLATE utf8mb4_unicode_ci
          AND r.active = 1
         WHERE ru.telegram_chat_id = ?
-          AND ru.legal_entity_group = ?
+          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
           AND ru.is_active = 1
     ");
     $roUsers->execute([$chatId, $group]);
@@ -91,7 +91,7 @@ function surveyGetPendingRestaurants($surveyId, $chatId, $group) {
         SELECT restaurant_number
         FROM survey_responses
         WHERE survey_id = ?
-          AND legal_entity_group = ?
+          AND legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
     ");
     $answeredStmt->execute([$surveyId, $group]);
     $answered = array_flip(array_map('intval', $answeredStmt->fetchAll(PDO::FETCH_COLUMN)));
@@ -356,7 +356,7 @@ function surveyFinish($chatId, $msgId, $state, $comment) {
         FROM survey_responses
         WHERE survey_id = ?
           AND restaurant_number = ?
-          AND legal_entity_group = ?
+          AND legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
     ");
     $dupStmt->execute([$surveyId, $restaurantNumber, $group]);
     if ($dupStmt->fetch()) {
