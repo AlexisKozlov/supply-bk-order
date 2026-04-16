@@ -97,6 +97,7 @@ const modules = [
   // Рестораны
   { title: 'Заказы ресторанов', icon: '🍔', route: 'restaurant-orders', module: 'restaurant-orders', keywords: 'рестораны ро' },
   { title: 'Отчёт по заказам ресторанов', icon: '📄', route: 'restaurant-report', module: 'restaurant-orders' },
+  { title: 'Опросы', icon: '📋', route: 'surveys', module: 'surveys', keywords: 'анкета опросник ответы рестораны' },
   { title: 'Реализация ресторанов', icon: '💹', route: 'restaurant-sales', module: 'restaurant-sales', keywords: 'продажи выручка' },
   { title: 'Чат с ресторанами', icon: '💬', route: 'chat', module: 'chat' },
   // Поставщики

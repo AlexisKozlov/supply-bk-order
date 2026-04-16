@@ -126,6 +126,7 @@ require_once __DIR__ . '/includes/bot_lookup.php';
 require_once __DIR__ . '/includes/bot_helpers.php';
 require_once __DIR__ . '/includes/bot_tools.php';
 require_once __DIR__ . '/includes/bot_veg.php';
+require_once __DIR__ . '/includes/bot_surveys.php';
 require_once __DIR__ . '/includes/bot_chat.php';
 require_once __DIR__ . '/includes/bot_import.php';
 
@@ -569,24 +570,6 @@ function cmdToday($chatId, $user, $editMsgId = null) {
     $text .= "🚚 Поставки сегодня: <b>" . count($todayOrders) . "</b>\n";
     if ($overdueOrders) $text .= "🔴 Просроченных: <b>" . count($overdueOrders) . "</b>\n";
     $text .= "📉 Критичных остатков: <b>" . count($critItems) . "</b>\n";
-
-    // 4. Дедлайны овощей
-    try {
-        $tz = new DateTimeZone('Europe/Minsk');
-        $now = new DateTime('now', $tz);
-        $todayDow = (int)$now->format('N');
-        $dlRow = $pdo->prepare("SELECT delivery_dow, deadline_time FROM veg_deadline_rules WHERE deadline_dow = ?");
-        $dlRow->execute([$todayDow]);
-        $todayDeadlines = $dlRow->fetchAll();
-        $activeSess = $pdo->query("SELECT id FROM veg_sessions WHERE status='active' LIMIT 1")->fetch();
-        if ($activeSess && $todayDeadlines) {
-            $dlDays = [1=>'пн',2=>'вт',3=>'ср',4=>'чт',5=>'пт',6=>'сб'];
-            foreach ($todayDeadlines as $dl) {
-                $delivDay = $dlDays[$dl['delivery_dow']] ?? '';
-                $text .= "🥬 Дедлайн заявок на овощи: <b>{$dl['deadline_time']}</b> (доставка {$delivDay})\n";
-            }
-        }
-    } catch (Exception $e) {}
 
     // Детали
     if ($todayOrders) {
@@ -1488,7 +1471,7 @@ function getMenuButtons($user) {
         // Рестораны
         [
             ['text' => '✏️ Корректировки', 'callback_data' => 'cmd_corrections'],
-            ['text' => '🥬 Овощи', 'callback_data' => 'cmd_veg_stats'],
+            ['text' => '🏪 Рестораны', 'callback_data' => 'cmd_veg_stats'],
         ],
         [
             ['text' => '🛒 Заказы рестов', 'callback_data' => 'cmd_ro_status'],
@@ -1907,8 +1890,9 @@ if (isset($input['callback_query'])) {
         exit;
     }
     if ($data === 'rest_menu_veg') {
+        // Старый callback — теперь всё через единое меню поставщиков
         answerCallback($cb['id']);
-        restMenuVeg($chatId, $msgId);
+        restMenuSupplier($chatId, $msgId);
         exit;
     }
     if ($data === 'rest_menu_supplier') {
@@ -2328,6 +2312,31 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
+    // ═══ Опросы ═══
+    if (preg_match('/^srv_start_(\d+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        surveyStart($chatId, $msgId, (int)$m[1]);
+        exit;
+    }
+    if (preg_match('/^srv_rest_(\d+)_(\d+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        surveySelectRestaurant($chatId, $msgId, (int)$m[1], (int)$m[2]);
+        exit;
+    }
+    if (preg_match('/^srv_ans_(\d+)_(\d+)_(\d+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        surveyProcessAnswer($chatId, $msgId, (int)$m[1], (int)$m[2], (int)$m[3]);
+        exit;
+    }
+    if (preg_match('/^srv_skip_comment_(\d+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        $survState = surveyLoadState($chatId);
+        if ($survState && (int)$survState['survey_id'] === (int)$m[1]) {
+            surveyFinish($chatId, $msgId, $survState, null);
+        }
+        exit;
+    }
+
     exit;
 }
 
@@ -2634,6 +2643,12 @@ if (file_exists($corrFile)) {
     }
 }
 
+// Режим ввода комментария к опросу
+if (!str_starts_with($text, '/')) {
+    $userMsgId = $msg['message_id'] ?? null;
+    if (surveyProcessComment($chatId, $text, $userMsgId)) exit;
+}
+
 // Режим ввода заявки поставщику (Камако и др.)
 $soOrderFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
 if (file_exists($soOrderFile)) {
@@ -2658,24 +2673,6 @@ if (file_exists($soOrderFile)) {
                 soOrderProcessInput($chatId, $text);
                 exit;
             }
-        }
-    }
-}
-
-// Старый овощной режим больше не должен принимать текст.
-// Если у пользователя остался старый temp-файл, сбрасываем его и просим открыть заявку заново.
-$vegOrderFile = sys_get_temp_dir() . "/vegord_{$chatId}.txt";
-if (file_exists($vegOrderFile)) {
-    if (time() - filemtime($vegOrderFile) > 1800) {
-        @unlink($vegOrderFile);
-    } else {
-        $vegMode = trim(@file_get_contents($vegOrderFile));
-        if ($vegMode && str_starts_with($vegMode, 'vegord_')) {
-            @unlink($vegOrderFile);
-            $userMsgId = $msg['message_id'] ?? null;
-            if ($userMsgId) @deleteMessage($chatId, $userMsgId);
-            sendMessage($chatId, "Старый экран заявки на овощи больше не используется.\n\nОткройте «Планета Ресторанов» заново и отправьте заявку ещё раз.");
-            exit;
         }
     }
 }

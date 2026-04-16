@@ -1058,23 +1058,17 @@ try {
 }
 
 // ═══ ЗАКАЗЫ РЕСТОРАНОВ: напоминания о дедлайнах ═══
+// Перебираем все активные сессии (BK_VM и PS могут иметь отдельные)
 try {
-    // Ищем активную сессию
-    $roSess = $pdo->query("SELECT id, week_start, week_end FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY id DESC LIMIT 1")->fetch();
-    if ($roSess) {
+    $roSessions = $pdo->query("SELECT id, week_start, week_end, legal_entity_group FROM ro_sessions WHERE status = 'active' AND week_end >= CURDATE() ORDER BY id DESC")->fetchAll();
+    foreach ($roSessions as $roSess) {
         $tz = new DateTimeZone('Europe/Minsk');
         $now = new DateTime('now', $tz);
-        $today = $now->format('Y-m-d');
         $currentTime = $now->format('H:i');
 
-        // Дни доставки на завтра (дедлайн подачи = сегодня)
         $tomorrow = (new DateTime('now', $tz))->modify('+1 day')->format('Y-m-d');
-
-        // Не шлём напоминания, если «завтра» выходит за рамки активной сессии
-        // (например, сегодня последний день, а новая неделя ещё не открыта)
         $tomorrowInSession = $tomorrow >= $roSess['week_start'] && $tomorrow <= $roSess['week_end'];
 
-        // Проверяем, что дата «завтра» явно открыта для приёма заявок
         $dateOpen = false;
         if ($tomorrowInSession) {
             $openChk = $pdo->prepare("SELECT is_open FROM ro_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
@@ -1082,63 +1076,58 @@ try {
             $dateOpen = (int)$openChk->fetchColumn() === 1;
         }
 
-        // Напоминаем в 8:00 и 12:00
-        if ($tomorrowInSession && $dateOpen && ($currentTime >= '08:00' && $currentTime < '08:15' || $currentTime >= '12:00' && $currentTime < '12:15')) {
-            $reminderType = $currentTime < '09:00' ? 'ro_morning' : 'ro_midday';
+        if (!$tomorrowInSession || !$dateOpen) continue;
+        if (!($currentTime >= '08:00' && $currentTime < '08:15' || $currentTime >= '12:00' && $currentTime < '12:15')) continue;
 
-            // День недели «завтра» (1=Пн … 7=Вс)
-            $tomorrowDow = (int)(new DateTime($tomorrow))->format('N');
+        $reminderType = $currentTime < '09:00' ? 'ro_morning' : 'ro_midday';
+        $tomorrowDow = (int)(new DateTime($tomorrow))->format('N');
+        $sessGroup = $roSess['legal_entity_group'] ?: 'BK_VM';
 
-            // Рестораны с привязанным Telegram, у которых есть доставка в этот день
-            // недели и ещё нет заказа на завтра
-            $s = $pdo->prepare("
-                SELECT ru.restaurant_number, ru.legal_entity_group, ru.telegram_chat_id
-                FROM ro_users ru
-                WHERE ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
-                AND ru.legal_entity_group = ?
-                AND EXISTS (
-                    SELECT 1 FROM restaurants r
-                    JOIN delivery_schedule ds ON ds.restaurant_id = r.id
-                    WHERE r.number = ru.restaurant_number
-                      AND r.legal_entity_group = ru.legal_entity_group COLLATE utf8mb4_general_ci
-                      AND r.active = 1
-                      AND ds.day_of_week = ?
-                )
-                AND ru.restaurant_number NOT IN (
-                    SELECT o.restaurant_number FROM ro_orders o
-                    WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
-                )
-            ");
-            $s->execute([$roSess['legal_entity_group'] ?? 'BK_VM', $tomorrowDow, $roSess['id'], $tomorrow]);
-            $missing = $s->fetchAll();
+        $s = $pdo->prepare("
+            SELECT ru.restaurant_number, ru.legal_entity_group, ru.telegram_chat_id
+            FROM ro_users ru
+            WHERE ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
+            AND ru.legal_entity_group = ?
+            AND EXISTS (
+                SELECT 1 FROM restaurants r
+                JOIN delivery_schedule ds ON ds.restaurant_id = r.id
+                WHERE r.number = ru.restaurant_number
+                  AND r.legal_entity_group = ru.legal_entity_group COLLATE utf8mb4_general_ci
+                  AND r.active = 1
+                  AND ds.day_of_week = ?
+            )
+            AND ru.restaurant_number NOT IN (
+                SELECT o.restaurant_number FROM ro_orders o
+                WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+            )
+        ");
+        $s->execute([$sessGroup, $tomorrowDow, $roSess['id'], $tomorrow]);
+        $missing = $s->fetchAll();
 
-            foreach ($missing as $m) {
-                $dedupKey = "{$reminderType}_{$m['restaurant_number']}_{$tomorrow}";
-                // Проверяем дедупликацию
-                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 6 HOUR");
-                $dup->execute([$dedupKey]);
-                if ($dup->fetch()) continue;
+        foreach ($missing as $m) {
+            $dedupKey = "{$reminderType}_{$m['restaurant_number']}_{$tomorrow}";
+            $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 6 HOUR");
+            $dup->execute([$dedupKey]);
+            if ($dup->fetch()) continue;
 
-                $timeLeft = $currentTime < '09:00' ? 'до 10:00' : 'до 13:00';
-                $dateFormatted = (new DateTime($tomorrow))->format('d.m');
-                $text = "⏰ <b>Напоминание</b>\n\n";
-                $text .= "Ресторан <b>" . formatRestaurantNumber($m['restaurant_number']) . "</b>: не подана заявка на <b>{$dateFormatted}</b>.\n";
-                $text .= "Дедлайн: {$timeLeft}.\n\n";
+            $timeLeft = $currentTime < '09:00' ? 'до 10:00' : 'до 13:00';
+            $dateFormatted = (new DateTime($tomorrow))->format('d.m');
+            $text = "⏰ <b>Напоминание</b>\n\n";
+            $text .= "Ресторан <b>" . formatRestaurantNumber($m['restaurant_number']) . "</b>: не подана заявка на <b>{$dateFormatted}</b>.\n";
+            $text .= "Дедлайн: {$timeLeft}.\n\n";
 
-                // Генерируем токен для быстрого входа (с привязкой к ресторану из напоминания)
-                $token = bin2hex(random_bytes(32));
-                $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
-                    ->execute([$token, $m['telegram_chat_id'], $m['restaurant_number'], $m['legal_entity_group'] ?: 'BK_VM']);
-                $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
+            $token = bin2hex(random_bytes(32));
+            $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), 0)")
+                ->execute([$token, $m['telegram_chat_id'], $m['restaurant_number'], $m['legal_entity_group'] ?: $sessGroup]);
+            $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
 
-                $btns = ['inline_keyboard' => [
-                    [['text' => '🏠 Открыть кабинет', 'url' => "{$siteUrl}/restaurant?tg_token={$token}"]],
-                ]];
-                sendMessage($m['telegram_chat_id'], $text, $btns);
-                $sent++;
+            $btns = ['inline_keyboard' => [
+                [['text' => '🏠 Открыть кабинет', 'url' => "{$siteUrl}/restaurant?tg_token={$token}"]],
+            ]];
+            sendMessage($m['telegram_chat_id'], $text, $btns);
+            $sent++;
 
-                $pdo->prepare("INSERT INTO tg_notification_log (notification_key, sent_at) VALUES (?, NOW())")->execute([$dedupKey]);
-            }
+            $pdo->prepare("INSERT INTO tg_notification_log (notification_key, sent_at) VALUES (?, NOW())")->execute([$dedupKey]);
         }
     }
 } catch (Exception $e) {
@@ -1198,7 +1187,7 @@ try {
                     $cid = $chatIdFallback->fetchColumn();
                 }
                 if (!$cid) continue; // ресторан без привязки — пропускаем
-                $byRest[$rn] = ['chat_id' => $cid, 'schedule' => []];
+                $byRest[$rn] = ['chat_id' => $cid, 'group' => $s['legal_entity_group'] ?: 'BK_VM', 'schedule' => []];
             }
             $byRest[$rn]['schedule'][] = [
                 'order_day' => (int)$s['order_day'],
@@ -1336,7 +1325,7 @@ try {
 
             // Токен быстрого входа → страница поставщика в кабинете
             $token = bin2hex(random_bytes(32));
-            $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+            $restGroup = $byRest[$restNum]['group'] ?? 'BK_VM';
             $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)")
                 ->execute([$token, $chatId, $restNum, $restGroup]);
 
@@ -1936,6 +1925,88 @@ try {
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] veg summary error: ' . $e->getMessage());
+}
+
+// ═══ ОПРОСЫ: напоминания ресторанам, которые не ответили ═══
+try {
+    $surveys = $pdo->query("
+        SELECT id, title, legal_entity_group, remind_after_hours
+        FROM surveys
+        WHERE status = 'active'
+          AND sent_at IS NOT NULL
+          AND sent_at <= NOW() - INTERVAL remind_after_hours HOUR
+    ")->fetchAll();
+
+    foreach ($surveys as $survey) {
+        $surveyId = $survey['id'];
+        $surveyTitle = $survey['title'];
+        $surveyGroup = $survey['legal_entity_group'];
+        $intervalSeconds = max(1, (int)$survey['remind_after_hours']) * 3600;
+
+        $chatIds = [];
+
+        $roPendingChats = $pdo->prepare("
+            SELECT DISTINCT CAST(ru.telegram_chat_id AS CHAR) AS chat_id
+            FROM ro_users ru
+            JOIN restaurants r
+              ON r.number = ru.restaurant_number
+             AND r.active = 1
+             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = ru.legal_entity_group COLLATE utf8mb4_unicode_ci
+            LEFT JOIN survey_responses sr
+              ON sr.survey_id = ?
+             AND sr.restaurant_number = ru.restaurant_number
+            WHERE ru.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              AND ru.is_active = 1
+              AND ru.telegram_chat_id IS NOT NULL
+              AND sr.id IS NULL
+        ");
+        $roPendingChats->execute([$surveyId, $surveyGroup]);
+        foreach ($roPendingChats->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+            $chatId = trim((string)$chatId);
+            if ($chatId !== '') $chatIds[$chatId] = true;
+        }
+
+        $vegPendingChats = $pdo->prepare("
+            SELECT DISTINCT CAST(vs.chat_id AS CHAR) AS chat_id
+            FROM veg_telegram_subs vs
+            JOIN restaurants r
+              ON r.number = vs.restaurant_number
+             AND r.active = 1
+             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            LEFT JOIN survey_responses sr
+              ON sr.survey_id = ?
+             AND sr.restaurant_number = vs.restaurant_number
+            WHERE vs.chat_id IS NOT NULL
+              AND sr.id IS NULL
+        ");
+        $vegPendingChats->execute([$surveyGroup, $surveyId]);
+        foreach ($vegPendingChats->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+            $chatId = trim((string)$chatId);
+            if ($chatId !== '') $chatIds[$chatId] = true;
+        }
+
+        foreach (array_keys($chatIds) as $chatId) {
+            $notificationKey = "survey_reminder_{$surveyId}_{$chatId}";
+            if (wasNotifiedByKey($pdo, $notificationKey, $intervalSeconds)) {
+                continue;
+            }
+
+            $text = "🔔 <b>Напоминание</b>\n\n";
+            $text .= "У вас ещё есть рестораны без ответа в опросе:\n«" . htmlspecialchars($surveyTitle, ENT_QUOTES, 'UTF-8') . "»\n\n";
+            $text .= "Пожалуйста, откройте опрос и заполните оставшиеся ответы.";
+
+            $btns = ['inline_keyboard' => [
+                [['text' => '📋 Пройти опрос', 'callback_data' => "srv_start_{$surveyId}"]],
+            ]];
+
+            if (tgSend($chatId, $text, false, $btns)) {
+                logNotificationByKey($pdo, 'survey_reminder', $notificationKey, (int)$chatId, $surveyGroup);
+                $sent++;
+            }
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] survey reminder error: ' . $e->getMessage());
 }
 
 // Очистка старых записей дедупликации (старше 7 дней)

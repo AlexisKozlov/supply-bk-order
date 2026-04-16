@@ -470,6 +470,7 @@ const toolsGroups = [
   ]},
   { title: 'Рестораны', items: [
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
+    { module: 'surveys', route: 'surveys', icon: 'document', label: 'Опросы' },
     { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
     { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   ]},
@@ -684,6 +685,7 @@ const pageNames = {
   'stock-collection': 'Сбор остатков',
   'veg-admin': 'Планета Ресторанов',
   'telegram-admin': 'Telegram-бот',
+  'surveys': 'Опросы',
   'corrections': 'Корректировки',
   'chat': 'Чат с ресторанами',
   'pallet-calc': 'Калькулятор паллет',

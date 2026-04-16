@@ -8,10 +8,13 @@
  *   POST   ro/logout          — выход
  *   POST   ro/validate        — проверка сессии
  *   GET    ro/my-info         — инфо о ресторане + текущая сессия + дедлайны
+ *   GET    ro/my-surveys      — мои опросы
+ *   GET    ro/my-survey/:id   — один опрос
  *   GET    ro/products        — товары для формы (из шаблона или stock_malling)
  *   GET    ro/my-orders       — мои заказы (история)
  *   GET    ro/my-order/:date  — мой заказ на дату
  *   POST   ro/submit-order    — отправить заказ
+ *   POST   ro/submit-survey   — отправить ответ на опрос
  *   POST   ro/repeat-order    — повторить предыдущий заказ
  *
  *   Для закупщиков (требуется сессия основного приложения):
@@ -85,6 +88,71 @@ function roGetRestaurantSession($pdo) {
         $user['legal_entity_group'] = $rest['legal_entity_group'];
     }
     return $user;
+}
+
+function roGetSurveyForRestaurant($pdo, $surveyId, $rest) {
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $stmt = $pdo->prepare("
+        SELECT s.id, s.title, s.description, s.legal_entity_group, s.status, s.allow_comment,
+               s.sent_at, s.created_at,
+               sr.id AS response_id, sr.comment AS response_comment, sr.submitted_at AS response_submitted_at
+        FROM surveys s
+        LEFT JOIN survey_responses sr
+          ON sr.survey_id = s.id
+         AND sr.restaurant_number = ?
+        WHERE s.id = ?
+          AND s.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        LIMIT 1
+    ");
+    $stmt->execute([(int)$rest['restaurant_number'], (int)$surveyId, $group]);
+    $survey = $stmt->fetch();
+    if (!$survey) return null;
+    if (($survey['status'] ?? '') !== 'active' && empty($survey['response_id'])) return null;
+
+    $questionsStmt = $pdo->prepare("
+        SELECT id, text, sort_order
+        FROM survey_questions
+        WHERE survey_id = ?
+        ORDER BY sort_order, id
+    ");
+    $questionsStmt->execute([(int)$surveyId]);
+    $questions = $questionsStmt->fetchAll();
+
+    $optionsStmt = $pdo->prepare("
+        SELECT id, text, sort_order
+        FROM survey_options
+        WHERE question_id = ?
+        ORDER BY sort_order, id
+    ");
+    foreach ($questions as &$question) {
+        $optionsStmt->execute([(int)$question['id']]);
+        $question['options'] = $optionsStmt->fetchAll();
+    }
+    unset($question);
+
+    $survey['questions'] = $questions;
+    $survey['already_answered'] = !empty($survey['response_id']);
+    $survey['comment'] = $survey['response_comment'] ?? null;
+    $survey['submitted_at'] = $survey['response_submitted_at'] ?? null;
+    unset($survey['response_comment'], $survey['response_submitted_at']);
+
+    if (!empty($survey['response_id'])) {
+        $answersStmt = $pdo->prepare("
+            SELECT question_id, option_id
+            FROM survey_answers
+            WHERE response_id = ?
+        ");
+        $answersStmt->execute([(int)$survey['response_id']]);
+        $answers = [];
+        foreach ($answersStmt->fetchAll() as $answer) {
+            $answers[(int)$answer['question_id']] = (int)$answer['option_id'];
+        }
+        $survey['answers'] = $answers;
+    } else {
+        $survey['answers'] = new stdClass();
+    }
+
+    return $survey;
 }
 
 function roGetActiveSession($pdo, $group = 'BK_VM') {
@@ -940,6 +1008,158 @@ if ($roAction === 'broadcast-read' && $method === 'POST') {
           AND type = 'ro_broadcast'
           AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))
     ")->execute($params);
+    roRespond(['success' => true]);
+}
+
+if ($roAction === 'my-surveys' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $stmt = $pdo->prepare("
+        SELECT s.id, s.title, s.description, s.allow_comment, s.status, s.sent_at, s.created_at,
+               (SELECT COUNT(*) FROM survey_questions sq WHERE sq.survey_id = s.id) AS questions_count,
+               sr.id AS response_id, sr.submitted_at
+        FROM surveys s
+        LEFT JOIN survey_responses sr
+          ON sr.survey_id = s.id
+         AND sr.restaurant_number = ?
+        WHERE s.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          AND (s.status = 'active' OR sr.id IS NOT NULL)
+        ORDER BY
+          CASE WHEN sr.id IS NULL AND s.status = 'active' THEN 0 ELSE 1 END,
+          COALESCE(s.sent_at, s.created_at) DESC,
+          s.id DESC
+    ");
+    $stmt->execute([(int)$rest['restaurant_number'], $group]);
+    $surveys = $stmt->fetchAll();
+
+    foreach ($surveys as &$survey) {
+        $survey['already_answered'] = !empty($survey['response_id']);
+    }
+    unset($survey);
+
+    roRespond(['surveys' => $surveys]);
+}
+
+if ($roAction === 'my-survey' && $method === 'GET' && $roParam) {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $survey = roGetSurveyForRestaurant($pdo, (int)$roParam, $rest);
+    if (!$survey) roRespond(['error' => 'Опрос не найден'], 404);
+
+    roRespond(['survey' => $survey]);
+}
+
+if ($roAction === 'submit-survey' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $surveyId = (int)($body['survey_id'] ?? 0);
+    if (!$surveyId) roRespond(['error' => 'Не указан опрос'], 400);
+
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $surveyStmt = $pdo->prepare("
+        SELECT id, allow_comment, status
+        FROM surveys
+        WHERE id = ?
+          AND legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+        LIMIT 1
+    ");
+    $surveyStmt->execute([$surveyId, $group]);
+    $survey = $surveyStmt->fetch();
+    if (!$survey) roRespond(['error' => 'Опрос не найден'], 404);
+    if (($survey['status'] ?? '') !== 'active') roRespond(['error' => 'Опрос уже закрыт'], 400);
+
+    $existsStmt = $pdo->prepare("
+        SELECT id
+        FROM survey_responses
+        WHERE survey_id = ? AND restaurant_number = ?
+        LIMIT 1
+    ");
+    $existsStmt->execute([$surveyId, (int)$rest['restaurant_number']]);
+    if ($existsStmt->fetch()) roRespond(['error' => 'Вы уже ответили на этот опрос'], 400);
+
+    $rawAnswers = $body['answers'] ?? [];
+    if (!is_array($rawAnswers)) roRespond(['error' => 'Некорректные ответы'], 400);
+
+    $answerMap = [];
+    foreach ($rawAnswers as $key => $value) {
+        if (is_array($value)) {
+            $questionId = (int)($value['question_id'] ?? 0);
+            $optionId = (int)($value['option_id'] ?? 0);
+        } else {
+            $questionId = (int)$key;
+            $optionId = (int)$value;
+        }
+        if ($questionId > 0 && $optionId > 0) {
+            $answerMap[$questionId] = $optionId;
+        }
+    }
+
+    $qStmt = $pdo->prepare("
+        SELECT sq.id AS question_id, so.id AS option_id
+        FROM survey_questions sq
+        JOIN survey_options so ON so.question_id = sq.id
+        WHERE sq.survey_id = ?
+        ORDER BY sq.sort_order, sq.id, so.sort_order, so.id
+    ");
+    $qStmt->execute([$surveyId]);
+    $questionOptions = [];
+    foreach ($qStmt->fetchAll() as $row) {
+        $questionId = (int)$row['question_id'];
+        $questionOptions[$questionId] ??= [];
+        $questionOptions[$questionId][] = (int)$row['option_id'];
+    }
+
+    if (!$questionOptions) roRespond(['error' => 'В опросе нет вопросов'], 400);
+    if (count($answerMap) !== count($questionOptions)) roRespond(['error' => 'Ответьте на все вопросы'], 400);
+
+    foreach ($questionOptions as $questionId => $optionIds) {
+        $selectedOptionId = (int)($answerMap[$questionId] ?? 0);
+        if (!$selectedOptionId || !in_array($selectedOptionId, $optionIds, true)) {
+            roRespond(['error' => 'Один из ответов выбран неверно'], 400);
+        }
+    }
+
+    $comment = null;
+    if (!empty($survey['allow_comment'])) {
+        $commentText = trim((string)($body['comment'] ?? ''));
+        $comment = ($commentText !== '') ? $commentText : null;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $insertResponse = $pdo->prepare("
+            INSERT INTO survey_responses (survey_id, restaurant_number, legal_entity_group, comment)
+            VALUES (?, ?, ?, ?)
+        ");
+        $insertResponse->execute([
+            $surveyId,
+            (int)$rest['restaurant_number'],
+            $group,
+            $comment,
+        ]);
+        $responseId = (int)$pdo->lastInsertId();
+
+        $insertAnswer = $pdo->prepare("
+            INSERT INTO survey_answers (response_id, question_id, option_id)
+            VALUES (?, ?, ?)
+        ");
+        foreach ($answerMap as $questionId => $optionId) {
+            $insertAnswer->execute([$responseId, (int)$questionId, (int)$optionId]);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if (($e->getCode() ?? null) === '23000') {
+            roRespond(['error' => 'Ответ уже был сохранён'], 400);
+        }
+        roRespond(['error' => 'Не удалось сохранить ответ'], 500);
+    }
+
     roRespond(['success' => true]);
 }
 

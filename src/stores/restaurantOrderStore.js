@@ -391,6 +391,23 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.broadcasts || [];
   }
 
+  async function loadSurveys() {
+    const data = await api('my-surveys');
+    return data.surveys || [];
+  }
+
+  async function loadSurvey(surveyId) {
+    const data = await api(`my-survey/${surveyId}`);
+    return data.survey || null;
+  }
+
+  async function submitSurvey(surveyId, answers, comment = '') {
+    return await api('submit-survey', {
+      method: 'POST',
+      body: JSON.stringify({ survey_id: surveyId, answers, comment }),
+    });
+  }
+
   async function markBroadcastRead(ids) {
     return await api('broadcast-read', {
       method: 'POST',
@@ -417,7 +434,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
-    loadBroadcasts, markBroadcastRead,
+    loadBroadcasts, loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,

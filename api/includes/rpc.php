@@ -4159,22 +4159,6 @@ if ($endpoint === 'rpc') {
             LEFT JOIN restaurants r ON r.number = vrl.restaurant_number AND r.legal_entity_group = 'BK_VM'
             ORDER BY vrl.sent_at DESC LIMIT 100")->fetchAll();
 
-        // Текущая сессия овощей + статус заявок по ресторанам
-        $activeSession = null;
-        $vegOrderStatus = [];
-        $sess = $pdo->query("SELECT id, name, date_from, date_to FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
-        if ($sess) {
-            $activeSession = $sess;
-            $ordSt = $pdo->prepare("SELECT restaurant_number,
-                COUNT(DISTINCT delivery_date) as dates_count,
-                MAX(submitted_at) as last_submitted,
-                SUM(CASE WHEN admin_qty IS NOT NULL THEN 1 ELSE 0 END) as admin_edited
-                FROM veg_orders WHERE session_id = ?
-                GROUP BY restaurant_number");
-            $ordSt->execute([$sess['id']]);
-            $vegOrderStatus = $ordSt->fetchAll();
-        }
-
         // Корректировки (за последние 7 дней)
         $corrStats = $pdo->query("SELECT
             SUM(status = 'pending') as pending,
@@ -4190,8 +4174,6 @@ if ($endpoint === 'rpc') {
             'veg_subs' => $vegSubs,
             'all_restaurants' => $allRests,
             'reminder_log' => $reminders,
-            'active_session' => $activeSession,
-            'veg_order_status' => $vegOrderStatus,
             'correction_stats' => $corrStats ?: ['pending' => 0, 'in_progress' => 0, 'approved' => 0, 'rejected' => 0],
         ]);
     }
@@ -5059,6 +5041,329 @@ if ($endpoint === 'rpc') {
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
         $s = $pdo->query("SELECT name, display_role, telegram_chat_id FROM users ORDER BY name");
         respond($s->fetchAll());
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // МОДУЛЬ ОПРОСОВ (surveys)
+    // ═══════════════════════════════════════════════════════════════
+
+    if (!function_exists('surveyGetTargetRestaurants')) {
+        function surveyGetTargetRestaurants($pdo, $group) {
+            $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
+            $stmt = $pdo->prepare("
+                SELECT r.number AS restaurant_number, r.legal_entity_group, r.address, r.city
+                FROM restaurants r
+                WHERE r.active = 1
+                  AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                  AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM ro_users ru
+                        WHERE ru.restaurant_number = r.number
+                          AND ru.is_active = 1
+                          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = r.legal_entity_group COLLATE utf8mb4_unicode_ci
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM veg_telegram_subs vs
+                        WHERE vs.restaurant_number = r.number
+                    )
+                  )
+                ORDER BY r.number
+            ");
+            $stmt->execute([$group]);
+            return $stmt->fetchAll();
+        }
+    }
+
+    if (!function_exists('surveyGetRecipientChatIds')) {
+        function surveyGetRecipientChatIds($pdo, $group) {
+            $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
+            $chatIds = [];
+
+            $roStmt = $pdo->prepare("
+                SELECT DISTINCT ru.telegram_chat_id
+                FROM ro_users ru
+                JOIN restaurants r
+                  ON r.number = ru.restaurant_number
+                 AND r.active = 1
+                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = ru.legal_entity_group COLLATE utf8mb4_unicode_ci
+                WHERE ru.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                  AND ru.is_active = 1
+                  AND ru.telegram_chat_id IS NOT NULL
+            ");
+            $roStmt->execute([$group]);
+            foreach ($roStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+                $chatId = trim((string)$chatId);
+                if ($chatId !== '') $chatIds[$chatId] = true;
+            }
+
+            $vegStmt = $pdo->prepare("
+                SELECT DISTINCT vs.chat_id
+                FROM veg_telegram_subs vs
+                JOIN restaurants r
+                  ON r.number = vs.restaurant_number
+                 AND r.active = 1
+                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                WHERE vs.chat_id IS NOT NULL
+            ");
+            $vegStmt->execute([$group]);
+            foreach ($vegStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+                $chatId = trim((string)$chatId);
+                if ($chatId !== '') $chatIds[$chatId] = true;
+            }
+
+            return array_keys($chatIds);
+        }
+    }
+
+    if ($fn === 'surveys_list') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $rows = $pdo->query("
+            SELECT s.id, s.title, s.legal_entity_group, s.status, s.allow_comment,
+                   s.remind_after_hours, s.sent_at, s.created_by, s.created_at, s.closed_at,
+                   (SELECT COUNT(*) FROM survey_questions sq WHERE sq.survey_id = s.id) AS questions_count,
+                   (SELECT COUNT(*) FROM survey_responses sr WHERE sr.survey_id = s.id) AS responses_count
+            FROM surveys s
+            ORDER BY s.created_at DESC
+        ")->fetchAll();
+
+        foreach ($rows as &$row) {
+            $group = $row['legal_entity_group'] ?? 'BK_VM';
+            $row['target_restaurants_count'] = count(surveyGetTargetRestaurants($pdo, $group));
+        }
+        unset($row);
+
+        respond($rows);
+    }
+
+    if ($fn === 'survey_get') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+
+        $survey = $pdo->prepare("SELECT * FROM surveys WHERE id = ?");
+        $survey->execute([$id]);
+        $s = $survey->fetch();
+        if (!$s) respond(['error' => 'Не найдено'], 404);
+
+        $questions = $pdo->prepare("SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY sort_order, id");
+        $questions->execute([$id]);
+        $qs = $questions->fetchAll();
+
+        foreach ($qs as &$q) {
+            $opts = $pdo->prepare("SELECT * FROM survey_options WHERE question_id = ? ORDER BY sort_order, id");
+            $opts->execute([$q['id']]);
+            $q['options'] = $opts->fetchAll();
+        }
+        $s['questions'] = $qs;
+
+        // Ответы
+        $responses = $pdo->prepare("
+            SELECT sr.id, sr.restaurant_number, sr.legal_entity_group, sr.comment, sr.submitted_at,
+                   sr.telegram_chat_id, r.address, r.city
+            FROM survey_responses sr
+            LEFT JOIN restaurants r
+              ON r.number = sr.restaurant_number
+             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = sr.legal_entity_group COLLATE utf8mb4_unicode_ci
+            WHERE sr.survey_id = ?
+            ORDER BY sr.restaurant_number ASC, sr.submitted_at DESC
+        ");
+        $responses->execute([$id]);
+        $respRows = $responses->fetchAll();
+
+        foreach ($respRows as &$r) {
+            $ans = $pdo->prepare("
+                SELECT sa.question_id, sq.text AS question_text, so.id AS option_id, so.text AS option_text
+                FROM survey_answers sa
+                JOIN survey_questions sq ON sq.id = sa.question_id
+                JOIN survey_options so ON so.id = sa.option_id
+                WHERE sa.response_id = ?
+                ORDER BY sq.sort_order, sq.id
+            ");
+            $ans->execute([$r['id']]);
+            $r['answers'] = $ans->fetchAll();
+        }
+        $s['responses'] = $respRows;
+
+        $answeredStmt = $pdo->prepare("SELECT restaurant_number FROM survey_responses WHERE survey_id = ?");
+        $answeredStmt->execute([$id]);
+        $answered = [];
+        foreach ($answeredStmt->fetchAll(PDO::FETCH_COLUMN) as $restaurantNumber) {
+            $answered[(int)$restaurantNumber] = true;
+        }
+
+        $pendingRows = [];
+        foreach (surveyGetTargetRestaurants($pdo, $s['legal_entity_group']) as $restaurant) {
+            if (!isset($answered[(int)$restaurant['restaurant_number']])) {
+                $pendingRows[] = $restaurant;
+            }
+        }
+        $s['pending_restaurants'] = $pendingRows;
+
+        respond($s);
+    }
+
+    if ($fn === 'survey_save') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $id    = intval($body['id'] ?? 0);
+        $title = trim($body['title'] ?? '');
+        $group = in_array($body['legal_entity_group'] ?? '', ['BK_VM','PS']) ? $body['legal_entity_group'] : 'BK_VM';
+        $desc  = trim($body['description'] ?? '');
+        $allowComment = isset($body['allow_comment']) ? (int)(bool)$body['allow_comment'] : 1;
+        $remindHours  = max(1, intval($body['remind_after_hours'] ?? 24));
+        $questions = is_array($body['questions'] ?? null) ? $body['questions'] : [];
+
+        if (!$title) respond(['error' => 'Нужен заголовок'], 400);
+
+        $normalizedQuestions = [];
+        foreach ($questions as $q) {
+            $qText = trim($q['text'] ?? '');
+            if ($qText === '') continue;
+
+            $normalizedOptions = [];
+            foreach (($q['options'] ?? []) as $opt) {
+                $optText = trim($opt['text'] ?? '');
+                if ($optText !== '') {
+                    $normalizedOptions[] = $optText;
+                }
+            }
+
+            if (count($normalizedOptions) < 2) {
+                respond(['error' => 'У каждого вопроса должно быть минимум 2 варианта ответа'], 400);
+            }
+
+            $normalizedQuestions[] = [
+                'text' => $qText,
+                'options' => $normalizedOptions,
+            ];
+        }
+
+        if (empty($normalizedQuestions)) respond(['error' => 'Нужен хотя бы один вопрос'], 400);
+
+        if ($id) {
+            $chk = $pdo->prepare("SELECT status FROM surveys WHERE id = ?");
+            $chk->execute([$id]);
+            $row = $chk->fetch();
+            if (!$row) respond(['error' => 'Не найдено'], 404);
+            if ($row['status'] !== 'draft') respond(['error' => 'Редактировать можно только черновик'], 400);
+        }
+
+        $pdo->beginTransaction();
+        try {
+            if ($id) {
+                $pdo->prepare("UPDATE surveys SET title=?, description=?, legal_entity_group=?, allow_comment=?, remind_after_hours=? WHERE id=?")
+                    ->execute([$title, $desc, $group, $allowComment, $remindHours, $id]);
+                $pdo->prepare("DELETE FROM survey_questions WHERE survey_id = ?")->execute([$id]);
+            } else {
+                $createdBy = trim((string)($caller['name'] ?? $caller['login'] ?? $caller['email'] ?? 'system'));
+                if ($createdBy === '') $createdBy = 'system';
+                $pdo->prepare("INSERT INTO surveys (title, description, legal_entity_group, allow_comment, remind_after_hours, created_by) VALUES (?,?,?,?,?,?)")
+                    ->execute([$title, $desc, $group, $allowComment, $remindHours, $createdBy]);
+                $id = (int)$pdo->lastInsertId();
+            }
+
+            foreach ($normalizedQuestions as $qi => $q) {
+                $pdo->prepare("INSERT INTO survey_questions (survey_id, text, sort_order) VALUES (?,?,?)")
+                    ->execute([$id, $q['text'], $qi]);
+                $qId = (int)$pdo->lastInsertId();
+                foreach ($q['options'] as $oi => $optText) {
+                    $pdo->prepare("INSERT INTO survey_options (question_id, text, sort_order) VALUES (?,?,?)")
+                        ->execute([$qId, $optText, $oi]);
+                }
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            respond(['error' => $e->getMessage()], 500);
+        }
+
+        respond(['success' => true, 'id' => $id]);
+    }
+
+    if ($fn === 'survey_send') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+
+        $survey = $pdo->prepare("SELECT * FROM surveys WHERE id = ?");
+        $survey->execute([$id]);
+        $s = $survey->fetch();
+        if (!$s) respond(['error' => 'Не найдено'], 404);
+        if ($s['status'] !== 'draft') respond(['error' => 'Можно разослать только черновик'], 400);
+
+        $qCountStmt = $pdo->prepare("SELECT COUNT(*) FROM survey_questions WHERE survey_id = ?");
+        $qCountStmt->execute([$id]);
+        $qCount = (int)$qCountStmt->fetchColumn();
+        if (!$qCount) respond(['error' => 'Нет вопросов'], 400);
+
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
+
+        $chatIds = surveyGetRecipientChatIds($pdo, $s['legal_entity_group']);
+
+        if (empty($chatIds)) respond(['error' => 'Нет подписчиков в этой группе'], 400);
+
+        $safeTitle = htmlspecialchars($s['title'], ENT_QUOTES, 'UTF-8');
+        $sent = 0;
+
+        foreach ($chatIds as $cid) {
+            $text = "📋 <b>Опрос: {$safeTitle}</b>\n\n";
+            if ($s['description']) $text .= htmlspecialchars($s['description'], ENT_QUOTES, 'UTF-8') . "\n\n";
+            $text .= "Нажмите кнопку, чтобы пройти опрос.";
+
+            $btns = ['inline_keyboard' => [
+                [['text' => '📝 Пройти опрос', 'callback_data' => "srv_start_{$id}"]],
+            ]];
+
+            $data = json_encode(['chat_id' => $cid, 'text' => $text, 'parse_mode' => 'HTML', 'reply_markup' => json_encode($btns)]);
+            $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $data, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
+            $res = curl_exec($ch); curl_close($ch);
+            $r = json_decode($res, true);
+            if ($r && ($r['ok'] ?? false)) $sent++;
+        }
+
+        if ($sent <= 0) respond(['error' => 'Не удалось отправить опрос ни одному получателю'], 500);
+
+        $pdo->prepare("UPDATE surveys SET status = 'active', sent_at = NOW() WHERE id = ?")->execute([$id]);
+
+        respond(['success' => true, 'sent' => $sent, 'total' => count($chatIds)]);
+    }
+
+    if ($fn === 'survey_close') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+        $pdo->prepare("UPDATE surveys SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$id]);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'survey_delete') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        requireModuleAccess($caller, 'surveys', 'full', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        $id = intval($body['id'] ?? 0);
+        if (!$id) respond(['error' => 'id required'], 400);
+        $pdo->prepare("DELETE FROM surveys WHERE id = ?")->execute([$id]);
+        respond(['success' => true]);
     }
 
     respond(['error'=>'Not found'], 404);

@@ -53,6 +53,7 @@ const routes = [
       { path: 'chat', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'Чат с ресторанами', module: 'chat' } },
       { path: 'restaurant-orders', name: 'restaurant-orders', component: () => import('@/views/RestaurantOrdersManagerView.vue'), meta: { title: 'Заказы ресторанов', module: 'restaurant-orders' } },
       { path: 'restaurant-report', name: 'restaurant-report', component: () => import('@/views/RestaurantReportView.vue'), meta: { title: 'Отчёт по заказам', module: 'restaurant-orders' } },
+      { path: 'surveys', name: 'surveys', component: () => import('@/views/SurveysView.vue'), meta: { title: 'Опросы', module: 'surveys' } },
       { path: 'supplier-orders', name: 'supplier-orders', component: () => import('@/views/SupplierOrdersHubView.vue'), meta: { title: 'Заявки поставщикам', module: 'supplier-orders' } },
       { path: 'truck-loading', name: 'truck-loading', component: () => import('@/views/TruckLoadingView.vue'), meta: { title: 'Загрузка машин', module: 'truck-loading' } },
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
@@ -94,6 +95,7 @@ const routes = [
       { path: 'orders/delivery', name: 'restaurant-orders-delivery', component: EmptySlot, meta: { title: 'Основная поставка' } },
       { path: 'orders/supplier/:supplierId', name: 'restaurant-orders-supplier', component: EmptySlot, meta: { title: 'Поставщик' } },
       { path: 'orders/history', name: 'restaurant-orders-history', component: EmptySlot, meta: { title: 'История заказов' } },
+      { path: 'surveys', name: 'restaurant-surveys', component: EmptySlot, meta: { title: 'Опросы' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Остатки' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
     ],
@@ -174,7 +176,7 @@ router.afterEach((to) => {
   document.title = pageTitle ? `${pageTitle} - ${APP_TITLE}` : APP_TITLE;
 });
 
-const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'supplier-orders', 'truck-loading'];
+const NAV_MODULES = ['order', 'history', 'plan-fact', 'planning', 'analytics', 'calendar', 'analysis', 'restaurant-sales', 'database', 'delivery-schedule', 'shelf-life', 'pricing', 'tenders', 'marketing', 'pallet-calc', 'stock-collection', 'deficit', 'distribution', 'corrections', 'chat', 'restaurant-orders', 'surveys', 'supplier-orders', 'truck-loading'];
 
 router.beforeEach((to) => {
   const userStore = useUserStore();

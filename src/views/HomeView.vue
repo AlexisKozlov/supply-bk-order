@@ -395,6 +395,7 @@ const toolsFolderItems = [
   { key: 'pallet-calc',        name: 'Паллеты',                svg: svgIcons.palletCalc },
   { key: 'payments',           name: 'Оплаты',                 svg: svgIcons.payments },
   { key: 'corrections',        name: 'Корректировки',          svg: svgIcons.corrections },
+  { key: 'surveys',            name: 'Опросы',                 svg: svgIcons.tenders },
   { key: 'chat',               name: 'Чат',                    svg: svgIcons.chat },
   { key: 'search',             name: 'Поиск карточек',         svg: svgIcons.search, public: true },
 ];

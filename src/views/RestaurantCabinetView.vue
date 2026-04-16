@@ -49,7 +49,10 @@
       <div class="sb-label">Другое</div>
       <template v-for="tab in mainTabs.filter(t => t.id !== 'dashboard' && t.id !== 'orders')" :key="tab.id">
         <button class="sb-item" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
-          <span class="sb-icon"><svg v-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+          <span class="sb-icon">
+            <svg v-if="tab.id === 'surveys'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            <svg v-else-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </span>
           {{ tab.label }}
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
@@ -88,7 +91,7 @@
     <div class="cab-main">
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'stock' ? 'Остатки' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Остатки' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
       </div>
@@ -522,6 +525,97 @@
       </div>
     </div>
 
+    <!-- ══════ TAB: Опросы ══════ -->
+    <section v-if="activeTab === 'surveys' && !globalLoading && !globalError" class="cab-section">
+      <div v-if="surveyError" class="error-msg" style="margin-bottom:16px">{{ surveyError }}</div>
+      <div v-if="surveySuccess" class="success-msg" style="margin-bottom:16px">{{ surveySuccess }}</div>
+
+      <div v-if="surveyListLoading && !surveyItems.length" class="cab-empty-card">
+        <p>Загрузка опросов...</p>
+      </div>
+      <div v-else-if="!surveyItems.length" class="cab-empty-card">
+        <h2>Сейчас нет опросов</h2>
+        <p>Когда для вашего ресторана появится новый опрос, он будет здесь.</p>
+      </div>
+      <div v-else class="cab-surveys">
+        <aside class="cab-surveys-list">
+          <button
+            v-for="survey in surveyItems"
+            :key="survey.id"
+            class="cab-survey-item"
+            :class="{ active: selectedSurveyId === Number(survey.id) }"
+            @click="surveySuccess = ''; openSurvey(survey.id)"
+          >
+            <div class="cab-survey-item-title">{{ survey.title }}</div>
+            <div class="cab-survey-item-meta">
+              <span>{{ survey.questions_count }} {{ survey.questions_count === 1 ? 'вопрос' : 'вопроса' }}</span>
+              <span>{{ survey.already_answered ? 'Отвечено' : 'Ждёт ответа' }}</span>
+            </div>
+            <div class="cab-survey-item-date">
+              {{ survey.already_answered ? `Ответ отправлен ${fmtDateTime(survey.submitted_at)}` : `Отправлен ${fmtDateTime(survey.sent_at || survey.created_at)}` }}
+            </div>
+          </button>
+        </aside>
+
+        <div class="cab-surveys-detail">
+          <div v-if="surveyDetailLoading" class="cab-empty-card">
+            <p>Открываю опрос...</p>
+          </div>
+          <div v-else-if="!surveyDetail" class="cab-empty-card">
+            <p>Выберите опрос слева.</p>
+          </div>
+          <div v-else class="cab-survey-card">
+            <div class="cab-survey-head">
+              <div>
+                <h2>{{ surveyDetail.title }}</h2>
+                <p v-if="surveyDetail.description" class="cab-survey-description">{{ surveyDetail.description }}</p>
+              </div>
+              <div class="cab-survey-status" :class="{ done: surveyDetail.already_answered }">
+                {{ surveyDetail.already_answered ? 'Уже отвечено' : 'Нужно ответить' }}
+              </div>
+            </div>
+
+            <div v-if="surveyDetail.already_answered" class="cab-survey-note">
+              Ваш ответ уже сохранён{{ surveyDetail.submitted_at ? ` (${fmtDateTime(surveyDetail.submitted_at)})` : '' }}.
+            </div>
+
+            <div v-for="(question, index) in surveyDetail.questions || []" :key="question.id" class="cab-survey-question">
+              <div class="cab-survey-question-title">{{ index + 1 }}. {{ question.text }}</div>
+              <label v-for="option in question.options || []" :key="option.id" class="cab-survey-option">
+                <input
+                  v-model="surveyAnswers[question.id]"
+                  type="radio"
+                  :name="`survey-question-${question.id}`"
+                  :value="Number(option.id)"
+                  :disabled="surveyDetail.already_answered || surveySubmitting"
+                />
+                <span>{{ option.text }}</span>
+              </label>
+            </div>
+
+            <div v-if="surveyDetail.allow_comment" class="cab-survey-comment">
+              <label class="cab-survey-comment-label" for="survey-comment">Комментарий</label>
+              <textarea
+                id="survey-comment"
+                v-model="surveyComment"
+                class="cab-survey-textarea"
+                rows="4"
+                placeholder="Если нужно, добавьте комментарий"
+                :disabled="surveyDetail.already_answered || surveySubmitting"
+              />
+            </div>
+
+            <div v-if="!surveyDetail.already_answered" class="cab-survey-actions">
+              <button class="btn btn-primary" :disabled="surveySubmitting" @click="submitSurveyAnswer">
+                <span v-if="surveySubmitting" class="cab-spin cab-spin-sm"></span>
+                Отправить ответ
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ══════ TAB: Сбор остатков ══════ -->
     <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section">
       <div v-if="stockLoading" class="cab-empty-card">
@@ -748,7 +842,7 @@
     <!-- ══════ Mobile tab bar ══════ -->
     <div class="mob-tabbar">
       <button v-for="tab in mainTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
-        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'stock' ? '\u{1F4CB}' : '\u{2699}' }}</span>
+        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'surveys' ? '\u{2705}' : tab.id === 'stock' ? '\u{1F4CB}' : '\u{2699}' }}</span>
         <span class="mob-tab-label">{{ tab.label }}</span>
         <span v-if="tab.badge" class="mob-tab-badge">{{ tab.badge }}</span>
       </button>
@@ -770,7 +864,6 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
-import { db } from '@/lib/apiClient.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
@@ -868,6 +961,19 @@ const historyOrderModal = reactive({
   order: null,
 });
 
+// ═══ Surveys ═══
+const surveyItems = ref([]);
+const surveyListLoading = ref(false);
+const surveyDetailLoading = ref(false);
+const surveySubmitting = ref(false);
+const surveyError = ref('');
+const surveySuccess = ref('');
+const surveyDetail = ref(null);
+const selectedSurveyId = ref(null);
+const surveyComment = ref('');
+const surveyAnswers = reactive({});
+const surveyPendingCount = computed(() => surveyItems.value.filter(item => !item.already_answered).length);
+
 // Уникальные источники для фильтра, сгруппированные по названию
 // (чтобы «Планета Ресторанов» из veg_orders и из so_orders давала один чип)
 const historySourceOptions = computed(() => {
@@ -958,6 +1064,9 @@ const mainTabs = computed(() => {
     { id: 'dashboard', label: 'Главная' },
     { id: 'orders', label: 'Заказы', badge: dashOrdersPending.value || null, badgeType: dashOrdersPending.value ? 'warn' : '' },
   ];
+  if (surveyItems.value.length) {
+    tabs.push({ id: 'surveys', label: 'Опросы', badge: surveyPendingCount.value || null, badgeType: surveyPendingCount.value ? 'warn' : '' });
+  }
   if (stockCollection.active) {
     tabs.push({
       id: 'stock', label: 'Остатки',
@@ -1570,6 +1679,9 @@ async function switchTab(tab, subTab) {
       if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
     }
   }
+  if (tab === 'surveys' && !surveyItems.value.length && !surveyListLoading.value) {
+    loadSurveyList();
+  }
   if (tab === 'stock' && stockCollection.active) loadStockInline();
 }
 // ═══ Синхронизация табов с роутом (URL) ═══
@@ -1594,6 +1706,13 @@ function applyRouteToState() {
     orderSubTab.value = 'sup_' + supId;
     const sup = suppliers.value.find(s => String(s.id) === supId);
     if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+  } else if (name === 'restaurant-surveys') {
+    if (surveyItems.value.length) {
+      activeTab.value = 'surveys';
+    } else {
+      activeTab.value = 'dashboard';
+      if (!surveyListLoading.value) loadSurveyList();
+    }
   } else if (name === 'restaurant-stock') {
     activeTab.value = 'stock';
   } else if (name === 'restaurant-profile') {
@@ -1605,6 +1724,8 @@ function syncStateToRoute() {
   let target = null;
   if (activeTab.value === 'dashboard') {
     target = { name: 'restaurant-dashboard' };
+  } else if (activeTab.value === 'surveys') {
+    target = { name: 'restaurant-surveys' };
   } else if (activeTab.value === 'stock') {
     target = { name: 'restaurant-stock' };
   } else if (activeTab.value === 'profile') {
@@ -1678,6 +1799,89 @@ function closeHistoryOrderModal() {
   historyOrderModal.loading = false;
   historyOrderModal.error = '';
   historyOrderModal.order = null;
+}
+
+function resetSurveyDraft(detail = surveyDetail.value) {
+  for (const key of Object.keys(surveyAnswers)) delete surveyAnswers[key];
+  if (!detail) {
+    surveyComment.value = '';
+    return;
+  }
+  const answers = detail.answers || {};
+  for (const [questionId, optionId] of Object.entries(answers)) {
+    surveyAnswers[questionId] = Number(optionId);
+  }
+  surveyComment.value = detail.comment || '';
+}
+
+async function loadSurveyList(preferredId = null) {
+  surveyListLoading.value = true;
+  surveyError.value = '';
+  try {
+    surveyItems.value = await roStore.loadSurveys();
+    const nextId = preferredId || selectedSurveyId.value;
+    if (nextId && surveyItems.value.some(item => Number(item.id) === Number(nextId))) {
+      await openSurvey(nextId);
+    } else if (activeTab.value === 'surveys' && surveyItems.value.length) {
+      await openSurvey(Number(surveyItems.value[0].id));
+    } else if (!surveyItems.value.length) {
+      selectedSurveyId.value = null;
+      surveyDetail.value = null;
+      resetSurveyDraft(null);
+      if (activeTab.value === 'surveys') {
+        activeTab.value = 'dashboard';
+      }
+    }
+  } catch (e) {
+    surveyItems.value = [];
+    surveyError.value = e.message || 'Не удалось загрузить опросы';
+  } finally {
+    surveyListLoading.value = false;
+  }
+}
+
+async function openSurvey(surveyId) {
+  if (!surveyId) return;
+  surveyDetailLoading.value = true;
+  surveyError.value = '';
+  selectedSurveyId.value = Number(surveyId);
+  try {
+    surveyDetail.value = await roStore.loadSurvey(surveyId);
+    resetSurveyDraft(surveyDetail.value);
+  } catch (e) {
+    surveyDetail.value = null;
+    resetSurveyDraft(null);
+    surveyError.value = e.message || 'Не удалось открыть опрос';
+  } finally {
+    surveyDetailLoading.value = false;
+  }
+}
+
+async function submitSurveyAnswer() {
+  if (!surveyDetail.value?.id || surveyDetail.value.already_answered) return;
+  surveyError.value = '';
+  surveySuccess.value = '';
+
+  const payload = {};
+  for (const question of (surveyDetail.value.questions || [])) {
+    const selected = Number(surveyAnswers[question.id] || 0);
+    if (!selected) {
+      surveyError.value = 'Ответьте на все вопросы';
+      return;
+    }
+    payload[question.id] = selected;
+  }
+
+  surveySubmitting.value = true;
+  try {
+    await roStore.submitSurvey(surveyDetail.value.id, payload, surveyComment.value);
+    await loadSurveyList(surveyDetail.value.id);
+    surveySuccess.value = 'Ответ сохранён';
+  } catch (e) {
+    surveyError.value = e.message || 'Не удалось сохранить ответ';
+  } finally {
+    surveySubmitting.value = false;
+  }
 }
 
 // Password change
@@ -1856,6 +2060,7 @@ async function loadCabinetData() {
   }
   delPreviousOrders.value = (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited');
   await loadHistory();
+  await loadSurveyList();
   await checkStockCollection();
   await loadTgStatus();
   await loadRestaurantBroadcasts();
@@ -2394,6 +2599,42 @@ tr.del-err { background: #fef2f2; }
 .stock-link { display: inline-flex; margin-top: 16px; }
 
 /* Inline stock form */
+.cab-surveys { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; }
+.cab-surveys-list,
+.cab-survey-card { background: white; border: 1px solid #EDE8E3; border-radius: 18px; }
+.cab-surveys-list { padding: 14px; display: flex; flex-direction: column; gap: 10px; height: fit-content; }
+.cab-surveys-detail { min-width: 0; }
+.cab-survey-item {
+  width: 100%; text-align: left; border: 1px solid #EFE6DC; border-radius: 14px; background: #FFFBF8;
+  padding: 14px; cursor: pointer; font: inherit; color: inherit; transition: 0.15s ease;
+}
+.cab-survey-item:hover,
+.cab-survey-item.active { border-color: #D7B79A; background: white; transform: translateY(-1px); }
+.cab-survey-item-title { font-size: 14px; font-weight: 700; color: #502314; }
+.cab-survey-item-meta,
+.cab-survey-item-date { margin-top: 6px; font-size: 12px; color: #8b7355; display: flex; gap: 8px; flex-wrap: wrap; }
+.cab-survey-card { padding: 20px; }
+.cab-survey-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #F2EDE8; }
+.cab-survey-head h2 { margin: 0; font-size: 20px; color: #502314; }
+.cab-survey-description { margin: 8px 0 0; color: #6b4f3a; white-space: pre-line; }
+.cab-survey-status { padding: 8px 12px; border-radius: 999px; background: #FFF3E7; color: #B45309; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.cab-survey-status.done { background: #ECFDF5; color: #15803D; }
+.cab-survey-note { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #F7F5F2; color: #6b4f3a; font-size: 13px; }
+.cab-survey-question { padding: 16px 0; border-bottom: 1px solid #F5F0EB; }
+.cab-survey-question:last-of-type { border-bottom: none; }
+.cab-survey-question-title { font-size: 15px; font-weight: 700; color: #502314; margin-bottom: 12px; }
+.cab-survey-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #EFE6DC; border-radius: 12px; background: #FFFBF8; cursor: pointer; margin-bottom: 8px; }
+.cab-survey-option input { margin-top: 2px; }
+.cab-survey-option span { color: #502314; line-height: 1.35; }
+.cab-survey-comment { margin-top: 18px; }
+.cab-survey-comment-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: #502314; }
+.cab-survey-textarea {
+  width: 100%; min-height: 110px; padding: 12px 14px; border: 1.5px solid #E0DBD5; border-radius: 12px;
+  font: inherit; color: #502314; background: white; resize: vertical;
+}
+.cab-survey-textarea:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
+.cab-survey-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+
 .stock-inline { background: white; border-radius: 18px; padding: 20px; margin: 0 0 16px; border: 1px solid #EDE8E3; }
 .stock-inline-head { padding-bottom: 12px; border-bottom: 1px solid #F2EDE8; margin-bottom: 12px; }
 .stock-inline-head h2 { color: #502314; margin: 0 0 4px; font-size: 18px; }
@@ -2517,6 +2758,13 @@ tr.del-err { background: #fef2f2; }
   .profile-card { margin-top: 8px; }
   .input-field { font-size: 16px; padding: 12px 14px; }
   .pw-form .btn { width: 100%; justify-content: center; }
+
+  /* Surveys */
+  .cab-surveys { grid-template-columns: 1fr; }
+  .cab-surveys-list { padding: 12px; }
+  .cab-survey-card { padding: 16px; }
+  .cab-survey-head { flex-direction: column; }
+  .cab-survey-actions .btn { width: 100%; justify-content: center; }
 
   /* Success */
   .cab-success { min-height: 25vh; }
