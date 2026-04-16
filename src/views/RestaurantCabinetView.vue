@@ -444,49 +444,79 @@
         <div v-if="historyLoading" class="mini-loader"><div class="cab-spin"></div></div>
         <div v-else-if="historyError" class="cab-empty-card"><p>{{ historyError }}</p></div>
         <div v-else-if="!historyOrders.length" class="cab-empty-card"><h2>Нет заказов</h2></div>
-        <div v-else>
-          <div v-for="order in historyOrders" :key="order.id" class="history-card" @click="openHistoryOrder(order)">
-            <div class="history-top">
-              <span class="history-date">{{ fmtDate(order.delivery_date) }}</span>
-              <span class="dash-order-source" :class="'src-' + order.source">{{ order.source_name }}</span>
-              <span class="dash-order-status" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
-            </div>
-            <div class="history-meta">
-              <span>{{ order.item_count }} поз.</span>
-              <span>{{ order.total_qty }} {{ order.source === 'delivery' ? 'кор.' : 'шт.' }}</span>
-              <span v-if="order.submitted_at" class="history-time">{{ fmtDateTime(order.submitted_at) }}</span>
+        <template v-else>
+          <!-- Фильтр по источнику -->
+          <div class="hist-filters">
+            <button class="hist-filter-chip" :class="{ active: historyFilter === 'all' }" @click="historyFilter = 'all'">Все</button>
+            <button v-for="src in historySourceOptions" :key="src.label"
+              class="hist-filter-chip" :class="[{ active: historyFilter === src.label }, 'src-chip-' + src.source]"
+              @click="historyFilter = src.label">
+              {{ src.label }}
+            </button>
+          </div>
+          <div v-if="!filteredHistoryOrders.length" class="cab-empty-card"><p>Нет заказов по этому фильтру</p></div>
+          <div v-else class="hist-cards">
+            <div v-for="order in filteredHistoryOrders" :key="order.id" class="hist-card" :class="'hist-src-' + order.source" @click="openHistoryOrder(order)">
+              <div class="hist-card-left"></div>
+              <div class="hist-card-body">
+                <div class="hist-card-top">
+                  <span class="hist-card-date">{{ fmtDate(order.delivery_date) }}</span>
+                  <span class="hist-badge" :class="'src-' + order.source">{{ order.source_name }}</span>
+                  <span class="hist-badge status-badge" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
+                </div>
+                <div class="hist-card-meta">
+                  <span v-if="Number(order.item_count) > 0" class="hist-meta-pill">
+                    {{ order.item_count }} поз. · {{ order.total_qty }} {{ order.source === 'delivery' ? 'кор.' : 'шт.' }}
+                  </span>
+                  <span v-else class="hist-meta-skip">Поставка не нужна</span>
+                  <span v-if="order.submitted_at" class="hist-card-time">{{ fmtDateTime(order.submitted_at) }}</span>
+                </div>
+              </div>
+              <div class="hist-card-arrow">›</div>
             </div>
           </div>
-        </div>
+        </template>
       </div>
     </section>
 
     <div v-if="historyOrderModal.show" class="modal-overlay" @click.self="closeHistoryOrderModal">
-      <div class="cab-modal">
+      <div class="cab-modal hist-modal">
         <div class="cab-modal-head">
-          <h2>{{ historyOrderModal.order?.source_name || 'Заказ' }}</h2>
+          <div class="hist-modal-title-block">
+            <span class="hist-badge" :class="'src-' + historyOrderModal.order?.source">{{ historyOrderModal.order?.source_name || 'Заказ' }}</span>
+            <span class="hist-modal-date">{{ historyOrderModal.order ? fmtDate(historyOrderModal.order.delivery_date) : '' }}</span>
+          </div>
           <button class="cab-modal-close" @click="closeHistoryOrderModal">&times;</button>
         </div>
         <div class="cab-modal-body">
           <div v-if="historyOrderModal.loading" class="cab-empty-card"><p>Загрузка…</p></div>
           <div v-else-if="historyOrderModal.error" class="cab-empty-card"><p>{{ historyOrderModal.error }}</p></div>
           <template v-else-if="historyOrderModal.order">
-            <div class="history-view-meta">
-              <div><strong>Дата доставки:</strong> {{ fmtDate(historyOrderModal.order.delivery_date) }}</div>
-              <div><strong>Статус:</strong> {{ statusLabel(historyOrderModal.order.status) }}</div>
-              <div v-if="historyOrderModal.order.submitted_at"><strong>Подано:</strong> {{ fmtDateTime(historyOrderModal.order.submitted_at) }}</div>
-              <div v-if="historyOrderModal.order.comment"><strong>Комментарий:</strong> {{ historyOrderModal.order.comment }}</div>
+            <div class="hist-modal-meta">
+              <div class="hist-modal-meta-row">
+                <span class="hist-badge status-badge" :class="'st-' + historyOrderModal.order.status">{{ statusLabel(historyOrderModal.order.status) }}</span>
+                <span v-if="historyOrderModal.order.submitted_at" class="hist-modal-time">Подано {{ fmtDateTime(historyOrderModal.order.submitted_at) }}</span>
+              </div>
+              <div v-if="historyOrderModal.order.comment" class="hist-modal-comment">{{ historyOrderModal.order.comment }}</div>
             </div>
-            <div v-if="historyOrderModal.order.items?.length" class="history-view-items">
-              <div v-for="(item, idx) in historyOrderModal.order.items" :key="idx" class="history-view-row">
-                <div class="history-view-main">
+            <div v-if="historyOrderModal.order.items?.length" class="hist-modal-items">
+              <div v-for="(item, idx) in historyOrderModal.order.items" :key="idx" class="hist-modal-row">
+                <div class="hist-modal-name">
                   <span v-if="item.sku" class="rom-sku-label">{{ item.sku }}</span>
-                  <span>{{ item.product_name }}</span>
+                  {{ item.product_name }}
                 </div>
-                <div class="history-view-qty">{{ item.quantity }}</div>
+                <div class="hist-modal-qty-block">
+                  <template v-if="item.admin_qty !== null && item.admin_qty !== undefined && Number(item.admin_qty) !== Number(item.quantity)">
+                    <span class="hist-qty-orig">{{ item.quantity }}</span>
+                    <span class="hist-qty-arrow">→</span>
+                    <span class="hist-qty-admin">{{ item.admin_qty }}</span>
+                    <span class="hist-edited-mark" title="Изменено закупщиком">✏</span>
+                  </template>
+                  <span v-else class="hist-qty-val">{{ item.effective_qty ?? item.quantity }}</span>
+                </div>
               </div>
             </div>
-            <div v-else class="cab-empty-card"><p>В заказе нет позиций</p></div>
+            <div v-else class="cab-empty-card"><p>Нет позиций — поставка не нужна</p></div>
           </template>
         </div>
       </div>
@@ -809,11 +839,40 @@ const pwLoading = ref(false);
 const historyLoading = ref(false);
 const historyOrders = ref([]);
 const historyError = ref('');
+const historyFilter = ref('all');
 const historyOrderModal = reactive({
   show: false,
   loading: false,
   error: '',
   order: null,
+});
+
+// Уникальные источники для фильтра, сгруппированные по названию
+// (чтобы «Планета Ресторанов» из veg_orders и из so_orders давала один чип)
+const historySourceOptions = computed(() => {
+  const groups = new Map(); // label -> { keys: Set, source }
+  for (const o of historyOrders.value) {
+    const key = o.source === 'supplier' ? 'sup_' + o.supplier_id : o.source;
+    if (!groups.has(o.source_name)) {
+      groups.set(o.source_name, { keys: new Set(), source: o.source });
+    }
+    groups.get(o.source_name).keys.add(key);
+  }
+  return [...groups.entries()].map(([label, g]) => ({
+    label,
+    keys: [...g.keys],
+    source: g.source,
+  }));
+});
+
+const filteredHistoryOrders = computed(() => {
+  if (historyFilter.value === 'all') return historyOrders.value;
+  const opt = historySourceOptions.value.find(o => o.label === historyFilter.value);
+  if (!opt) return historyOrders.value;
+  return historyOrders.value.filter(o => {
+    const key = o.source === 'supplier' ? 'sup_' + o.supplier_id : o.source;
+    return opt.keys.includes(key);
+  });
 });
 
 // ═══ Dashboard ═══
@@ -1346,6 +1405,7 @@ async function supSelectDate(sup, dateInfo) {
   try {
     const products = await soStore.loadProducts(sup.id);
     if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
+    let displayProducts = products;
     if (dateInfo.order) {
       const order = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date);
       if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
@@ -1362,6 +1422,16 @@ async function supSelectDate(sup, dateInfo) {
             nextAdminEdits[item.sku] = { original: orig, edited: adminQ };
           }
         }
+        // Если дедлайн закрыт — показываем позиции из заявки, а не текущий шаблон,
+        // чтобы старые SKU (до смены шаблона) отображались корректно
+        if (dateInfo.deadline_status === 'closed') {
+          displayProducts = order.items.map(item => ({
+            sku: item.sku,
+            product_name: item.product_name || item.name || item.sku,
+            multiplicity: item.multiplicity ?? null,
+            min_qty: item.min_qty ?? null,
+          }));
+        }
       } else {
         // Заявка есть, но позиций нет → «Поставка не нужна»: ставим нули во все поля
         nextIsSkip = true;
@@ -1371,7 +1441,7 @@ async function supSelectDate(sup, dateInfo) {
       }
     }
     if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
-    supProducts[sup.id] = products;
+    supProducts[sup.id] = displayProducts;
     supQuantities[sup.id] = nextQuantities;
     supAdminEdits[sup.id] = nextAdminEdits;
     supIsSkipOrder[sup.id] = nextIsSkip;
@@ -2172,6 +2242,8 @@ tr.del-err { background: #fef2f2; }
   .cab-success-time { font-size: 24px; }
   .cab-success-btns { flex-direction: column; }
   .cab-success-btns .btn { max-width: none; }
+  .hist-card-time { margin-left: 0; }
+  .hist-modal-title-block { flex-wrap: wrap; }
 }
 
 /* Unified item list (Планета, Камако, etc.) */
@@ -2207,20 +2279,56 @@ tr.del-err { background: #fef2f2; }
 
 /* History */
 .history-list { padding: 0; }
-.history-card { background: white; padding: 14px 18px; border-bottom: 1px solid #F5F2EE; transition: background 0.1s; cursor: pointer; }
-.history-card:hover { background: #FAF8F5; }
-.history-card:first-child { border-radius: 16px 16px 0 0; }
-.history-card:last-child { border-bottom: none; border-radius: 0 0 16px 16px; }
-.history-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.history-date { font-weight: 700; color: #502314; font-size: 14px; }
-.history-meta { display: flex; gap: 10px; font-size: 12px; color: #8b7355; margin-top: 4px; }
-.history-time { margin-left: auto; }
-.history-view-meta { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; color: #6b4f3a; font-size: 14px; }
-.history-view-items { display: flex; flex-direction: column; gap: 0; border-top: 1px solid #F2EDE8; }
-.history-view-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #F7F2EC; }
-.history-view-row:last-child { border-bottom: none; }
-.history-view-main { display: flex; align-items: center; gap: 8px; min-width: 0; color: #502314; }
-.history-view-qty { flex-shrink: 0; font-weight: 700; color: #502314; }
+
+.hist-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0 12px; }
+.hist-filter-chip { padding: 6px 14px; border-radius: 20px; border: 1.5px solid #e0d5c8; background: white; font-size: 12px; font-weight: 600; color: #6b4f3a; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.hist-filter-chip:hover { border-color: #502314; color: #502314; }
+.hist-filter-chip.active { background: #502314; color: white; border-color: #502314; }
+.hist-filter-chip.src-chip-delivery.active { background: #D62300; border-color: #D62300; }
+.hist-filter-chip.src-chip-supplier.active { background: #2563eb; border-color: #2563eb; }
+.hist-filter-chip.src-chip-planeta.active { background: #16a34a; border-color: #16a34a; }
+
+.hist-cards { display: flex; flex-direction: column; gap: 8px; }
+.hist-card { display: flex; align-items: stretch; background: white; border-radius: 14px; border: 1px solid #EDE8E3; overflow: hidden; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s; }
+.hist-card:hover { box-shadow: 0 2px 12px rgba(80,35,20,0.10); border-color: #d5c8bc; }
+.hist-card-left { width: 5px; flex-shrink: 0; background: #e0d5c8; }
+.hist-src-delivery .hist-card-left { background: #D62300; }
+.hist-src-supplier .hist-card-left { background: #2563eb; }
+.hist-src-planeta .hist-card-left { background: #16a34a; }
+.hist-card-body { flex: 1; padding: 12px 14px; min-width: 0; }
+.hist-card-arrow { display: flex; align-items: center; padding: 0 12px 0 4px; font-size: 20px; color: #c5b8aa; }
+.hist-card-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 6px; }
+.hist-card-date { font-weight: 700; color: #502314; font-size: 14px; }
+.hist-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700; white-space: nowrap; }
+.src-delivery { background: #FFF0EE; color: #D62300; }
+.src-supplier { background: #EFF6FF; color: #2563eb; }
+.src-planeta { background: #ECFDF5; color: #16a34a; }
+.status-badge.st-submitted { background: #ECFDF5; color: #16a34a; }
+.status-badge.st-locked   { background: #FEF2F2; color: #dc2626; }
+.status-badge.st-draft    { background: #F5F0EB; color: #8b7355; }
+.hist-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hist-meta-pill { font-size: 12px; color: #6b4f3a; background: #F7F2EC; border-radius: 8px; padding: 2px 8px; font-weight: 600; }
+.hist-meta-skip { font-size: 12px; color: #d97706; font-style: italic; }
+.hist-card-time { font-size: 11px; color: #b0a090; margin-left: auto; }
+
+/* History modal */
+.hist-modal .cab-modal-head { border-bottom: 1px solid #F2EDE8; }
+.hist-modal-title-block { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.hist-modal-date { font-weight: 700; font-size: 16px; color: #502314; }
+.hist-modal-meta { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.hist-modal-meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hist-modal-time { font-size: 12px; color: #8b7355; }
+.hist-modal-comment { font-size: 13px; color: #6b4f3a; background: #FAF8F5; padding: 8px 12px; border-radius: 8px; }
+.hist-modal-items { border-top: 1px solid #F2EDE8; }
+.hist-modal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid #F7F2EC; }
+.hist-modal-row:last-child { border-bottom: none; }
+.hist-modal-name { flex: 1; min-width: 0; color: #502314; font-size: 14px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.hist-modal-qty-block { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.hist-qty-val { font-weight: 700; color: #502314; font-size: 15px; }
+.hist-qty-orig { font-size: 13px; color: #9e8a7a; text-decoration: line-through; }
+.hist-qty-arrow { font-size: 12px; color: #9e8a7a; }
+.hist-qty-admin { font-weight: 700; color: #D62300; font-size: 15px; }
+.hist-edited-mark { font-size: 11px; color: #d97706; }
 
 /* Stock */
 .stock-card { background: white; border-radius: 18px; padding: 32px 24px; margin: 0 0 16px; text-align: center; border: 1px solid #EDE8E3; }

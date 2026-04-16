@@ -1167,6 +1167,8 @@ if ($roAction === 'all-history' && $method === 'GET') {
     }
 
     // 3. Планета Ресторанов / овощи (veg_orders)
+    // Исключаем даты, для которых уже есть SO-заявка от этого ресторана —
+    // это дубли после перехода на модуль заявок поставщикам.
     $s3 = $pdo->prepare("
         SELECT vs.id as session_id, vs.name as session_name, vo.delivery_date,
                vo.submitted_at,
@@ -1176,6 +1178,12 @@ if ($roAction === 'all-history' && $method === 'GET') {
         JOIN veg_sessions vs ON vs.id = vo.session_id
         WHERE vo.restaurant_number = ? AND COALESCE(vo.admin_qty, vo.quantity) > 0
           AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM so_orders so
+              WHERE so.restaurant_number = vo.restaurant_number
+                AND so.delivery_date = vo.delivery_date
+                AND so.status != 'draft'
+          )
         GROUP BY vo.session_id, vo.delivery_date
         ORDER BY vo.delivery_date DESC LIMIT {$limit}
     ");
@@ -1263,7 +1271,9 @@ if ($roAction === 'history-order' && $method === 'GET') {
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
 
         $items = $pdo->prepare("
-            SELECT sku, product_name, COALESCE(admin_qty, quantity) AS quantity
+            SELECT sku, product_name, quantity,
+                   admin_qty,
+                   COALESCE(admin_qty, quantity) AS effective_qty
             FROM so_order_items
             WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0
             ORDER BY product_name

@@ -46,29 +46,59 @@
     </div>
 
     <template v-else>
-      <!-- Supplier selector -->
+      <!-- Supplier selector / История -->
       <div v-if="!selectedSupplier" class="so-supplier-list">
-        <h2 class="so-section-title">Заявки поставщикам</h2>
-        <div v-for="sup in suppliers" :key="sup.id" class="so-supplier-card" @click="selectSupplier(sup)">
-          <div class="so-supplier-name">{{ sup.name }}</div>
-          <div class="so-supplier-schedule">
-            График: {{ sup.schedule.map(s => s.order_day_name + ' → ' + s.delivery_day_name).join(', ') }}
-          </div>
-          <div v-if="!sup.is_accepting_orders" class="so-supplier-status closed">
-            {{ sup.pause_message || 'Приём заявок временно приостановлен' }}
-          </div>
-          <div v-else-if="!sup.available_dates?.length" class="so-supplier-status closed">
-            Ближайшие поставки не запланированы
-          </div>
-          <div v-else class="so-supplier-dates">
-            <div v-for="d in getOrderedDates(sup)" :key="d.delivery_date" class="so-date-chip"
-              :class="{ submitted: d.order, closed: d.deadline_status === 'closed' && !d.order }">
-              {{ formatDateShort(d.delivery_date) }}
-              <span v-if="d.order" class="so-chip-icon">✓</span>
-              <span v-else-if="d.deadline_status === 'closed'" class="so-chip-icon">✕</span>
-            </div>
+        <div class="so-header-row">
+          <h2 class="so-section-title">Заявки поставщикам</h2>
+          <div class="so-view-tabs">
+            <button class="so-view-tab" :class="{ active: !showHistory }" @click="showHistory = false">Поставщики</button>
+            <button class="so-view-tab" :class="{ active: showHistory }" @click="openHistory">История</button>
           </div>
         </div>
+
+        <!-- Список поставщиков -->
+        <template v-if="!showHistory">
+          <div v-for="sup in suppliers" :key="sup.id" class="so-supplier-card" @click="selectSupplier(sup)">
+            <div class="so-supplier-name">{{ sup.name }}</div>
+            <div class="so-supplier-schedule">
+              График: {{ sup.schedule.map(s => s.order_day_name + ' → ' + s.delivery_day_name).join(', ') }}
+            </div>
+            <div v-if="!sup.is_accepting_orders" class="so-supplier-status closed">
+              {{ sup.pause_message || 'Приём заявок временно приостановлен' }}
+            </div>
+            <div v-else-if="!sup.available_dates?.length" class="so-supplier-status closed">
+              Ближайшие поставки не запланированы
+            </div>
+            <div v-else class="so-supplier-dates">
+              <div v-for="d in getOrderedDates(sup)" :key="d.delivery_date" class="so-date-chip"
+                :class="{ submitted: d.order, closed: d.deadline_status === 'closed' && !d.order }">
+                {{ formatDateShort(d.delivery_date) }}
+                <span v-if="d.order" class="so-chip-icon">✓</span>
+                <span v-else-if="d.deadline_status === 'closed'" class="so-chip-icon">✕</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- История заявок -->
+        <template v-else>
+          <div v-if="historyLoading" class="ro-loading"><div class="ro-spinner"></div><span>Загрузка...</span></div>
+          <div v-else-if="!history.length" class="ro-card ro-empty"><p>История заявок пуста.</p></div>
+          <div v-else class="so-history-list">
+            <div v-for="o in history" :key="o.id" class="so-history-item">
+              <div class="so-history-top">
+                <span class="so-history-supplier">{{ o.supplier_name }}</span>
+                <span class="so-history-status" :class="historyStatusClass(o)">{{ historyStatusLabel(o) }}</span>
+              </div>
+              <div class="so-history-info">
+                <span class="so-history-date">Доставка: {{ formatDate(o.delivery_date) }}</span>
+                <span v-if="Number(o.item_count) > 0" class="so-history-qty">{{ o.item_count }} поз., {{ fmtNum(o.total_qty) }} шт.</span>
+                <span v-else class="so-history-skip">Поставка не нужна</span>
+              </div>
+              <div class="so-history-sub">Подано: {{ o.submitted_at ? formatDateTime(o.submitted_at) : '—' }}</div>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- Order form for selected supplier -->
@@ -200,6 +230,10 @@ const quantities = ref({});
 const showSuccess = ref(false);
 const successInfo = ref({});
 const isSkipOrder = ref(false);
+
+const showHistory = ref(false);
+const history = ref([]);
+const historyLoading = ref(false);
 
 function sortAvailableDates(list = []) {
   return [...list].sort((a, b) => {
@@ -358,6 +392,38 @@ async function handleSubmit() {
   } finally {
     submitting.value = false;
   }
+}
+
+async function openHistory() {
+  showHistory.value = true;
+  if (history.value.length) return;
+  historyLoading.value = true;
+  try {
+    history.value = await soStore.loadMyOrders();
+  } catch (e) {
+    console.error('Ошибка загрузки истории:', e);
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+function historyStatusClass(o) {
+  if (Number(o.item_count) === 0) return 'so-st-skip';
+  if (o.status === 'locked') return 'so-st-locked';
+  return 'so-st-submitted';
+}
+
+function historyStatusLabel(o) {
+  if (Number(o.item_count) === 0) return 'Не нужна';
+  if (o.status === 'locked') return 'Закрыто';
+  return 'Подано';
+}
+
+function formatDateTime(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+    + ' ' + dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
 function handleLogout() {
@@ -527,6 +593,27 @@ function formatDateShort(d) {
 .so-error-msg { padding: 8px 16px; border-radius: 8px; background: #fef2f2; color: #dc2626; font-size: 13px; font-weight: 600; margin-bottom: 10px; text-align: center; }
 .ro-qty-error { border-color: #dc2626 !important; background: #fef2f2; }
 .ro-row-error { background: #fef2f2; }
+
+/* История заявок */
+.so-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.so-header-row .so-section-title { margin-bottom: 0; }
+.so-view-tabs { display: flex; gap: 4px; background: #f0ebe4; border-radius: 10px; padding: 3px; }
+.so-view-tab { padding: 6px 14px; border-radius: 8px; border: none; background: transparent; font-size: 13px; font-weight: 600; color: #8b7355; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.so-view-tab.active { background: white; color: #502314; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+
+.so-history-list { display: flex; flex-direction: column; gap: 10px; }
+.so-history-item { background: white; border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.so-history-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.so-history-supplier { font-size: 16px; font-weight: 700; color: #333; }
+.so-history-status { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 8px; }
+.so-st-submitted { background: #e8f5e9; color: #2e7d32; }
+.so-st-locked { background: #e3f2fd; color: #1565c0; }
+.so-st-skip { background: #fef3c7; color: #92400e; }
+.so-history-info { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #502314; flex-wrap: wrap; }
+.so-history-date { font-weight: 600; }
+.so-history-qty { color: #8b7355; }
+.so-history-skip { color: #92400e; font-style: italic; }
+.so-history-sub { font-size: 11px; color: #aaa; margin-top: 4px; }
 
 /* Mobile */
 @media (max-width: 600px) {

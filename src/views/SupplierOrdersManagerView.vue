@@ -121,6 +121,10 @@
               @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
               {{ exportDatePickerOpen ? '▲ Дни' : '▼ Дни' }}
             </button>
+            <button class="rom-btn" style="background:#f0fdf4;color:#166534;border-color:#166534"
+              @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
+              {{ sendingSummary ? 'Отправка...' : '📤 Отправить сводку' }}
+            </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
             <label class="so-filter-check">
               <input type="checkbox" v-model="showMissing" /> Не подавшие
@@ -531,6 +535,7 @@ const templateEntities = computed(() => {
 const showOrderModal = ref(false);
 const viewedOrder = ref(null);
 const exporting = ref(false);
+const sendingSummary = ref(false);
 
 // Multi-date export
 const exportDatePickerOpen = ref(false);
@@ -945,6 +950,48 @@ function toggleScheduleDay(restaurant, dow) {
 }
 
 async function saveScheduleGrid() {
+  const dayNames = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
+
+  // Текущее состояние в БД
+  const currentState = {};
+  for (const s of schedules.value) {
+    if (s.is_active != 1) continue;
+    const rest = scheduleRestaurants.value.find(r => r.number == s.restaurant_number);
+    if (!rest) continue;
+    if (!currentState[rest.id]) currentState[rest.id] = new Set();
+    currentState[rest.id].add(Number(s.delivery_day));
+  }
+
+  // Новое состояние из сетки
+  const removedByDay = {}, addedByDay = {};
+  for (const r of scheduleRestaurants.value) {
+    const cur = currentState[r.id] || new Set();
+    for (let d = 1; d <= 7; d++) {
+      const wasActive = cur.has(d);
+      const willBeActive = !!scheduleGrid[r.id]?.[d];
+      if (wasActive && !willBeActive) removedByDay[d] = (removedByDay[d] || 0) + 1;
+      if (!wasActive && willBeActive) addedByDay[d]  = (addedByDay[d]  || 0) + 1;
+    }
+  }
+
+  // Предупреждение если есть удаления
+  const removedDays = Object.keys(removedByDay).map(Number).sort();
+  const addedDays   = Object.keys(addedByDay).map(Number).sort();
+
+  if (removedDays.length || addedDays.length) {
+    const lines = ['Подтвердите изменения в графике:\n'];
+    if (removedDays.length) {
+      lines.push('❌ Будет удалено:');
+      for (const d of removedDays) lines.push(`  ${dayNames[d]}: −${removedByDay[d]} рест.`);
+    }
+    if (addedDays.length) {
+      lines.push('\n✅ Будет добавлено:');
+      for (const d of addedDays) lines.push(`  ${dayNames[d]}: +${addedByDay[d]} рест.`);
+    }
+    lines.push('\nПродолжить?');
+    if (!confirm(lines.join('\n'))) return;
+  }
+
   savingScheduleGrid.value = true;
   try {
     const items = [];
@@ -1048,6 +1095,23 @@ function fmtDateDDMM(dateStr) {
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   return `${dd}.${mm}.${d.getFullYear()}`;
+}
+
+async function sendSummary() {
+  if (!currentSupplierId.value || !selectedDate.value) return;
+  const date = selectedDate.value;
+  const fmt = new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const ok = confirm(`Отправить сводку по заявкам на ${fmt} подписчикам в Telegram?`);
+  if (!ok) return;
+  sendingSummary.value = true;
+  try {
+    const res = await store.adminSendSummary(currentSupplierId.value, date);
+    alert(`Сводка отправлена ${res.sent} из ${res.total_subs} подписчиков.`);
+  } catch (e) {
+    alert('Ошибка отправки: ' + (e.message || e));
+  } finally {
+    sendingSummary.value = false;
+  }
 }
 
 async function exportExcel() {

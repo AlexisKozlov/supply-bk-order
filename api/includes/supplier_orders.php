@@ -26,6 +26,7 @@
  *   POST   so/admin/templates     — сохранить шаблон
  *   POST   so/admin/extend-deadline — разовое продление дедлайна
  *   GET    so/admin/export        — Excel-экспорт
+ *   POST   so/admin/send-summary  — ручная отправка сводки подписчикам в Telegram
  */
 
 if ($endpoint !== 'so') return;
@@ -87,6 +88,13 @@ function soGetSupplierNotifyUsers($pdo, $supplierId) {
     ");
     $s->execute([$supplierId]);
     return $s->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function soAutoLockOrders($pdo, $supplierId, $deliveryDate) {
+    $pdo->prepare("
+        UPDATE so_orders SET status = 'locked', updated_at = NOW()
+        WHERE supplier_id = ? AND delivery_date = ? AND status = 'submitted'
+    ")->execute([$supplierId, $deliveryDate]);
 }
 
 function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
@@ -345,128 +353,181 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $rest = soGetRestaurantSession($pdo);
     if (!$rest) soRespond(['error' => 'Не авторизован'], 401);
 
-    // Группа юрлиц ресторана — показываем только поставщиков своей группы,
-    // даже если вдруг появится запись в so_supplier_schedules с чужим поставщиком.
     $restGroup = getEntityGroup($rest['legal_entity'] ?? '');
 
-    $s = $pdo->prepare("
-        SELECT DISTINCT s.id, s.short_name, s.full_name
+    // 1. Все поставщики + их расписание для этого ресторана — один запрос
+    $suppStmt = $pdo->prepare("
+        SELECT s.id, s.short_name, s.full_name, ss.order_day, ss.delivery_day
         FROM so_supplier_schedules ss
         JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1
         WHERE ss.restaurant_id = ? AND ss.is_active = 1 AND s.legal_entity_group = ?
-        ORDER BY s.short_name
+        ORDER BY s.short_name, ss.order_day
     ");
-    $s->execute([$rest['restaurant_id'], $restGroup]);
-    $suppliers = $s->fetchAll();
+    $suppStmt->execute([$rest['restaurant_id'], $restGroup]);
 
-    // Для каждого поставщика — график, настройки, ближайшие поставки
-    $result = [];
+    // Группируем: поставщик → расписание
+    $suppliersMap = [];
+    foreach ($suppStmt->fetchAll() as $row) {
+        $sid = $row['id'];
+        if (!isset($suppliersMap[$sid])) {
+            $suppliersMap[$sid] = ['id' => $sid, 'name' => $row['short_name'], 'full_name' => $row['full_name'], 'schedule' => []];
+        }
+        $suppliersMap[$sid]['schedule'][] = ['order_day' => (int)$row['order_day'], 'delivery_day' => (int)$row['delivery_day']];
+    }
+
+    if (empty($suppliersMap)) {
+        soRespond(['suppliers' => []]);
+    }
+
+    $supplierIds = array_keys($suppliersMap);
+    $ph = implode(',', array_fill(0, count($supplierIds), '?'));
+
+    // 2. Настройки всех поставщиков — один запрос
+    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
+    $settingsRows->execute($supplierIds);
+    $settingsMap = [];
+    foreach ($settingsRows->fetchAll() as $r) {
+        $settingsMap[$r['supplier_id']] = $r;
+    }
+
+    // 3. Правила дедлайнов — один запрос
+    $rulesRows = $pdo->prepare("SELECT supplier_id, delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id IN ({$ph})");
+    $rulesRows->execute($supplierIds);
+    $rulesMap = [];
+    foreach ($rulesRows->fetchAll() as $r) {
+        $rulesMap[$r['supplier_id']][(int)$r['delivery_dow']] = $r;
+    }
+
+    // 4. Переопределения дедлайнов на ближайшие 3 недели — один запрос
     $tz = new DateTimeZone('Europe/Minsk');
-    $today = new DateTime('now', $tz);
-    $today->setTime(0, 0, 0);
+    $today = (new DateTime('now', $tz))->setTime(0, 0, 0);
+    $rangeStart = $today->format('Y-m-d');
+    $rangeEnd = (clone $today)->modify('+21 days')->format('Y-m-d');
+    $overParams = array_merge($supplierIds, [$rangeStart, $rangeEnd]);
+    $overRows = $pdo->prepare("SELECT supplier_id, delivery_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id IN ({$ph}) AND delivery_date BETWEEN ? AND ?");
+    $overRows->execute($overParams);
+    $overridesMap = [];
+    foreach ($overRows->fetchAll() as $r) {
+        $overridesMap[$r['supplier_id']][$r['delivery_date']] = $r;
+    }
 
-    foreach ($suppliers as $sup) {
-        // График
-        $sch = $pdo->prepare("SELECT order_day, delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1 ORDER BY order_day");
-        $sch->execute([$sup['id'], $rest['restaurant_id']]);
-        $schedule = $sch->fetchAll();
+    // 5. Существующие заявки ресторана по всем поставщикам — один запрос
+    $ordParams = array_merge($supplierIds, [$rest['restaurant_number'], $rangeStart]);
+    $ordRows = $pdo->prepare("
+        SELECT o.supplier_id, o.delivery_date, o.id, o.status, o.submitted_at,
+               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
+        FROM so_orders o
+        WHERE o.supplier_id IN ({$ph}) AND o.restaurant_number = ? AND o.delivery_date >= ?
+    ");
+    $ordRows->execute($ordParams);
+    $ordersMap = [];
+    foreach ($ordRows->fetchAll() as $r) {
+        $ordersMap[$r['supplier_id']][$r['delivery_date']] = $r;
+    }
+
+    // Проверка дедлайна без запросов в БД
+    $checkDeadline = function($sid, $deliveryDate) use ($tz, $today, $rulesMap, $overridesMap, $settingsMap) {
+        $now = new DateTime('now', $tz);
+        $override = $overridesMap[$sid][$deliveryDate] ?? null;
+        if ($override && !empty($override['is_closed'])) {
+            return ['status' => 'closed', 'deadline' => null];
+        }
+        $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
+        $rule = $rulesMap[$sid][$deliveryDow] ?? null;
+        if ($override && $override['deadline_time']) {
+            $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+            $deadlineTime = $override['deadline_time'];
+        } elseif ($rule) {
+            $deadlineDow = (int)$rule['deadline_dow'];
+            $deadlineTime = $rule['deadline_time'];
+            $deliveryObj = new DateTime($deliveryDate, $tz);
+            $deadlineDate = clone $deliveryObj;
+            $diff = $deliveryDow - $deadlineDow;
+            if ($diff <= 0) $diff += 7;
+            $deadlineDate->modify("-{$diff} days");
+        } else {
+            $s = $settingsMap[$sid] ?? null;
+            $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
+            $deadlineTime = $s['default_deadline_time'] ?? '14:00:00';
+        }
+        $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
+        $deadlineStr = $deadlineDate->format('Y-m-d') . ' ' . substr($deadlineTime, 0, 5);
+        return $now < $deadlineDT
+            ? ['status' => 'open', 'deadline' => $deadlineStr]
+            : ['status' => 'closed', 'deadline' => $deadlineStr];
+    };
+
+    $weekStart = (clone $today)->modify('-' . ((int)$today->format('N') - 1) . ' days');
+    $WEEKS_AHEAD = 2;
+
+    $result = [];
+    foreach ($suppliersMap as $sid => $sup) {
+        $settings = $settingsMap[$sid] ?? ['is_accepting_orders' => 1, 'default_deadline_time' => '14:00:00', 'pause_message' => null];
+        $isAccepting = (int)($settings['is_accepting_orders'] ?? 1) === 1;
 
         $scheduleFormatted = [];
-        foreach ($schedule as $sc) {
+        foreach ($sup['schedule'] as $sc) {
             $scheduleFormatted[] = [
-                'order_day' => (int)$sc['order_day'],
-                'order_day_name' => $dayNames[(int)$sc['order_day']] ?? '',
-                'delivery_day' => (int)$sc['delivery_day'],
-                'delivery_day_name' => $dayNames[(int)$sc['delivery_day']] ?? '',
+                'order_day' => $sc['order_day'],
+                'order_day_name' => $dayNames[$sc['order_day']] ?? '',
+                'delivery_day' => $sc['delivery_day'],
+                'delivery_day_name' => $dayNames[$sc['delivery_day']] ?? '',
             ];
         }
 
-        // Настройки: приём вкл/выкл
-        $settings = soGetSupplierSettings($pdo, $sup['id']);
-        $isAccepting = (int)($settings['is_accepting_orders'] ?? 1) === 1;
-
-        // Доступные поставки: следующие 2 цикла для каждого пункта графика
         $availableDates = [];
         if ($isAccepting) {
-            $WEEKS_AHEAD = 2; // показываем поставки на текущую и следующую неделю
-            foreach ($schedule as $sc) {
-                $orderDow = (int)$sc['order_day'];
-                $deliveryDow = (int)$sc['delivery_day'];
-
-                // Базовая дата — понедельник текущей недели (по ISO)
-                $weekStart = clone $today;
-                $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
-
+            foreach ($sup['schedule'] as $sc) {
+                $orderDow = $sc['order_day'];
+                $deliveryDow = $sc['delivery_day'];
                 for ($w = 0; $w < $WEEKS_AHEAD; $w++) {
-                    $orderDateObj = (clone $weekStart)->modify('+' . ($orderDow - 1 + $w * 7) . ' days');
+                    $orderDateObj    = (clone $weekStart)->modify('+' . ($orderDow - 1 + $w * 7) . ' days');
                     $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
-                    // Если день поставки по номеру <= день заказа, поставка на следующей неделе относительно заказа
-                    if ($deliveryDow <= $orderDow) {
-                        $deliveryDateObj->modify('+7 days');
-                    }
-
-                    // Скрываем поставки, которые уже прошли (delivery_date < сегодня)
+                    if ($deliveryDow <= $orderDow) $deliveryDateObj->modify('+7 days');
                     if ($deliveryDateObj < $today) continue;
-
-                    $orderDateStr = $orderDateObj->format('Y-m-d');
+                    $orderDateStr    = $orderDateObj->format('Y-m-d');
                     $deliveryDateStr = $deliveryDateObj->format('Y-m-d');
-
-                    $deadlineInfo = soCheckDeadline($pdo, $sup['id'], $deliveryDateStr);
-
-                    // Существующая заявка (без привязки к сессии)
-                    $os = $pdo->prepare("SELECT o.id, o.status, o.submitted_at,
-                               (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
-                        FROM so_orders o
-                        WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?");
-                    $os->execute([$sup['id'], $rest['restaurant_number'], $deliveryDateStr]);
-                    $order = $os->fetch();
-
-                    // Если дедлайн прошёл и нет заявки — не показываем
+                    $deadlineInfo = $checkDeadline($sid, $deliveryDateStr);
+                    $order = $ordersMap[$sid][$deliveryDateStr] ?? null;
                     if ($deadlineInfo['status'] === 'closed' && !$order) continue;
-
                     $availableDates[] = [
-                        'order_date' => $orderDateStr,
-                        'order_day_name' => $dayNamesFull[$orderDow] ?? '',
-                        'delivery_date' => $deliveryDateStr,
-                        'delivery_day_name' => $dayNamesFull[$deliveryDow] ?? '',
-                        'deadline' => $deadlineInfo['deadline'],
-                        'deadline_status' => $deadlineInfo['status'],
+                        'order_date'       => $orderDateStr,
+                        'order_day_name'   => $dayNamesFull[$orderDow] ?? '',
+                        'delivery_date'    => $deliveryDateStr,
+                        'delivery_day_name'=> $dayNamesFull[$deliveryDow] ?? '',
+                        'deadline'         => $deadlineInfo['deadline'],
+                        'deadline_status'  => $deadlineInfo['status'],
                         'order' => $order ? [
-                            'id' => (int)$order['id'],
-                            'status' => $order['status'],
+                            'id'           => (int)$order['id'],
+                            'status'       => $order['status'],
                             'submitted_at' => $order['submitted_at'],
-                            'item_count' => (int)$order['item_count'],
-                            'is_skip' => ((int)$order['item_count']) === 0,
+                            'item_count'   => (int)$order['item_count'],
+                            'is_skip'      => ((int)$order['item_count']) === 0,
                         ] : null,
                     ];
                 }
             }
 
-            // Убираем дубли по delivery_date (если в графике несколько записей указывают на одну дату)
+            // Убираем дубли по delivery_date
             $seen = [];
             $availableDates = array_values(array_filter($availableDates, function ($d) use (&$seen) {
                 if (isset($seen[$d['delivery_date']])) return false;
                 $seen[$d['delivery_date']] = true;
                 return true;
             }));
-
-            // Сортировка: ближайшая дата поставки первой (по возрастанию)
-            usort($availableDates, function ($a, $b) {
-                return strcmp($a['delivery_date'], $b['delivery_date']);
-            });
-
-            // Ресторану показываем только две ближайшие доступные даты.
-            $availableDates = array_slice($availableDates, 0, 2);
+            usort($availableDates, fn($a, $b) => strcmp($a['delivery_date'], $b['delivery_date']));
+            // Ресторану показываем только три ближайшие доступные даты.
+            $availableDates = array_slice($availableDates, 0, 3);
         }
 
         $result[] = [
-            'id' => $sup['id'],
-            'name' => $sup['short_name'],
-            'full_name' => $sup['full_name'],
-            'schedule' => $scheduleFormatted,
-            'is_accepting_orders' => $isAccepting,
-            'pause_message' => $settings['pause_message'] ?? null,
-            'available_dates' => $availableDates,
+            'id'                 => $sid,
+            'name'               => $sup['name'],
+            'full_name'          => $sup['full_name'],
+            'schedule'           => $scheduleFormatted,
+            'is_accepting_orders'=> $isAccepting,
+            'pause_message'      => $settings['pause_message'] ?? null,
+            'available_dates'    => $availableDates,
         ];
     }
 
@@ -495,19 +556,6 @@ if ($soAction === 'products' && $method === 'GET' && $soParam1) {
     $s->execute([$supplierId, $le]);
     $products = $s->fetchAll();
 
-    // Если шаблон пуст — берём товары этого поставщика из products
-    if (empty($products)) {
-        $s = $pdo->prepare("
-            SELECT id as product_id, sku, name as product_name, qty_per_box, unit_of_measure
-            FROM products
-            WHERE supplier = (SELECT short_name FROM suppliers WHERE id = ?)
-              AND legal_entity = ? AND is_active = 1
-            ORDER BY name
-        ");
-        $s->execute([$supplierId, $le]);
-        $products = $s->fetchAll();
-    }
-
     soRespond(['products' => $products]);
 }
 
@@ -519,11 +567,9 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
     $supplierId = $soParam1;
     $deliveryDate = $soParam2;
 
-    $group = getEntityGroup($rest['legal_entity'] ?? '');
-    $entities = getEntitiesInGroup($group);
-    $ph = implode(',', array_fill(0, count($entities), '?'));
-    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity IN ({$ph})");
-    $s->execute(array_merge([$supplierId, $rest['restaurant_number'], $deliveryDate], $entities));
+    $le = $rest['legal_entity'];
+    $s = $pdo->prepare("SELECT id, status, submitted_at, updated_at FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+    $s->execute([$supplierId, $rest['restaurant_number'], $deliveryDate, $le]);
     $order = $s->fetch();
 
     if (!$order) soRespond(['order' => null]);
@@ -550,16 +596,8 @@ if ($soAction === 'my-orders' && $method === 'GET') {
     $supplierId = $_GET['supplier_id'] ?? '';
     $limit = min((int)($_GET['limit'] ?? 20), 50);
 
-    $group = getEntityGroup($rest['legal_entity'] ?? '');
-    $where = "o.restaurant_number = ?";
-    $params = [$rest['restaurant_number']];
-    $whereParts = [];
-    $entityParams = [];
-    applyEntityTextFilter($group, $whereParts, $entityParams, 'o.legal_entity');
-    if (!empty($whereParts)) {
-        $where .= " AND " . implode(' AND ', $whereParts);
-        $params = array_merge($params, $entityParams);
-    }
+    $where = "o.restaurant_number = ? AND o.legal_entity = ?";
+    $params = [$rest['restaurant_number'], $rest['legal_entity']];
     if ($supplierId) {
         $where .= " AND o.supplier_id = ?";
         $params[] = $supplierId;
@@ -612,6 +650,36 @@ if ($soAction === 'submit-order' && $method === 'POST') {
 
     if (!soRestaurantHasDeliveryDate($pdo, $rest['restaurant_id'] ?? null, $supplierId, $deliveryDate)) {
         soRespond(['error' => 'На эту дату у ресторана нет поставки от этого поставщика'], 403);
+    }
+
+    // Валидация кратности и минимума по шаблону поставщика
+    if (!empty($items)) {
+        $tplCheck = $pdo->prepare("SELECT sku, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1");
+        $tplCheck->execute([$supplierId, $rest['legal_entity']]);
+        $tplMap = [];
+        foreach ($tplCheck->fetchAll() as $t) {
+            $tplMap[$t['sku']] = $t;
+        }
+        $valErrors = [];
+        foreach ($items as $item) {
+            $qty = floatval($item['quantity'] ?? 0);
+            $sku = $item['sku'] ?? '';
+            if ($qty <= 0 || !isset($tplMap[$sku])) continue;
+            $mult = floatval($tplMap[$sku]['multiplicity'] ?? 0);
+            $min  = floatval($tplMap[$sku]['min_qty'] ?? 0);
+            if ($mult > 0) {
+                $rem = fmod($qty, $mult);
+                if ($rem > 0.001 && abs($rem - $mult) > 0.001) {
+                    $valErrors[] = "{$sku}: количество {$qty} должно быть кратно {$mult}";
+                }
+            }
+            if ($min > 0 && $qty < $min) {
+                $valErrors[] = "{$sku}: минимум {$min}, указано {$qty}";
+            }
+        }
+        if (!empty($valErrors)) {
+            soRespond(['error' => 'Ошибки в заявке: ' . implode('; ', $valErrors)], 422);
+        }
     }
 
     // Проверяем: есть ли уже заявка?
@@ -1194,6 +1262,18 @@ if ($soAction === 'admin') {
         // Дедлайн для этой даты
         $deadlineInfo = soCheckDeadline($pdo, $supplierId, $date);
 
+        // Автоматически переводим заявки в «закрыто» после дедлайна
+        if ($deadlineInfo['status'] === 'closed') {
+            soAutoLockOrders($pdo, $supplierId, $date);
+            // Обновляем статус в уже загруженных ресторанах без повторного запроса
+            foreach ($restaurants as &$r) {
+                if (($r['order_status'] ?? '') === 'submitted') {
+                    $r['order_status'] = 'locked';
+                }
+            }
+            unset($r);
+        }
+
         soRespond([
             'settings' => $settings,
             'date' => $date,
@@ -1357,16 +1437,48 @@ if ($soAction === 'admin') {
             $pdo->prepare("UPDATE so_orders SET updated_at = NOW() WHERE id = ?")->execute([$orderId]);
         }
 
-        // Уведомляем ресторан в Telegram
+        // Уведомляем ресторан в Telegram (с итоговым составом)
         $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
         $oi->execute([$orderId]);
         $orderInfo = $oi->fetch();
         if ($orderInfo) {
-            $dowNames = [0=>'Вс',1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
-            $dow = (int)date('w', strtotime($orderInfo['delivery_date']));
-            $dateStr = ($dowNames[$dow] ?? '') . ', ' . date('d.m', strtotime($orderInfo['delivery_date']));
-            roNotifyRestaurant($pdo, $orderInfo['restaurant_number'],
-                "✏️ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} изменена ({$updatedBy}).");
+            try {
+                $dowNames = [0=>'Вс',1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб'];
+                $dow = (int)date('w', strtotime($orderInfo['delivery_date']));
+                $dateStr = ($dowNames[$dow] ?? '') . ', ' . date('d.m', strtotime($orderInfo['delivery_date']));
+                $esc = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $fmt = function($q) { $s = number_format((float)$q, 1, '.', ''); return rtrim(rtrim($s, '0'), '.'); };
+                $updItems = $pdo->prepare("
+                    SELECT oi.sku, oi.product_name, COALESCE(oi.admin_qty, oi.quantity) as qty,
+                           p.unit_of_measure
+                    FROM so_order_items oi
+                    LEFT JOIN products p ON p.sku = oi.sku
+                    WHERE oi.order_id = ? AND COALESCE(oi.admin_qty, oi.quantity) > 0
+                    ORDER BY oi.product_name
+                ");
+                $updItems->execute([$orderId]);
+                $finalItems = $updItems->fetchAll();
+                $lines = ["✏️ <b>Заявка изменена закупщиком</b>"];
+                $lines[] = '';
+                $lines[] = "🏪 <b>Поставщик:</b> " . $esc($orderInfo['supplier_name']);
+                $lines[] = "📅 <b>Доставка:</b> {$dateStr}";
+                if (empty($finalItems)) {
+                    $lines[] = '';
+                    $lines[] = '<i>Все позиции удалены.</i>';
+                } else {
+                    $lines[] = "📋 <b>Позиций:</b> " . count($finalItems);
+                    $lines[] = '';
+                    $lines[] = '<b>Итоговый состав:</b>';
+                    foreach ($finalItems as $it) {
+                        $unit = $esc($it['unit_of_measure'] ?? '');
+                        $unitStr = $unit !== '' ? " {$unit}" : '';
+                        $lines[] = "• <code>" . $esc($it['sku']) . "</code> " . $esc($it['product_name']) . " — <b>" . $fmt($it['qty']) . $unitStr . "</b>";
+                    }
+                }
+                $msg = implode("\n", $lines);
+                if (mb_strlen($msg) > 3900) $msg = mb_substr($msg, 0, 3900) . "\n\n…(обрезано)";
+                roNotifyRestaurant($pdo, $orderInfo['restaurant_number'], $msg);
+            } catch (Exception $e) { /* не критично */ }
         }
 
         // Аудит
@@ -1790,6 +1902,192 @@ if ($soAction === 'admin') {
         }
 
         soRespond(['success' => true, 'count' => $count]);
+    }
+
+    // --- Ручная отправка сводки подписчикам ---
+    if ($adminAction === 'send-summary' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? '';
+        $deliveryDate = $body['delivery_date'] ?? '';
+
+        if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+
+        // Данные поставщика
+        $supRow = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+        $supRow->execute([$supplierId]);
+        $sup = $supRow->fetch();
+        if (!$sup) soRespond(['error' => 'Поставщик не найден'], 404);
+        $supName = $sup['short_name'];
+
+        // Подписчики
+        $subsStmt = $pdo->prepare("
+            SELECT u.name, u.telegram_chat_id
+            FROM so_supplier_summary_subscribers sss
+            JOIN users u ON u.name = sss.user_name
+            WHERE sss.supplier_id = ?
+              AND u.telegram_chat_id IS NOT NULL
+              AND u.telegram_chat_id != ''
+        ");
+        $subsStmt->execute([$supplierId]);
+        $subs = $subsStmt->fetchAll();
+        if (!$subs) soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
+
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if (!$botToken) soRespond(['error' => 'Telegram Bot Token не настроен'], 500);
+
+        // День недели даты доставки (1=Пн..7=Вс)
+        $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
+
+        // Ожидаемые рестораны по графику на этот день
+        $expStmt = $pdo->prepare("
+            SELECT DISTINCT r.number, r.region, r.address, r.city
+            FROM so_supplier_schedules ss
+            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+            WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
+            ORDER BY r.region, CAST(r.number AS UNSIGNED)
+        ");
+        $expStmt->execute([$supplierId, $deliveryDow]);
+        $expectedRests = $expStmt->fetchAll();
+
+        if (!$expectedRests) soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
+
+        // Кто подал заявку (по статусу, не зависимо от количеств)
+        $subStmt = $pdo->prepare("
+            SELECT restaurant_number FROM so_orders
+            WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+        ");
+        $subStmt->execute([$supplierId, $deliveryDate]);
+        $submittedNums = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
+
+        // Позиции с ненулевыми количествами — для таблицы/пивота
+        $ordStmt = $pdo->prepare("
+            SELECT o.restaurant_number, oi.sku, oi.product_name,
+                   COALESCE(oi.admin_qty, oi.quantity) AS qty
+            FROM so_orders o
+            JOIN so_order_items oi ON oi.order_id = o.id
+            WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+              AND COALESCE(oi.admin_qty, oi.quantity) > 0
+        ");
+        $ordStmt->execute([$supplierId, $deliveryDate]);
+        $orderRows = $ordStmt->fetchAll();
+
+        // Пивот
+        $productsOrdered = [];
+        $pivot = [];
+        foreach ($orderRows as $row) {
+            $sku = $row['sku'];
+            if (!isset($productsOrdered[$sku])) {
+                $productsOrdered[$sku] = ['sku' => $sku, 'name' => $row['product_name']];
+            }
+            $rn = $row['restaurant_number'];
+            if (!isset($pivot[$rn])) $pivot[$rn] = [];
+            $pivot[$rn][$sku] = ($pivot[$rn][$sku] ?? 0) + (float)$row['qty'];
+        }
+        uasort($productsOrdered, function($a, $b) { return strcmp($a['name'], $b['name']); });
+
+        $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
+        $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+        $dayShort = $dayNames[$deliveryDow] ?? '';
+
+        $expectedNums = array_column($expectedRests, 'number');
+        // Считаем подавших по статусу заявки, а не по наличию позиций
+        $submittedCount = count(array_intersect($expectedNums, array_keys($submittedNums)));
+        $missingCount = count($expectedNums) - $submittedCount;
+
+        // Если никто не подал — только текст
+        if (!$productsOrdered) {
+            $caption = "⚠️ <b>Никто не подал заявку</b>\n";
+            $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+            $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
+            $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
+            $sentCount = 0;
+            foreach ($subs as $sub) {
+                if (sendTelegramMessage($botToken, $sub['telegram_chat_id'], $caption)) $sentCount++;
+            }
+            soRespond(['success' => true, 'sent' => $sentCount, 'mode' => 'text_only']);
+        }
+
+        $productsOut = array_values($productsOrdered);
+
+        // Формируем payload для Node
+        $restaurantsOut = [];
+        foreach ($expectedRests as $rest) {
+            $rn = $rest['number'];
+            $restaurantsOut[] = [
+                'number'    => (int)$rn,
+                'city'      => $rest['city'] ?: '',
+                'region'    => $rest['region'] ?: '',
+                'address'   => $rest['address'] ?: '',
+                'submitted' => isset($submittedNums[$rn]),
+            ];
+        }
+
+        $itemsOut = new stdClass();
+        $colTotals = array_fill_keys(array_column($productsOut, 'sku'), 0);
+        foreach ($pivot as $rn => $pmap) {
+            foreach ($pmap as $sku => $qty) {
+                $itemsOut->{"{$rn}_{$sku}"} = ['qty' => (float)$qty, 'is_admin' => false];
+                if (isset($colTotals[$sku])) $colTotals[$sku] += (float)$qty;
+            }
+        }
+
+        $payload = [
+            'supplier_name'     => $supName,
+            'delivery_date_fmt' => $dateFmt,
+            'sheet_name'        => $supName,
+            'products'          => $productsOut,
+            'restaurants'       => $restaurantsOut,
+            'items'             => $itemsOut,
+        ];
+
+        // Генерируем Excel через Node
+        $tmpJson = tempnam(sys_get_temp_dir(), 'so_json_');
+        $tmpXlsx = tempnam(sys_get_temp_dir(), 'so_xlsx_') . '.xlsx';
+        file_put_contents($tmpJson, json_encode($payload, JSON_UNESCAPED_UNICODE));
+
+        $scriptPath = escapeshellarg(__DIR__ . '/../../scripts/build_so_order_xlsx.mjs');
+        $cmd = 'node ' . $scriptPath . ' ' . escapeshellarg($tmpJson) . ' ' . escapeshellarg($tmpXlsx) . ' 2>&1';
+        exec($cmd, $outLines, $rc);
+        @unlink($tmpJson);
+
+        if ($rc !== 0 || !file_exists($tmpXlsx)) {
+            error_log('[so send-summary] node generator failed (rc=' . $rc . '): ' . implode("\n", $outLines));
+            @unlink($tmpXlsx);
+            soRespond(['error' => 'Не удалось сгенерировать Excel: ' . implode(' ', $outLines)], 500);
+        }
+
+        $xlsxBinary = file_get_contents($tmpXlsx);
+        @unlink($tmpXlsx);
+
+        $filename = "Заявка {$supName} на {$dateFmt}.xlsx";
+
+        $caption = "🧾 <b>Заказ поставщику</b> (повторная отправка)\n";
+        $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+        $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n\n";
+        $caption .= "✅ Подали: <b>{$submittedCount}</b> из <b>" . count($expectedRests) . "</b>\n";
+        if ($missingCount > 0) $caption .= "❌ Не подали: <b>{$missingCount}</b>\n";
+        arsort($colTotals);
+        $topProducts = array_slice($colTotals, 0, 5, true);
+        if ($topProducts) {
+            $caption .= "\n📊 <b>Итого по товарам:</b>\n";
+            foreach ($topProducts as $sku => $tot) {
+                if ($tot <= 0) continue;
+                $name = $productsOrdered[$sku]['name'] ?? $sku;
+                $caption .= "• " . htmlspecialchars($name, ENT_QUOTES) . " — <b>" . rtrim(rtrim(number_format($tot, 2, '.', ''), '0'), '.') . "</b>\n";
+            }
+            if (count($colTotals) > 5) {
+                $caption .= "… и ещё " . (count($colTotals) - 5) . " позиций в файле";
+            }
+        }
+
+        $sentCount = 0;
+        foreach ($subs as $sub) {
+            if (sendTelegramDocument($botToken, $sub['telegram_chat_id'], $filename, $xlsxBinary, $caption)) {
+                $sentCount++;
+            }
+        }
+
+        soRespond(['success' => true, 'sent' => $sentCount, 'total_subs' => count($subs)]);
     }
 
     // --- Экспорт ---

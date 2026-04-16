@@ -1468,7 +1468,15 @@ try {
 
                 if (!$expectedRests) continue;
 
-                // Все поданные строки заказов
+                // Кто подал заявку (по статусу, независимо от количеств)
+                $subStmt = $pdo->prepare("
+                    SELECT restaurant_number FROM so_orders
+                    WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+                ");
+                $subStmt->execute([$supId, $deliveryDate]);
+                $submittedByStatus = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
+
+                // Позиции с ненулевыми количествами — для таблицы/пивота
                 $ordStmt = $pdo->prepare("
                     SELECT o.restaurant_number, oi.sku, oi.product_name,
                            COALESCE(oi.admin_qty, oi.quantity) AS qty
@@ -1495,8 +1503,8 @@ try {
                 uasort($productsOrdered, function($a, $b) { return strcmp($a['name'], $b['name']); });
 
                 $expectedNums = array_column($expectedRests, 'number');
-                $submittedNums = array_intersect($expectedNums, array_keys($pivot));
-                $submittedCount = count($submittedNums);
+                // Считаем подавших по статусу заявки, а не по наличию ненулевых позиций
+                $submittedCount = count(array_intersect($expectedNums, array_keys($submittedByStatus)));
                 $missingCount = count($expectedNums) - $submittedCount;
                 $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
                 $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
@@ -1542,7 +1550,7 @@ try {
                         'city'     => $rest['city'] ?: '',
                         'region'   => $rest['region'] ?: '',
                         'address'  => $rest['address'] ?: '',
-                        'submitted'=> isset($pivot[$rn]),
+                        'submitted'=> isset($submittedByStatus[$rn]),
                     ];
                 }
 

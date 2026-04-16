@@ -90,6 +90,46 @@ function getSubscribedChatIds($pdo, $settingField) {
     return $s->fetchAll(PDO::FETCH_COLUMN);
 }
 
+function sendTelegramDocument($botToken, $chatId, $filename, $content, $caption = '') {
+    if (!$botToken || !$chatId) return false;
+    $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    $boundary = '----BkCalc' . bin2hex(random_bytes(8));
+    $crlf = "\r\n";
+    $body  = "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"chat_id\"{$crlf}{$crlf}{$chatId}{$crlf}";
+    if ($caption !== '') {
+        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"caption\"{$crlf}{$crlf}{$caption}{$crlf}";
+        $body .= "--{$boundary}{$crlf}Content-Disposition: form-data; name=\"parse_mode\"{$crlf}{$crlf}HTML{$crlf}";
+    }
+    $body .= "--{$boundary}{$crlf}";
+    $body .= "Content-Disposition: form-data; name=\"document\"; filename=\"{$filename}\"{$crlf}";
+    $body .= "Content-Type: {$mime}{$crlf}{$crlf}";
+    $body .= $content . $crlf;
+    $body .= "--{$boundary}--{$crlf}";
+    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendDocument");
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => ['Content-Type: multipart/form-data; boundary=' . $boundary],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $result = curl_exec($ch);
+    $curlErr = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($result === false || $curlErr) {
+        error_log("[sendTelegramDocument] curl error chat={$chatId}: " . ($curlErr ?: 'unknown'));
+        return false;
+    }
+    $data = json_decode($result, true);
+    if (!is_array($data) || empty($data['ok'])) {
+        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
+        error_log("[sendTelegramDocument] Telegram error chat={$chatId} http={$httpCode}: {$desc}");
+        return false;
+    }
+    return true;
+}
+
 function notifyTelegramDataUpdate($pdo, $type, $userName, $legalEntity = '', $count = 0) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;

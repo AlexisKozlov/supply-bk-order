@@ -223,6 +223,13 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     return data;
   }
 
+  async function adminSendSummary(supplierId, deliveryDate) {
+    return api('admin/send-summary', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate }),
+    });
+  }
+
   return {
     loading,
     // Ресторан
@@ -235,6 +242,6 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminGetSchedules, adminSaveSchedules,
     adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates,
-    adminUpdateQty, adminGetExport,
+    adminUpdateQty, adminGetExport, adminSendSummary,
   };
 });
