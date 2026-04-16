@@ -206,6 +206,7 @@ function callAIDigest($systemPrompt, $context, $provider, $apiKey) {
 
 function wasNotified($pdo, $type, $legalEntity, $chatId, $intervalSeconds) {
     try {
+        $chatId = (int)$chatId;
         $s = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type=? AND legal_entity=? AND chat_id=? AND sent_at > NOW() - INTERVAL ? SECOND LIMIT 1");
         $s->execute([$type, $legalEntity, $chatId, $intervalSeconds]);
         return (bool)$s->fetch();
@@ -214,8 +215,25 @@ function wasNotified($pdo, $type, $legalEntity, $chatId, $intervalSeconds) {
 
 function logNotification($pdo, $type, $legalEntity, $chatId) {
     try {
+        $chatId = (int)$chatId;
         $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id) VALUES (?,?,?)")
             ->execute([$type, $legalEntity, $chatId]);
+    } catch (Exception $e) {}
+}
+
+function wasNotifiedByKey($pdo, $notificationKey, $intervalSeconds) {
+    try {
+        $s = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL ? SECOND LIMIT 1");
+        $s->execute([$notificationKey, $intervalSeconds]);
+        return (bool)$s->fetch();
+    } catch (Exception $e) { return false; }
+}
+
+function logNotificationByKey($pdo, $type, $notificationKey, $chatId = 0, $legalEntity = '') {
+    try {
+        $chatId = (int)$chatId;
+        $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?,?,?,?)")
+            ->execute([$type, $legalEntity, $chatId, $notificationKey]);
     } catch (Exception $e) {}
 }
 
@@ -1008,12 +1026,14 @@ try {
     $decStmt = $pdo->query("SELECT d.id, d.text, d.responsible_person, d.deadline, d.status, p.topic, p.meeting_date FROM protocol_decisions d JOIN meeting_protocols p ON p.id = d.protocol_id WHERE d.status = 'pending' AND d.deadline IS NOT NULL AND d.deadline BETWEEN CURDATE() AND CURDATE() + INTERVAL 1 DAY AND d.responsible_person != ''");
     $decisions = $decStmt->fetchAll();
     foreach ($decisions as $dec) {
-        // Проверяем что не отправляли сегодня
-        if (wasNotified($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', 86400)) continue;
+        $isToday = $dec['deadline'] === date('Y-m-d');
+        $deadlinePhase = $isToday ? 'today' : 'tomorrow';
+        $dedupKey = "protocol_deadline:decision_{$dec['id']}:{$deadlinePhase}";
+        if (wasNotifiedByKey($pdo, $dedupKey, 86400)) continue;
+
         // responsible_person может содержать несколько имён через запятую
         $responsibles = array_map('trim', explode(',', $dec['responsible_person']));
         $deadlineDate = date('d.m', strtotime($dec['deadline']));
-        $isToday = $dec['deadline'] === date('Y-m-d');
         $urgency = $isToday ? '🔴 Сегодня' : '🟡 Завтра';
         $notified = false;
         foreach ($responsibles as $respName) {
@@ -1031,7 +1051,7 @@ try {
             $notified = true;
             $sent++;
         }
-        if ($notified) logNotification($pdo, 'protocol_deadline', 'decision_' . $dec['id'], '', '');
+        if ($notified) logNotificationByKey($pdo, 'protocol_deadline', $dedupKey);
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] protocol deadline reminders error: ' . $e->getMessage());
@@ -1343,31 +1363,37 @@ try {
 }
 
 // ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): итоговая сводка закупщикам после дедлайна ═══
-// После прохождения дедлайна (не более 20 мин назад) шлём подписчикам
-// (telegram_settings.so_deadline_summary = 1) сводку: краткий текст + Excel-файл.
+// После прохождения дедлайна (не более 20 мин назад) шлём сводку только тем,
+// кто подписан на конкретного поставщика.
 try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
 
-    // Подписчики на сводку
-    $subs = $pdo->query("
-        SELECT u.name, u.telegram_chat_id
-        FROM users u
-        JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.so_deadline_summary = 1
+    $suppliers = $pdo->query("
+        SELECT DISTINCT s.id, s.short_name,
+               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+        FROM suppliers s
+        JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
+        LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
+        WHERE s.is_active = 1
     ")->fetchAll();
 
-    if ($subs) {
-        $suppliers = $pdo->query("
-            SELECT DISTINCT s.id, s.short_name,
-                   COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
-            FROM suppliers s
-            JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
-            LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-            WHERE s.is_active = 1
-        ")->fetchAll();
+    foreach ($suppliers as $sup) {
+        $subsStmt = $pdo->prepare("
+            SELECT u.name, u.telegram_chat_id
+            FROM so_supplier_summary_subscribers sss
+            JOIN users u ON u.name = sss.user_name
+            WHERE sss.supplier_id = ?
+              AND u.telegram_chat_id IS NOT NULL
+              AND u.telegram_chat_id != ''
+            ORDER BY u.name
+        ");
+        $subsStmt->execute([$sup['id']]);
+        $subs = $subsStmt->fetchAll();
+        if (!$subs) {
+            continue;
+        }
 
-        foreach ($suppliers as $sup) {
             $supId = $sup['id'];
             $supName = $sup['short_name'];
             $defaultDeadlineTime = $sup['default_deadline_time'];
@@ -1592,7 +1618,6 @@ try {
                 $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
                     ->execute([$dedupKey]);
             }
-        }
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] so summary error: ' . $e->getMessage());

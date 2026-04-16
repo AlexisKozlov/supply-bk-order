@@ -30,13 +30,6 @@
         Основная поставка
         <span v-if="deliveryBadge" class="sb-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
       </button>
-      <!-- Планета Ресторанов -->
-      <button v-if="canUseVeg" class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'planeta' }"
-        @click="switchTab('orders', 'planeta')">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></span>
-        Планета Ресторанов
-        <span v-if="planetaBadge" class="sb-badge" :class="planetaBadge.type">{{ planetaBadge.text }}</span>
-      </button>
       <!-- Поставщики (Камако и др.) -->
       <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'sup_' + sup.id }"
@@ -68,6 +61,11 @@
       </router-link>
 
       <div class="sb-spacer"></div>
+      <a href="https://t.me/alexiskozlov" target="_blank" rel="noopener noreferrer" class="sb-help">
+        <span class="sb-help-icon">?</span>
+        <span>Помощь</span>
+        <span class="sb-item-ext" title="Откроется в Telegram">↗</span>
+      </a>
       <div class="sb-rest" :class="{ active: activeTab === 'profile' }">
         <button class="sb-rest-main" @click="switchTab('profile')" title="Открыть профиль">
           <div class="sb-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
@@ -164,7 +162,7 @@
       <!-- Последние заказы -->
       <div v-if="historyOrders.length" class="dash-recent">
         <h3 class="dash-section-title">Последние заказы</h3>
-        <div v-for="order in historyOrders.slice(0, 5)" :key="order.id" class="dash-order">
+        <div v-for="order in historyOrders.slice(0, 5)" :key="order.id" class="dash-order" @click="openHistoryOrder(order)">
           <div class="dash-order-left">
             <span class="dash-order-source" :class="'src-' + order.source">{{ order.source_name }}</span>
             <span class="dash-order-date">{{ fmtDate(order.delivery_date) }}</span>
@@ -349,141 +347,6 @@
 
       </div>
 
-      <!-- ── Планета Ресторанов ── -->
-      <div v-if="canUseVeg && orderSubTab === 'planeta'">
-        <div v-if="vegLoading" class="mini-loader"><div class="cab-spin"></div></div>
-        <div v-else-if="vegNoSession" class="cab-empty-card">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-          <h2>Планета Ресторанов</h2>
-          <p>Сейчас приём заявок не проводится. Возможные причины:</p>
-          <ul style="text-align:left; max-width:320px; margin:10px auto 0; font-size:13px; color:#8b7355; line-height:1.8">
-            <li>Для вашего ресторана не настроен график доставки овощей</li>
-            <li>Нет активной сессии приёма заявок</li>
-            <li>Дедлайн подачи истёк</li>
-          </ul>
-          <p style="margin-top:14px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок для уточнения</p>
-        </div>
-
-        <div v-else-if="vegSubmitted && !vegEditing" class="cab-success">
-          <div class="cab-success-inner">
-            <div class="cab-success-check">&#10003;</div>
-            <h2>Заявка отправлена!</h2>
-            <div class="veg-success-list">
-              <template v-for="del in vegDeliveries" :key="del.date">
-                <div class="veg-success-day">{{ vegFmtDeliveryDate(del.date) }}</div>
-                <template v-if="vegDayAllZeros(del.date)"><div class="veg-success-skip">Поставка не нужна</div></template>
-                <template v-else-if="vegDayHasData(del.date)">
-                  <div v-for="prod in vegInfo.products" :key="prod.id + '-' + del.date" class="veg-success-row">
-                    <span>{{ prod.product_name }}</span>
-                    <strong>{{ vegOrderValues[del.date + '_' + prod.id] || 0 }} {{ vegUnitShort(prod.unit) }}</strong>
-                  </div>
-                </template>
-                <div v-else class="veg-success-skip">Не заказано</div>
-              </template>
-            </div>
-            <div class="cab-success-btns">
-              <button v-if="vegCanEdit" class="btn btn-primary" @click="vegEditing = true">Изменить заявку</button>
-            </div>
-          </div>
-        </div>
-
-        <template v-else-if="vegInfo">
-          <div v-if="!vegDeliveries.length" class="cab-empty-card">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-            <h2>Планета Ресторанов</h2>
-            <p>Для вашего ресторана не настроен график доставки овощей.</p>
-            <p style="margin-top:10px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок для настройки</p>
-          </div>
-          <template v-else>
-          <div class="cab-info-bar">{{ vegInfo.session_name }}</div>
-          <div class="day-tabs">
-            <button v-for="(del, dIdx) in vegDeliveries" :key="del.date"
-              class="day-tab" :class="{ active: vegActiveDay === dIdx, closed: del.expired }"
-              @click="vegActiveDay = dIdx">
-              <span class="day-tab-label">{{ vegFmtDayShort(del.date) }}</span>
-              <span v-if="del.expired" class="day-tab-mark closed">!</span>
-              <span v-else-if="vegDayHasData(del.date)" class="day-tab-mark done">&#10003;</span>
-            </button>
-          </div>
-
-          <div class="order-form">
-            <div v-for="(del, dIdx) in vegDeliveries" :key="'vd-'+del.date" v-show="vegActiveDay === dIdx">
-              <div class="deadline-bar" :class="del.expired ? 'dl-closed' : 'dl-open'">
-                <span class="deadline-icon" v-if="!del.expired">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </span>
-                <span class="deadline-icon" v-else>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                </span>
-                <template v-if="del.expired">Дедлайн прошёл</template>
-                <template v-else-if="del.deadline">Дедлайн: {{ vegFmtDeadline(del.deadline) }}</template>
-              </div>
-              <template v-if="!del.expired">
-                <div v-if="vegHasPrevData(del.date) && !vegDayHasData(del.date)" class="quick-actions">
-                  <button class="btn btn-sm btn-outline" @click="vegFillFromPrev(del.date)">Повторить предыдущий</button>
-                </div>
-                <div class="item-list">
-                  <div v-for="prod in vegInfo.products" :key="prod.id + '-' + del.date"
-                    class="item-row" :class="{ 'item-filled': parseFloat(vegOrderValues[del.date + '_' + prod.id]) > 0, 'item-error': vegMultError(del.date, prod) }">
-                    <div class="item-info">
-                      <span class="item-name">{{ prod.product_name }}</span>
-                      <span v-if="prod.multiplicity" class="item-hint">кр. {{ prod.multiplicity }}</span>
-                    </div>
-                    <div class="item-input">
-                      <input v-model="vegOrderValues[del.date + '_' + prod.id]" type="text" inputmode="decimal" placeholder="0"
-                        class="item-qty" :class="{ 'item-qty-err': vegMultError(del.date, prod) }" @focus="$event.target.select()" />
-                      <span class="item-unit">{{ vegUnitShort(prod.unit) }}</span>
-                    </div>
-                  </div>
-                </div>
-              </template>
-              <template v-if="del.expired">
-                <div v-if="vegDayHasData(del.date)" class="prev-data">
-                  <div class="prev-data-title">
-                    <template v-if="vegDayAllZeros(del.date)">Поставка не нужна</template>
-                    <template v-else>Ваша заявка:</template>
-                  </div>
-                  <template v-if="!vegDayAllZeros(del.date)">
-                    <div v-for="prod in vegInfo.products" :key="'sent-' + prod.id + '-' + del.date" class="prev-data-row">
-                      <span>{{ prod.product_name }}</span>
-                      <strong v-if="parseFloat(vegOrderValues[del.date + '_' + prod.id]) > 0">{{ vegOrderValues[del.date + '_' + prod.id] }} {{ vegUnitShort(prod.unit) }}</strong>
-                      <span v-else>—</span>
-                    </div>
-                  </template>
-                </div>
-                <div v-else class="prev-data">
-                  <div class="prev-data-title">Заявка не подана</div>
-                </div>
-                <div v-if="vegHasPrevData(del.date)" class="prev-data">
-                  <div class="prev-data-title">Предыдущий заказ:</div>
-                  <div v-for="prod in vegInfo.products" :key="'prev-' + prod.id + '-' + del.date" class="prev-data-row">
-                    <span>{{ prod.product_name }}</span>
-                    <strong v-if="vegPrevInfo(del.date, prod)">{{ vegPrevInfo(del.date, prod).qty }} {{ vegUnitShort(prod.unit) }}</strong>
-                    <span v-else>—</span>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <div class="submit-area" v-if="vegDeliveries[vegActiveDay] && !vegDeliveries[vegActiveDay].expired">
-              <div v-if="vegHasMultErrors" class="error-msg">Исправьте кратность</div>
-              <div class="submit-buttons-row">
-                <button v-if="vegEditing" class="btn btn-outline btn-lg" @click="vegEditing = false; vegSubmitted = true">Отмена</button>
-                <button class="btn btn-danger-outline btn-lg" :disabled="vegSubmitting" @click="vegSkipDelivery">
-                  Поставка не нужна
-                </button>
-                <button class="btn btn-primary btn-lg" :disabled="!vegCanSubmit || vegSubmitting || vegHasMultErrors" @click="vegSubmit">
-                  <span v-if="vegSubmitting" class="cab-spin cab-spin-sm"></span>
-                  {{ vegEditing ? 'Сохранить' : 'Отправить' }}
-                </button>
-              </div>
-              <div v-if="vegError" class="error-msg">{{ vegError }}</div>
-            </div>
-          </div>
-          </template>
-        </template>
-      </div>
-
       <!-- ── Поставщик (Камако и др.) ── -->
       <template v-for="sup in suppliers" :key="'stab-' + sup.id">
         <div v-if="orderSubTab === 'sup_' + sup.id">
@@ -582,7 +445,7 @@
         <div v-else-if="historyError" class="cab-empty-card"><p>{{ historyError }}</p></div>
         <div v-else-if="!historyOrders.length" class="cab-empty-card"><h2>Нет заказов</h2></div>
         <div v-else>
-          <div v-for="order in historyOrders" :key="order.id" class="history-card">
+          <div v-for="order in historyOrders" :key="order.id" class="history-card" @click="openHistoryOrder(order)">
             <div class="history-top">
               <span class="history-date">{{ fmtDate(order.delivery_date) }}</span>
               <span class="dash-order-source" :class="'src-' + order.source">{{ order.source_name }}</span>
@@ -597,6 +460,37 @@
         </div>
       </div>
     </section>
+
+    <div v-if="historyOrderModal.show" class="modal-overlay" @click.self="closeHistoryOrderModal">
+      <div class="cab-modal">
+        <div class="cab-modal-head">
+          <h2>{{ historyOrderModal.order?.source_name || 'Заказ' }}</h2>
+          <button class="cab-modal-close" @click="closeHistoryOrderModal">&times;</button>
+        </div>
+        <div class="cab-modal-body">
+          <div v-if="historyOrderModal.loading" class="cab-empty-card"><p>Загрузка…</p></div>
+          <div v-else-if="historyOrderModal.error" class="cab-empty-card"><p>{{ historyOrderModal.error }}</p></div>
+          <template v-else-if="historyOrderModal.order">
+            <div class="history-view-meta">
+              <div><strong>Дата доставки:</strong> {{ fmtDate(historyOrderModal.order.delivery_date) }}</div>
+              <div><strong>Статус:</strong> {{ statusLabel(historyOrderModal.order.status) }}</div>
+              <div v-if="historyOrderModal.order.submitted_at"><strong>Подано:</strong> {{ fmtDateTime(historyOrderModal.order.submitted_at) }}</div>
+              <div v-if="historyOrderModal.order.comment"><strong>Комментарий:</strong> {{ historyOrderModal.order.comment }}</div>
+            </div>
+            <div v-if="historyOrderModal.order.items?.length" class="history-view-items">
+              <div v-for="(item, idx) in historyOrderModal.order.items" :key="idx" class="history-view-row">
+                <div class="history-view-main">
+                  <span v-if="item.sku" class="rom-sku-label">{{ item.sku }}</span>
+                  <span>{{ item.product_name }}</span>
+                </div>
+                <div class="history-view-qty">{{ item.quantity }}</div>
+              </div>
+            </div>
+            <div v-else class="cab-empty-card"><p>В заказе нет позиций</p></div>
+          </template>
+        </div>
+      </div>
+    </div>
 
     <!-- ══════ TAB: Сбор остатков ══════ -->
     <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section">
@@ -858,7 +752,6 @@ const cabBrand = computed(() => {
   };
 });
 const isPizzaStarCabinet = computed(() => roStore.restaurant?.legal_entity_group === 'PS');
-const canUseVeg = computed(() => !isPizzaStarCabinet.value);
 const canUseCardSearch = computed(() => !isPizzaStarCabinet.value);
 
 // Адрес без дублирования города
@@ -916,6 +809,12 @@ const pwLoading = ref(false);
 const historyLoading = ref(false);
 const historyOrders = ref([]);
 const historyError = ref('');
+const historyOrderModal = reactive({
+  show: false,
+  loading: false,
+  error: '',
+  order: null,
+});
 
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
@@ -925,8 +824,6 @@ const dashOrdersSubmitted = computed(() => {
   for (const sup of suppliers.value) {
     total += (sup.available_dates || []).filter(d => !!d.order).length;
   }
-  // Планета — считаем как 1 поданную, если ресторан отправил
-  if (canUseVeg.value && vegInfo.value && vegSubmitted.value) total += 1;
   return total;
 });
 const dashOrdersPending = computed(() => {
@@ -935,11 +832,6 @@ const dashOrdersPending = computed(() => {
   // Поставщики: открытые даты без заявки
   for (const sup of suppliers.value) {
     total += (sup.available_dates || []).filter(d => d.deadline_status === 'open' && !d.order).length;
-  }
-  // Планета: 1, если есть открытые дни и ничего не подано
-  if (canUseVeg.value && vegInfo.value && !vegSubmitted.value) {
-    const openVeg = vegDeliveries.value.filter(d => !d.expired).length;
-    if (openVeg > 0) total += 1;
   }
   return total;
 });
@@ -955,18 +847,6 @@ const urgentItems = computed(() => {
       subtitle: openDays.map(d => d.day_name).join(', '),
       action: async () => { await switchTab('orders', 'delivery'); if (openDays[0]) delSelectDay(openDays[0].date); },
     });
-  }
-  // Veg
-  if (canUseVeg.value && vegInfo.value && !vegSubmitted.value) {
-    const openVeg = vegDeliveries.value.filter(d => !d.expired).length;
-    if (openVeg) {
-      items.push({
-        key: 'veg', type: 'green',
-        icon: '&#127811;', title: 'Планета Ресторанов: заявка не подана',
-        subtitle: `${openVeg} дн. доставки`,
-        action: () => switchTab('orders', 'planeta'),
-      });
-    }
   }
   // Suppliers
   for (const sup of suppliers.value) {
@@ -1440,110 +1320,6 @@ async function delExportExcel() {
   XLSX.writeFile(wb, `Заказ_${prettyNum}_${delSelectedDate.value}.xlsx`);
 }
 
-// ═══ Планета Ресторанов (veg) ═══
-const vegLoading = ref(false);
-const vegNoSession = ref(false);
-const vegInfo = ref(null);
-const vegDeliveries = ref([]);
-const vegActiveDay = ref(0);
-const vegOrderValues = reactive({});
-const vegSubmitted = ref(false);
-const vegSubmitting = ref(false);
-const vegEditing = ref(false);
-const vegError = ref('');
-const vegAllExisting = ref([]);
-const vegPrevSessionOrders = ref([]);
-
-const DAY_NAMES = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
-const DAY_SHORT = { 1: 'Пн', 2: 'Вт', 3: 'Ср', 4: 'Чт', 5: 'Пт', 6: 'Сб', 7: 'Вс' };
-
-function vegUnitShort(u) { return u === 'pcs' ? 'шт.' : 'кг'; }
-function vegUnitLabel(u) { return u === 'pcs' ? 'штуки' : 'килограммы'; }
-function vegFmtDeliveryDate(dateStr) { const d = new Date(dateStr + 'T00:00:00'); const dow = d.getDay() || 7; return `${DAY_NAMES[dow]}, ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`; }
-function vegFmtDeadline(str) { if (!str) return ''; const d = new Date(str.replace(' ', 'T')); const dow = d.getDay() || 7; return `${DAY_NAMES[dow]}, ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}, ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`; }
-function vegFmtDayShort(dateStr) { if (!dateStr) return ''; const d = new Date(dateStr + 'T00:00:00'); const dow = d.getDay() || 7; return `${DAY_SHORT[dow]}, ${d.getDate()} ${d.toLocaleDateString('ru-RU', { month: 'short' })}`; }
-
-function vegMultError(date, prod) { if (!prod.multiplicity || prod.multiplicity <= 0) return false; const val = parseFloat(String(vegOrderValues[date + '_' + prod.id] || '0').replace(',', '.')) || 0; if (val === 0) return false; const rem = Math.abs(val % prod.multiplicity); return rem > 0.001 && Math.abs(rem - prod.multiplicity) > 0.001; }
-const vegHasMultErrors = computed(() => { if (!vegInfo.value) return false; return vegDeliveries.value.some(del => !del.expired && vegInfo.value.products.some(prod => vegMultError(del.date, prod))); });
-const vegCanSubmit = computed(() => { if (!vegInfo.value || !vegDeliveries.value.length) return false; if (!vegDeliveries.value.some(d => !d.expired)) return false; return vegDeliveries.value.some(d => !d.expired && vegDayHasData(d.date)); });
-const vegCanEdit = computed(() => vegDeliveries.value.some(d => !d.expired));
-
-function vegDayHasData(date) { if (!vegInfo.value) return false; return vegInfo.value.products.some(p => { const val = String(vegOrderValues[date + '_' + p.id] || '').replace(',', '.').trim(); return val !== ''; }); }
-function vegDayAllZeros(date) { if (!vegInfo.value) return false; return vegInfo.value.products.every(p => { const val = String(vegOrderValues[date + '_' + p.id] || '').replace(',', '.').trim(); return val === '0'; }); }
-function vegOrderQty(order) { const adminQ = order.admin_qty !== null && order.admin_qty !== undefined ? parseFloat(order.admin_qty) : NaN; return !isNaN(adminQ) ? adminQ : parseFloat(order.quantity); }
-function vegPrevInfo(date, prod) {
-  const allDates = [...new Set(vegAllExisting.value.map(o => o.delivery_date))].sort();
-  const prevDates = allDates.filter(d => d < date);
-  if (prevDates.length > 0) { const prevDate = prevDates[prevDates.length - 1]; const order = vegAllExisting.value.find(o => o.delivery_date === prevDate && o.product_id === prod.id); if (order) { const q = vegOrderQty(order); if (q > 0) return { date: prevDate, qty: q }; } }
-  const prevOrders = vegPrevSessionOrders.value.filter(o => o.product_name === prod.product_name);
-  if (!prevOrders.length) return null;
-  const sorted = prevOrders.sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
-  const q = vegOrderQty(sorted[0]);
-  return q > 0 ? { date: sorted[0].delivery_date, qty: q } : null;
-}
-function vegHasPrevData(date) { if (!vegInfo.value) return false; return vegInfo.value.products.some(p => vegPrevInfo(date, p)); }
-function vegFillFromPrev(date) { if (!vegInfo.value) return; for (const prod of vegInfo.value.products) { const prev = vegPrevInfo(date, prod); if (prev?.qty > 0) vegOrderValues[date + '_' + prod.id] = String(prev.qty); } }
-function vegFillZeros(date) { if (!vegInfo.value) return; for (const prod of vegInfo.value.products) vegOrderValues[date + '_' + prod.id] = '0'; }
-
-const planetaBadge = computed(() => {
-  if (vegNoSession.value || !vegInfo.value) return null;
-  if (vegSubmitted.value) return { text: '\u2713', type: 'ok' };
-  const open = vegDeliveries.value.filter(d => !d.expired).length;
-  if (open > 0) return { text: open, type: 'warn' };
-  return null;
-});
-
-async function vegLoadData() {
-  vegLoading.value = true; vegError.value = '';
-  try {
-    const { data } = await db.rpc('veg_validate_token', {});
-    if (!data || data.error) { vegNoSession.value = true; return; }
-    vegInfo.value = data;
-    const restNum = roStore.restaurant?.number;
-    const [schedRes, ordRes, prevRes] = await Promise.all([
-      db.rpc('veg_get_schedule', { restaurant_number: restNum }),
-      db.rpc('veg_get_existing_orders', { restaurant_number: restNum }),
-      db.rpc('veg_get_previous_orders', { restaurant_number: restNum }),
-    ]);
-    vegDeliveries.value = schedRes.data?.deliveries || [];
-    for (const del of vegDeliveries.value) { for (const prod of (vegInfo.value?.products || [])) { vegOrderValues[del.date + '_' + prod.id] = ''; } }
-    const existing = ordRes.data?.orders || [];
-    vegAllExisting.value = existing;
-    vegPrevSessionOrders.value = prevRes.data?.orders || [];
-    for (const o of existing) { const key = o.delivery_date + '_' + o.product_id; if (key in vegOrderValues) { const q = vegOrderQty(o); vegOrderValues[key] = !isNaN(q) ? String(q) : ''; } }
-  } catch { vegNoSession.value = true; }
-  finally { vegLoading.value = false; }
-}
-
-async function vegSubmit() {
-  vegError.value = ''; vegSubmitting.value = true;
-  try {
-    const items = [];
-    for (const del of vegDeliveries.value) { if (del.expired) continue; for (const prod of (vegInfo.value?.products || [])) { const val = String(vegOrderValues[del.date + '_' + prod.id] || '').replace(',', '.').trim(); if (val === '') continue; items.push({ product_id: prod.id, delivery_date: del.date, quantity: parseFloat(val) || 0 }); } }
-    const submittedDates = vegDeliveries.value.filter(d => !d.expired).map(d => d.date);
-    const { data } = await db.rpc('veg_submit_order', { restaurant_number: roStore.restaurant?.number, items, submitted_dates: submittedDates });
-    if (data?.error) { vegError.value = data.error === 'session_closed' ? 'Сессия закрыта' : data.error; }
-    else {
-      vegSubmitted.value = true;
-      vegEditing.value = false;
-      try { await loadHistory(); } catch {}
-    }
-  } catch { vegError.value = 'Ошибка при отправке'; }
-  finally { vegSubmitting.value = false; }
-}
-
-async function vegSkipDelivery() {
-  const del = vegDeliveries.value[vegActiveDay.value];
-  if (!del || del.expired) return;
-  const dayLabel = vegFmtDeliveryDate(del.date);
-  const ok = await showConfirm('Отказ от поставки', `Подтвердить, что поставка от «Планета Ресторанов» на ${dayLabel} не нужна?`, { okText: 'Не нужна', danger: true });
-  if (!ok) return;
-  for (const prod of (vegInfo.value?.products || [])) {
-    vegOrderValues[del.date + '_' + prod.id] = '0';
-  }
-  await vegSubmit();
-}
-
 // ═══ Supplier orders ═══
 const supSelectedDates = reactive({});
 const supProducts = reactive({});
@@ -1674,19 +1450,14 @@ async function switchTab(tab, subTab) {
   const curSub = orderSubTab.value;
   const nextTab = tab;
   const requestedSub = (tab === 'orders') ? (subTab || orderSubTab.value) : null;
-  const nextSub = (requestedSub === 'planeta' && !canUseVeg.value) ? 'delivery' : requestedSub;
+  const nextSub = requestedSub;
 
   // Определяем, какую под-вкладку пользователь реально покидает
   const leavingDelivery = curTab === 'orders' && curSub === 'delivery' && !(nextTab === 'orders' && nextSub === 'delivery');
-  const leavingPlaneta = curTab === 'orders' && curSub === 'planeta' && !(nextTab === 'orders' && nextSub === 'planeta');
   const leavingProfile = curTab === 'profile' && nextTab !== 'profile';
 
   if (leavingDelivery && delHasUnsavedChanges.value) {
     const ok = await showConfirm('Несохранённые изменения', 'В заказе есть несохранённые изменения. Перейти на другую вкладку?', { okText: 'Перейти' });
-    if (!ok) return;
-  }
-  if (leavingPlaneta && vegEditing.value) {
-    const ok = await showConfirm('Несохранённые изменения', 'Заявка «Планета Ресторанов» не сохранена. Перейти на другую вкладку?', { okText: 'Перейти' });
     if (!ok) return;
   }
   if (leavingProfile && (pwOld.value || pwNew.value)) {
@@ -1701,7 +1472,6 @@ async function switchTab(tab, subTab) {
   }
   if (tab === 'orders') {
     const sub = nextSub || orderSubTab.value;
-    if (sub === 'planeta' && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
     if (sub === 'history' && !historyOrders.value.length) loadHistory();
     if (sub && sub.startsWith('sup_')) {
       const supId = sub.slice(4);
@@ -1722,8 +1492,7 @@ function applyRouteToState() {
     orderSubTab.value = 'delivery';
   } else if (name === 'restaurant-orders-planeta') {
     activeTab.value = 'orders';
-    orderSubTab.value = canUseVeg.value ? 'planeta' : 'delivery';
-    if (canUseVeg.value && !vegInfo.value && !vegLoading.value && !vegNoSession.value) vegLoadData();
+    orderSubTab.value = 'delivery';
   } else if (name === 'restaurant-orders-history') {
     activeTab.value = 'orders';
     orderSubTab.value = 'history';
@@ -1752,7 +1521,6 @@ function syncStateToRoute() {
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery') target = { name: 'restaurant-orders-delivery' };
-    else if (sub === 'planeta' && canUseVeg.value) target = { name: 'restaurant-orders-planeta' };
     else if (sub === 'history') target = { name: 'restaurant-orders-history' };
     else if (sub && sub.startsWith('sup_')) {
       target = { name: 'restaurant-orders-supplier', params: { supplierId: sub.slice(4) } };
@@ -1797,6 +1565,28 @@ async function loadHistory() {
     historyError.value = e.message || 'Не удалось загрузить историю заказов';
   }
   finally { historyLoading.value = false; }
+}
+
+async function openHistoryOrder(order) {
+  if (!order?.id || !order?.source) return;
+  historyOrderModal.show = true;
+  historyOrderModal.loading = true;
+  historyOrderModal.error = '';
+  historyOrderModal.order = null;
+  try {
+    historyOrderModal.order = await roStore.loadHistoryOrder(order.source, order.id);
+  } catch (e) {
+    historyOrderModal.error = e.message || 'Не удалось открыть заказ';
+  } finally {
+    historyOrderModal.loading = false;
+  }
+}
+
+function closeHistoryOrderModal() {
+  historyOrderModal.show = false;
+  historyOrderModal.loading = false;
+  historyOrderModal.error = '';
+  historyOrderModal.order = null;
 }
 
 // Password change
@@ -1923,7 +1713,7 @@ async function submitStockInline() {
 }
 
 function onBeforeUnload(e) {
-  if (delHasUnsavedChanges.value || vegEditing.value || pwOld.value || pwNew.value) {
+  if (delHasUnsavedChanges.value || pwOld.value || pwNew.value) {
     e.preventDefault();
     e.returnValue = '';
   }
@@ -1948,7 +1738,6 @@ async function loadCabinetData() {
   await loadHistory();
   await checkStockCollection();
   await loadTgStatus();
-  if (canUseVeg.value) await vegLoadData();
 }
 
 async function retryCabinetLoad() {
@@ -2045,6 +1834,38 @@ onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListe
 .sb-badge.ok { background: #16a34a; }
 .sb-badge.alert { background: #dc2626; }
 .sb-spacer { flex: 1; }
+.sb-help {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  margin-top: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.05);
+  color: #fff;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.18s;
+}
+.sb-help:hover {
+  background: rgba(42,171,238,0.18);
+  border-color: rgba(42,171,238,0.35);
+}
+.sb-help-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(42,171,238,0.22);
+  color: #8fd8ff;
+  font-size: 13px;
+  font-weight: 900;
+}
 .sb-rest {
   background: rgba(255,255,255,0.06); border-radius: 13px;
   margin-top: 8px; border: 1px solid rgba(255,255,255,0.04);
@@ -2394,6 +2215,12 @@ tr.del-err { background: #fef2f2; }
 .history-date { font-weight: 700; color: #502314; font-size: 14px; }
 .history-meta { display: flex; gap: 10px; font-size: 12px; color: #8b7355; margin-top: 4px; }
 .history-time { margin-left: auto; }
+.history-view-meta { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; color: #6b4f3a; font-size: 14px; }
+.history-view-items { display: flex; flex-direction: column; gap: 0; border-top: 1px solid #F2EDE8; }
+.history-view-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #F7F2EC; }
+.history-view-row:last-child { border-bottom: none; }
+.history-view-main { display: flex; align-items: center; gap: 8px; min-width: 0; color: #502314; }
+.history-view-qty { flex-shrink: 0; font-weight: 700; color: #502314; }
 
 /* Stock */
 .stock-card { background: white; border-radius: 18px; padding: 32px 24px; margin: 0 0 16px; text-align: center; border: 1px solid #EDE8E3; }

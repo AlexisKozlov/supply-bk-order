@@ -94,7 +94,7 @@ export const useUserStore = defineStore('user', () => {
       const { data } = await db.rpc('validate_session', {});
       if (!data?.valid) {
         logout();
-        return;
+        return null;
       }
       // Сохранить сессионный токен если сервер выдал (миграция)
       if (data.session_token) setSessionToken(data.session_token);
@@ -103,8 +103,16 @@ export const useUserStore = defineStore('user', () => {
         const updated = { ...user, role: data.user.role, display_role: data.user.display_role, legal_entities: data.user.legal_entities, permissions: data.user.permissions || null, hidden_modules: data.user.hidden_modules || [] };
         currentUser.value = updated;
         localStorage.setItem('bk_user', JSON.stringify(updated));
+        return updated;
       }
+      return currentUser.value;
     } catch (e) { /* сеть недоступна — оставляем локальную сессию */ }
+    return currentUser.value;
+  }
+
+  async function refreshSession() {
+    if (!currentUser.value) return null;
+    return await validateSession(currentUser.value);
   }
 
   async function login(email, password) {
@@ -181,6 +189,7 @@ export const useUserStore = defineStore('user', () => {
     maintenanceMessage,
     maintenanceEndTime,
     restoreSession,
+    refreshSession,
     login,
     logout,
     getAllowedEntities,

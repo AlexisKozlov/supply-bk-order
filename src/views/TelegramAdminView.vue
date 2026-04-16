@@ -277,7 +277,6 @@
               <th title="Остатки заканчиваются">📉</th>
               <th title="Корректировки заказов">✏️</th>
               <th title="Сообщения из ресторанов">💬</th>
-              <th title="Сводка заявок поставщикам после дедлайна">🧾</th>
             </tr>
           </thead>
           <tbody>
@@ -293,7 +292,6 @@
               <td :class="cellClass(u.low_stock)" class="tga-cell-toggle" @click="toggleSetting(u, 'low_stock')">{{ u.low_stock ? '✓' : '✕' }}</td>
               <td :class="cellClass(u.correction_notifications)" class="tga-cell-toggle" @click="toggleSetting(u, 'correction_notifications')">{{ u.correction_notifications ? '✓' : '✕' }}</td>
               <td :class="cellClass(u.chat_notifications)" class="tga-cell-toggle" @click="toggleSetting(u, 'chat_notifications')">{{ u.chat_notifications ? '✓' : '✕' }}</td>
-              <td :class="cellClass(u.so_deadline_summary)" class="tga-cell-toggle" @click="toggleSetting(u, 'so_deadline_summary')">{{ u.so_deadline_summary ? '✓' : '✕' }}</td>
             </tr>
           </tbody>
         </table>
@@ -309,7 +307,6 @@
         <span>📉 Остатки заканчиваются</span>
         <span>✏️ Корректировки заказов</span>
         <span>💬 Сообщения из ресторанов</span>
-        <span>🧾 Сводка заявок поставщикам</span>
       </div>
     </div>
 

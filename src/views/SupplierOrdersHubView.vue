@@ -29,8 +29,7 @@
       </button>
     </div>
 
-    <VegOrderAdminView v-if="selectedType === 'veg'" embedded />
-    <SupplierOrdersManagerView v-else-if="selectedType === 'so' && selectedId" :supplier-id="selectedId" />
+    <SupplierOrdersManagerView v-if="selectedId" :supplier-id="selectedId" />
     <div v-else-if="!suppliers.length" class="so-hub-empty">
       Для юрлица «{{ orderStore.settings.legalEntity }}» пока не подключено ни одного поставщика к приёму заявок.<br>
       Нажмите <b>«+ Подключить поставщика»</b>, чтобы настроить график, шаблон товаров и дедлайны.
@@ -47,17 +46,14 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue';
-import VegOrderAdminView from '@/views/VegOrderAdminView.vue';
 import SupplierOrdersManagerView from '@/views/SupplierOrdersManagerView.vue';
 import SupplierConnectModal from '@/components/modals/SupplierConnectModal.vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
-import { useUserStore } from '@/stores/userStore.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 
 const soStore = useSupplierOrderStore();
 const orderStore = useOrderStore();
-const userStore = useUserStore();
 
 const suppliers = ref([]);
 const selectedId = ref('');
@@ -97,7 +93,7 @@ async function disconnectSelected() {
 
 function selectSupplier(id) {
   selectedId.value = id;
-  selectedType.value = id === 'veg' ? 'veg' : 'so';
+  selectedType.value = 'so';
   // Ключ в sessionStorage делаем per-юрлицо, чтобы при переключении
   // сайдбара не восстанавливался чужой поставщик.
   sessionStorage.setItem(storageKey(), id);
@@ -109,14 +105,6 @@ function storageKey() {
 
 async function loadList() {
   const list = [];
-
-  // Планета Ресторанов — только для БК+ВМ. Для Пицца Стар этот модуль
-  // пока не используется, поэтому кнопку не показываем.
-  const groupCode = getEntityGroupCode(orderStore.settings.legalEntity);
-  const hasVeg = userStore.hasAccess?.('veg', 'view') || userStore.hasAccess?.('supplier-orders', 'view');
-  if (groupCode !== 'PS' && hasVeg !== false) {
-    list.push({ id: 'veg', name: 'Планета Ресторанов', type: 'veg' });
-  }
 
   // SO-поставщики из API — передаём юрлицо, чтобы на ПС показались только свои
   try {

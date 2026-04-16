@@ -9,23 +9,78 @@
 
 // ═══ Хелперы для заявок поставщикам ═══
 
-/** Юрлицо ресторана по его номеру */
-function soGetLegalEntity($restNum) {
-    if ((int)$restNum === 3) return 'ООО "Воглия Матта"';
-    return 'ООО "Бургер БК"';
+function soGetPlanetaSupplierId() {
+    return 'bbbbbbbb-0000-4000-a000-000000000001';
+}
+
+function soGetRestaurantContext($pdo, $restNum) {
+    $s = $pdo->prepare("
+        SELECT id, number, legal_entity_group
+        FROM restaurants
+        WHERE number = ? AND active = 1
+        ORDER BY id
+        LIMIT 1
+    ");
+    $s->execute([(int)$restNum]);
+    $rest = $s->fetch();
+    if (!$rest) {
+        return null;
+    }
+
+    $group = $rest['legal_entity_group'] ?: 'BK_VM';
+    if ($group === 'PS') {
+        $legalEntity = 'ООО "Пицца Стар"';
+    } elseif ((int)$restNum === 3) {
+        $legalEntity = 'ООО "Воглия Матта"';
+    } else {
+        $legalEntity = 'ООО "Бургер БК"';
+    }
+
+    $rest['legal_entity'] = $legalEntity;
+    return $rest;
+}
+
+function soGetSupplierName($pdo, $supplierId) {
+    $s = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+    $s->execute([$supplierId]);
+    return $s->fetchColumn() ?: 'Поставщик';
+}
+
+function soGetSupplierSettingsBot($pdo, $supplierId) {
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+    $s->execute([$supplierId]);
+    $row = $s->fetch();
+    if ($row) {
+        return $row;
+    }
+    return [
+        'supplier_id' => $supplierId,
+        'is_accepting_orders' => 1,
+        'default_deadline_time' => '14:00:00',
+        'pause_message' => null,
+    ];
 }
 
 /** Проверка дедлайна заявки (open/closed) */
-function soBotCheckDeadline($pdo, $session, $deliveryDate) {
+function soBotCheckDeadline($pdo, $supplierId, $deliveryDate) {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
-    $supplierId = $session['supplier_id'] ?? '';
     $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
 
     // 1. Переопределение на конкретную дату
-    $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE session_id = ? AND delivery_date = ?");
-    $s->execute([$session['id'], $deliveryDate]);
-    $override = $s->fetch();
+    try {
+        $s = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+        $s->execute([$supplierId, $deliveryDate]);
+        $override = $s->fetch();
+    } catch (PDOException $e) {
+        $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+        $s->execute([$supplierId, $deliveryDate]);
+        $override = $s->fetch();
+    }
+
+    if ($override && !empty($override['is_closed'])) {
+        return ['status' => 'closed', 'deadline' => null];
+    }
 
     // 2. Правило по дню недели
     $rule = null;
@@ -36,7 +91,7 @@ function soBotCheckDeadline($pdo, $session, $deliveryDate) {
     }
 
     // 3. Вычисляем дедлайн
-    if ($override) {
+    if ($override && !empty($override['deadline_time'])) {
         $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
         $deadlineTime = $override['deadline_time'];
     } elseif ($rule) {
@@ -48,8 +103,9 @@ function soBotCheckDeadline($pdo, $session, $deliveryDate) {
         if ($diff <= 0) $diff += 7;
         $deadlineDate->modify("-{$diff} days");
     } else {
+        $settings = soGetSupplierSettingsBot($pdo, $supplierId);
         $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-        $deadlineTime = $session['deadline_time'] ?? '14:00:00';
+        $deadlineTime = $settings['default_deadline_time'] ?? '14:00:00';
     }
 
     $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
@@ -57,6 +113,163 @@ function soBotCheckDeadline($pdo, $session, $deliveryDate) {
 
     if ($now < $deadlineDT) return ['status' => 'open', 'deadline' => $deadlineStr];
     return ['status' => 'closed', 'deadline' => $deadlineStr];
+}
+
+function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {
+    $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+    $checkUser = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $checkUser->execute([$restNum, $restGroup]);
+    if (!$checkUser->fetch()) {
+        return null;
+    }
+
+    $tgToken = bin2hex(random_bytes(32));
+    $pdo->prepare("
+        INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
+        VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)
+    ")->execute([$tgToken, $chatId, $restNum, $restGroup]);
+
+    $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
+    $redirect = '/restaurant/orders/supplier/' . urlencode($supplierId);
+    return "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode($redirect);
+}
+
+function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
+    $rest = soGetRestaurantContext($pdo, $restNum);
+    if (!$rest) {
+        return ['rest' => null, 'schedule' => [], 'available_dates' => [], 'settings' => soGetSupplierSettingsBot($pdo, $supplierId)];
+    }
+
+    $sch = $pdo->prepare("
+        SELECT order_day, delivery_day
+        FROM so_supplier_schedules
+        WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
+        ORDER BY order_day
+    ");
+    $sch->execute([$supplierId, $rest['id']]);
+    $schedule = $sch->fetchAll();
+
+    $settings = soGetSupplierSettingsBot($pdo, $supplierId);
+    if ((int)($settings['is_accepting_orders'] ?? 1) !== 1 || empty($schedule)) {
+        return ['rest' => $rest, 'schedule' => $schedule, 'available_dates' => [], 'settings' => $settings];
+    }
+
+    $tz = new DateTimeZone('Europe/Minsk');
+    $today = new DateTime('now', $tz);
+    $today->setTime(0, 0, 0);
+    $weekStart = clone $today;
+    $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
+    $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
+
+    $availableDates = [];
+    foreach ($schedule as $sc) {
+        $orderDow = (int)$sc['order_day'];
+        $deliveryDow = (int)$sc['delivery_day'];
+
+        for ($w = 0; $w < 2; $w++) {
+            $orderDateObj = (clone $weekStart)->modify('+' . ($orderDow - 1 + $w * 7) . ' days');
+            $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+            if ($deliveryDow <= $orderDow) {
+                $deliveryDateObj->modify('+7 days');
+            }
+            if ($deliveryDateObj < $today) {
+                continue;
+            }
+
+            $deliveryDate = $deliveryDateObj->format('Y-m-d');
+            $deadlineInfo = soBotCheckDeadline($pdo, $supplierId, $deliveryDate);
+
+            $os = $pdo->prepare("
+                SELECT o.id, o.status, o.submitted_at,
+                       (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count
+                FROM so_orders o
+                WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ?
+                LIMIT 1
+            ");
+            $os->execute([$supplierId, $restNum, $deliveryDate]);
+            $order = $os->fetch();
+
+            if ($deadlineInfo['status'] === 'closed' && !$order) {
+                continue;
+            }
+
+            $availableDates[] = [
+                'order_date' => $orderDateObj->format('Y-m-d'),
+                'order_day_name' => $dayNamesFull[$orderDow] ?? '',
+                'delivery_date' => $deliveryDate,
+                'delivery_day_name' => $dayNamesFull[$deliveryDow] ?? '',
+                'deadline' => $deadlineInfo['deadline'],
+                'deadline_status' => $deadlineInfo['status'],
+                'order' => $order ? [
+                    'id' => (int)$order['id'],
+                    'status' => $order['status'],
+                    'submitted_at' => $order['submitted_at'],
+                    'item_count' => (int)$order['item_count'],
+                    'is_skip' => ((int)$order['item_count']) === 0,
+                ] : null,
+            ];
+        }
+    }
+
+    $seen = [];
+    $availableDates = array_values(array_filter($availableDates, function ($dateInfo) use (&$seen) {
+        if (isset($seen[$dateInfo['delivery_date']])) {
+            return false;
+        }
+        $seen[$dateInfo['delivery_date']] = true;
+        return true;
+    }));
+
+    usort($availableDates, function ($a, $b) {
+        return strcmp($a['delivery_date'], $b['delivery_date']);
+    });
+
+    // В боте показываем только две ближайшие доступные даты.
+    $availableDates = array_slice($availableDates, 0, 2);
+
+    return ['rest' => $rest, 'schedule' => $schedule, 'available_dates' => $availableDates, 'settings' => $settings];
+}
+
+function soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate) {
+    $rest = soGetRestaurantContext($pdo, $restNum);
+    if (!$rest || !$deliveryDate) {
+        return false;
+    }
+
+    $sch = $pdo->prepare("
+        SELECT order_day, delivery_day
+        FROM so_supplier_schedules
+        WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
+    ");
+    $sch->execute([$supplierId, $rest['id']]);
+    $schedule = $sch->fetchAll();
+    if (!$schedule) {
+        return false;
+    }
+
+    $tz = new DateTimeZone('Europe/Minsk');
+    $today = new DateTime('now', $tz);
+    $today->setTime(0, 0, 0);
+    $weekStart = clone $today;
+    $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
+
+    foreach ($schedule as $sc) {
+        $orderDow = (int)$sc['order_day'];
+        $deliveryDow = (int)$sc['delivery_day'];
+        for ($w = 0; $w < 2; $w++) {
+            $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+            if ($deliveryDow <= $orderDow) {
+                $deliveryDateObj->modify('+7 days');
+            }
+            if ($deliveryDateObj < $today) {
+                continue;
+            }
+            if ($deliveryDateObj->format('Y-m-d') === $deliveryDate) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // ═══ Овощи: статистика подписок (для админа) ═══
@@ -261,6 +474,10 @@ function restMenuMain($chatId, $msgId) {
 
 // Подменю: Планета Ресторанов
 function restMenuVeg($chatId, $msgId) {
+    global $pdo;
+    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
+    @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt");
+    $supplierId = soGetPlanetaSupplierId();
     $text = "🥬 <b>Планета Ресторанов</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
     $text .= "📝 <b>Заявка</b> — подать через бот или сайт\n";
@@ -268,13 +485,18 @@ function restMenuVeg($chatId, $msgId) {
 
     $btns = [
         [
-            ['text' => '📝 Подать заявку', 'callback_data' => 'vegord_start'],
-            ['text' => '📋 Мои заявки', 'callback_data' => 'veg_my_orders'],
+            ['text' => '📝 Подать заявку', 'callback_data' => "soord_sup_{$supplierId}"],
+            ['text' => '📋 Мои заявки', 'callback_data' => "sohist_sup_{$supplierId}"],
         ],
     ];
-    $formLink = vegGetFormLink($chatId);
-    if ($formLink) {
-        $btns[] = [['text' => '🌐 Через сайт', 'web_app' => ['url' => $formLink]]];
+    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? ORDER BY CAST(restaurant_number AS UNSIGNED)");
+    $s->execute([$chatId]);
+    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+    if (count($restNums) === 1) {
+        $webUrl = soBotGetWebLink($pdo, $chatId, $supplierId, $restNums[0]);
+        if ($webUrl) {
+            $btns[] = [['text' => '🌐 Через сайт', 'web_app' => ['url' => $webUrl]]];
+        }
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -327,10 +549,16 @@ function restMenuSupplier($chatId, $msgId) {
 // Камако: выбор ресторана
 function soOrderSelectRest($chatId, $msgId, $supplierId) {
     global $pdo;
+    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
     $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? ORDER BY CAST(restaurant_number AS UNSIGNED)");
     $s->execute([$chatId]);
     $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
-    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+    $supName = soGetSupplierName($pdo, $supplierId);
+
+    if (!$restNums) {
+        editMessage($chatId, $msgId, "Сначала подпишитесь на ресторан.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
 
     if (count($restNums) === 1) {
         soOrderSelectDay($chatId, $msgId, $supplierId, $restNums[0]);
@@ -341,96 +569,83 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
     foreach ($restNums as $rn) {
         $btns[] = [['text' => "Ресторан {$rn}", 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
     }
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier')]];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
 // Камако: выбор дня
 function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     global $pdo;
-    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
+    $supName = soGetSupplierName($pdo, $supplierId);
+    $botData = soGetBotAvailableDates($pdo, $supplierId, $restNum);
+    $rest = $botData['rest'];
+    $settings = $botData['settings'];
 
-    // Активная сессия
-    $sess = $pdo->prepare("SELECT * FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() ORDER BY week_start DESC LIMIT 1");
-    $sess->execute([$supplierId]);
-    $session = $sess->fetch();
-    if (!$session) {
-        editMessage($chatId, $msgId, "📦 <b>{$supName}</b>\n\nСейчас приём заявок закрыт.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+    if (!$rest) {
+        editMessage($chatId, $msgId, "Ресторан не найден.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
         return;
     }
 
-    // Расписание
-    $restId = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND active = 1 LIMIT 1"); $restId->execute([$restNum]); $restId = $restId->fetchColumn();
-    $sch = $pdo->prepare("SELECT order_day, delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1 ORDER BY order_day");
-    $sch->execute([$supplierId, $restId]);
-    $schedules = $sch->fetchAll();
-
     $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
-    $tz = new DateTimeZone('Europe/Minsk');
-    $weekStart = new DateTime($session['week_start'], $tz);
 
     $btns = [];
     $text = "📦 <b>{$supName}</b> — Ресторан {$restNum}\n\nВыберите день доставки:\n";
 
-    foreach ($schedules as $sc) {
-        $deliveryDow = (int)$sc['delivery_day'];
-        $deliveryDateObj = clone $weekStart;
-        $currentDow = (int)$deliveryDateObj->format('N');
-        $diff = $deliveryDow - $currentDow;
-        if ($diff < 0) $diff += 7;
-        $deliveryDateObj->modify("+{$diff} days");
-        if ((int)$sc['delivery_day'] <= (int)$sc['order_day']) $deliveryDateObj->modify('+7 days');
-
-        $deliveryDate = $deliveryDateObj->format('Y-m-d');
+    foreach ($botData['available_dates'] as $dateInfo) {
+        $deliveryDate = $dateInfo['delivery_date'];
+        $deliveryDateObj = new DateTime($deliveryDate);
+        $deliveryDow = (int)$deliveryDateObj->format('N');
         $dayLabel = $dayNamesFull[$deliveryDow] . ', ' . $deliveryDateObj->format('d.m');
-
-        // Проверяем дедлайн
-        $dlStatus = soBotCheckDeadline($pdo, $session, $deliveryDate);
-
-        // Проверяем есть ли заказ
-        $existing = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $existing->execute([$session['id'], $restNum, $deliveryDate]);
-        $hasOrder = $existing->fetch();
+        $hasOrder = !empty($dateInfo['order']);
+        $isClosed = ($dateInfo['deadline_status'] ?? 'open') === 'closed';
 
         if ($hasOrder) {
-            $mark = ' ✅';
-        } elseif ($dlStatus['status'] === 'closed') {
+            $mark = !empty($dateInfo['order']['is_skip']) ? ' 🚫' : ' ✅';
+        } elseif ($isClosed) {
             $mark = ' ✕';
         } else {
             $mark = '';
         }
 
-        // Показываем кнопку: открытые дни + дни с уже поданной заявкой (для просмотра)
-        if ($dlStatus['status'] === 'open' || $hasOrder) {
-            $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+        $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+    }
+
+    if (empty($btns)) {
+        if ((int)($settings['is_accepting_orders'] ?? 1) !== 1) {
+            $pauseMessage = trim((string)($settings['pause_message'] ?? ''));
+            $text .= "\nСейчас приём заявок закрыт." . ($pauseMessage ? "\n\n{$pauseMessage}" : '');
+        } elseif (empty($botData['schedule'])) {
+            $text .= "\nДля этого ресторана не настроен график поставок.";
+        } else {
+            $text .= "\nНет доступных дней для заявки.";
         }
     }
 
-    // Кнопка «Через сайт» — открывает заявку Камако в личном кабинете ресторана
-    // Доступна, только если у ресторана есть активная учётка
-    $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
-    $checkUser = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
-    $checkUser->execute([$restNum, $restGroup]);
-    if ($checkUser->fetch()) {
-        $tgToken = bin2hex(random_bytes(32));
-        // Сохраняем выбранный ресторан в токене — иначе при двух+ подписках tg-auth возьмёт первый
-        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
-            ->execute([$tgToken, $chatId, $restNum, $restGroup]);
-        $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
-        $redirect = '/restaurant/orders/supplier/' . urlencode($supplierId);
-        $webUrl = "{$siteUrl}/restaurant/login?tg_token={$tgToken}&redirect=" . urlencode($redirect);
+    $webUrl = soBotGetWebLink($pdo, $chatId, $supplierId, $restNum);
+    if ($webUrl) {
         $btns[] = [['text' => '🌐 Через сайт', 'web_app' => ['url' => $webUrl]]];
     }
 
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']];
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier')]];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
 // Камако: показ товаров для ввода
 function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
-    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
-    $le = soGetLegalEntity($restNum);
+    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
+    $supName = soGetSupplierName($pdo, $supplierId);
+    $rest = soGetRestaurantContext($pdo, $restNum);
+    if (!$rest) {
+        editMessage($chatId, $msgId, "Ресторан не найден.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
+        return;
+    }
+    if (!soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate)) {
+        editMessage($chatId, $msgId, "Для этой даты нет настроенной поставки.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        return;
+    }
+    $le = $rest['legal_entity'];
 
     // Загружаем товары из шаблона (с учётом юрлица)
     $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1 ORDER BY sort_order, product_name");
@@ -438,20 +653,20 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $products = $tpl->fetchAll();
 
     if (!$products) {
-        editMessage($chatId, $msgId, "📦 <b>{$supName}</b>\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+        editMessage($chatId, $msgId, "📦 <b>{$supName}</b>\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier')]]]]);
         return;
     }
 
     // Существующий заказ
-    $sess = $pdo->prepare("SELECT id FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() LIMIT 1"); $sess->execute([$supplierId]); $session = $sess->fetch();
     $existingQty = [];
-    if ($session) {
-        $eo = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $eo->execute([$session['id'], $restNum, $deliveryDate]);
-        $order = $eo->fetch();
-        if ($order) {
-            $ei = $pdo->prepare("SELECT sku, quantity FROM so_order_items WHERE order_id = ?"); $ei->execute([$order['id']]);
-            foreach ($ei->fetchAll() as $item) $existingQty[$item['sku']] = $item['quantity'];
+    $eo = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+    $eo->execute([$supplierId, $restNum, $deliveryDate]);
+    $order = $eo->fetch();
+    if ($order) {
+        $ei = $pdo->prepare("SELECT sku, COALESCE(admin_qty, quantity) as effective_qty FROM so_order_items WHERE order_id = ?");
+        $ei->execute([$order['id']]);
+        foreach ($ei->fetchAll() as $item) {
+            $existingQty[$item['sku']] = $item['effective_qty'];
         }
     }
 
@@ -491,7 +706,11 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $text .= "</code>";
 
     // Сохраняем режим ввода
-    $modeData = "soord_{$supplierId}_{$restNum}_{$deliveryDate}_{$session['id']}";
+    $modeData = json_encode([
+        'supplier_id' => $supplierId,
+        'restaurant_number' => (string)$restNum,
+        'delivery_date' => $deliveryDate,
+    ], JSON_UNESCAPED_UNICODE);
     file_put_contents(sys_get_temp_dir() . "/soord_{$chatId}.txt", $modeData);
 
     $btns = [
@@ -505,33 +724,37 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
 // Камако: «Поставка не нужна» — создаём пустую заявку-отказ
 function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDate) {
     global $pdo;
-    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
-    $supName->execute([$supplierId]);
-    $supName = $supName->fetchColumn() ?: 'Поставщик';
-
-    // Активная сессия
-    $sess = $pdo->prepare("SELECT * FROM so_sessions WHERE supplier_id = ? AND status = 'active' AND week_end >= CURDATE() LIMIT 1");
-    $sess->execute([$supplierId]);
-    $session = $sess->fetch();
-    if (!$session) {
-        editMessage($chatId, $msgId, "❌ Сессия не активна.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+    $supName = soGetSupplierName($pdo, $supplierId);
+    $rest = soGetRestaurantContext($pdo, $restNum);
+    if (!$rest) {
+        editMessage($chatId, $msgId, "Ресторан не найден.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
         return;
     }
 
-    // Дедлайн
-    $dlStatus = soBotCheckDeadline($pdo, $session, $deliveryDate);
+    $settings = soGetSupplierSettingsBot($pdo, $supplierId);
+    if ((int)($settings['is_accepting_orders'] ?? 1) !== 1) {
+        $msg = $settings['pause_message'] ?: 'Приём заявок для этого поставщика временно приостановлен.';
+        editMessage($chatId, $msgId, "❌ {$msg}", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        return;
+    }
+
+    if (!soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate)) {
+        editMessage($chatId, $msgId, "❌ Для ресторана не настроена поставка на эту дату.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        return;
+    }
+
+    $dlStatus = soBotCheckDeadline($pdo, $supplierId, $deliveryDate);
     if ($dlStatus['status'] === 'closed') {
-        editMessage($chatId, $msgId, "❌ Приём заявок на эту дату закрыт (дедлайн: {$dlStatus['deadline']}).", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "❌ Приём заявок на эту дату закрыт" . ($dlStatus['deadline'] ? " (дедлайн: {$dlStatus['deadline']})" : '') . ".", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
         return;
     }
-
-    $le = soGetLegalEntity($restNum);
+    $le = $rest['legal_entity'];
 
     // Сохраняем заявку-отказ (без позиций)
     try {
         $pdo->beginTransaction();
-        $old = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $old->execute([$session['id'], $restNum, $deliveryDate]);
+        $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+        $old->execute([$supplierId, $restNum, $deliveryDate]);
         $oldOrder = $old->fetch();
         $isUpdate = false;
         if ($oldOrder) {
@@ -540,8 +763,8 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
                 ->execute([$oldOrder['id']]);
             $isUpdate = true;
         } else {
-            $pdo->prepare("INSERT INTO so_orders (session_id, supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-                ->execute([$session['id'], $supplierId, $restNum, $deliveryDate, $le]);
+            $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                ->execute([$supplierId, $restNum, $deliveryDate, $le]);
         }
         $pdo->commit();
     } catch (Exception $e) {
@@ -589,17 +812,32 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
 function soOrderProcessInput($chatId, $text) {
     global $pdo;
     $modeFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
-    $mode = trim(file_get_contents($modeFile));
+    if (!file_exists($modeFile)) {
+        sendMessage($chatId, "❌ Сначала откройте заявку через меню бота.");
+        return;
+    }
+    $mode = trim((string)file_get_contents($modeFile));
     @unlink($modeFile);
 
-    // Парсим режим: soord_{supplierId}_{restNum}_{date}_{sessionId}
-    $parts = explode('_', $mode);
-    if (count($parts) < 5) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
-    $supplierId = $parts[1]; $restNum = $parts[2]; $deliveryDate = $parts[3]; $sessionId = $parts[4];
-    $supName = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?"); $supName->execute([$supplierId]); $supName = $supName->fetchColumn() ?: 'Поставщик';
+    $state = json_decode($mode, true);
+    if (is_array($state)) {
+        $supplierId = $state['supplier_id'] ?? '';
+        $restNum = $state['restaurant_number'] ?? '';
+        $deliveryDate = $state['delivery_date'] ?? '';
+    } else {
+        $parts = explode('_', $mode);
+        if (count($parts) < 4) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
+        $supplierId = $parts[1] ?? '';
+        $restNum = $parts[2] ?? '';
+        $deliveryDate = $parts[3] ?? '';
+    }
+    if (!$supplierId || !$restNum || !$deliveryDate) { sendMessage($chatId, "❌ Ошибка: попробуйте начать заново."); return; }
+    $supName = soGetSupplierName($pdo, $supplierId);
 
     // Загружаем шаблон (с учётом юрлица)
-    $le = soGetLegalEntity($restNum);
+    $rest = soGetRestaurantContext($pdo, $restNum);
+    if (!$rest) { sendMessage($chatId, "❌ Ресторан не найден."); return; }
+    $le = $rest['legal_entity'];
     $tpl = $pdo->prepare("SELECT product_id, sku, product_name, multiplicity, min_qty FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 1");
     $tpl->execute([$supplierId, $le]);
     $products = $tpl->fetchAll();
@@ -635,32 +873,40 @@ function soOrderProcessInput($chatId, $text) {
     if (!$items) { sendMessage($chatId, "❌ Не удалось распознать ни одной позиции. Скопируйте шаблон и измените числа."); return; }
 
     // Проверяем дедлайн
-    $session = $pdo->prepare("SELECT * FROM so_sessions WHERE id = ?"); $session->execute([$sessionId]); $session = $session->fetch();
-    if ($session) {
-        $dlStatus = soBotCheckDeadline($pdo, $session, $deliveryDate);
-        if ($dlStatus['status'] === 'closed') {
-            sendMessage($chatId, "❌ Приём заявок на эту дату закрыт (дедлайн: {$dlStatus['deadline']}).");
-            return;
-        }
+    $settings = soGetSupplierSettingsBot($pdo, $supplierId);
+    if ((int)($settings['is_accepting_orders'] ?? 1) !== 1) {
+        $msg = $settings['pause_message'] ?: 'Приём заявок для этого поставщика временно приостановлен.';
+        sendMessage($chatId, "❌ {$msg}");
+        return;
+    }
+
+    $dlStatus = soBotCheckDeadline($pdo, $supplierId, $deliveryDate);
+    if ($dlStatus['status'] === 'closed') {
+        sendMessage($chatId, "❌ Приём заявок на эту дату закрыт" . ($dlStatus['deadline'] ? " (дедлайн: {$dlStatus['deadline']})" : '') . ".");
+        return;
+    }
+    if (!soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate)) {
+        sendMessage($chatId, "❌ На эту дату у ресторана нет поставки от этого поставщика.");
+        return;
     }
 
     // Определяем юрлицо ресторана
-    $le = soGetLegalEntity($restNum);
+    $le = $rest['legal_entity'];
 
     // Сохраняем заказ
     try {
         $pdo->beginTransaction();
         // Удаляем старый если есть
-        $old = $pdo->prepare("SELECT id FROM so_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $old->execute([$sessionId, $restNum, $deliveryDate]);
+        $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+        $old->execute([$supplierId, $restNum, $deliveryDate]);
         $oldOrder = $old->fetch();
         if ($oldOrder) {
             $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$oldOrder['id']]);
             $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$oldOrder['id']]);
         }
         // Вставляем новый
-        $pdo->prepare("INSERT INTO so_orders (session_id, supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-            ->execute([$sessionId, $supplierId, $restNum, $deliveryDate, $le]);
+        $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+            ->execute([$supplierId, $restNum, $deliveryDate, $le]);
         $orderId = $pdo->lastInsertId();
         $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
         foreach ($items as $it) { $ins->execute([$orderId, $it['product_id'], $it['sku'], $it['product_name'], $it['quantity']]); }
@@ -683,6 +929,177 @@ function soOrderProcessInput($chatId, $text) {
         [['text' => '◂ В меню', 'callback_data' => 'veg_my_subs']],
     ]];
     sendMessage($chatId, $confirmText, $btns);
+}
+
+function soFormatOrders($orders) {
+    $text = '';
+    $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
+    foreach ($orders as $order) {
+        $dateObj = new DateTime($order['delivery_date']);
+        $dow = (int)$dateObj->format('N');
+        $text .= "📅 <b>" . ($dayNames[$dow] ?? '') . ' ' . $dateObj->format('d.m') . "</b>\n";
+        if (empty($order['items'])) {
+            $text .= "  <i>Поставка не нужна</i>\n\n";
+            continue;
+        }
+        foreach ($order['items'] as $item) {
+            $qty = ($item['admin_qty'] !== null && $item['admin_qty'] !== '') ? (float)$item['admin_qty'] : (float)$item['quantity'];
+            if ($qty <= 0) {
+                continue;
+            }
+            $qtyFmt = rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.');
+            $text .= "  • {$item['product_name']}: <b>{$qtyFmt}</b>\n";
+        }
+        $text .= "\n";
+    }
+    return $text;
+}
+
+function soShowMyOrders($chatId, $msgId, $supplierId) {
+    global $pdo;
+    $supName = soGetSupplierName($pdo, $supplierId);
+    $s = $pdo->prepare("
+        SELECT vs.restaurant_number, r.address, r.city
+        FROM veg_telegram_subs vs
+        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.active = 1
+        WHERE vs.chat_id = ?
+        ORDER BY CAST(vs.restaurant_number AS UNSIGNED)
+    ");
+    $s->execute([$chatId]);
+    $subs = $s->fetchAll();
+
+    if (!$subs) {
+        editMessage($chatId, $msgId, "📋 У вас нет подписок.\nСначала подпишитесь на ресторан.", ['inline_keyboard' => [
+            [['text' => '➕ Подписаться', 'callback_data' => 'veg_pick_rest']],
+            [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+        ]]);
+        return;
+    }
+
+    if (count($subs) === 1) {
+        soShowRestOrders($chatId, $msgId, $supplierId, $subs[0]['restaurant_number']);
+        return;
+    }
+
+    $text = "📋 <b>{$supName}</b>\n\nВыберите ресторан:";
+    $btns = [];
+    foreach ($subs as $sub) {
+        $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
+        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => "sohist_rest_{$supplierId}_{$sub['restaurant_number']}"]];
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier')]];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+function soShowRestOrders($chatId, $msgId, $supplierId, $restNum) {
+    global $pdo;
+    $supName = soGetSupplierName($pdo, $supplierId);
+    $s = $pdo->prepare("
+        SELECT id, delivery_date, submitted_at
+        FROM so_orders
+        WHERE supplier_id = ? AND restaurant_number = ?
+        ORDER BY delivery_date DESC, id DESC
+        LIMIT 10
+    ");
+    $s->execute([$supplierId, $restNum]);
+    $orders = $s->fetchAll();
+
+    $text = "📋 <b>{$supName}</b>\n";
+    $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n\n";
+
+    $usedLegacyHistory = false;
+    $formattedOrders = [];
+    $existingDates = [];
+    if ($orders) {
+        $orderIds = array_column($orders, 'id');
+        $ph = implode(',', array_fill(0, count($orderIds), '?'));
+        $itemsStmt = $pdo->prepare("
+            SELECT order_id, product_name, quantity, admin_qty
+            FROM so_order_items
+            WHERE order_id IN ({$ph})
+            ORDER BY product_name
+        ");
+        $itemsStmt->execute($orderIds);
+        $itemsByOrder = [];
+        foreach ($itemsStmt->fetchAll() as $item) {
+            $itemsByOrder[$item['order_id']][] = $item;
+        }
+
+        foreach ($orders as $order) {
+            $formattedOrders[] = [
+                'delivery_date' => $order['delivery_date'],
+                'items' => $itemsByOrder[$order['id']] ?? [],
+            ];
+            $existingDates[$order['delivery_date']] = true;
+        }
+    }
+
+    if ($supplierId === soGetPlanetaSupplierId()) {
+        $legacyStmt = $pdo->prepare("
+            SELECT vo.delivery_date, sp.product_name, vo.quantity, vo.admin_qty
+            FROM veg_orders vo
+            JOIN veg_session_products sp ON sp.id = vo.product_id AND sp.session_id = vo.session_id
+            WHERE vo.restaurant_number = ?
+            ORDER BY vo.delivery_date DESC, sp.sort_order, sp.product_name
+        ");
+        $legacyStmt->execute([$restNum]);
+        $legacyByDate = [];
+        foreach ($legacyStmt->fetchAll() as $row) {
+            $legacyByDate[$row['delivery_date']][] = $row;
+        }
+
+        foreach ($legacyByDate as $deliveryDate => $legacyItems) {
+            if (isset($existingDates[$deliveryDate])) {
+                continue;
+            }
+            $hasPositive = false;
+            foreach ($legacyItems as $item) {
+                $qty = ($item['admin_qty'] !== null && $item['admin_qty'] !== '') ? (float)$item['admin_qty'] : (float)$item['quantity'];
+                if ($qty > 0) {
+                    $hasPositive = true;
+                    break;
+                }
+            }
+            if (!$hasPositive) {
+                continue;
+            }
+            $formattedOrders[] = [
+                'delivery_date' => $deliveryDate,
+                'items' => $legacyItems,
+            ];
+            $usedLegacyHistory = true;
+        }
+    }
+
+    if (!$formattedOrders) {
+        $text .= "<i>Заявок пока нет.</i>";
+    } else {
+        usort($formattedOrders, function ($a, $b) {
+            return strcmp($b['delivery_date'], $a['delivery_date']);
+        });
+        $formattedOrders = array_slice($formattedOrders, 0, 10);
+        $text .= soFormatOrders($formattedOrders);
+    }
+
+    if ($usedLegacyHistory) {
+        $text .= "ℹ️ Часть старых заявок показана из архива.\n";
+    }
+
+    if (mb_strlen($text) > 4000) {
+        $text = mb_substr($text, 0, 3980) . "\n\n…";
+    }
+
+    $subsCountStmt = $pdo->prepare("SELECT COUNT(*) FROM veg_telegram_subs WHERE chat_id = ?");
+    $subsCountStmt->execute([$chatId]);
+    $subsCount = (int)$subsCountStmt->fetchColumn();
+    $menuBackCallback = ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier');
+    $backCallback = $subsCount > 1 ? "sohist_sup_{$supplierId}" : $menuBackCallback;
+    $btns = [
+        [['text' => '📝 Подать или изменить заявку', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]],
+        [['text' => '◂ Назад', 'callback_data' => $backCallback]],
+    ];
+    editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
 // График доставок для ресторана (все подписанные рестораны)

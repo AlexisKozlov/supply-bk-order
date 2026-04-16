@@ -140,7 +140,6 @@ const tgLabels = {
   low_stock: '📉 Остатки заканчиваются',
   correction_notifications: '✏️ Корректировки заказов',
   chat_notifications: '💬 Сообщения из ресторанов',
-  so_deadline_summary: '🧾 Сводка заявок поставщикам',
 }
 const tgSettings = ref({})
 const tgLoading = ref(false)

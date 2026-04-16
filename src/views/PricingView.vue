@@ -1762,6 +1762,7 @@ function agreementExpiry(a) {
 onMounted(async () => {
   // Применить фильтр из query-параметра (переход из другого модуля)
   if (route.query.supplier) filterSupplier.value = route.query.supplier;
+  await userStore.refreshSession();
   await supplierStore.loadSuppliers(orderStore.settings.legalEntity);
   await loadPrices();
   // Подгрузить протоколы в фоне для отображения бейджей

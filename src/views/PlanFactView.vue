@@ -734,11 +734,13 @@ async function acceptAsOrdered() {
     }
     if (editTtnDate.value) updateData2.ttn_date = editTtnDate.value
     await db.from('orders').update(updateData2).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
-    const paymentDate2 = editTtnDate.value || editDeliveryDate.value || selectedOrder.value.delivery_date
-    await db.rpc('create_payment_if_needed', {
-      order_id: selectedOrder.value.id,
-      delivery_date: paymentDate2,
-    }).catch(() => {})
+    const paymentDate2 = editTtnDate.value || selectedOrder.value.ttn_date || ''
+    if (paymentDate2) {
+      await db.rpc('create_payment_if_needed', {
+        order_id: selectedOrder.value.id,
+        ttn_date: paymentDate2,
+      }).catch(() => {})
+    }
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,
@@ -790,11 +792,13 @@ async function saveReceived() {
     if (editTtnDate.value) updateData.ttn_date = editTtnDate.value
     await db.from('orders').update(updateData).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
     // Создаём запись оплаты для российских поставщиков (отсрочка от даты ТТН)
-    const paymentDate = editTtnDate.value || editDeliveryDate.value || selectedOrder.value.delivery_date
-    await db.rpc('create_payment_if_needed', {
-      order_id: selectedOrder.value.id,
-      delivery_date: paymentDate,
-    }).catch(() => {})
+    const paymentDate = editTtnDate.value || selectedOrder.value.ttn_date || ''
+    if (paymentDate) {
+      await db.rpc('create_payment_if_needed', {
+        order_id: selectedOrder.value.id,
+        ttn_date: paymentDate,
+      }).catch(() => {})
+    }
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
     await db.from('audit_log').insert({
       entity_type: 'order', entity_id: selectedOrder.value.id, action: 'received', user_name: userName,

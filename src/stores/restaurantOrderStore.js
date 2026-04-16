@@ -361,6 +361,12 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.orders || [];
   }
 
+  async function loadHistoryOrder(source, id) {
+    const params = new URLSearchParams({ source, id: String(id) });
+    const data = await api(`history-order?${params}`);
+    return data.order || null;
+  }
+
   async function changePassword(oldPassword, newPassword) {
     return await api('change-password', {
       method: 'POST',
@@ -398,7 +404,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
-    loadAllHistory, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
+    loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,

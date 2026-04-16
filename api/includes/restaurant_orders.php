@@ -151,8 +151,8 @@ function roFormatCttRestaurantLabel($restaurantNumber, $city, $address) {
 }
 
 function roFormatCttWeight($weightBruttoGrams) {
-    $kg = ((float)$weightBruttoGrams) / 1000;
-    $formatted = rtrim(rtrim(number_format($kg, 6, '.', ''), '0'), '.');
+    $tons = ((float)$weightBruttoGrams) / 1000000;
+    $formatted = rtrim(rtrim(number_format($tons, 6, '.', ''), '0'), '.');
     return $formatted !== '' ? $formatted : '0';
 }
 
@@ -283,6 +283,11 @@ function roGetTodayMinsk() {
     return (new DateTime('now', $tz))->format('Y-m-d');
 }
 
+function roNormalizeSku($sku) {
+    $sku = preg_replace('/\s+/u', '', (string)$sku);
+    return trim((string)$sku);
+}
+
 function roRestaurantHasDeliveryDate($pdo, $restaurantNumber, $legalEntityGroup, $deliveryDate) {
     if (!$deliveryDate) return false;
     $dow = (int)(new DateTime($deliveryDate))->format('N');
@@ -396,7 +401,27 @@ function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
     if (empty($skus)) return [];
 
     $ph = implode(',', array_fill(0, count($skus), '?'));
-    $params = array_merge([$legalEntity], $skus);
+    $tplParams = array_merge([$legalEntity], $skus);
+    $tplStmt = $pdo->prepare("
+        SELECT sku, category, product_name, COALESCE(NULLIF(multiplicity, 0), 1) AS multiplicity
+        FROM ro_templates
+        WHERE legal_entity = ?
+          AND is_active = 1
+          AND sku IN ({$ph})
+    ");
+    $tplStmt->execute($tplParams);
+
+    $templateMap = [];
+    $templateBySku = [];
+    foreach ($tplStmt->fetchAll() as $row) {
+        $key = $row['sku'] . '|' . ($row['category'] ?? '');
+        $templateMap[$key] = $row;
+        if (!isset($templateBySku[$row['sku']])) {
+            $templateBySku[$row['sku']] = $row;
+        }
+    }
+
+    $productParams = array_merge([$legalEntity], $skus);
     $s = $pdo->prepare("
         SELECT sku, name, COALESCE(multiplicity, 1) AS multiplicity
         FROM products
@@ -404,7 +429,7 @@ function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
           AND is_active = 1
           AND sku IN ({$ph})
     ");
-    $s->execute($params);
+    $s->execute($productParams);
 
     $productMap = [];
     foreach ($s->fetchAll() as $row) {
@@ -413,13 +438,15 @@ function roFindMultiplicityViolations($pdo, $legalEntity, $aggregatedItems) {
 
     $violations = [];
     foreach ($aggregatedItems as $sku => $item) {
+        $category = $item['category'] ?? '';
+        $template = $templateMap[$sku . '|' . $category] ?? $templateBySku[$sku] ?? null;
         $product = $productMap[$sku] ?? null;
-        $multiplicity = floatval($product['multiplicity'] ?? 1);
+        $multiplicity = floatval($template['multiplicity'] ?? ($product['multiplicity'] ?? 1));
         $quantity = floatval($item['quantity'] ?? 0);
         if (!roHasMultiplicityViolation($quantity, $multiplicity)) continue;
         $violations[] = [
             'sku' => $sku,
-            'product_name' => $product['name'] ?? ($item['product_name'] ?? ''),
+            'product_name' => $template['product_name'] ?? ($product['name'] ?? ($item['product_name'] ?? '')),
             'quantity' => $quantity,
             'multiplicity' => $multiplicity,
         ];
@@ -981,7 +1008,8 @@ if ($roAction === 'products' && $method === 'GET') {
         $products = $s->fetchAll();
     } else {
         // Сначала из шаблона
-        $tplQuery = "SELECT t.sku, t.product_name as name, t.category, t.sort_order, p.qty_per_box, p.multiplicity
+        $tplQuery = "SELECT t.sku, t.product_name as name, t.category, t.sort_order, p.qty_per_box,
+                COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
             FROM ro_templates t
             LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
             WHERE t.legal_entity = ? AND t.is_active = 1";
@@ -1034,13 +1062,24 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
 
     $items = $pdo->prepare("
         SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
-               COALESCE(p.multiplicity, 1) AS multiplicity
+               COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
         FROM ro_order_items oi
-        LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ? AND p.is_active = 1
+        LEFT JOIN ro_templates t
+            ON t.legal_entity = ?
+           AND t.category = oi.category
+           AND t.sku = oi.sku
+           AND t.is_active = 1
+        LEFT JOIN products p ON p.id = (
+            SELECT p2.id
+            FROM products p2
+            WHERE p2.sku = oi.sku AND p2.legal_entity = ?
+            ORDER BY p2.is_active DESC, p2.id ASC
+            LIMIT 1
+        )
         WHERE oi.order_id = ?
         ORDER BY oi.category, oi.product_name
     ");
-    $items->execute([$rest['legal_entity'], $order['id']]);
+    $items->execute([$rest['legal_entity'], $rest['legal_entity'], $order['id']]);
 
     roRespond([
         'order' => [
@@ -1131,11 +1170,11 @@ if ($roAction === 'all-history' && $method === 'GET') {
     $s3 = $pdo->prepare("
         SELECT vs.id as session_id, vs.name as session_name, vo.delivery_date,
                vo.submitted_at,
-               COUNT(*) as item_count,
-               SUM(vo.quantity) as total_qty
+               SUM(CASE WHEN COALESCE(vo.admin_qty, vo.quantity) > 0 THEN 1 ELSE 0 END) as item_count,
+               SUM(CASE WHEN COALESCE(vo.admin_qty, vo.quantity) > 0 THEN COALESCE(vo.admin_qty, vo.quantity) ELSE 0 END) as total_qty
         FROM veg_orders vo
         JOIN veg_sessions vs ON vs.id = vo.session_id
-        WHERE vo.restaurant_number = ? AND vo.quantity > 0
+        WHERE vo.restaurant_number = ? AND COALESCE(vo.admin_qty, vo.quantity) > 0
           AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
         GROUP BY vo.session_id, vo.delivery_date
         ORDER BY vo.delivery_date DESC LIMIT {$limit}
@@ -1160,6 +1199,146 @@ if ($roAction === 'all-history' && $method === 'GET') {
     });
     $allOrders = array_slice($allOrders, 0, $limit);
     roRespond(['orders' => $allOrders]);
+}
+
+// --- Детали заказа из истории ресторана ---
+if ($roAction === 'history-order' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $source = trim((string)($_GET['source'] ?? ''));
+    $id = trim((string)($_GET['id'] ?? ''));
+    if ($source === '' || $id === '') roRespond(['error' => 'Не указан заказ'], 400);
+
+    $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    $entities = getEntitiesInGroup($group);
+    $entityPh = implode(',', array_fill(0, count($entities), '?'));
+
+    if ($source === 'delivery') {
+        $params = array_merge([(int)$id, $rest['restaurant_number']], $entities);
+        $s = $pdo->prepare("
+            SELECT id, delivery_date, status, submitted_at, updated_at, updated_by, comment, legal_entity
+            FROM ro_orders
+            WHERE id = ? AND restaurant_number = ? AND legal_entity IN ({$entityPh})
+            LIMIT 1
+        ");
+        $s->execute($params);
+        $order = $s->fetch();
+        if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
+
+        $items = $pdo->prepare("
+            SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment
+            FROM ro_order_items oi
+            WHERE oi.order_id = ?
+            ORDER BY oi.category, oi.product_name
+        ");
+        $items->execute([$order['id']]);
+
+        roRespond(['order' => [
+            'id' => (int)$order['id'],
+            'source' => 'delivery',
+            'source_name' => 'Основная поставка',
+            'delivery_date' => $order['delivery_date'],
+            'status' => $order['status'],
+            'submitted_at' => $order['submitted_at'],
+            'updated_at' => $order['updated_at'],
+            'updated_by' => $order['updated_by'],
+            'comment' => $order['comment'] ?? null,
+            'items' => $items->fetchAll(),
+        ]]);
+    }
+
+    if ($source === 'supplier') {
+        $params = array_merge([(int)$id, $rest['restaurant_number']], $entities);
+        $s = $pdo->prepare("
+            SELECT o.id, o.delivery_date, o.status, o.submitted_at, o.updated_at, o.supplier_id,
+                   s.short_name AS supplier_name
+            FROM so_orders o
+            LEFT JOIN suppliers s ON s.id = o.supplier_id
+            WHERE o.id = ? AND o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
+            LIMIT 1
+        ");
+        $s->execute($params);
+        $order = $s->fetch();
+        if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
+
+        $items = $pdo->prepare("
+            SELECT sku, product_name, COALESCE(admin_qty, quantity) AS quantity
+            FROM so_order_items
+            WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0
+            ORDER BY product_name
+        ");
+        $items->execute([$order['id']]);
+
+        roRespond(['order' => [
+            'id' => (int)$order['id'],
+            'source' => 'supplier',
+            'source_name' => $order['supplier_name'] ?: 'Поставщик',
+            'delivery_date' => $order['delivery_date'],
+            'status' => $order['status'],
+            'submitted_at' => $order['submitted_at'],
+            'updated_at' => $order['updated_at'],
+            'updated_by' => null,
+            'comment' => null,
+            'items' => $items->fetchAll(),
+        ]]);
+    }
+
+    if ($source === 'planeta') {
+        if (!preg_match('/^veg_(\d+)_(\d{4}-\d{2}-\d{2})$/', $id, $m)) {
+            roRespond(['error' => 'Неверный идентификатор заказа'], 400);
+        }
+        $sessionId = (int)$m[1];
+        $deliveryDate = $m[2];
+
+        $meta = $pdo->prepare("
+            SELECT MIN(vo.submitted_at) AS submitted_at
+            FROM veg_orders vo
+            JOIN veg_sessions vs ON vs.id = vo.session_id
+            WHERE vo.session_id = ? AND vo.restaurant_number = ? AND vo.delivery_date = ?
+              AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
+        ");
+        $meta->execute([$sessionId, $rest['restaurant_number'], $deliveryDate, $group]);
+        $submittedAt = $meta->fetchColumn();
+
+        $items = $pdo->prepare("
+            SELECT COALESCE(sp.product_name, CONCAT('Товар #', vo.product_id)) AS product_name,
+                   COALESCE(vo.admin_qty, vo.quantity) AS quantity
+            FROM veg_orders vo
+            LEFT JOIN veg_session_products sp ON sp.id = vo.product_id
+            JOIN veg_sessions vs ON vs.id = vo.session_id
+            WHERE vo.session_id = ? AND vo.restaurant_number = ? AND vo.delivery_date = ?
+              AND COALESCE(vo.admin_qty, vo.quantity) > 0
+              AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
+            ORDER BY sp.sort_order, sp.product_name
+        ");
+        $items->execute([$sessionId, $rest['restaurant_number'], $deliveryDate, $group]);
+        $rows = $items->fetchAll();
+        if (empty($rows)) roRespond(['error' => 'Заказ не найден'], 404);
+
+        $mappedItems = array_map(function ($row) {
+            return [
+                'sku' => '',
+                'product_name' => $row['product_name'],
+                'quantity' => $row['quantity'],
+            ];
+        }, $rows);
+
+        roRespond(['order' => [
+            'id' => $id,
+            'source' => 'planeta',
+            'source_name' => 'Планета Ресторанов',
+            'delivery_date' => $deliveryDate,
+            'status' => 'submitted',
+            'submitted_at' => $submittedAt,
+            'updated_at' => null,
+            'updated_by' => null,
+            'comment' => null,
+            'items' => $mappedItems,
+        ]]);
+    }
+
+    roRespond(['error' => 'Неизвестный источник заказа'], 400);
 }
 
 // --- Отправка заказа ---
@@ -1410,10 +1589,21 @@ if ($roAction === 'repeat-order' && $method === 'POST') {
     // Получаем позиции исходного заказа
     $s = $pdo->prepare("
         SELECT oi.sku, oi.product_name, oi.category, oi.quantity, oi.comment,
-               COALESCE(p.multiplicity, 1) AS multiplicity
+               COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) AS multiplicity
         FROM ro_order_items oi
         JOIN ro_orders o ON o.id = oi.order_id
-        LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
+        LEFT JOIN ro_templates t
+            ON t.legal_entity = o.legal_entity
+           AND t.category = oi.category
+           AND t.sku = oi.sku
+           AND t.is_active = 1
+        LEFT JOIN products p ON p.id = (
+            SELECT p2.id
+            FROM products p2
+            WHERE p2.sku = oi.sku AND p2.legal_entity = o.legal_entity
+            ORDER BY p2.is_active DESC, p2.id ASC
+            LIMIT 1
+        )
         WHERE o.id = ? AND o.restaurant_number = ?
     ");
     $s->execute([$sourceOrderId, $rest['restaurant_number']]);
@@ -1503,16 +1693,27 @@ if (strpos($roAction, 'admin') === 0) {
                 SELECT oi.order_id, oi.category,
                        SUM(oi.quantity * COALESCE(p.weight_brutto, 0)) as total_weight,
                        SUM(CASE WHEN p.boxes_per_pallet > 0
-                           THEN (CASE WHEN COALESCE(p.multiplicity, 1) > 1
-                                 THEN (oi.quantity / p.multiplicity) / p.boxes_per_pallet
+                           THEN (CASE WHEN COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) > 1
+                                 THEN (oi.quantity / COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1)) / p.boxes_per_pallet
                                  ELSE oi.quantity / p.boxes_per_pallet END)
                            ELSE 0 END) as raw_pallets
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
-                WHERE oi.order_id IN ({$ph})
-                GROUP BY oi.order_id, oi.category
-            ");
+                LEFT JOIN ro_templates t
+                    ON t.legal_entity = o.legal_entity
+                   AND t.category = oi.category
+                   AND t.sku = oi.sku
+                   AND t.is_active = 1
+            LEFT JOIN products p ON p.id = (
+                SELECT p2.id
+                FROM products p2
+                WHERE p2.sku = oi.sku AND p2.legal_entity = o.legal_entity
+                ORDER BY p2.is_active DESC, p2.id ASC
+                LIMIT 1
+            )
+            WHERE oi.order_id IN ({$ph})
+            GROUP BY oi.order_id, oi.category
+        ");
             $ws->execute($orderIds);
             foreach ($ws->fetchAll() as $row) {
                 $oid = $row['order_id'];
@@ -1577,12 +1778,23 @@ if (strpos($roAction, 'admin') === 0) {
             roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
 
-        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
+        $items = $pdo->prepare("SELECT oi.*, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
                    (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = ? AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price
             FROM ro_order_items oi
-            LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = ? AND p.is_active = 1
+            LEFT JOIN ro_templates t
+                ON t.legal_entity = ?
+               AND t.category = oi.category
+               AND t.sku = oi.sku
+               AND t.is_active = 1
+            LEFT JOIN products p ON p.id = (
+                SELECT p2.id
+                FROM products p2
+                WHERE p2.sku = oi.sku AND p2.legal_entity = ?
+                ORDER BY p2.is_active DESC, p2.id ASC
+                LIMIT 1
+            )
             WHERE oi.order_id = ? ORDER BY oi.category, oi.product_name");
-        $items->execute([$order['legal_entity'], $order['legal_entity'], $order['id']]);
+        $items->execute([$order['legal_entity'], $order['legal_entity'], $order['legal_entity'], $order['id']]);
 
         $order['items'] = $items->fetchAll();
         roRespond(['order' => $order]);
@@ -1613,9 +1825,6 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         $aggregated = $items !== null ? roAggregateOrderItems($items) : [];
-        if ($items !== null) {
-            roRespondMultiplicityError(roFindMultiplicityViolations($pdo, $oldOrder['legal_entity'] ?? '', $aggregated));
-        }
 
         $pdo->beginTransaction();
         try {
@@ -2066,7 +2275,7 @@ if (strpos($roAction, 'admin') === 0) {
         $category = $_GET['category'] ?? null;
         roEnsureGroupAccess($sessionUser, getEntityGroup($le));
 
-        $q = "SELECT t.*, COALESCE(p.multiplicity, 1) as multiplicity
+        $q = "SELECT t.*, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity
             FROM ro_templates t
             LEFT JOIN products p ON p.sku = t.sku AND p.legal_entity = ? AND p.is_active = 1
             WHERE t.legal_entity = ?";
@@ -2092,15 +2301,17 @@ if (strpos($roAction, 'admin') === 0) {
             // Удаляем старые для этой категории + юрлица
             $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
 
-            $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, sort_order) VALUES (?, ?, ?, ?, ?)");
-            $updateMult = $pdo->prepare("UPDATE products SET multiplicity = ? WHERE sku = ? AND legal_entity = ?");
+            $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
             foreach ($items as $i => $item) {
-                $insert->execute([$le, $category, $item['sku'] ?? '', $item['product_name'] ?? '', $i]);
-                // Обновляем кратность в products если передана
                 $mult = intval($item['multiplicity'] ?? 0);
-                if ($mult > 0 && ($item['sku'] ?? '')) {
-                    $updateMult->execute([$mult, $item['sku'], $le]);
-                }
+                $insert->execute([
+                    $le,
+                    $category,
+                    $item['sku'] ?? '',
+                    $item['product_name'] ?? '',
+                    $mult > 0 ? $mult : 1,
+                    $i,
+                ]);
             }
             roRespond(['success' => true, 'count' => count($items)]);
         }
@@ -2137,9 +2348,17 @@ if (strpos($roAction, 'admin') === 0) {
 
             // Сохраняем как шаблон
             $pdo->prepare("DELETE FROM ro_templates WHERE legal_entity = ? AND category = ?")->execute([$le, $category]);
-            $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, sort_order) VALUES (?, ?, ?, ?, ?)");
+            $insert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
             foreach ($products as $i => $p) {
-                $insert->execute([$le, $category, $p['sku'], $p['product_name'], $i]);
+                $mult = intval($p['multiplicity'] ?? 0);
+                $insert->execute([
+                    $le,
+                    $category,
+                    $p['sku'],
+                    $p['product_name'],
+                    $mult > 0 ? $mult : 1,
+                    $i,
+                ]);
             }
 
             roRespond(['success' => true, 'count' => count($products), 'items' => $products, 'balance_date' => $latestDate]);
@@ -2395,12 +2614,23 @@ if (strpos($roAction, 'admin') === 0) {
         $allItems = [];
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
-            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
+            $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
                        (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price,
                        (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' ORDER BY pp.updated_at DESC LIMIT 1) AS purchase_price
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
-                LEFT JOIN products p ON p.sku = oi.sku AND p.legal_entity = o.legal_entity AND p.is_active = 1
+                LEFT JOIN ro_templates t
+                    ON t.legal_entity = o.legal_entity
+                   AND t.category = oi.category
+                   AND t.sku = oi.sku
+                   AND t.is_active = 1
+                LEFT JOIN products p ON p.id = (
+                    SELECT p2.id
+                    FROM products p2
+                    WHERE p2.sku = oi.sku AND p2.legal_entity = o.legal_entity
+                    ORDER BY p2.is_active DESC, p2.id ASC
+                    LIMIT 1
+                )
                 WHERE oi.order_id IN ({$ph}) AND oi.quantity > 0 ORDER BY oi.category, oi.product_name");
             $items->execute($orderIds);
             $allItems = $items->fetchAll();
@@ -2415,7 +2645,7 @@ if (strpos($roAction, 'admin') === 0) {
 
             $cttItems = [];
             $skippedMissingGtin = 0;
-            $missingPurchasePrice = 0;
+            $missingDepositPrice = 0;
             foreach ($allItems as $item) {
                 $gtin = trim((string)($item['gtin'] ?? ''));
                 if ($gtin === '') {
@@ -2425,9 +2655,9 @@ if (strpos($roAction, 'admin') === 0) {
                 $order = $ordersById[(int)$item['order_id']] ?? null;
                 if (!$order) continue;
                 $restaurantNumber = (int)$order['restaurant_number'];
-                $price = round((float)($item['purchase_price'] ?? 0), 2);
-                if ($price <= 0) {
-                    $missingPurchasePrice++;
+                $depositPrice = round((float)($item['deposit_price'] ?? 0), 2);
+                if ($depositPrice <= 0) {
+                    $missingDepositPrice++;
                 }
                 $cttItems[] = [
                     'o' => $cttPrefix . '-' . $restaurantNumber,
@@ -2437,7 +2667,7 @@ if (strpos($roAction, 'admin') === 0) {
                     'n' => trim((string)($item['product_name'] ?? '')),
                     'q' => (string)(0 + (float)($item['quantity'] ?? 0)),
                     'w' => roFormatCttWeight($item['weight_brutto'] ?? 0),
-                    'p' => $price,
+                    'p' => $depositPrice,
                 ];
             }
 
@@ -2451,7 +2681,7 @@ if (strpos($roAction, 'admin') === 0) {
                 'filename' => 'data-' . strtolower($cttPrefix) . '-' . $date . '.json',
                 'items' => $cttItems,
                 'skipped_missing_gtin' => $skippedMissingGtin,
-                'missing_purchase_price' => $missingPurchasePrice,
+                'missing_deposit_price' => $missingDepositPrice,
             ]);
         }
 
@@ -2791,7 +3021,57 @@ if (strpos($roAction, 'admin') === 0) {
             $s = $pdo->prepare($sql);
             $s->execute($balanceParams);
         }
-        $balances = $s->fetchAll();
+        $balanceRowsRaw = $s->fetchAll();
+
+        // Склеиваем остатки по SKU + юрлицу, чтобы одна позиция не распадалась
+        // на несколько строк из-за нескольких складов или дублей в загрузке.
+        $balancesMap = [];
+        foreach ($balanceRowsRaw as $row) {
+            $sku = roNormalizeSku($row['sku'] ?? '');
+            $legalEntityRow = trim((string)($row['legal_entity'] ?? ''));
+            if ($sku === '' || $legalEntityRow === '') continue;
+            $key = $sku . '|' . $legalEntityRow;
+            if (!isset($balancesMap[$key])) {
+                $balancesMap[$key] = [
+                    'sku' => $sku,
+                    'product_name' => trim((string)($row['product_name'] ?? '')) ?: $sku,
+                    'quantity' => 0,
+                    'warehouses' => [],
+                    'legal_entity' => $legalEntityRow,
+                ];
+            }
+            $balancesMap[$key]['quantity'] += (float)($row['quantity'] ?? 0);
+            $warehouse = trim((string)($row['warehouse'] ?? ''));
+            if ($warehouse !== '') {
+                $balancesMap[$key]['warehouses'][$warehouse] = true;
+            }
+            if (
+                ($balancesMap[$key]['product_name'] === '' || $balancesMap[$key]['product_name'] === $sku)
+                && !empty($row['product_name'])
+            ) {
+                $balancesMap[$key]['product_name'] = trim((string)$row['product_name']);
+            }
+        }
+
+        $balances = [];
+        foreach ($balancesMap as $row) {
+            $warehouses = array_keys($row['warehouses']);
+            sort($warehouses, SORT_NATURAL | SORT_FLAG_CASE);
+            $hasWarehouseConflict = count($warehouses) > 1;
+            $balances[] = [
+                'sku' => $row['sku'],
+                'product_name' => $row['product_name'],
+                'quantity' => $row['quantity'],
+                'warehouse' => $hasWarehouseConflict ? 'Ошибка склада' : ($warehouses[0] ?? ''),
+                'warehouse_error' => $hasWarehouseConflict,
+                'warehouse_error_details' => $hasWarehouseConflict ? implode(', ', $warehouses) : '',
+                'legal_entity' => $row['legal_entity'],
+            ];
+        }
+        usort($balances, function ($a, $b) {
+            return [$a['legal_entity'], $a['warehouse'], $a['product_name'], $a['sku']]
+                <=> [$b['legal_entity'], $b['warehouse'], $b['product_name'], $b['sku']];
+        });
 
         // Карта поставщиков: sku|legal_entity -> supplier (активные карточки приоритетнее)
         $supplierMap = [];
@@ -2802,12 +3082,14 @@ if (strpos($roAction, 'admin') === 0) {
             $qs = $pdo->prepare("SELECT sku, supplier, legal_entity FROM products WHERE sku IN ($ph) ORDER BY is_active DESC, id ASC");
             $qs->execute($balanceSkus);
             foreach ($qs->fetchAll() as $row) {
-                $mk = $row['sku'] . '|' . $row['legal_entity'];
+                $normalizedSku = roNormalizeSku($row['sku'] ?? '');
+                if ($normalizedSku === '') continue;
+                $mk = $normalizedSku . '|' . $row['legal_entity'];
                 if (!isset($supplierMap[$mk]) && !empty($row['supplier'])) {
                     $supplierMap[$mk] = $row['supplier'];
                 }
-                if (!isset($supplierBySku[$row['sku']]) && !empty($row['supplier'])) {
-                    $supplierBySku[$row['sku']] = $row['supplier'];
+                if (!isset($supplierBySku[$normalizedSku]) && !empty($row['supplier'])) {
+                    $supplierBySku[$normalizedSku] = $row['supplier'];
                 }
             }
         }
@@ -2843,7 +3125,11 @@ if (strpos($roAction, 'admin') === 0) {
         $s2->execute($ordersParams);
         $orders = [];
         foreach ($s2->fetchAll() as $row) {
-            $orders[$row['sku'] . '|' . $row['real_legal_entity']] = (float)$row['total_ordered'];
+            $normalizedSku = roNormalizeSku($row['sku'] ?? '');
+            if ($normalizedSku === '') continue;
+            $key = $normalizedSku . '|' . $row['real_legal_entity'];
+            if (!isset($orders[$key])) $orders[$key] = 0;
+            $orders[$key] += (float)$row['total_ordered'];
         }
 
         $items = [];
@@ -2851,15 +3137,19 @@ if (strpos($roAction, 'admin') === 0) {
         foreach ($balances as $b) {
             $stockQty = (float)$b['quantity'];
             $le = $b['legal_entity'];
-            $key = $b['sku'] . '|' . $le;
+            $normalizedSku = roNormalizeSku($b['sku'] ?? '');
+            if ($normalizedSku === '') continue;
+            $key = $normalizedSku . '|' . $le;
             $orderedQty = $orders[$key] ?? 0;
             $seenSkus[$key] = true;
-            $supplier = $supplierMap[$key] ?? $supplierBySku[$b['sku']] ?? '';
+            $supplier = $supplierMap[$key] ?? $supplierBySku[$normalizedSku] ?? '';
             $items[] = [
-                'sku' => $b['sku'],
+                'sku' => $normalizedSku,
                 'product_name' => $b['product_name'],
                 'supplier' => $supplier,
                 'warehouse' => $b['warehouse'],
+                'warehouse_error' => !empty($b['warehouse_error']),
+                'warehouse_error_details' => $b['warehouse_error_details'] ?? '',
                 'legal_entity' => $le,
                 'stock_qty' => $stockQty,
                 'ordered_qty' => $orderedQty,
@@ -2888,6 +3178,8 @@ if (strpos($roAction, 'admin') === 0) {
                 'product_name' => $prodName,
                 'supplier' => $prod['supplier'] ?? '',
                 'warehouse' => $warehouse,
+                'warehouse_error' => false,
+                'warehouse_error_details' => '',
                 'legal_entity' => $le,
                 'stock_qty' => 0,
                 'ordered_qty' => $orderedQty,

@@ -1919,6 +1919,16 @@ if (isset($input['callback_query'])) {
         soOrderSkipDelivery($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
+    if (preg_match('/^sohist_sup_(.+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soShowMyOrders($chatId, $msgId, $m[1]);
+        exit;
+    }
+    if (preg_match('/^sohist_rest_(.+?)_(\d+)$/', $data, $m)) {
+        answerCallback($cb['id']);
+        soShowRestOrders($chatId, $msgId, $m[1], $m[2]);
+        exit;
+    }
     if ($data === 'rest_schedule') {
         answerCallback($cb['id']);
         restShowSchedule($chatId, $msgId);
@@ -2147,30 +2157,30 @@ if (isset($input['callback_query'])) {
     // ═══ Овощи: просмотр заявок ресторана ═══
     if ($data === 'veg_my_orders') {
         answerCallback($cb['id']);
-        vegShowMyOrders($chatId, $msgId);
+        soShowMyOrders($chatId, $msgId, soGetPlanetaSupplierId());
         exit;
     }
 
     if (str_starts_with($data, 'veg_orders_rest_')) {
         answerCallback($cb['id']);
         $restNum = substr($data, 16);
-        vegShowRestOrders($chatId, $msgId, $restNum);
+        soShowRestOrders($chatId, $msgId, soGetPlanetaSupplierId(), $restNum);
         exit;
     }
 
     if (str_starts_with($data, 'veg_history_')) {
         answerCallback($cb['id']);
         $restNum = substr($data, 12);
-        vegShowHistory($chatId, $msgId, $restNum);
+        soShowRestOrders($chatId, $msgId, soGetPlanetaSupplierId(), $restNum);
         exit;
     }
 
     if (str_starts_with($data, 'veg_hist_')) {
         answerCallback($cb['id']);
-        // формат: veg_hist_{restNum}_{sessId}
+        // Старые кнопки истории переводим на новый просмотр заявок поставщика
         $parts = explode('_', substr($data, 9), 2);
         if (count($parts) === 2) {
-            vegShowHistorySession($chatId, $msgId, $parts[0], intval($parts[1]));
+            soShowRestOrders($chatId, $msgId, soGetPlanetaSupplierId(), $parts[0]);
         }
         exit;
     }
@@ -2239,13 +2249,13 @@ if (isset($input['callback_query'])) {
     // Подача заявки через бота
     if ($data === 'vegord_start') {
         answerCallback($cb['id']);
-        vegStartOrder($chatId, $msgId);
+        soOrderSelectRest($chatId, $msgId, soGetPlanetaSupplierId());
         exit;
     }
     if (str_starts_with($data, 'vegord_rest_')) {
         answerCallback($cb['id']);
         @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода
-        vegOrderSelectDay($chatId, $msgId, substr($data, 12));
+        soOrderSelectDay($chatId, $msgId, soGetPlanetaSupplierId(), substr($data, 12));
         exit;
     }
     if (str_starts_with($data, 'vegord_day_')) {
@@ -2255,7 +2265,7 @@ if (isset($input['callback_query'])) {
         if ($sep !== false) {
             $restNum = substr($rest, 0, $sep);
             $date = substr($rest, $sep + 1);
-            vegOrderShowProducts($chatId, $msgId, $restNum, $date);
+            soOrderShowProducts($chatId, $msgId, soGetPlanetaSupplierId(), $restNum, $date);
         }
         exit;
     }
@@ -2266,7 +2276,7 @@ if (isset($input['callback_query'])) {
         if ($sep !== false) {
             $restNum = substr($rest, 0, $sep);
             $date = substr($rest, $sep + 1);
-            vegOrderSkipDay($chatId, $msgId, $restNum, $date);
+            soOrderSkipDelivery($chatId, $msgId, soGetPlanetaSupplierId(), $restNum, $date);
         }
         exit;
     }
@@ -2421,6 +2431,7 @@ if ($text === '/help' || $text === '/menu') {
     setUserMode($user['name'], null); // сброс режима
     @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
+    @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt"); // сброс режима ввода заявки поставщику
     $tips = "\n\n💡 <i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Что скоро просрочится?\n• Когда доставка в ресторан 45?";
     sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
     exit;
@@ -2583,27 +2594,6 @@ if (file_exists($corrFile)) {
     }
 }
 
-// Режим ввода заявки на овощи (через файл — работает и без аккаунта)
-$vegOrderFile = sys_get_temp_dir() . "/vegord_{$chatId}.txt";
-if (file_exists($vegOrderFile)) {
-    // Автоочистка: если файл старше 30 минут — удаляем (защита от зависания)
-    if (time() - filemtime($vegOrderFile) > 1800) {
-        @unlink($vegOrderFile);
-    } else {
-        $vegMode = trim(@file_get_contents($vegOrderFile));
-        if ($vegMode && str_starts_with($vegMode, 'vegord_')) {
-            if (str_starts_with($text, '/')) {
-                @unlink($vegOrderFile);
-            } else {
-                $userMsgId = $msg['message_id'] ?? null;
-                if ($userMsgId) @deleteMessage($chatId, $userMsgId);
-                vegOrderProcessInput($chatId, $text, $vegMode);
-                exit;
-            }
-        }
-    }
-}
-
 // Режим ввода заявки поставщику (Камако и др.)
 $soOrderFile = sys_get_temp_dir() . "/soord_{$chatId}.txt";
 if (file_exists($soOrderFile)) {
@@ -2611,15 +2601,41 @@ if (file_exists($soOrderFile)) {
         @unlink($soOrderFile);
     } else {
         $soMode = trim(@file_get_contents($soOrderFile));
-        if ($soMode && str_starts_with($soMode, 'soord_')) {
+        $soState = json_decode($soMode, true);
+        $isNewSoMode = is_array($soState)
+            && !empty($soState['supplier_id'])
+            && !empty($soState['restaurant_number'])
+            && !empty($soState['delivery_date']);
+        $isLegacySoMode = $soMode && str_starts_with($soMode, 'soord_');
+
+        if ($isNewSoMode || $isLegacySoMode) {
             if (str_starts_with($text, '/')) {
                 @unlink($soOrderFile);
             } else {
+                @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
                 $userMsgId = $msg['message_id'] ?? null;
                 if ($userMsgId) @deleteMessage($chatId, $userMsgId);
                 soOrderProcessInput($chatId, $text);
                 exit;
             }
+        }
+    }
+}
+
+// Старый овощной режим больше не должен принимать текст.
+// Если у пользователя остался старый temp-файл, сбрасываем его и просим открыть заявку заново.
+$vegOrderFile = sys_get_temp_dir() . "/vegord_{$chatId}.txt";
+if (file_exists($vegOrderFile)) {
+    if (time() - filemtime($vegOrderFile) > 1800) {
+        @unlink($vegOrderFile);
+    } else {
+        $vegMode = trim(@file_get_contents($vegOrderFile));
+        if ($vegMode && str_starts_with($vegMode, 'vegord_')) {
+            @unlink($vegOrderFile);
+            $userMsgId = $msg['message_id'] ?? null;
+            if ($userMsgId) @deleteMessage($chatId, $userMsgId);
+            sendMessage($chatId, "Старый экран заявки на овощи больше не используется.\n\nОткройте «Планета Ресторанов» заново и отправьте заявку ещё раз.");
+            exit;
         }
     }
 }

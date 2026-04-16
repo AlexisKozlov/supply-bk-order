@@ -61,23 +61,36 @@
         <label>Дата поставки:</label>
         <div class="so-date-nav">
           <button v-for="wd in weekDates" :key="wd.date"
-            class="rom-btn-sm" :class="{ 'rom-btn-primary': selectedDate === wd.date }"
-            @click="selectedDate = wd.date; loadStatus()">
-            {{ wd.day_name }} {{ formatDateShort(wd.date) }}
+            class="rom-btn-sm"
+            :class="{ 'rom-btn-primary': selectedDate === wd.date, 'so-day-closed-btn': isDateForcedClosed(wd.date) }"
+            @click="selectedDate = wd.date; loadStatus()"
+            :title="isDateForcedClosed(wd.date) ? '🔒 День закрыт' : ''">
+            {{ isDateForcedClosed(wd.date) ? '🔒 ' : '' }}{{ wd.day_name }} {{ formatDateShort(wd.date) }}
           </button>
         </div>
         <input type="date" v-model="selectedDate" @change="loadStatus" style="margin-left:8px" />
         <button v-if="selectedDate" class="rom-btn-sm" @click="handleExtendDeadline" title="Разовое продление дедлайна на эту дату">
           ⏰ Продлить дедлайн
         </button>
+        <button v-if="selectedDate" class="rom-btn-sm" :class="isDateForcedClosed(selectedDate) ? 'so-btn-open-day' : 'so-btn-close-day'"
+          @click="handleToggleCloseDay(selectedDate)" :title="isDateForcedClosed(selectedDate) ? 'Открыть день для подачи заявок' : 'Закрыть день — рестораны не смогут подавать заявки'">
+          {{ isDateForcedClosed(selectedDate) ? '🔓 Открыть день' : '🔒 Закрыть день' }}
+        </button>
       </div>
 
       <!-- Существующие переопределения дедлайна -->
       <div v-if="deadlineOverrides.length" class="rom-date-row" style="flex-wrap:wrap;gap:6px;">
         <span style="font-size:12px;color:#666;">Разовые продления:</span>
-        <span v-for="o in deadlineOverrides" :key="o.delivery_date" class="so-override-chip">
+        <span v-for="o in deadlineOverrides.filter(o => !o.is_closed)" :key="o.delivery_date" class="so-override-chip">
           {{ formatDateShort(o.delivery_date) }} — до {{ o.deadline_time?.substring(0,5) }}
           <button class="so-override-del" @click="removeOverride(o.delivery_date)" title="Удалить">×</button>
+        </span>
+      </div>
+      <div v-if="deadlineOverrides.some(o => o.is_closed)" class="rom-date-row" style="flex-wrap:wrap;gap:6px;">
+        <span style="font-size:12px;color:#B71C1C;">🔒 Закрытые дни:</span>
+        <span v-for="o in deadlineOverrides.filter(o => o.is_closed)" :key="'cl-'+o.delivery_date" class="so-override-chip so-override-chip-closed">
+          {{ formatDateShort(o.delivery_date) }}
+          <button class="so-override-del" @click="handleToggleCloseDay(o.delivery_date)" title="Открыть день">×</button>
         </span>
       </div>
 
@@ -101,8 +114,12 @@
 
           <!-- Export + controls -->
           <div class="rom-export-row">
-            <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting">
-              {{ exporting ? 'Выгрузка...' : 'Выгрузить в Excel' }}
+            <button class="rom-btn rom-btn-export" @click="exportExcel" :disabled="exporting || exportSelectedDates.size === 0">
+              {{ exporting ? 'Выгрузка...' : exportSelectedDates.size > 1 ? `Выгрузить ${exportSelectedDates.size} дня в Excel` : 'Выгрузить в Excel' }}
+            </button>
+            <button class="rom-btn rom-btn-export" style="background:#f0f9ff;color:#0369a1;border-color:#0369a1"
+              @click="exportDatePickerOpen = !exportDatePickerOpen" title="Выбрать дни для выгрузки">
+              {{ exportDatePickerOpen ? '▲ Дни' : '▼ Дни' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
             <label class="so-filter-check">
@@ -110,16 +127,25 @@
             </label>
             <input v-model="filterText" type="text" class="rom-input-sm so-filter-input" placeholder="Поиск..." />
           </div>
+          <div v-if="exportDatePickerOpen" class="so-export-date-picker">
+            <span class="so-export-date-hint">Выберите дни для выгрузки:</span>
+            <label v-for="wd in weekDates" :key="wd.date" class="so-export-date-check">
+              <input type="checkbox" :checked="exportSelectedDates.has(wd.date)" @change="toggleExportDate(wd.date)" />
+              {{ wd.day_name }} {{ formatDateShort(wd.date) }}
+            </label>
+            <button class="rom-btn-sm" @click="exportSelectAll">Все</button>
+            <button class="rom-btn-sm" @click="exportSelectNone">Ни одного</button>
+          </div>
 
           <!-- Pivot table: restaurants × products -->
-          <div class="rom-table-wrap" v-if="products.length">
+          <div class="rom-table-wrap" v-if="displayProducts.length">
             <table class="rom-table so-pivot-table">
               <thead>
                 <tr>
                   <th class="so-th-rest">Ресторан</th>
                   <th class="so-th-status">Статус</th>
-                  <th v-for="p in products" :key="p.sku" class="so-th-qty">
-                    <div class="so-th-prod">{{ p.sku }}</div>
+                  <th v-for="p in displayProducts" :key="p.display_key" class="so-th-qty">
+                    <div class="so-th-prod">{{ p.is_grouped ? `SKU ×${p.source_skus.length}` : p.sku }}</div>
                     <div class="so-th-prod">{{ p.product_name }}</div>
                     <div v-if="p.multiplicity" class="so-th-mult">×{{ p.multiplicity }}</div>
                   </th>
@@ -139,10 +165,11 @@
                       {{ statusLabel(r.order_status) }}
                     </span>
                   </td>
-                  <td v-for="p in products" :key="p.sku"
+                  <td v-for="p in displayProducts" :key="p.display_key"
                     class="so-td-qty"
                     :class="{ 'so-td-skip-cell': isSkipOrder(r) }"
-                    @dblclick="startEdit(r.number, p.sku)">
+                    :title="p.is_grouped ? `Объединено из SKU: ${p.source_skus.join(', ')}` : ''"
+                    @dblclick="canEditProduct(p) && startEdit(r.number, p.sku)">
                     <template v-if="editCell === `${r.number}_${p.sku}`">
                       <input
                         v-model="editValue"
@@ -158,11 +185,11 @@
                       <span class="so-qty-zero" title="Поставка не нужна">0</span>
                     </template>
                     <template v-else>
-                      <span v-if="getCellAdmin(r.number, p.sku) !== null" class="so-qty-admin" :title="'Исходное: ' + getCellQty(r.number, p.sku)">
-                        {{ getCellAdmin(r.number, p.sku) }}
+                      <span v-if="getCellAdmin(r.number, p) !== null" class="so-qty-admin" :title="'Исходное: ' + getCellQty(r.number, p)">
+                        {{ getCellAdmin(r.number, p) }}
                       </span>
-                      <span v-else-if="getCellQty(r.number, p.sku) !== ''" class="so-qty">
-                        {{ getCellQty(r.number, p.sku) }}
+                      <span v-else-if="getCellQty(r.number, p) !== ''" class="so-qty">
+                        {{ getCellQty(r.number, p) }}
                       </span>
                       <span v-else class="so-qty-empty">—</span>
                     </template>
@@ -173,8 +200,8 @@
                 <tr class="so-totals-row">
                   <td class="so-td-rest"><strong>Итого</strong></td>
                   <td></td>
-                  <td v-for="p in products" :key="p.sku" class="so-td-qty so-td-total">
-                    <strong>{{ getProductTotal(p.sku) || '' }}</strong>
+                  <td v-for="p in displayProducts" :key="p.display_key" class="so-td-qty so-td-total">
+                    <strong>{{ getProductTotal(p) || '' }}</strong>
                   </td>
                 </tr>
               </tfoot>
@@ -187,11 +214,38 @@
     <!-- ═══ TAB: Список заявок ═══ -->
     <template v-if="pageTab === 'list' && currentSupplierId">
       <div class="rom-date-row">
-        <label>Период:</label>
-        <input type="date" v-model="listDateFrom" />
+        <label>Подано:</label>
+        <input type="date" v-model="listSubmittedFrom" />
         <span>—</span>
-        <input type="date" v-model="listDateTo" />
+        <input type="date" v-model="listSubmittedTo" />
         <button class="rom-btn-sm" @click="loadOrdersList">Загрузить</button>
+      </div>
+      <div class="rom-date-row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
+        <div>
+          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Доставка от</label>
+          <input type="date" v-model="listDeliveryFrom" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Доставка до</label>
+          <input type="date" v-model="listDeliveryTo" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Статус</label>
+          <select v-model="listStatus" class="rom-select">
+            <option value="">Все</option>
+            <option value="submitted">Подано</option>
+            <option value="locked">Закрыто</option>
+            <option value="draft">Черновик</option>
+          </select>
+        </div>
+        <div style="min-width:240px">
+          <label style="display:block;font-size:12px;color:#666;margin-bottom:4px">Ресторан / адрес</label>
+          <input type="text" v-model="listQuery" class="rom-input-sm" placeholder="Номер, город, адрес" style="min-width:240px" />
+        </div>
+        <label class="so-filter-check" style="margin-bottom:6px">
+          <input type="checkbox" v-model="listSkipOnly" /> Только "не нужна"
+        </label>
+        <button class="rom-btn-sm" @click="resetOrdersFilters">Сбросить</button>
       </div>
       <div v-if="loadingList" class="rom-loading">Загрузка...</div>
       <div v-else-if="ordersList.length === 0" class="rom-empty">Заявок за выбранный период нет.</div>
@@ -201,8 +255,8 @@
             <tr>
               <th>Рест.</th>
               <th>Адрес</th>
+              <th>Подано</th>
               <th>Дата доставки</th>
-              <th>Дата заказа</th>
               <th>Статус</th>
               <th>Позиций</th>
               <th>Кол-во</th>
@@ -213,13 +267,14 @@
             <tr v-for="o in ordersList" :key="o.id">
               <td class="rom-td-num">{{ formatRestaurantNumber(o.restaurant_number, o.legal_entity_group) }}</td>
               <td>{{ o.address }}</td>
+              <td>{{ o.submitted_at ? formatDateTime(o.submitted_at) : '—' }}</td>
               <td>{{ formatDate(o.delivery_date) }}</td>
-              <td>{{ formatDate(o.order_date) }}</td>
               <td>
-                <span class="rom-status" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span>
+                <span v-if="Number(o.item_count || 0) === 0 && (o.status === 'submitted' || o.status === 'locked')" class="rom-status st-skip">🚫 Не нужна</span>
+                <span v-else class="rom-status" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span>
               </td>
               <td>{{ o.item_count || '—' }}</td>
-              <td>{{ o.total_qty ? (+o.total_qty).toFixed(0) : '—' }}</td>
+              <td>{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
               <td class="rom-td-actions">
                 <button class="rom-btn-sm" @click="viewOrder(o.id)">Открыть</button>
                 <button class="rom-btn-sm rom-btn-danger" @click="deleteOrder(o.id)">Удалить</button>
@@ -234,6 +289,26 @@
     <template v-if="pageTab === 'schedules' && currentSupplierId">
       <div v-if="loadingSchedules" class="rom-loading">Загрузка...</div>
       <div v-else>
+        <div class="so-notify-box" style="margin-bottom:20px">
+          <div class="so-notify-head">
+            <div>
+              <div class="so-section-title" style="margin:0">Получатели итоговой сводки</div>
+              <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам этого поставщика.</div>
+            </div>
+            <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
+              {{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить получателей' }}
+            </button>
+          </div>
+          <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0">Загрузка пользователей...</div>
+          <div v-else class="so-notify-users">
+            <label v-for="u in allNotifyUsers" :key="u.name" class="so-notify-user">
+              <input type="checkbox" :value="u.name" v-model="notifyUsers" />
+              <span>{{ u.name }}<small v-if="u.display_role"> · {{ u.display_role }}</small></span>
+              <small v-if="!u.telegram_chat_id" class="so-notify-muted">(нет Telegram)</small>
+            </label>
+          </div>
+        </div>
+
         <!-- Дедлайны по дням недели -->
         <div class="so-deadline-section">
           <h3 class="so-section-title">Дедлайны по дням доставки</h3>
@@ -354,7 +429,10 @@
             <tbody>
               <tr v-for="item in viewedOrder.items" :key="item.id">
                 <td><span class="so-tpl-sku">{{ item.sku }}</span> {{ item.product_name }}</td>
-                <td>{{ item.quantity }}</td>
+                <td>
+                  <span v-if="item.admin_qty !== null && item.admin_qty !== undefined" class="so-qty-admin" :title="'Исходное: ' + item.quantity">{{ item.admin_qty }}</span>
+                  <span v-else>{{ item.quantity }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -372,6 +450,7 @@
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
+import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 
 const props = defineProps({
@@ -399,12 +478,21 @@ const settings = ref({ is_accepting_orders: 1, default_deadline_time: '14:00:00'
 const defaultDeadline = ref('14:00');
 const pauseMessage = ref('');
 const deadlineOverrides = ref([]);
+const allNotifyUsers = ref([]);
+const loadingNotifyUsers = ref(false);
+const savingNotifyUsers = ref(false);
+const notifyUsers = ref([]);
 
 // List tab
 const loadingList = ref(false);
 const ordersList = ref([]);
-const listDateFrom = ref(todayStr(-7));
-const listDateTo = ref(todayStr(7));
+const listSubmittedFrom = ref(todayStr(-7));
+const listSubmittedTo = ref(todayStr(0));
+const listDeliveryFrom = ref('');
+const listDeliveryTo = ref('');
+const listStatus = ref('');
+const listQuery = ref('');
+const listSkipOnly = ref(false);
 
 // Schedules
 const loadingSchedules = ref(false);
@@ -444,6 +532,24 @@ const showOrderModal = ref(false);
 const viewedOrder = ref(null);
 const exporting = ref(false);
 
+// Multi-date export
+const exportDatePickerOpen = ref(false);
+const exportSelectedDates = ref(new Set());
+
+// Когда weekDates подгружаются — инициализируем все даты как выбранные
+watch(weekDates, (dates) => {
+  exportSelectedDates.value = new Set(dates.map(d => d.date));
+}, { deep: true });
+
+function toggleExportDate(date) {
+  const s = new Set(exportSelectedDates.value);
+  if (s.has(date)) s.delete(date);
+  else s.add(date);
+  exportSelectedDates.value = s;
+}
+function exportSelectAll() { exportSelectedDates.value = new Set(weekDates.value.map(d => d.date)); }
+function exportSelectNone() { exportSelectedDates.value = new Set(); }
+
 // Pivot table data
 const products = ref([]);
 const orderItems = ref([]);
@@ -452,6 +558,50 @@ const showMissing = ref(true);
 const editCell = ref('');
 const editValue = ref('');
 const editInputRef = ref(null);
+
+function normalizeProductName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+function buildDisplayProducts(list) {
+  const groups = new Map();
+  for (const product of list || []) {
+    const groupKey = normalizeProductName(product.product_name) || String(product.sku || '').trim();
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(product);
+  }
+
+  const result = [];
+  for (const group of groups.values()) {
+    const first = group[0] || {};
+    if (group.length === 1) {
+      result.push({
+        ...first,
+        display_key: first.sku,
+        source_skus: [first.sku],
+        is_grouped: false,
+      });
+      continue;
+    }
+
+    const multiplicities = [...new Set(group.map(p => p.multiplicity).filter(v => v !== null && v !== undefined && v !== ''))];
+    result.push({
+      ...first,
+      display_key: `group:${normalizeProductName(first.product_name)}`,
+      source_skus: group.map(p => p.sku).filter(Boolean),
+      is_grouped: true,
+      multiplicity: multiplicities.length === 1 ? multiplicities[0] : null,
+      product_id: null,
+    });
+  }
+
+  return result;
+}
+
+function formatQtyValue(value) {
+  if (!Number.isFinite(value)) return '';
+  return value === Math.floor(value) ? Math.floor(value) : +value.toFixed(2);
+}
 
 function todayStr(offsetDays = 0) {
   const d = new Date();
@@ -463,8 +613,7 @@ function todayStr(offsetDays = 0) {
 watch(() => props.supplierId, (val) => {
   if (val) {
     currentSupplierId.value = val;
-    loadSettings();
-    loadStatus();
+    refreshActiveTab();
   }
 }, { immediate: true });
 
@@ -474,8 +623,7 @@ onMounted(async () => {
       allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
       if (allSuppliers.value.length === 1) {
         currentSupplierId.value = allSuppliers.value[0].id;
-        await loadSettings();
-        await loadStatus();
+        await refreshActiveTab();
       }
     } catch (e) {
       console.error(e);
@@ -492,8 +640,7 @@ watch(() => orderStore.settings.legalEntity, async () => {
     allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
     if (allSuppliers.value.length === 1) {
       currentSupplierId.value = allSuppliers.value[0].id;
-      await loadSettings();
-      await loadStatus();
+      await refreshActiveTab();
     }
   } catch (e) {
     console.error(e);
@@ -507,7 +654,24 @@ async function onSupplierChange() {
   if (!templateEntities.value.includes(templateLe.value)) {
     templateLe.value = templateEntities.value[0] || templateLe.value;
   }
+  await refreshActiveTab();
+}
+
+async function refreshActiveTab() {
+  if (!currentSupplierId.value) return;
   await loadSettings();
+  if (pageTab.value === 'schedules') {
+    await loadSchedules();
+    return;
+  }
+  if (pageTab.value === 'templates') {
+    await loadTemplates();
+    return;
+  }
+  if (pageTab.value === 'list') {
+    await loadOrdersList();
+    return;
+  }
   await loadStatus();
 }
 
@@ -519,8 +683,22 @@ async function loadSettings() {
     defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
+    notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
+    if (!allNotifyUsers.value.length) await loadNotifyUsers();
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function loadNotifyUsers() {
+  loadingNotifyUsers.value = true;
+  try {
+    const { data } = await db.rpc('get_users_list_short');
+    allNotifyUsers.value = data || [];
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingNotifyUsers.value = false;
   }
 }
 
@@ -565,6 +743,24 @@ async function savePauseMessage() {
   }
 }
 
+async function saveNotifyUsers() {
+  savingNotifyUsers.value = true;
+  try {
+    const data = await store.adminSaveSettings(currentSupplierId.value, {
+      is_accepting_orders: settings.value.is_accepting_orders,
+      default_deadline_time: defaultDeadline.value + ':00',
+      pause_message: pauseMessage.value || null,
+      notify_users: notifyUsers.value,
+    });
+    notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
+    alert('Получатели сохранены');
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  } finally {
+    savingNotifyUsers.value = false;
+  }
+}
+
 async function loadStatus() {
   if (!currentSupplierId.value) return;
   loading.value = true;
@@ -581,6 +777,27 @@ async function loadStatus() {
     console.error(e);
   } finally {
     loading.value = false;
+  }
+}
+
+function isDateForcedClosed(date) {
+  return deadlineOverrides.value.some(o => o.delivery_date === date && o.is_closed);
+}
+
+async function handleToggleCloseDay(date) {
+  if (!date) return;
+  const closing = !isDateForcedClosed(date);
+  const d = weekDates.value.find(w => w.date === date);
+  const label = d ? `${d.day_name} ${formatDateShort(date)}` : formatDateShort(date);
+  if (closing) {
+    const ok = confirm(`Закрыть день ${label} для подачи заявок?\n\nРестораны не смогут отправить заявку на эту дату.`);
+    if (!ok) return;
+  }
+  try {
+    await store.adminCloseDay(currentSupplierId.value, date, closing);
+    await loadSettings();
+  } catch (e) {
+    alert('Ошибка: ' + (e.message || e));
   }
 }
 
@@ -617,12 +834,31 @@ async function loadOrdersList() {
   if (!currentSupplierId.value) return;
   loadingList.value = true;
   try {
-    ordersList.value = await store.adminGetOrders(currentSupplierId.value, listDateFrom.value, listDateTo.value);
+    ordersList.value = await store.adminGetOrders(currentSupplierId.value, {
+      submitted_from: listSubmittedFrom.value,
+      submitted_to: listSubmittedTo.value,
+      delivery_from: listDeliveryFrom.value,
+      delivery_to: listDeliveryTo.value,
+      status: listStatus.value,
+      query: listQuery.value,
+      skip_only: listSkipOnly.value,
+    });
   } catch (e) {
     console.error(e);
   } finally {
     loadingList.value = false;
   }
+}
+
+function resetOrdersFilters() {
+  listSubmittedFrom.value = todayStr(-7);
+  listSubmittedTo.value = todayStr(0);
+  listDeliveryFrom.value = '';
+  listDeliveryTo.value = '';
+  listStatus.value = '';
+  listQuery.value = '';
+  listSkipOnly.value = false;
+  loadOrdersList();
 }
 
 async function loadSchedules() {
@@ -641,8 +877,9 @@ async function loadSchedules() {
         deadlineRulesMap[dow].active = true;
       }
     }
-    // Автоматически загружаем рестораны для сетки
-    if (!scheduleRestaurants.value.length) await loadRestaurantsForSchedule();
+    // Для нового поставщика сетку нужно пересобирать всегда, иначе в ней
+    // остаются дни предыдущего поставщика.
+    await loadRestaurantsForSchedule();
   } catch (e) {
     console.error(e);
   } finally {
@@ -806,294 +1043,191 @@ async function deleteOrder(orderId) {
   }
 }
 
-async function exportExcel() {
-  if (!currentSupplierId.value || !selectedDate.value) return;
-  exporting.value = true;
-  try {
-    if (!products.value.length) { alert('Нет товаров для экспорта'); return; }
-    if (!restaurants.value.length) { alert('Нет ресторанов по графику'); return; }
+function fmtDateDDMM(dateStr) {
+  const d = new Date(dateStr);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
 
+async function exportExcel() {
+  if (!currentSupplierId.value) return;
+  exporting.value = true;
+
+  const datesToExport = exportSelectedDates.value.size > 0
+    ? [...exportSelectedDates.value].sort()
+    : (selectedDate.value ? [selectedDate.value] : []);
+
+  if (!datesToExport.length) { exporting.value = false; alert('Выберите хотя бы один день'); return; }
+
+  try {
     const XLSX = await import('xlsx-js-style');
     const supplierName = allSuppliers.value.find(s => s.id === currentSupplierId.value)?.short_name || 'Поставщик';
-    const prods = products.value;
+    const wb = XLSX.utils.book_new();
 
-    // Формат даты для заголовка
-    const dateFmt = (() => {
-      const d = new Date(selectedDate.value);
-      const dd = String(d.getDate()).padStart(2, '0');
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      return `${dd}.${mm}.${d.getFullYear()}`;
-    })();
-
-    // ═══ Стили (в цветовой палитре «Планеты») ═══
-    const border = {
-      top:    { style: 'thin', color: { rgb: 'BDBDBD' } },
-      bottom: { style: 'thin', color: { rgb: 'BDBDBD' } },
-      left:   { style: 'thin', color: { rgb: 'BDBDBD' } },
-      right:  { style: 'thin', color: { rgb: 'BDBDBD' } },
-    };
-    const titleStyle = {
-      font: { bold: true, sz: 14, name: 'Calibri', color: { rgb: '2E7D32' } },
-      alignment: { horizontal: 'left', vertical: 'center' },
-    };
-    const headerStyle = {
-      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Calibri' },
-      fill: { fgColor: { rgb: '2E7D32' } },
-      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-      border,
-    };
+    // ═══ Стили (определяем один раз) ═══
+    const border = { top: { style: 'thin', color: { rgb: 'BDBDBD' } }, bottom: { style: 'thin', color: { rgb: 'BDBDBD' } }, left: { style: 'thin', color: { rgb: 'BDBDBD' } }, right: { style: 'thin', color: { rgb: 'BDBDBD' } } };
+    const titleStyle = { font: { bold: true, sz: 14, name: 'Calibri', color: { rgb: '2E7D32' } }, alignment: { horizontal: 'left', vertical: 'center' } };
+    const headerStyle = { font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: 'Calibri' }, fill: { fgColor: { rgb: '2E7D32' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border };
     const headerLeftStyle = { ...headerStyle, alignment: { horizontal: 'left', vertical: 'center', wrapText: true } };
-    const cityStyle = {
-      font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: 'FFFFFF' } },
-      fill: { fgColor: { rgb: '5D4037' } },
-      alignment: { horizontal: 'left', vertical: 'center' },
-      border,
-    };
-    const restStyle = {
-      font: { bold: true, sz: 11, name: 'Calibri' },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border,
-    };
-    const addrStyle = {
-      font: { sz: 10, color: { rgb: '666666' }, name: 'Calibri' },
-      alignment: { horizontal: 'left', vertical: 'center' },
-      border,
-    };
-    const qtyStyle = {
-      font: { sz: 11, name: 'Calibri' },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border,
-    };
-    const qtyFilledStyle = {
-      ...qtyStyle,
-      font: { bold: true, sz: 11, name: 'Calibri' },
-      fill: { fgColor: { rgb: 'E8F5E9' } },
-    };
-    const adminQtyStyle = {
-      ...qtyStyle,
-      font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'D62700' } },
-      fill: { fgColor: { rgb: 'FFEBEE' } },
-    };
-    const missQtyStyle = {
-      font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B71C1C' } },
-      fill: { fgColor: { rgb: 'FFCDD2' } },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border,
-    };
-    const missRestStyle = {
-      font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B71C1C' } },
-      fill: { fgColor: { rgb: 'FFCDD2' } },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border,
-    };
-    const missAddrStyle = {
-      font: { sz: 10, bold: true, color: { rgb: 'B71C1C' }, name: 'Calibri' },
-      fill: { fgColor: { rgb: 'FFCDD2' } },
-      alignment: { horizontal: 'left', vertical: 'center' },
-      border,
-    };
-    const missNoteStyle = {
-      font: { sz: 10, italic: true, bold: true, name: 'Calibri', color: { rgb: 'B71C1C' } },
-      fill: { fgColor: { rgb: 'FFCDD2' } },
-      alignment: { horizontal: 'left', vertical: 'center' },
-      border,
-    };
-    const noteStyle = {
-      font: { sz: 10, italic: true, name: 'Calibri', color: { rgb: '555555' } },
-      alignment: { horizontal: 'left', vertical: 'center' },
-      border,
-    };
+    const cityStyle = { font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '5D4037' } }, alignment: { horizontal: 'left', vertical: 'center' }, border };
+    const restStyle = { font: { bold: true, sz: 11, name: 'Calibri' }, alignment: { horizontal: 'center', vertical: 'center' }, border };
+    const addrStyle = { font: { sz: 10, color: { rgb: '666666' }, name: 'Calibri' }, alignment: { horizontal: 'left', vertical: 'center' }, border };
+    const qtyStyle = { font: { sz: 11, name: 'Calibri' }, alignment: { horizontal: 'center', vertical: 'center' }, border };
+    const qtyFilledStyle = { ...qtyStyle, font: { bold: true, sz: 11, name: 'Calibri' }, fill: { fgColor: { rgb: 'E8F5E9' } } };
+    const adminQtyStyle = { ...qtyStyle, font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'D62700' } }, fill: { fgColor: { rgb: 'FFEBEE' } } };
+    const missQtyStyle = { font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B71C1C' } }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'center', vertical: 'center' }, border };
+    const missRestStyle = { font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B71C1C' } }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'center', vertical: 'center' }, border };
+    const missAddrStyle = { font: { sz: 10, bold: true, color: { rgb: 'B71C1C' }, name: 'Calibri' }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'left', vertical: 'center' }, border };
+    const missNoteStyle = { font: { sz: 10, italic: true, bold: true, name: 'Calibri', color: { rgb: 'B71C1C' } }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'left', vertical: 'center' }, border };
+    const noteStyle = { font: { sz: 10, italic: true, name: 'Calibri', color: { rgb: '555555' } }, alignment: { horizontal: 'left', vertical: 'center' }, border };
     const evenRowBg = { fgColor: { rgb: 'F5F5F5' } };
-    const subtotalStyle = {
-      font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: '5D4037' } },
-      fill: { fgColor: { rgb: 'EFEBE9' } },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border,
-    };
+    const subtotalStyle = { font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: '5D4037' } }, fill: { fgColor: { rgb: 'EFEBE9' } }, alignment: { horizontal: 'center', vertical: 'center' }, border };
     const subtotalLeftStyle = { ...subtotalStyle, alignment: { horizontal: 'left', vertical: 'center' } };
-    const grandTotalStyle = {
-      font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: '2E7D32' } },
-      fill: { fgColor: { rgb: 'C8E6C9' } },
-      alignment: { horizontal: 'center', vertical: 'center' },
-      border: {
-        top:    { style: 'medium', color: { rgb: '2E7D32' } },
-        bottom: { style: 'medium', color: { rgb: '2E7D32' } },
-        left:   border.left,
-        right:  border.right,
-      },
-    };
+    const grandBorder = { top: { style: 'medium', color: { rgb: '2E7D32' } }, bottom: { style: 'medium', color: { rgb: '2E7D32' } }, left: border.left, right: border.right };
+    const grandTotalStyle = { font: { bold: true, sz: 12, name: 'Calibri', color: { rgb: '2E7D32' } }, fill: { fgColor: { rgb: 'C8E6C9' } }, alignment: { horizontal: 'center', vertical: 'center' }, border: grandBorder };
     const grandTotalLeftStyle = { ...grandTotalStyle, alignment: { horizontal: 'left', vertical: 'center' } };
 
-    // ═══ Группировка ресторанов по городу ═══
-    const rests = restaurants.value.slice().sort((a, b) => {
-      const ca = (a.city || '').localeCompare(b.city || '');
-      if (ca !== 0) return ca;
-      return (parseInt(a.number) || 0) - (parseInt(b.number) || 0);
-    });
-    const cityGroups = {};
-    const cityOrder = [];
-    for (const r of rests) {
-      const c = r.city || r.region || 'Без города';
-      if (!cityGroups[c]) { cityGroups[c] = []; cityOrder.push(c); }
-      cityGroups[c].push(r);
-    }
+    // ═══ По одному листу на каждую дату ═══
+    for (const date of datesToExport) {
+      let prods, rests, items;
+      if (date === selectedDate.value && products.value.length) {
+        prods = buildDisplayProducts(products.value); rests = restaurants.value; items = orderItems.value;
+      } else {
+        const data = await store.adminGetStatus(currentSupplierId.value, date);
+        prods = buildDisplayProducts(data.products || []); rests = data.restaurants || []; items = data.order_items || [];
+      }
+      if (!prods.length || !rests.length) continue;
 
-    // ═══ Формируем AOA ═══
-    const header = ['№', 'Адрес'];
-    for (const p of prods) {
-      const label = p.sku ? `${p.sku}\n${p.product_name}` : p.product_name;
-      header.push(label);
-    }
-    header.push('Пометка');
-
-    const titleRow = [`Заявка ${supplierName} на ${dateFmt}`];
-    const aoa = [titleRow, header];
-    const rowMeta = []; // { type, row?, isEven? }
-    const merges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } },
-    ];
-
-    // Вспомогалки для получения значений
-    function getRowQty(r, p) {
-      const item = itemLookup.value[`${r.number}_${p.sku}`];
-      if (!item) return null;
-      const admin = (item.admin_qty !== null && item.admin_qty !== undefined) ? parseFloat(item.admin_qty) : NaN;
-      if (!isNaN(admin)) return { qty: admin, isAdmin: true };
-      const q = parseFloat(item.quantity);
-      if (!isNaN(q)) return { qty: q, isAdmin: false };
-      return null;
-    }
-
-    for (const city of cityOrder) {
-      const group = cityGroups[city];
-      // Строка заголовка города
-      const cityRow = [city];
-      for (let i = 1; i < header.length; i++) cityRow.push('');
-      aoa.push(cityRow);
-      merges.push({ s: { r: aoa.length - 1, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } });
-      rowMeta.push({ type: 'city' });
-
-      // Строки ресторанов
-      for (let i = 0; i < group.length; i++) {
-        const r = group[i];
-        const isSubmitted = !!r.order_status && r.order_status !== 'draft';
-        const row = [r.number, r.address || ''];
-        for (const p of prods) {
-          if (!isSubmitted) { row.push(0); continue; }
-          const v = getRowQty(r, p);
-          row.push(v ? v.qty : 0);
+      const lookup = {};
+      for (const it of items) lookup[`${it.restaurant_number}_${it.sku}`] = it;
+      const getQty = (r, p) => {
+        const skus = p?.source_skus?.length ? p.source_skus : [p?.sku];
+        let found = false;
+        let qty = 0;
+        let hasAdmin = false;
+        for (const sku of skus) {
+          const it = lookup[`${r.number}_${sku}`];
+          if (!it) continue;
+          found = true;
+          const admin = (it.admin_qty !== null && it.admin_qty !== undefined) ? parseFloat(it.admin_qty) : NaN;
+          const q = parseFloat(it.quantity);
+          if (!isNaN(admin)) {
+            qty += admin;
+            hasAdmin = true;
+          } else if (!isNaN(q)) {
+            qty += q;
+          }
         }
-        // Пометка: для неподавших — «Не подал»
-        let note = '';
-        if (!isSubmitted) note = 'Не подал';
-        else if (isSkipOrder(r)) note = 'Не нужна';
-        row.push(note);
-        aoa.push(row);
-        rowMeta.push({ type: 'data', row: r, isEven: i % 2 === 1, isSubmitted });
+        return found ? { qty, isAdmin: hasAdmin } : null;
+      };
+      const skipRest = (r) => {
+        if (!r.order_status || r.order_status === 'draft') return false;
+        return prods.every(p => { const v = getQty(r, p); return !v || v.qty === 0; });
+      };
+
+      const dateFmt = fmtDateDDMM(date);
+      const sortedRests = rests.slice().sort((a, b) => {
+        const ca = (a.city || '').localeCompare(b.city || '');
+        return ca !== 0 ? ca : (parseInt(a.number) || 0) - (parseInt(b.number) || 0);
+      });
+      const cityGroups = {}; const cityOrder = [];
+      for (const r of sortedRests) {
+        const c = r.city || r.region || 'Без города';
+        if (!cityGroups[c]) { cityGroups[c] = []; cityOrder.push(c); }
+        cityGroups[c].push(r);
       }
 
-      // Подытог по городу
-      const subRow = [`Итого ${city}`, ''];
+      const header = ['№', 'Адрес'];
+      for (const p of prods) header.push(p.is_grouped ? `${p.product_name}\nSKU ×${p.source_skus.length}` : (p.sku ? `${p.sku}\n${p.product_name}` : p.product_name));
+      header.push('Пометка');
+
+      const aoa = [[`Заявка ${supplierName} на ${dateFmt}`], header];
+      const rowMeta = [];
+      const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }];
+
+      for (const city of cityOrder) {
+        const group = cityGroups[city];
+        const cityRow = [city]; for (let i = 1; i < header.length; i++) cityRow.push('');
+        aoa.push(cityRow);
+        merges.push({ s: { r: aoa.length - 1, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } });
+        rowMeta.push({ type: 'city' });
+        for (let i = 0; i < group.length; i++) {
+          const r = group[i];
+          const isSubmitted = !!r.order_status && r.order_status !== 'draft';
+          const row = [r.number, r.address || ''];
+          for (const p of prods) { if (!isSubmitted) { row.push(0); continue; } const v = getQty(r, p); row.push(v ? v.qty : 0); }
+          let note = '';
+          if (!isSubmitted) note = 'Не подал';
+          else if (skipRest(r)) note = 'Не нужна';
+          row.push(note);
+          aoa.push(row);
+          rowMeta.push({ type: 'data', row: r, isEven: i % 2 === 1, isSubmitted });
+        }
+        const subRow = [`Итого ${city}`, ''];
+        for (const p of prods) {
+          let sum = 0, hasAny = false;
+          for (const r of group) { if (!r.order_status || r.order_status === 'draft') continue; const v = getQty(r, p); if (v) { sum += v.qty; hasAny = true; } }
+          subRow.push(hasAny ? sum : '');
+        }
+        subRow.push(''); aoa.push(subRow); rowMeta.push({ type: 'subtotal' });
+      }
+
+      const grandRow = ['ИТОГО', ''];
       for (const p of prods) {
         let sum = 0, hasAny = false;
-        for (const r of group) {
-          if (!r.order_status || r.order_status === 'draft') continue;
-          const v = getRowQty(r, p);
-          if (v) { sum += v.qty; hasAny = true; }
-        }
-        subRow.push(hasAny ? sum : '');
+        for (const r of sortedRests) { if (!r.order_status || r.order_status === 'draft') continue; const v = getQty(r, p); if (v) { sum += v.qty; hasAny = true; } }
+        grandRow.push(hasAny ? sum : '');
       }
-      subRow.push('');
-      aoa.push(subRow);
-      rowMeta.push({ type: 'subtotal' });
-    }
+      grandRow.push(''); aoa.push(grandRow); rowMeta.push({ type: 'total' });
 
-    // Общий итог
-    const grandRow = ['ИТОГО', ''];
-    for (const p of prods) {
-      let sum = 0, hasAny = false;
-      for (const r of rests) {
-        if (!r.order_status || r.order_status === 'draft') continue;
-        const v = getRowQty(r, p);
-        if (v) { sum += v.qty; hasAny = true; }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!merges'] = merges;
+
+      const titleCell = ws[XLSX.utils.encode_cell({ r: 0, c: 0 })];
+      if (titleCell) titleCell.s = titleStyle;
+      for (let c = 0; c < header.length; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: 1, c })];
+        if (cell) cell.s = c <= 1 ? headerLeftStyle : headerStyle;
       }
-      grandRow.push(hasAny ? sum : '');
-    }
-    grandRow.push('');
-    aoa.push(grandRow);
-    rowMeta.push({ type: 'total' });
-
-    // ═══ Строим лист и применяем стили ═══
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges'] = merges;
-
-    // Title
-    const titleCell = ws[XLSX.utils.encode_cell({ r: 0, c: 0 })];
-    if (titleCell) titleCell.s = titleStyle;
-
-    // Header (row 1)
-    for (let c = 0; c < header.length; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: 1, c })];
-      if (cell) cell.s = c <= 1 ? headerLeftStyle : headerStyle;
-    }
-
-    // Data rows (rowMeta идёт с offset 2: title + header)
-    for (let mi = 0; mi < rowMeta.length; mi++) {
-      const r = mi + 2;
-      const meta = rowMeta[mi];
-
-      if (meta.type === 'city') {
-        for (let c = 0; c < header.length; c++) {
-          const cell = ws[XLSX.utils.encode_cell({ r, c })];
-          if (cell) cell.s = cityStyle;
-        }
-      } else if (meta.type === 'data') {
-        const numCell = ws[XLSX.utils.encode_cell({ r, c: 0 })];
-        if (numCell) numCell.s = meta.isSubmitted
-          ? { ...restStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) }
-          : missRestStyle;
-        const aCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
-        if (aCell) aCell.s = meta.isSubmitted
-          ? { ...addrStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) }
-          : missAddrStyle;
-        for (let pi = 0; pi < prods.length; pi++) {
-          const c = 2 + pi;
-          const cell = ws[XLSX.utils.encode_cell({ r, c })];
-          if (!cell) continue;
-          if (!meta.isSubmitted) { cell.s = missQtyStyle; continue; }
-          const v = getRowQty(meta.row, prods[pi]);
-          if (v && v.isAdmin) cell.s = adminQtyStyle;
-          else if (v) cell.s = { ...qtyFilledStyle, ...(meta.isEven ? { fill: { fgColor: { rgb: 'E8F5E9' } } } : {}) };
-          else cell.s = { ...qtyStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) };
-        }
-        const nCell = ws[XLSX.utils.encode_cell({ r, c: header.length - 1 })];
-        if (nCell) nCell.s = meta.isSubmitted
-          ? { ...noteStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) }
-          : missNoteStyle;
-      } else if (meta.type === 'subtotal') {
-        for (let c = 0; c < header.length; c++) {
-          const cell = ws[XLSX.utils.encode_cell({ r, c })];
-          if (cell) cell.s = c === 0 ? subtotalLeftStyle : subtotalStyle;
-        }
-      } else if (meta.type === 'total') {
-        for (let c = 0; c < header.length; c++) {
-          const cell = ws[XLSX.utils.encode_cell({ r, c })];
-          if (cell) cell.s = c === 0 ? grandTotalLeftStyle : grandTotalStyle;
+      for (let mi = 0; mi < rowMeta.length; mi++) {
+        const ri = mi + 2; const meta = rowMeta[mi];
+        if (meta.type === 'city') {
+          for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: ri, c })]; if (cell) cell.s = cityStyle; }
+        } else if (meta.type === 'data') {
+          const numCell = ws[XLSX.utils.encode_cell({ r: ri, c: 0 })];
+          if (numCell) numCell.s = meta.isSubmitted ? { ...restStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) } : missRestStyle;
+          const aCell = ws[XLSX.utils.encode_cell({ r: ri, c: 1 })];
+          if (aCell) aCell.s = meta.isSubmitted ? { ...addrStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) } : missAddrStyle;
+          for (let pi = 0; pi < prods.length; pi++) {
+            const c = 2 + pi; const cell = ws[XLSX.utils.encode_cell({ r: ri, c })]; if (!cell) continue;
+            if (!meta.isSubmitted) { cell.s = missQtyStyle; continue; }
+            const v = getQty(meta.row, prods[pi]);
+            if (v && v.isAdmin) cell.s = adminQtyStyle;
+            else if (v) cell.s = { ...qtyFilledStyle, ...(meta.isEven ? { fill: { fgColor: { rgb: 'E8F5E9' } } } : {}) };
+            else cell.s = { ...qtyStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) };
+          }
+          const nCell = ws[XLSX.utils.encode_cell({ r: ri, c: header.length - 1 })];
+          if (nCell) nCell.s = meta.isSubmitted ? { ...noteStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) } : missNoteStyle;
+        } else if (meta.type === 'subtotal') {
+          for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: ri, c })]; if (cell) cell.s = c === 0 ? subtotalLeftStyle : subtotalStyle; }
+        } else if (meta.type === 'total') {
+          for (let c = 0; c < header.length; c++) { const cell = ws[XLSX.utils.encode_cell({ r: ri, c })]; if (cell) cell.s = c === 0 ? grandTotalLeftStyle : grandTotalStyle; }
         }
       }
+
+      ws['!cols'] = [{ wch: 8 }, { wch: 32 }, ...Array(prods.length).fill({ wch: 14 }), { wch: 20 }];
+      ws['!rows'] = [{ hpx: 28 }, { hpx: 42 }];
+
+      const wd = weekDates.value.find(d => d.date === date);
+      const sheetName = (wd ? `${wd.day_name} ${dateFmt}` : dateFmt).slice(0, 31);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
     }
 
-    // Column widths
-    ws['!cols'] = [
-      { wch: 8 }, { wch: 32 },
-      ...Array(prods.length).fill({ wch: 14 }),
-      { wch: 20 },
-    ];
-    ws['!rows'] = [{ hpx: 28 }, { hpx: 42 }];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, supplierName.slice(0, 28));
-    XLSX.writeFile(wb, `Заявка ${supplierName} на ${dateFmt}.xlsx`);
+    if (wb.SheetNames.length === 0) { alert('Нет данных для выгрузки'); return; }
+    const firstDate = fmtDateDDMM(datesToExport[0]);
+    const lastDate = datesToExport.length > 1 ? `-${fmtDateDDMM(datesToExport[datesToExport.length - 1])}` : '';
+    XLSX.writeFile(wb, `Заявка ${supplierName} ${firstDate}${lastDate}.xlsx`);
   } catch (e) {
     alert('Ошибка экспорта: ' + e.message);
   } finally {
@@ -1113,6 +1247,37 @@ const itemLookup = computed(() => {
   return map;
 });
 
+const displayProducts = computed(() => buildDisplayProducts(products.value));
+
+function getDisplayItem(restNum, product) {
+  const skus = product?.source_skus?.length ? product.source_skus : [product?.sku];
+  let found = false;
+  let originalQty = 0;
+  let effectiveQty = 0;
+  let hasAdmin = false;
+
+  for (const sku of skus) {
+    const item = itemLookup.value[`${restNum}_${sku}`];
+    if (!item) continue;
+    found = true;
+    const rawQty = parseFloat(item.quantity);
+    const rawAdmin = item.admin_qty !== null && item.admin_qty !== undefined ? parseFloat(item.admin_qty) : NaN;
+    if (!isNaN(rawQty)) originalQty += rawQty;
+    if (!isNaN(rawAdmin)) {
+      effectiveQty += rawAdmin;
+      hasAdmin = true;
+    } else if (!isNaN(rawQty)) {
+      effectiveQty += rawQty;
+    }
+  }
+
+  if (!found) return null;
+  return {
+    quantity: originalQty,
+    admin_qty: hasAdmin ? effectiveQty : null,
+  };
+}
+
 const filteredRestaurants = computed(() => {
   let list = restaurants.value;
   if (!showMissing.value) {
@@ -1130,34 +1295,35 @@ const filteredRestaurants = computed(() => {
   return list;
 });
 
-function getCellQty(restNum, sku) {
-  const item = itemLookup.value[`${restNum}_${sku}`];
+function getCellQty(restNum, product) {
+  const item = getDisplayItem(restNum, product);
   if (!item) return '';
-  const v = parseFloat(item.quantity);
-  return v === Math.floor(v) ? Math.floor(v) : v;
+  return formatQtyValue(item.quantity);
 }
 
-function getCellAdmin(restNum, sku) {
-  const item = itemLookup.value[`${restNum}_${sku}`];
+function getCellAdmin(restNum, product) {
+  const item = getDisplayItem(restNum, product);
   if (!item || item.admin_qty === null || item.admin_qty === undefined) return null;
-  const v = parseFloat(item.admin_qty);
-  return v === Math.floor(v) ? Math.floor(v) : v;
+  return formatQtyValue(item.admin_qty);
 }
 
-function getProductTotal(sku) {
+function getProductTotal(product) {
   let total = 0;
   for (const r of filteredRestaurants.value) {
-    const item = itemLookup.value[`${r.number}_${sku}`];
+    const item = getDisplayItem(r.number, product);
     if (!item) continue;
-    const admin = item.admin_qty !== null && item.admin_qty !== undefined ? parseFloat(item.admin_qty) : NaN;
-    const qty = !isNaN(admin) ? admin : parseFloat(item.quantity);
-    if (!isNaN(qty)) total += qty;
+    const qty = item.admin_qty !== null && item.admin_qty !== undefined ? item.admin_qty : item.quantity;
+    if (Number.isFinite(qty)) total += qty;
   }
-  return total === Math.floor(total) ? Math.floor(total) : +total.toFixed(2);
+  return formatQtyValue(total);
 }
 
 function shortName(name) {
   return name && name.length > 15 ? name.slice(0, 15) + '…' : name;
+}
+
+function canEditProduct(product) {
+  return !product?.is_grouped;
 }
 
 function startEdit(restNum, sku) {
@@ -1248,6 +1414,17 @@ function formatTime(dt) {
   const d = new Date(dt);
   return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
+function formatDateTime(dt) {
+  if (!dt) return '';
+  const d = new Date(dt);
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 </script>
 
 <style scoped>
@@ -1319,7 +1496,16 @@ function formatTime(dt) {
 .rom-stat-pending { color: #D62300; }
 .rom-stat-label { font-size: 12px; color: #8b7355; }
 
-.rom-export-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+.rom-export-row { display: flex; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
+.so-export-date-picker {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 8px 12px; margin-bottom: 12px;
+  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
+  font-size: 13px;
+}
+.so-export-date-hint { color: #0369a1; font-weight: 600; margin-right: 4px; }
+.so-export-date-check { display: flex; align-items: center; gap: 4px; cursor: pointer; color: #374151; }
+.so-export-date-check input { cursor: pointer; }
 
 .rom-loading { padding: 40px; text-align: center; color: #8b7355; }
 .rom-empty { padding: 40px; text-align: center; color: #8b7355; font-size: 15px; }
@@ -1533,4 +1719,50 @@ function formatTime(dt) {
   font-size: 14px; line-height: 1; padding: 0 2px;
 }
 .so-override-del:hover { color: #D62300; }
+.so-override-chip-closed {
+  background: #fff0f0; color: #B71C1C; border-color: #ef9a9a;
+}
+.so-override-chip-closed .so-override-del { color: #B71C1C; }
+.so-day-closed-btn { background: #fff0f0 !important; color: #B71C1C !important; border-color: #ef9a9a !important; }
+.so-btn-close-day { background: #fff0f0; color: #B71C1C; border-color: #ef9a9a; }
+.so-btn-close-day:hover { background: #ffcdd2; }
+.so-btn-open-day { background: #f0fdf4; color: #166534; border-color: #86efac; }
+.so-btn-open-day:hover { background: #dcfce7; }
+
+.so-notify-box {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid #eadfce;
+  border-radius: 12px;
+  background: #fffaf4;
+}
+.so-notify-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.so-notify-users {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 12px;
+}
+.so-notify-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eee2d3;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+  color: #502314;
+}
+.so-notify-user small {
+  color: #8b7355;
+}
+.so-notify-muted {
+  color: #b45309 !important;
+}
 </style>

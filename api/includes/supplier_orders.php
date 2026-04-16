@@ -78,14 +78,76 @@ function soGetSupplierSettings($pdo, $supplierId) {
     ];
 }
 
+function soGetSupplierNotifyUsers($pdo, $supplierId) {
+    $s = $pdo->prepare("
+        SELECT user_name
+        FROM so_supplier_summary_subscribers
+        WHERE supplier_id = ?
+        ORDER BY user_name
+    ");
+    $s->execute([$supplierId]);
+    return $s->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
+    $names = [];
+    if (is_array($notifyUsers)) {
+        foreach ($notifyUsers as $userName) {
+            $userName = trim((string)$userName);
+            if ($userName !== '') {
+                $names[$userName] = true;
+            }
+        }
+    }
+    $names = array_keys($names);
+
+    $pdo->prepare("DELETE FROM so_supplier_summary_subscribers WHERE supplier_id = ?")->execute([$supplierId]);
+    if (empty($names)) {
+        return [];
+    }
+
+    $ph = implode(',', array_fill(0, count($names), '?'));
+    $validStmt = $pdo->prepare("SELECT name FROM users WHERE name IN ({$ph})");
+    $validStmt->execute($names);
+    $validNames = $validStmt->fetchAll(PDO::FETCH_COLUMN);
+    if (empty($validNames)) {
+        return [];
+    }
+
+    $createdBy = $GLOBALS['sessionUser']['name'] ?? 'system';
+    $ins = $pdo->prepare("
+        INSERT INTO so_supplier_summary_subscribers (supplier_id, user_name, created_by)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE user_name = VALUES(user_name)
+    ");
+    foreach ($validNames as $userName) {
+        $ins->execute([$supplierId, $userName, $createdBy]);
+    }
+
+    sort($validNames, SORT_NATURAL | SORT_FLAG_CASE);
+    return $validNames;
+}
+
 function soCheckDeadline($pdo, $supplierId, $deliveryDate) {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
 
     // 1. Переопределение на конкретную дату (по поставщику)
-    $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
-    $s->execute([$supplierId, $deliveryDate]);
-    $override = $s->fetch();
+    try {
+        $s = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+        $s->execute([$supplierId, $deliveryDate]);
+        $override = $s->fetch();
+    } catch (PDOException $e) {
+        // Колонка is_closed ещё не создана (миграция не применена) — fallback
+        $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+        $s->execute([$supplierId, $deliveryDate]);
+        $override = $s->fetch();
+    }
+
+    // Принудительно закрытый день — сразу возвращаем closed
+    if ($override && !empty($override['is_closed'])) {
+        return ['status' => 'closed', 'deadline' => null, 'forced_closed' => true];
+    }
 
     // 2. Правило по дню недели доставки
     $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
@@ -97,7 +159,7 @@ function soCheckDeadline($pdo, $supplierId, $deliveryDate) {
     }
 
     // 3. Вычисляем дату и время дедлайна
-    if ($override) {
+    if ($override && $override['deadline_time']) {
         $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
         $deadlineTime = $override['deadline_time'];
     } elseif ($rule) {
@@ -140,7 +202,7 @@ function soRestaurantHasDeliveryDate($pdo, $restaurantId, $supplierId, $delivery
         FROM so_supplier_schedules
         WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
     ");
-    $sch->execute([(int)$supplierId, (int)$restaurantId]);
+    $sch->execute([$supplierId, (int)$restaurantId]);
     $schedule = $sch->fetchAll();
     if (!$schedule) return false;
 
@@ -165,6 +227,103 @@ function soRestaurantHasDeliveryDate($pdo, $restaurantId, $supplierId, $delivery
     return false;
 }
 
+function soGetAllowedEntityGroups($sessionUser) {
+    if (!$sessionUser || ($sessionUser['role'] ?? '') === 'admin') {
+        return ['BK_VM', 'PS'];
+    }
+    $entities = $sessionUser['legal_entities'] ?? [];
+    if (is_string($entities)) {
+        $entities = json_decode($entities, true) ?: [];
+    }
+    if (!is_array($entities) || empty($entities)) {
+        return [];
+    }
+    $groups = [];
+    foreach ($entities as $entity) {
+        $groups[getEntityGroup($entity)] = true;
+    }
+    return array_keys($groups);
+}
+
+function soRequireAdminEntityGroupAccess($sessionUser, $legalEntity) {
+    if (!$legalEntity || !$sessionUser || ($sessionUser['role'] ?? '') === 'admin') {
+        return;
+    }
+    $allowedGroups = soGetAllowedEntityGroups($sessionUser);
+    $entityGroup = getEntityGroup($legalEntity);
+    if (!in_array($entityGroup, $allowedGroups, true)) {
+        soRespond(['error' => 'Нет доступа к данной группе юрлиц'], 403);
+    }
+}
+
+function soAppendAllowedSupplierGroupFilter($sessionUser, $requestedLegalEntity, &$where, &$params, $column = 's.legal_entity_group') {
+    if ($requestedLegalEntity) {
+        soRequireAdminEntityGroupAccess($sessionUser, $requestedLegalEntity);
+        $where[] = $column . ' = ?';
+        $params[] = getEntityGroup($requestedLegalEntity);
+        return;
+    }
+
+    $allowedGroups = soGetAllowedEntityGroups($sessionUser);
+    if (empty($allowedGroups)) {
+        soRespond(['error' => 'Нет доступа к группе юрлиц'], 403);
+    }
+
+    if (count($allowedGroups) === 1) {
+        $where[] = $column . ' = ?';
+        $params[] = $allowedGroups[0];
+        return;
+    }
+
+    $ph = implode(',', array_fill(0, count($allowedGroups), '?'));
+    $where[] = $column . " IN ({$ph})";
+    foreach ($allowedGroups as $group) {
+        $params[] = $group;
+    }
+}
+
+function soAppendAllowedOrderEntityFilter($sessionUser, &$where, &$params, $column = 'o.legal_entity') {
+    if (!$sessionUser || ($sessionUser['role'] ?? '') === 'admin') {
+        return;
+    }
+    $entities = $sessionUser['legal_entities'] ?? [];
+    if (is_string($entities)) {
+        $entities = json_decode($entities, true) ?: [];
+    }
+    if (!is_array($entities) || empty($entities)) {
+        soRespond(['error' => 'Нет доступа к юр. лицам'], 403);
+    }
+    $entities = array_values(array_unique($entities));
+    $ph = implode(',', array_fill(0, count($entities), '?'));
+    $where[] = $column . " IN ({$ph})";
+    foreach ($entities as $entity) {
+        $params[] = $entity;
+    }
+}
+
+function soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId) {
+    if (!$supplierId) {
+        soRespond(['error' => 'Не указан поставщик'], 400);
+    }
+
+    $s = $pdo->prepare("SELECT id, short_name, legal_entity, legal_entity_group, is_active, so_enabled FROM suppliers WHERE id = ?");
+    $s->execute([$supplierId]);
+    $supplier = $s->fetch();
+    if (!$supplier || (int)($supplier['is_active'] ?? 0) !== 1) {
+        soRespond(['error' => 'Поставщик не найден'], 404);
+    }
+
+    if ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
+        $allowedGroups = soGetAllowedEntityGroups($sessionUser);
+        $supplierGroup = $supplier['legal_entity_group'] ?: getEntityGroup($supplier['legal_entity'] ?? '');
+        if (!in_array($supplierGroup, $allowedGroups, true)) {
+            soRespond(['error' => 'Нет доступа к этому поставщику'], 403);
+        }
+    }
+
+    return $supplier;
+}
+
 // ═══ Парсинг маршрута ═══
 
 $soParts = explode('/', $uri);
@@ -174,7 +333,7 @@ $soParam1 = $soParts[2] ?? null;
 $soParam2 = $soParts[3] ?? null;
 $soParam3 = $soParts[4] ?? null;
 
-$dayNames = [1=>'ПН', 2=>'ВТ', 3=>'СР', 4=>'ЧТ', 5=>'ПТ', 6=>'С��', 7=>'ВС'];
+$dayNames = [1=>'ПН', 2=>'ВТ', 3=>'СР', 4=>'ЧТ', 5=>'ПТ', 6=>'СБ', 7=>'ВС'];
 $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
 
 // ═══════════════════════════════════════════════
@@ -295,6 +454,9 @@ if ($soAction === 'suppliers' && $method === 'GET') {
             usort($availableDates, function ($a, $b) {
                 return strcmp($a['delivery_date'], $b['delivery_date']);
             });
+
+            // Ресторану показываем только две ближайшие доступные даты.
+            $availableDates = array_slice($availableDates, 0, 2);
         }
 
         $result[] = [
@@ -533,11 +695,11 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         };
 
-        // Подтягиваем единицы измерения из products по sku
+        // Подтягиваем единицы измерения из products по sku (используем агрегированные позиции)
         $skus = [];
-        foreach ($items as $it) {
+        foreach ($aggregated as $it) {
             $sk = trim((string)($it['sku'] ?? ''));
-            if ($sk !== '' && floatval($it['quantity'] ?? 0) > 0) $skus[$sk] = true;
+            if ($sk !== '') $skus[$sk] = true;
         }
         $unitBySku = [];
         if (!empty($skus)) {
@@ -565,7 +727,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             $lines[] = "📋 <b>Позиций:</b> {$totalItems}";
             $lines[] = '';
             $lines[] = '<b>Состав:</b>';
-            foreach ($items as $it) {
+            foreach ($aggregated as $it) {
                 $q = floatval($it['quantity'] ?? 0);
                 if ($q <= 0) continue;
                 $sku = $esc($it['sku'] ?? '');
@@ -600,7 +762,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             'Ресторан ' . $rest['restaurant_number'],
             [
                 'legal_entity' => $rest['legal_entity'] ?? '',
-                'supplier_id' => (int)$supplierId,
+                'supplier_id' => $supplierId,
                 'supplier' => $supNameForLog,
                 'delivery_date' => $deliveryDate,
                 'items_count' => $totalItems,
@@ -648,7 +810,9 @@ if ($soAction === 'admin') {
     // --- Список поставщиков с активными расписаниями ---
     if ($adminAction === 'suppliers' && $method === 'GET') {
         $legalEntity = $_GET['legal_entity'] ?? null;
-        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $where = ["s.is_active = 1", "s.so_enabled = 1"];
+        $params = [];
+        soAppendAllowedSupplierGroupFilter($sessionUser, $legalEntity, $where, $params);
         // Показываем только подключённых к SO-модулю поставщиков (so_enabled=1),
         // остальные доступны через мастер «+ Подключить поставщика».
         $s = $pdo->prepare("
@@ -658,11 +822,11 @@ if ($soAction === 'admin') {
             FROM suppliers s
             LEFT JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
             LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-            WHERE s.is_active = 1 AND s.so_enabled = 1 AND s.legal_entity_group = ?
+            WHERE " . implode(' AND ', $where) . "
             GROUP BY s.id
             ORDER BY s.short_name
         ");
-        $s->execute([$entityGroup]);
+        $s->execute($params);
         soRespond(['suppliers' => $s->fetchAll()]);
     }
 
@@ -671,21 +835,23 @@ if ($soAction === 'admin') {
     // среди тех, кого можно активировать.
     if ($adminAction === 'available-suppliers' && $method === 'GET') {
         $legalEntity = $_GET['legal_entity'] ?? null;
-        $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : 'BK_VM';
+        $where = ["is_active = 1", "so_enabled = 0"];
+        $params = [];
+        soAppendAllowedSupplierGroupFilter($sessionUser, $legalEntity, $where, $params, 'legal_entity_group');
         $s = $pdo->prepare("
             SELECT id, short_name, full_name, legal_entity, legal_entity_group
             FROM suppliers
-            WHERE is_active = 1 AND so_enabled = 0 AND legal_entity_group = ?
+            WHERE " . implode(' AND ', $where) . "
             ORDER BY short_name
         ");
-        $s->execute([$entityGroup]);
+        $s->execute($params);
         soRespond(['suppliers' => $s->fetchAll()]);
     }
 
     // --- Отключение поставщика от SO-модуля (не удаление, просто скрыть) ---
     if ($adminAction === 'disconnect-supplier' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
         soRespond(['success' => true]);
     }
@@ -696,13 +862,7 @@ if ($soAction === 'admin') {
     // Сохраняет всё в транзакции и ставит so_enabled = 1.
     if ($adminAction === 'register-supplier' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
-
-        // Проверим, что поставщик существует и активен
-        $sup = $pdo->prepare("SELECT id, short_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ? AND is_active = 1");
-        $sup->execute([$supplierId]);
-        $supplier = $sup->fetch();
-        if (!$supplier) soRespond(['error' => 'Поставщик не найден'], 404);
+        $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         // Валидация входных данных
         $schedules     = $body['schedules']     ?? []; // [{restaurant_id, order_day, delivery_day}]
@@ -741,7 +901,12 @@ if ($soAction === 'admin') {
                 $schUp = $pdo->prepare("
                     INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
                     VALUES (?, ?, ?, ?, 1, NOW(), ?)
-                    ON DUPLICATE KEY UPDATE delivery_day = VALUES(delivery_day), is_active = 1, updated_at = NOW(), updated_by = VALUES(updated_by)
+                    ON DUPLICATE KEY UPDATE
+                        order_day = VALUES(order_day),
+                        delivery_day = VALUES(delivery_day),
+                        is_active = 1,
+                        updated_at = NOW(),
+                        updated_by = VALUES(updated_by)
                 ");
                 foreach ($schedules as $sch) {
                     $restId = (int)($sch['restaurant_id'] ?? 0);
@@ -775,6 +940,7 @@ if ($soAction === 'admin') {
                 foreach ($templates as $tpl) {
                     $le = $tpl['legal_entity'] ?? null;
                     if (!$le) continue;
+                    soRequireAdminEntityGroupAccess($sessionUser, $le);
                     $items = $tpl['items'] ?? [];
                     $pdo->prepare("DELETE FROM so_templates WHERE supplier_id = ? AND legal_entity = ?")
                         ->execute([$supplierId, $le]);
@@ -795,22 +961,8 @@ if ($soAction === 'admin') {
                 }
             }
 
-            // 6) Подписчики-уведомления — сохраняем в telegram_settings.so_deadline_summary для выбранных пользователей
-            //    (так уже устроены другие уведомления модуля)
-            if (!empty($notifyUsers) && is_array($notifyUsers)) {
-                // Сбрасываем флаг у всех, затем включаем только у выбранных — чтобы при
-                // переподключении старые получатели не остались висеть.
-                // NB: это глобальный флаг «получать сводки по SO», общий для всех поставщиков.
-                $pdo->prepare("UPDATE telegram_settings SET so_deadline_summary = 0")->execute();
-                if (count($notifyUsers) > 0) {
-                    $ph = implode(',', array_fill(0, count($notifyUsers), '?'));
-                    $pdo->prepare("
-                        INSERT INTO telegram_settings (user_name, so_deadline_summary)
-                        SELECT u.name, 1 FROM users u WHERE u.name IN ($ph)
-                        ON DUPLICATE KEY UPDATE so_deadline_summary = 1
-                    ")->execute($notifyUsers);
-                }
-            }
+            // 6) Подписчики итоговой сводки — отдельные для конкретного поставщика
+            soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers);
 
             $pdo->commit();
             soRespond(['success' => true, 'supplier' => $supplier]);
@@ -824,21 +976,31 @@ if ($soAction === 'admin') {
     // --- Настройки поставщика (GET) ---
     if ($adminAction === 'settings' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $settings = soGetSupplierSettings($pdo, $supplierId);
         // Список разовых переопределений дедлайна
-        $ov = $pdo->prepare("SELECT delivery_date, deadline_time, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
-        $ov->execute([$supplierId]);
+        $overridesList = [];
+        try {
+            $ov = $pdo->prepare("SELECT delivery_date, deadline_time, is_closed, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
+            $ov->execute([$supplierId]);
+            $overridesList = $ov->fetchAll();
+        } catch (PDOException $e) {
+            // is_closed колонка не существует — миграция не применена, читаем без неё
+            $ov = $pdo->prepare("SELECT delivery_date, deadline_time, 0 as is_closed, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
+            $ov->execute([$supplierId]);
+            $overridesList = $ov->fetchAll();
+        }
         soRespond([
             'settings' => $settings,
-            'overrides' => $ov->fetchAll(),
+            'overrides' => $overridesList,
+            'notify_users' => soGetSupplierNotifyUsers($pdo, $supplierId),
         ]);
     }
 
     // --- Обновить настройки поставщика (POST) ---
     if ($adminAction === 'settings' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $updatedBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
 
         $isAccepting = isset($body['is_accepting_orders']) ? ((int)!!$body['is_accepting_orders']) : 1;
@@ -849,6 +1011,7 @@ if ($soAction === 'admin') {
             $defaultDl = '14:00:00';
         }
         $pauseMsg = $body['pause_message'] ?? null;
+        $notifyUsers = array_key_exists('notify_users', $body) ? ($body['notify_users'] ?? []) : null;
 
         $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, default_deadline_time, pause_message, updated_by)
             VALUES (?, ?, ?, ?, ?)
@@ -859,7 +1022,15 @@ if ($soAction === 'admin') {
               updated_by = VALUES(updated_by)")
             ->execute([$supplierId, $isAccepting, $defaultDl, $pauseMsg, $updatedBy]);
 
-        soRespond(['success' => true, 'settings' => soGetSupplierSettings($pdo, $supplierId)]);
+        if ($notifyUsers !== null) {
+            soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers);
+        }
+
+        soRespond([
+            'success' => true,
+            'settings' => soGetSupplierSettings($pdo, $supplierId),
+            'notify_users' => soGetSupplierNotifyUsers($pdo, $supplierId),
+        ]);
     }
 
     // --- Сводка заявок по поставщику + дате ---
@@ -867,7 +1038,7 @@ if ($soAction === 'admin') {
         $supplierId = $_GET['supplier_id'] ?? '';
         $date = $_GET['date'] ?? '';
 
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         $settings = soGetSupplierSettings($pdo, $supplierId);
 
@@ -915,11 +1086,11 @@ if ($soAction === 'admin') {
 
         // Все рестораны, у которых поставка в этот день (без session_id)
         $rests = $pdo->prepare("
-            SELECT r.number, r.region, r.city, r.address,
+            SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
                    ss.order_day,
                    o.id as order_id, o.status as order_status, o.submitted_at,
-                   (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id) as item_count,
-                   (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
+                   (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
+                   (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.supplier_id = ? AND o.delivery_date = ?
@@ -961,16 +1132,6 @@ if ($soAction === 'admin') {
         }
         usort($weekDates, fn($a, $b) => strcmp($a['date'], $b['date']));
 
-        // Товары из шаблонов (все юрлица)
-        $tplStmt = $pdo->prepare("
-            SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.product_id
-            FROM so_templates t
-            WHERE t.supplier_id = ? AND t.is_active = 1
-            ORDER BY t.sort_order, t.product_name
-        ");
-        $tplStmt->execute([$supplierId]);
-        $products = $tplStmt->fetchAll();
-
         // Все позиции заявок для этой даты
         $itemsStmt = $pdo->prepare("
             SELECT o.restaurant_number, o.delivery_date,
@@ -981,6 +1142,54 @@ if ($soAction === 'admin') {
         ");
         $itemsStmt->execute([$supplierId, $date]);
         $orderItems = $itemsStmt->fetchAll();
+
+        // Товары для матрицы:
+        // 1. текущий шаблон
+        // 2. плюс реальные SKU из заявок на выбранную дату, которых в шаблоне уже нет
+        // Это нужно для старых заявок Планеты и других исторических данных, чтобы
+        // закупщик видел позиции, даже если шаблон потом поменяли.
+        $tplStmt = $pdo->prepare("
+            SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.product_id
+            FROM so_templates t
+            WHERE t.supplier_id = ? AND t.is_active = 1
+            ORDER BY t.sort_order, t.product_name
+        ");
+        $tplStmt->execute([$supplierId]);
+        $products = $tplStmt->fetchAll();
+
+        $productMap = [];
+        $maxSortOrder = 0;
+        foreach ($products as $idx => $product) {
+            $sku = (string)($product['sku'] ?? '');
+            if ($sku === '') continue;
+            $productMap[$sku] = $product;
+            $sortOrder = isset($product['sort_order']) ? (int)$product['sort_order'] : ($idx * 10);
+            if ($sortOrder > $maxSortOrder) {
+                $maxSortOrder = $sortOrder;
+            }
+        }
+
+        foreach ($orderItems as $item) {
+            $sku = (string)($item['sku'] ?? '');
+            if ($sku === '' || isset($productMap[$sku])) continue;
+            $maxSortOrder += 10;
+            $productMap[$sku] = [
+                'sku' => $sku,
+                'product_name' => $item['product_name'] ?: $sku,
+                'sort_order' => $maxSortOrder,
+                'multiplicity' => null,
+                'product_id' => null,
+                'is_legacy' => 1,
+            ];
+        }
+
+        $products = array_values($productMap);
+        usort($products, function ($a, $b) {
+            $sortA = isset($a['sort_order']) ? (int)$a['sort_order'] : 0;
+            $sortB = isset($b['sort_order']) ? (int)$b['sort_order'] : 0;
+            if ($sortA !== $sortB) return $sortA <=> $sortB;
+            return strcmp((string)($a['product_name'] ?? ''), (string)($b['product_name'] ?? ''));
+        });
 
         // Дедлайн для этой даты
         $deadlineInfo = soCheckDeadline($pdo, $supplierId, $date);
@@ -1001,30 +1210,75 @@ if ($soAction === 'admin') {
     // --- Список заявок по дням ---
     if ($adminAction === 'orders' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
-        $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-7 days'));
-        $dateTo = $_GET['date_to'] ?? date('Y-m-d', strtotime('+7 days'));
+        $submittedFrom = $_GET['submitted_from'] ?? date('Y-m-d', strtotime('-7 days'));
+        $submittedTo = $_GET['submitted_to'] ?? date('Y-m-d');
+        $deliveryFrom = $_GET['delivery_from'] ?? '';
+        $deliveryTo = $_GET['delivery_to'] ?? '';
+        $statusFilter = trim((string)($_GET['status'] ?? ''));
+        $query = trim((string)($_GET['query'] ?? ''));
+        $skipOnly = !empty($_GET['skip_only']);
 
         $where = "1=1";
         $params = [];
         if ($supplierId) {
+            soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
             $where .= " AND o.supplier_id = ?";
             $params[] = $supplierId;
         }
-        $where .= " AND o.delivery_date BETWEEN ? AND ?";
-        $params[] = $dateFrom;
-        $params[] = $dateTo;
+        $orderWhereParts = [];
+        $orderWhereParams = [];
+        soAppendAllowedOrderEntityFilter($sessionUser, $orderWhereParts, $orderWhereParams, 'o.legal_entity');
+        if (!empty($orderWhereParts)) {
+            $where .= " AND " . implode(' AND ', $orderWhereParts);
+            $params = array_merge($params, $orderWhereParams);
+        }
+        if ($submittedFrom) {
+            $where .= " AND DATE(o.submitted_at) >= ?";
+            $params[] = $submittedFrom;
+        }
+        if ($submittedTo) {
+            $where .= " AND DATE(o.submitted_at) <= ?";
+            $params[] = $submittedTo;
+        }
+        if ($deliveryFrom) {
+            $where .= " AND o.delivery_date >= ?";
+            $params[] = $deliveryFrom;
+        }
+        if ($deliveryTo) {
+            $where .= " AND o.delivery_date <= ?";
+            $params[] = $deliveryTo;
+        }
+        if ($statusFilter !== '') {
+            $where .= " AND o.status = ?";
+            $params[] = $statusFilter;
+        }
+        if ($query !== '') {
+            $where .= " AND (CAST(o.restaurant_number AS CHAR) LIKE ? OR COALESCE(r.address, '') LIKE ? OR COALESCE(r.city, '') LIKE ? OR COALESCE(r.region, '') LIKE ?)";
+            $like = '%' . $query . '%';
+            $params[] = $like;
+            $params[] = $like;
+            $params[] = $like;
+            $params[] = $like;
+        }
+        if ($skipOnly) {
+            $where .= " AND NOT EXISTS (
+                SELECT 1
+                FROM so_order_items soi
+                WHERE soi.order_id = o.id AND COALESCE(soi.admin_qty, soi.quantity) > 0
+            )";
+        }
 
         $s = $pdo->prepare("
             SELECT o.id, o.delivery_date, o.order_date, o.restaurant_number, o.status, o.submitted_at, o.supplier_id,
                    s.short_name as supplier_name,
-                   r.region, r.city, r.address,
-                   (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id) as item_count,
-                   (SELECT SUM(quantity) FROM so_order_items WHERE order_id = o.id) as total_qty
+                   r.region, r.city, r.address, r.legal_entity_group,
+                   (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
+                   (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_orders o
             JOIN suppliers s ON s.id = o.supplier_id
             LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
             WHERE {$where}
-            ORDER BY o.delivery_date, o.restaurant_number
+            ORDER BY o.submitted_at DESC, o.restaurant_number
         ");
         $s->execute($params);
         soRespond(['orders' => $s->fetchAll()]);
@@ -1033,7 +1287,7 @@ if ($soAction === 'admin') {
     // --- Детали заявки ---
     if ($adminAction === 'order' && $method === 'GET' && $adminParam) {
         $s = $pdo->prepare("
-            SELECT o.*, s.short_name as supplier_name, r.region, r.city, r.address
+            SELECT o.*, s.short_name as supplier_name, r.region, r.city, r.address, r.legal_entity_group
             FROM so_orders o
             JOIN suppliers s ON s.id = o.supplier_id
             LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
@@ -1153,6 +1407,7 @@ if ($soAction === 'admin') {
             // Получаем текущее состояние ДО обновления
             $cur = $pdo->prepare("
                 SELECT oi.order_id, oi.product_name, oi.sku, oi.quantity, oi.admin_qty,
+                       o.legal_entity,
                        o.restaurant_number, o.delivery_date, s.short_name as supplier_name
                 FROM so_order_items oi
                 JOIN so_orders o ON o.id = oi.order_id
@@ -1162,6 +1417,7 @@ if ($soAction === 'admin') {
             $cur->execute([$itemId]);
             $info = $cur->fetch();
             if ($info) {
+                soRequireAdminEntityGroupAccess($sessionUser, $info['legal_entity'] ?? '');
                 $oldVal = ($info['admin_qty'] !== null) ? (float)$info['admin_qty'] : (float)$info['quantity'];
                 $orderId = (int)$info['order_id'];
                 $notify = [
@@ -1177,6 +1433,7 @@ if ($soAction === 'admin') {
             $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $itemId]);
             $reload = false;
         } elseif ($restNum && $deliveryDate && $sku && $suppId) {
+            soRequireAdminSupplierAccess($pdo, $sessionUser, $suppId);
             // Ищем заказ ресторана
             $orderStmt = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
             $orderStmt->execute([$suppId, $restNum, $deliveryDate]);
@@ -1185,6 +1442,7 @@ if ($soAction === 'admin') {
             if (!$order) {
                 // Создаём заказ за ресторан
                 $le = $body['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
+                soRequireAdminEntityGroupAccess($sessionUser, $le);
                 $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
                     VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
                     ->execute([$restNum, $suppId, $deliveryDate, $le]);
@@ -1334,7 +1592,7 @@ if ($soAction === 'admin') {
     // --- Графики поставок ---
     if ($adminAction === 'schedules' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         $s = $pdo->prepare("
             SELECT ss.id, ss.order_day, ss.delivery_day, ss.is_active,
@@ -1357,7 +1615,7 @@ if ($soAction === 'admin') {
         $supplierId = $body['supplier_id'] ?? '';
         $schedules = $body['schedules'] ?? [];
 
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         $updatedBy = $sessionUser ? $sessionUser['name'] : 'admin';
 
@@ -1368,7 +1626,12 @@ if ($soAction === 'admin') {
         $upsert = $pdo->prepare("
             INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
             VALUES (?, ?, ?, ?, ?, NOW(), ?)
-            ON DUPLICATE KEY UPDATE delivery_day = VALUES(delivery_day), is_active = VALUES(is_active), updated_at = NOW(), updated_by = VALUES(updated_by)
+            ON DUPLICATE KEY UPDATE
+                order_day = VALUES(order_day),
+                delivery_day = VALUES(delivery_day),
+                is_active = VALUES(is_active),
+                updated_at = NOW(),
+                updated_by = VALUES(updated_by)
         ");
 
         $count = 0;
@@ -1392,7 +1655,7 @@ if ($soAction === 'admin') {
     // --- Правила дедлайнов ---
     if ($adminAction === 'deadline-rules' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $s = $pdo->prepare("SELECT id, delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
         $s->execute([$supplierId]);
         soRespond(['rules' => $s->fetchAll()]);
@@ -1401,7 +1664,7 @@ if ($soAction === 'admin') {
     if ($adminAction === 'deadline-rules' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
         $rules = $body['rules'] ?? [];
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         // Очищаем и перезаписываем
         $pdo->prepare("DELETE FROM so_deadline_rules WHERE supplier_id = ?")->execute([$supplierId]);
         $ins = $pdo->prepare("INSERT INTO so_deadline_rules (supplier_id, delivery_dow, deadline_dow, deadline_time) VALUES (?, ?, ?, ?)");
@@ -1420,6 +1683,7 @@ if ($soAction === 'admin') {
         if (!$supplierId || !$deliveryDate || !$deadlineTime) {
             soRespond(['error' => 'Не указаны поставщик, дата доставки или новое время'], 400);
         }
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         // Нормализуем время к формату HH:MM:SS
         if (preg_match('/^(\d{1,2}):(\d{2})$/', $deadlineTime, $m)) {
             $deadlineTime = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
@@ -1440,8 +1704,33 @@ if ($soAction === 'admin') {
         $supplierId = $body['supplier_id'] ?? null;
         $deliveryDate = $body['delivery_date'] ?? '';
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $pdo->prepare("DELETE FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?")
             ->execute([$supplierId, $deliveryDate]);
+        soRespond(['success' => true]);
+    }
+
+    // --- Закрыть / открыть день доставки для подачи заявок ---
+    if ($adminAction === 'close-day' && $method === 'POST') {
+        $supplierId = $body['supplier_id'] ?? null;
+        $deliveryDate = $body['delivery_date'] ?? '';
+        $isClosed = isset($body['is_closed']) ? (int)(bool)$body['is_closed'] : 1;
+        if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $createdBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+        if ($isClosed) {
+            $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_time, is_closed, created_by)
+                           VALUES (?, ?, NULL, 1, ?)
+                           ON DUPLICATE KEY UPDATE is_closed = 1, created_by = VALUES(created_by)")
+                ->execute([$supplierId, $deliveryDate, $createdBy]);
+        } else {
+            // Снять принудительное закрытие — если была только закрытая запись, удаляем её
+            $pdo->prepare("DELETE FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ? AND is_closed = 1 AND (deadline_time IS NULL OR deadline_time = '')")
+                ->execute([$supplierId, $deliveryDate]);
+            // Если была запись с продлением дедлайна — сбрасываем is_closed
+            $pdo->prepare("UPDATE so_deadline_overrides SET is_closed = 0 WHERE supplier_id = ? AND delivery_date = ?")
+                ->execute([$supplierId, $deliveryDate]);
+        }
         soRespond(['success' => true]);
     }
 
@@ -1449,7 +1738,8 @@ if ($soAction === 'admin') {
     if ($adminAction === 'templates' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
         $le = $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        soRequireAdminEntityGroupAccess($sessionUser, $le);
 
         $s = $pdo->prepare("
             SELECT t.*, p.name as original_name, p.qty_per_box
@@ -1468,7 +1758,8 @@ if ($soAction === 'admin') {
         $le = $body['legal_entity'] ?? 'ООО "Бургер БК"';
         $items = $body['items'] ?? [];
 
-        if (!$supplierId) soRespond(['error' => 'Не указан поставщик'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        soRequireAdminEntityGroupAccess($sessionUser, $le);
 
         // Деактивируем все текущие
         $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ? AND legal_entity = ?")
@@ -1507,6 +1798,7 @@ if ($soAction === 'admin') {
         $date = $_GET['date'] ?? '';
 
         if (!$supplierId || !$date) soRespond(['error' => 'Не указан поставщик или дата'], 400);
+        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         // Все заявки на эту дату (без session_id)
         $s = $pdo->prepare("

@@ -346,10 +346,13 @@
           </thead>
           <tbody>
             <tr v-for="(item, idx) in filteredStockItems" :key="item.sku + item.legal_entity"
-              :class="{ 'rom-row-deficit': item.remaining < 0 }">
+              :class="{ 'rom-row-deficit': item.remaining < 0, 'rom-row-warning': item.warehouse_error }">
               <td><span class="rom-sku-label">{{ item.sku }}</span> {{ item.product_name }}</td>
               <td>{{ item.supplier || '—' }}</td>
-              <td>{{ item.warehouse }}</td>
+              <td :title="item.warehouse_error_details || ''">
+                <span v-if="item.warehouse_error" class="rom-stock-error">{{ item.warehouse }}</span>
+                <span v-else>{{ item.warehouse }}</span>
+              </td>
               <td class="rom-td-right">{{ item.stock_qty }}</td>
               <td class="rom-td-right">{{ item.ordered_qty || '' }}</td>
               <td class="rom-td-right rom-td-remaining" :class="{ 'rom-deficit': item.remaining < 0 }">
@@ -573,7 +576,7 @@
                       min="0"
                       :step="parseFloat(item.multiplicity) > 1 ? item.multiplicity : 0.5"
                       class="rom-edit-qty"
-                      :class="{ 'rom-edit-qty-err': editItemHasMultError(item) }"
+                      :class="{ 'rom-edit-qty-warn': editItemHasMultError(item) }"
                     />
                     <div v-if="editItemHasMultError(item)" class="rom-edit-mult-hint">
                       Кратность {{ formatEditNumber(item.multiplicity) }}
@@ -594,8 +597,8 @@
             </div>
           </div>
 
-          <div v-if="editHasMultErrors" class="rom-edit-error-box">
-            Исправьте кратность. Например: {{ editMultiplicityErrorText }}
+          <div v-if="editHasMultErrors" class="rom-edit-warning-box">
+            Предупреждение: количество не кратно шаблону. Сохранение разрешено. Например: {{ editMultiplicityErrorText }}
           </div>
 
           <!-- Фиксированный подвал с кнопками -->
@@ -610,7 +613,7 @@
             <button class="rom-btn rom-btn-export" @click="exportSingleOrder(editingOrder)">
               Excel
             </button>
-            <button class="rom-btn rom-btn-primary" @click="saveEditedOrder" :disabled="saving || editHasMultErrors">
+            <button class="rom-btn rom-btn-primary" @click="saveEditedOrder" :disabled="saving">
               {{ saving ? 'Сохранение...' : 'Сохранить изменения' }}
             </button>
           </div>
@@ -2323,8 +2326,8 @@ async function downloadCttJson() {
     if (data.skipped_missing_gtin) {
       toast.warning('Часть строк пропущена', `Без GTIN: ${data.skipped_missing_gtin}`);
     }
-    if (data.missing_purchase_price) {
-      toast.warning('Есть товары без цены', `С нулевой закупочной ценой: ${data.missing_purchase_price}`);
+    if (data.missing_deposit_price) {
+      toast.warning('Не везде есть залог', `С нулевой залоговой ценой: ${data.missing_deposit_price}`);
     }
   } catch (e) {
     toast.error('Ошибка выгрузки', e.message);
@@ -2949,15 +2952,15 @@ async function doUnifiedExport() {
   width: 70px; padding: 4px 6px; border: 1px solid #e0d5c8;
   border-radius: 6px; font-size: 13px; text-align: center;
 }
-.rom-edit-qty-err { border-color: #D62300; background: #fff5f5; color: #9f1239; }
-.rom-edit-mult-hint { margin-top: 4px; font-size: 11px; color: #D62300; text-align: center; }
-.rom-edit-error-box {
+.rom-edit-qty-warn { border-color: #d97706; background: #fff7ed; color: #9a3412; }
+.rom-edit-mult-hint { margin-top: 4px; font-size: 11px; color: #d97706; text-align: center; }
+.rom-edit-warning-box {
   margin: 10px 18px 0;
   padding: 10px 12px;
-  border: 1px solid #f5c2c7;
+  border: 1px solid #fbd38d;
   border-radius: 10px;
-  background: #fff5f5;
-  color: #9f1239;
+  background: #fff7ed;
+  color: #9a3412;
   font-size: 13px;
 }
 .rom-edit-comment {
@@ -3222,6 +3225,8 @@ async function doUnifiedExport() {
 .rom-stock-checkbox { font-size: 13px; color: #502314; white-space: nowrap; cursor: pointer; }
 .rom-stock-checkbox input { margin-right: 4px; }
 .rom-stock-summary { font-size: 12px; color: #8b7355; white-space: nowrap; }
+.rom-row-warning { background: #fff8e7; }
+.rom-stock-error { color: #b45309; font-weight: 700; }
 .rom-th-right { text-align: right; }
 .rom-td-right { text-align: right; font-variant-numeric: tabular-nums; }
 .rom-row-deficit { background: #f3f4f6 !important; }

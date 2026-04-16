@@ -61,7 +61,7 @@
             Ближайшие поставки не запланированы
           </div>
           <div v-else class="so-supplier-dates">
-            <div v-for="d in sup.available_dates" :key="d.delivery_date" class="so-date-chip"
+            <div v-for="d in getOrderedDates(sup)" :key="d.delivery_date" class="so-date-chip"
               :class="{ submitted: d.order, closed: d.deadline_status === 'closed' && !d.order }">
               {{ formatDateShort(d.delivery_date) }}
               <span v-if="d.order" class="so-chip-icon">✓</span>
@@ -78,9 +78,9 @@
         <h2 class="so-section-title">{{ selectedSupplier.name }}</h2>
 
         <!-- Date tabs -->
-        <div v-if="selectedSupplier.is_accepting_orders && selectedSupplier.available_dates?.length" class="ro-day-tabs">
+        <div v-if="selectedSupplier.is_accepting_orders && orderedSelectedDates.length" class="ro-day-tabs">
           <button
-            v-for="d in selectedSupplier.available_dates" :key="d.delivery_date"
+            v-for="d in orderedSelectedDates" :key="d.delivery_date"
             class="ro-day-tab"
             :class="{
               active: selectedDeliveryDate === d.delivery_date,
@@ -201,6 +201,21 @@ const showSuccess = ref(false);
 const successInfo = ref({});
 const isSkipOrder = ref(false);
 
+function sortAvailableDates(list = []) {
+  return [...list].sort((a, b) => {
+    const aClosed = a?.deadline_status === 'closed' ? 1 : 0;
+    const bClosed = b?.deadline_status === 'closed' ? 1 : 0;
+    if (aClosed !== bClosed) return aClosed - bClosed;
+    return String(a?.delivery_date || '').localeCompare(String(b?.delivery_date || ''));
+  });
+}
+
+function getOrderedDates(supplier) {
+  return sortAvailableDates(supplier?.available_dates || []);
+}
+
+const orderedSelectedDates = computed(() => getOrderedDates(selectedSupplier.value));
+
 const currentDateInfo = computed(() => {
   if (!selectedSupplier.value || !selectedDeliveryDate.value) return null;
   return selectedSupplier.value.available_dates?.find(d => d.delivery_date === selectedDeliveryDate.value);
@@ -276,7 +291,7 @@ function selectSupplier(sup) {
   quantities.value = {};
 
   // Автовыбор первой открытой даты
-  const openDate = sup.available_dates?.find(d => d.deadline_status === 'open');
+  const openDate = getOrderedDates(sup).find(d => d.deadline_status === 'open');
   if (openDate) selectDate(openDate);
 }
 

@@ -92,7 +92,6 @@ const routes = [
       { path: 'dashboard', name: 'restaurant-dashboard', component: EmptySlot, meta: { title: 'Главная' } },
       { path: 'orders', name: 'restaurant-orders-tab', component: EmptySlot, meta: { title: 'Заказы' } },
       { path: 'orders/delivery', name: 'restaurant-orders-delivery', component: EmptySlot, meta: { title: 'Основная поставка' } },
-      { path: 'orders/planeta', name: 'restaurant-orders-planeta', component: EmptySlot, meta: { title: 'Планета Ресторанов' } },
       { path: 'orders/supplier/:supplierId', name: 'restaurant-orders-supplier', component: EmptySlot, meta: { title: 'Поставщик' } },
       { path: 'orders/history', name: 'restaurant-orders-history', component: EmptySlot, meta: { title: 'История заказов' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Остатки' } },

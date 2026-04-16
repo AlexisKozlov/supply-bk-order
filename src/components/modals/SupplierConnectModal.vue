@@ -365,9 +365,9 @@ async function submit() {
     for (const rId of Object.keys(scheduleGrid)) {
       for (let d = 1; d <= 7; d++) {
         if (scheduleGrid[rId]?.[d]) {
-          // В текущей модели — один и тот же день заказа и доставки.
-          // Реальные order_day/delivery_day закупщик сможет поправить позже в «Графиках».
-          schedules.push({ restaurant_id: parseInt(rId), order_day: d, delivery_day: d });
+          const rule = deadlineRulesMap[d];
+          const orderDay = rule?.active ? rule.deadline_dow : (d > 1 ? d - 1 : 7);
+          schedules.push({ restaurant_id: parseInt(rId), order_day: orderDay, delivery_day: d });
         }
       }
     }

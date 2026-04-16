@@ -122,11 +122,16 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
-  async function adminGetOrders(supplierId, dateFrom, dateTo) {
+  async function adminGetOrders(supplierId, filters = {}) {
     const params = new URLSearchParams();
     if (supplierId) params.set('supplier_id', supplierId);
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
+    if (filters.submitted_from) params.set('submitted_from', filters.submitted_from);
+    if (filters.submitted_to) params.set('submitted_to', filters.submitted_to);
+    if (filters.delivery_from) params.set('delivery_from', filters.delivery_from);
+    if (filters.delivery_to) params.set('delivery_to', filters.delivery_to);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.query) params.set('query', filters.query);
+    if (filters.skip_only) params.set('skip_only', '1');
     const data = await api(`admin/orders?${params}`);
     return data.orders || [];
   }
@@ -185,6 +190,13 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
+  async function adminCloseDay(supplierId, deliveryDate, isClosed = true) {
+    return api('admin/close-day', {
+      method: 'POST',
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate, is_closed: isClosed ? 1 : 0 }),
+    });
+  }
+
   async function adminGetTemplates(supplierId, legalEntity) {
     const params = new URLSearchParams({ supplier_id: supplierId });
     if (legalEntity) params.set('legal_entity', legalEntity);
@@ -221,7 +233,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     adminUpdateOrder, adminDeleteOrder,
     adminGetSettings, adminSaveSettings,
     adminGetSchedules, adminSaveSchedules,
-    adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride,
+    adminGetDeadlineRules, adminSaveDeadlineRules, adminExtendDeadline, adminRemoveDeadlineOverride, adminCloseDay,
     adminGetTemplates, adminSaveTemplates,
     adminUpdateQty, adminGetExport,
   };
