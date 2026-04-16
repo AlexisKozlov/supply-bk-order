@@ -6,12 +6,7 @@ function chatStart($chatId, $msgId) {
     global $pdo;
     @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
 
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-        WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
     if (!$subs) {
         editMessage($chatId, $msgId, "💬 Сначала подпишитесь на ресторан.", ['inline_keyboard' => [
@@ -28,7 +23,8 @@ function chatStart($chatId, $msgId) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
-        $btns[] = [['text' => "🏪 {$sub['restaurant_number']} — {$addr}", 'callback_data' => "chat_rest_{$sub['restaurant_number']}"]];
+        $label = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
+        $btns[] = [['text' => "🏪 {$label} — {$addr}", 'callback_data' => "chat_rest_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, "💬 <b>Написать в закупки</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
@@ -69,10 +65,7 @@ function chatProcessMessage($chatId, $text, $restNum, $userMsgId, $from, $photoF
         // Определяем группу юрлиц ресторана — через таблицу restaurants.
         // Если записи нет (чат с неизвестным номером) — fallback по значению
         // номера: PS-рестораны живут в диапазоне 1000+.
-        $restGroupStmt = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-        $restGroupStmt->execute([(int)$restNum]);
-        $restGroup = $restGroupStmt->fetchColumn();
-        if (!$restGroup) $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+        $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
 
         $ins = $pdo->prepare("INSERT INTO chat_conversations (restaurant_number, restaurant_chat_id, restaurant_name, legal_entity_group, last_message_at) VALUES (?, ?, ?, ?, NOW())");
         $ins->execute([$restNum, $chatId, $senderName, $restGroup]);

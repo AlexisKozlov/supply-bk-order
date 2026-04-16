@@ -180,6 +180,38 @@ function getEntityShort($entity) {
     return mb_substr($entity, 0, 4);
 }
 
+function botOpenRestaurantCabinet($chatId, $msgId, $restNum) {
+    global $pdo;
+
+    $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
+    $ru = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $ru->execute([$restNum, $restGroup]);
+    if (!$ru->fetch()) {
+        editMessage($chatId, $msgId, "Учётная запись ресторана " . botFormatSubscribedRestaurant($restNum, $restGroup) . " не найдена. Обратитесь в отдел закупок.", ['inline_keyboard' => [
+            [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+        ]]);
+        return;
+    }
+
+    $token = bin2hex(random_bytes(32));
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
+        ->execute([$token, $chatId, $restNum, $restGroup]);
+
+    $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
+    $url = "{$siteUrl}/restaurant?tg_token={$token}";
+    $btns = [
+        [['text' => '🏠 Открыть кабинет', 'url' => $url]],
+        [['text' => '« Назад', 'callback_data' => 'start_role_restaurant']],
+    ];
+
+    editMessage(
+        $chatId,
+        $msgId,
+        "🏠 <b>Личный кабинет</b>\n\nНажмите кнопку, чтобы открыть кабинет ресторана " . botFormatSubscribedRestaurant($restNum, $restGroup) . ".\n\n<i>Ссылка действует 5 минут.</i>",
+        ['inline_keyboard' => $btns]
+    );
+}
+
 // ═══ Команды с данными ═══
 
 // Универсальная отправка: editMessage если есть $editMsgId, иначе sendMessage
@@ -1840,34 +1872,31 @@ if (isset($input['callback_query'])) {
     // ═══ Личный кабинет ресторана ═══
     if ($data === 'rest_cabinet') {
         answerCallback($cb['id']);
-        // Находим ресторан пользователя
-        $sub = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
-        $sub->execute([$chatId]);
-        $restSub = $sub->fetch();
-        if (!$restSub) {
-            sendMessage($chatId, "Вы не подписаны ни на один ресторан.");
+        $subs = botGetSubscribedRestaurants($pdo, $chatId);
+        if (!$subs) {
+            editMessage($chatId, $msgId, "Вы не подписаны ни на один ресторан.", ['inline_keyboard' => [
+                [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+            ]]);
             exit;
         }
-        $restNum = $restSub['restaurant_number'];
-        // Проверяем ro_users
-        $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
-        $ru = $pdo->prepare("SELECT id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
-        $ru->execute([$restNum, $restGroup]);
-        if (!$ru->fetch()) {
-            sendMessage($chatId, "Учётная запись ресторана {$restNum} не найдена. Обратитесь в отдел закупок.");
+        if (count($subs) === 1) {
+            botOpenRestaurantCabinet($chatId, $msgId, $subs[0]['restaurant_number']);
             exit;
         }
-        // Генерируем одноразовый токен (с явной привязкой к выбранному ресторану)
-        $token = bin2hex(random_bytes(32));
-        $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
-            ->execute([$token, $chatId, $restNum, $restGroup]);
-        $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
-        $url = "{$siteUrl}/restaurant?tg_token={$token}";
-        $btns = [
-            [['text' => '🏠 Открыть кабинет', 'url' => $url]],
-            [['text' => '« Назад', 'callback_data' => 'start_role_restaurant']],
-        ];
-        editMessage($chatId, $msgId, "🏠 <b>Личный кабинет</b>\n\nНажмите кнопку, чтобы открыть кабинет ресторана {$restNum}.\n\n<i>Ссылка действует 5 минут.</i>", ['inline_keyboard' => $btns]);
+        $btns = [];
+        foreach ($subs as $sub) {
+            $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
+            $label = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
+            $btns[] = [['text' => "{$label} — {$addr}", 'callback_data' => "rest_cab:{$sub['restaurant_number']}"]];
+        }
+        $btns[] = [['text' => '« Назад', 'callback_data' => 'start_role_restaurant']];
+        editMessage($chatId, $msgId, "🏠 <b>Личный кабинет</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
+        exit;
+    }
+
+    if (str_starts_with($data, 'rest_cab:')) {
+        answerCallback($cb['id']);
+        botOpenRestaurantCabinet($chatId, $msgId, substr($data, 9));
         exit;
     }
 
@@ -2186,8 +2215,10 @@ if (isset($input['callback_query'])) {
     }
 
     // ═══ Овощи: выбор ресторана для подписки ═══
-    if (str_starts_with($data, 'veg_sub_')) {
-        $restNum = substr($data, 8);
+    if (str_starts_with($data, 'veg_sub:')) {
+        $parts = explode(':', $data, 3);
+        $group = $parts[1] ?? 'BK_VM';
+        $restNum = $parts[2] ?? '';
         $exists = $pdo->prepare("SELECT id FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?");
         $exists->execute([$chatId, $restNum]);
         if ($exists->fetch()) {
@@ -2203,7 +2234,7 @@ if (isset($input['callback_query'])) {
             answerCallback($cb['id'], 'Подписано');
         }
         // Обновить список
-        vegShowRestaurants($chatId, $msgId);
+        vegShowRestaurants($chatId, $msgId, 0, $group);
         exit;
     }
 
@@ -2232,8 +2263,9 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
-    if (str_starts_with($data, 'veg_unsub_')) {
-        $restNum = substr($data, 10);
+    if (str_starts_with($data, 'veg_unsub:')) {
+        $parts = explode(':', $data, 3);
+        $restNum = $parts[2] ?? '';
         $pdo->prepare("DELETE FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?")->execute([$chatId, $restNum]);
         answerCallback($cb['id'], "Отписано от ресторана $restNum");
         vegShowSubsManage($chatId, $msgId);
@@ -2242,7 +2274,13 @@ if (isset($input['callback_query'])) {
 
     if ($data === 'veg_pick_rest') {
         answerCallback($cb['id']);
-        vegShowRestaurants($chatId, $msgId);
+        vegShowRestaurantGroups($chatId, $msgId);
+        exit;
+    }
+
+    if (str_starts_with($data, 'veg_pick_group:')) {
+        answerCallback($cb['id']);
+        vegShowRestaurants($chatId, $msgId, 0, substr($data, 15));
         exit;
     }
 
@@ -2281,10 +2319,12 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
-    if (str_starts_with($data, 'veg_page_')) {
+    if (str_starts_with($data, 'veg_page:')) {
         answerCallback($cb['id']);
-        $page = intval(substr($data, 9));
-        vegShowRestaurants($chatId, $msgId, $page);
+        $parts = explode(':', $data, 3);
+        $group = $parts[1] ?? 'BK_VM';
+        $page = intval($parts[2] ?? 0);
+        vegShowRestaurants($chatId, $msgId, $page, $group);
         exit;
     }
 

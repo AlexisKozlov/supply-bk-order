@@ -40,6 +40,58 @@ function soGetRestaurantContext($pdo, $restNum) {
     return $rest;
 }
 
+function botGetRestaurantGroupByNumber($pdo, $restNum) {
+    $s = $pdo->prepare("
+        SELECT legal_entity_group
+        FROM restaurants
+        WHERE number = ? AND active = 1
+        ORDER BY id
+        LIMIT 1
+    ");
+    $s->execute([(int)$restNum]);
+    $group = $s->fetchColumn();
+    if ($group) {
+        return $group;
+    }
+    return ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+}
+
+function botGetRestaurantGroupTitle($group) {
+    return $group === 'PS' ? 'Пицца Стар' : 'Бургер БК';
+}
+
+function botGetRestaurantGroupShort($group) {
+    return $group === 'PS' ? 'ПС' : 'БК';
+}
+
+function botFormatSubscribedRestaurant($restaurantNumber, $group) {
+    return formatRestaurantNumber($restaurantNumber) . ' (' . botGetRestaurantGroupShort($group) . ')';
+}
+
+function botGetSubscribedRestaurants($pdo, $chatId) {
+    $s = $pdo->prepare("
+        SELECT vs.restaurant_number, r.address, r.city, r.legal_entity_group
+        FROM veg_telegram_subs vs
+        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.active = 1
+        WHERE vs.chat_id = ?
+        ORDER BY CAST(vs.restaurant_number AS UNSIGNED), r.id
+    ");
+    $s->execute([$chatId]);
+    $rows = $s->fetchAll();
+
+    $out = [];
+    foreach ($rows as $row) {
+        $restNum = (string)($row['restaurant_number'] ?? '');
+        if ($restNum === '' || isset($out[$restNum])) {
+            continue;
+        }
+        $row['legal_entity_group'] = $row['legal_entity_group'] ?: botGetRestaurantGroupByNumber($pdo, $restNum);
+        $out[$restNum] = $row;
+    }
+
+    return array_values($out);
+}
+
 function soGetSupplierName($pdo, $supplierId) {
     $s = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
     $s->execute([$supplierId]);
@@ -116,7 +168,7 @@ function soBotCheckDeadline($pdo, $supplierId, $deliveryDate) {
 }
 
 function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {
-    $restGroup = ((int)$restNum >= 1000) ? 'PS' : 'BK_VM';
+    $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
     $checkUser = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
     $checkUser->execute([$restNum, $restGroup]);
     if (!$checkUser->fetch()) {
@@ -283,7 +335,7 @@ function cmdVegStats($chatId, $msgId) {
         ORDER BY CAST(vs.restaurant_number AS UNSIGNED)")->fetchAll();
 
     // Все активные рестораны
-    $allRests = $pdo->query("SELECT number, address, city FROM restaurants WHERE active=1 AND legal_entity_group='BK_VM' ORDER BY CAST(number AS UNSIGNED)")->fetchAll();
+    $allRests = $pdo->query("SELECT number, address, city, legal_entity_group FROM restaurants WHERE active = 1 ORDER BY CAST(number AS UNSIGNED), legal_entity_group")->fetchAll();
     $restInfo = [];
     foreach ($allRests as $r) $restInfo[$r['number']] = $r;
 
@@ -316,7 +368,7 @@ function cmdVegStats($chatId, $msgId) {
         foreach ($subsByRest as $restNum => $restSubs) {
             $cnt = count($restSubs);
             $addr = isset($restInfo[$restNum]) ? mb_substr($restInfo[$restNum]['address'] ?: $restInfo[$restNum]['city'], 0, 30) : '';
-            $prettyRn = formatRestaurantNumber($restNum);
+            $prettyRn = botFormatSubscribedRestaurant($restNum, $restInfo[$restNum]['legal_entity_group'] ?? 'BK_VM');
             $text .= "  {$prettyRn} ({$cnt} чел.) — {$addr}\n";
         }
         $text .= "\n";
@@ -332,7 +384,7 @@ function cmdVegStats($chatId, $msgId) {
                 break;
             }
             $addr = mb_substr($r['address'] ?: $r['city'], 0, 30);
-            $prettyRn = formatRestaurantNumber($r['number']);
+            $prettyRn = botFormatSubscribedRestaurant($r['number'], $r['legal_entity_group'] ?? 'BK_VM');
             $text .= "  {$prettyRn} — {$addr}\n";
             $shown++;
         }
@@ -360,19 +412,22 @@ function vegShowMySubs($chatId, $msgId = null) {
     @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt");
 
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-        WHERE vs.chat_id = ?
-        ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $hasBkSubs = false;
+    foreach ($subs as $sub) {
+        if (($sub['legal_entity_group'] ?? '') === 'BK_VM') {
+            $hasBkSubs = true;
+            break;
+        }
+    }
 
     $btns = [];
 
     if ($subs) {
-        $restNums = array_column($subs, 'restaurant_number');
-        $restList = implode(', ', array_map('formatRestaurantNumber', $restNums));
+        $restList = implode(', ', array_map(
+            fn($sub) => botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']),
+            $subs
+        ));
 
         // Статистика для приветствия
         $activeSc = $pdo->query("SELECT id, name FROM stock_collections WHERE status = 'active' LIMIT 1")->fetch();
@@ -398,8 +453,10 @@ function vegShowMySubs($chatId, $msgId = null) {
         // ── Разделы ──
         $text .= "🏠 <b>Кабинет</b> — заказы, заявки, профиль\n";
         $text .= "📦 <b>Поставки</b> — график, корректировки\n";
-        $text .= "🥬 <b>Планета Ресторанов</b> — заявки\n";
-        $text .= "🧴 <b>Камако</b> — заявки на майонез\n";
+        if ($hasBkSubs) {
+            $text .= "🥬 <b>Планета Ресторанов</b> — заявки\n";
+        }
+        $text .= "📦 <b>Поставщики</b> — заявки по вашим ресторанам\n";
         if ($activeSc) $text .= "📋 <b>Сбор остатков</b> — {$activeSc['name']}\n";
 
         $btns[] = [
@@ -409,10 +466,12 @@ function vegShowMySubs($chatId, $msgId = null) {
             ['text' => '📦 Поставки', 'callback_data' => 'rest_menu_main'],
             ['text' => '🛒 Заказы', 'callback_data' => 'rest_ro_orders'],
         ];
-        $btns[] = [
-            ['text' => '🥬 Планета Ресторанов', 'callback_data' => 'rest_menu_veg'],
-            ['text' => '🧴 Камако', 'callback_data' => 'rest_menu_supplier'],
-        ];
+        $supplierRow = [];
+        if ($hasBkSubs) {
+            $supplierRow[] = ['text' => '🥬 Планета Ресторанов', 'callback_data' => 'rest_menu_veg'];
+        }
+        $supplierRow[] = ['text' => '📦 Поставщики', 'callback_data' => 'rest_menu_supplier'];
+        $btns[] = $supplierRow;
         if ($activeSc) {
             $btns[] = [['text' => "📋 Сбор остатков", 'callback_data' => 'rest_sc_start']];
         }
@@ -450,6 +509,34 @@ function vegShowMySubs($chatId, $msgId = null) {
     else sendMessage($chatId, $text, $markup);
 }
 
+function vegShowRestaurantGroups($chatId, $msgId = null) {
+    global $pdo;
+
+    $counts = [];
+    $s = $pdo->query("
+        SELECT legal_entity_group, COUNT(*) AS cnt
+        FROM restaurants
+        WHERE active = 1 AND legal_entity_group IN ('BK_VM', 'PS')
+        GROUP BY legal_entity_group
+    ");
+    foreach ($s->fetchAll() as $row) {
+        $counts[$row['legal_entity_group']] = (int)$row['cnt'];
+    }
+
+    $text = "🏪 <b>Выберите юрлицо</b>\n\n";
+    $text .= "Сначала выберите, к какому юрлицу относится ресторан:";
+
+    $btns = [
+        [['text' => '🍔 Бургер БК' . (!empty($counts['BK_VM']) ? " ({$counts['BK_VM']})" : ''), 'callback_data' => 'veg_pick_group:BK_VM']],
+        [['text' => '🍕 Пицца Стар' . (!empty($counts['PS']) ? " ({$counts['PS']})" : ''), 'callback_data' => 'veg_pick_group:PS']],
+        [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+    ];
+
+    $markup = ['inline_keyboard' => $btns];
+    if ($msgId) editMessage($chatId, $msgId, $text, $markup);
+    else sendMessage($chatId, $text, $markup);
+}
+
 // Подменю: Основные поставки
 function restMenuMain($chatId, $msgId) {
     $text = "📦 <b>Основные поставки</b>\n";
@@ -477,6 +564,20 @@ function restMenuVeg($chatId, $msgId) {
     global $pdo;
     @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt");
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $restNums = [];
+    foreach ($subs as $sub) {
+        if (($sub['legal_entity_group'] ?? '') === 'BK_VM') {
+            $restNums[] = $sub['restaurant_number'];
+        }
+    }
+    if (!$restNums) {
+        editMessage($chatId, $msgId, "🥬 <b>Планета Ресторанов</b>\n\nЭтот раздел доступен только для ресторанов Бургер БК.", ['inline_keyboard' => [
+            [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+        ]]);
+        return;
+    }
+
     $supplierId = soGetPlanetaSupplierId();
     $text = "🥬 <b>Планета Ресторанов</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
@@ -489,9 +590,6 @@ function restMenuVeg($chatId, $msgId) {
             ['text' => '📋 Мои заявки', 'callback_data' => "sohist_sup_{$supplierId}"],
         ],
     ];
-    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? ORDER BY CAST(restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
     if (count($restNums) === 1) {
         $webUrl = soBotGetWebLink($pdo, $chatId, $supplierId, $restNums[0]);
         if ($webUrl) {
@@ -550,9 +648,8 @@ function restMenuSupplier($chatId, $msgId) {
 function soOrderSelectRest($chatId, $msgId, $supplierId) {
     global $pdo;
     @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
-    $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? ORDER BY CAST(restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $restNums = array_column($subs, 'restaurant_number');
     $supName = soGetSupplierName($pdo, $supplierId);
 
     if (!$restNums) {
@@ -566,8 +663,10 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
     }
     $text = "📦 <b>{$supName}</b>\n\nВыберите ресторан:";
     $btns = [];
-    foreach ($restNums as $rn) {
-        $btns[] = [['text' => "Ресторан {$rn}", 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
+    foreach ($subs as $sub) {
+        $rn = $sub['restaurant_number'];
+        $label = botFormatSubscribedRestaurant($rn, $sub['legal_entity_group']);
+        $btns[] = [['text' => $label, 'callback_data' => "soord_rest_{$supplierId}_{$rn}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier')]];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -958,15 +1057,7 @@ function soFormatOrders($orders) {
 function soShowMyOrders($chatId, $msgId, $supplierId) {
     global $pdo;
     $supName = soGetSupplierName($pdo, $supplierId);
-    $s = $pdo->prepare("
-        SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.active = 1
-        WHERE vs.chat_id = ?
-        ORDER BY CAST(vs.restaurant_number AS UNSIGNED)
-    ");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
     if (!$subs) {
         editMessage($chatId, $msgId, "📋 У вас нет подписок.\nСначала подпишитесь на ресторан.", ['inline_keyboard' => [
@@ -985,7 +1076,7 @@ function soShowMyOrders($chatId, $msgId, $supplierId) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
-        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
+        $prettyRest = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
         $btns[] = [['text' => "🏪 {$prettyRest} — {$addr}", 'callback_data' => "sohist_rest_{$supplierId}_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => ($supplierId === soGetPlanetaSupplierId() ? 'rest_menu_veg' : 'rest_menu_supplier')]];
@@ -1106,9 +1197,7 @@ function soShowRestOrders($chatId, $msgId, $supplierId, $restNum) {
 function restShowSchedule($chatId, $msgId) {
     global $pdo;
 
-    $s = $pdo->prepare("SELECT vs.restaurant_number FROM veg_telegram_subs vs WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+    $restNums = array_column(botGetSubscribedRestaurants($pdo, $chatId), 'restaurant_number');
 
     if (!$restNums) {
         editMessage($chatId, $msgId, "📅 Сначала подпишитесь на ресторан.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
@@ -1263,12 +1352,7 @@ function restScSelectRest($chatId, $msgId, $collectionId) {
     global $pdo;
 
     // Подписки пользователя
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-        WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
     if (!$subs) {
         editMessage($chatId, $msgId, "📋 Сначала подпишитесь на ресторан.", ['inline_keyboard' => [
@@ -1465,10 +1549,17 @@ function restScProcessInput($chatId, $text, $userMsgId) {
     ]]);
 }
 
-function vegShowRestaurants($chatId, $msgId = null, $page = 0) {
+function vegShowRestaurants($chatId, $msgId = null, $page = 0, $group = 'BK_VM') {
     global $pdo;
-    // Все активные рестораны (дедупликация)
-    $s = $pdo->query("SELECT number, address, city FROM restaurants WHERE active=1 AND legal_entity_group='BK_VM' ORDER BY CAST(number AS UNSIGNED)");
+    $group = $group === 'PS' ? 'PS' : 'BK_VM';
+    $groupTitle = botGetRestaurantGroupTitle($group);
+    $s = $pdo->prepare("
+        SELECT number, address, city
+        FROM restaurants
+        WHERE active = 1 AND legal_entity_group = ?
+        ORDER BY CAST(number AS UNSIGNED)
+    ");
+    $s->execute([$group]);
     $allRests = $s->fetchAll();
 
     // Уже подписанные
@@ -1476,13 +1567,21 @@ function vegShowRestaurants($chatId, $msgId = null, $page = 0) {
     $s2->execute([$chatId]);
     $subbed = array_column($s2->fetchAll(), 'restaurant_number');
 
+    if (!$allRests) {
+        editMessage($chatId, $msgId, "🏪 <b>{$groupTitle}</b>\n\nДля этого юрлица рестораны не найдены.", ['inline_keyboard' => [
+            [['text' => '◂ Назад', 'callback_data' => 'veg_pick_rest']],
+        ]]);
+        return;
+    }
+
     $perPage = 10;
     $total = count($allRests);
     $pages = ceil($total / $perPage);
     $page = max(0, min($page, $pages - 1));
     $slice = array_slice($allRests, $page * $perPage, $perPage);
 
-    $text = "🏪 <b>Выберите ресторан</b> (стр. " . ($page + 1) . "/$pages)\n\n";
+    $text = "🏪 <b>{$groupTitle}</b>\n";
+    $text .= "Страница " . ($page + 1) . "/{$pages}\n\n";
     $text .= "✅ = подписаны. Нажмите чтобы отписаться.\n";
 
     $btns = [];
@@ -1490,15 +1589,15 @@ function vegShowRestaurants($chatId, $msgId = null, $page = 0) {
         $num = $r['number'];
         $mark = in_array($num, $subbed) ? '✅ ' : '';
         $addr = mb_substr($r['address'] ?: $r['city'], 0, 35);
-        $btns[] = [['text' => "{$mark}{$num} — {$addr}", 'callback_data' => "veg_sub_{$num}"]];
+        $btns[] = [['text' => "{$mark}{$num} — {$addr}", 'callback_data' => "veg_sub:{$group}:{$num}"]];
     }
 
     // Навигация
     $nav = [];
-    if ($page > 0) $nav[] = ['text' => '◀', 'callback_data' => 'veg_page_' . ($page - 1)];
-    if ($page < $pages - 1) $nav[] = ['text' => '▶', 'callback_data' => 'veg_page_' . ($page + 1)];
+    if ($page > 0) $nav[] = ['text' => '◀', 'callback_data' => "veg_page:{$group}:" . ($page - 1)];
+    if ($page < $pages - 1) $nav[] = ['text' => '▶', 'callback_data' => "veg_page:{$group}:" . ($page + 1)];
     if ($nav) $btns[] = $nav;
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_pick_rest']];
 
     $markup = ['inline_keyboard' => $btns];
     if ($msgId) editMessage($chatId, $msgId, $text, $markup);
@@ -1508,13 +1607,7 @@ function vegShowRestaurants($chatId, $msgId = null, $page = 0) {
 // Callback veg_my_subs_manage — список с кнопками отписки
 function vegShowSubsManage($chatId, $msgId) {
     global $pdo;
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-        WHERE vs.chat_id = ?
-        ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
     if (!$subs) {
         editMessage($chatId, $msgId, "У вас нет активных подписок.", ['inline_keyboard' => [
@@ -1528,8 +1621,8 @@ function vegShowSubsManage($chatId, $msgId) {
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
-        $prettyRest = formatRestaurantNumber($sub['restaurant_number']);
-        $btns[] = [['text' => "❌ {$prettyRest} — {$addr}", 'callback_data' => "veg_unsub_{$sub['restaurant_number']}"]];
+        $prettyRest = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
+        $btns[] = [['text' => "❌ {$prettyRest} — {$addr}", 'callback_data' => "veg_unsub:{$sub['legal_entity_group']}:{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
@@ -1608,13 +1701,7 @@ function vegGetFormLink($chatId = null) {
 // Просмотр заявок — список ресторанов, на которые подписан
 function vegShowMyOrders($chatId, $msgId) {
     global $pdo;
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-        WHERE vs.chat_id = ?
-        ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
     if (!$subs) {
         editMessage($chatId, $msgId, "📋 У вас нет подписок.\nСначала подпишитесь на ресторан.", ['inline_keyboard' => [
@@ -1801,9 +1888,7 @@ function vegStartOrder($chatId, $msgId = null) {
     }
 
     // Рестораны, на которые подписан
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address FROM veg_telegram_subs vs LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM' WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
 
     if (!$subs) {
         $text = "🥬 <b>Подача заявки</b>\n\nСначала подпишитесь на ресторан.";
@@ -2504,12 +2589,7 @@ function corrStart($chatId, $msgId) {
     @unlink(sys_get_temp_dir() . "/corr_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/corr_data_{$chatId}.json");
 
-    $s = $pdo->prepare("SELECT vs.restaurant_number, r.address, r.city
-        FROM veg_telegram_subs vs
-        LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-        WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $subs = $s->fetchAll();
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
     if (!$subs) {
         editMessage($chatId, $msgId, "✏️ <b>Корректировка заказа</b>\n\nСначала подпишитесь на ресторан.", ['inline_keyboard' => [
             [['text' => '➕ Подписаться', 'callback_data' => 'veg_pick_rest']],
@@ -2768,11 +2848,7 @@ function corrSubmitBatch($chatId) {
     $submitterName = $sub ? ($sub['first_name'] ?: ('@' . $sub['username'])) : null;
 
     // Определяем группу юрлиц ресторана (для фильтра в админке)
-    $restGroup = ((int)$state['rest'] >= 1000) ? 'PS' : 'BK_VM';
-    $restGroupStmt = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-    $restGroupStmt->execute([(int)$state['rest']]);
-    $restGroupRow = $restGroupStmt->fetchColumn();
-    if ($restGroupRow) $restGroup = $restGroupRow;
+    $restGroup = botGetRestaurantGroupByNumber($pdo, $state['rest']);
 
     // INSERT всех позиций
     $corrIds = [];
@@ -3083,9 +3159,7 @@ function restRoOrders($chatId, $msgId) {
     global $pdo;
 
     // Получаем подписки ресторан��
-    $s = $pdo->prepare("SELECT vs.restaurant_number FROM veg_telegram_subs vs WHERE vs.chat_id = ? ORDER BY CAST(vs.restaurant_number AS UNSIGNED)");
-    $s->execute([$chatId]);
-    $restNums = $s->fetchAll(PDO::FETCH_COLUMN);
+    $restNums = array_column(botGetSubscribedRestaurants($pdo, $chatId), 'restaurant_number');
 
     if (empty($restNums)) {
         editMessage($chatId, $msgId, "Нет подписок на рестораны.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']]]]);
