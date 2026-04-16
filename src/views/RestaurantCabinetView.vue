@@ -643,6 +643,24 @@
       <button class="btn btn-danger-outline btn-lg logout-full" @click="handleLogout">Выйти из аккаунта</button>
     </section>
 
+    <div v-if="currentBroadcast" class="modal-overlay" @click.self="dismissCurrentBroadcast">
+      <div class="cab-modal cab-modal-info">
+        <div class="cab-modal-head">
+          <h2>{{ currentBroadcast.title || 'Сообщение от отдела закупок' }}</h2>
+          <button class="cab-modal-close" @click="dismissCurrentBroadcast">&times;</button>
+        </div>
+        <div class="cab-modal-body">
+          <p class="cab-info-text cab-info-text-broadcast">{{ currentBroadcast.message }}</p>
+          <div class="cab-info-meta">
+            {{ currentBroadcast.created_by || 'Отдел закупок' }} · {{ fmtDateTime(currentBroadcast.created_at) }}
+          </div>
+          <div class="cab-info-actions">
+            <button class="btn btn-primary" @click="dismissCurrentBroadcast">Понятно</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Info modal (шаблон / прочие уведомления) -->
     <div v-if="infoModal.show" class="modal-overlay" @click.self="infoModal.show = false">
       <div class="cab-modal cab-modal-info">
@@ -811,6 +829,9 @@ const stockLoading = ref(false);
 const stockSaving = ref(false);
 const stockError = ref('');
 const stockSavedFlash = ref(false);
+const restaurantBroadcasts = ref([]);
+let restaurantBroadcastTimer = null;
+const currentBroadcast = computed(() => restaurantBroadcasts.value[0] || null);
 const stockDirty = computed(() => {
   for (const p of stockProducts.value) {
     const saved = stockSavedSnapshot[p.id];
@@ -1683,6 +1704,35 @@ async function loadTgStatus() {
     tgError.value = e.message || 'Не удалось получить статус Telegram';
   }
 }
+
+async function loadRestaurantBroadcasts() {
+  try {
+    restaurantBroadcasts.value = await roStore.loadBroadcasts();
+  } catch (e) {
+    console.warn('[restaurant cabinet] broadcasts:', e);
+  }
+}
+
+async function dismissCurrentBroadcast() {
+  const current = currentBroadcast.value;
+  if (!current?.id) return;
+  try {
+    await roStore.markBroadcastRead([current.id]);
+  } catch (e) {
+    console.warn('[restaurant cabinet] broadcast-read:', e);
+  } finally {
+    restaurantBroadcasts.value = restaurantBroadcasts.value.filter(b => b.id !== current.id);
+  }
+}
+
+function startRestaurantBroadcastPolling() {
+  if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
+  loadRestaurantBroadcasts();
+  restaurantBroadcastTimer = setInterval(() => {
+    loadRestaurantBroadcasts();
+  }, 45000);
+}
+
 async function tgGetCode() {
   tgError.value = '';
   tgLinkLoading.value = true;
@@ -1808,12 +1858,14 @@ async function loadCabinetData() {
   await loadHistory();
   await checkStockCollection();
   await loadTgStatus();
+  await loadRestaurantBroadcasts();
 }
 
 async function retryCabinetLoad() {
   globalLoading.value = true;
   try {
     await loadCabinetData();
+    startRestaurantBroadcastPolling();
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally {
@@ -1853,12 +1905,17 @@ onMounted(async () => {
   }
   try {
     await loadCabinetData();
+    startRestaurantBroadcastPolling();
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally { globalLoading.value = false; }
 });
 
-onUnmounted(() => { clearInterval(delEditTimerInterval); window.removeEventListener('beforeunload', onBeforeUnload); });
+onUnmounted(() => {
+  clearInterval(delEditTimerInterval);
+  if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
+  window.removeEventListener('beforeunload', onBeforeUnload);
+});
 </script>
 
 <style scoped>
@@ -2394,6 +2451,8 @@ tr.del-err { background: #fef2f2; }
 .cab-modal-info { max-width: 380px; }
 .cab-info-text { color: #502314; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
 .cab-info-text.cab-info-error { color: #b91c1c; }
+.cab-info-text-broadcast { white-space: pre-line; }
+.cab-info-meta { color: #8b7355; font-size: 12px; margin: -8px 0 16px; }
 .cab-info-actions { display: flex; justify-content: flex-end; }
 .cab-info-actions-two { gap: 8px; }
 .modal-search { width: 50%; min-width: 200px; margin-bottom: 12px; }

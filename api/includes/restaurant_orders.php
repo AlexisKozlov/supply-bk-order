@@ -363,6 +363,12 @@ function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     }
 }
 
+function roBroadcastReaderKey($restaurantUser) {
+    $number = (int)($restaurantUser['restaurant_number'] ?? 0);
+    $group = roNormalizeLegalEntityGroup($restaurantUser['legal_entity_group'] ?? null, $number);
+    return 'ro:' . $number . ':' . $group;
+}
+
 function roAggregateOrderItems($items) {
     $aggregated = [];
     foreach ($items as $item) {
@@ -897,6 +903,44 @@ if ($roAction === 'telegram-status' && $method === 'GET') {
     $s->execute([$rest['id']]);
     $user = $s->fetch();
     roRespond(['linked' => !empty($user['telegram_chat_id']), 'chat_id' => $user['telegram_chat_id'] ?? null]);
+}
+
+if ($roAction === 'broadcasts' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $readerKey = roBroadcastReaderKey($rest);
+    $s = $pdo->prepare("
+        SELECT id, title, message, created_by, created_at
+        FROM notifications
+        WHERE type = 'ro_broadcast'
+          AND created_at > NOW() - INTERVAL 30 DAY
+          AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))
+          AND NOT JSON_CONTAINS(COALESCE(deleted_by, '[]'), JSON_QUOTE(?))
+        ORDER BY created_at DESC
+        LIMIT 5
+    ");
+    $s->execute([$readerKey, $readerKey]);
+    roRespond(['broadcasts' => $s->fetchAll()]);
+}
+
+if ($roAction === 'broadcast-read' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $ids = $body['ids'] ?? [];
+    if (!is_array($ids) || empty($ids)) roRespond(['error' => 'Нет ID'], 400);
+    $ids = array_values(array_filter(array_map('intval', $ids)));
+    if (!$ids) roRespond(['error' => 'Нет ID'], 400);
+    $readerKey = roBroadcastReaderKey($rest);
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $params = array_merge([$readerKey], $ids, [$readerKey]);
+    $pdo->prepare("
+        UPDATE notifications
+        SET read_by = JSON_ARRAY_APPEND(COALESCE(read_by, '[]'), '$', ?)
+        WHERE id IN ($ph)
+          AND type = 'ro_broadcast'
+          AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))
+    ")->execute($params);
+    roRespond(['success' => true]);
 }
 
 // --- Инфо: текущая сессия, расписание, дедлайны ---

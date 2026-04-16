@@ -386,6 +386,18 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api('telegram-unlink', { method: 'POST' });
   }
 
+  async function loadBroadcasts() {
+    const data = await api('broadcasts');
+    return data.broadcasts || [];
+  }
+
+  async function markBroadcastRead(ids) {
+    return await api('broadcast-read', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  }
+
   async function getStockCollectionStatus() {
     return await api('stock-collection-status');
   }
@@ -405,6 +417,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
+    loadBroadcasts, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,

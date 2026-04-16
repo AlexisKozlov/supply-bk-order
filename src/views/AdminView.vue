@@ -183,16 +183,31 @@
 
         <div class="adm-maint-msg-card" style="margin-top:16px;">
           <h4 class="adm-maint-msg-title">Новое сообщение</h4>
+          <p class="adm-maint-msg-hint">Один и тот же текст уйдёт во все выбранные направления.</p>
           <div style="display:flex;flex-direction:column;gap:10px;">
             <input v-model="bcTitle" class="adm-maint-textarea" style="resize:none;height:auto;padding:10px 14px;" placeholder="Заголовок (необязательно)" />
-            <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения для всех сотрудников..."></textarea>
+            <textarea v-model="bcMessage" class="adm-maint-textarea" rows="4" placeholder="Текст сообщения..."></textarea>
           </div>
-          <label class="adm-checkbox" style="margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-            <input type="checkbox" v-model="bcSendTelegram" style="width:16px;height:16px;cursor:pointer;" />
-            Отправить также в Telegram
-          </label>
-          <button class="btn primary" style="margin-top:10px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim()">
-            {{ bcSending ? 'Отправка...' : 'Отправить всем' }}
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:12px;">
+            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" v-model="bcTargets.staffCabinet" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
+              <span>В кабинет закупщикам</span>
+            </label>
+            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" v-model="bcTargets.restaurantCabinet" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
+              <span>В кабинет ресторанам</span>
+            </label>
+            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" v-model="bcTargets.staffTelegram" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
+              <span>В Telegram закупщикам</span>
+            </label>
+            <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+              <input type="checkbox" v-model="bcTargets.restaurantTelegram" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
+              <span>В Telegram ресторанам</span>
+            </label>
+          </div>
+          <button class="btn primary" style="margin-top:10px;font-size:13px;padding:9px 20px;" @click="sendBroadcast" :disabled="bcSending || !bcMessage.trim() || !bcHasAnyTarget">
+            {{ bcSending ? 'Отправка...' : 'Отправить' }}
           </button>
         </div>
 
@@ -201,12 +216,16 @@
           <div v-if="bcHistoryLoading" style="text-align:center;padding:24px;"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="!bcHistory.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Ещё не было рассылок</div>
           <div v-else style="display:flex;flex-direction:column;gap:8px;">
-            <div v-for="b in bcHistory" :key="b.id" class="bc-history-item">
+            <div v-for="b in bcHistory" :key="b.broadcast_group || b.id" class="bc-history-item">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                 <div style="flex:1;min-width:0;">
                   <div class="bc-history-title">{{ b.title || 'Важное сообщение' }}</div>
                   <div class="bc-history-msg">{{ b.message }}</div>
-                  <div class="bc-history-meta">{{ b.created_by }} &middot; {{ formatBcDate(b.created_at) }}</div>
+                  <div class="bc-history-meta">
+                    {{ b.sender || b.created_by }} &middot; {{ formatBcDate(b.created_at) }}
+                    <span v-if="formatBroadcastTargets(b)"> &middot; {{ formatBroadcastTargets(b) }}</span>
+                    <span v-if="broadcastTelegramStats(b)"> &middot; {{ broadcastTelegramStats(b) }}</span>
+                  </div>
                 </div>
                 <button class="bc-delete-btn" @click="deleteBroadcast(b)" :disabled="b._deleting" title="Удалить рассылку">
                   <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M6 2a1 1 0 00-1 1v1H3a1 1 0 000 2h1v10a2 2 0 002 2h8a2 2 0 002-2V6h1a1 1 0 100-2h-2V3a1 1 0 00-1-1H6zm2 2h4v1H8V4zm-2 4a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"/></svg>
@@ -1165,9 +1184,15 @@ const broadcastMode = ref('broadcast');
 const bcTitle = ref('');
 const bcMessage = ref('');
 const bcSending = ref(false);
-const bcSendTelegram = ref(true);
 const bcHistory = ref([]);
 const bcHistoryLoading = ref(false);
+const bcTargets = ref({
+  staffCabinet: true,
+  restaurantCabinet: false,
+  staffTelegram: false,
+  restaurantTelegram: false,
+});
+const bcHasAnyTarget = computed(() => Object.values(bcTargets.value).some(Boolean));
 
 // ═══ Онлайн-пользователи ═══
 const onlineUsers = ref([]);
@@ -1194,17 +1219,23 @@ const formatOnlineTime = formatMoscowRelative;
 
 async function sendBroadcast() {
   if (!bcMessage.value.trim()) return;
+  if (!bcHasAnyTarget.value) { toast.error('Получатели не выбраны', ''); return; }
   bcSending.value = true;
   try {
     const { data } = await db.rpc('send_broadcast', {
       user_name: userStore.currentUser.name,
       title: bcTitle.value.trim() || 'Важное сообщение',
       message: bcMessage.value.trim(),
-      send_telegram: bcSendTelegram.value,
+      to_staff_cabinet: bcTargets.value.staffCabinet,
+      to_restaurants_cabinet: bcTargets.value.restaurantCabinet,
+      to_staff_telegram: bcTargets.value.staffTelegram,
+      to_restaurants_telegram: bcTargets.value.restaurantTelegram,
     });
     if (data?.success) {
-      const tgInfo = data.telegram_sent > 0 ? ` + Telegram (${data.telegram_sent})` : '';
-      toast.success('Отправлено', 'Сообщение отправлено всем пользователям' + tgInfo);
+      const tgParts = [];
+      if (data.staff_telegram_sent > 0) tgParts.push(`закупщики Telegram: ${data.staff_telegram_sent}`);
+      if (data.restaurant_telegram_sent > 0) tgParts.push(`рестораны Telegram: ${data.restaurant_telegram_sent}`);
+      toast.success('Отправлено', tgParts.length ? tgParts.join(', ') : 'Рассылка отправлена');
       bcTitle.value = '';
       bcMessage.value = '';
       loadBcHistory();
@@ -1221,7 +1252,7 @@ async function sendBroadcast() {
 async function loadBcHistory() {
   bcHistoryLoading.value = true;
   try {
-    const { data } = await db.from('notifications').select('*').eq('type', 'broadcast').order('created_at', { ascending: false }).limit(20);
+    const { data } = await db.rpc('get_broadcast_history', { limit: 20 });
     bcHistory.value = data || [];
   } catch (e) { console.warn('[admin] loadBcHistory:', e); }
   finally { bcHistoryLoading.value = false; }
@@ -1232,10 +1263,11 @@ async function deleteBroadcast(b) {
   if (!ok) return;
   b._deleting = true;
   try {
-    const { data, error } = await db.rpc('delete_broadcast', { id: b.id });
+    const payload = b.is_legacy ? { id: b.id } : { broadcast_group: b.broadcast_group };
+    const { data, error } = await db.rpc('delete_broadcast', payload);
     if (error || (data && !data.success)) { toast.error('Ошибка', error || data?.error || ''); return; }
     toast.success('Удалено', 'Рассылка удалена');
-    bcHistory.value = bcHistory.value.filter(x => x.id !== b.id);
+    bcHistory.value = bcHistory.value.filter(x => (x.broadcast_group || x.id) !== (b.broadcast_group || b.id));
   } catch {
     toast.error('Ошибка', 'Не удалось удалить');
   } finally {
@@ -1244,6 +1276,22 @@ async function deleteBroadcast(b) {
 }
 
 const formatBcDate = formatMoscowDateTime;
+
+function formatBroadcastTargets(b) {
+  const parts = [];
+  if (b.target_staff_cabinet) parts.push('кабинет закупщиков');
+  if (b.target_restaurant_cabinet) parts.push('кабинет ресторанов');
+  if (b.target_staff_telegram) parts.push('Telegram закупщиков');
+  if (b.target_restaurant_telegram) parts.push('Telegram ресторанов');
+  return parts.join(', ');
+}
+
+function broadcastTelegramStats(b) {
+  const parts = [];
+  if (Number(b.staff_telegram_sent || 0) > 0) parts.push(`закупщики TG: ${b.staff_telegram_sent}`);
+  if (Number(b.restaurant_telegram_sent || 0) > 0) parts.push(`рестораны TG: ${b.restaurant_telegram_sent}`);
+  return parts.join(', ');
+}
 
 // ═══ Статистика ═══
 const statsPeriod = ref('all');
