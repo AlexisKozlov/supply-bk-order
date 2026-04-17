@@ -1166,28 +1166,20 @@ try {
         $schStmt->execute([$supId]);
         $schRows = $schStmt->fetchAll();
 
-        // Группируем по ресторану, chat_id резолвим ниже (ro_users → veg_telegram_subs)
+        // Группируем по ресторану, chat_id'ы берём из ro_telegram_subs (все подписчики)
         $byRest = [];
-        $chatIdLookup = $pdo->prepare("
-            SELECT telegram_chat_id FROM ro_users
-            WHERE restaurant_number = ? AND legal_entity_group = ? AND telegram_chat_id > 0 AND is_active = 1
-            LIMIT 1
-        ");
-        $chatIdFallback = $pdo->prepare("
-            SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? LIMIT 1
+        $chatIdsLookup = $pdo->prepare("
+            SELECT chat_id FROM ro_telegram_subs
+            WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1
         ");
         foreach ($schRows as $s) {
             $rn = $s['restaurant_number'];
             if (!isset($byRest[$rn])) {
-                // Резолвим chat_id: сначала ro_users, иначе veg_telegram_subs
-                $chatIdLookup->execute([$rn, $s['legal_entity_group'] ?: 'BK_VM']);
-                $cid = $chatIdLookup->fetchColumn();
-                if (!$cid) {
-                    $chatIdFallback->execute([$rn]);
-                    $cid = $chatIdFallback->fetchColumn();
-                }
-                if (!$cid) continue; // ресторан без привязки — пропускаем
-                $byRest[$rn] = ['chat_id' => $cid, 'group' => $s['legal_entity_group'] ?: 'BK_VM', 'schedule' => []];
+                $grp = $s['legal_entity_group'] ?: 'BK_VM';
+                $chatIdsLookup->execute([$rn, $grp]);
+                $cids = $chatIdsLookup->fetchAll(PDO::FETCH_COLUMN);
+                if (empty($cids)) continue; // ресторан без подписок — пропускаем
+                $byRest[$rn] = ['chat_ids' => $cids, 'group' => $grp, 'schedule' => []];
             }
             $byRest[$rn]['schedule'][] = [
                 'order_day' => (int)$s['order_day'],
@@ -1196,7 +1188,7 @@ try {
         }
 
         foreach ($byRest as $restNum => $info) {
-            $chatId = $info['chat_id'];
+            $chatIds = $info['chat_ids'];
 
             // Ищем ближайший будущий день поставки (в пределах 2 недель)
             $nextDelivery = null;
@@ -1323,32 +1315,219 @@ try {
                 $msgText .= "Заявка ещё не подана!";
             }
 
-            // Токен быстрого входа → страница поставщика в кабинете
-            $token = bin2hex(random_bytes(32));
             $restGroup = $byRest[$restNum]['group'] ?? 'BK_VM';
-            $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)")
-                ->execute([$token, $chatId, $restNum, $restGroup]);
-
             $redirect = "/restaurant/orders/supplier/{$supId}";
-            $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
 
-            // Кнопка «Подать в боте» — показывается только если дедлайн ещё не истёк
-            $rows = [];
-            if ($reminderType !== 'expired') {
-                $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
+            // Рассылаем каждому подписчику ресторана (свой токен на каждый chat_id)
+            $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)");
+            $logStmt = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)");
+            foreach ($chatIds as $chatId) {
+                $token = bin2hex(random_bytes(32));
+                $tokStmt->execute([$token, $chatId, $restNum, $restGroup]);
+                $url = "{$SITE_URL}/restaurant?tg_token={$token}&redirect=" . urlencode($redirect);
+
+                $rows = [];
+                if ($reminderType !== 'expired') {
+                    $rows[] = [['text' => '📝 Подать в боте', 'callback_data' => "soord_day_{$supId}_{$restNum}_{$deliveryDate}"]];
+                }
+                $rows[] = [['text' => '🌐 Открыть на сайте', 'url' => $url]];
+                $keyboard = ['inline_keyboard' => $rows];
+
+                tgSend($chatId, $msgText, true, $keyboard);
+                $sent++;
+                $logStmt->execute([$chatId, $dedupKey]);
             }
-            $rows[] = [['text' => '🌐 Открыть на сайте', 'url' => $url]];
-            $keyboard = ['inline_keyboard' => $rows];
-
-            tgSend($chatId, $msgText, true, $keyboard);
-            $sent++;
-
-            $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)")
-                ->execute([$chatId, $dedupKey]);
         }
     }
 } catch (Exception $e) {
     error_log('[cron_telegram] so reminders error: ' . $e->getMessage());
+}
+
+// ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): авто-подача предыдущей заявки по дедлайну ═══
+// Если у поставщика so_supplier_settings.auto_submit_previous = 1 — после прохождения
+// дедлайна (окно -5..+15 мин) для каждого ресторана без submitted/locked заявки
+// копируем последнюю поданную заявку того же ресторана как новую submitted.
+try {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $now = new DateTime('now', $tz);
+
+    $autoSuppliers = $pdo->query("
+        SELECT s.id, s.short_name,
+               COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
+        FROM suppliers s
+        JOIN so_supplier_settings sst ON sst.supplier_id = s.id
+        WHERE s.is_active = 1 AND sst.auto_submit_previous = 1 AND COALESCE(sst.is_accepting_orders, 1) = 1
+    ")->fetchAll();
+
+    foreach ($autoSuppliers as $sup) {
+        $supId = $sup['id'];
+        $supName = $sup['short_name'];
+        $defaultDl = $sup['default_deadline_time'];
+
+        // Расписания поставщика
+        $schStmt = $pdo->prepare("
+            SELECT ss.restaurant_id, ss.delivery_day,
+                   r.number AS restaurant_number, r.legal_entity_group
+            FROM so_supplier_schedules ss
+            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
+            WHERE ss.supplier_id = ? AND ss.is_active = 1
+        ");
+        $schStmt->execute([$supId]);
+        $schRows = $schStmt->fetchAll();
+
+        // Собираем кандидатов: {restaurant_number, delivery_date, legal_entity_group}
+        $candidates = [];
+        foreach ($schRows as $s) {
+            $deliveryDow = (int)$s['delivery_day'];
+            $weekStart = clone $now;
+            $weekStart->setTime(0, 0, 0);
+            $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
+
+            for ($w = 0; $w < 2; $w++) {
+                $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+                if ($deliveryDateObj < (clone $now)->setTime(0, 0, 0)) continue;
+                $deliveryDate = $deliveryDateObj->format('Y-m-d');
+
+                // Дедлайн: override → rule → default
+                $ovStmt = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                $ovStmt->execute([$supId, $deliveryDate]);
+                $ov = $ovStmt->fetch();
+                if ($ov && !empty($ov['is_closed'])) continue;
+                if ($ov && $ov['deadline_time']) {
+                    $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
+                    $deadlineTime = $ov['deadline_time'];
+                } else {
+                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                    $rlStmt->execute([$supId, $deliveryDow]);
+                    $rule = $rlStmt->fetch();
+                    if ($rule) {
+                        $deadlineDow = (int)$rule['deadline_dow'];
+                        $deadlineTime = $rule['deadline_time'];
+                        $deadlineDateObj = clone $deliveryDateObj;
+                        $diff = $deliveryDow - $deadlineDow;
+                        if ($diff <= 0) $diff += 7;
+                        $deadlineDateObj->modify("-{$diff} days");
+                    } else {
+                        $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
+                        $deadlineTime = $defaultDl;
+                    }
+                }
+                $tp = explode(':', $deadlineTime);
+                $deadline = clone $deadlineDateObj;
+                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                $minutesSinceDeadline = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
+
+                // Окно срабатывания: дедлайн прошёл от 0 до 15 минут назад
+                if ($minutesSinceDeadline >= -1 && $minutesSinceDeadline <= 15) {
+                    $candidates[] = [
+                        'restaurant_number' => (int)$s['restaurant_number'],
+                        'delivery_date' => $deliveryDate,
+                        'group' => $s['legal_entity_group'] ?: 'BK_VM',
+                    ];
+                }
+            }
+        }
+
+        if (empty($candidates)) continue;
+
+        // Убираем дубликаты (ресторан + дата)
+        $seen = [];
+        foreach ($candidates as $c) {
+            $k = $c['restaurant_number'] . '|' . $c['delivery_date'];
+            if (!isset($seen[$k])) $seen[$k] = $c;
+        }
+
+        foreach ($seen as $c) {
+            $rn = $c['restaurant_number'];
+            $dd = $c['delivery_date'];
+
+            // Уже было авто-создано?
+            $logCheck = $pdo->prepare("SELECT id FROM so_auto_submit_log WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+            $logCheck->execute([$supId, $rn, $dd]);
+            if ($logCheck->fetch()) continue;
+
+            // Есть ли уже submitted/locked заявка?
+            $oc = $pdo->prepare("SELECT COUNT(*) FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND status IN ('submitted','locked')");
+            $oc->execute([$supId, $rn, $dd]);
+            if ((int)$oc->fetchColumn() > 0) continue;
+
+            // Определяем legal_entity ресторана (логика аналогична roGetLegalEntity)
+            if ($c['group'] === 'PS') {
+                $le = 'ООО "Пицца Стар"';
+            } elseif ((int)$rn === 3) {
+                $le = 'ООО "Воглия Матта"';
+            } else {
+                $le = 'ООО "Бургер БК"';
+            }
+
+            // Ищем последнюю поданную заявку
+            $prev = $pdo->prepare("
+                SELECT id FROM so_orders
+                WHERE supplier_id = ? AND restaurant_number = ? AND legal_entity = ?
+                  AND status IN ('submitted','locked') AND delivery_date < ?
+                ORDER BY delivery_date DESC LIMIT 1
+            ");
+            $prev->execute([$supId, $rn, $le, $dd]);
+            $prevOrderId = $prev->fetchColumn();
+            if (!$prevOrderId) continue;
+
+            // Копируем позиции
+            $pdo->beginTransaction();
+            try {
+                // Создаём или обновляем заявку-черновик → submitted
+                $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+                $existing->execute([$supId, $rn, $dd, $le]);
+                $existingId = $existing->fetchColumn();
+
+                if ($existingId) {
+                    $pdo->prepare("UPDATE so_orders SET status='submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")->execute([$existingId]);
+                    $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$existingId]);
+                    $newOrderId = $existingId;
+                } else {
+                    $pdo->prepare("
+                        INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
+                        VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)
+                    ")->execute([$rn, $supId, $dd, $now->format('Y-m-d'), $le]);
+                    $newOrderId = (int)$pdo->lastInsertId();
+                }
+
+                // Копируем позиции (сбрасываем admin_qty)
+                $pdo->prepare("
+                    INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity)
+                    SELECT ?, product_id, sku, product_name, COALESCE(admin_qty, quantity)
+                    FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0
+                ")->execute([$newOrderId, $prevOrderId]);
+
+                $pdo->prepare("
+                    INSERT INTO so_auto_submit_log (supplier_id, restaurant_number, delivery_date, source_order_id, new_order_id)
+                    VALUES (?, ?, ?, ?, ?)
+                ")->execute([$supId, $rn, $dd, $prevOrderId, $newOrderId]);
+
+                $pdo->commit();
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                error_log('[cron_telegram] auto_submit error for ' . $supId . '/' . $rn . '/' . $dd . ': ' . $e->getMessage());
+                continue;
+            }
+
+            // Уведомление подписчикам ресторана
+            $subStmt = $pdo->prepare("SELECT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1");
+            $subStmt->execute([$rn, $c['group']]);
+            $subChats = $subStmt->fetchAll(PDO::FETCH_COLUMN);
+            $dateObj = new DateTime($dd);
+            $msg = "🤖 <b>Заявка выставлена автоматически</b>\n\n";
+            $msg .= "🏪 Ресторан <b>" . formatRestaurantNumber($rn) . "</b>\n";
+            $msg .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
+            $msg .= "📅 Доставка: <b>" . $dateObj->format('d.m.Y') . "</b>\n\n";
+            $msg .= "Дедлайн прошёл — подали копию вашей предыдущей заявки.";
+            foreach ($subChats as $cid) {
+                tgSend($cid, $msg, true);
+                $sent++;
+            }
+        }
+    }
+} catch (Exception $e) {
+    error_log('[cron_telegram] so auto-submit error: ' . $e->getMessage());
 }
 
 // ═══ ЗАЯВКИ ПОСТАВЩИКАМ (so_*): итоговая сводка закупщикам после дедлайна ═══

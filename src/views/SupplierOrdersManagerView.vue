@@ -46,6 +46,10 @@
           <label style="font-size:12px;color:#666;">Дедлайн по умолчанию:</label>
           <input type="time" v-model="defaultDeadline" class="rom-input-sm" style="width:100px" />
           <button class="rom-btn-sm" @click="saveDefaultDeadline" :disabled="!defaultDeadline">Сохранить</button>
+          <label style="font-size:12px;color:#666;display:inline-flex;align-items:center;gap:4px;margin-left:8px;" title="Если ресторан не подал заявку до дедлайна — автоматически подать предыдущую заявку этого ресторана">
+            <input type="checkbox" :checked="!!settings.auto_submit_previous" @change="toggleAutoSubmit" />
+            Авто-подача предыдущей по дедлайну
+          </label>
           <button class="rom-btn rom-btn-outline" @click="copyLink">Ссылка</button>
         </div>
       </div>
@@ -126,6 +130,9 @@
               {{ sendingSummary ? 'Отправка...' : '📤 Отправить сводку' }}
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
+            <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
+              📋 Копировать не подавших
+            </button>
             <label class="so-filter-check">
               <input type="checkbox" v-model="showMissing" /> Не подавшие
             </label>
@@ -456,6 +463,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
+import { useToastStore } from '@/stores/toastStore.js';
 
 const props = defineProps({
   supplierId: { type: String, default: '' },
@@ -463,6 +471,7 @@ const props = defineProps({
 
 const store = useSupplierOrderStore();
 const orderStore = useOrderStore();
+const toast = useToastStore();
 
 const dayNames = { 1: 'ПН', 2: 'ВТ', 3: 'СР', 4: 'ЧТ', 5: 'ПТ', 6: 'СБ', 7: 'ВС' };
 const dayNamesFull = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' };
@@ -478,7 +487,7 @@ const restaurants = ref([]);
 const weekDates = ref([]);
 
 // Settings (постоянный режим приёма)
-const settings = ref({ is_accepting_orders: 1, default_deadline_time: '14:00:00', pause_message: null });
+const settings = ref({ is_accepting_orders: 1, auto_submit_previous: 0, default_deadline_time: '14:00:00', pause_message: null });
 const defaultDeadline = ref('14:00');
 const pauseMessage = ref('');
 const deadlineOverrides = ref([]);
@@ -517,7 +526,7 @@ const templateLe = ref(orderStore.settings.legalEntity || 'ООО "Бургер 
 // Группа юрлиц текущего поставщика (BK_VM | PS). Определяется из списка
 // поставщиков: он уже отфильтрован backend'ом по группе юрлица сайдбара.
 const currentSupplierGroup = computed(() => {
-  const sup = allSuppliers.value.find(s => s.id === currentSupplierId.value);
+  const sup = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value));
   if (sup?.legal_entity_group) return sup.legal_entity_group;
   // Fallback: берём группу из сайдбара, т.к. список поставщиков уже сужен
   return orderStore.settings.legalEntity?.includes('Пицца Стар') ? 'PS' : 'BK_VM';
@@ -623,16 +632,14 @@ watch(() => props.supplierId, (val) => {
 }, { immediate: true });
 
 onMounted(async () => {
-  if (!props.supplierId) {
-    try {
-      allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
-      if (allSuppliers.value.length === 1) {
-        currentSupplierId.value = allSuppliers.value[0].id;
-        await refreshActiveTab();
-      }
-    } catch (e) {
-      console.error(e);
+  try {
+    allSuppliers.value = await store.adminGetSuppliers(orderStore.settings.legalEntity);
+    if (!props.supplierId && allSuppliers.value.length === 1) {
+      currentSupplierId.value = allSuppliers.value[0].id;
+      await refreshActiveTab();
     }
+  } catch (e) {
+    console.error(e);
   }
 });
 
@@ -684,7 +691,7 @@ async function loadSettings() {
   if (!currentSupplierId.value) return;
   try {
     const data = await store.adminGetSettings(currentSupplierId.value);
-    settings.value = data.settings || { is_accepting_orders: 1, default_deadline_time: '14:00:00', pause_message: null };
+    settings.value = data.settings || { is_accepting_orders: 1, auto_submit_previous: 0, default_deadline_time: '14:00:00', pause_message: null };
     defaultDeadline.value = (settings.value.default_deadline_time || '14:00:00').substring(0, 5);
     pauseMessage.value = settings.value.pause_message || '';
     deadlineOverrides.value = data.overrides || [];
@@ -707,15 +714,31 @@ async function loadNotifyUsers() {
   }
 }
 
+function currentSettingsPayload(overrides = {}) {
+  return {
+    is_accepting_orders: settings.value.is_accepting_orders,
+    auto_submit_previous: settings.value.auto_submit_previous ? 1 : 0,
+    default_deadline_time: defaultDeadline.value + ':00',
+    pause_message: pauseMessage.value || null,
+    ...overrides,
+  };
+}
+
 async function toggleAccepting() {
   const next = settings.value.is_accepting_orders ? 0 : 1;
   if (next === 0 && !confirm('Приостановить приём заявок? Рестораны увидят сообщение о паузе.')) return;
   try {
-    await store.adminSaveSettings(currentSupplierId.value, {
-      is_accepting_orders: next,
-      default_deadline_time: defaultDeadline.value + ':00',
-      pause_message: pauseMessage.value || null,
-    });
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ is_accepting_orders: next }));
+    await loadSettings();
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+  }
+}
+
+async function toggleAutoSubmit(ev) {
+  const next = ev.target.checked ? 1 : 0;
+  try {
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ auto_submit_previous: next }));
     await loadSettings();
   } catch (e) {
     alert('Ошибка: ' + e.message);
@@ -724,11 +747,7 @@ async function toggleAccepting() {
 
 async function saveDefaultDeadline() {
   try {
-    await store.adminSaveSettings(currentSupplierId.value, {
-      is_accepting_orders: settings.value.is_accepting_orders,
-      default_deadline_time: defaultDeadline.value + ':00',
-      pause_message: pauseMessage.value || null,
-    });
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
     alert('Дедлайн по умолчанию сохранён');
     await loadSettings();
   } catch (e) {
@@ -738,11 +757,7 @@ async function saveDefaultDeadline() {
 
 async function savePauseMessage() {
   try {
-    await store.adminSaveSettings(currentSupplierId.value, {
-      is_accepting_orders: settings.value.is_accepting_orders,
-      default_deadline_time: defaultDeadline.value + ':00',
-      pause_message: pauseMessage.value || null,
-    });
+    await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
   } catch (e) {
     alert('Ошибка: ' + e.message);
   }
@@ -751,12 +766,7 @@ async function savePauseMessage() {
 async function saveNotifyUsers() {
   savingNotifyUsers.value = true;
   try {
-    const data = await store.adminSaveSettings(currentSupplierId.value, {
-      is_accepting_orders: settings.value.is_accepting_orders,
-      default_deadline_time: defaultDeadline.value + ':00',
-      pause_message: pauseMessage.value || null,
-      notify_users: notifyUsers.value,
-    });
+    const data = await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ notify_users: notifyUsers.value }));
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
     alert('Получатели сохранены');
   } catch (e) {
@@ -1126,7 +1136,7 @@ async function exportExcel() {
 
   try {
     const XLSX = await import('xlsx-js-style');
-    const supplierName = allSuppliers.value.find(s => s.id === currentSupplierId.value)?.short_name || 'Поставщик';
+    const supplierName = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value))?.short_name || 'Поставщик';
     const wb = XLSX.utils.book_new();
 
     // ═══ Стили (определяем один раз) ═══
@@ -1340,6 +1350,24 @@ function getDisplayItem(restNum, product) {
     quantity: originalQty,
     admin_qty: hasAdmin ? effectiveQty : null,
   };
+}
+
+async function copyMissingRestaurants() {
+  const missing = restaurants.value.filter(r => !r.order_status || r.order_status === 'draft');
+  if (!missing.length) {
+    toast.info('Все подали', 'Нет ресторанов без заявки на эту дату');
+    return;
+  }
+  const sup = allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value));
+  const supName = sup?.short_name || 'поставщик';
+  const list = missing.map(r => formatRestaurantNumber(r.number, r.legal_entity_group)).join(', ');
+  const text = `Нет заявок на "${supName}" от ресторанов: ${list}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success('Скопировано', `${missing.length} ${missing.length === 1 ? 'ресторан' : 'ресторанов'} в буфере обмена`);
+  } catch (e) {
+    toast.error('Ошибка копирования', e.message);
+  }
 }
 
 const filteredRestaurants = computed(() => {

@@ -48,7 +48,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
 
   async function loadMyOrder(supplierId, deliveryDate) {
     const data = await api(`my-order/${supplierId}/${deliveryDate}`);
-    return data.order || null;
+    return { order: data.order || null, previousOrder: data.previous_order || null };
   }
 
   async function loadMyOrders(supplierId) {

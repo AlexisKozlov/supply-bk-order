@@ -393,6 +393,18 @@
               </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
               <template v-else>
+                <div v-if="supPreviousOrders[sup.id] && (!supCurrentDateInfo(sup)?.order || supCurrentDateInfo(sup)?.order?.status === 'draft')" class="sup-prev-order-block">
+                  <div class="sup-prev-order-head" @click="supShowPreviousOrder[sup.id] = !supShowPreviousOrder[sup.id]">
+                    <span>📋 Ваша предыдущая заявка от {{ formatDate(supPreviousOrders[sup.id].delivery_date) }} — {{ supPreviousOrders[sup.id].items?.length || 0 }} поз.</span>
+                    <span class="sup-prev-order-toggle">{{ supShowPreviousOrder[sup.id] ? '▲ скрыть' : '▼ показать' }}</span>
+                  </div>
+                  <div v-if="supShowPreviousOrder[sup.id]" class="sup-prev-order-body">
+                    <div v-for="it in supPreviousOrders[sup.id].items" :key="it.sku" class="sup-prev-order-row">
+                      <span class="sup-prev-name">{{ it.product_name }}</span>
+                      <span class="sup-prev-qty">{{ supFmtNum(it.quantity) }}</span>
+                    </div>
+                  </div>
+                </div>
                 <div v-if="supIsSkipOrder[sup.id]" class="sup-skip-banner">
                   <span class="sup-skip-icon">🚫</span>
                   <strong>Поставка не нужна.</strong>
@@ -526,94 +538,249 @@
     </div>
 
     <!-- ══════ TAB: Опросы ══════ -->
-    <section v-if="activeTab === 'surveys' && !globalLoading && !globalError" class="cab-section">
+    <section v-if="activeTab === 'surveys' && !globalLoading && !globalError" class="cab-section cab-sv-section">
       <div v-if="surveyError" class="error-msg" style="margin-bottom:16px">{{ surveyError }}</div>
-      <div v-if="surveySuccess" class="success-msg" style="margin-bottom:16px">{{ surveySuccess }}</div>
 
+      <!-- ─── Начальная загрузка ─── -->
       <div v-if="surveyListLoading && !surveyItems.length" class="cab-empty-card">
         <p>Загрузка опросов...</p>
       </div>
+
+      <!-- ─── Пусто ─── -->
       <div v-else-if="!surveyItems.length" class="cab-empty-card">
-        <h2>Сейчас нет опросов</h2>
-        <p>Когда для вашего ресторана появится новый опрос, он будет здесь.</p>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#D7B79A" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:8px">
+          <rect x="3" y="4" width="18" height="17" rx="2"/>
+          <path d="M8 2v4M16 2v4M3 10h18"/>
+          <path d="M9 15l2 2 4-4"/>
+        </svg>
+        <h2>Пока нет опросов</h2>
+        <p>Когда появится новый опрос, вы увидите его здесь и получите уведомление в боте.</p>
       </div>
-      <div v-else class="cab-surveys">
-        <aside class="cab-surveys-list">
+
+      <!-- ═══ СПИСОК ═══ -->
+      <div v-else-if="surveyMode === 'list'" class="cab-sv-home">
+        <div v-if="pendingSurveys.length" class="cab-sv-group">
+          <div class="cab-sv-group-head">
+            <span class="cab-sv-group-title">Нужно ответить</span>
+            <span class="cab-sv-group-count">{{ pendingSurveys.length }}</span>
+          </div>
           <button
-            v-for="survey in surveyItems"
+            v-for="survey in pendingSurveys"
             :key="survey.id"
-            class="cab-survey-item"
-            :class="{ active: selectedSurveyId === Number(survey.id) }"
-            @click="surveySuccess = ''; openSurvey(survey.id)"
+            class="cab-sv-bigcard pending"
+            @click="openSurveyCard(survey)"
           >
-            <div class="cab-survey-item-title">{{ survey.title }}</div>
-            <div class="cab-survey-item-meta">
-              <span>{{ survey.questions_count }} {{ survey.questions_count === 1 ? 'вопрос' : 'вопроса' }}</span>
-              <span>{{ survey.already_answered ? 'Отвечено' : 'Ждёт ответа' }}</span>
+            <div class="cab-sv-bigcard-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/><path d="M9 15h6"/></svg>
             </div>
-            <div class="cab-survey-item-date">
-              {{ survey.already_answered ? `Ответ отправлен ${fmtDateTime(survey.submitted_at)}` : `Отправлен ${fmtDateTime(survey.sent_at || survey.created_at)}` }}
+            <div class="cab-sv-bigcard-body">
+              <div class="cab-sv-bigcard-title">{{ survey.title }}</div>
+              <div class="cab-sv-bigcard-meta">
+                <span>{{ survey.questions_count }} {{ surveyQuestionPlural(survey.questions_count) }}</span>
+                <span>·</span>
+                <span>{{ fmtDateTime(survey.sent_at || survey.created_at) }}</span>
+              </div>
+            </div>
+            <div class="cab-sv-bigcard-arrow">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </div>
           </button>
-        </aside>
+        </div>
 
-        <div class="cab-surveys-detail">
-          <div v-if="surveyDetailLoading" class="cab-empty-card">
-            <p>Открываю опрос...</p>
+        <div v-if="answeredSurveys.length" class="cab-sv-group">
+          <div class="cab-sv-group-head">
+            <span class="cab-sv-group-title">Отвеченные</span>
+            <span class="cab-sv-group-count muted">{{ answeredSurveys.length }}</span>
           </div>
-          <div v-else-if="!surveyDetail" class="cab-empty-card">
-            <p>Выберите опрос слева.</p>
-          </div>
-          <div v-else class="cab-survey-card">
-            <div class="cab-survey-head">
-              <div>
-                <h2>{{ surveyDetail.title }}</h2>
-                <p v-if="surveyDetail.description" class="cab-survey-description">{{ surveyDetail.description }}</p>
-              </div>
-              <div class="cab-survey-status" :class="{ done: surveyDetail.already_answered }">
-                {{ surveyDetail.already_answered ? 'Уже отвечено' : 'Нужно ответить' }}
+          <button
+            v-for="survey in answeredSurveys"
+            :key="survey.id"
+            class="cab-sv-bigcard done"
+            @click="openSurveyCard(survey)"
+          >
+            <div class="cab-sv-bigcard-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="cab-sv-bigcard-body">
+              <div class="cab-sv-bigcard-title">{{ survey.title }}</div>
+              <div class="cab-sv-bigcard-meta">
+                <span>Ответ отправлен {{ fmtDateTime(survey.submitted_at) }}</span>
               </div>
             </div>
-
-            <div v-if="surveyDetail.already_answered" class="cab-survey-note">
-              Ваш ответ уже сохранён{{ surveyDetail.submitted_at ? ` (${fmtDateTime(surveyDetail.submitted_at)})` : '' }}.
+            <div class="cab-sv-bigcard-arrow">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </div>
+          </button>
+        </div>
+      </div>
 
-            <div v-for="(question, index) in surveyDetail.questions || []" :key="question.id" class="cab-survey-question">
-              <div class="cab-survey-question-title">{{ index + 1 }}. {{ question.text }}</div>
-              <label v-for="option in question.options || []" :key="option.id" class="cab-survey-option">
-                <input
-                  v-model="surveyAnswers[question.id]"
-                  type="radio"
-                  :name="`survey-question-${question.id}`"
-                  :value="Number(option.id)"
-                  :disabled="surveyDetail.already_answered || surveySubmitting"
+      <!-- ─── Загрузка деталей ─── -->
+      <div v-else-if="surveyDetailLoading" class="cab-empty-card"><p>Открываю опрос...</p></div>
+
+      <!-- ═══ МАСТЕР (идёт заполнение) ═══ -->
+      <div v-else-if="surveyMode === 'wizard' && surveyDetail" class="cab-sv-wiz">
+        <button class="cab-sv-back" @click="backToList">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          К опросам
+        </button>
+
+        <div class="cab-sv-wiz-card">
+          <div class="cab-sv-wiz-head">
+            <div class="cab-sv-wiz-pretitle">Опрос</div>
+            <h2 class="cab-sv-wiz-title">{{ surveyDetail.title }}</h2>
+            <p v-if="surveyDetail.description" class="cab-sv-wiz-desc">{{ surveyDetail.description }}</p>
+          </div>
+
+          <!-- Прогресс-сегменты -->
+          <div class="cab-sv-chain">
+            <button
+              v-for="(seg, i) in wizardSegments"
+              :key="i"
+              class="cab-sv-chain-seg"
+              :class="{ filled: seg.filled, active: i === wizardStep, locked: !seg.reachable }"
+              :disabled="!seg.reachable"
+              :title="seg.label"
+              @click="gotoStep(i)"
+            />
+          </div>
+          <div class="cab-sv-chain-label">{{ wizardStepLabel }}</div>
+
+          <!-- Контент шага -->
+          <transition :name="wizardSlideName" mode="out-in">
+            <div :key="wizardStep" class="cab-sv-step">
+              <!-- Вопрос -->
+              <div v-if="wizardIsQuestion && currentQuestion" class="cab-sv-step-q">
+                <h3 class="cab-sv-step-title">{{ currentQuestion.text }}</h3>
+                <div class="cab-sv-bigopts">
+                  <button
+                    v-for="option in currentQuestion.options || []"
+                    :key="option.id"
+                    class="cab-sv-bigopt"
+                    :class="{ selected: Number(surveyAnswers[currentQuestion.id]) === Number(option.id) }"
+                    :disabled="surveySubmitting"
+                    @click="chooseOption(currentQuestion.id, option.id)"
+                  >
+                    <span class="cab-sv-bigopt-mark">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                    <span class="cab-sv-bigopt-text">{{ option.text }}</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Комментарий -->
+              <div v-else-if="wizardIsComment" class="cab-sv-step-c">
+                <h3 class="cab-sv-step-title">Комментарий <span class="cab-sv-optional">необязательно</span></h3>
+                <p class="cab-sv-step-hint">Если хотите, добавьте пояснение к своим ответам.</p>
+                <textarea
+                  v-model="surveyComment"
+                  class="cab-sv-textarea"
+                  rows="5"
+                  placeholder="Ваш комментарий..."
+                  :disabled="surveySubmitting"
+                  @keydown.ctrl.enter="wizardCanSubmit && submitSurveyAnswer()"
                 />
-                <span>{{ option.text }}</span>
-              </label>
+              </div>
+            </div>
+          </transition>
+
+          <!-- Навигация -->
+          <div class="cab-sv-wiz-nav">
+            <button
+              class="cab-sv-nav-btn back"
+              :disabled="wizardStep === 0 || surveySubmitting"
+              @click="prevStep"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              Назад
+            </button>
+
+            <button
+              v-if="!wizardIsLast"
+              class="cab-sv-nav-btn next"
+              :disabled="!wizardCanNext || surveySubmitting"
+              @click="nextStep"
+            >
+              Далее
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <button
+              v-else
+              class="cab-sv-nav-btn submit"
+              :disabled="!wizardCanSubmit || surveySubmitting"
+              @click="submitSurveyAnswer"
+            >
+              <span v-if="surveySubmitting" class="cab-spin cab-spin-sm"></span>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              Отправить ответ
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ READONLY (уже ответил) ═══ -->
+      <div v-else-if="surveyMode === 'readonly' && surveyDetail" class="cab-sv-ro">
+        <button class="cab-sv-back" @click="backToList">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          К опросам
+        </button>
+
+        <div class="cab-sv-ro-card">
+          <div class="cab-sv-ro-head">
+            <div class="cab-sv-ro-badge">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Ответ отправлен
+            </div>
+            <h2 class="cab-sv-ro-title">{{ surveyDetail.title }}</h2>
+            <p v-if="surveyDetail.description" class="cab-sv-ro-desc">{{ surveyDetail.description }}</p>
+            <div v-if="surveyDetail.submitted_at" class="cab-sv-ro-meta">
+              {{ fmtDateTime(surveyDetail.submitted_at) }}
+            </div>
+          </div>
+
+          <div class="cab-sv-ro-body">
+            <div v-for="(q, i) in surveyDetail.questions || []" :key="q.id" class="cab-sv-ro-q">
+              <div class="cab-sv-ro-qhead">
+                <span class="cab-sv-ro-qnum">{{ i + 1 }}</span>
+                <span class="cab-sv-ro-qtext">{{ q.text }}</span>
+              </div>
+              <div class="cab-sv-ro-opts">
+                <div
+                  v-for="opt in q.options || []"
+                  :key="opt.id"
+                  class="cab-sv-ro-opt"
+                  :class="{ selected: Number(surveyAnswers[q.id]) === Number(opt.id) }"
+                >
+                  <span class="cab-sv-ro-opt-mark">
+                    <svg v-if="Number(surveyAnswers[q.id]) === Number(opt.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  </span>
+                  <span>{{ opt.text }}</span>
+                </div>
+              </div>
             </div>
 
-            <div v-if="surveyDetail.allow_comment" class="cab-survey-comment">
-              <label class="cab-survey-comment-label" for="survey-comment">Комментарий</label>
-              <textarea
-                id="survey-comment"
-                v-model="surveyComment"
-                class="cab-survey-textarea"
-                rows="4"
-                placeholder="Если нужно, добавьте комментарий"
-                :disabled="surveyDetail.already_answered || surveySubmitting"
-              />
-            </div>
-
-            <div v-if="!surveyDetail.already_answered" class="cab-survey-actions">
-              <button class="btn btn-primary" :disabled="surveySubmitting" @click="submitSurveyAnswer">
-                <span v-if="surveySubmitting" class="cab-spin cab-spin-sm"></span>
-                Отправить ответ
-              </button>
+            <div v-if="surveyDetail.comment" class="cab-sv-ro-comment">
+              <div class="cab-sv-ro-comment-label">Ваш комментарий</div>
+              <div class="cab-sv-ro-comment-value">{{ surveyDetail.comment }}</div>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- ═══ УСПЕХ ═══ -->
+      <transition name="cab-sv-fade">
+        <div v-if="surveyMode === 'success'" class="cab-sv-success-screen">
+          <div class="cab-sv-success-ring">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="cab-sv-success-check">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </div>
+          <h2 class="cab-sv-success-title">Спасибо!</h2>
+          <p class="cab-sv-success-text">Ваш ответ сохранён</p>
+          <button class="btn btn-primary btn-lg cab-sv-success-btn" @click="backToList">К опросам</button>
+        </div>
+      </transition>
     </section>
 
     <!-- ══════ TAB: Сбор остатков ══════ -->
@@ -973,6 +1140,124 @@ const selectedSurveyId = ref(null);
 const surveyComment = ref('');
 const surveyAnswers = reactive({});
 const surveyPendingCount = computed(() => surveyItems.value.filter(item => !item.already_answered).length);
+const surveyTotalQuestions = computed(() => (surveyDetail.value?.questions || []).length);
+const surveyAnsweredCount = computed(() => {
+  const qs = surveyDetail.value?.questions || [];
+  let n = 0;
+  for (const q of qs) { if (Number(surveyAnswers[q.id]) > 0) n++; }
+  return n;
+});
+const surveyProgressPct = computed(() => {
+  const total = surveyTotalQuestions.value;
+  if (!total) return 0;
+  return Math.round(surveyAnsweredCount.value * 100 / total);
+});
+const surveyAllAnswered = computed(() => {
+  return surveyTotalQuestions.value > 0 && surveyAnsweredCount.value === surveyTotalQuestions.value;
+});
+function surveyQuestionPlural(n) {
+  const abs = Math.abs(Number(n) || 0);
+  const mod10 = abs % 10;
+  const mod100 = abs % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'вопрос';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'вопроса';
+  return 'вопросов';
+}
+
+// ═══ Wizard state ═══
+const surveyMode = ref('list'); // 'list' | 'wizard' | 'readonly' | 'success'
+const wizardStep = ref(0);
+const wizardSlideName = ref('cab-sv-slide-forward');
+
+const pendingSurveys = computed(() => surveyItems.value.filter(s => !s.already_answered));
+const answeredSurveys = computed(() => surveyItems.value.filter(s => !!s.already_answered));
+
+const wizardTotalSteps = computed(() => surveyTotalQuestions.value + 1); // questions + comment
+const wizardIsQuestion = computed(() => wizardStep.value < surveyTotalQuestions.value);
+const wizardIsComment = computed(() => wizardStep.value === surveyTotalQuestions.value);
+const wizardIsLast = computed(() => wizardStep.value === wizardTotalSteps.value - 1);
+const currentQuestion = computed(() => {
+  const qs = surveyDetail.value?.questions || [];
+  return wizardIsQuestion.value ? (qs[wizardStep.value] || null) : null;
+});
+const wizardCanNext = computed(() => {
+  if (wizardIsQuestion.value) {
+    const q = currentQuestion.value;
+    return !!q && Number(surveyAnswers[q.id]) > 0;
+  }
+  return true;
+});
+const wizardCanSubmit = computed(() => surveyAllAnswered.value);
+const wizardSegments = computed(() => {
+  const qs = surveyDetail.value?.questions || [];
+  const segs = qs.map((q, i) => ({
+    filled: Number(surveyAnswers[q.id]) > 0,
+    reachable: true,
+    label: `Вопрос ${i + 1}`,
+  }));
+  segs.push({
+    filled: !!surveyComment.value.trim(),
+    reachable: surveyAllAnswered.value,
+    label: 'Комментарий',
+  });
+  return segs;
+});
+const wizardStepLabel = computed(() => {
+  if (wizardIsComment.value) return `Комментарий · шаг ${wizardStep.value + 1} из ${wizardTotalSteps.value}`;
+  return `Вопрос ${wizardStep.value + 1} из ${surveyTotalQuestions.value}`;
+});
+
+function openSurveyCard(survey) {
+  if (!survey?.id) return;
+  selectedSurveyId.value = Number(survey.id);
+  wizardStep.value = 0;
+  wizardSlideName.value = 'cab-sv-slide-forward';
+  openSurvey(survey.id).then(() => {
+    if (!surveyDetail.value) return;
+    surveyMode.value = surveyDetail.value.already_answered ? 'readonly' : 'wizard';
+  });
+}
+
+function backToList() {
+  surveyMode.value = 'list';
+  wizardStep.value = 0;
+  surveyError.value = '';
+}
+
+function gotoStep(i) {
+  const segs = wizardSegments.value;
+  if (i < 0 || i >= segs.length) return;
+  if (!segs[i].reachable) return;
+  wizardSlideName.value = i > wizardStep.value ? 'cab-sv-slide-forward' : 'cab-sv-slide-back';
+  wizardStep.value = i;
+}
+
+function nextStep() {
+  if (wizardStep.value >= wizardTotalSteps.value - 1) return;
+  if (!wizardCanNext.value) return;
+  wizardSlideName.value = 'cab-sv-slide-forward';
+  wizardStep.value += 1;
+}
+
+function prevStep() {
+  if (wizardStep.value === 0) return;
+  wizardSlideName.value = 'cab-sv-slide-back';
+  wizardStep.value -= 1;
+}
+
+function chooseOption(questionId, optionId) {
+  surveyAnswers[questionId] = Number(optionId);
+  // Auto-advance after short delay
+  setTimeout(() => {
+    if (!wizardIsQuestion.value) return;
+    const q = currentQuestion.value;
+    if (!q || Number(surveyAnswers[q.id]) !== Number(optionId)) return;
+    if (wizardStep.value < wizardTotalSteps.value - 1) {
+      wizardSlideName.value = 'cab-sv-slide-forward';
+      wizardStep.value += 1;
+    }
+  }, 260);
+}
 
 // Уникальные источники для фильтра, сгруппированные по названию
 // (чтобы «Планета Ресторанов» из veg_orders и из so_orders давала один чип)
@@ -1516,6 +1801,8 @@ const supQuantities = reactive({});
 const supAdminEdits = reactive({}); // { supId: { sku: { original, edited } } } — правки закупщика
 const supProductsLoading = reactive({});
 const supIsSkipOrder = reactive({}); // { supId: true } — заявка с флагом «поставка не нужна»
+const supPreviousOrders = reactive({}); // { supId: previousOrder } — предыдущая заявка для справки
+const supShowPreviousOrder = reactive({}); // { supId: true } — раскрыт ли блок
 const supSubmitting = reactive({});
 const supShowSuccess = ref(false);
 const supSuccessInfo = ref({});
@@ -1536,9 +1823,11 @@ async function supSelectDate(sup, dateInfo) {
     const products = await soStore.loadProducts(sup.id);
     if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
     let displayProducts = products;
-    if (dateInfo.order) {
-      const order = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date);
-      if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
+    // Всегда грузим заявку (вернёт previous_order, даже если текущей нет)
+    const { order, previousOrder } = await soStore.loadMyOrder(sup.id, dateInfo.delivery_date);
+    if (supLoadRequestId[sup.id] !== nextRequestId || supSelectedDates[sup.id] !== dateInfo.delivery_date) return;
+    supPreviousOrders[sup.id] = previousOrder;
+    if (order) {
       const itemCount = order?.items?.length || 0;
       if (itemCount > 0) {
         for (const item of order.items) {
@@ -1819,11 +2108,10 @@ async function loadSurveyList(preferredId = null) {
   surveyError.value = '';
   try {
     surveyItems.value = await roStore.loadSurveys();
-    const nextId = preferredId || selectedSurveyId.value;
-    if (nextId && surveyItems.value.some(item => Number(item.id) === Number(nextId))) {
-      await openSurvey(nextId);
-    } else if (activeTab.value === 'surveys' && surveyItems.value.length) {
-      await openSurvey(Number(surveyItems.value[0].id));
+    if (preferredId && surveyItems.value.some(item => Number(item.id) === Number(preferredId))) {
+      // После отправки ответа обновляем данные выбранного опроса,
+      // но остаёмся в текущем режиме (успех/readonly/список)
+      await openSurvey(preferredId);
     } else if (!surveyItems.value.length) {
       selectedSurveyId.value = null;
       surveyDetail.value = null;
@@ -1875,8 +2163,8 @@ async function submitSurveyAnswer() {
   surveySubmitting.value = true;
   try {
     await roStore.submitSurvey(surveyDetail.value.id, payload, surveyComment.value);
+    surveyMode.value = 'success';
     await loadSurveyList(surveyDetail.value.id);
-    surveySuccess.value = 'Ответ сохранён';
   } catch (e) {
     surveyError.value = e.message || 'Не удалось сохранить ответ';
   } finally {
@@ -2350,6 +2638,14 @@ onUnmounted(() => {
 .sup-skip-icon { font-size: 14px; }
 .sup-skip-hint { font-size: 11px; opacity: 0.75; }
 
+.sup-prev-order-block { background: #f1f5f9; border-bottom: 1px solid #cbd5e1; padding: 8px 14px; }
+.sup-prev-order-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 500; color: #334155; font-size: 13px; }
+.sup-prev-order-toggle { font-size: 11px; color: #64748b; }
+.sup-prev-order-body { margin-top: 6px; border-top: 1px dashed #cbd5e1; padding-top: 6px; max-height: 240px; overflow-y: auto; }
+.sup-prev-order-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
+.sup-prev-name { color: #334155; }
+.sup-prev-qty { color: #64748b; font-variant-numeric: tabular-nums; }
+
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
 .deadline-bar { padding: 8px 14px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 0; }
@@ -2598,42 +2894,347 @@ tr.del-err { background: #fef2f2; }
 .stock-card p { color: #8b7355; font-size: 14px; margin: 0; }
 .stock-link { display: inline-flex; margin-top: 16px; }
 
-/* Inline stock form */
-.cab-surveys { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; }
-.cab-surveys-list,
-.cab-survey-card { background: white; border: 1px solid #EDE8E3; border-radius: 18px; }
-.cab-surveys-list { padding: 14px; display: flex; flex-direction: column; gap: 10px; height: fit-content; }
-.cab-surveys-detail { min-width: 0; }
-.cab-survey-item {
-  width: 100%; text-align: left; border: 1px solid #EFE6DC; border-radius: 14px; background: #FFFBF8;
-  padding: 14px; cursor: pointer; font: inherit; color: inherit; transition: 0.15s ease;
+/* ═══ Опросы (wizard) ═══ */
+.cab-sv-section { max-width: 720px; margin: 0 auto; }
+.cab-sv-optional { font-weight: 500; color: #a89a87; margin-left: 6px; font-size: 13px; }
+
+/* ─── Список опросов ─── */
+.cab-sv-home { display: flex; flex-direction: column; gap: 24px; }
+.cab-sv-group { display: flex; flex-direction: column; gap: 10px; }
+.cab-sv-group-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 0 4px;
 }
-.cab-survey-item:hover,
-.cab-survey-item.active { border-color: #D7B79A; background: white; transform: translateY(-1px); }
-.cab-survey-item-title { font-size: 14px; font-weight: 700; color: #502314; }
-.cab-survey-item-meta,
-.cab-survey-item-date { margin-top: 6px; font-size: 12px; color: #8b7355; display: flex; gap: 8px; flex-wrap: wrap; }
-.cab-survey-card { padding: 20px; }
-.cab-survey-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #F2EDE8; }
-.cab-survey-head h2 { margin: 0; font-size: 20px; color: #502314; }
-.cab-survey-description { margin: 8px 0 0; color: #6b4f3a; white-space: pre-line; }
-.cab-survey-status { padding: 8px 12px; border-radius: 999px; background: #FFF3E7; color: #B45309; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.cab-survey-status.done { background: #ECFDF5; color: #15803D; }
-.cab-survey-note { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #F7F5F2; color: #6b4f3a; font-size: 13px; }
-.cab-survey-question { padding: 16px 0; border-bottom: 1px solid #F5F0EB; }
-.cab-survey-question:last-of-type { border-bottom: none; }
-.cab-survey-question-title { font-size: 15px; font-weight: 700; color: #502314; margin-bottom: 12px; }
-.cab-survey-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #EFE6DC; border-radius: 12px; background: #FFFBF8; cursor: pointer; margin-bottom: 8px; }
-.cab-survey-option input { margin-top: 2px; }
-.cab-survey-option span { color: #502314; line-height: 1.35; }
-.cab-survey-comment { margin-top: 18px; }
-.cab-survey-comment-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: #502314; }
-.cab-survey-textarea {
-  width: 100%; min-height: 110px; padding: 12px 14px; border: 1.5px solid #E0DBD5; border-radius: 12px;
-  font: inherit; color: #502314; background: white; resize: vertical;
+.cab-sv-group-title {
+  font-size: 13px; font-weight: 800; color: #502314;
+  text-transform: uppercase; letter-spacing: .06em;
 }
-.cab-survey-textarea:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.08); }
-.cab-survey-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+.cab-sv-group-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
+  background: #FFEACE; color: #B45309;
+  font-size: 11px; font-weight: 800;
+}
+.cab-sv-group-count.muted { background: #EEEAE5; color: #8b7355; }
+
+.cab-sv-bigcard {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; padding: 18px 18px; text-align: left;
+  background: white; border: 1.5px solid #EDE8E3; border-radius: 18px;
+  cursor: pointer; font: inherit; color: inherit;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.cab-sv-bigcard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(80,35,20,0.08);
+  border-color: #E2CFB0;
+}
+.cab-sv-bigcard.pending { border-left: 4px solid #F59E0B; }
+.cab-sv-bigcard.done { border-left: 4px solid #10B981; opacity: .9; }
+.cab-sv-bigcard-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #FFF6E7, #FAE4BF);
+  color: #B45309; flex-shrink: 0;
+}
+.cab-sv-bigcard.done .cab-sv-bigcard-icon {
+  background: linear-gradient(135deg, #E6F9EE, #BCEACB);
+  color: #15803D;
+}
+.cab-sv-bigcard-body { flex: 1; min-width: 0; }
+.cab-sv-bigcard-title {
+  font-size: 15px; font-weight: 800; color: #502314;
+  line-height: 1.3; word-break: break-word;
+}
+.cab-sv-bigcard-meta {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; font-size: 12px; color: #8b7355; font-weight: 500;
+}
+.cab-sv-bigcard-arrow {
+  flex-shrink: 0; color: #C5B8AA;
+  display: flex; align-items: center;
+  transition: color .15s ease, transform .15s ease;
+}
+.cab-sv-bigcard:hover .cab-sv-bigcard-arrow {
+  color: #502314; transform: translateX(2px);
+}
+
+/* ─── Кнопка «назад» ─── */
+.cab-sv-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700;
+  color: #6b4f3a; padding: 6px 8px; margin: 0 0 12px -8px;
+  border-radius: 8px; transition: background .15s ease, color .15s ease;
+}
+.cab-sv-back:hover { background: #FBF6F1; color: #502314; }
+
+/* ─── Мастер (wizard) ─── */
+.cab-sv-wiz { max-width: 640px; margin: 0 auto; }
+.cab-sv-wiz-card {
+  background: white; border: 1px solid #EDE8E3; border-radius: 22px;
+  padding: 26px 28px 22px; box-shadow: 0 2px 12px rgba(80,35,20,0.04);
+}
+.cab-sv-wiz-head { margin-bottom: 18px; }
+.cab-sv-wiz-pretitle {
+  font-size: 11px; font-weight: 800; color: #B45309;
+  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px;
+}
+.cab-sv-wiz-title {
+  margin: 0; font-size: 22px; font-weight: 800; color: #502314;
+  line-height: 1.25; letter-spacing: -0.01em; word-break: break-word;
+}
+.cab-sv-wiz-desc {
+  margin: 10px 0 0; color: #6b4f3a; font-size: 14px;
+  line-height: 1.5; white-space: pre-line;
+}
+
+/* Цепочка сегментов */
+.cab-sv-chain {
+  display: flex; gap: 6px; margin: 4px 0 6px;
+  padding: 2px 0;
+}
+.cab-sv-chain-seg {
+  flex: 1; height: 8px; border-radius: 4px; border: none;
+  background: #F0E8DE; padding: 0; cursor: pointer;
+  transition: background .2s ease, transform .2s ease;
+}
+.cab-sv-chain-seg.filled { background: #D08B3A; }
+.cab-sv-chain-seg.active {
+  background: #502314;
+  transform: scaleY(1.35);
+}
+.cab-sv-chain-seg.locked { cursor: not-allowed; opacity: .6; }
+.cab-sv-chain-label {
+  font-size: 11px; font-weight: 700; color: #8b7355;
+  text-transform: uppercase; letter-spacing: .08em;
+  margin: 4px 0 16px;
+}
+
+/* Шаг */
+.cab-sv-step { min-height: 220px; }
+.cab-sv-step-title {
+  margin: 0 0 14px; font-size: 17px; font-weight: 800;
+  color: #502314; line-height: 1.4; word-break: break-word;
+}
+.cab-sv-step-hint {
+  margin: -8px 0 14px; color: #8b7355; font-size: 13px;
+}
+
+/* Большие варианты */
+.cab-sv-bigopts {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.cab-sv-bigopt {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; padding: 16px 18px; text-align: left;
+  background: white; border: 2px solid #EDE8E3; border-radius: 14px;
+  cursor: pointer; font: inherit;
+  transition: transform .12s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.cab-sv-bigopt:hover:not(:disabled) {
+  border-color: #D7B79A; background: #FFFBF5;
+  transform: translateY(-1px);
+}
+.cab-sv-bigopt:disabled { cursor: default; opacity: .75; }
+.cab-sv-bigopt-mark {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid #D7C4AA; background: white;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: white; flex-shrink: 0;
+  transition: .18s ease;
+}
+.cab-sv-bigopt-mark svg { opacity: 0; transform: scale(0.5); transition: .18s ease; }
+.cab-sv-bigopt-text {
+  flex: 1; font-size: 15px; font-weight: 500; color: #502314;
+  line-height: 1.35; word-break: break-word;
+}
+.cab-sv-bigopt.selected {
+  border-color: #D08B3A;
+  background: linear-gradient(135deg, #FFF8EB 0%, #FBF1E0 100%);
+  box-shadow: 0 4px 14px rgba(208,139,58,0.18);
+}
+.cab-sv-bigopt.selected .cab-sv-bigopt-mark {
+  background: #D08B3A; border-color: #D08B3A;
+}
+.cab-sv-bigopt.selected .cab-sv-bigopt-mark svg {
+  opacity: 1; transform: scale(1);
+}
+.cab-sv-bigopt.selected .cab-sv-bigopt-text { color: #4A2C18; font-weight: 700; }
+
+/* Textarea */
+.cab-sv-textarea {
+  width: 100%; min-height: 120px; padding: 14px 16px;
+  border: 1.5px solid #E0DBD5; border-radius: 12px;
+  font: inherit; font-size: 14px; color: #502314;
+  background: white; resize: vertical;
+  transition: .15s ease;
+}
+.cab-sv-textarea:focus {
+  outline: none; border-color: #D08B3A;
+  box-shadow: 0 0 0 3px rgba(208,139,58,0.14);
+}
+
+/* Навигация */
+.cab-sv-wiz-nav {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; margin-top: 22px; padding-top: 18px;
+  border-top: 1px solid #F5F0EB;
+}
+.cab-sv-nav-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 12px 20px; border-radius: 12px; border: none;
+  font: inherit; font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: .15s ease;
+}
+.cab-sv-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+.cab-sv-nav-btn.back {
+  background: #F5F0EB; color: #6b4f3a;
+}
+.cab-sv-nav-btn.back:hover:not(:disabled) { background: #EAE2D8; color: #502314; }
+.cab-sv-nav-btn.next {
+  background: #502314; color: white;
+  padding: 12px 22px;
+}
+.cab-sv-nav-btn.next:hover:not(:disabled) { background: #3E1A0D; }
+.cab-sv-nav-btn.submit {
+  background: linear-gradient(135deg, #D08B3A, #B87528);
+  color: white; padding: 12px 24px;
+  box-shadow: 0 4px 14px rgba(208,139,58,0.35);
+}
+.cab-sv-nav-btn.submit:hover:not(:disabled) {
+  box-shadow: 0 6px 18px rgba(208,139,58,0.45);
+  transform: translateY(-1px);
+}
+
+/* Slide переходы */
+.cab-sv-slide-forward-enter-active,
+.cab-sv-slide-forward-leave-active,
+.cab-sv-slide-back-enter-active,
+.cab-sv-slide-back-leave-active {
+  transition: transform .26s ease, opacity .22s ease;
+}
+.cab-sv-slide-forward-enter-from { opacity: 0; transform: translateX(24px); }
+.cab-sv-slide-forward-leave-to   { opacity: 0; transform: translateX(-24px); }
+.cab-sv-slide-back-enter-from    { opacity: 0; transform: translateX(-24px); }
+.cab-sv-slide-back-leave-to      { opacity: 0; transform: translateX(24px); }
+
+/* ─── Readonly просмотр ─── */
+.cab-sv-ro { max-width: 640px; margin: 0 auto; }
+.cab-sv-ro-card {
+  background: white; border: 1px solid #EDE8E3; border-radius: 22px;
+  overflow: hidden; box-shadow: 0 2px 12px rgba(80,35,20,0.04);
+}
+.cab-sv-ro-head {
+  padding: 22px 26px 18px;
+  background: linear-gradient(135deg, #F0FDF4 0%, #D6F5E0 100%);
+  border-bottom: 1px solid #C6EACF;
+}
+.cab-sv-ro-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: white; color: #15803D;
+  font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04em;
+  box-shadow: 0 1px 3px rgba(16,122,64,0.10);
+}
+.cab-sv-ro-title {
+  margin: 12px 0 0; font-size: 20px; font-weight: 800;
+  color: #15401E; line-height: 1.25; word-break: break-word;
+}
+.cab-sv-ro-desc {
+  margin: 8px 0 0; color: #3a6147; font-size: 14px;
+  line-height: 1.5; white-space: pre-line;
+}
+.cab-sv-ro-meta {
+  margin-top: 10px; font-size: 12px; color: #3a6147; font-weight: 600;
+}
+.cab-sv-ro-body { padding: 18px 26px 22px; }
+.cab-sv-ro-q {
+  padding: 14px 0; border-bottom: 1px solid #F5F0EB;
+}
+.cab-sv-ro-q:last-of-type { border-bottom: none; }
+.cab-sv-ro-qhead {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-bottom: 10px;
+}
+.cab-sv-ro-qnum {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: #502314; color: white;
+  font-size: 12px; font-weight: 800; flex-shrink: 0;
+}
+.cab-sv-ro-qtext {
+  flex: 1; font-size: 15px; font-weight: 700; color: #502314;
+  line-height: 1.35; padding-top: 2px;
+}
+.cab-sv-ro-opts { display: flex; flex-direction: column; gap: 6px; padding-left: 34px; }
+.cab-sv-ro-opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 10px;
+  background: #FBF6EE; color: #8b7355;
+  font-size: 13px; line-height: 1.35;
+}
+.cab-sv-ro-opt.selected {
+  background: linear-gradient(135deg, #FFF8EB 0%, #FBF1E0 100%);
+  color: #4A2C18; font-weight: 700;
+}
+.cab-sv-ro-opt-mark {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid #D7C4AA; background: white;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: white; flex-shrink: 0;
+}
+.cab-sv-ro-opt.selected .cab-sv-ro-opt-mark {
+  background: #D08B3A; border-color: #D08B3A;
+}
+.cab-sv-ro-comment {
+  margin-top: 14px; padding: 14px 16px;
+  background: #FBF6EE; border-radius: 12px;
+}
+.cab-sv-ro-comment-label {
+  font-size: 11px; font-weight: 800; color: #8b7355;
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px;
+}
+.cab-sv-ro-comment-value {
+  color: #502314; font-size: 14px; line-height: 1.5; white-space: pre-wrap;
+}
+
+/* ─── Success ─── */
+.cab-sv-success-screen {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 50px 20px 40px; text-align: center;
+}
+.cab-sv-success-ring {
+  width: 96px; height: 96px; border-radius: 50%;
+  background: linear-gradient(135deg, #10B981, #059669);
+  display: flex; align-items: center; justify-content: center;
+  color: white;
+  box-shadow: 0 12px 32px rgba(16,185,129,0.35);
+  animation: cabSvPop .45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cab-sv-success-check {
+  stroke-dasharray: 34;
+  stroke-dashoffset: 34;
+  animation: cabSvDraw .5s ease-out .25s forwards;
+}
+@keyframes cabSvPop {
+  0%   { transform: scale(.4); opacity: 0; }
+  60%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes cabSvDraw {
+  to { stroke-dashoffset: 0; }
+}
+.cab-sv-success-title {
+  margin: 22px 0 6px; font-size: 26px; font-weight: 800; color: #502314;
+}
+.cab-sv-success-text {
+  margin: 0 0 22px; color: #6b4f3a; font-size: 15px;
+}
+.cab-sv-success-btn { min-width: 180px; }
+.cab-sv-fade-enter-active, .cab-sv-fade-leave-active { transition: opacity .25s ease; }
+.cab-sv-fade-enter-from, .cab-sv-fade-leave-to { opacity: 0; }
 
 .stock-inline { background: white; border-radius: 18px; padding: 20px; margin: 0 0 16px; border: 1px solid #EDE8E3; }
 .stock-inline-head { padding-bottom: 12px; border-bottom: 1px solid #F2EDE8; margin-bottom: 12px; }
@@ -2760,11 +3361,28 @@ tr.del-err { background: #fef2f2; }
   .pw-form .btn { width: 100%; justify-content: center; }
 
   /* Surveys */
-  .cab-surveys { grid-template-columns: 1fr; }
-  .cab-surveys-list { padding: 12px; }
-  .cab-survey-card { padding: 16px; }
-  .cab-survey-head { flex-direction: column; }
-  .cab-survey-actions .btn { width: 100%; justify-content: center; }
+  .cab-sv { grid-template-columns: 1fr; }
+  .cab-sv-list {
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 8px;
+    gap: 8px;
+  }
+  .cab-sv-item {
+    min-width: 240px;
+    flex-shrink: 0;
+  }
+  .cab-sv-hero { padding: 18px 18px 16px; }
+  .cab-sv-hero-title { font-size: 18px; }
+  .cab-sv-q { padding: 16px 18px; }
+  .cab-sv-q-text { font-size: 15px; }
+  .cab-sv-progress { padding: 12px 18px; }
+  .cab-sv-comment, .cab-sv-comment-readonly { padding: 14px 18px 16px; }
+  .cab-sv-actions { padding: 16px 18px 20px; flex-direction: column; align-items: stretch; }
+  .cab-sv-actions .cab-sv-actions-hint { text-align: center; }
+  .cab-sv-submit { width: 100%; min-width: 0; }
 
   /* Success */
   .cab-success { min-height: 25vh; }

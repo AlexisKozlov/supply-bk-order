@@ -145,6 +145,20 @@
             </template>
           </div>
 
+          <!-- Предыдущая заявка (справочно) -->
+          <div v-if="previousOrderInfo && (!currentDateInfo?.order || currentDateInfo?.order?.status === 'draft')" class="so-prev-order-block">
+            <div class="so-prev-order-head" @click="showPreviousOrder = !showPreviousOrder">
+              <span>📋 Ваша предыдущая заявка от {{ formatDate(previousOrderInfo.delivery_date) }} — {{ previousOrderInfo.items?.length || 0 }} поз.</span>
+              <span class="so-prev-order-toggle">{{ showPreviousOrder ? '▲ скрыть' : '▼ показать' }}</span>
+            </div>
+            <div v-if="showPreviousOrder" class="so-prev-order-body">
+              <div v-for="it in previousOrderInfo.items" :key="it.sku" class="so-prev-order-row">
+                <span class="so-prev-name">{{ it.product_name }}</span>
+                <span class="so-prev-qty">{{ fmtNum(it.quantity) }}</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Products -->
           <div v-if="currentDateInfo?.deadline_status === 'open' || currentDateInfo?.order" class="ro-products">
             <div v-if="productsLoading" class="ro-loading"><div class="ro-spinner"></div></div>
@@ -230,6 +244,8 @@ const quantities = ref({});
 const showSuccess = ref(false);
 const successInfo = ref({});
 const isSkipOrder = ref(false);
+const previousOrderInfo = ref(null);
+const showPreviousOrder = ref(false);
 
 const showHistory = ref(false);
 const history = ref([]);
@@ -338,9 +354,11 @@ async function selectDate(dateInfo) {
   try {
     products.value = await soStore.loadProducts(selectedSupplier.value.id);
 
-    // Если есть существующий заказ — загрузить
-    if (dateInfo.order) {
-      const order = await soStore.loadMyOrder(selectedSupplier.value.id, dateInfo.delivery_date);
+    // Всегда грузим заявку (вернёт previous_order, даже если текущей нет)
+    const { order, previousOrder } = await soStore.loadMyOrder(selectedSupplier.value.id, dateInfo.delivery_date);
+    previousOrderInfo.value = previousOrder;
+
+    if (order) {
       const itemCount = order?.items?.length || 0;
       if (itemCount > 0) {
         for (const item of order.items) {
@@ -444,6 +462,15 @@ function formatDateShort(d) {
 </script>
 
 <style scoped>
+/* ═══ Блок «Предыдущая заявка» ═══ */
+.so-prev-order-block { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.so-prev-order-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 500; color: #334155; font-size: 14px; }
+.so-prev-order-toggle { font-size: 12px; color: #64748b; }
+.so-prev-order-body { margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
+.so-prev-order-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
+.so-prev-name { color: #334155; }
+.so-prev-qty { color: #64748b; font-variant-numeric: tabular-nums; }
+
 /* ═══ Базовые стили (из RestaurantOrderFormView) ═══ */
 .ro-page {
   min-height: 100vh;

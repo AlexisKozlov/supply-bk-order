@@ -67,13 +67,14 @@ function soGetRestaurantSession($pdo) {
 
 // Настройки поставщика: есть строка в so_supplier_settings или дефолты
 function soGetSupplierSettings($pdo, $supplierId) {
-    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
+    $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
     $row = $s->fetch();
     if ($row) return $row;
     return [
         'supplier_id' => $supplierId,
         'is_accepting_orders' => 1,
+        'auto_submit_previous' => 0,
         'default_deadline_time' => '14:00:00',
         'pause_message' => null,
     ];
@@ -383,7 +384,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $ph = implode(',', array_fill(0, count($supplierIds), '?'));
 
     // 2. Настройки всех поставщиков — один запрос
-    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
+    $settingsRows = $pdo->prepare("SELECT supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id IN ({$ph})");
     $settingsRows->execute($supplierIds);
     $settingsMap = [];
     foreach ($settingsRows->fetchAll() as $r) {
@@ -572,7 +573,35 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
     $s->execute([$supplierId, $rest['restaurant_number'], $deliveryDate, $le]);
     $order = $s->fetch();
 
-    if (!$order) soRespond(['order' => null]);
+    // Предыдущая заявка — последняя submitted/locked этого ресторана у этого поставщика.
+    // Отдаём только если текущая ещё не подана (нет заявки или статус draft).
+    $previousOrder = null;
+    $currentSubmitted = $order && in_array($order['status'], ['submitted', 'locked'], true);
+    if (!$currentSubmitted) {
+        $prev = $pdo->prepare("
+            SELECT id, delivery_date, submitted_at, status
+            FROM so_orders
+            WHERE supplier_id = ? AND restaurant_number = ? AND legal_entity = ?
+              AND status IN ('submitted','locked')
+              AND delivery_date < ?
+            ORDER BY delivery_date DESC
+            LIMIT 1
+        ");
+        $prev->execute([$supplierId, $rest['restaurant_number'], $le, $deliveryDate]);
+        $prevRow = $prev->fetch();
+        if ($prevRow) {
+            $prevItems = $pdo->prepare("SELECT sku, product_name, COALESCE(admin_qty, quantity) AS quantity FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0 ORDER BY product_name");
+            $prevItems->execute([$prevRow['id']]);
+            $previousOrder = [
+                'id' => (int)$prevRow['id'],
+                'delivery_date' => $prevRow['delivery_date'],
+                'submitted_at' => $prevRow['submitted_at'],
+                'items' => $prevItems->fetchAll(),
+            ];
+        }
+    }
+
+    if (!$order) soRespond(['order' => null, 'previous_order' => $previousOrder]);
 
     // quantity — исходное значение от ресторана, admin_qty — правка закупщика (если была)
     $items = $pdo->prepare("SELECT product_id, sku, product_name, quantity, admin_qty FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0 ORDER BY product_name");
@@ -585,6 +614,7 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
             'submitted_at' => $order['submitted_at'],
             'items' => $items->fetchAll(),
         ],
+        'previous_order' => $previousOrder,
     ]);
 }
 
@@ -698,7 +728,9 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
                 ->execute([$orderId]);
         } else {
-            $le = $rest['legal_entity'];
+            // legal_entity всегда берём из единого источника истины roGetLegalEntity
+            // (правильно обрабатывает ресторан 3 = Воглия Матта), а не из ro_users.legal_entity.
+            $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
             $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
                 ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
             $orderId = $pdo->lastInsertId();
@@ -949,18 +981,20 @@ if ($soAction === 'admin') {
 
             // 2) Настройки приёма заявок
             $acceptingFlag  = !empty($acceptance['is_accepting_orders']) ? 1 : 0;
+            $autoSubmitFlag = !empty($acceptance['auto_submit_previous']) ? 1 : 0;
             $defaultDeadline = $acceptance['default_deadline_time'] ?? '14:00:00';
             $pauseMessage    = $acceptance['pause_message'] ?? null;
             $pdo->prepare("
-                INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, default_deadline_time, pause_message, updated_by)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     is_accepting_orders = VALUES(is_accepting_orders),
+                    auto_submit_previous = VALUES(auto_submit_previous),
                     default_deadline_time = VALUES(default_deadline_time),
                     pause_message = VALUES(pause_message),
                     updated_at = NOW(),
                     updated_by = VALUES(updated_by)
-            ")->execute([$supplierId, $acceptingFlag, $defaultDeadline, $pauseMessage, $updatedBy]);
+            ")->execute([$supplierId, $acceptingFlag, $autoSubmitFlag, $defaultDeadline, $pauseMessage, $updatedBy]);
 
             // 3) Расписание (деактивируем старые, вставляем новые)
             $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")
@@ -1072,6 +1106,7 @@ if ($soAction === 'admin') {
         $updatedBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
 
         $isAccepting = isset($body['is_accepting_orders']) ? ((int)!!$body['is_accepting_orders']) : 1;
+        $autoSubmitPrev = !empty($body['auto_submit_previous']) ? 1 : 0;
         $defaultDl = $body['default_deadline_time'] ?? '14:00:00';
         if (preg_match('/^(\d{1,2}):(\d{2})$/', $defaultDl, $m)) {
             $defaultDl = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
@@ -1081,14 +1116,15 @@ if ($soAction === 'admin') {
         $pauseMsg = $body['pause_message'] ?? null;
         $notifyUsers = array_key_exists('notify_users', $body) ? ($body['notify_users'] ?? []) : null;
 
-        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, default_deadline_time, pause_message, updated_by)
-            VALUES (?, ?, ?, ?, ?)
+        $pdo->prepare("INSERT INTO so_supplier_settings (supplier_id, is_accepting_orders, auto_submit_previous, default_deadline_time, pause_message, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               is_accepting_orders = VALUES(is_accepting_orders),
+              auto_submit_previous = VALUES(auto_submit_previous),
               default_deadline_time = VALUES(default_deadline_time),
               pause_message = VALUES(pause_message),
               updated_by = VALUES(updated_by)")
-            ->execute([$supplierId, $isAccepting, $defaultDl, $pauseMsg, $updatedBy]);
+            ->execute([$supplierId, $isAccepting, $autoSubmitPrev, $defaultDl, $pauseMsg, $updatedBy]);
 
         if ($notifyUsers !== null) {
             soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers);

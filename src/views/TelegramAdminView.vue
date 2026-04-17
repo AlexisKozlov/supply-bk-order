@@ -19,7 +19,7 @@
         ⚙️ Уведомления
       </button>
       <button class="adm-tab" :class="{ active: tab === 'veg' }" @click="tab = 'veg'">
-        🥬 Планета Ресторанов <span class="adm-tab-count" :class="{ active: tab === 'veg' }">{{ vegSubCount }}</span>
+        🏪 Рестораны <span class="adm-tab-count" :class="{ active: tab === 'veg' }">{{ vegSubCount }}</span>
       </button>
       <button class="adm-tab" :class="{ active: tab === 'questions' }" @click="tab = 'questions'; loadQuestions()">
         💬 Вопросы AI
@@ -170,28 +170,6 @@
           </div>
         </div>
 
-        <!-- Текущая сессия овощей -->
-        <div class="tga-section-card" v-if="activeSession">
-          <h3 class="tga-subtitle">Текущая сессия: {{ activeSession.name }}</h3>
-          <div class="tga-stats-row">
-            <div class="tga-stat-card">
-              <div class="tga-stat-val tga-cell-ok">{{ vegSubmittedRests.length }}</div>
-              <div class="tga-stat-label">Подали заявку</div>
-            </div>
-            <div class="tga-stat-card">
-              <div class="tga-stat-val" :style="vegMissingRests.length ? 'color:#e65100' : ''">{{ vegMissingRests.length }}</div>
-              <div class="tga-stat-label">Не подали</div>
-            </div>
-          </div>
-          <div v-if="vegMissingRests.length" style="margin-top:12px;">
-            <details class="tga-details" style="border:none;padding:0;margin:0;">
-              <summary>Не подавшие рестораны ({{ vegMissingRests.length }})</summary>
-              <div class="tga-details-body" style="font-size:13px;color:var(--text-muted);">
-                {{ vegMissingRests.map(r => formatRestaurantNumber(r.number, r.legal_entity_group)).join(', ') }}
-              </div>
-            </details>
-          </div>
-        </div>
       </template>
     </div>
 
@@ -310,7 +288,7 @@
       </div>
     </div>
 
-    <!-- ═══ Овощи: подписки ═══ -->
+    <!-- ═══ Рестораны: подписки ═══ -->
     <div v-else-if="tab === 'veg'" class="adm-section">
       <div class="tga-stats-row">
         <div class="tga-stat-card">
@@ -352,7 +330,6 @@
                 <th>Адрес</th>
                 <th>Город</th>
                 <th>Подписчики</th>
-                <th v-if="activeSession">Заявка</th>
                 <th>Дата подписки</th>
                 <th style="width:50px"></th>
               </tr>
@@ -370,18 +347,6 @@
                         {{ sub.first_name || 'Без имени' }}<span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
                       </div>
                     </div>
-                  </template>
-                  <template v-else>—</template>
-                </td>
-                <td v-if="activeSession" style="text-align:center;">
-                  <template v-if="vegOrderStatusMap[r.number]">
-                    <span class="tga-badge tga-badge-submitted" :title="'Подана ' + formatDate(vegOrderStatusMap[r.number].last_submitted)">
-                      ✅ {{ vegOrderStatusMap[r.number].dates_count }}д.
-                      <span v-if="vegOrderStatusMap[r.number].admin_edited > 0" title="Есть правки админа"> ✏️</span>
-                    </span>
-                  </template>
-                  <template v-else-if="r.subCount">
-                    <span class="tga-badge tga-badge-expired">не подана</span>
                   </template>
                   <template v-else>—</template>
                 </td>
@@ -404,8 +369,8 @@
               <tr>
                 <th style="text-align:left">Подписчик</th>
                 <th style="text-align:left">Рестораны</th>
-                <th title="Напоминания об овощах">🥬</th>
-                <th title="Новые сессии овощей">📢</th>
+                <th title="Напоминания о заявках">🔔</th>
+                <th title="Новые периоды приёма">📢</th>
                 <th title="Подтверждения заявок">✅</th>
                 <th title="Напоминания об остатках">📋</th>
                 <th title="Новые сборы остатков">📦</th>
@@ -428,8 +393,8 @@
           </table>
         </div>
         <div class="tga-legend">
-          <span>🥬 Напоминания об овощах</span>
-          <span>📢 Новые сессии овощей</span>
+          <span>🔔 Напоминания о заявках</span>
+          <span>📢 Новые периоды приёма</span>
           <span>✅ Подтверждения заявок</span>
           <span>📋 Напоминания об остатках</span>
           <span>📦 Новые сборы остатков</span>
@@ -439,7 +404,7 @@
 
     <!-- ═══ Лог напоминаний ═══ -->
     <div v-else-if="tab === 'log'" class="adm-section">
-      <p class="tga-hint">Последние 100 отправленных напоминаний о заявках на овощи.</p>
+      <p class="tga-hint">Последние 100 отправленных напоминаний о заявках.</p>
 
       <!-- Фильтры -->
       <div class="tga-filter-row">
@@ -496,7 +461,7 @@
               Все сотрудники ({{ linkedUsers.length }})
             </button>
             <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'all_veg' }" @click="broadcastTarget = 'all_veg'">
-              Все рестораны-овощи ({{ vegUniqueChatIds.length }})
+              Все рестораны ({{ vegUniqueChatIds.length }})
             </button>
             <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'everyone' }" @click="broadcastTarget = 'everyone'">
               Все ({{ allUniqueChatIds.length }})
@@ -621,9 +586,7 @@ const vegSearch = ref('')
 const expandedRest = ref(null)
 const vegSubTab = ref('rests')
 
-// Session & corrections
-const activeSession = ref(null)
-const vegOrderStatus = ref([])
+// Corrections
 const corrStats = ref(null)
 
 // Reminder log filters
@@ -649,8 +612,6 @@ async function loadData() {
     vegSubs.value = data.veg_subs || []
     allRestaurants.value = data.all_restaurants || []
     reminderLog.value = data.reminder_log || []
-    activeSession.value = data.active_session || null
-    vegOrderStatus.value = data.veg_order_status || []
     corrStats.value = data.correction_stats || null
   } catch (e) {
     console.error('tg_admin_stats error:', e)
@@ -806,22 +767,6 @@ const filteredReminderLog = computed(() => {
   return list
 })
 
-const vegOrderStatusMap = computed(() => {
-  const map = {}
-  for (const o of vegOrderStatus.value) {
-    map[o.restaurant_number] = o
-  }
-  return map
-})
-
-const vegSubmittedRests = computed(() => {
-  return subscribedRests.value.filter(r => vegOrderStatusMap.value[r.number])
-})
-
-const vegMissingRests = computed(() => {
-  return subscribedRests.value.filter(r => !vegOrderStatusMap.value[r.number])
-})
-
 const vegUniqueSubscribers = computed(() => {
   const map = {}
   for (const s of vegSubs.value) {
@@ -889,7 +834,7 @@ async function unlinkUser(u) {
 }
 
 async function sendVegReminder(rest) {
-  const defaultMsg = `Напоминание для ресторана ${rest.number}: пожалуйста, подайте заявку на овощи.`
+  const defaultMsg = `Напоминание для ресторана ${rest.number}: пожалуйста, подайте заявку поставщику.`
   const msg = prompt('Текст напоминания:', defaultMsg)
   if (!msg) return
   try {

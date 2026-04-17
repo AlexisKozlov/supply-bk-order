@@ -1816,14 +1816,24 @@ if ($endpoint === 'rpc') {
         $byExt = [];
         $byGtin = [];
         foreach ($allProducts as $p) {
-            $key = trim($p['sku']) . '|' . trim($p['legal_entity']);
-            $bySku[$key] = $p;
-            if (!empty($p['external_code'])) $byExt[trim($p['external_code']) . '|' . trim($p['legal_entity'])] = $p;
-            if (!empty($p['gtin'])) $byGtin[trim($p['gtin']) . '|' . trim($p['legal_entity'])] = $p;
-            // Также без юрлица — fallback
-            if (!empty($p['external_code'])) $byExt[trim($p['external_code'])] = $byExt[trim($p['external_code'])] ?? $p;
-            if (!empty($p['gtin'])) $byGtin[trim($p['gtin'])] = $byGtin[trim($p['gtin'])] ?? $p;
-            $bySku[trim($p['sku'])] = $bySku[trim($p['sku'])] ?? $p;
+            $leRow = trim($p['legal_entity']);
+            $grpRow = getEntityGroup($leRow);
+            // Точное совпадение по юрлицу.
+            $bySku[trim($p['sku']) . '|' . $leRow] = $p;
+            if (!empty($p['external_code'])) $byExt[trim($p['external_code']) . '|' . $leRow] = $p;
+            if (!empty($p['gtin'])) $byGtin[trim($p['gtin']) . '|' . $leRow] = $p;
+            // Fallback в пределах группы юрлиц (BK_VM / PS) — ни в коем случае не глобально,
+            // чтобы не склеить товары из чужой группы (напр. цены ВМ с поставщиком из ПС).
+            $bySkuGrpKey = trim($p['sku']) . '|group|' . $grpRow;
+            $bySku[$bySkuGrpKey] = $bySku[$bySkuGrpKey] ?? $p;
+            if (!empty($p['external_code'])) {
+                $byExtGrpKey = trim($p['external_code']) . '|group|' . $grpRow;
+                $byExt[$byExtGrpKey] = $byExt[$byExtGrpKey] ?? $p;
+            }
+            if (!empty($p['gtin'])) {
+                $byGtinGrpKey = trim($p['gtin']) . '|group|' . $grpRow;
+                $byGtin[$byGtinGrpKey] = $byGtin[$byGtinGrpKey] ?? $p;
+            }
         }
 
         // Собираем уникальные (товар → цена) — в файле одна и та же цена повторяется для разных ресторанов
@@ -1843,7 +1853,8 @@ if ($endpoint === 'rpc') {
         }
 
         // Список юрлиц в группе выбранного юрлица: для БК/ВМ — оба, для ПС — только ПС
-        $entities = getEntitiesInGroup(getEntityGroup($le));
+        $group = getEntityGroup($le);
+        $entities = getEntitiesInGroup($group);
         $matched = 0;
         $skipped = [];
         $upsert = $pdo->prepare("INSERT INTO product_prices (sku, supplier, legal_entity, price, vat_rate, unit_type, price_type, currency, updated_by)
@@ -1860,10 +1871,10 @@ if ($endpoint === 'rpc') {
                     if ($up['ec']) $product = $byExt[$up['ec'] . '|' . $le] ?? null;
                     if (!$product && $up['gt']) $product = $byGtin[$up['gt'] . '|' . $le] ?? null;
                     if (!$product && $up['sk']) $product = $bySku[$up['sk'] . '|' . $le] ?? null;
-                    // Fallback без юрлица
-                    if (!$product && $up['ec']) $product = $byExt[$up['ec']] ?? null;
-                    if (!$product && $up['gt']) $product = $byGtin[$up['gt']] ?? null;
-                    if (!$product && $up['sk']) $product = $bySku[$up['sk']] ?? null;
+                    // Fallback в пределах той же группы юрлиц (без выхода в чужую группу).
+                    if (!$product && $up['ec']) $product = $byExt[$up['ec'] . '|group|' . $group] ?? null;
+                    if (!$product && $up['gt']) $product = $byGtin[$up['gt'] . '|group|' . $group] ?? null;
+                    if (!$product && $up['sk']) $product = $bySku[$up['sk'] . '|group|' . $group] ?? null;
                     if (!$product) continue;
                     $upsert->execute([
                         $product['sku'],
@@ -2592,15 +2603,19 @@ if ($endpoint === 'rpc') {
             $recipes = $s->fetchAll();
         }
 
-        // Собрать все SKU ингредиентов для массового поиска аналогов
+        // Собрать все SKU ингредиентов для массового поиска аналогов.
+        // JOIN с products фильтруем по группе юрлиц рецепта, чтобы не подтянуть карточку
+        // из чужой группы (например, поставщика ПС для рецепта БК_ВМ).
         $allSkus = [];
         $recipeIngs = [];
         foreach ($recipes as $r) {
             $s = $pdo->prepare("SELECT ri.*, p.analog_group, p.qty_per_box, p.unit_of_measure as product_unit, p.supplier as product_supplier
                 FROM recipe_ingredients ri
                 LEFT JOIN products p ON p.sku COLLATE utf8mb4_unicode_ci = ri.sku COLLATE utf8mb4_unicode_ci
+                 AND p.legal_entity_group = ?
+                 AND p.is_active = 1
                 WHERE ri.recipe_id=? ORDER BY ri.sort_order");
-            $s->execute([$r['id']]);
+            $s->execute([$group, $r['id']]);
             $ings = $s->fetchAll();
             $recipeIngs[$r['id']] = $ings;
             foreach ($ings as $ing) {
@@ -2648,8 +2663,9 @@ if ($endpoint === 'rpc') {
             $productByCardSku = [];
             if (!empty($allCardSkus)) {
                 $ph2 = implode(',', array_fill(0, count($allCardSkus), '?'));
-                $s = $pdo->prepare("SELECT sku, analog_group, qty_per_box, unit_of_measure, supplier FROM products WHERE sku COLLATE utf8mb4_unicode_ci IN ($ph2)");
-                $s->execute($allCardSkus);
+                // Фильтруем по группе юрлиц рецепта, чтобы не затянуть карточку из чужой группы.
+                $s = $pdo->prepare("SELECT sku, analog_group, qty_per_box, unit_of_measure, supplier FROM products WHERE sku COLLATE utf8mb4_unicode_ci IN ($ph2) AND legal_entity_group = ?");
+                $s->execute(array_merge($allCardSkus, [$group]));
                 while ($pr = $s->fetch()) $productByCardSku[$pr['sku']] = $pr;
             }
             // 4) Связать: recipe_sku → card → analog_skus → product
@@ -5076,6 +5092,37 @@ if ($endpoint === 'rpc') {
         }
     }
 
+    if (!function_exists('surveyCountTargetsByGroup')) {
+        function surveyCountTargetsByGroup($pdo) {
+            $rows = $pdo->query("
+                SELECT r.legal_entity_group AS grp, COUNT(*) AS cnt
+                FROM restaurants r
+                WHERE r.active = 1
+                  AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM ro_users ru
+                        WHERE ru.restaurant_number = r.number
+                          AND ru.is_active = 1
+                          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = r.legal_entity_group COLLATE utf8mb4_unicode_ci
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM veg_telegram_subs vs
+                        WHERE vs.restaurant_number = r.number
+                    )
+                  )
+                GROUP BY r.legal_entity_group
+            ")->fetchAll();
+            $out = ['BK_VM' => 0, 'PS' => 0];
+            foreach ($rows as $r) {
+                $g = $r['grp'] ?? '';
+                if (isset($out[$g])) $out[$g] = (int)$r['cnt'];
+            }
+            return $out;
+        }
+    }
+
     if (!function_exists('surveyGetRecipientChatIds')) {
         function surveyGetRecipientChatIds($pdo, $group) {
             $group = in_array($group, ['BK_VM', 'PS'], true) ? $group : 'BK_VM';
@@ -5131,9 +5178,10 @@ if ($endpoint === 'rpc') {
             ORDER BY s.created_at DESC
         ")->fetchAll();
 
+        $targetCounts = surveyCountTargetsByGroup($pdo);
         foreach ($rows as &$row) {
             $group = $row['legal_entity_group'] ?? 'BK_VM';
-            $row['target_restaurants_count'] = count(surveyGetTargetRestaurants($pdo, $group));
+            $row['target_restaurants_count'] = (int)($targetCounts[$group] ?? 0);
         }
         unset($row);
 
@@ -5153,19 +5201,39 @@ if ($endpoint === 'rpc') {
         $s = $survey->fetch();
         if (!$s) respond(['error' => 'Не найдено'], 404);
 
-        $questions = $pdo->prepare("SELECT * FROM survey_questions WHERE survey_id = ? ORDER BY sort_order, id");
-        $questions->execute([$id]);
-        $qs = $questions->fetchAll();
-
-        foreach ($qs as &$q) {
-            $opts = $pdo->prepare("SELECT * FROM survey_options WHERE question_id = ? ORDER BY sort_order, id");
-            $opts->execute([$q['id']]);
-            $q['options'] = $opts->fetchAll();
+        // Вопросы + опции одним запросом
+        $qRowsStmt = $pdo->prepare("
+            SELECT sq.id AS question_id, sq.text AS question_text, sq.sort_order AS question_sort,
+                   so.id AS option_id, so.text AS option_text, so.sort_order AS option_sort
+            FROM survey_questions sq
+            LEFT JOIN survey_options so ON so.question_id = sq.id
+            WHERE sq.survey_id = ?
+            ORDER BY sq.sort_order, sq.id, so.sort_order, so.id
+        ");
+        $qRowsStmt->execute([$id]);
+        $questionsMap = [];
+        foreach ($qRowsStmt->fetchAll() as $row) {
+            $qid = (int)$row['question_id'];
+            if (!isset($questionsMap[$qid])) {
+                $questionsMap[$qid] = [
+                    'id' => $qid,
+                    'text' => $row['question_text'],
+                    'sort_order' => (int)$row['question_sort'],
+                    'options' => [],
+                ];
+            }
+            if (!empty($row['option_id'])) {
+                $questionsMap[$qid]['options'][] = [
+                    'id' => (int)$row['option_id'],
+                    'text' => $row['option_text'],
+                    'sort_order' => (int)$row['option_sort'],
+                ];
+            }
         }
-        $s['questions'] = $qs;
+        $s['questions'] = array_values($questionsMap);
 
-        // Ответы
-        $responses = $pdo->prepare("
+        // Ответы (шапка) одним запросом
+        $respStmt = $pdo->prepare("
             SELECT sr.id, sr.restaurant_number, sr.legal_entity_group, sr.comment, sr.submitted_at,
                    sr.telegram_chat_id, r.address, r.city
             FROM survey_responses sr
@@ -5175,30 +5243,63 @@ if ($endpoint === 'rpc') {
             WHERE sr.survey_id = ?
             ORDER BY sr.restaurant_number ASC, sr.submitted_at DESC
         ");
-        $responses->execute([$id]);
-        $respRows = $responses->fetchAll();
+        $respStmt->execute([$id]);
+        $respRows = $respStmt->fetchAll();
 
-        foreach ($respRows as &$r) {
-            $ans = $pdo->prepare("
-                SELECT sa.question_id, sq.text AS question_text, so.id AS option_id, so.text AS option_text
-                FROM survey_answers sa
-                JOIN survey_questions sq ON sq.id = sa.question_id
-                JOIN survey_options so ON so.id = sa.option_id
-                WHERE sa.response_id = ?
-                ORDER BY sq.sort_order, sq.id
-            ");
-            $ans->execute([$r['id']]);
-            $r['answers'] = $ans->fetchAll();
+        // Детали ответов одним запросом
+        $ansStmt = $pdo->prepare("
+            SELECT sa.response_id, sa.question_id, sq.text AS question_text,
+                   sa.option_id, so.text AS option_text, sq.sort_order AS q_sort
+            FROM survey_answers sa
+            JOIN survey_responses sr ON sr.id = sa.response_id
+            JOIN survey_questions sq ON sq.id = sa.question_id
+            JOIN survey_options so ON so.id = sa.option_id
+            WHERE sr.survey_id = ?
+            ORDER BY sq.sort_order, sq.id
+        ");
+        $ansStmt->execute([$id]);
+        $ansByResp = [];
+        $optionCounts = [];
+        foreach ($ansStmt->fetchAll() as $row) {
+            $rid = (int)$row['response_id'];
+            $ansByResp[$rid] ??= [];
+            $ansByResp[$rid][] = [
+                'question_id' => (int)$row['question_id'],
+                'question_text' => $row['question_text'],
+                'option_id' => (int)$row['option_id'],
+                'option_text' => $row['option_text'],
+            ];
+            $oid = (int)$row['option_id'];
+            $optionCounts[$oid] = ($optionCounts[$oid] ?? 0) + 1;
         }
+        foreach ($respRows as &$r) {
+            $r['answers'] = $ansByResp[(int)$r['id']] ?? [];
+        }
+        unset($r);
         $s['responses'] = $respRows;
 
-        $answeredStmt = $pdo->prepare("SELECT restaurant_number FROM survey_responses WHERE survey_id = ?");
-        $answeredStmt->execute([$id]);
-        $answered = [];
-        foreach ($answeredStmt->fetchAll(PDO::FETCH_COLUMN) as $restaurantNumber) {
-            $answered[(int)$restaurantNumber] = true;
+        // Аналитика по вариантам (% и count)
+        $totalResponses = count($respRows);
+        foreach ($s['questions'] as &$q) {
+            $totalForQ = 0;
+            foreach ($q['options'] as $opt) {
+                $totalForQ += (int)($optionCounts[(int)$opt['id']] ?? 0);
+            }
+            foreach ($q['options'] as &$opt) {
+                $cnt = (int)($optionCounts[(int)$opt['id']] ?? 0);
+                $opt['responses_count'] = $cnt;
+                $opt['responses_percent'] = $totalForQ > 0 ? round($cnt * 100 / $totalForQ) : 0;
+            }
+            unset($opt);
+            $q['responses_total'] = $totalForQ;
         }
+        unset($q);
 
+        // Не ответили
+        $answered = [];
+        foreach ($respRows as $r) {
+            $answered[(int)$r['restaurant_number']] = true;
+        }
         $pendingRows = [];
         foreach (surveyGetTargetRestaurants($pdo, $s['legal_entity_group']) as $restaurant) {
             if (!isset($answered[(int)$restaurant['restaurant_number']])) {
@@ -5206,6 +5307,7 @@ if ($endpoint === 'rpc') {
             }
         }
         $s['pending_restaurants'] = $pendingRows;
+        $s['target_restaurants_count'] = count($pendingRows) + $totalResponses;
 
         respond($s);
     }

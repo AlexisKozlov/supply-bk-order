@@ -1675,8 +1675,10 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             $pdo->prepare("UPDATE ro_orders SET status = 'submitted', updated_at = NOW(), updated_by = ?, comment = ? WHERE id = ?")
                 ->execute(["Ресторан {$rest['restaurant_number']}", $comment, $orderId]);
         } else {
-            // Создаём новый заказ
-            $le = $rest['legal_entity'];
+            // Создаём новый заказ. legal_entity всегда вычисляем заново через
+            // roGetLegalEntity — это единый источник истины (в т.ч. ресторан 3 = Воглия Матта).
+            // Не опираемся на ro_users.legal_entity: там могут быть старые/некорректные значения.
+            $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
             $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?)")
                 ->execute([$session['id'], $rest['restaurant_number'], $deliveryDate, "Ресторан {$rest['restaurant_number']}", $le, $comment]);
             $orderId = $pdo->lastInsertId();
@@ -2889,20 +2891,29 @@ if (strpos($roAction, 'admin') === 0) {
         if (!empty($orderIds)) {
             $ph = implode(',', array_fill(0, count($orderIds), '?'));
             $items = $pdo->prepare("SELECT oi.*, o.restaurant_number, p.weight_netto, p.weight_brutto, p.external_code, p.gtin, p.boxes_per_pallet, COALESCE(NULLIF(t.multiplicity, 0), p.multiplicity, 1) as multiplicity, COALESCE(p.is_traceable, 0) as is_traceable,
-                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit' ORDER BY pp.updated_at DESC LIMIT 1) AS deposit_price,
-                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' ORDER BY pp.updated_at DESC LIMIT 1) AS purchase_price
+                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.price_type = 'deposit'
+                          AND ((o.legal_entity LIKE '%Пицца%' AND pp.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND pp.legal_entity NOT LIKE '%Пицца%'))
+                          ORDER BY (pp.legal_entity = o.legal_entity) DESC, pp.updated_at DESC LIMIT 1) AS deposit_price,
+                       (SELECT pp.price FROM product_prices pp WHERE pp.sku = oi.sku AND pp.price_type = 'purchase'
+                          AND ((o.legal_entity LIKE '%Пицца%' AND pp.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND pp.legal_entity NOT LIKE '%Пицца%'))
+                          ORDER BY (pp.legal_entity = o.legal_entity) DESC, pp.updated_at DESC LIMIT 1) AS purchase_price
                 FROM ro_order_items oi
                 JOIN ro_orders o ON o.id = oi.order_id
-                LEFT JOIN ro_templates t
-                    ON t.legal_entity = o.legal_entity
-                   AND t.category = oi.category
-                   AND t.sku = oi.sku
-                   AND t.is_active = 1
+                LEFT JOIN ro_templates t ON t.id = (
+                    SELECT t2.id FROM ro_templates t2
+                    WHERE t2.sku = oi.sku
+                      AND t2.category = oi.category
+                      AND t2.is_active = 1
+                      AND ((o.legal_entity LIKE '%Пицца%' AND t2.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND t2.legal_entity NOT LIKE '%Пицца%'))
+                    ORDER BY (t2.legal_entity = o.legal_entity) DESC
+                    LIMIT 1
+                )
                 LEFT JOIN products p ON p.id = (
                     SELECT p2.id
                     FROM products p2
-                    WHERE p2.sku = oi.sku AND p2.legal_entity = o.legal_entity
-                    ORDER BY p2.is_active DESC, p2.id ASC
+                    WHERE p2.sku = oi.sku
+                      AND ((o.legal_entity LIKE '%Пицца%' AND p2.legal_entity LIKE '%Пицца%') OR (o.legal_entity NOT LIKE '%Пицца%' AND p2.legal_entity NOT LIKE '%Пицца%'))
+                    ORDER BY (p2.legal_entity = o.legal_entity) DESC, p2.is_active DESC, p2.id ASC
                     LIMIT 1
                 )
                 WHERE oi.order_id IN ({$ph}) AND oi.quantity > 0 ORDER BY oi.category, oi.product_name");
@@ -3347,9 +3358,11 @@ if (strpos($roAction, 'admin') === 0) {
                 <=> [$b['legal_entity'], $b['warehouse'], $b['product_name'], $b['sku']];
         });
 
-        // Карта поставщиков: sku|legal_entity -> supplier (активные карточки приоритетнее)
+        // Карта поставщиков: sku|legal_entity -> supplier (точное совпадение, активные карточки приоритетнее).
+        // Fallback ищем строго внутри той же группы юрлиц (BK_VM / PS), чтобы ВМ не подтягивала
+        // данные из ПС и наоборот — это нарушение правила групп.
         $supplierMap = [];
-        $supplierBySku = [];
+        $supplierByGroup = [];
         $balanceSkus = array_values(array_unique(array_column($balances, 'sku')));
         if (!empty($balanceSkus)) {
             $ph = implode(',', array_fill(0, count($balanceSkus), '?'));
@@ -3358,12 +3371,14 @@ if (strpos($roAction, 'admin') === 0) {
             foreach ($qs->fetchAll() as $row) {
                 $normalizedSku = roNormalizeSku($row['sku'] ?? '');
                 if ($normalizedSku === '') continue;
+                if (empty($row['supplier'])) continue;
                 $mk = $normalizedSku . '|' . $row['legal_entity'];
-                if (!isset($supplierMap[$mk]) && !empty($row['supplier'])) {
+                if (!isset($supplierMap[$mk])) {
                     $supplierMap[$mk] = $row['supplier'];
                 }
-                if (!isset($supplierBySku[$normalizedSku]) && !empty($row['supplier'])) {
-                    $supplierBySku[$normalizedSku] = $row['supplier'];
+                $gk = $normalizedSku . '|' . getEntityGroup($row['legal_entity']);
+                if (!isset($supplierByGroup[$gk])) {
+                    $supplierByGroup[$gk] = $row['supplier'];
                 }
             }
         }
@@ -3416,7 +3431,7 @@ if (strpos($roAction, 'admin') === 0) {
             $key = $normalizedSku . '|' . $le;
             $orderedQty = $orders[$key] ?? 0;
             $seenSkus[$key] = true;
-            $supplier = $supplierMap[$key] ?? $supplierBySku[$normalizedSku] ?? '';
+            $supplier = $supplierMap[$key] ?? $supplierByGroup[$normalizedSku . '|' . getEntityGroup($le)] ?? '';
             $items[] = [
                 'sku' => $normalizedSku,
                 'product_name' => $b['product_name'],
@@ -3436,9 +3451,13 @@ if (strpos($roAction, 'admin') === 0) {
             if (isset($seenSkus[$key])) continue;
             list($sku, $le) = explode('|', $key);
             if ($legalEntity && $le !== $legalEntity) continue;
-            // Получаем название товара из БД (активная карточка приоритетнее)
-            $ps = $pdo->prepare("SELECT name, category, supplier FROM products WHERE sku = ? ORDER BY is_active DESC, id ASC LIMIT 1");
-            $ps->execute([$sku]);
+            // Получаем название товара из БД. Точная карточка по юрлицу приоритетнее;
+            // если её нет — ищем внутри той же группы юрлиц (BK_VM / PS), чтобы не подтянуть карточку чужой группы.
+            $leGroup = getEntityGroup($le);
+            $entitiesInGroup = getEntitiesInGroup($leGroup);
+            $grpPh = implode(',', array_fill(0, count($entitiesInGroup), '?'));
+            $ps = $pdo->prepare("SELECT name, category, supplier FROM products WHERE sku = ? AND legal_entity IN ($grpPh) ORDER BY (legal_entity = ?) DESC, is_active DESC, id ASC LIMIT 1");
+            $ps->execute(array_merge([$sku], $entitiesInGroup, [$le]));
             $prod = $ps->fetch();
             $prodName = $prod ? $prod['name'] : $sku;
             $warehouse = '';
