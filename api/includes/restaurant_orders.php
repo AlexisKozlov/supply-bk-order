@@ -327,24 +327,8 @@ function roCanEdit($pdo, $sessionId, $deliveryDate) {
     return $now->format('H:i:s') < $deadlines['edit_until'];
 }
 
-function roGetLegalEntity($pdo, $restaurantNumber, $group = null) {
-    // Если группу не передали — смотрим её в таблице restaurants.
-    // Может быть до двух записей (одна в BK_VM, одна в PS) — берём первую;
-    // пока PS-рестораны не заведены, это безопасно.
-    if ($group === null) {
-        $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-        $s->execute([(int)$restaurantNumber]);
-        $group = $s->fetchColumn() ?: 'BK_VM';
-    }
-    if ($group === 'PS') {
-        return 'ООО "Пицца Стар"';
-    }
-    // Группа BK_VM: исторически ресторан 3 = Воглия Матта, остальные = Бургер БК
-    if ((int)$restaurantNumber === 3) {
-        return 'ООО "Воглия Матта"';
-    }
-    return 'ООО "Бургер БК"';
-}
+// roGetLegalEntity перенесён в api/includes/legal_entities.php — доступен во всех местах
+// (включая cron_telegram.php и telegram_bot.php), где нужно узнать юрлицо ресторана.
 
 function roGetTodayMinsk() {
     $tz = new DateTimeZone('Europe/Minsk');

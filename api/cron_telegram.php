@@ -1440,25 +1440,23 @@ try {
         foreach ($seen as $c) {
             $rn = $c['restaurant_number'];
             $dd = $c['delivery_date'];
-
-            // Уже было авто-создано?
-            $logCheck = $pdo->prepare("SELECT id FROM so_auto_submit_log WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
-            $logCheck->execute([$supId, $rn, $dd]);
-            if ($logCheck->fetch()) continue;
+            $le = roGetLegalEntity($pdo, $rn, $c['group']);
 
             // Есть ли уже submitted/locked заявка?
             $oc = $pdo->prepare("SELECT COUNT(*) FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND status IN ('submitted','locked')");
             $oc->execute([$supId, $rn, $dd]);
             if ((int)$oc->fetchColumn() > 0) continue;
 
-            // Определяем legal_entity ресторана (логика аналогична roGetLegalEntity)
-            if ($c['group'] === 'PS') {
-                $le = 'ООО "Пицца Стар"';
-            } elseif ((int)$rn === 3) {
-                $le = 'ООО "Воглия Матта"';
-            } else {
-                $le = 'ООО "Бургер БК"';
-            }
+            // Есть ли черновик с правками закупщика (admin_qty)?
+            // Если закупщик вмешался — не подавать автоматически: это его решение.
+            $draftCheck = $pdo->prepare("
+                SELECT COUNT(*) FROM so_orders o
+                JOIN so_order_items oi ON oi.order_id = o.id
+                WHERE o.supplier_id = ? AND o.restaurant_number = ? AND o.delivery_date = ? AND o.legal_entity = ?
+                  AND o.status = 'draft' AND oi.admin_qty IS NOT NULL
+            ");
+            $draftCheck->execute([$supId, $rn, $dd, $le]);
+            if ((int)$draftCheck->fetchColumn() > 0) continue;
 
             // Ищем последнюю поданную заявку
             $prev = $pdo->prepare("
@@ -1471,10 +1469,20 @@ try {
             $prevOrderId = $prev->fetchColumn();
             if (!$prevOrderId) continue;
 
+            // Атомарный захват права на авто-подачу через UNIQUE(supplier_id,restaurant_number,delivery_date)
+            // в so_auto_submit_log. Если параллельный cron уже обработал — INSERT IGNORE вернёт 0 затронутых строк.
+            $lockStmt = $pdo->prepare("
+                INSERT IGNORE INTO so_auto_submit_log (supplier_id, restaurant_number, delivery_date, source_order_id)
+                VALUES (?, ?, ?, ?)
+            ");
+            $lockStmt->execute([$supId, $rn, $dd, $prevOrderId]);
+            if ($lockStmt->rowCount() === 0) continue; // уже обработано
+
             // Копируем позиции
             $pdo->beginTransaction();
             try {
-                // Создаём или обновляем заявку-черновик → submitted
+                // Создаём или обновляем заявку-черновик → submitted.
+                // Черновик без admin_qty — безопасно перезаписать (проверили выше).
                 $existing = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
                 $existing->execute([$supId, $rn, $dd, $le]);
                 $existingId = $existing->fetchColumn();
@@ -1491,21 +1499,23 @@ try {
                     $newOrderId = (int)$pdo->lastInsertId();
                 }
 
-                // Копируем позиции (сбрасываем admin_qty)
+                // Копируем позиции (берём финальные значения: admin_qty если было, иначе quantity)
                 $pdo->prepare("
                     INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity)
                     SELECT ?, product_id, sku, product_name, COALESCE(admin_qty, quantity)
                     FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0
                 ")->execute([$newOrderId, $prevOrderId]);
 
-                $pdo->prepare("
-                    INSERT INTO so_auto_submit_log (supplier_id, restaurant_number, delivery_date, source_order_id, new_order_id)
-                    VALUES (?, ?, ?, ?, ?)
-                ")->execute([$supId, $rn, $dd, $prevOrderId, $newOrderId]);
+                // Дополняем запись лога новым order_id (сама запись уже вставлена lock-шагом выше).
+                $pdo->prepare("UPDATE so_auto_submit_log SET new_order_id = ? WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?")
+                    ->execute([$newOrderId, $supId, $rn, $dd]);
 
                 $pdo->commit();
             } catch (Exception $e) {
                 $pdo->rollBack();
+                // Откатываем lock-запись, чтобы следующий запуск cron смог повторить попытку.
+                $pdo->prepare("DELETE FROM so_auto_submit_log WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND new_order_id IS NULL")
+                    ->execute([$supId, $rn, $dd]);
                 error_log('[cron_telegram] auto_submit error for ' . $supId . '/' . $rn . '/' . $dd . ': ' . $e->getMessage());
                 continue;
             }

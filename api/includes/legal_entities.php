@@ -7,6 +7,20 @@ function getEntityGroup($legalEntity) {
     return (strpos($legalEntity, 'Пицца Стар') !== false) ? 'PS' : 'BK_VM';
 }
 
+// Полное юрлицо ресторана по его номеру + группе.
+// Единый источник истины: PS → «Пицца Стар», BK_VM + номер 3 → «Воглия Матта», остальные BK_VM → «Бургер БК».
+// Если группа не задана — пытаемся определить по таблице restaurants.
+function roGetLegalEntity($pdo, $restaurantNumber, $group = null) {
+    if ($group === null) {
+        $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+        $s->execute([(int)$restaurantNumber]);
+        $group = $s->fetchColumn() ?: 'BK_VM';
+    }
+    if ($group === 'PS') return 'ООО "Пицца Стар"';
+    if ((int)$restaurantNumber === 3) return 'ООО "Воглия Матта"';
+    return 'ООО "Бургер БК"';
+}
+
 // Возвращает список полных названий юрлиц, входящих в группу ('BK_VM' | 'PS').
 // Нужно для таблиц с данными (analysis_data, stock_collections, orders и т.п.),
 // где хранится textовая колонка legal_entity без колонки legal_entity_group.
