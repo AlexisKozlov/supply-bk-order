@@ -101,6 +101,12 @@ function soGetSupplierName($pdo, $supplierId) {
     return $s->fetchColumn() ?: 'Поставщик';
 }
 
+// Экранирование текста для HTML-сообщений Telegram (parse_mode=HTML).
+// Названия товаров/поставщиков с символами <, >, & ломают парсер без этого.
+function soEsc($v) {
+    return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
+
 function soGetSupplierSettingsBot($pdo, $supplierId) {
     $s = $pdo->prepare("SELECT supplier_id, is_accepting_orders, default_deadline_time, pause_message FROM so_supplier_settings WHERE supplier_id = ?");
     $s->execute([$supplierId]);
@@ -607,7 +613,7 @@ function soOrderSelectRest($chatId, $msgId, $supplierId) {
         soOrderSelectDay($chatId, $msgId, $supplierId, $restNums[0]);
         return;
     }
-    $text = "📦 <b>{$supName}</b>\n\nВыберите ресторан:";
+    $text = "📦 <b>" . soEsc($supName) . "</b>\n\nВыберите ресторан:";
     $btns = [];
     foreach ($subs as $sub) {
         $rn = $sub['restaurant_number'];
@@ -635,7 +641,7 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
     $dayNamesFull = [1=>'Понедельник',2=>'Вторник',3=>'Среда',4=>'Четверг',5=>'Пятница',6=>'Суббота',7=>'Воскресенье'];
 
     $btns = [];
-    $text = "📦 <b>{$supName}</b> — Ресторан {$restNum}\n\nВыберите день доставки:\n";
+    $text = "📦 <b>" . soEsc($supName) . "</b> — Ресторан " . soEsc($restNum) . "\n\nВыберите день доставки:\n";
 
     foreach ($botData['available_dates'] as $dateInfo) {
         $deliveryDate = $dateInfo['delivery_date'];
@@ -698,14 +704,14 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $products = $tpl->fetchAll();
 
     if (!$products) {
-        editMessage($chatId, $msgId, "📦 <b>{$supName}</b>\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+        editMessage($chatId, $msgId, "📦 <b>" . soEsc($supName) . "</b>\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
         return;
     }
 
     // Существующий заказ
     $existingQty = [];
-    $eo = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
-    $eo->execute([$supplierId, $restNum, $deliveryDate]);
+    $eo = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+    $eo->execute([$supplierId, $restNum, $deliveryDate, $le]);
     $order = $eo->fetch();
     if ($order) {
         $ei = $pdo->prepare("SELECT sku, COALESCE(admin_qty, quantity) as effective_qty FROM so_order_items WHERE order_id = ?");
@@ -740,8 +746,8 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         }
     }
 
-    $text = "📦 <b>{$supName}</b>\n";
-    $text .= "Ресторан: <b>{$restNum}</b>\n";
+    $text = "📦 <b>" . soEsc($supName) . "</b>\n";
+    $text .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
     $text .= "Доставка: <b>{$dateLabel}</b>\n\n";
 
     // Показываем текущую заявку, если есть
@@ -750,7 +756,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         foreach ($products as $p) {
             $qty = $existingQty[$p['sku']] ?? 0;
             if ($qty > 0) {
-                $text .= "• {$p['product_name']}: <b>{$qty}</b>\n";
+                $text .= "• " . soEsc($p['product_name']) . ": <b>{$qty}</b>\n";
             }
         }
         $text .= "\nЧтобы изменить — скопируйте шаблон ниже, измените числа и отправьте:\n\n";
@@ -760,7 +766,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
             $prevDateLabel = $prevDateObj->format('d.m');
             $text .= "📋 <b>Ваша предыдущая заявка от {$prevDateLabel}:</b>\n";
             foreach ($prevOrder['items'] as $it) {
-                $text .= "• {$it['product_name']}: <b>" . (0 + (float)$it['qty']) . "</b>\n";
+                $text .= "• " . soEsc($it['product_name']) . ": <b>" . (0 + (float)$it['qty']) . "</b>\n";
             }
             $text .= "\nСкопируйте шаблон ниже, впишите количества и отправьте:\n\n";
         } else {
@@ -774,7 +780,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         $hint = '';
         if ($p['multiplicity'] && $p['multiplicity'] > 1) $hint = " (кр.{$p['multiplicity']})";
         if ($p['min_qty'] && $p['min_qty'] > 0) $hint .= " (мин.{$p['min_qty']})";
-        $text .= "{$p['product_name']}{$hint}: {$qty}\n";
+        $text .= soEsc($p['product_name']) . "{$hint}: {$qty}\n";
     }
     $text .= "</code>";
 
@@ -826,8 +832,8 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     // Сохраняем заявку-отказ (без позиций)
     try {
         $pdo->beginTransaction();
-        $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $old->execute([$supplierId, $restNum, $deliveryDate]);
+        $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+        $old->execute([$supplierId, $restNum, $deliveryDate, $le]);
         $oldOrder = $old->fetch();
         $isUpdate = false;
         if ($oldOrder) {
@@ -842,7 +848,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
-        editMessage($chatId, $msgId, "❌ Ошибка сохранения: " . htmlspecialchars($e->getMessage()), ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
+        editMessage($chatId, $msgId, "❌ Ошибка сохранения: " . soEsc($e->getMessage()), ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]]]]);
         return;
     }
 
@@ -851,7 +857,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
         $title = $isUpdate ? '🚫 <b>Поставка отменена</b>' : '🚫 <b>Поставка не нужна</b>';
         $msg = $title . "\n\n";
-        $msg .= "🏪 <b>Поставщик:</b> " . htmlspecialchars($supName, ENT_QUOTES | ENT_HTML5, 'UTF-8') . "\n";
+        $msg .= "🏪 <b>Поставщик:</b> " . soEsc($supName) . "\n";
         $msg .= "📅 <b>Доставка:</b> " . $deliveryFmt . "\n\n";
         $msg .= "<i>Ресторан отметил, что поставка на эту дату не требуется.</i>";
 
@@ -869,8 +875,8 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     // Подтверждение в чате
     $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
     $confirmText = "🚫 <b>Поставка не нужна</b>\n\n";
-    $confirmText .= "Поставщик: <b>{$supName}</b>\n";
-    $confirmText .= "Ресторан: <b>{$restNum}</b>\n";
+    $confirmText .= "Поставщик: <b>" . soEsc($supName) . "</b>\n";
+    $confirmText .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
     $confirmText .= "Дата: <b>{$deliveryFmt}</b>\n\n";
     $confirmText .= "<i>Закупщик увидит, что на эту дату ваш ресторан ничего не заказывает.</i>";
 
@@ -969,33 +975,35 @@ function soOrderProcessInput($chatId, $text) {
     // Сохраняем заказ
     try {
         $pdo->beginTransaction();
-        // Удаляем старый если есть
-        $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
-        $old->execute([$supplierId, $restNum, $deliveryDate]);
+        // Ищем существующую заявку — UPDATE сохраняет id, admin_qty и историю
+        $old = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ? AND legal_entity = ?");
+        $old->execute([$supplierId, $restNum, $deliveryDate, $le]);
         $oldOrder = $old->fetch();
         if ($oldOrder) {
-            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$oldOrder['id']]);
-            $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$oldOrder['id']]);
+            $orderId = $oldOrder['id'];
+            $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
+            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
+                ->execute([$orderId]);
+        } else {
+            $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                ->execute([$supplierId, $restNum, $deliveryDate, $le]);
+            $orderId = $pdo->lastInsertId();
         }
-        // Вставляем новый
-        $pdo->prepare("INSERT INTO so_orders (supplier_id, restaurant_number, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-            ->execute([$supplierId, $restNum, $deliveryDate, $le]);
-        $orderId = $pdo->lastInsertId();
         $ins = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
         foreach ($items as $it) { $ins->execute([$orderId, $it['product_id'], $it['sku'], $it['product_name'], $it['quantity']]); }
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
-        sendMessage($chatId, "❌ Ошибка сохранения: " . $e->getMessage());
+        sendMessage($chatId, "❌ Ошибка сохранения: " . soEsc($e->getMessage()));
         return;
     }
 
     $totalQty = array_sum(array_column($items, 'quantity'));
-    $confirmText = "✅ <b>Заявка {$supName} отправлена!</b>\n\n";
-    $confirmText .= "Ресторан: <b>{$restNum}</b>\n";
+    $confirmText = "✅ <b>Заявка " . soEsc($supName) . " отправлена!</b>\n\n";
+    $confirmText .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
     $confirmText .= "Доставка: <b>{$deliveryDate}</b>\n";
     $confirmText .= "Позиций: <b>{$matched}</b>, всего: <b>{$totalQty}</b>\n\n";
-    foreach ($items as $it) { $confirmText .= "• {$it['product_name']}: <b>{$it['quantity']}</b>\n"; }
+    foreach ($items as $it) { $confirmText .= "• " . soEsc($it['product_name']) . ": <b>{$it['quantity']}</b>\n"; }
 
     $btns = ['inline_keyboard' => [
         [['text' => '📦 К заявкам', 'callback_data' => "soord_sup_{$supplierId}"]],
@@ -1021,7 +1029,7 @@ function soFormatOrders($orders) {
                 continue;
             }
             $qtyFmt = rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.');
-            $text .= "  • {$item['product_name']}: <b>{$qtyFmt}</b>\n";
+            $text .= "  • " . soEsc($item['product_name']) . ": <b>{$qtyFmt}</b>\n";
         }
         $text .= "\n";
     }
@@ -1046,7 +1054,7 @@ function soShowMyOrders($chatId, $msgId, $supplierId) {
         return;
     }
 
-    $text = "📋 <b>{$supName}</b>\n\nВыберите ресторан:";
+    $text = "📋 <b>" . soEsc($supName) . "</b>\n\nВыберите ресторан:";
     $btns = [];
     foreach ($subs as $sub) {
         $addr = mb_substr($sub['address'] ?: $sub['city'], 0, 35);
@@ -1070,8 +1078,8 @@ function soShowRestOrders($chatId, $msgId, $supplierId, $restNum) {
     $s->execute([$supplierId, $restNum]);
     $orders = $s->fetchAll();
 
-    $text = "📋 <b>{$supName}</b>\n";
-    $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n\n";
+    $text = "📋 <b>" . soEsc($supName) . "</b>\n";
+    $text .= "🏪 Ресторан <b>" . soEsc(formatRestaurantNumber($restNum)) . "</b>\n\n";
 
     $usedLegacyHistory = false;
     $formattedOrders = [];
