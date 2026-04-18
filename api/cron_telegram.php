@@ -1166,17 +1166,23 @@ try {
         $schStmt->execute([$supId]);
         $schRows = $schStmt->fetchAll();
 
-        // Группируем по ресторану, chat_id'ы берём из ro_telegram_subs (все подписчики)
+        // Группируем по ресторану, chat_id'ы берём из обеих таблиц подписок
+        // (ro_telegram_subs — ЛК ресторана, veg_telegram_subs — бот), DISTINCT для защиты от дублей.
         $byRest = [];
         $chatIdsLookup = $pdo->prepare("
-            SELECT chat_id FROM ro_telegram_subs
-            WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1
+            SELECT DISTINCT chat_id FROM (
+                SELECT chat_id FROM ro_telegram_subs
+                WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1
+                UNION
+                SELECT chat_id FROM veg_telegram_subs
+                WHERE restaurant_number = ?
+            ) u
         ");
         foreach ($schRows as $s) {
             $rn = $s['restaurant_number'];
             if (!isset($byRest[$rn])) {
                 $grp = $s['legal_entity_group'] ?: 'BK_VM';
-                $chatIdsLookup->execute([$rn, $grp]);
+                $chatIdsLookup->execute([$rn, $grp, $rn]);
                 $cids = $chatIdsLookup->fetchAll(PDO::FETCH_COLUMN);
                 if (empty($cids)) continue; // ресторан без подписок — пропускаем
                 $byRest[$rn] = ['chat_ids' => $cids, 'group' => $grp, 'schedule' => []];
@@ -1520,9 +1526,17 @@ try {
                 continue;
             }
 
-            // Уведомление подписчикам ресторана
-            $subStmt = $pdo->prepare("SELECT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1");
-            $subStmt->execute([$rn, $c['group']]);
+            // Уведомление подписчикам ресторана (ЛК + бот, DISTINCT для защиты от дублей)
+            $subStmt = $pdo->prepare("
+                SELECT DISTINCT chat_id FROM (
+                    SELECT chat_id FROM ro_telegram_subs
+                    WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1
+                    UNION
+                    SELECT chat_id FROM veg_telegram_subs
+                    WHERE restaurant_number = ?
+                ) u
+            ");
+            $subStmt->execute([$rn, $c['group'], $rn]);
             $subChats = $subStmt->fetchAll(PDO::FETCH_COLUMN);
             $dateObj = new DateTime($dd);
             $msg = "🤖 <b>Заявка выставлена автоматически</b>\n\n";

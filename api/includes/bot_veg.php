@@ -250,10 +250,6 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
             $os->execute([$supplierId, $restNum, $deliveryDate]);
             $order = $os->fetch();
 
-            if ($deadlineInfo['status'] === 'closed' && !$order) {
-                continue;
-            }
-
             $availableDates[] = [
                 'order_date' => $orderDateObj->format('Y-m-d'),
                 'order_day_name' => $dayNamesFull[$orderDow] ?? '',
@@ -285,10 +281,23 @@ function soGetBotAvailableDates($pdo, $supplierId, $restNum) {
         return strcmp($a['delivery_date'], $b['delivery_date']);
     });
 
-    // В боте показываем только две ближайшие доступные даты.
-    $availableDates = array_slice($availableDates, 0, 2);
+    // Формируем итоговый список: до 2 «открытых/с заказом» дат + 1 ближайший закрытый
+    // без заявки (для информации: «приём уже прошёл»).
+    $openDates = [];
+    $closedInfoDate = null;
+    foreach ($availableDates as $d) {
+        $isClosedEmpty = ($d['deadline_status'] === 'closed') && empty($d['order']);
+        if ($isClosedEmpty) {
+            if ($closedInfoDate === null) $closedInfoDate = $d;
+        } else {
+            if (count($openDates) < 2) $openDates[] = $d;
+        }
+    }
+    $finalDates = $openDates;
+    if ($closedInfoDate !== null) $finalDates[] = $closedInfoDate;
+    usort($finalDates, fn($a, $b) => strcmp($a['delivery_date'], $b['delivery_date']));
 
-    return ['rest' => $rest, 'schedule' => $schedule, 'available_dates' => $availableDates, 'settings' => $settings];
+    return ['rest' => $rest, 'schedule' => $schedule, 'available_dates' => $finalDates, 'settings' => $settings];
 }
 
 function soBotRestaurantHasDeliveryDate($pdo, $supplierId, $restNum, $deliveryDate) {
@@ -654,12 +663,18 @@ function soOrderSelectDay($chatId, $msgId, $supplierId, $restNum) {
         if ($hasOrder) {
             $mark = !empty($dateInfo['order']['is_skip']) ? ' 🚫' : ' ✅';
         } elseif ($isClosed) {
-            $mark = ' ✕';
+            $mark = ' ⏱';
         } else {
             $mark = '';
         }
 
-        $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+        // Закрытый день без заявки — показываем только для информации (без ввода).
+        if ($isClosed && !$hasOrder) {
+            $btnLabel = '⏱ Приём завершён — ' . $dayLabel;
+            $btns[] = [['text' => $btnLabel, 'callback_data' => "soord_closed_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+        } else {
+            $btns[] = [['text' => $dayLabel . $mark, 'callback_data' => "soord_day_{$supplierId}_{$restNum}_{$deliveryDate}"]];
+        }
     }
 
     if (empty($btns)) {
@@ -704,7 +719,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $products = $tpl->fetchAll();
 
     if (!$products) {
-        editMessage($chatId, $msgId, "📦 <b>" . soEsc($supName) . "</b>\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
+        editMessage($chatId, $msgId, "📦 <b>" . soEsc($supName) . "</b>\n🏢 " . soEsc($le) . "\n\nНет товаров в шаблоне.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_menu_supplier']]]]);
         return;
     }
 
@@ -747,6 +762,7 @@ function soOrderShowProducts($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     }
 
     $text = "📦 <b>" . soEsc($supName) . "</b>\n";
+    $text .= "🏢 " . soEsc($le) . "\n";
     $text .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
     $text .= "Доставка: <b>{$dateLabel}</b>\n\n";
 

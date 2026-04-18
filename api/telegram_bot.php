@@ -1926,6 +1926,10 @@ if (isset($input['callback_query'])) {
         soOrderShowProducts($chatId, $msgId, $m[1], $m[2], $m[3]);
         exit;
     }
+    if (preg_match('/^soord_closed_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
+        answerCallback($cb['id'], 'Приём заявок на этот день уже завершён', true);
+        exit;
+    }
     // Поставка не нужна (заявка-отказ)
     if (preg_match('/^soord_skip_(.+?)_(\d+)_(\d{4}-\d{2}-\d{2})$/', $data, $m)) {
         answerCallback($cb['id']);
