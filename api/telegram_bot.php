@@ -2435,13 +2435,18 @@ if (preg_match('/^\d{6}$/', $text)) {
     $s->execute([$code]);
     $tok = $s->fetch();
     if ($tok && (int)($tok['telegram_chat_id'] ?? 0) === 0 && !empty($tok['restaurant_number'])) {
-        $restNum = (int)$tok['restaurant_number'];
-        $restGroup = ($tok['legal_entity_group'] ?? '') === 'PS' ? 'PS' : 'BK_VM';
-        // Привязываем
-        $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1")
-            ->execute([$chatId, $restNum, $restGroup]);
-        $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ?")->execute([$tok['id']]);
-        sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан №{$restNum} успешно привязан к вашему Telegram.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
+        // Атомарно гасим код — защита от ввода одного кода в двух чатах подряд.
+        $claim = $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ? AND used = 0");
+        $claim->execute([$tok['id']]);
+        if ($claim->rowCount() !== 1) {
+            sendMessage($chatId, "❌ Код уже был использован.\n\nПолучите новый код в личном кабинете (Профиль → Telegram → Получить код).");
+        } else {
+            $restNum = (int)$tok['restaurant_number'];
+            $restGroup = ($tok['legal_entity_group'] ?? '') === 'PS' ? 'PS' : 'BK_VM';
+            $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1")
+                ->execute([$chatId, $restNum, $restGroup]);
+            sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан №{$restNum} успешно привязан к вашему Telegram.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
+        }
     } else {
         sendMessage($chatId, "❌ Код недействителен или истёк.\n\nПолучите новый код в личном кабинете (Профиль → Telegram → Получить код).");
     }

@@ -1319,7 +1319,7 @@ try {
             $redirect = "/restaurant/orders/supplier/{$supId}";
 
             // Рассылаем каждому подписчику ресторана (свой токен на каждый chat_id)
-            $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), 0)");
+            $tokStmt = $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), 0)");
             $logStmt = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_reminder', '', ?, ?)");
             foreach ($chatIds as $chatId) {
                 $token = bin2hex(random_bytes(32));

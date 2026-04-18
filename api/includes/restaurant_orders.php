@@ -615,8 +615,13 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Ссылка недействительна или истекла']);
     }
 
-    // Помечаем токен использованным
-    $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ?")->execute([$tgAuth['id']]);
+    // Атомарно помечаем токен использованным. Если параллельный запрос успел
+    // первым (rowCount=0) — отказываем, чтобы ссылка действительно была одноразовой.
+    $claim = $pdo->prepare("UPDATE ro_tg_tokens SET used = 1 WHERE id = ? AND used = 0");
+    $claim->execute([$tgAuth['id']]);
+    if ($claim->rowCount() !== 1) {
+        roRespond(['success' => false, 'error' => 'Ссылка уже была использована']);
+    }
 
     // Если в токене явно указан ресторан (например, выбран в меню Камако) — используем его
     $restNum = $tgAuth['restaurant_number'] ?? null;
