@@ -694,7 +694,11 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         foreach ($items as $item) {
             $qty = floatval($item['quantity'] ?? 0);
             $sku = $item['sku'] ?? '';
-            if ($qty <= 0 || !isset($tplMap[$sku])) continue;
+            if ($qty <= 0) continue;
+            if (!isset($tplMap[$sku])) {
+                $valErrors[] = "{$sku}: товара нет в шаблоне поставщика";
+                continue;
+            }
             $mult = floatval($tplMap[$sku]['multiplicity'] ?? 0);
             $min  = floatval($tplMap[$sku]['min_qty'] ?? 0);
             if ($mult > 0) {
@@ -720,17 +724,26 @@ if ($soAction === 'submit-order' && $method === 'POST') {
     $existing->execute(array_merge([$supplierId, $rest['restaurant_number'], $deliveryDate], $entities));
     $existingOrder = $existing->fetch();
 
+    // legal_entity всегда берём из единого источника истины roGetLegalEntity
+    // (правильно обрабатывает ресторан 3 = Воглия Матта), а не из ro_users.legal_entity.
+    $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
+
     $pdo->beginTransaction();
     try {
+        // Сохраняем правки закупщика по SKU, чтобы повторная подача рестораном их не затёрла.
+        $preservedAdminQty = [];
         if ($existingOrder) {
             $orderId = $existingOrder['id'];
+            $existingItems = $pdo->prepare("SELECT sku, admin_qty FROM so_order_items WHERE order_id = ? AND admin_qty IS NOT NULL");
+            $existingItems->execute([$orderId]);
+            foreach ($existingItems->fetchAll() as $row) {
+                $preservedAdminQty[$row['sku']] = $row['admin_qty'];
+            }
             $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
-            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?")
-                ->execute([$orderId]);
+            // Обновляем и legal_entity — ресторан мог сменить юрлицо в рамках группы.
+            $pdo->prepare("UPDATE so_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), legal_entity = ? WHERE id = ?")
+                ->execute([$le, $orderId]);
         } else {
-            // legal_entity всегда берём из единого источника истины roGetLegalEntity
-            // (правильно обрабатывает ресторан 3 = Воглия Матта), а не из ro_users.legal_entity.
-            $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
             $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity) VALUES (?, ?, ?, ?, 'submitted', NOW(), ?)")
                 ->execute([$rest['restaurant_number'], $supplierId, $deliveryDate, $orderDate ?: date('Y-m-d'), $le]);
             $orderId = $pdo->lastInsertId();
@@ -755,8 +768,9 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             $aggregated[$sku]['quantity'] += $qty;
         }
 
-        // Вставляем позиции (UNIQUE KEY order_id+sku гарантирует отсутствие дублей)
-        $insertItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity) VALUES (?, ?, ?, ?, ?)");
+        // Вставляем позиции (UNIQUE KEY order_id+sku гарантирует отсутствие дублей).
+        // Если у этого SKU был admin_qty — сохраняем его, чтобы повторная подача не затёрла.
+        $insertItem = $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, ?, ?)");
         $totalQty = 0;
         $totalItems = 0;
         foreach ($aggregated as $item) {
@@ -766,6 +780,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
                 $item['sku'],
                 $item['product_name'],
                 $item['quantity'],
+                $preservedAdminQty[$item['sku']] ?? null,
             ]);
             $totalQty += $item['quantity'];
             $totalItems++;
@@ -1417,7 +1432,8 @@ if ($soAction === 'admin') {
             soRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
 
-        $items = $pdo->prepare("SELECT * FROM so_order_items WHERE order_id = ? ORDER BY product_name");
+        // Скрываем пустые позиции (quantity=0 и admin_qty не выставлен) — это мусор от старых правок.
+        $items = $pdo->prepare("SELECT * FROM so_order_items WHERE order_id = ? AND (quantity > 0 OR admin_qty > 0) ORDER BY product_name");
         $items->execute([$order['id']]);
         $order['items'] = $items->fetchAll();
 
@@ -1587,31 +1603,40 @@ if ($soAction === 'admin') {
             $orderStmt->execute([$suppId, $restNum, $deliveryDate]);
             $order = $orderStmt->fetch();
 
-            if (!$order) {
-                // Создаём заказ за ресторан
-                $le = $body['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
-                soRequireAdminEntityGroupAccess($sessionUser, $le);
-                $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
-                    VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
-                    ->execute([$restNum, $suppId, $deliveryDate, $le]);
-                $orderId = $pdo->lastInsertId();
-            } else {
-                $orderId = $order['id'];
-            }
+            // Создание заявки и позиции — в транзакции, иначе при сбое
+            // INSERT-позиции остаётся пустая заявка-сирота.
+            $pdo->beginTransaction();
+            try {
+                if (!$order) {
+                    // Создаём заказ за ресторан
+                    $le = $body['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
+                    soRequireAdminEntityGroupAccess($sessionUser, $le);
+                    $pdo->prepare("INSERT INTO so_orders (restaurant_number, supplier_id, delivery_date, order_date, status, submitted_at, legal_entity)
+                        VALUES (?, ?, ?, CURDATE(), 'submitted', NOW(), ?)")
+                        ->execute([$restNum, $suppId, $deliveryDate, $le]);
+                    $orderId = $pdo->lastInsertId();
+                } else {
+                    $orderId = $order['id'];
+                }
 
-            // Ищем позицию по SKU
-            $existingItem = $pdo->prepare("SELECT id, quantity, admin_qty, product_name FROM so_order_items WHERE order_id = ? AND sku = ?");
-            $existingItem->execute([$orderId, $sku]);
-            $item = $existingItem->fetch();
+                // Ищем позицию по SKU
+                $existingItem = $pdo->prepare("SELECT id, quantity, admin_qty, product_name FROM so_order_items WHERE order_id = ? AND sku = ?");
+                $existingItem->execute([$orderId, $sku]);
+                $item = $existingItem->fetch();
 
-            if ($item) {
-                $oldVal = ($item['admin_qty'] !== null) ? (float)$item['admin_qty'] : (float)$item['quantity'];
-                $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $item['id']]);
-            } else {
-                $oldVal = 0;
-                // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе)
-                $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, 0, ?)")
-                    ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val]);
+                if ($item) {
+                    $oldVal = ($item['admin_qty'] !== null) ? (float)$item['admin_qty'] : (float)$item['quantity'];
+                    $pdo->prepare("UPDATE so_order_items SET admin_qty = ? WHERE id = ?")->execute([$val, $item['id']]);
+                } else {
+                    $oldVal = 0;
+                    // Создаём новую позицию (админ добавил количество для товара, которого не было в заказе)
+                    $pdo->prepare("INSERT INTO so_order_items (order_id, product_id, sku, product_name, quantity, admin_qty) VALUES (?, ?, ?, ?, 0, ?)")
+                        ->execute([$orderId, $body['product_id'] ?? '', $sku, $productName ?? '', $val]);
+                }
+                $pdo->commit();
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                soRespond(['error' => 'Ошибка сохранения правки'], 500);
             }
 
             // Подтянем название поставщика для уведомления
@@ -1844,6 +1869,13 @@ if ($soAction === 'admin') {
                        ON DUPLICATE KEY UPDATE deadline_time = VALUES(deadline_time), created_by = VALUES(created_by)")
             ->execute([$supplierId, $deliveryDate, $deadlineTime, $createdBy]);
 
+        try {
+            auditLog($pdo, 'so_deadline_extended', 'supplier', $supplierId, $createdBy, [
+                'delivery_date' => $deliveryDate,
+                'deadline_time' => $deadlineTime,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
+
         soRespond(['success' => true, 'supplier_id' => $supplierId, 'delivery_date' => $deliveryDate, 'deadline_time' => $deadlineTime]);
     }
 
@@ -1879,6 +1911,13 @@ if ($soAction === 'admin') {
             $pdo->prepare("UPDATE so_deadline_overrides SET is_closed = 0 WHERE supplier_id = ? AND delivery_date = ?")
                 ->execute([$supplierId, $deliveryDate]);
         }
+
+        try {
+            auditLog($pdo, $isClosed ? 'so_day_closed' : 'so_day_reopened', 'supplier', $supplierId, $createdBy, [
+                'delivery_date' => $deliveryDate,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
+
         soRespond(['success' => true]);
     }
 
@@ -1936,6 +1975,14 @@ if ($soAction === 'admin') {
             ]);
             $count++;
         }
+
+        try {
+            $by = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+            auditLog($pdo, 'so_template_saved', 'supplier', $supplierId, $by, [
+                'legal_entity' => $le,
+                'items_count' => $count,
+            ]);
+        } catch (Exception $e) { /* не критично */ }
 
         soRespond(['success' => true, 'count' => $count]);
     }
