@@ -2030,6 +2030,10 @@ if ($soAction === 'admin') {
         $submittedCount = count(array_intersect($expectedNums, array_keys($submittedNums)));
         $missingCount = count($expectedNums) - $submittedCount;
 
+        // Ключ дедупликации — тот же формат, что и в cron_telegram.php,
+        // чтобы ручная отправка блокировала автоматическую и наоборот.
+        $dedupKey = "so_summary_{$supplierId}_{$deliveryDate}";
+
         // Если никто не подал — только текст
         if (!$productsOrdered) {
             $caption = "⚠️ <b>Никто не подал заявку</b>\n";
@@ -2037,9 +2041,15 @@ if ($soAction === 'admin') {
             $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
             $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
             $sentCount = 0;
+            $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
             foreach ($subs as $sub) {
-                if (sendTelegramMessage($botToken, $sub['telegram_chat_id'], $caption)) $sentCount++;
+                $ok = sendTelegramMessage($botToken, $sub['telegram_chat_id'], $caption);
+                $type = $ok ? 'so_summary_sent' : 'so_summary_fail';
+                $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+                if ($ok) $sentCount++;
             }
+            $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                ->execute([$dedupKey]);
             soRespond(['success' => true, 'sent' => $sentCount, 'mode' => 'text_only']);
         }
 
@@ -2117,11 +2127,15 @@ if ($soAction === 'admin') {
         }
 
         $sentCount = 0;
+        $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
         foreach ($subs as $sub) {
-            if (sendTelegramDocument($botToken, $sub['telegram_chat_id'], $filename, $xlsxBinary, $caption)) {
-                $sentCount++;
-            }
+            $ok = sendTelegramDocument($botToken, $sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
+            $type = $ok ? 'so_summary_sent' : 'so_summary_fail';
+            $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
+            if ($ok) $sentCount++;
         }
+        $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+            ->execute([$dedupKey]);
 
         soRespond(['success' => true, 'sent' => $sentCount, 'total_subs' => count($subs)]);
     }
