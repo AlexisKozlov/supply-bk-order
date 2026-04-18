@@ -395,7 +395,7 @@
               <template v-else>
                 <div v-if="supPreviousOrders[sup.id] && (!supCurrentDateInfo(sup)?.order || supCurrentDateInfo(sup)?.order?.status === 'draft')" class="sup-prev-order-block">
                   <div class="sup-prev-order-head" @click="supShowPreviousOrder[sup.id] = !supShowPreviousOrder[sup.id]">
-                    <span>📋 Ваша предыдущая заявка от {{ formatDate(supPreviousOrders[sup.id].delivery_date) }} — {{ supPreviousOrders[sup.id].items?.length || 0 }} поз.</span>
+                    <span>📋 Ваша предыдущая заявка от {{ fmtDate(supPreviousOrders[sup.id].delivery_date) }} — {{ supPreviousOrders[sup.id].items?.length || 0 }} поз.</span>
                     <span class="sup-prev-order-toggle">{{ supShowPreviousOrder[sup.id] ? '▲ скрыть' : '▼ показать' }}</span>
                   </div>
                   <div v-if="supShowPreviousOrder[sup.id]" class="sup-prev-order-body">
