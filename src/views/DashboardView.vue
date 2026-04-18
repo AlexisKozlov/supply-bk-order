@@ -332,7 +332,7 @@ onMounted(load)
 
 /* Tasks */
 .dash-tasks-list { display: flex; flex-direction: column; gap: 6px; }
-.dash-task-item { padding: 8px 10px; border-radius: 8px; background: #FFFBF5; border-left: 3px solid #F5A623; }
+.dash-task-item { padding: 8px 10px; border-radius: 8px; background: #FFFBF5; border-left: 3px solid #F4A261; }
 .dash-task-item.overdue { background: #FFF5F5; border-left-color: #F44336; }
 .dash-task-text { font-size: 13px; font-weight: 500; }
 .dash-task-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px; }

@@ -1040,7 +1040,7 @@ onBeforeUnmount(() => { clearTimeout(_saveTimer); });
   transition: all 0.15s;
 }
 .anv-mode-btn.active {
-  background: var(--bk-brown, #D62700);
+  background: var(--bk-brown, #E76F51);
   color: #fff;
 }
 .anv-mode-btn:not(.active):hover {

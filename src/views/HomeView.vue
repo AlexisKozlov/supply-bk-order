@@ -184,9 +184,9 @@
         <div v-if="showLoader" class="supply-loader-overlay">
           <div class="supply-loader-icon">
             <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none" width="80" height="80">
-              <circle cx="16" cy="16" r="10" fill="#D62300" class="ldr-c ldr-c1"/>
-              <circle cx="32" cy="16" r="10" fill="#F5A623" class="ldr-c ldr-c2"/>
-              <circle cx="16" cy="32" r="10" fill="#FF8733" class="ldr-c ldr-c3"/>
+              <circle cx="16" cy="16" r="10" fill="#E76F51" class="ldr-c ldr-c1"/>
+              <circle cx="32" cy="16" r="10" fill="#F4A261" class="ldr-c ldr-c2"/>
+              <circle cx="16" cy="32" r="10" fill="#F4A261" class="ldr-c ldr-c3"/>
               <circle cx="32" cy="32" r="10" fill="#FFD54F" class="ldr-c ldr-c4"/>
               <circle cx="24" cy="24" r="8.5" fill="#502314"/>
               <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
@@ -332,7 +332,7 @@ function actionColor(action) {
   if (action.includes('created') || action === 'product_created') return '#4CAF50';
   if (action.includes('deleted')) return '#E53935';
   if (action === 'received') return '#00897B';
-  return '#FF8733';
+  return '#F4A261';
 }
 
 function actionDetail(item) {
@@ -582,15 +582,15 @@ function confirmLogout() {
 .p-header-left { display: flex; align-items: center; gap: 14px; }
 .p-logo { display: flex; align-items: center; justify-content: center; }
 .p-brand h1 { font-size: 17px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }
-.p-brand small { display: block; font-size: 9px; font-weight: 700; color: rgba(245,166,35,.7); text-transform: uppercase; letter-spacing: 2px; margin-top: 1px; }
+.p-brand small { display: block; font-size: 9px; font-weight: 700; color: rgba(244,162,97,.7); text-transform: uppercase; letter-spacing: 2px; margin-top: 1px; }
 .p-header-right { display: flex; align-items: center; gap: 14px; position: relative; }
 .p-entity { font-size: 10px; font-weight: 700; color: rgba(245,230,208,.6); background: rgba(255,255,255,.07); padding: 5px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); }
 .p-user { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 5px 14px 5px 5px; border-radius: 24px; transition: .15s; }
 .p-user:hover { background: rgba(255,255,255,.05); }
-.p-av { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #D62700, #FF8733); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; }
+.p-av { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #E76F51, #F4A261); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; }
 .p-uname { font-size: 12px; font-weight: 600; color: rgba(245,230,208,.65); }
 .p-login-btn { padding: 8px 20px; border-radius: 10px; border: 2px solid rgba(214,39,0,.4); background: rgba(214,39,0,.15); color: rgba(255,200,160,.8); font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
-.p-login-btn:hover { background: #D62700; color: #fff; box-shadow: 0 4px 16px rgba(214,39,0,.25); }
+.p-login-btn:hover { background: #E76F51; color: #fff; box-shadow: 0 4px 16px rgba(214,39,0,.25); }
 .p-user-dropdown { position: absolute; top: 100%; right: 0; margin-top: 6px; background: #2C1A0E; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 100; }
 .p-user-dropdown button { display: block; width: 100%; padding: 8px 16px; border: none; background: none; color: rgba(245,230,208,.5); font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; border-radius: 8px; text-align: left; white-space: nowrap; transition: .15s; }
 .p-user-dropdown button:hover { background: rgba(255,255,255,.05); color: #F5E6D0; }
@@ -599,7 +599,7 @@ function confirmLogout() {
 .p-body { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; z-index: 1; padding: 0 36px; gap: 36px; min-height: 0; }
 .p-greeting { text-align: center; flex-shrink: 0; }
 .p-greeting h2 { font-size: 30px; font-weight: 900; color: #F5E6D0; line-height: 1.15; font-family: 'Flame', 'Sora', sans-serif; }
-.p-greeting h2 em { font-style: normal; color: #FF8733; }
+.p-greeting h2 em { font-style: normal; color: #F4A261; }
 .p-greeting p { font-size: 12px; color: rgba(245,230,208,.45); margin-top: 6px; font-weight: 500; }
 
 /* Activity dashboard — right center */
@@ -632,14 +632,14 @@ function confirmLogout() {
 .p-dock-stub .p-dock-icon { background: rgba(250,246,239,.4); border-style: dashed; border-color: rgba(80,35,20,.08); }
 .p-dock-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; font-size: 9px; font-weight: 700; color: rgba(245,230,208,.65); opacity: 0; transition: opacity .18s; white-space: nowrap; text-align: center; pointer-events: none; }
 .p-dock-item.p-dock-hovered .p-dock-label { opacity: 1; }
-.p-dock-tag { position: absolute; top: -6px; right: -4px; font-size: 7px; font-weight: 800; text-transform: uppercase; background: rgba(214,39,0,.12); color: #D62700; padding: 1px 5px; border-radius: 4px; letter-spacing: .3px; }
+.p-dock-tag { position: absolute; top: -6px; right: -4px; font-size: 7px; font-weight: 800; text-transform: uppercase; background: rgba(214,39,0,.12); color: #E76F51; padding: 1px 5px; border-radius: 4px; letter-spacing: .3px; }
 
 /* Actions */
 .p-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .p-btn { padding: 11px 22px; border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: .2s; border: 1.5px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); color: rgba(245,230,208,.7); display: flex; align-items: center; gap: 7px; }
 .p-btn:hover { border-color: rgba(255,255,255,.15); color: #F5E6D0; background: rgba(255,255,255,.07); }
 .p-btn-primary { border-color: rgba(214,39,0,.3); background: rgba(214,39,0,.12); color: rgba(255,200,160,.8); }
-.p-btn-primary:hover { background: #D62700; color: #fff; box-shadow: 0 4px 20px rgba(214,39,0,.25); transform: translateY(-1px); }
+.p-btn-primary:hover { background: #E76F51; color: #fff; box-shadow: 0 4px 20px rgba(214,39,0,.25); transform: translateY(-1px); }
 .p-btn-primary svg { opacity: .8; }
 .p-btn-primary:hover svg { opacity: 1; }
 
@@ -656,7 +656,7 @@ function confirmLogout() {
 .login-brand { text-align: center; }
 .login-brand-icon { font-size: 36px; display: block; margin-bottom: 10px; }
 .login-brand-title { font-size: 18px; font-weight: 400; color: #F5E6D0; font-family: 'Flame', 'Sora', sans-serif; }
-.login-brand-sub { font-size: 9px; font-weight: 700; color: rgba(245,166,35,.5); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
+.login-brand-sub { font-size: 9px; font-weight: 700; color: rgba(244,162,97,.5); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
 .login-right { flex: 1; background: #FFFBF5; padding: 32px; position: relative; }
 .login-close { position: absolute; top: 12px; right: 14px; background: none; border: none; font-size: 18px; color: #A08870; cursor: pointer; }
 .login-form-title { font-size: 18px; font-weight: 800; color: #502314; margin-bottom: 10px; }
@@ -668,12 +668,12 @@ function confirmLogout() {
 .login-field { margin-bottom: 12px; }
 .login-field label { display: block; font-size: 10px; font-weight: 700; color: #8B7355; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 4px; }
 .login-field select, .login-field input { width: 100%; padding: 10px 12px; border: 1.5px solid #E8DDD0; border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; }
-.login-field select:focus, .login-field input:focus { border-color: #D62700; outline: none; }
+.login-field select:focus, .login-field input:focus { border-color: #E76F51; outline: none; }
 .login-field input[type="number"] { -moz-appearance: textfield; }
 .login-field input[type="number"]::-webkit-inner-spin-button,
 .login-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.login-error { color: #D62700; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
-.login-submit { width: 100%; padding: 11px; border: none; border-radius: 10px; background: #D62700; color: #fff; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
+.login-error { color: #E76F51; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.login-submit { width: 100%; padding: 11px; border: none; border-radius: 10px; background: #E76F51; color: #fff; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
 .login-submit:hover { background: #B52200; }
 .login-submit:disabled { opacity: .5; cursor: default; }
 @media (max-width: 600px) { .login-left { display: none; } }

@@ -64,7 +64,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(day, di) in cellTableRows" :key="day.date" :style="di === 0 ? 'font-weight:600;background:rgba(245,166,35,.06);' : ''">
+              <tr v-for="(day, di) in cellTableRows" :key="day.date" :style="di === 0 ? 'font-weight:600;background:rgba(244,162,97,.06);' : ''">
                 <td>{{ fmtCellDate(day.date) }}</td>
                 <template v-for="e in cellTableEntities" :key="day.date+e">
                   <td v-for="(st, si) in stockTypesFor(e)" :key="st" :class="[si === 0 ? 'cell-border-left' : '', { 'cell-manual': day.manual[e]?.[st] }]" @dblclick="canEditCells && startCellEdit(day.date, e, st, day.data[e]?.[st] || 0)">
@@ -371,7 +371,7 @@ function fmtCellDate(d) {
 // Chart — по типам хранения для каждого юрлица
 const chartW = 800, chartH = 180, chartPad = 40;
 
-const STOCK_TYPE_COLORS = { cold: '#2196F3', frozen: '#9C27B0', dry: '#F5A623', shabany: '#4CAF50' };
+const STOCK_TYPE_COLORS = { cold: '#2196F3', frozen: '#9C27B0', dry: '#F4A261', shabany: '#4CAF50' };
 
 function buildChartData() {
   const entities = cellTableEntities.value;
@@ -755,7 +755,7 @@ watch(() => orderStore.settings.legalEntity, (v) => {
 .sl-tab:hover { color: var(--text); background: rgba(0,0,0,0.02); }
 .sl-tab.active {
   background: var(--bk-orange); color: white;
-  box-shadow: 0 1px 4px rgba(245,166,35,0.3);
+  box-shadow: 0 1px 4px rgba(244,162,97,0.3);
 }
 
 /* ═══ Upload button ═══ */
@@ -928,8 +928,8 @@ watch(() => orderStore.settings.legalEntity, (v) => {
 .sl-cells-table th:first-child { text-align: left; position: sticky; left: 0; background: var(--bg); z-index: 1; }
 .sl-cells-table td { padding: 7px 4px 7px 6px; text-align: center; border-bottom: 1px solid var(--border-light); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sl-cells-table td:first-child { text-align: left; font-weight: 600; color: var(--text); font-size: 12px; position: sticky; left: 0; background: var(--card); z-index: 1; }
-.sl-cells-table tbody tr:hover td { background: rgba(245,166,35,.06); }
-.sl-cells-table tbody tr:first-child td { background: rgba(245,166,35,.08); font-weight: 700; }
+.sl-cells-table tbody tr:hover td { background: rgba(244,162,97,.06); }
+.sl-cells-table tbody tr:first-child td { background: rgba(244,162,97,.08); font-weight: 700; }
 .cell-layout { display: inline-flex; align-items: baseline; justify-content: center; }
 .cell-val { text-align: center; }
 .cell-delta { width: 30px; text-align: left; font-size: 10px; font-weight: 600; margin-left: 2px; flex-shrink: 0; }
@@ -956,17 +956,17 @@ watch(() => orderStore.settings.legalEntity, (v) => {
   content: '';
   position: absolute; top: 3px; right: 3px;
   width: 5px; height: 5px; border-radius: 50%;
-  background: #F5A623;
+  background: #F4A261;
 }
 
 /* Инпут редактирования */
 .cell-edit-input {
   width: 56px; padding: 2px 4px; font-size: 12px; font-weight: 600;
-  border: 1.5px solid #F5A623; border-radius: 4px;
-  background: rgba(245,166,35,.06); color: var(--text);
+  border: 1.5px solid #F4A261; border-radius: 4px;
+  background: rgba(244,162,97,.06); color: var(--text);
   text-align: center; outline: none;
 }
-.cell-edit-input:focus { border-color: #D62700; box-shadow: 0 0 0 2px rgba(214,35,0,.12); }
+.cell-edit-input:focus { border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,.12); }
 
 /* Ячейки с данными — курсор при наведении */
 .sl-cells-table td:not(.cell-total):not(:first-child) { cursor: default; position: relative; }

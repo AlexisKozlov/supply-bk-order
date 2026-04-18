@@ -737,7 +737,7 @@ async function loadHistory() {
 
 <style scoped>
 /* ══════ BASE ══════ */
-.dfc { --brown: #502314; --orange: #FF8732; --red: #D62700; --green: #2E7D32; --border: #EDE7DF; --muted: #8C7B6E; --bg2: #F9F6F2; }
+.dfc { --brown: #502314; --orange: #F4A261; --red: #E76F51; --green: #2E7D32; --border: #EDE7DF; --muted: #8C7B6E; --bg2: #F9F6F2; }
 
 /* ══════ GRID ══════ */
 .dfc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }

@@ -47,7 +47,7 @@
       <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;pointer-events:none;opacity:0.5;"><BkIcon name="search" size="sm"/></span>
       <input v-model="searchQuery" style="width:100%;padding:9px 36px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--card);box-sizing:border-box;transition:border-color .15s,box-shadow .15s;"
         :placeholder="activeTab === 'products' ? 'Поиск по названию, артикулу, поставщику...' : activeTab === 'suppliers' ? 'Поиск по названию поставщика...' : activeTab === 'restaurants' ? 'Поиск по номеру или адресу...' : activeTab === 'recipes' ? 'Поиск по названию или коду рецептуры...' : 'Поиск по названию группы или товара...'"
-        @focus="$event.target.style.borderColor='var(--bk-orange)';$event.target.style.boxShadow='0 0 0 3px rgba(245,166,35,0.12)'"
+        @focus="$event.target.style.borderColor='var(--bk-orange)';$event.target.style.boxShadow='0 0 0 3px rgba(244,162,97,0.12)'"
         @blur="$event.target.style.borderColor='var(--border)';$event.target.style.boxShadow='none'" />
       <button v-if="searchQuery" @click="searchQuery=''" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;"><BkIcon name="close" size="xs"/></button>
     </div>
@@ -776,7 +776,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .db-contact.wa.active { background:#25D366; box-shadow:0 1px 3px rgba(37,211,102,.3); }
 .db-contact.tg.active { background:#0088cc; box-shadow:0 1px 3px rgba(0,136,204,.3); }
 .db-contact.vb.active { background:#7360f2; box-shadow:0 1px 3px rgba(115,96,242,.3); }
-.db-contact.em.active { background:#FF8733; box-shadow:0 1px 3px rgba(255,135,51,.3); }
+.db-contact.em.active { background:#F4A261; box-shadow:0 1px 3px rgba(244,162,97,.3); }
 
 .analog-groups { display:flex; flex-direction:column; gap:6px; }
 .analog-group-card { background:var(--card); border:1px solid var(--border-light); border-radius:8px; overflow:hidden; }
@@ -786,7 +786,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
 .analog-group-items { border-top:1px solid var(--border-light); }
 .analog-item { display:flex; align-items:center; gap:8px; padding:6px 14px 6px 34px; cursor:pointer; transition:background .15s; border-bottom:1px solid var(--border-light); }
 .analog-item:last-child { border-bottom:none; }
-.analog-item:hover { background:rgba(245,166,35,.04); }
+.analog-item:hover { background:rgba(244,162,97,.04); }
 .db-card-inactive { opacity:0.5; }
 .db-card-inactive-badge { background:#FFEBEE; color:#E57373; font-weight:600; border:1px solid #E57373; }
 .db-card-missing { flex-basis:100%; width:100%; margin-top:4px; padding:4px 7px; font-size:10px; color:#C62828; background:#FFF3E0; border:1px dashed #FFB74D; border-radius:4px; line-height:1.35; }

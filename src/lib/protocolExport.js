@@ -118,7 +118,7 @@ export function exportProtocolPdf(proto) {
 <style>
   @page { size: A4; margin: 15mm; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 12px; color: #222; margin: 0 auto; padding: 24px 40px; max-width: 900px; }
-  .header { background: #D62700; color: #fff; padding: 14px 24px; margin: -24px -40px 16px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .header { background: #E76F51; color: #fff; padding: 14px 24px; margin: -24px -40px 16px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @media print { body { padding: 0; max-width: none; } .header { margin: 0 0 16px; } h3 { background: #f5f5f5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } table th { background: #333 !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } tr[style] { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   .header h1 { margin: 0; font-size: 18px; font-weight: 600; }
   .meta { margin-bottom: 16px; }

@@ -1208,7 +1208,7 @@ function fmtTime(s) {
   color: #E65100; font-size: 13px; margin-bottom: 16px;
 }
 .retry-banner .btn { flex-shrink: 0; }
-.sc { --brown: #502314; --orange: #FF8732; --red: #D62700; --green: #2E7D32; --border: #EDE7DF; --muted: #8C7B6E; --bg2: #F9F6F2; }
+.sc { --brown: #502314; --orange: #F4A261; --red: #E76F51; --green: #2E7D32; --border: #EDE7DF; --muted: #8C7B6E; --bg2: #F9F6F2; }
 .modal-confirm { z-index: 10001; }
 
 /* Top */
@@ -1314,7 +1314,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
   color: #ccc; display: inline-flex; align-items: center; justify-content: center;
   transition: all 0.1s;
 }
-.sc-row-del:hover { background: #FFEBEE; color: #D62700; }
+.sc-row-del:hover { background: #FFEBEE; color: #E76F51; }
 .muted { color: #8C7B6E; }
 .fw { font-weight: 700; color: #502314; }
 

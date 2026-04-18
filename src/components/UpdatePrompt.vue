@@ -121,7 +121,7 @@ function later() {
 }
 .upd-btn-later:hover { background: #EDE8E0; }
 .upd-btn-primary {
-  background: linear-gradient(135deg, #D62700, #FF8733);
+  background: linear-gradient(135deg, #E76F51, #F4A261);
   color: white;
 }
 .upd-btn-primary:hover { box-shadow: 0 4px 12px rgba(214,39,0,0.35); transform: translateY(-1px); }

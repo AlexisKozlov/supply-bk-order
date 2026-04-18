@@ -350,7 +350,7 @@ const filteredPlans = computed(() => {
 });
 
 // --- Supplier colors ---
-const PALETTE = ['#F5A623','#4CAF50','#2196F3','#9C27B0','#F44336','#00BCD4','#FF5722','#607D8B','#E91E63','#795548'];
+const PALETTE = ['#F4A261','#4CAF50','#2196F3','#9C27B0','#F44336','#00BCD4','#FF5722','#607D8B','#E91E63','#795548'];
 const colorMap = computed(() => {
   const map = {};
   const allS = [...new Set([...historyStore.orders.map(o => o.supplier), ...historyStore.plans.map(p => p.supplier)].filter(Boolean))].sort();
@@ -552,7 +552,7 @@ function planItemTotalBoxes(item) { return (item.plan || []).reduce((s, p) => s 
 .ht-tab:hover { color: var(--text); background: rgba(0,0,0,0.02); }
 .ht-tab.active {
   background: var(--bk-orange); color: white;
-  box-shadow: 0 1px 4px rgba(245,166,35,0.3);
+  box-shadow: 0 1px 4px rgba(244,162,97,0.3);
 }
 .ht-tab .bk-icon { flex-shrink: 0; }
 

@@ -3,9 +3,9 @@
     <!-- Header -->
     <div class="sf-brand">
       <svg class="sf-logo" width="36" height="36" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
-        <circle cx="16" cy="16" r="10" fill="#D62300"/>
-        <circle cx="32" cy="16" r="10" fill="#F5A623"/>
-        <circle cx="16" cy="32" r="10" fill="#FF8733"/>
+        <circle cx="16" cy="16" r="10" fill="#E76F51"/>
+        <circle cx="32" cy="16" r="10" fill="#F4A261"/>
+        <circle cx="16" cy="32" r="10" fill="#F4A261"/>
         <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
         <circle cx="24" cy="24" r="8.5" fill="#502314"/>
         <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ stockBrand.logoLetter }}</text>
@@ -118,7 +118,7 @@
       <!-- Edit mode -->
       <div v-else>
         <div class="sf-header">
-          <div class="sf-badge" style="background: #FF8733;">Редактирование</div>
+          <div class="sf-badge" style="background: #F4A261;">Редактирование</div>
           <h1>Изменить остатки</h1>
           <p class="sf-entity">Ресторан {{ selectedRestaurantLabel }}</p>
         </div>
@@ -159,7 +159,7 @@
         <div class="sf-expired-icon">
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
             <circle cx="24" cy="24" r="24" fill="#FFEBEE"/>
-            <path d="M16 16l16 16M32 16l-16 16" stroke="#D62700" stroke-width="3" stroke-linecap="round"/>
+            <path d="M16 16l16 16M32 16l-16 16" stroke="#E76F51" stroke-width="3" stroke-linecap="round"/>
           </svg>
         </div>
         <h2>Ссылка недействительна</h2>
@@ -348,7 +348,7 @@ async function submitEdit() {
 .sf-header { text-align: center; margin-bottom: 14px; }
 .sf-badge {
   display: inline-block;
-  background: linear-gradient(135deg, #D62700, #FF8733);
+  background: linear-gradient(135deg, #E76F51, #F4A261);
   color: #fff; font-size: 10px; font-weight: 700;
   padding: 3px 10px; border-radius: 20px;
   text-transform: uppercase; letter-spacing: 0.5px;
@@ -367,7 +367,7 @@ async function submitEdit() {
 }
 .sf-spinner {
   width: 32px; height: 32px; border: 3px solid #EDE7DF;
-  border-top-color: #D62700; border-radius: 50%;
+  border-top-color: #E76F51; border-radius: 50%;
   animation: sf-spin 0.7s linear infinite;
 }
 @keyframes sf-spin { to { transform: rotate(360deg); } }
@@ -396,7 +396,7 @@ async function submitEdit() {
   background-repeat: no-repeat; background-position: right 12px center;
   padding-right: 32px;
 }
-.sf-select:focus { outline: none; border-color: #FF8733; box-shadow: 0 0 0 2px rgba(255,135,51,0.12); }
+.sf-select:focus { outline: none; border-color: #F4A261; box-shadow: 0 0 0 2px rgba(244,162,97,0.12); }
 .sf-select.filled { color: #502314; border-color: #A5D6A7; }
 
 /* Products */
@@ -411,7 +411,7 @@ async function submitEdit() {
 }
 .sf-product-name { font-size: 13px; font-weight: 700; color: #502314; }
 .sf-product-unit {
-  font-size: 10px; font-weight: 600; color: #FF8733;
+  font-size: 10px; font-weight: 600; color: #F4A261;
   background: #FFF3E0; padding: 1px 6px; border-radius: 5px;
 }
 .sf-product-note {
@@ -425,7 +425,7 @@ async function submitEdit() {
   background: #fff; transition: all 0.15s; box-sizing: border-box;
   color: #502314;
 }
-.sf-input:focus { outline: none; border-color: #FF8733; box-shadow: 0 0 0 2px rgba(255,135,51,0.12); }
+.sf-input:focus { outline: none; border-color: #F4A261; box-shadow: 0 0 0 2px rgba(244,162,97,0.12); }
 .sf-input.filled { border-color: #A5D6A7; }
 .sf-input::placeholder { color: #ccc; font-weight: 400; }
 .sf-input-unit {
@@ -443,7 +443,7 @@ async function submitEdit() {
   display: flex; align-items: center; justify-content: center; gap: 8px;
 }
 .sf-submit.ready {
-  background: linear-gradient(135deg, #D62700, #FF8733);
+  background: linear-gradient(135deg, #E76F51, #F4A261);
   box-shadow: 0 4px 16px rgba(214,39,0,0.3);
 }
 .sf-submit.ready:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(214,39,0,0.4); }
@@ -455,12 +455,12 @@ async function submitEdit() {
   animation: sf-spin 0.7s linear infinite;
 }
 .sf-already {
-  text-align: center; font-size: 13px; font-weight: 600; color: #FF8733;
+  text-align: center; font-size: 13px; font-weight: 600; color: #F4A261;
   padding: 10px; background: #FFF3E0; border-radius: 10px; margin-top: 10px;
   line-height: 1.4;
 }
 .sf-error {
-  color: #D62700; font-size: 13px; text-align: center;
+  color: #E76F51; font-size: 13px; text-align: center;
   margin-top: 12px; padding: 8px; background: #FFEBEE; border-radius: 8px;
 }
 
@@ -489,10 +489,10 @@ async function submitEdit() {
   font-size: 14px; font-weight: 700; font-family: inherit;
   cursor: pointer; transition: all 0.15s; margin-top: 12px;
 }
-.sf-edit-btn:hover { border-color: #FF8733; background: #FFF8F0; }
+.sf-edit-btn:hover { border-color: #F4A261; background: #FFF8F0; }
 .sf-edit-timer {
   text-align: center; font-size: 12px; font-weight: 600;
-  color: #FF8733; margin-bottom: 16px;
+  color: #F4A261; margin-bottom: 16px;
   padding: 6px 0; background: #FFF3E0; border-radius: 8px;
 }
 .sf-cancel-btn {
@@ -505,7 +505,7 @@ async function submitEdit() {
 /* Expired */
 .sf-expired { text-align: center; padding: 12px 0; }
 .sf-expired-icon { margin-bottom: 16px; }
-.sf-expired h2 { font-size: 20px; font-weight: 800; color: #D62700; margin: 0 0 8px; }
+.sf-expired h2 { font-size: 20px; font-weight: 800; color: #E76F51; margin: 0 0 8px; }
 .sf-expired p { color: #8C7B6E; font-size: 14px; margin: 0; line-height: 1.5; }
 
 /* Footer */

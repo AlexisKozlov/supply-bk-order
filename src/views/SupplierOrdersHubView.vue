@@ -164,9 +164,9 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
 .so-hub-connect-btn {
   padding: 9px 18px;
   border-radius: 8px;
-  background: #D62300;
+  background: #E76F51;
   color: white;
-  border: 1.5px solid #D62300;
+  border: 1.5px solid #E76F51;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -215,9 +215,9 @@ watch(() => orderStore.settings.legalEntity, () => { loadList(); });
   border-color: #502314;
 }
 .so-hub-pill.active {
-  background: #D62300;
+  background: #E76F51;
   color: white;
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 .so-hub-empty {

@@ -389,7 +389,7 @@ watch(() => orderStore.settings.legalEntity, () => { loadData(); });
 <style scoped>
 .ps-view { padding: 0; }
 .ps-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-.ps-entity-badge { display: inline-block; margin-left: 8px; padding: 3px 10px; border-radius: 12px; background: #fff2e0; color: #D62300; font-size: 12px; font-weight: 700; vertical-align: middle; }
+.ps-entity-badge { display: inline-block; margin-left: 8px; padding: 3px 10px; border-radius: 12px; background: #fff2e0; color: #E76F51; font-size: 12px; font-weight: 700; vertical-align: middle; }
 .ps-header-right { display: flex; align-items: center; gap: 8px; }
 .ps-tabs { display: inline-flex; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
 .ps-tab { padding: 6px 16px; font-size: 13px; font-weight: 600; border: none; background: none; cursor: pointer; color: var(--text-muted); transition: all .15s; }
@@ -428,7 +428,7 @@ watch(() => orderStore.settings.legalEntity, () => { loadData(); });
 .ps-row-empty { opacity: 0.5; }
 .ps-total-row { font-weight: 700; background: rgba(139,115,85,.04); }
 .ps-total-row td { border-top: 2px solid var(--border); }
-.ps-cat-badge { font-size: 11px; padding: 2px 8px; background: rgba(245,166,35,.08); border-radius: 4px; color: var(--bk-orange); font-weight: 600; }
+.ps-cat-badge { font-size: 11px; padding: 2px 8px; background: rgba(244,162,97,.08); border-radius: 4px; color: var(--bk-orange); font-weight: 600; }
 
 /* Коэффициент */
 .ps-coeff { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 12px; }
@@ -438,7 +438,7 @@ watch(() => orderStore.settings.legalEntity, () => { loadData(); });
 
 /* Ввод коробок */
 .ps-boxes-input { width: 70px; padding: 4px 8px; border: 1.5px solid var(--border); border-radius: 6px; text-align: right; font-size: 13px; font-weight: 600; background: var(--card); }
-.ps-boxes-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 2px rgba(245,166,35,.15); }
+.ps-boxes-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 2px rgba(244,162,97,.15); }
 .ps-unit-select { padding: 3px 4px; border: 1.5px solid var(--border); border-radius: 6px; font-size: 11px; background: var(--card); cursor: pointer; }
 .ps-boxes-input::placeholder { color: var(--text-muted); font-weight: 400; }
 

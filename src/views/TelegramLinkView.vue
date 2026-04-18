@@ -24,7 +24,7 @@
           <!-- Ошибка -->
           <div v-else-if="error" class="tgl-content">
             <div class="tgl-status tgl-status-error">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#D62700" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#E76F51" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
             </div>
             <div class="tgl-form-title">{{ error }}</div>
             <div class="tgl-form-sub">{{ errorDetail }}</div>
@@ -248,7 +248,7 @@ async function login() {
 .tgl-brand-sub {
   font-size: 9px;
   font-weight: 700;
-  color: rgba(245,166,35,.5);
+  color: rgba(244,162,97,.5);
   text-transform: uppercase;
   letter-spacing: 2px;
   margin-top: 4px;
@@ -322,13 +322,13 @@ async function login() {
   color: #502314;
 }
 .tgl-field input:focus {
-  border-color: #D62700;
+  border-color: #E76F51;
   outline: none;
 }
 .tgl-field input::placeholder { color: #C4B8A8; }
 
 .tgl-error {
-  color: #D62700;
+  color: #E76F51;
   font-size: 12px;
   font-weight: 600;
   margin-bottom: 8px;
@@ -341,7 +341,7 @@ async function login() {
   padding: 11px;
   border: none;
   border-radius: 10px;
-  background: #D62700;
+  background: #E76F51;
   color: #fff;
   font-size: 14px;
   font-weight: 700;
@@ -369,7 +369,7 @@ async function login() {
   width: 28px;
   height: 28px;
   border: 3px solid #E8DDD0;
-  border-top-color: #D62700;
+  border-top-color: #E76F51;
   border-radius: 50%;
   animation: tgl-spin .7s linear infinite;
   margin: 0 auto 12px;

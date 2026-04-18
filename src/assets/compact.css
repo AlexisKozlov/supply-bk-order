@@ -152,7 +152,7 @@
 
 /* ─── Row hover states preserved ─── */
 .compact-mode .order-table tbody tr { transition: background 0.08s; }
-.compact-mode .order-table tbody tr:hover { background: #FFF8F0; }
+.compact-mode .order-table tbody tr:hover { background: #FFF8ED; }
 .compact-mode .order-table tbody tr.has-order:hover { background: rgba(45,80,22,0.06); }
 
 /* ─── Empty row ─── */

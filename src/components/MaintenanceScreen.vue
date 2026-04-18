@@ -206,7 +206,7 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer); });
 }
 .mnt-flame-1 {
   width: 600px; height: 500px; left: 10%;
-  background: radial-gradient(ellipse, rgba(214,35,0,.5) 0%, rgba(214,35,0,0) 70%);
+  background: radial-gradient(ellipse, rgba(231,111,81,.5) 0%, rgba(231,111,81,0) 70%);
   animation: flameRise 5s ease-in-out infinite;
 }
 .mnt-flame-2 {
@@ -216,12 +216,12 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer); });
 }
 .mnt-flame-3 {
   width: 500px; height: 400px; left: 40%;
-  background: radial-gradient(ellipse, rgba(245,166,35,.35) 0%, rgba(245,166,35,0) 70%);
+  background: radial-gradient(ellipse, rgba(244,162,97,.35) 0%, rgba(244,162,97,0) 70%);
   animation: flameRise 4.5s ease-in-out infinite .5s;
 }
 .mnt-flame-4 {
   width: 350px; height: 350px; left: -5%;
-  background: radial-gradient(ellipse, rgba(214,35,0,.3) 0%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(231,111,81,.3) 0%, transparent 70%);
   animation: flameRise 7s ease-in-out infinite 2s;
 }
 .mnt-flame-5 {
@@ -272,7 +272,7 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer); });
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(214,35,0,.12) 0%, transparent 60%);
+  background: radial-gradient(circle, rgba(231,111,81,.12) 0%, transparent 60%);
   animation: glowPulse 4s ease-in-out infinite;
   pointer-events: none;
 }
@@ -309,7 +309,7 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer); });
 }
 .mnt-title-accent {
   font-size: 58px;
-  background: linear-gradient(180deg, #FDBD10 20%, #D62300 100%);
+  background: linear-gradient(180deg, #FDBD10 20%, #E76F51 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -401,14 +401,14 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer); });
 }
 .mnt-progress-fill {
   height: 100%; border-radius: 4px;
-  background: linear-gradient(90deg, #D62300, #F5A623, #FDBD10);
+  background: linear-gradient(90deg, #E76F51, #F4A261, #FDBD10);
   transition: width 1s linear;
   position: relative;
 }
 .mnt-progress-fire {
   position: absolute; right: -4px; top: -6px;
   width: 16px; height: 20px;
-  background: radial-gradient(ellipse at bottom, #FDBD10 0%, rgba(214,35,0,.8) 40%, transparent 70%);
+  background: radial-gradient(ellipse at bottom, #FDBD10 0%, rgba(231,111,81,.8) 40%, transparent 70%);
   border-radius: 50% 50% 30% 30%;
   filter: blur(2px);
   animation: fireFlicker .3s ease-in-out infinite alternate;
@@ -419,7 +419,7 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer); });
 }
 .mnt-progress-pulse {
   width: 35%;
-  background: linear-gradient(90deg, transparent, #D62300, #FDBD10, #D62300, transparent);
+  background: linear-gradient(90deg, transparent, #E76F51, #FDBD10, #E76F51, transparent);
   animation: progressPulse 2.5s ease-in-out infinite;
 }
 @keyframes progressPulse {

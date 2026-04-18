@@ -3,9 +3,9 @@
     <!-- Header -->
     <div class="sf-brand">
       <svg class="sf-logo" width="36" height="36" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
-        <circle cx="16" cy="16" r="10" fill="#D62300"/>
-        <circle cx="32" cy="16" r="10" fill="#F5A623"/>
-        <circle cx="16" cy="32" r="10" fill="#FF8733"/>
+        <circle cx="16" cy="16" r="10" fill="#E76F51"/>
+        <circle cx="32" cy="16" r="10" fill="#F4A261"/>
+        <circle cx="16" cy="32" r="10" fill="#F4A261"/>
         <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
         <circle cx="24" cy="24" r="8.5" fill="#502314"/>
         <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
@@ -180,7 +180,7 @@
           <template v-for="del in deliveries" :key="del.date">
             <div class="veg-success-day">
               {{ formatDeliveryDate(del.date) }}
-              <span v-if="del.expired" class="veg-success-deadline" style="color:#D62700;">дедлайн прошёл</span>
+              <span v-if="del.expired" class="veg-success-deadline" style="color:#E76F51;">дедлайн прошёл</span>
               <span v-else-if="del.deadline" class="veg-success-deadline">до {{ formatDeadline(del.deadline) }}</span>
             </div>
             <template v-if="dayAllZeros(del.date)">
@@ -206,7 +206,7 @@
       <!-- Edit mode -->
       <div v-else>
         <div class="sf-header">
-          <div class="sf-badge" style="background: #FF8733;">Редактирование</div>
+          <div class="sf-badge" style="background: #F4A261;">Редактирование</div>
           <h1>Изменить заявку</h1>
           <p class="sf-entity">Ресторан {{ selectedRestaurant }}</p>
         </div>
@@ -286,7 +286,7 @@
           <div class="sf-expired-icon">
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
               <circle cx="24" cy="24" r="24" fill="#FFEBEE"/>
-              <path d="M16 16l16 16M32 16l-16 16" stroke="#D62700" stroke-width="3" stroke-linecap="round"/>
+              <path d="M16 16l16 16M32 16l-16 16" stroke="#E76F51" stroke-width="3" stroke-linecap="round"/>
             </svg>
           </div>
           <h2>Ссылка недействительна</h2>
@@ -612,7 +612,7 @@ async function submitEdit() {
 .sf-header { text-align: center; margin-bottom: 14px; }
 .sf-badge {
   display: inline-block;
-  background: linear-gradient(135deg, #D62700, #FF8733);
+  background: linear-gradient(135deg, #E76F51, #F4A261);
   color: #fff; font-size: 10px; font-weight: 700;
   padding: 3px 10px; border-radius: 20px;
   text-transform: uppercase; letter-spacing: 0.5px;
@@ -681,7 +681,7 @@ async function submitEdit() {
   display: inline-flex; align-items: center; justify-content: center;
 }
 .veg-tab-badge.filled { background: #E8F5E9; color: #2E7D32; }
-.veg-tab-badge.expired { background: #FFEBEE; color: #D62700; }
+.veg-tab-badge.expired { background: #FFEBEE; color: #E76F51; }
 .veg-next-day-hint {
   text-align: center; font-size: 12px; color: #66BB6A; cursor: pointer;
   padding: 6px 0; font-weight: 600;
@@ -710,10 +710,10 @@ async function submitEdit() {
   white-space: nowrap;
 }
 .veg-deadline-badge.expired {
-  color: #D62700; background: #FFEBEE;
+  color: #E76F51; background: #FFEBEE;
 }
 .sf-no-schedule {
-  text-align: center; font-size: 13px; color: #FF8733;
+  text-align: center; font-size: 13px; color: #F4A261;
   padding: 16px; background: #FFF3E0; border-radius: 10px;
   margin: 10px 0; line-height: 1.4;
 }
@@ -774,9 +774,9 @@ async function submitEdit() {
 .sf-prev-order-none { color: #bbb; }
 .sf-product-error { background: #FFF5F5; }
 .sf-mult-error {
-  font-size: 11px; color: #D62700; margin-top: 2px; font-weight: 600;
+  font-size: 11px; color: #E76F51; margin-top: 2px; font-weight: 600;
 }
-.sf-input.error { border-color: #D62700 !important; background: #FFF5F5; }
+.sf-input.error { border-color: #E76F51 !important; background: #FFF5F5; }
 .sf-product-input-wrap { position: relative; }
 .sf-input {
   width: 100%; padding: 8px 44px 8px 12px; border: 1.5px solid #EDE7DF;
@@ -815,7 +815,7 @@ async function submitEdit() {
   animation: sf-spin 0.7s linear infinite;
 }
 .sf-error {
-  color: #D62700; font-size: 13px; text-align: center;
+  color: #E76F51; font-size: 13px; text-align: center;
   margin-top: 12px; padding: 8px; background: #FFEBEE; border-radius: 8px;
 }
 
@@ -862,7 +862,7 @@ async function submitEdit() {
 /* Expired */
 .sf-expired { text-align: center; padding: 12px 0; }
 .sf-expired-icon { margin-bottom: 16px; }
-.sf-expired h2 { font-size: 20px; font-weight: 800; color: #D62700; margin: 0 0 8px; }
+.sf-expired h2 { font-size: 20px; font-weight: 800; color: #E76F51; margin: 0 0 8px; }
 .sf-expired p { color: #8C7B6E; font-size: 14px; margin: 0; line-height: 1.5; }
 
 /* Footer */

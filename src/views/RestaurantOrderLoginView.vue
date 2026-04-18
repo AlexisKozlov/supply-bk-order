@@ -13,9 +13,9 @@
       <div class="ro-brand">
         <div class="ro-logo-wrap">
           <svg width="48" height="48" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
-            <circle cx="16" cy="16" r="10" fill="#D62300"/>
-            <circle cx="32" cy="16" r="10" fill="#F5A623"/>
-            <circle cx="16" cy="32" r="10" fill="#FF8733"/>
+            <circle cx="16" cy="16" r="10" fill="#E76F51"/>
+            <circle cx="32" cy="16" r="10" fill="#F4A261"/>
+            <circle cx="16" cy="32" r="10" fill="#F4A261"/>
             <circle cx="32" cy="32" r="10" fill="#FFD54F"/>
             <circle cx="24" cy="24" r="8.5" fill="#502314"/>
             <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">{{ loginBrand.logoLetter }}</text>
@@ -37,7 +37,7 @@
       <div v-else class="ro-login-card">
         <div class="ro-card-header">
           <div class="ro-card-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#D62300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
               <polyline points="10 17 15 12 10 7"/>
               <line x1="15" y1="12" x2="3" y2="12"/>
@@ -306,7 +306,7 @@ async function forceLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #502314 0%, #7a3a1e 40%, #D62300 100%);
+  background: linear-gradient(135deg, #502314 0%, #7a3a1e 40%, #E76F51 100%);
   padding: 20px;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   position: relative;
@@ -448,9 +448,9 @@ async function forceLogin() {
 }
 .ro-input-wrap input:focus {
   outline: none;
-  border-color: #D62300;
+  border-color: #E76F51;
   background: white;
-  box-shadow: 0 0 0 4px rgba(214, 35, 0, 0.08);
+  box-shadow: 0 0 0 4px rgba(231, 111, 81, 0.08);
 }
 .ro-input-wrap input::placeholder { color: #c4b8a8; }
 .ro-input-wrap input[type="number"] { text-align: left; -moz-appearance: textfield; }
@@ -506,7 +506,7 @@ async function forceLogin() {
 .ro-submit-btn {
   width: 100%;
   padding: 15px;
-  background: linear-gradient(135deg, #D62300 0%, #e83a1a 100%);
+  background: linear-gradient(135deg, #E76F51 0%, #e83a1a 100%);
   color: white;
   border: none;
   border-radius: 12px;
@@ -519,16 +519,16 @@ async function forceLogin() {
   justify-content: center;
   gap: 8px;
   transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(214, 35, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(231, 111, 81, 0.3);
 }
 .ro-submit-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #b81e00 0%, #D62300 100%);
-  box-shadow: 0 6px 20px rgba(214, 35, 0, 0.4);
+  background: linear-gradient(135deg, #b81e00 0%, #E76F51 100%);
+  box-shadow: 0 6px 20px rgba(231, 111, 81, 0.4);
   transform: translateY(-1px);
 }
 .ro-submit-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(214, 35, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(231, 111, 81, 0.3);
 }
 .ro-submit-btn:disabled {
   opacity: 0.5;

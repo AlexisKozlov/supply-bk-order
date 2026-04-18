@@ -167,13 +167,13 @@
               <!-- Area fill -->
               <path :d="areaPath" fill="url(#areaGrad)" opacity="0.3"/>
               <!-- Line -->
-              <path :d="linePath" fill="none" stroke="#FF8732" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+              <path :d="linePath" fill="none" stroke="#F4A261" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
               <!-- Dots -->
-              <circle v-for="(pt, i) in areaPoints" :key="'dot-'+i" :cx="pt.x" :cy="pt.y" r="3" fill="#FF8732" stroke="#fff" stroke-width="1.5"/>
+              <circle v-for="(pt, i) in areaPoints" :key="'dot-'+i" :cx="pt.x" :cy="pt.y" r="3" fill="#F4A261" stroke="#fff" stroke-width="1.5"/>
               <defs>
                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#FF8732" stop-opacity="0.5"/>
-                  <stop offset="100%" stop-color="#FF8732" stop-opacity="0.02"/>
+                  <stop offset="0%" stop-color="#F4A261" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="#F4A261" stop-opacity="0.02"/>
                 </linearGradient>
               </defs>
             </svg>
@@ -1236,7 +1236,7 @@ onMounted(() => {
 .dash-kpi:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
 .dash-kpi__left-border { width: 4px; flex-shrink: 0; }
 .dash-kpi--brown .dash-kpi__left-border { background: linear-gradient(to bottom, #502314, #7a4a3a); }
-.dash-kpi--orange .dash-kpi__left-border { background: linear-gradient(to bottom, #FF8732, #FFB366); }
+.dash-kpi--orange .dash-kpi__left-border { background: linear-gradient(to bottom, #F4A261, #F4A261); }
 .dash-kpi--blue .dash-kpi__left-border { background: linear-gradient(to bottom, #1976D2, #64B5F6); }
 .dash-kpi--green .dash-kpi__left-border { background: linear-gradient(to bottom, #2E7D32, #81C784); }
 .dash-kpi--red .dash-kpi__left-border { background: linear-gradient(to bottom, #D32F2F, #EF9A9A); }
@@ -1339,7 +1339,7 @@ onMounted(() => {
   width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; flex-shrink: 0; background: var(--border-light); color: var(--text);
 }
-.dash-mini-row__rank.top { background: #FF8732; color: #fff; }
+.dash-mini-row__rank.top { background: #F4A261; color: #fff; }
 .dash-mini-row__name { flex: 1; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-mini-row__val { font-weight: 700; color: var(--text); min-width: 40px; text-align: right; }
 .dash-mini-row__delta { font-size: 10px; font-weight: 700; min-width: 40px; text-align: right; }
@@ -1397,10 +1397,10 @@ onMounted(() => {
   width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; flex-shrink: 0; background: var(--border); color: var(--text);
 }
-.an-prod-rank.top { background: #FF8732; color: #fff; font-size: 12px; }
+.an-prod-rank.top { background: #F4A261; color: #fff; font-size: 12px; }
 .an-prod-info { flex: 1; min-width: 0; }
 .an-prod-line1 { display: flex; align-items: baseline; gap: 5px; }
-.an-prod-sku { font-size: 10px; font-weight: 700; color: #FF8732; }
+.an-prod-sku { font-size: 10px; font-weight: 700; color: #F4A261; }
 .an-prod-name { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-prod-progress { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-top: 3px; }
 .an-prod-progress-bar { height: 100%; background: linear-gradient(90deg, #4CAF50, #81C784); border-radius: 2px; transition: width 0.4s; }
@@ -1435,11 +1435,11 @@ onMounted(() => {
 }
 .rpt-season-val { font-size: 9px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; }
 .rpt-season-bar-area { width: 70%; height: 130px; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
-.rpt-season-bar { width: 100%; background: linear-gradient(to top, #FF8732, #ffb366); border-radius: 3px 3px 0 0; transition: height 0.4s; }
+.rpt-season-bar { width: 100%; background: linear-gradient(to top, #F4A261, #F4A261); border-radius: 3px 3px 0 0; transition: height 0.4s; }
 .rpt-season-avg-dot {
   position: absolute; left: 50%; transform: translateX(-50%);
   width: 8px; height: 8px; border-radius: 50%;
-  background: #D62300; border: 2px solid var(--card);
+  background: #E76F51; border: 2px solid var(--card);
   z-index: 2;
 }
 .rpt-season-label {
@@ -1451,8 +1451,8 @@ onMounted(() => {
   display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-muted);
 }
 .rpt-season-legend-item { display: flex; align-items: center; gap: 4px; }
-.rpt-season-legend-bar { width: 16px; height: 6px; border-radius: 2px; background: linear-gradient(90deg, #FF8732, #ffb366); }
-.rpt-season-legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #D62300; }
+.rpt-season-legend-bar { width: 16px; height: 6px; border-radius: 2px; background: linear-gradient(90deg, #F4A261, #F4A261); }
+.rpt-season-legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #E76F51; }
 
 .rpt-yoy-table { margin-top: 14px; }
 .rpt-yoy-title { font-size: 12px; font-weight: 800; color: var(--text); margin-bottom: 6px; }
@@ -1702,7 +1702,7 @@ onMounted(() => {
 .fc2-sub { cursor: default; background: var(--bg); border-left-width: 3px; }
 .fc2-sub:hover { background: #f0ece6; }
 .fc2-sub-name { padding-left: 30px !important; display: flex; align-items: center; gap: 8px; }
-.fc2-sub-sku { font-size: 10px; font-weight: 700; color: #FF8732; min-width: 50px; }
+.fc2-sub-sku { font-size: 10px; font-weight: 700; color: #F4A261; min-width: 50px; }
 .fc2-sub-label { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .fc2-empty { text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px; }

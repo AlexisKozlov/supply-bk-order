@@ -510,7 +510,7 @@ onBeforeUnmount(() => {
 .mpd-top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .mpd-top-left { display: flex; align-items: center; gap: 12px; }
 .mpd-top-actions { display: flex; gap: 6px; }
-.mpd-back { border: none; background: none; font-size: 13px; cursor: pointer; color: #D62700; padding: 4px 0; }
+.mpd-back { border: none; background: none; font-size: 13px; cursor: pointer; color: #E76F51; padding: 4px 0; }
 .mpd-back:hover { text-decoration: underline; }
 
 .mpd-content { display: flex; flex-direction: column; gap: 10px; }
@@ -531,10 +531,10 @@ onBeforeUnmount(() => {
 .mpd-participants { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .mpd-participant-tag { display: inline-flex; align-items: center; gap: 4px; background: #f0f0f0; padding: 4px 10px; border-radius: 12px; font-size: 12px; }
 .mpd-tag-remove { border: none; background: none; font-size: 15px; cursor: pointer; color: #999; line-height: 1; padding: 0 2px; }
-.mpd-tag-remove:hover { color: #D62700; }
+.mpd-tag-remove:hover { color: #E76F51; }
 .mpd-add-wrap { position: relative; }
 .mpd-add-btn { width: 28px; height: 28px; border-radius: 50%; border: 1.5px dashed #bbb; background: none; font-size: 18px; line-height: 1; color: #888; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.mpd-add-btn:hover { border-color: #D62700; color: #D62700; }
+.mpd-add-btn:hover { border-color: #E76F51; color: #E76F51; }
 .mpd-picker { position: absolute; top: 34px; left: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; min-width: 200px; max-height: 220px; overflow-y: auto; }
 .mpd-picker-item { padding: 7px 12px; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mpd-picker-item:hover { background: #f5f5f5; }
@@ -562,13 +562,13 @@ onBeforeUnmount(() => {
 .mpd-tr-pending { background: #fff8e1; }
 .mpd-tr-done { background: #e8f5e9; }
 .mpd-tr-overdue { background: #fce4ec; }
-.mpd-tr-mine { box-shadow: inset 3px 0 0 #D62700; }
+.mpd-tr-mine { box-shadow: inset 3px 0 0 #E76F51; }
 .mpd-tr-mine.mpd-tr-pending { background: #fff3e0; }
 .mpd-tr-mine.mpd-tr-done { background: #c8e6c9; }
 .mpd-tr-mine.mpd-tr-overdue { background: #f8bbd0; }
 .mpd-td-del { text-align: center; }
 .mpd-row-del { border: none; background: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 0 4px; }
-.mpd-row-del:hover { color: #D62700; }
+.mpd-row-del:hover { color: #E76F51; }
 
 /* Multi-select ответственных */
 .mpd-td-resp { position: relative; }
@@ -595,16 +595,16 @@ onBeforeUnmount(() => {
 /* Buttons */
 .mpd-btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; white-space: nowrap; }
 .mpd-btn:hover { background: #f5f5f5; }
-.mpd-btn-primary { background: #D62700; color: #fff; border-color: #D62700; }
+.mpd-btn-primary { background: #E76F51; color: #fff; border-color: #E76F51; }
 .mpd-btn-primary:hover { background: #b52200; }
 .mpd-btn-primary:disabled { opacity: 0.6; cursor: default; }
 .mpd-btn-finalize { background: #2e7d32; color: #fff; border-color: #2e7d32; }
 .mpd-btn-finalize:hover { background: #1b5e20; }
-.mpd-btn-danger { color: #D62700; border-color: #fcc; font-size: 12px; }
+.mpd-btn-danger { color: #E76F51; border-color: #fcc; font-size: 12px; }
 .mpd-btn-danger:hover { background: #fff0f0; }
 .mpd-btn-export { background: #f5f5f5; font-size: 12px; padding: 5px 10px; }
 .mpd-btn-add { border-style: dashed; color: #888; width: 100%; padding: 8px; margin-top: 4px; }
-.mpd-btn-add:hover { border-color: #D62700; color: #D62700; }
+.mpd-btn-add:hover { border-color: #E76F51; color: #E76F51; }
 
 /* Files */
 .mpd-files { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
@@ -615,7 +615,7 @@ onBeforeUnmount(() => {
 .mpd-file-meta { font-size: 11px; color: #999; white-space: nowrap; }
 .mpd-files-empty { font-size: 12px; color: #aaa; margin-bottom: 8px; }
 .mpd-btn-upload { border-style: dashed; color: #888; padding: 7px 14px; cursor: pointer; display: inline-block; text-align: center; border: 1px dashed #ddd; border-radius: 6px; font-size: 13px; }
-.mpd-btn-upload:hover { border-color: #D62700; color: #D62700; }
+.mpd-btn-upload:hover { border-color: #E76F51; color: #E76F51; }
 
 .mpd-actions { display: flex; gap: 8px; margin-top: 4px; align-items: center; }
 .mpd-unsaved { font-size: 11px; color: #e65100; font-weight: 500; background: #fff3e0; padding: 3px 8px; border-radius: 10px; }

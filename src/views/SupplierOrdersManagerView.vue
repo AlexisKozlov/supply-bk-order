@@ -1535,7 +1535,7 @@ function formatDateTime(dt) {
   font-family: inherit; color: #502314; transition: all 0.2s;
 }
 .rom-btn:hover { background: #f5f0eb; }
-.rom-btn-primary { background: #D62300; color: white; border-color: #D62300; }
+.rom-btn-primary { background: #E76F51; color: white; border-color: #E76F51; }
 .rom-btn-primary:hover { background: #b81e00; }
 .rom-btn-outline { border-style: dashed; }
 .rom-btn-export { background: #f0fdf4; color: #16a34a; border-color: #16a34a; }
@@ -1546,7 +1546,7 @@ function formatDateTime(dt) {
   color: #502314; transition: all 0.2s;
 }
 .rom-btn-sm:hover { background: #f5f0eb; }
-.rom-btn-sm.rom-btn-primary { background: #D62300; color: white; border-color: #D62300; }
+.rom-btn-sm.rom-btn-primary { background: #E76F51; color: white; border-color: #E76F51; }
 .rom-btn-sm.rom-btn-primary:hover { background: #b81e00; }
 .rom-btn-sm.rom-btn-danger { background: white; color: #dc2626; border-color: #dc2626; }
 .rom-btn-sm.rom-btn-danger:hover { background: #fef2f2; }
@@ -1562,7 +1562,7 @@ function formatDateTime(dt) {
   color: #8b7355; border-bottom: 3px solid transparent;
   transition: all 0.2s; font-family: inherit;
 }
-.rom-page-tab.active { color: #D62300; border-bottom-color: #D62300; }
+.rom-page-tab.active { color: #E76F51; border-bottom-color: #E76F51; }
 .rom-page-tab:hover { color: #502314; }
 
 .rom-date-row {
@@ -1585,7 +1585,7 @@ function formatDateTime(dt) {
   text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
 .rom-stat-value { display: block; font-size: 28px; font-weight: 700; color: #16a34a; }
-.rom-stat-pending { color: #D62300; }
+.rom-stat-pending { color: #E76F51; }
 .rom-stat-label { font-size: 12px; color: #8b7355; }
 
 .rom-export-row { display: flex; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
@@ -1729,7 +1729,7 @@ function formatDateTime(dt) {
   width: 180px; padding: 6px 10px; border: 1.5px solid #e0d5c8; border-radius: 8px;
   font-size: 13px; font-family: inherit; background: white; color: #502314;
 }
-.so-filter-input:focus { outline: none; border-color: #D62300; box-shadow: 0 0 0 2px rgba(214,35,0,0.12); }
+.so-filter-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.12); }
 
 .rom-table-wrap:has(.so-pivot-table) {
   border: 2px solid #e0d5c8; border-radius: 10px;
@@ -1771,7 +1771,7 @@ function formatDateTime(dt) {
   border-right: 2px solid #e0d5c8 !important;
 }
 .so-rest-addr { font-size: 11px; color: #8b7355; margin-left: 6px; }
-.rom-td-num { font-weight: 800; color: #D62300; display: inline-block; min-width: 24px; }
+.rom-td-num { font-weight: 800; color: #E76F51; display: inline-block; min-width: 24px; }
 
 .so-td-qty {
   text-align: center; cursor: pointer; min-width: 65px;
@@ -1780,14 +1780,14 @@ function formatDateTime(dt) {
 .so-td-qty:hover { background: #fff8e1; }
 
 .so-qty { font-weight: 700; color: #502314; }
-.so-qty-admin { font-weight: 800; color: #D62300; }
+.so-qty-admin { font-weight: 800; color: #E76F51; }
 .so-qty-empty { color: #ccc; font-size: 14px; }
 
 .so-cell-input {
-  width: 56px; padding: 3px 4px; border: 2px solid #D62300;
+  width: 56px; padding: 3px 4px; border: 2px solid #E76F51;
   border-radius: 6px; text-align: center; font-size: 13px; font-weight: 700;
   font-family: inherit; color: #502314; background: #fff; outline: none;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.15);
+  box-shadow: 0 0 0 3px rgba(231,111,81,0.15);
 }
 
 .so-td-total { background: #faf7f4 !important; font-size: 14px; }
@@ -1810,7 +1810,7 @@ function formatDateTime(dt) {
   background: none; border: none; color: #b45309; cursor: pointer;
   font-size: 14px; line-height: 1; padding: 0 2px;
 }
-.so-override-del:hover { color: #D62300; }
+.so-override-del:hover { color: #E76F51; }
 .so-override-chip-closed {
   background: #fff0f0; color: #B71C1C; border-color: #ef9a9a;
 }

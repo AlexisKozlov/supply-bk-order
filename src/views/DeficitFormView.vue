@@ -156,13 +156,13 @@ async function submit() {
 }
 .deficit-form-submit {
   width: 100%; padding: 12px; border: none; border-radius: 10px;
-  background: linear-gradient(135deg, #D62700, #FF8733);
+  background: linear-gradient(135deg, #E76F51, #F4A261);
   color: #fff; font-size: 15px; font-weight: 700; font-family: inherit;
   cursor: pointer; transition: opacity 0.15s; margin-top: 8px;
 }
 .deficit-form-submit:disabled { opacity: 0.5; cursor: not-allowed; }
 .deficit-form-submit:hover:not(:disabled) { opacity: 0.9; }
-.deficit-form-error { color: #D62700; font-size: 13px; text-align: center; margin-top: 12px; }
+.deficit-form-error { color: #E76F51; font-size: 13px; text-align: center; margin-top: 12px; }
 .deficit-form-success { text-align: center; padding: 20px 0; }
 .deficit-form-check {
   width: 56px; height: 56px; border-radius: 50%;
@@ -174,6 +174,6 @@ async function submit() {
 .deficit-form-success p { color: #555; margin: 0 0 4px; font-size: 14px; }
 .deficit-form-hint { color: #aaa !important; font-size: 12px !important; margin-top: 16px !important; }
 .deficit-form-expired { text-align: center; padding: 20px 0; }
-.deficit-form-expired h2 { font-size: 18px; color: #D62700; margin: 0 0 8px; }
+.deficit-form-expired h2 { font-size: 18px; color: #E76F51; margin: 0 0 8px; }
 .deficit-form-expired p { color: #888; font-size: 14px; margin: 0; }
 </style>

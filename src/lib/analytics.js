@@ -9,7 +9,7 @@ import { getEntityGroupCode } from './legalEntities.js';
 
 export const ANALYTICS_VERSION = 2;
 const PALETTE = [
-  '#F5A623','#4CAF50','#2196F3','#9C27B0',
+  '#F4A261','#4CAF50','#2196F3','#9C27B0',
   '#F44336','#00BCD4','#FF5722','#607D8B',
   '#E91E63','#795548'
 ];

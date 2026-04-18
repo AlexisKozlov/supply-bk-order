@@ -2360,9 +2360,9 @@ watch(() => route.query.planId, async (newId) => {
 .plan-pallet-period, .plan-reset-cell { display: inline-block; font-size: 10px; cursor: pointer; margin-left: 2px; opacity: 0.5; transition: opacity 0.15s; vertical-align: middle; }
 .plan-pallet-period:hover, .plan-reset-cell:hover { opacity: 1; }
 .plan-reset-cell { color: #d32f2f; font-weight: 700; }
-.plan-th-total { min-width: 70px; background: rgba(245,166,35,0.15) !important; }
+.plan-th-total { min-width: 70px; background: rgba(244,162,97,0.15) !important; }
 .plan-td-total { text-align: center; min-width: 80px; border-left: 2px solid var(--bk-orange); padding: 4px 6px; }
-.plan-td-total.plan-has-value { background: rgba(245,166,35,0.08); }
+.plan-td-total.plan-has-value { background: rgba(244,162,97,0.08); }
 .plan-total-boxes { display: block; font-weight: 700; font-size: 13px; color: var(--bk-brown); }
 .plan-total-units { display: block; font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 .plan-total-price { display: block; font-size: 10px; color: #1B5E20; margin-top: 1px; }

@@ -1252,7 +1252,7 @@ onBeforeUnmount(() => {
 /* ═══ HERO ═══ */
 .hero {
   position: relative;
-  background: linear-gradient(135deg, #1A0E08 0%, #3D1F12 40%, #5C2D0E 70%, #D62300 100%);
+  background: linear-gradient(135deg, #1A0E08 0%, #3D1F12 40%, #5C2D0E 70%, #E76F51 100%);
   padding: 0 0 80px;
   overflow: visible;
 }
@@ -1261,7 +1261,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 600px 400px at 20% 50%, rgba(214,35,0,0.25), transparent),
+    radial-gradient(ellipse 600px 400px at 20% 50%, rgba(231,111,81,0.25), transparent),
     radial-gradient(ellipse 500px 350px at 80% 30%, rgba(255,135,50,0.2), transparent);
   pointer-events: none;
   -webkit-clip-path: inset(0);
@@ -1391,7 +1391,7 @@ onBeforeUnmount(() => {
 .search-field:focus-within {
   background: rgba(255,255,255,0.22);
   border-color: rgba(255,255,255,0.45);
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.25), 0 8px 32px rgba(0,0,0,0.2);
+  box-shadow: 0 0 0 3px rgba(231,111,81,0.25), 0 8px 32px rgba(0,0,0,0.2);
 }
 .search-icon {
   color: rgba(255,255,255,0.4);
@@ -1446,7 +1446,7 @@ onBeforeUnmount(() => {
   margin-left: auto;
   margin-right: auto;
   padding: 11px 28px;
-  background: linear-gradient(135deg, #D62300 0%, #FF5722 100%);
+  background: linear-gradient(135deg, #E76F51 0%, #FF5722 100%);
   color: #fff;
   border: none;
   border-radius: 12px;
@@ -1455,15 +1455,15 @@ onBeforeUnmount(() => {
   font-family: inherit;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 4px 16px rgba(214,35,0,0.4);
+  box-shadow: 0 4px 16px rgba(231,111,81,0.4);
 }
 .search-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 24px rgba(214,35,0,0.5);
+  box-shadow: 0 6px 24px rgba(231,111,81,0.5);
 }
 .search-btn:active {
   transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(214,35,0,0.3);
+  box-shadow: 0 2px 8px rgba(231,111,81,0.3);
 }
 .search-btn-icon { display: none; }
 
@@ -1492,11 +1492,11 @@ onBeforeUnmount(() => {
 }
 .ac-item:hover,
 .ac-item.active {
-  background: rgba(214,35,0,0.15);
+  background: rgba(231,111,81,0.15);
 }
 .ac-article {
   font-weight: 700;
-  color: #FF8732;
+  color: #F4A261;
   font-size: 0.82rem;
   min-width: 76px;
   flex-shrink: 0;
@@ -1571,22 +1571,22 @@ onBeforeUnmount(() => {
   top: 0;
   bottom: 0;
   width: 4px;
-  background: linear-gradient(180deg, #D62300, #FF8732);
+  background: linear-gradient(180deg, #E76F51, #F4A261);
   border-radius: 4px 0 0 4px;
   opacity: 0;
   transition: opacity 0.2s;
 }
 .result-card:hover {
-  border-color: #D6230033;
-  box-shadow: 0 4px 20px rgba(214,35,0,0.08);
+  border-color: #E76F5133;
+  box-shadow: 0 4px 20px rgba(231,111,81,0.08);
   transform: translateY(-1px);
 }
 .result-card:hover::before {
   opacity: 1;
 }
 .result-card.copied {
-  border-color: #D62300;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.1);
+  border-color: #E76F51;
+  box-shadow: 0 0 0 3px rgba(231,111,81,0.1);
 }
 .result-card.copied::before {
   opacity: 1;
@@ -1600,7 +1600,7 @@ onBeforeUnmount(() => {
 .result-article {
   font-weight: 800;
   font-size: 1rem;
-  color: #D62300;
+  color: #E76F51;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.3px;
 }
@@ -1696,12 +1696,12 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 .fab-btn.fab-active {
-  background: linear-gradient(135deg, #D62300, #FF5722);
+  background: linear-gradient(135deg, #E76F51, #FF5722);
   color: #fff;
-  box-shadow: 0 4px 20px rgba(214,35,0,0.4);
+  box-shadow: 0 4px 20px rgba(231,111,81,0.4);
 }
 .fab-btn.fab-active:hover {
-  box-shadow: 0 8px 28px rgba(214,35,0,0.5);
+  box-shadow: 0 8px 28px rgba(231,111,81,0.5);
 }
 
 /* ═══ LOGIN POPUP ═══ */
@@ -1744,8 +1744,8 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 .field-input:focus {
-  border-color: #D62300;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.08);
+  border-color: #E76F51;
+  box-shadow: 0 0 0 3px rgba(231,111,81,0.08);
 }
 select.field-input {
   cursor: pointer;
@@ -1758,7 +1758,7 @@ select.field-input {
 }
 .btn-primary {
   padding: 10px 20px;
-  background: linear-gradient(135deg, #D62300 0%, #FF5722 100%);
+  background: linear-gradient(135deg, #E76F51 0%, #FF5722 100%);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -1767,10 +1767,10 @@ select.field-input {
   font-family: inherit;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(214,35,0,0.2);
+  box-shadow: 0 2px 8px rgba(231,111,81,0.2);
 }
 .btn-primary:hover {
-  box-shadow: 0 4px 16px rgba(214,35,0,0.35);
+  box-shadow: 0 4px 16px rgba(231,111,81,0.35);
   transform: translateY(-1px);
 }
 .btn-ghost {
@@ -1869,7 +1869,7 @@ select.field-input {
 }
 .close-btn:hover {
   background: #eee9e3;
-  color: #D62300;
+  color: #E76F51;
 }
 
 .admin-tabs {
@@ -1896,8 +1896,8 @@ select.field-input {
   transition: all 0.15s;
 }
 .tab-btn.active {
-  color: #D62300;
-  border-bottom-color: #D62300;
+  color: #E76F51;
+  border-bottom-color: #E76F51;
 }
 .tab-btn:hover:not(.active) {
   color: #6B5344;
@@ -1956,7 +1956,7 @@ select.field-input {
   transition: border-color 0.15s;
 }
 .edit-card-item:hover {
-  border-color: #D6230033;
+  border-color: #E76F5133;
 }
 .edit-card-info {
   min-width: 0;
@@ -1970,7 +1970,7 @@ select.field-input {
 }
 .edit-card-id {
   font-weight: 800;
-  color: #D62300;
+  color: #E76F51;
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
 }
@@ -2017,7 +2017,7 @@ select.field-input {
   width: 28px;
   height: 28px;
   border: 3px solid #F0EBE4;
-  border-top-color: #D62300;
+  border-top-color: #E76F51;
   border-radius: 50%;
   animation: hero-spin 0.7s linear infinite;
 }
@@ -2154,14 +2154,14 @@ select.field-input {
 }
 .top-card-bar {
   height: 100%;
-  background: linear-gradient(90deg, #D62300, #FF6B35);
+  background: linear-gradient(90deg, #E76F51, #FF6B35);
   border-radius: 3px;
   transition: width 0.4s ease;
 }
 .top-card-count {
   font-size: 0.8rem;
   font-weight: 800;
-  color: #D62300;
+  color: #E76F51;
   font-variant-numeric: tabular-nums;
   min-width: 24px;
   text-align: right;
@@ -2195,7 +2195,7 @@ select.field-input {
   outline: none;
 }
 .audit-mini-select:focus {
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 .audit-log-list {
   display: flex;
@@ -2264,9 +2264,9 @@ select.field-input {
   transition: all 0.15s;
 }
 .audit-load-more:hover {
-  border-color: #D62300;
-  color: #D62300;
-  background: rgba(214,35,0,0.03);
+  border-color: #E76F51;
+  color: #E76F51;
+  background: rgba(231,111,81,0.03);
 }
 .audit-load-more:disabled {
   opacity: 0.5;
@@ -2314,7 +2314,7 @@ select.field-input {
   transition: color 0.15s;
 }
 .footer-link:hover {
-  color: #D62300;
+  color: #E76F51;
 }
 .footer-guests {
   color: #6B8E6B;

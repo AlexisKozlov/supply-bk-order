@@ -86,7 +86,7 @@
                 </td>
                 <td class="rsv-td-chart">
                   <svg class="rsv-sparkline" viewBox="0 0 70 20" preserveAspectRatio="none">
-                    <path :d="sparkline(g.last7)" stroke="#FF8732" stroke-width="1.5" fill="none" />
+                    <path :d="sparkline(g.last7)" stroke="#F4A261" stroke-width="1.5" fill="none" />
                   </svg>
                 </td>
                 <td class="rsv-td-num rsv-td-days-cnt">{{ g.dayCount }}</td>
@@ -603,7 +603,7 @@ async function onFileSelected(e) {
 .rsv-trend-down { color: #C62828 !important; font-weight: 700; }
 
 /* Detail row */
-.rsv-detail-row td { padding: 0 !important; border-bottom: 2px solid #FF8732; }
+.rsv-detail-row td { padding: 0 !important; border-bottom: 2px solid #F4A261; }
 .rsv-detail { padding: 14px 10px; background: var(--bg); }
 
 .rsv-detail-section { margin-bottom: 14px; }
@@ -618,7 +618,7 @@ async function onFileSelected(e) {
 .rsv-chart-area { flex: 1; min-width: 0; }
 .rsv-chart-bars { display: flex; align-items: flex-end; height: 100%; gap: 0; }
 .rsv-bar-col { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 0; padding: 0 0.3px; }
-.rsv-bar { width: 100%; background: #FF8732; border-radius: 1px 1px 0 0; transition: height 0.15s; min-height: 1px; }
+.rsv-bar { width: 100%; background: #F4A261; border-radius: 1px 1px 0 0; transition: height 0.15s; min-height: 1px; }
 .rsv-bar:hover { opacity: 0.7; }
 .rsv-bar-we { background: #FFB74D; }
 
@@ -627,9 +627,9 @@ async function onFileSelected(e) {
 .rsv-wd-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
 .rsv-wd-val { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .rsv-wd-bar-area { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
-.rsv-wd-bar { width: 100%; max-width: 28px; background: #FF8732; border-radius: 3px 3px 0 0; transition: height 0.15s; }
+.rsv-wd-bar { width: 100%; max-width: 28px; background: #F4A261; border-radius: 3px 3px 0 0; transition: height 0.15s; }
 .rsv-wd-label { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
-.rsv-wd-we { color: #FF8732 !important; }
+.rsv-wd-we { color: #F4A261 !important; }
 
 /* Weekly trends */
 .rsv-weekly { display: flex; gap: 2px; height: 130px; }
@@ -637,7 +637,7 @@ async function onFileSelected(e) {
 .rsv-wk-change { font-size: 10px; font-weight: 700; white-space: nowrap; margin-bottom: 1px; }
 .rsv-wk-val { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .rsv-wk-bar-area { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
-.rsv-wk-bar { width: 100%; max-width: 40px; background: #FF8732; border-radius: 3px 3px 0 0; transition: height 0.15s; min-height: 2px; }
+.rsv-wk-bar { width: 100%; max-width: 40px; background: #F4A261; border-radius: 3px 3px 0 0; transition: height 0.15s; min-height: 2px; }
 .rsv-wk-label { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
 
 /* Metrics */

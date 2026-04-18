@@ -17,7 +17,7 @@
 .not-found-inner { max-width: 400px; }
 .not-found-code {
   font-size: 96px; font-weight: 900; line-height: 1;
-  color: var(--bk-orange, #F5A623); opacity: 0.8;
+  color: var(--bk-orange, #F4A261); opacity: 0.8;
 }
 .not-found-title {
   font-size: 22px; font-weight: 700; margin: 12px 0 8px;

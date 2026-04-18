@@ -550,20 +550,20 @@ function statusLabel(s) {
   width: 40px;
   height: 40px;
   padding: 0;
-  background: linear-gradient(135deg, #D62300 0%, #FF5722 100%);
+  background: linear-gradient(135deg, #E76F51 0%, #FF5722 100%);
   color: #fff;
   border: none;
   border-radius: 50%;
   cursor: pointer;
   font-family: inherit;
-  box-shadow: 0 3px 14px rgba(214,35,0,0.35), 0 1px 6px rgba(0,0,0,0.12);
+  box-shadow: 0 3px 14px rgba(231,111,81,0.35), 0 1px 6px rgba(0,0,0,0.12);
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
   overflow: visible;
 }
 .bug-fab:hover {
   transform: translateY(-2px) scale(1.08);
-  box-shadow: 0 5px 22px rgba(214,35,0,0.45), 0 2px 10px rgba(0,0,0,0.18);
+  box-shadow: 0 5px 22px rgba(231,111,81,0.45), 0 2px 10px rgba(0,0,0,0.18);
 }
 .bug-fab.active {
   width: 36px;
@@ -607,7 +607,7 @@ function statusLabel(s) {
   50% { transform: scale(1.2); }
 }
 @keyframes bug-glow {
-  0%, 100% { box-shadow: 0 4px 20px rgba(214,35,0,0.35); }
+  0%, 100% { box-shadow: 0 4px 20px rgba(231,111,81,0.35); }
   50% { box-shadow: 0 4px 30px rgba(255,215,0,0.5), 0 0 20px rgba(255,215,0,0.3); }
 }
 
@@ -675,8 +675,8 @@ function statusLabel(s) {
 }
 .bug-tab:hover { color: #2c1810; }
 .bug-tab.active {
-  color: #D62300;
-  border-bottom-color: #D62300;
+  color: #E76F51;
+  border-bottom-color: #E76F51;
 }
 .bug-tab-count {
   background: #f0ebe4;
@@ -715,8 +715,8 @@ function statusLabel(s) {
 }
 .bug-input:focus {
   outline: none;
-  border-color: #D62300;
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.08);
+  border-color: #E76F51;
+  box-shadow: 0 0 0 3px rgba(231,111,81,0.08);
 }
 .bug-textarea {
   resize: vertical;
@@ -772,7 +772,7 @@ function statusLabel(s) {
   width: 20px;
   height: 20px;
   border: 2px solid #e8e0d6;
-  border-top-color: #D62300;
+  border-top-color: #E76F51;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -791,9 +791,9 @@ function statusLabel(s) {
   flex-shrink: 0;
 }
 .bug-screenshot-add:hover {
-  border-color: #D62300;
-  color: #D62300;
-  background: rgba(214,35,0,0.03);
+  border-color: #E76F51;
+  color: #E76F51;
+  background: rgba(231,111,81,0.03);
 }
 .bug-paste-hint {
   font-size: 10px;
@@ -821,7 +821,7 @@ function statusLabel(s) {
   align-items: center;
   gap: 6px;
   padding: 9px 20px;
-  background: linear-gradient(135deg, #D62300 0%, #FF5722 100%);
+  background: linear-gradient(135deg, #E76F51 0%, #FF5722 100%);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -834,7 +834,7 @@ function statusLabel(s) {
 }
 .bug-submit:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(214,35,0,0.3);
+  box-shadow: 0 4px 12px rgba(231,111,81,0.3);
 }
 .bug-submit:disabled {
   opacity: 0.5;
@@ -873,8 +873,8 @@ function statusLabel(s) {
   transition: 0.15s;
 }
 .bug-report-card:hover {
-  border-color: #D62300;
-  background: rgba(214,35,0,0.02);
+  border-color: #E76F51;
+  background: rgba(231,111,81,0.02);
 }
 .bug-report-card-top {
   display: flex;
@@ -981,7 +981,7 @@ function statusLabel(s) {
   word-break: break-word;
 }
 .chat-bubble.me .chat-bubble-body {
-  background: #D62300;
+  background: #E76F51;
   color: #fff;
   border-bottom-right-radius: 4px;
 }
@@ -1069,7 +1069,7 @@ function statusLabel(s) {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #D62300;
+  background: #E76F51;
   color: #fff;
   border: none;
   font-size: 11px;
@@ -1092,7 +1092,7 @@ function statusLabel(s) {
   content: '';
   width: 14px;
   height: 14px;
-  border: 2px solid #D62300;
+  border: 2px solid #E76F51;
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -1112,7 +1112,7 @@ function statusLabel(s) {
   flex-shrink: 0;
   transition: 0.15s;
 }
-.chat-attach:hover { color: #D62300; background: rgba(214,35,0,0.05); }
+.chat-attach:hover { color: #E76F51; background: rgba(231,111,81,0.05); }
 .chat-textarea {
   flex: 1;
   padding: 8px 12px;
@@ -1131,14 +1131,14 @@ function statusLabel(s) {
 }
 .chat-textarea:focus {
   outline: none;
-  border-color: #D62300;
+  border-color: #E76F51;
   background: #fff;
 }
 .chat-send {
   width: 36px;
   height: 36px;
   padding: 0;
-  background: #D62300;
+  background: #E76F51;
   color: #fff;
   border: none;
   border-radius: 50%;

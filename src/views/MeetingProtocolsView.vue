@@ -237,12 +237,12 @@ watch(() => orderStore.settings.legalEntity, async () => {
 .mp-textarea { padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 100%; resize: vertical; box-sizing: border-box; font-family: inherit; }
 .mp-btn { padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; white-space: nowrap; }
 .mp-btn:hover { background: #f5f5f5; }
-.mp-btn-primary { background: #D62700; color: #fff; border-color: #D62700; }
+.mp-btn-primary { background: #E76F51; color: #fff; border-color: #E76F51; }
 .mp-btn-primary:hover { background: #b52200; }
 .mp-btn-series { background: #f5f5f5; }
 .mp-btn-sm { padding: 3px 8px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; background: #fff; }
 .mp-btn-sm:hover { background: #f5f5f5; }
-.mp-btn-danger { color: #D62700; border-color: #fcc; }
+.mp-btn-danger { color: #E76F51; border-color: #fcc; }
 .mp-btn-danger:hover { background: #fff0f0; }
 
 /* Stats */
@@ -268,7 +268,7 @@ watch(() => orderStore.settings.legalEntity, async () => {
 .mp-card-series { background: #f0f0f0; padding: 1px 6px; border-radius: 4px; }
 .mp-card-decisions { font-weight: 500; white-space: nowrap; }
 .mp-card-participants { display: flex; gap: 3px; flex-shrink: 0; }
-.mp-avatar { width: 24px; height: 24px; border-radius: 50%; background: #D62700; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; }
+.mp-avatar { width: 24px; height: 24px; border-radius: 50%; background: #E76F51; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; }
 .mp-avatar-more { background: #888; }
 
 .mp-loading, .mp-empty { text-align: center; padding: 40px; color: #888; }

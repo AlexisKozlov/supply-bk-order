@@ -344,7 +344,7 @@ watch([legalEntity, period, dataSource], () => { items.value = []; loadData(); }
 .abc-table-card { background:white; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,0.06); overflow:hidden; }
 .abc-search-wrap { }
 .abc-search { padding:6px 12px; border:1.5px solid #D4C4B0; border-radius:8px; font-size:12px; font-family:inherit; width:220px; }
-.abc-search:focus { border-color:#D62300; outline:none; }
+.abc-search:focus { border-color:#E76F51; outline:none; }
 .abc-clear-filter { font-size:11px; color:var(--text-muted); cursor:pointer; margin-left:6px; }
 .abc-clear-filter:hover { color:#C62828; }
 

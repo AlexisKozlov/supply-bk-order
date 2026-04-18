@@ -120,7 +120,7 @@ onMounted(() => {
 .gantt-col-today { color: #fff; background: rgba(255,255,255,0.12); }
 .gantt-body { position: relative; min-height: 100px; min-width: 100%; background: #FAFAF8; }
 .gantt-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #F0EBE5; }
-.gantt-today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #D62300; z-index: 1; box-shadow: 0 0 6px rgba(214,35,0,0.3); }
+.gantt-today-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #E76F51; z-index: 1; box-shadow: 0 0 6px rgba(231,111,81,0.3); }
 .gantt-row { height: 40px; position: relative; border-bottom: 1px solid #F0EBE5; }
 .gantt-bar { position: absolute; top: 6px; height: 28px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; padding: 0 10px; overflow: hidden; transition: all 0.15s; min-width: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
 .gantt-bar:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,0.2); }

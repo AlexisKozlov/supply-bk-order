@@ -553,7 +553,7 @@ watch(legalEntity, () => {
 
 .db-sort-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border-radius: 8px; border: 1.5px solid #D4C4B0; background: white; font-size: 11px; font-weight: 600; font-family: inherit; color: var(--text-muted); cursor: pointer; transition: all .15s; white-space: nowrap; }
 .db-sort-btn:hover { border-color: var(--bk-orange); color: var(--text); }
-.db-sort-btn.active { border-color: #D62300; color: var(--bk-brown); background: #FFFBF5; }
+.db-sort-btn.active { border-color: #E76F51; color: var(--bk-brown); background: #FFFBF5; }
 
 .mkt-empty { text-align: center; padding: 60px 20px; }
 .mkt-empty-icon { margin-bottom: 12px; opacity: 0.3; }
@@ -584,7 +584,7 @@ watch(legalEntity, () => {
 .mkt-recipes-stats strong { color: var(--bk-brown, #502314); }
 .mkt-recipes-search { margin-bottom: 12px; }
 .mkt-input { width: 100%; max-width: 400px; padding: 8px 12px; border: 1.5px solid #E8E0D8; border-radius: 8px; font-size: 13px; font-family: inherit; background: #FAFAF8; color: var(--text); box-sizing: border-box; }
-.mkt-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(214,35,0,0.08); }
+.mkt-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(231,111,81,0.08); }
 .mkt-muted { color: var(--text-muted); }
 .mkt-recipes-list { display: flex; flex-direction: column; gap: 6px; }
 .mkt-recipe-card { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); cursor: pointer; transition: all 0.15s; overflow: hidden; }
@@ -598,7 +598,7 @@ watch(legalEntity, () => {
 .mkt-recipe-count { font-size: 11px; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
 .mkt-recipe-body { padding: 0 16px 14px; border-top: 1px solid #F5F0EB; }
 .mkt-recipe-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-.mkt-recipe-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--bk-brown, #502314); font-weight: 700; padding: 8px 8px; border-bottom: 2px solid var(--bk-orange, #D62300); text-align: center; background: #FFF8F0; }
+.mkt-recipe-table th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--bk-brown, #502314); font-weight: 700; padding: 8px 8px; border-bottom: 2px solid var(--bk-orange, #E76F51); text-align: center; background: #FFF8F0; }
 .mkt-recipe-table td { padding: 5px 8px; border-bottom: 1px solid #F5F0EB; text-align: center; }
 .mkt-recipe-table tbody tr:hover { background: #FFFBF5; }
 
@@ -617,13 +617,13 @@ watch(legalEntity, () => {
 .mkt-group-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; gap: 12px; }
 .mkt-group-header:hover { color: var(--bk-red); }
 .mkt-group-kw { display: flex; gap: 4px; flex-wrap: wrap; }
-.mkt-kw-tag { display: inline-block; padding: 2px 8px; background: rgba(245,166,35,.1); color: var(--bk-orange); border-radius: 4px; font-size: 11px; font-weight: 600; }
+.mkt-kw-tag { display: inline-block; padding: 2px 8px; background: rgba(244,162,97,.1); color: var(--bk-orange); border-radius: 4px; font-size: 11px; font-weight: 600; }
 .mkt-group-recipes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mkt-group-recipe { font-size: 12px; padding: 2px 8px; background: var(--bg); border-radius: 4px; color: var(--text-muted); }
 .mkt-field { display: flex; flex-direction: column; gap: 4px; }
 .mkt-field label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .mkt-group-recipe-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 8px; padding: 6px; }
 .mkt-group-recipe-option { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 5px 8px; border-radius: 6px; cursor: pointer; line-height: 1.3; }
-.mkt-group-recipe-option:hover { background: rgba(245,166,35,.06); }
+.mkt-group-recipe-option:hover { background: rgba(244,162,97,.06); }
 .mkt-group-recipe-option input[type=checkbox] { flex: 0 0 14px; width: 14px; height: 14px; min-width: 14px; max-width: 14px; margin: 0; accent-color: var(--bk-red); cursor: pointer; -webkit-appearance: checkbox; appearance: checkbox; }
 </style>

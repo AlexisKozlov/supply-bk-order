@@ -2608,7 +2608,7 @@ async function doUnifiedExport() {
   font-size: 14px; font-family: inherit; color: #502314; font-weight: 600;
   background: #faf7f4;
 }
-.rom-cmd-date:focus { outline: none; border-color: #D62300; background: white; }
+.rom-cmd-date:focus { outline: none; border-color: #E76F51; background: white; }
 .rom-command-deadline {
   padding: 8px 16px; border-radius: 10px;
   background: #faf7f4;
@@ -2668,7 +2668,7 @@ async function doUnifiedExport() {
   border: 1px solid #e0d5c8; border-radius: 8px;
   font-size: 14px; font-family: inherit; color: #502314; background: white;
 }
-.rom-list-search:focus { outline: none; border-color: #D62300; }
+.rom-list-search:focus { outline: none; border-color: #E76F51; }
 .rom-list-search::placeholder { color: #a08570; }
 .rom-list-status-filters { display: flex; gap: 6px; }
 .rom-chip {
@@ -2742,7 +2742,7 @@ async function doUnifiedExport() {
   transition: all 0.15s;
 }
 .rom-btn:hover { background: #faf0e6; border-color: #d4c2a8; }
-.rom-btn-primary { background: #D62300; color: white; border-color: #D62300; }
+.rom-btn-primary { background: #E76F51; color: white; border-color: #E76F51; }
 .rom-btn-primary:hover { background: #b81e00; border-color: #b81e00; color: white; }
 .rom-btn-outline { border-style: dashed; }
 .rom-btn-export { background: white; color: #16a34a; border-color: #c5f0d8; }
@@ -2829,7 +2829,7 @@ async function doUnifiedExport() {
   display: flex; gap: 20px; margin-top: 8px; font-size: 14px; color: #502314;
   background: #f0ebe4; padding: 8px 14px; border-radius: 8px;
 }
-.rom-order-totals-bar strong { color: #D62300; }
+.rom-order-totals-bar strong { color: #E76F51; }
 
 /* Табы режимов в модалке заказа */
 .rom-cat-tabs {
@@ -2848,12 +2848,12 @@ async function doUnifiedExport() {
   transition: all 0.15s; font-family: inherit;
   display: flex; align-items: center; gap: 6px;
 }
-.rom-cat-tab.active { color: #D62300; border-bottom-color: #D62300; }
+.rom-cat-tab.active { color: #E76F51; border-bottom-color: #E76F51; }
 .rom-cat-tab:hover:not(.active) { color: #502314; }
 .rom-cat-tab-count {
   background: #f0ebe4; padding: 1px 7px; border-radius: 10px; font-size: 11px; color: #502314;
 }
-.rom-cat-tab.active .rom-cat-tab-count { background: rgba(214, 35, 0, 0.1); color: #D62300; }
+.rom-cat-tab.active .rom-cat-tab-count { background: rgba(231, 111, 81, 0.1); color: #E76F51; }
 
 /* Скроллируемая часть модалки */
 .rom-modal-scroll {
@@ -2922,7 +2922,7 @@ async function doUnifiedExport() {
   padding: 6px 14px; border-radius: 8px; border: 1px solid #e0d5c8;
   background: white; cursor: pointer; font-size: 13px; font-family: inherit;
 }
-.rom-tpl-tab.active { background: #D62300; color: white; border-color: #D62300; }
+.rom-tpl-tab.active { background: #E76F51; color: white; border-color: #E76F51; }
 .rom-tpl-actions { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
 .rom-select { padding: 6px 10px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; font-family: inherit; }
 .rom-tpl-list { max-height: 400px; overflow-y: auto; }
@@ -2939,10 +2939,10 @@ async function doUnifiedExport() {
 .rom-order-meta { display: flex; gap: 20px; margin-bottom: 16px; font-size: 14px; color: #502314; flex-wrap: wrap; align-items: center; }
 .rom-meta-edited { font-size: 12px; color: #8b7355; }
 .rom-date-editable { cursor: pointer; border-bottom: 1px dashed #8b7355; }
-.rom-date-editable:hover { color: #D62300; border-color: #D62300; }
+.rom-date-editable:hover { color: #E76F51; border-color: #E76F51; }
 .rom-date-edit { display: inline-flex; align-items: center; gap: 6px; }
 .rom-input-date { padding: 4px 8px; border: 1.5px solid #e0dbd5; border-radius: 6px; font-size: 13px; font-family: inherit; }
-.rom-cat-title { font-size: 14px; color: #D62300; margin: 16px 0 8px; }
+.rom-cat-title { font-size: 14px; color: #E76F51; margin: 16px 0 8px; }
 .rom-table-edit th { text-align: center; }
 .rom-table-edit th:first-child { text-align: left; }
 .rom-table-edit td { padding: 4px 8px; text-align: left; }
@@ -2979,7 +2979,7 @@ async function doUnifiedExport() {
   color: #8b7355; border-bottom: 3px solid transparent;
   transition: all 0.2s; font-family: inherit;
 }
-.rom-page-tab.active { color: #D62300; border-bottom-color: #D62300; }
+.rom-page-tab.active { color: #E76F51; border-bottom-color: #E76F51; }
 .rom-page-tab:hover { color: #502314; }
 .rom-page-tab-link {
   text-decoration: none; margin-left: auto;
@@ -3008,7 +3008,7 @@ async function doUnifiedExport() {
   font-weight: 600; color: #502314; transition: all 0.2s;
   display: flex; align-items: center; gap: 6px;
 }
-.rom-tpl-tab.active { background: #D62300; color: white; border-color: #D62300; }
+.rom-tpl-tab.active { background: #E76F51; color: white; border-color: #E76F51; }
 .rom-tpl-tab-count {
   background: rgba(0,0,0,0.1); padding: 1px 7px; border-radius: 10px; font-size: 11px;
 }
@@ -3058,7 +3058,7 @@ async function doUnifiedExport() {
   width: 60px; padding: 4px 6px; border: 1px solid #e0d5c8;
   border-radius: 6px; font-size: 13px; text-align: center;
 }
-.rom-tpl-mult-input:focus { outline: none; border-color: #D62300; }
+.rom-tpl-mult-input:focus { outline: none; border-color: #E76F51; }
 
 /* Add to template */
 .rom-tpl-add-row {
@@ -3067,7 +3067,7 @@ async function doUnifiedExport() {
   border: 1px solid #f0ebe4; margin-bottom: 4px;
   font-size: 13px; transition: all 0.15s;
 }
-.rom-tpl-add-row:hover { background: #f5f0eb; border-color: #D62300; }
+.rom-tpl-add-row:hover { background: #f5f0eb; border-color: #E76F51; }
 .rom-add-cat { font-size: 11px; color: #8b7355; background: #f5f0eb; padding: 2px 8px; border-radius: 4px; }
 .rom-mult-badge { background: #eff6ff; color: #2563eb; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 
@@ -3119,8 +3119,8 @@ async function doUnifiedExport() {
 }
 .rom-exp-grouping-opt:hover { background: #faf0e6; border-color: #d4c2a8; }
 .rom-exp-grouping-opt.active {
-  background: #fff5e8; border-color: #D62300;
-  box-shadow: 0 0 0 2px rgba(214,35,0,0.12);
+  background: #fff5e8; border-color: #E76F51;
+  box-shadow: 0 0 0 2px rgba(231,111,81,0.12);
 }
 .rom-exp-grouping-name { font-size: 13px; font-weight: 700; color: #502314; }
 .rom-exp-grouping-hint { font-size: 11px; color: #8b7355; margin-top: 2px; }
@@ -3150,7 +3150,7 @@ async function doUnifiedExport() {
   background: white; cursor: pointer; font-size: 11px; font-family: inherit;
   color: #502314; font-weight: 600; transition: all 0.15s;
 }
-.rom-exp-preset-btn:hover { background: #fff5e8; border-color: #D62300; color: #D62300; }
+.rom-exp-preset-btn:hover { background: #fff5e8; border-color: #E76F51; color: #E76F51; }
 .rom-exp-cols-hint { font-size: 11px; color: #8b7355; margin-bottom: 8px; line-height: 1.4; }
 .rom-exp-cols-list {
   border: 1px solid #e8dccd; border-radius: 10px;
@@ -3183,7 +3183,7 @@ async function doUnifiedExport() {
   display: inline-flex; align-items: center; justify-content: center;
   color: #502314;
 }
-.rom-exp-arrow:hover:not(:disabled) { background: #fff5e8; border-color: #D62300; color: #D62300; }
+.rom-exp-arrow:hover:not(:disabled) { background: #fff5e8; border-color: #E76F51; color: #E76F51; }
 .rom-exp-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .rom-exp-footer {
@@ -3192,7 +3192,7 @@ async function doUnifiedExport() {
   border-radius: 0 0 16px 16px;
 }
 .rom-exp-summary { font-size: 13px; color: #502314; }
-.rom-exp-summary strong { color: #D62300; }
+.rom-exp-summary strong { color: #E76F51; }
 
 .rom-td-weight { font-size: 12px; color: #8b7355; }
 .rom-cat-summary {
@@ -3317,7 +3317,7 @@ async function doUnifiedExport() {
   background: none; border: none; color: #8b7355; cursor: pointer;
   font-size: 11px; padding: 0 4px; text-decoration: underline;
 }
-.rom-audit-details-btn:hover { color: #D62300; }
+.rom-audit-details-btn:hover { color: #E76F51; }
 .rom-audit-details {
   grid-column: 3 / 5; margin: 6px 0 0; padding: 8px 10px;
   background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
@@ -3330,7 +3330,7 @@ async function doUnifiedExport() {
   width: 28px; height: 28px; cursor: pointer; color: #6b7280; font-size: 14px;
   display: flex; align-items: center; justify-content: center;
 }
-.rom-audit-goto:hover { border-color: #D62300; color: #D62300; background: #fff8f0; }
+.rom-audit-goto:hover { border-color: #E76F51; color: #E76F51; background: #fff8f0; }
 
 .rom-audit-more { text-align: center; padding: 16px 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .rom-audit-more-hint { font-size: 11px; color: #9ca3af; }

@@ -58,7 +58,7 @@
 }
 
 .safety-calendar-icon:hover {
-  background: rgba(245,166,35,0.15);
+  background: rgba(244,162,97,0.18);
   opacity: 1;
 }
 /* ========================================
@@ -77,12 +77,12 @@
 }
 
 .stat-card {
-  background: linear-gradient(135deg, #F5A623 0%, #ff8c42 100%);
+  background: linear-gradient(135deg, #F4A261 0%, #E76F51 100%);
   color: white;
   padding: 20px;
   border-radius: 12px;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(255, 140, 66, 0.3);
+  box-shadow: 0 4px 12px rgba(231,111,81,0.3);
 }
 
 .stat-value {
@@ -129,7 +129,7 @@
 
 .chart-bar {
   width: 100%;
-  background: linear-gradient(to top, #F5A623, #ffb366);
+  background: linear-gradient(to top, #F4A261, #F4A261);
   border-radius: 4px 4px 0 0;
   position: relative;
   min-height: 20px;
@@ -142,7 +142,7 @@
 }
 
 .chart-bar:hover {
-  background: linear-gradient(to top, #ff8c42, #ffcc99);
+  background: linear-gradient(to top, #E76F51, #F9D49B);
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0,0,0,0.15);
 }
@@ -177,7 +177,7 @@
 }
 
 .supplier-row:hover {
-  background: #FFF8F0;
+  background: #FFF8ED;
 }
 
 .supplier-name {
@@ -202,7 +202,7 @@
 
 .supplier-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #F5A623, #ff8c42);
+  background: linear-gradient(90deg, #F4A261, #E76F51);
   border-radius: 12px;
   transition: width 0.5s ease;
 }
@@ -239,14 +239,14 @@
 }
 
 .product-row:hover {
-  background: #FFF8F0;
+  background: #FFF8ED;
   transform: translateX(4px);
 }
 
 .product-rank {
   width: 32px;
   height: 32px;
-  background: #F5A623;
+  background: #F4A261;
   color: white;
   border-radius: 50%;
   display: flex;
@@ -520,7 +520,7 @@ td input[type="number"]:focus {
 
 /* ── Скроллбар в таблице — BK-цвета ── */
 .table-wrap::-webkit-scrollbar-thumb {
-  background: #e0c9a8;
+  background: #E5D9C0;
 }
 
 .table-wrap::-webkit-scrollbar-thumb:hover {
@@ -530,12 +530,12 @@ td input[type="number"]:focus {
 /* ── Фокус-кольцо для select (accessibility) ── */
 select:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--accent, #D62300);
+  box-shadow: inset 0 0 0 1px var(--accent, #E76F51);
 }
 
 /* ── Счётчик позиций — badge-стиль ── */
 #itemsCounter:not(:empty) {
-  background: rgba(245,166,35,0.15);
+  background: rgba(244,162,97,0.18);
   color: var(--text);
   padding: 2px 10px;
   border-radius: 12px;
@@ -624,7 +624,7 @@ tbody tr td[colspan] {
 }
 
 .plan-table thead {
-  background: linear-gradient(90deg, #4e2709, var(--text), #4e2709);
+  background: linear-gradient(90deg, #2C1810, var(--text), #2C1810);
   color: white;
   position: sticky;
   top: 0;
@@ -650,7 +650,7 @@ tbody tr td[colspan] {
   position: sticky;
   left: 0;
   z-index: 12;
-  background: linear-gradient(90deg, #4e2709, var(--text));
+  background: linear-gradient(90deg, #2C1810, var(--text));
 }
 
 .plan-th-num {
@@ -692,7 +692,7 @@ tbody tr td[colspan] {
 }
 
 .plan-table tbody tr:hover .plan-td-name {
-  background: #FFF8F0;
+  background: #FFF8ED;
 }
 
 .plan-td-input {
@@ -741,7 +741,7 @@ tbody tr td[colspan] {
 }
 
 .plan-td-result.plan-has-value {
-  background: #FFF8F0;
+  background: #FFF8ED;
 }
 
 .plan-result-value {
@@ -777,7 +777,7 @@ tbody tr td[colspan] {
 }
 
 .plan-total-cell.plan-has-value {
-  background: rgba(245,166,35,0.12);
+  background: rgba(244,162,97,0.14);
   color: var(--accent);
   font-size: 15px;
 }
@@ -801,7 +801,7 @@ tbody tr td[colspan] {
 }
 
 .plan-table tbody tr:hover {
-  background: #FFF8F0;
+  background: #FFF8ED;
 }
 
 .plan-table tbody tr:last-child td {
@@ -922,7 +922,7 @@ tbody tr td[colspan] {
 
 .cal-cell:nth-child(7n) { border-right: none; }
 
-.cal-cell:hover { background: #FFF8F0; }
+.cal-cell:hover { background: #FFF8ED; }
 
 .cal-empty { background: var(--bg); }
 
@@ -1170,7 +1170,7 @@ td.plan-td-result:hover {
 
 .setting-group input.required {
   border-color: var(--orange);
-  background: #FFF8F0;
+  background: #FFF8ED;
 }
 
 /* ─── Toolbar Row ─── */
@@ -1261,7 +1261,7 @@ td.plan-td-result:hover {
 }
 
 .order-table tbody tr { transition: background 0.1s; }
-.order-table tbody tr:hover { background: #FFF8F0; }
+.order-table tbody tr:hover { background: #FFF8ED; }
 
 .order-table tbody tr.has-order { background: rgba(45,80,22,0.03); }
 .order-table tbody tr.has-order td { background: rgba(45,80,22,0.03); }
@@ -1512,7 +1512,7 @@ td.plan-td-result:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--bk-brown) 0%, #3E2518 50%, var(--bk-brown) 100%);
+  background: linear-gradient(135deg, var(--bk-brown) 0%, #2C1810 50%, var(--bk-brown) 100%);
   z-index: 9999;
 }
 
@@ -1921,7 +1921,7 @@ td.stock-high::before {
   transition: color .15s;
 }
 .pf-cross-link:hover {
-  color: var(--primary, #e64626);
+  color: var(--primary, #E76F51);
 }
 .pf-cross-link-icon {
   cursor: pointer;
@@ -1932,7 +1932,7 @@ td.stock-high::before {
   vertical-align: middle;
 }
 .pf-cross-link-icon:hover {
-  color: var(--primary, #e64626);
+  color: var(--primary, #E76F51);
 }
 tr:hover .pf-cross-link-icon,
 .pf-mrow:hover .pf-cross-link-icon {

@@ -2,9 +2,9 @@
   <div class="supply-spinner" :class="[sizeClass]">
     <div class="ss-icon">
       <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none" class="ss-svg">
-        <circle cx="16" cy="16" r="10" fill="#D62300" class="ss-circle ss-c1"/>
-        <circle cx="32" cy="16" r="10" fill="#F5A623" class="ss-circle ss-c2"/>
-        <circle cx="16" cy="32" r="10" fill="#FF8733" class="ss-circle ss-c3"/>
+        <circle cx="16" cy="16" r="10" fill="#E76F51" class="ss-circle ss-c1"/>
+        <circle cx="32" cy="16" r="10" fill="#F4A261" class="ss-circle ss-c2"/>
+        <circle cx="16" cy="32" r="10" fill="#F4A261" class="ss-circle ss-c3"/>
         <circle cx="32" cy="32" r="10" fill="#FFD54F" class="ss-circle ss-c4"/>
         <circle cx="24" cy="24" r="8.5" fill="#502314"/>
         <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>

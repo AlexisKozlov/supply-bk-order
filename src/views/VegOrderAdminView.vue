@@ -1530,7 +1530,7 @@ async function saveScheduleAll() {
 .veg-btn.fill:hover { background: #1B5E20; }
 .veg-btn.outline:hover { background: var(--bg, #f5f5f5); }
 .veg-btn.sm { padding: 5px 10px; font-size: 12px; }
-.veg-btn.red-text { color: #D62700; }
+.veg-btn.red-text { color: #E76F51; }
 .veg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Sessions list */
@@ -1641,11 +1641,11 @@ async function saveScheduleAll() {
 .veg-del-row {
   display: none; position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   width: 18px; height: 18px; border-radius: 4px; border: none;
-  background: #FFEBEE; color: #D62700; font-size: 12px; cursor: pointer;
+  background: #FFEBEE; color: #E76F51; font-size: 12px; cursor: pointer;
   align-items: center; justify-content: center; padding: 0; line-height: 1;
 }
 .veg-td-rest:hover .veg-del-row { display: flex; }
-.veg-del-row:hover { background: #D62700; color: #fff; }
+.veg-del-row:hover { background: #E76F51; color: #fff; }
 .veg-rest-num {
   font-weight: 800; margin-right: 6px; color: #2E7D32;
   display: inline-block; min-width: 24px;
@@ -1668,7 +1668,7 @@ async function saveScheduleAll() {
 .veg-td-refused { background: #FFF3E0 !important; }
 .veg-td-auto { background: #FFE0B2 !important; }
 .veg-qty { font-weight: 700; color: #333; }
-.veg-qty-admin { font-weight: 800; color: #D62700; }
+.veg-qty-admin { font-weight: 800; color: #E76F51; }
 .veg-qty-auto { color: #E65100; }
 .veg-summary-subs-list { display: flex; flex-wrap: wrap; gap: 12px 20px; padding: 8px 0; }
 .veg-summary-sub-row { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none; }
@@ -1744,7 +1744,7 @@ async function saveScheduleAll() {
 .veg-day-config-default { font-size: 11px; color: var(--text-muted); }
 .veg-day-config-rests { max-height: 300px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 8px; padding: 6px; }
 .veg-day-config-rest-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 13px; cursor: pointer; border-radius: 4px; }
-.veg-day-config-rest-item:hover { background: rgba(245,166,35,.06); }
+.veg-day-config-rest-item:hover { background: rgba(244,162,97,.06); }
 .veg-day-config-rest-item input[type=checkbox] { flex: 0 0 14px; width: 14px; height: 14px; accent-color: #4CAF50; cursor: pointer; }
 .veg-day-config-rest-name { color: var(--text-muted); font-size: 12px; }
 </style>
@@ -1773,7 +1773,7 @@ async function saveScheduleAll() {
 }
 .veg-product-del {
   width: 24px; height: 24px; border-radius: 6px; border: 1px solid #ddd;
-  background: #fff; color: #D62700; font-size: 14px; cursor: pointer;
+  background: #fff; color: #E76F51; font-size: 14px; cursor: pointer;
   display: flex; align-items: center; justify-content: center; padding: 0;
 }
 .veg-product-del:hover { background: #FFEBEE; }
@@ -1794,7 +1794,7 @@ async function saveScheduleAll() {
 .modal .veg-btn.fill:hover { background: #1B5E20; }
 .modal .veg-btn.outline:hover { background: #f5f5f5; }
 .modal .veg-btn.sm { padding: 5px 10px; font-size: 12px; }
-.modal .veg-btn.red-text { color: #D62700; }
+.modal .veg-btn.red-text { color: #E76F51; }
 .modal .veg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .modal .veg-token-row { display: flex; gap: 6px; }
 .modal .veg-token-input {

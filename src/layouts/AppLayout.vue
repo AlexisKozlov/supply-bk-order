@@ -1144,7 +1144,7 @@ function confirmLogout() {
 }
 .notification-badge {
   position: absolute; top: -2px; right: 0;
-  background: #D62700; color: #fff; font-size: 10px; font-weight: 700;
+  background: #E76F51; color: #fff; font-size: 10px; font-weight: 700;
   min-width: 16px; height: 16px; border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
   padding: 0 4px; line-height: 1;
@@ -1163,7 +1163,7 @@ function confirmLogout() {
   position: relative;
 }
 .notification-badge-sidebar {
-  background: #D62700; color: #fff; font-size: 10px; font-weight: 700;
+  background: #E76F51; color: #fff; font-size: 10px; font-weight: 700;
   min-width: 16px; height: 16px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0 4px; margin-left: auto; line-height: 1;
@@ -1208,11 +1208,11 @@ function confirmLogout() {
   opacity: 0; transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 .notif-item:hover .notif-delete-btn { opacity: 1; }
-.notif-delete-btn:hover { background: rgba(214, 39, 0, 0.1); color: #D62700; }
+.notif-delete-btn:hover { background: rgba(214, 39, 0, 0.1); color: #E76F51; }
 
 /* Кнопка «Удалить все» */
 .notif-delete-all-btn {
-  color: #D62700 !important; border-color: #D62700 !important;
+  color: #E76F51 !important; border-color: #E76F51 !important;
 }
 .notif-delete-all-btn:hover { background: rgba(214, 39, 0, 0.08) !important; }
 
@@ -1247,7 +1247,7 @@ function confirmLogout() {
 }
 .welcome-avatar-ring {
   width: 80px; height: 80px; border-radius: 50%;
-  background: conic-gradient(#FDBD10, #D62700, #FF8733, #FDBD10);
+  background: conic-gradient(#FDBD10, #E76F51, #F4A261, #FDBD10);
   display: flex; align-items: center; justify-content: center;
   animation: welcomeRingSpin 3s linear infinite;
   padding: 3px;
@@ -1255,7 +1255,7 @@ function confirmLogout() {
 @keyframes welcomeRingSpin { to { transform: rotate(360deg); } }
 .welcome-avatar {
   width: 100%; height: 100%; border-radius: 50%;
-  background: linear-gradient(135deg, #D62700, #FF8733);
+  background: linear-gradient(135deg, #E76F51, #F4A261);
   display: flex; align-items: center; justify-content: center;
   font-size: 22px; font-weight: 900; color: #fff;
   letter-spacing: 1px;
@@ -1277,7 +1277,7 @@ function confirmLogout() {
 }
 .welcome-line {
   width: 40px; height: 3px; border-radius: 2px;
-  background: linear-gradient(90deg, #D62700, #FF8733);
+  background: linear-gradient(90deg, #E76F51, #F4A261);
   margin-top: 4px;
   animation: welcomeLineGrow .8s ease .3s both;
 }

@@ -4,8 +4,8 @@
     <div class="ro-header">
       <div class="ro-brand">
         <svg class="ro-logo" width="28" height="28" viewBox="5 5 38 38" xmlns="http://www.w3.org/2000/svg" fill="none">
-          <circle cx="16" cy="16" r="10" fill="#D62300"/><circle cx="32" cy="16" r="10" fill="#F5A623"/>
-          <circle cx="16" cy="32" r="10" fill="#FF8733"/><circle cx="32" cy="32" r="10" fill="#FFD54F"/>
+          <circle cx="16" cy="16" r="10" fill="#E76F51"/><circle cx="32" cy="16" r="10" fill="#F4A261"/>
+          <circle cx="16" cy="32" r="10" fill="#F4A261"/><circle cx="32" cy="32" r="10" fill="#FFD54F"/>
           <circle cx="24" cy="24" r="8.5" fill="#502314"/>
           <text x="24" y="29" text-anchor="middle" fill="white" font-size="14" font-weight="900" font-family="Arial, sans-serif">S</text>
         </svg>
@@ -518,7 +518,7 @@ function formatDateShort(d) {
 
 /* Loading */
 .ro-loading { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 60px; color: #8b7355; }
-.ro-spinner { width: 24px; height: 24px; border: 3px solid #e0d5c8; border-top-color: #D62300; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.ro-spinner { width: 24px; height: 24px; border: 3px solid #e0d5c8; border-top-color: #E76F51; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .ro-card { background: white; border-radius: 12px; padding: 32px; margin: 20px auto; text-align: center; max-width: 900px; }
@@ -528,7 +528,7 @@ function formatDateShort(d) {
 /* Day tabs */
 .ro-day-tabs { display: flex; gap: 6px; padding: 12px 16px; overflow-x: auto; background: white; border-radius: 12px; margin-top: 12px; justify-content: center; }
 .ro-day-tab { flex-shrink: 0; padding: 8px 14px; border-radius: 10px; border: 2px solid #e0d5c8; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.2s; position: relative; }
-.ro-day-tab.active { border-color: #D62300; background: #fff5f2; }
+.ro-day-tab.active { border-color: #E76F51; background: #fff5f2; }
 .ro-day-tab.submitted { border-color: #16a34a; }
 .ro-day-tab.closed { opacity: 0.5; }
 .ro-day-name { display: block; font-size: 12px; font-weight: 600; color: #502314; }
@@ -538,7 +538,7 @@ function formatDateShort(d) {
 .ro-day-badge.skipped { background: #9ca3af; color: white; font-size: 10px; }
 .ro-day-badge.closed { background: #9ca3af; color: white; }
 .ro-day-tab.skipped { border-color: #9ca3af; background: #f5f5f5; }
-.ro-day-tab.active.skipped { background: #D62300; border-color: #D62300; color: white; }
+.ro-day-tab.active.skipped { background: #E76F51; border-color: #E76F51; color: white; }
 .ro-day-tab.active.skipped .ro-day-name, .ro-day-tab.active.skipped .ro-day-date { color: white; }
 
 .ro-skip-banner {
@@ -569,12 +569,12 @@ function formatDateShort(d) {
 .ro-prod-sku { font-size: 11px; color: #8b7355; }
 .ro-td-qty { }
 .ro-qty-input { width: 80px; padding: 6px 8px; border: 2px solid #e0d5c8; border-radius: 8px; font-size: 14px; text-align: center; font-family: inherit; }
-.ro-qty-input:focus { outline: none; border-color: #D62300; }
+.ro-qty-input:focus { outline: none; border-color: #E76F51; }
 
 /* Submit */
 .ro-submit-area { padding: 16px; text-align: center; }
 .ro-submit-summary { font-size: 14px; color: #502314; margin-bottom: 12px; }
-.ro-submit-btn { padding: 14px 40px; background: #D62300; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 8px; transition: background 0.2s; }
+.ro-submit-btn { padding: 14px 40px; background: #E76F51; color: white; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 8px; transition: background 0.2s; }
 .ro-submit-btn:hover:not(:disabled) { background: #b81e00; }
 .ro-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 

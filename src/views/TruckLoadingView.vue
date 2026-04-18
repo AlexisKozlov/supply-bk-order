@@ -706,7 +706,7 @@ onMounted(async () => {
 }
 
 .tl-date-input:focus {
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 /* Tabs */
@@ -736,8 +736,8 @@ onMounted(async () => {
 }
 
 .tl-page-tab.active {
-  color: #D62300;
-  border-bottom-color: #D62300;
+  color: #E76F51;
+  border-bottom-color: #E76F51;
 }
 
 /* Buttons */
@@ -760,9 +760,9 @@ onMounted(async () => {
 }
 
 .tl-btn-primary {
-  background: #D62300;
+  background: #E76F51;
   color: white;
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 .tl-btn-primary:hover {
@@ -835,9 +835,9 @@ onMounted(async () => {
 }
 
 .tl-btn-sm.tl-btn-primary {
-  background: #D62300;
+  background: #E76F51;
   color: white;
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 .tl-btn-sm.tl-btn-danger {
@@ -946,7 +946,7 @@ onMounted(async () => {
 }
 
 .tl-checkbox-label input[type="checkbox"] {
-  accent-color: #D62300;
+  accent-color: #E76F51;
 }
 
 /* Add truck dropdown */
@@ -1069,7 +1069,7 @@ onMounted(async () => {
 }
 
 .tl-filter-input:focus {
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 .tl-filter-cats {
@@ -1131,16 +1131,16 @@ onMounted(async () => {
   cursor: pointer;
   white-space: nowrap;
 }
-.tl-filter-more:hover { border-color: #D62300; }
+.tl-filter-more:hover { border-color: #E76F51; }
 .tl-filter-more.active {
   background: #fff2e0;
-  border-color: #D62300;
-  color: #D62300;
+  border-color: #E76F51;
+  color: #E76F51;
 }
 .tl-filter-more-count {
   min-width: 18px;
   padding: 1px 5px;
-  background: #D62300;
+  background: #E76F51;
   color: white;
   border-radius: 9px;
   font-size: 10px;
@@ -1178,7 +1178,7 @@ onMounted(async () => {
   outline: none;
   min-width: 140px;
 }
-.tl-filter-select:focus { border-color: #D62300; }
+.tl-filter-select:focus { border-color: #E76F51; }
 .tl-filter-range { display: flex; align-items: center; gap: 6px; color: #8b7355; }
 .tl-filter-num {
   width: 60px;
@@ -1190,7 +1190,7 @@ onMounted(async () => {
   background: white;
   outline: none;
 }
-.tl-filter-num:focus { border-color: #D62300; }
+.tl-filter-num:focus { border-color: #E76F51; }
 .tl-filter-reset {
   margin-left: auto;
   padding: 5px 12px;
@@ -1202,7 +1202,7 @@ onMounted(async () => {
   font-weight: 600;
   cursor: pointer;
 }
-.tl-filter-reset:hover:not(:disabled) { border-color: #D62300; color: #D62300; }
+.tl-filter-reset:hover:not(:disabled) { border-color: #E76F51; color: #E76F51; }
 .tl-filter-reset:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Entity filters (legal entity) */
@@ -1231,10 +1231,10 @@ onMounted(async () => {
   cursor: pointer;
   transition: all 0.15s;
 }
-.tl-filter-entity:hover { border-color: #D62300; }
+.tl-filter-entity:hover { border-color: #E76F51; }
 .tl-filter-entity.active {
-  background: #D62300;
-  border-color: #D62300;
+  background: #E76F51;
+  border-color: #E76F51;
   color: white;
 }
 .tl-filter-entity.tl-entity-ps.active {
@@ -1261,7 +1261,7 @@ onMounted(async () => {
   padding: 6px 10px;
   border-radius: 8px;
   background: #fff2e0;
-  border-left: 4px solid #D62300;
+  border-left: 4px solid #E76F51;
   font-size: 12px;
   color: #502314;
 }
@@ -1273,7 +1273,7 @@ onMounted(async () => {
 .tl-entity-badge {
   padding: 2px 8px;
   border-radius: 10px;
-  background: #D62300;
+  background: #E76F51;
   color: white;
   font-weight: 700;
   font-size: 11px;
@@ -1287,7 +1287,7 @@ onMounted(async () => {
 }
 
 /* Карточка окрашена под юрлицо — тонкая цветная полоса слева */
-.tl-card.tl-entity-bk_vm { border-left: 4px solid #D62300; }
+.tl-card.tl-entity-bk_vm { border-left: 4px solid #E76F51; }
 .tl-card.tl-entity-ps { border-left: 4px solid #0e7490; }
 
 /* Cards (unassigned) */
@@ -1302,7 +1302,7 @@ onMounted(async () => {
 }
 
 .tl-card:hover {
-  border-color: #D62300;
+  border-color: #E76F51;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -1385,7 +1385,7 @@ onMounted(async () => {
 }
 
 .tl-truck-dragover {
-  border-color: #D62300;
+  border-color: #E76F51;
   background: #fff5f3;
   border-style: solid;
 }
@@ -1525,7 +1525,7 @@ onMounted(async () => {
 }
 
 .tl-assigned-card:hover {
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 .tl-assigned-card:active {
@@ -1646,7 +1646,7 @@ onMounted(async () => {
 }
 
 .tl-inline-input:focus {
-  border-color: #D62300;
+  border-color: #E76F51;
 }
 
 .tl-inline-num {

@@ -2107,13 +2107,13 @@ onUnmounted(() => {
   background: var(--card); border: 1.5px solid transparent;
   cursor: pointer; transition: all .15s;
 }
-.adm-user-row:hover { border-color: var(--bk-orange); box-shadow: 0 2px 8px rgba(245,166,35,.08); }
+.adm-user-row:hover { border-color: var(--bk-orange); box-shadow: 0 2px 8px rgba(244,162,97,.08); }
 
 .adm-user-avatar {
   width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700; color: #fff;
-  background: linear-gradient(135deg, #F5A623, #E8941A);
+  background: linear-gradient(135deg, #F4A261, #E8941A);
 }
 .adm-user-avatar.admin { background: linear-gradient(135deg, #E53935, #C62828); }
 
@@ -2233,7 +2233,7 @@ onUnmounted(() => {
   transition: border-color .15s; box-sizing: border-box;
   background: var(--bg);
 }
-.adm-maint-textarea:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(245,166,35,.1); }
+.adm-maint-textarea:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(244,162,97,.1); }
 
 /* Timer */
 .adm-timer-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
@@ -2252,7 +2252,7 @@ onUnmounted(() => {
   font-size: 15px; font-family: inherit; font-weight: 600;
   background: var(--bg); color: var(--text); width: 120px;
 }
-.adm-timer-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(245,166,35,.1); }
+.adm-timer-input:focus { border-color: var(--bk-orange); outline: none; box-shadow: 0 0 0 3px rgba(244,162,97,.1); }
 .adm-timer-info {
   margin-top: 12px; font-size: 13px; color: var(--text-secondary);
   padding: 10px 14px; border-radius: 8px; background: #FFF8E1; border: 1px solid #FFE0B2;
@@ -2589,7 +2589,7 @@ onUnmounted(() => {
   background: var(--card);
 }
 .adm-bug-row { cursor: pointer; }
-.adm-bug-row:hover { background: rgba(214,35,0,0.02); }
+.adm-bug-row:hover { background: rgba(231,111,81,0.02); }
 .adm-bug-status-col { flex-shrink: 0; width: 90px; }
 .adm-bug-status {
   font-size: 10px;
@@ -2634,7 +2634,7 @@ onUnmounted(() => {
 .bug-reply-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(214,35,0,0.08);
+  box-shadow: 0 0 0 3px rgba(231,111,81,0.08);
 }
 
 /* ═══ Feedback messenger ═══ */

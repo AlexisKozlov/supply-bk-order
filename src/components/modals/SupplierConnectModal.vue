@@ -428,12 +428,12 @@ onMounted(loadAvailable);
 .scm-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid #eee; }
 .scm-header h2 { margin: 0; font-size: 18px; color: #502314; }
 .scm-close { background: none; border: none; font-size: 28px; cursor: pointer; color: #8b7355; line-height: 1; }
-.scm-close:hover { color: #D62300; }
+.scm-close:hover { color: #E76F51; }
 
 .scm-steps { display: flex; gap: 0; padding: 12px 24px; border-bottom: 1px solid #eee; background: #fbf7f2; overflow-x: auto; }
 .scm-step { flex: 1; min-width: 110px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b7355; padding: 6px 8px; position: relative; }
 .scm-step-num { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #e0d5c8; color: #fff; font-weight: 700; font-size: 12px; flex-shrink: 0; }
-.scm-step.active .scm-step-num { background: #D62300; }
+.scm-step.active .scm-step-num { background: #E76F51; }
 .scm-step.done .scm-step-num { background: #16a34a; }
 .scm-step.active { color: #502314; font-weight: 700; }
 .scm-step-name { white-space: nowrap; }
@@ -446,8 +446,8 @@ onMounted(loadAvailable);
 /* Step 1 */
 .scm-supplier-list { display: flex; flex-direction: column; gap: 6px; }
 .scm-supplier-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 2px solid #e0d5c8; border-radius: 8px; cursor: pointer; background: white; transition: all 0.15s; }
-.scm-supplier-item:hover { border-color: #D62300; }
-.scm-supplier-item.selected { border-color: #D62300; background: #fff2e0; }
+.scm-supplier-item:hover { border-color: #E76F51; }
+.scm-supplier-item.selected { border-color: #E76F51; background: #fff2e0; }
 .scm-supplier-info { flex: 1; }
 .scm-supplier-name { font-weight: 700; color: #502314; font-size: 14px; }
 .scm-supplier-full { font-size: 12px; color: #8b7355; margin-top: 2px; }
@@ -458,7 +458,7 @@ onMounted(loadAvailable);
 .scm-sched-tbl th, .scm-sched-tbl td { padding: 8px 10px; border-bottom: 1px solid #f0e8de; text-align: center; }
 .scm-sched-tbl th { background: #fbf7f2; color: #502314; font-weight: 700; position: sticky; top: 0; }
 .scm-sched-rest { text-align: left; }
-.scm-sched-rest b { color: #D62300; margin-right: 8px; }
+.scm-sched-rest b { color: #E76F51; margin-right: 8px; }
 .scm-sched-cell { cursor: pointer; }
 .scm-sched-cell:hover { background: #fff2e0; }
 
@@ -466,9 +466,9 @@ onMounted(loadAvailable);
 .scm-tpl-le-row { display: flex; gap: 6px; }
 .scm-tpl-le-btn { padding: 6px 14px; border: 1.5px solid #e0d5c8; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #502314; display: inline-flex; align-items: center; gap: 6px; }
 .scm-tpl-le-btn input { margin: 0; }
-.scm-tpl-le-btn.active { background: #D62300; color: white; border-color: #D62300; }
+.scm-tpl-le-btn.active { background: #E76F51; color: white; border-color: #E76F51; }
 .scm-tpl-controls { position: relative; }
-.scm-product-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: white; border: 2px solid #D62300; border-radius: 8px; max-height: 240px; overflow-y: auto; margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.scm-product-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: white; border: 2px solid #E76F51; border-radius: 8px; max-height: 240px; overflow-y: auto; margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .scm-product-item { padding: 8px 12px; cursor: pointer; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #f0e8de; }
 .scm-product-item:hover { background: #fbf7f2; }
 .scm-product-supplier { margin-left: auto; color: #8b7355; font-size: 11px; }
@@ -478,9 +478,9 @@ onMounted(loadAvailable);
 .scm-tpl-tbl th { background: #fbf7f2; color: #502314; font-weight: 700; }
 .scm-cell-input { width: 100%; padding: 4px 8px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; background: white; box-sizing: border-box; }
 .scm-cell-input.scm-num { text-align: right; }
-.scm-cell-input:focus { border-color: #D62300; outline: none; }
+.scm-cell-input:focus { border-color: #E76F51; outline: none; }
 .scm-row-del { background: none; border: none; color: #8b7355; font-size: 18px; cursor: pointer; padding: 0 8px; }
-.scm-row-del:hover { color: #D62300; }
+.scm-row-del:hover { color: #E76F51; }
 
 /* Step 4: deadlines */
 .scm-deadlines { display: flex; flex-direction: column; gap: 10px; }
@@ -490,7 +490,7 @@ onMounted(loadAvailable);
 .scm-deadline-label span { color: #8b7355; font-size: 11px; }
 .scm-deadline-arrow { color: #8b7355; font-size: 16px; }
 .scm-input { padding: 6px 10px; border: 1.5px solid #e0d5c8; border-radius: 6px; font-size: 13px; background: white; color: #502314; }
-.scm-input:focus { border-color: #D62300; outline: none; }
+.scm-input:focus { border-color: #E76F51; outline: none; }
 .scm-input-sm { min-width: 80px; }
 .scm-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #502314; cursor: pointer; margin-left: auto; }
 textarea.scm-input { width: 100%; font-family: inherit; resize: vertical; box-sizing: border-box; }
@@ -511,10 +511,10 @@ textarea.scm-input { width: 100%; font-family: inherit; resize: vertical; box-si
 .scm-footer { display: flex; gap: 10px; padding: 14px 24px; border-top: 1px solid #eee; background: #fbf7f2; border-radius: 0 0 12px 12px; }
 .scm-footer button { padding: 9px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; border: 1.5px solid #e0d5c8; }
 .scm-btn-outline { background: white; color: #502314; }
-.scm-btn-outline:hover { border-color: #D62300; color: #D62300; }
-.scm-btn-primary { background: #D62300; color: white; border-color: #D62300; margin-left: auto; }
+.scm-btn-outline:hover { border-color: #E76F51; color: #E76F51; }
+.scm-btn-primary { background: #E76F51; color: white; border-color: #E76F51; margin-left: auto; }
 .scm-btn-primary:hover:not(:disabled) { background: #b51e00; }
 .scm-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .scm-btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 6px; background: white; border: 1.5px solid #e0d5c8; color: #502314; cursor: pointer; font-family: inherit; align-self: flex-start; }
-.scm-btn-sm:hover { border-color: #D62300; }
+.scm-btn-sm:hover { border-color: #E76F51; }
 </style>

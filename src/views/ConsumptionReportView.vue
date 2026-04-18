@@ -463,7 +463,7 @@ onMounted(async () => { await loadExcluded(); loadData() })
 }
 .crv-excl-clear {
   font-size: 11px;
-  color: var(--bk-red, #D62300);
+  color: var(--bk-red, #E76F51);
   background: none;
   border: none;
   cursor: pointer;
@@ -602,7 +602,7 @@ onMounted(async () => { await loadExcluded(); loadData() })
   font-family: inherit;
 }
 .crv-tr:hover .crv-hide-btn { opacity: 0.5; }
-.crv-hide-btn:hover { opacity: 1 !important; background: var(--border-light); color: var(--bk-red, #D62300); }
+.crv-hide-btn:hover { opacity: 1 !important; background: var(--border-light); color: var(--bk-red, #E76F51); }
 
 /* Diff badge */
 .crv-diff-badge {

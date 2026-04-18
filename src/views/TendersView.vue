@@ -161,7 +161,7 @@ watch(legalEntity, () => { tenders.value = []; loadTenders(); });
 
 .db-sort-btn { display:inline-flex; align-items:center; gap:4px; padding:6px 14px; border-radius:8px; border:1.5px solid #D4C4B0; background:white; font-size:11px; font-weight:600; font-family:inherit; color:var(--text-muted); cursor:pointer; transition:all .15s; white-space:nowrap; }
 .db-sort-btn:hover { border-color:var(--bk-orange); color:var(--text); }
-.db-sort-btn.active { border-color:#D62300; color:var(--bk-brown); background:#FFFBF5; }
+.db-sort-btn.active { border-color:#E76F51; color:var(--bk-brown); background:#FFFBF5; }
 
 @media (max-width: 480px) {
   .tenders-header { flex-direction:column; align-items:stretch; }
