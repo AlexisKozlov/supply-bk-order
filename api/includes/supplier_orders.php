@@ -29,6 +29,8 @@
  *   POST   so/admin/send-summary  — ручная отправка сводки подписчикам в Telegram
  */
 
+require_once __DIR__ . '/so_deadline.php';
+
 if ($endpoint !== 'so') return;
 
 // ═══ Хелперы ═══
@@ -137,62 +139,12 @@ function soSaveSupplierNotifyUsers($pdo, $supplierId, $notifyUsers) {
     return $validNames;
 }
 
+// Контракт сохранён: ['status' => 'open'|'closed', 'deadline' => 'Y-m-d HH:MM'|null, 'forced_closed'? => true]
 function soCheckDeadline($pdo, $supplierId, $deliveryDate) {
-    $tz = new DateTimeZone('Europe/Minsk');
-    $now = new DateTime('now', $tz);
-
-    // 1. Переопределение на конкретную дату (по поставщику)
-    try {
-        $s = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
-        $s->execute([$supplierId, $deliveryDate]);
-        $override = $s->fetch();
-    } catch (PDOException $e) {
-        // Колонка is_closed ещё не создана (миграция не применена) — fallback
-        $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
-        $s->execute([$supplierId, $deliveryDate]);
-        $override = $s->fetch();
-    }
-
-    // Принудительно закрытый день — сразу возвращаем closed
-    if ($override && !empty($override['is_closed'])) {
-        return ['status' => 'closed', 'deadline' => null, 'forced_closed' => true];
-    }
-
-    // 2. Правило по дню недели доставки
-    $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
-    $rule = null;
-    if ($supplierId) {
-        $r = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
-        $r->execute([$supplierId, $deliveryDow]);
-        $rule = $r->fetch();
-    }
-
-    // 3. Вычисляем дату и время дедлайна
-    if ($override && $override['deadline_time']) {
-        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-        $deadlineTime = $override['deadline_time'];
-    } elseif ($rule) {
-        $deadlineDow = (int)$rule['deadline_dow'];
-        $deadlineTime = $rule['deadline_time'];
-        $deliveryObj = new DateTime($deliveryDate, $tz);
-        $deadlineDate = clone $deliveryObj;
-        $diff = $deliveryDow - $deadlineDow;
-        if ($diff <= 0) $diff += 7;
-        $deadlineDate->modify("-{$diff} days");
-    } else {
-        // Фоллбэк: дедлайн = день перед доставкой, по умолчанию из настроек поставщика
-        $settings = soGetSupplierSettings($pdo, $supplierId);
-        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-        $deadlineTime = $settings['default_deadline_time'] ?? '14:00:00';
-    }
-
-    $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
-    $deadlineStr = $deadlineDate->format('Y-m-d') . ' ' . substr($deadlineTime, 0, 5);
-
-    if ($now < $deadlineDT) {
-        return ['status' => 'open', 'deadline' => $deadlineStr];
-    }
-    return ['status' => 'closed', 'deadline' => $deadlineStr];
+    $r = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+    $out = ['status' => $r['status'], 'deadline' => $r['deadline_str']];
+    if (!empty($r['forced_closed'])) $out['forced_closed'] = true;
+    return $out;
 }
 
 function soDeadlineTimeLabel($deadline) {
@@ -426,36 +378,17 @@ if ($soAction === 'suppliers' && $method === 'GET') {
         $ordersMap[$r['supplier_id']][$r['delivery_date']] = $r;
     }
 
-    // Проверка дедлайна без запросов в БД
-    $checkDeadline = function($sid, $deliveryDate) use ($tz, $today, $rulesMap, $overridesMap, $settingsMap) {
-        $now = new DateTime('now', $tz);
+    // Проверка дедлайна без запросов в БД — используем ядро soCalculateDeadlineCore
+    $checkDeadline = function($sid, $deliveryDate) use ($tz, $rulesMap, $overridesMap, $settingsMap) {
         $override = $overridesMap[$sid][$deliveryDate] ?? null;
-        if ($override && !empty($override['is_closed'])) {
-            return ['status' => 'closed', 'deadline' => null];
-        }
         $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
         $rule = $rulesMap[$sid][$deliveryDow] ?? null;
-        if ($override && $override['deadline_time']) {
-            $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-            $deadlineTime = $override['deadline_time'];
-        } elseif ($rule) {
-            $deadlineDow = (int)$rule['deadline_dow'];
-            $deadlineTime = $rule['deadline_time'];
-            $deliveryObj = new DateTime($deliveryDate, $tz);
-            $deadlineDate = clone $deliveryObj;
-            $diff = $deliveryDow - $deadlineDow;
-            if ($diff <= 0) $diff += 7;
-            $deadlineDate->modify("-{$diff} days");
-        } else {
-            $s = $settingsMap[$sid] ?? null;
-            $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-            $deadlineTime = $s['default_deadline_time'] ?? '14:00:00';
-        }
-        $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
-        $deadlineStr = $deadlineDate->format('Y-m-d') . ' ' . substr($deadlineTime, 0, 5);
-        return $now < $deadlineDT
-            ? ['status' => 'open', 'deadline' => $deadlineStr]
-            : ['status' => 'closed', 'deadline' => $deadlineStr];
+        $default = $settingsMap[$sid]['default_deadline_time'] ?? '14:00:00';
+        $r = soCalculateDeadlineCore($override, $rule, $default, $deliveryDate, $tz);
+        return [
+            'status' => $r['is_closed'] ? 'closed' : 'open',
+            'deadline' => $r['deadline_str'],
+        ];
     };
 
     $weekStart = (clone $today)->modify('-' . ((int)$today->format('N') - 1) . ' days');
@@ -986,7 +919,7 @@ if ($soAction === 'admin') {
         $acceptance    = $body['acceptance']    ?? ['is_accepting_orders' => 1, 'default_deadline_time' => '14:00:00', 'pause_message' => null];
         $notifyUsers   = $body['notify_users']  ?? []; // [user_name, ...]
 
-        $updatedBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+        $updatedBy = resolveActorName($pdo, $sessionUser);
 
         try {
             $pdo->beginTransaction();
@@ -1118,7 +1051,7 @@ if ($soAction === 'admin') {
     if ($adminAction === 'settings' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
-        $updatedBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+        $updatedBy = resolveActorName($pdo, $sessionUser);
 
         $isAccepting = isset($body['is_accepting_orders']) ? ((int)!!$body['is_accepting_orders']) : 1;
         $autoSubmitPrev = !empty($body['auto_submit_previous']) ? 1 : 0;
@@ -1482,7 +1415,7 @@ if ($soAction === 'admin') {
             }
         }
 
-        $updatedBy = $sessionUser ? $sessionUser['name'] : 'admin';
+        $updatedBy = resolveActorName($pdo, $sessionUser);
         if ($status) {
             $pdo->prepare("UPDATE so_orders SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $orderId]);
         } else {
@@ -1677,7 +1610,7 @@ if ($soAction === 'admin') {
                     return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 };
 
-                $by = $sessionUser ? ($sessionUser['name'] ?? 'закупщик') : 'закупщик';
+                $by = resolveActorName($pdo, $sessionUser, 'закупщик');
                 $deliveryFmt = (new DateTime($notify['delivery_date']))->format('d.m.Y');
                 $oldStr = $notify['old_val'] > 0 ? ($fmt($notify['old_val']) . $unitStr) : '—';
                 $newStr = $notify['new_val'] !== null && $notify['new_val'] > 0 ? ($fmt($notify['new_val']) . $unitStr) : '—';
@@ -1703,7 +1636,7 @@ if ($soAction === 'admin') {
         // Аудит ручной правки количества
         if ($notify) {
             try {
-                $byName = $sessionUser ? ($sessionUser['name'] ?? 'закупщик') : 'закупщик';
+                $byName = resolveActorName($pdo, $sessionUser, 'закупщик');
                 auditLog($pdo, 'so_qty_adjusted', 'supplier_order', $orderId ?? null, $byName, [
                     'supplier' => $notify['supplier_name'] ?? null,
                     'restaurant_number' => $notify['restaurant_number'] ?? null,
@@ -1735,7 +1668,7 @@ if ($soAction === 'admin') {
         $pdo->prepare("DELETE FROM so_order_items WHERE order_id = ?")->execute([$orderId]);
         $pdo->prepare("DELETE FROM so_orders WHERE id = ?")->execute([$orderId]);
 
-        $by = $sessionUser ? $sessionUser['name'] : 'admin';
+        $by = resolveActorName($pdo, $sessionUser);
 
         // Уведомляем ресторан
         if ($orderInfo) {
@@ -1790,7 +1723,7 @@ if ($soAction === 'admin') {
 
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
-        $updatedBy = $sessionUser ? $sessionUser['name'] : 'admin';
+        $updatedBy = resolveActorName($pdo, $sessionUser);
 
         // Сначала деактивируем все расписания поставщика, потом активируем присланные
         $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
@@ -1864,7 +1797,7 @@ if ($soAction === 'admin') {
             soRespond(['error' => 'Неверный формат времени, используйте HH:MM'], 400);
         }
 
-        $createdBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+        $createdBy = resolveActorName($pdo, $sessionUser);
         $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_time, created_by) VALUES (?, ?, ?, ?)
                        ON DUPLICATE KEY UPDATE deadline_time = VALUES(deadline_time), created_by = VALUES(created_by)")
             ->execute([$supplierId, $deliveryDate, $deadlineTime, $createdBy]);
@@ -1897,7 +1830,7 @@ if ($soAction === 'admin') {
         $isClosed = isset($body['is_closed']) ? (int)(bool)$body['is_closed'] : 1;
         if (!$supplierId || !$deliveryDate) soRespond(['error' => 'Не указан поставщик или дата'], 400);
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
-        $createdBy = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+        $createdBy = resolveActorName($pdo, $sessionUser);
         if ($isClosed) {
             $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_time, is_closed, created_by)
                            VALUES (?, ?, NULL, 1, ?)
@@ -1977,7 +1910,7 @@ if ($soAction === 'admin') {
         }
 
         try {
-            $by = $sessionUser ? ($sessionUser['name'] ?? 'admin') : 'admin';
+            $by = resolveActorName($pdo, $sessionUser);
             auditLog($pdo, 'so_template_saved', 'supplier', $supplierId, $by, [
                 'legal_entity' => $le,
                 'items_count' => $count,

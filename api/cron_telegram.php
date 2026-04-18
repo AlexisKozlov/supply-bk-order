@@ -38,6 +38,7 @@ $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
 $pdo->exec("SET SESSION max_statement_time = 30");
 
 require_once __DIR__ . '/includes/legal_entities.php';
+require_once __DIR__ . '/includes/so_deadline.php';
 
 // Тихие часы: 22:00–09:00 по Минску — никакие уведомления не отправляем.
 // Выходим до всех проверок, чтобы дедуп не пометил неотправленные сообщения как доставленные.
@@ -1212,34 +1213,19 @@ try {
 
                     $deliveryDate = $deliveryDateObj->format('Y-m-d');
 
-                    // Дедлайн: override → rule → default
+                    // Дедлайн через ядро: override → rule → default. is_closed здесь не учитываем
+                    // (для совместимости с прежней логикой напоминаний — она тоже не различала закрытые дни).
                     $ovStmt = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                     $ovStmt->execute([$supId, $deliveryDate]);
-                    $override = $ovStmt->fetchColumn();
+                    $override = $ovStmt->fetch() ?: null;
 
-                    if ($override) {
-                        $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
-                        $deadlineTime = $override;
-                    } else {
-                        $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
-                        $rlStmt->execute([$supId, $deliveryDow]);
-                        $rule = $rlStmt->fetch();
-                        if ($rule) {
-                            $deadlineDow = (int)$rule['deadline_dow'];
-                            $deadlineTime = $rule['deadline_time'];
-                            $deadlineDateObj = clone $deliveryDateObj;
-                            $diff = $deliveryDow - $deadlineDow;
-                            if ($diff <= 0) $diff += 7;
-                            $deadlineDateObj->modify("-{$diff} days");
-                        } else {
-                            $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
-                            $deadlineTime = $defaultDeadlineTime;
-                        }
-                    }
+                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                    $rlStmt->execute([$supId, $deliveryDow]);
+                    $rule = $rlStmt->fetch() ?: null;
 
-                    $tp = explode(':', $deadlineTime);
-                    $deadline = clone $deadlineDateObj;
-                    $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                    $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz);
+                    if (!$r['deadline_dt']) continue;
+                    $deadline = $r['deadline_dt'];
                     $minutesLeft = ($deadline->getTimestamp() - $now->getTimestamp()) / 60;
 
                     // Берём ближайший активный дедлайн (-10..+2000 мин)
@@ -1394,33 +1380,18 @@ try {
                 if ($deliveryDateObj < (clone $now)->setTime(0, 0, 0)) continue;
                 $deliveryDate = $deliveryDateObj->format('Y-m-d');
 
-                // Дедлайн: override → rule → default
+                // Дедлайн через ядро: override → rule → default, forced_closed — пропускаем
                 $ovStmt = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                 $ovStmt->execute([$supId, $deliveryDate]);
-                $ov = $ovStmt->fetch();
-                if ($ov && !empty($ov['is_closed'])) continue;
-                if ($ov && $ov['deadline_time']) {
-                    $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
-                    $deadlineTime = $ov['deadline_time'];
-                } else {
-                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
-                    $rlStmt->execute([$supId, $deliveryDow]);
-                    $rule = $rlStmt->fetch();
-                    if ($rule) {
-                        $deadlineDow = (int)$rule['deadline_dow'];
-                        $deadlineTime = $rule['deadline_time'];
-                        $deadlineDateObj = clone $deliveryDateObj;
-                        $diff = $deliveryDow - $deadlineDow;
-                        if ($diff <= 0) $diff += 7;
-                        $deadlineDateObj->modify("-{$diff} days");
-                    } else {
-                        $deadlineDateObj = (clone $deliveryDateObj)->modify('-1 day');
-                        $deadlineTime = $defaultDl;
-                    }
-                }
-                $tp = explode(':', $deadlineTime);
-                $deadline = clone $deadlineDateObj;
-                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                $ov = $ovStmt->fetch() ?: null;
+
+                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                $rlStmt->execute([$supId, $deliveryDow]);
+                $rule = $rlStmt->fetch() ?: null;
+
+                $r = soCalculateDeadlineCore($ov, $rule, $defaultDl, $deliveryDate, $tz);
+                if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
+                $deadline = $r['deadline_dt'];
                 $minutesSinceDeadline = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
 
                 // Окно срабатывания: дедлайн прошёл от 0 до 15 минут назад
@@ -1608,34 +1579,19 @@ try {
             }
 
             foreach ($datesSet as $deliveryDate => $deliveryDow) {
-                // Вычисляем дедлайн
+                // Дедлайн через ядро: override → rule → default. is_closed не учитываем,
+                // сводку отправляем и для закрытых дней, если смогли вычислить дедлайн по правилу/default.
                 $ovStmt = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                 $ovStmt->execute([$supId, $deliveryDate]);
-                $override = $ovStmt->fetchColumn();
+                $override = $ovStmt->fetch() ?: null;
 
-                if ($override) {
-                    $deadlineDateObj = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-                    $deadlineTime = $override;
-                } else {
-                    $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
-                    $rlStmt->execute([$supId, $deliveryDow]);
-                    $rule = $rlStmt->fetch();
-                    if ($rule) {
-                        $deadlineDow = (int)$rule['deadline_dow'];
-                        $deadlineTime = $rule['deadline_time'];
-                        $deadlineDateObj = new DateTime($deliveryDate, $tz);
-                        $diff = $deliveryDow - $deadlineDow;
-                        if ($diff <= 0) $diff += 7;
-                        $deadlineDateObj->modify("-{$diff} days");
-                    } else {
-                        $deadlineDateObj = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-                        $deadlineTime = $defaultDeadlineTime;
-                    }
-                }
+                $rlStmt = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
+                $rlStmt->execute([$supId, $deliveryDow]);
+                $rule = $rlStmt->fetch() ?: null;
 
-                $tp = explode(':', $deadlineTime);
-                $deadline = clone $deadlineDateObj;
-                $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
+                $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz);
+                if (!$r['deadline_dt']) continue;
+                $deadline = $r['deadline_dt'];
                 $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
 
                 // Окно: дедлайн прошёл не более 20 мин назад и не в будущем

@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/so_deadline.php';
+
 // ═══ Ресторанные подписки и уведомления ═══
 // cmdVegStats, vegShowMySubs, vegShowRestaurants, vegShowSubsManage, vegNotifySubscribers
 //
@@ -123,57 +125,13 @@ function soGetSupplierSettingsBot($pdo, $supplierId) {
 }
 
 /** Проверка дедлайна заявки (open/closed) */
+// Тонкая обёртка над soCalculateDeadline — сохраняет старый контракт вызовов в боте.
 function soBotCheckDeadline($pdo, $supplierId, $deliveryDate) {
-    $tz = new DateTimeZone('Europe/Minsk');
-    $now = new DateTime('now', $tz);
-    $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
-
-    // 1. Переопределение на конкретную дату
-    try {
-        $s = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
-        $s->execute([$supplierId, $deliveryDate]);
-        $override = $s->fetch();
-    } catch (PDOException $e) {
-        $s = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
-        $s->execute([$supplierId, $deliveryDate]);
-        $override = $s->fetch();
-    }
-
-    if ($override && !empty($override['is_closed'])) {
-        return ['status' => 'closed', 'deadline' => null];
-    }
-
-    // 2. Правило по дню недели
-    $rule = null;
-    if ($supplierId) {
-        $r = $pdo->prepare("SELECT deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? AND delivery_dow = ?");
-        $r->execute([$supplierId, $deliveryDow]);
-        $rule = $r->fetch();
-    }
-
-    // 3. Вычисляем дедлайн
-    if ($override && !empty($override['deadline_time'])) {
-        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-        $deadlineTime = $override['deadline_time'];
-    } elseif ($rule) {
-        $deadlineDow = (int)$rule['deadline_dow'];
-        $deadlineTime = $rule['deadline_time'];
-        $deliveryObj = new DateTime($deliveryDate, $tz);
-        $deadlineDate = clone $deliveryObj;
-        $diff = $deliveryDow - $deadlineDow;
-        if ($diff <= 0) $diff += 7;
-        $deadlineDate->modify("-{$diff} days");
-    } else {
-        $settings = soGetSupplierSettingsBot($pdo, $supplierId);
-        $deadlineDate = (new DateTime($deliveryDate, $tz))->modify('-1 day');
-        $deadlineTime = $settings['default_deadline_time'] ?? '14:00:00';
-    }
-
-    $deadlineDT = new DateTime($deadlineDate->format('Y-m-d') . ' ' . $deadlineTime, $tz);
-    $deadlineStr = $deadlineDate->format('Y-m-d') . ' ' . substr($deadlineTime, 0, 5);
-
-    if ($now < $deadlineDT) return ['status' => 'open', 'deadline' => $deadlineStr];
-    return ['status' => 'closed', 'deadline' => $deadlineStr];
+    $r = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+    return [
+        'status' => $r['status'],
+        'deadline' => !empty($r['forced_closed']) ? null : $r['deadline_str'],
+    ];
 }
 
 function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {

@@ -510,7 +510,7 @@ if ($method === 'DELETE') {
     }
     // Аудит-лог для удалений
     if ($s->rowCount() > 0 && !empty($deletedIds)) {
-        $deletedBy = $sessionUser ? $sessionUser['name'] : 'unknown';
+        $deletedBy = resolveActorName($pdo, $sessionUser, 'unknown');
         try {
             foreach ($deletedIds as $did) {
                 $pdo->prepare("INSERT INTO `audit_log` (`action`, `entity_type`, `entity_id`, `user_name`, `details`, `created_at`) VALUES (?, ?, ?, ?, '{}', NOW())")

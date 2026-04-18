@@ -463,6 +463,32 @@ function checkApiKey($pdo) {
     return $s->fetch() !== false;
 }
 
+// Возвращает key_name активного API-ключа из заголовка X-API-Key или null.
+// Кеширует результат на время запроса, чтобы не дёргать БД много раз из resolveActorName().
+function getApiKeyName($pdo) {
+    static $cache = ['done' => false, 'value' => null];
+    if ($cache['done']) return $cache['value'];
+    $cache['done'] = true;
+    $k = $_SERVER['HTTP_X_API_KEY'] ?? '';
+    if (!$k) return $cache['value'] = null;
+    $s = $pdo->prepare("SELECT key_name FROM api_keys WHERE api_key=? AND is_active='true'");
+    $s->execute([$k]);
+    $row = $s->fetch();
+    if (!$row) return $cache['value'] = null;
+    $name = isset($row['key_name']) ? trim((string)$row['key_name']) : '';
+    return $cache['value'] = ($name !== '' ? $name : 'api');
+}
+
+// Единая точка для поля аудита «кто сделал»:
+// 1) имя авторизованного пользователя, если есть; 2) 'api:<key_name>' при запросе по API-ключу;
+// 3) fallback (по умолчанию 'admin').
+function resolveActorName($pdo, $sessionUser, $fallback = 'admin') {
+    if ($sessionUser && !empty($sessionUser['name'])) return $sessionUser['name'];
+    $apiName = getApiKeyName($pdo);
+    if ($apiName) return 'api:' . $apiName;
+    return $fallback;
+}
+
 function checkAuth($pdo) {
     if (getSessionUser($pdo)) return true;
     return checkApiKey($pdo);

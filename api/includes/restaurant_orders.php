@@ -2108,7 +2108,7 @@ if (strpos($roAction, 'admin') === 0) {
                     ->execute([$deliveryDate, $orderId]);
             }
 
-            $updatedBy = $sessionUser ? $sessionUser['name'] : 'admin';
+            $updatedBy = resolveActorName($pdo, $sessionUser);
             $newStatus = $status ?: 'edited';
             $pdo->prepare("UPDATE ro_orders SET status = ?, updated_at = NOW(), updated_by = ? WHERE id = ?")
                 ->execute([$newStatus, $updatedBy, $orderId]);
@@ -2120,7 +2120,7 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         // ═══ Журнал: правка заказа закупщиком ═══
-        $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
+        $actorName = resolveActorName($pdo, $sessionUser);
         if ($items !== null) {
             $newItemsAudit = [];
             foreach (roAggregateOrderItems($items) as $sku => $it) {
@@ -2291,7 +2291,7 @@ if (strpos($roAction, 'admin') === 0) {
 
         // ═══ Журнал: удаление заказа целиком ═══
         if ($oi) {
-            $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
+            $actorName = resolveActorName($pdo, $sessionUser);
             $totalQty = array_sum(array_map(fn($r) => floatval($r['quantity']), $delItems));
             roLogAudit($pdo, [
                 'order_id' => $orderId,
@@ -2312,7 +2312,7 @@ if (strpos($roAction, 'admin') === 0) {
             $dayName = $dayNames[$dow] ?? '';
             $dateStr = $dayName . ', ' . date('d.m', strtotime($oi['delivery_date']));
             $restNum = $oi['restaurant_number'];
-            $by = $sessionUser ? $sessionUser['name'] : 'admin';
+            $by = resolveActorName($pdo, $sessionUser);
             roNotifyRestaurant($pdo, $restNum,
                 "❌ Ресторан {$restNum} — заказ на {$dateStr} удалён ({$by}). Если это ошибка — свяжитесь с нами.",
                 getEntityGroup($oi['legal_entity'] ?? '') === 'PS' ? 'PS' : 'BK_VM');
@@ -2352,7 +2352,7 @@ if (strpos($roAction, 'admin') === 0) {
         $pdo->prepare("DELETE FROM ro_order_items WHERE id = ?")->execute([$item['id']]);
 
         // ═══ Журнал: удаление одной позиции закупщиком ═══
-        $actorName = $sessionUser ? $sessionUser['name'] : 'admin';
+        $actorName = resolveActorName($pdo, $sessionUser);
         roLogAudit($pdo, [
             'order_id' => $item['order_id'],
             'restaurant_number' => $item['restaurant_number'],
@@ -2403,7 +2403,7 @@ if (strpos($roAction, 'admin') === 0) {
         if ($action === 'create') {
             $weekStart = $body['week_start'] ?? date('Y-m-d', strtotime('monday this week'));
             $weekEnd = $body['week_end'] ?? date('Y-m-d', strtotime('saturday this week'));
-            $createdBy = $sessionUser ? $sessionUser['name'] : 'system';
+            $createdBy = resolveActorName($pdo, $sessionUser, 'system');
 
             if (roSessionsSupportGroups($pdo)) {
                 // Закрываем старые сессии только этой группы
@@ -2466,7 +2466,7 @@ if (strpos($roAction, 'admin') === 0) {
         $sessionId = $body['session_id'] ?? null;
         $date = $body['delivery_date'] ?? '';
         $isOpen = isset($body['is_open']) ? ($body['is_open'] ? 1 : 0) : 1;
-        $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
+        $createdBy = resolveActorName($pdo, $sessionUser);
 
         if (!$sessionId || !$date) roRespond(['error' => 'Не указана сессия или дата'], 400);
         $session = roGetSessionById($pdo, $sessionId);
@@ -2521,7 +2521,7 @@ if (strpos($roAction, 'admin') === 0) {
         $date = $body['delivery_date'] ?? '';
         $softDeadline = $body['soft_deadline'] ?? '14:00:00';
         $hardDeadline = $body['hard_deadline'] ?? '16:00:00';
-        $createdBy = $sessionUser ? $sessionUser['name'] : 'admin';
+        $createdBy = resolveActorName($pdo, $sessionUser);
 
         if (!$sessionId || !$date) roRespond(['error' => 'Не указана сессия или дата'], 400);
         $session = roGetSessionById($pdo, $sessionId);
