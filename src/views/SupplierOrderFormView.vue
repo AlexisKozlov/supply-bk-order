@@ -158,6 +158,11 @@
                 <span class="so-prev-qty">{{ fmtNum(it.quantity) }}</span>
               </div>
             </div>
+            <div v-if="currentDateInfo?.deadline_status === 'open' && previousOrderInfo.items?.length" class="so-prev-order-actions">
+              <button type="button" class="so-prev-repeat-btn" @click="handleRepeatPrevious">
+                ↺ Повторить предыдущую заявку
+              </button>
+            </div>
           </div>
 
           <!-- Products -->
@@ -385,6 +390,27 @@ async function selectDate(dateInfo) {
   }
 }
 
+function handleRepeatPrevious() {
+  const prev = previousOrderInfo.value;
+  if (!prev?.items?.length) return;
+  const ok = window.confirm(`Заполнить текущую заявку позициями из заявки от ${formatDate(prev.delivery_date)}?`);
+  if (!ok) return;
+  const available = new Set(products.value.map(p => p.sku));
+  let applied = 0;
+  let skipped = 0;
+  for (const it of prev.items) {
+    if (available.has(it.sku)) {
+      quantities.value[it.sku] = parseFloat(it.quantity) || 0;
+      applied++;
+    } else {
+      skipped++;
+    }
+  }
+  if (skipped > 0) {
+    alert(`Скопировано позиций: ${applied}. Пропущено (нет в шаблоне): ${skipped}.`);
+  }
+}
+
 async function handleSubmit() {
   submitting.value = true;
   try {
@@ -476,6 +502,10 @@ function formatDateShort(d) {
 .so-prev-order-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
 .so-prev-name { color: #334155; }
 .so-prev-qty { color: #64748b; font-variant-numeric: tabular-nums; }
+.so-prev-order-actions { margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 10px; display: flex; justify-content: center; }
+.so-prev-repeat-btn { background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 500; color: #0f766e; cursor: pointer; transition: background 0.15s; }
+.so-prev-repeat-btn:hover { background: #ecfdf5; }
+.so-prev-repeat-btn:active { background: #d1fae5; }
 
 /* ═══ Базовые стили (из RestaurantOrderFormView) ═══ */
 .ro-page {

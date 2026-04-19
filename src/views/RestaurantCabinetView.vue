@@ -406,6 +406,11 @@
                       <span class="sup-prev-qty">{{ supFmtNum(it.quantity) }}</span>
                     </div>
                   </div>
+                  <div v-if="supCurrentDateInfo(sup)?.deadline_status === 'open' && supPreviousOrders[sup.id].items?.length" class="sup-prev-order-actions">
+                    <button type="button" class="sup-prev-repeat-btn" @click="supHandleRepeatPrevious(sup)">
+                      ↺ Повторить предыдущую заявку
+                    </button>
+                  </div>
                 </div>
                 <div v-if="supIsSkipOrder[sup.id]" class="sup-skip-banner">
                   <span class="sup-skip-icon">🚫</span>
@@ -1907,6 +1912,33 @@ function supHasErrors(supId) { return (supProducts[supId] || []).some(p => supHa
 function supFilledCount(supId) { return Object.values(supQuantities[supId] || {}).filter(v => v > 0).length; }
 function supFilledTotal(supId) { return Object.values(supQuantities[supId] || {}).reduce((s, v) => s + (v > 0 ? v : 0), 0); }
 
+async function supHandleRepeatPrevious(sup) {
+  const prev = supPreviousOrders[sup.id];
+  if (!prev?.items?.length) return;
+  const ok = await showConfirm(
+    'Повторить предыдущую заявку',
+    `Заполнить позициями из заявки от ${fmtDate(prev.delivery_date)}?`,
+    { okText: 'Повторить' },
+  );
+  if (!ok) return;
+  const available = new Set((supProducts[sup.id] || []).map(p => p.sku));
+  if (!supQuantities[sup.id]) supQuantities[sup.id] = {};
+  let applied = 0;
+  let skipped = 0;
+  for (const it of prev.items) {
+    if (available.has(it.sku)) {
+      supQuantities[sup.id][it.sku] = parseFloat(it.quantity) || 0;
+      applied++;
+    } else {
+      skipped++;
+    }
+  }
+  supIsSkipOrder[sup.id] = false;
+  if (skipped > 0) {
+    showInfo('Готово', `Скопировано позиций: ${applied}. Пропущено (нет в шаблоне): ${skipped}.`, 'info');
+  }
+}
+
 async function supHandleSubmit(sup) {
   supSubmitting[sup.id] = true;
   try {
@@ -2667,6 +2699,10 @@ onUnmounted(() => {
 .sup-prev-order-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
 .sup-prev-name { color: #334155; }
 .sup-prev-qty { color: #64748b; font-variant-numeric: tabular-nums; }
+.sup-prev-order-actions { margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 8px; display: flex; justify-content: center; }
+.sup-prev-repeat-btn { background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500; color: #0f766e; cursor: pointer; transition: background 0.15s; }
+.sup-prev-repeat-btn:hover { background: #ecfdf5; }
+.sup-prev-repeat-btn:active { background: #d1fae5; }
 
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
