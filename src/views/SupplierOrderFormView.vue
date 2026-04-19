@@ -226,6 +226,24 @@
         </div>
       </div>
     </template>
+
+    <ConfirmModal
+      v-if="confirmModal.show"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :ok-text="confirmModal.okText"
+      :cancel-text="confirmModal.cancelText"
+      :danger="confirmModal.danger"
+      @confirm="onConfirm"
+      @cancel="onCancel"
+    />
+    <InfoModal
+      v-if="infoModal.show"
+      :title="infoModal.title"
+      :message="infoModal.message"
+      :type="infoModal.type"
+      @close="onInfoClose"
+    />
   </div>
 </template>
 
@@ -235,6 +253,11 @@ import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useDeadlineCountdown } from '@/composables/useDeadlineCountdown.js';
+import { useConfirm } from '@/composables/useConfirm.js';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+import InfoModal from '@/components/modals/InfoModal.vue';
+
+const { confirmModal, confirm: showConfirm, onConfirm, onCancel, infoModal, info: showInfo, onInfoClose } = useConfirm();
 
 const router = useRouter();
 const roStore = useRestaurantOrderStore();
@@ -390,10 +413,10 @@ async function selectDate(dateInfo) {
   }
 }
 
-function handleRepeatPrevious() {
+async function handleRepeatPrevious() {
   const prev = previousOrderInfo.value;
   if (!prev?.items?.length) return;
-  const ok = window.confirm(`Заполнить текущую заявку позициями из заявки от ${formatDate(prev.delivery_date)}?`);
+  const ok = await showConfirm('Повторить заявку', `Заполнить текущую заявку позициями из заявки от ${formatDate(prev.delivery_date)}?`);
   if (!ok) return;
   const available = new Set(products.value.map(p => p.sku));
   let applied = 0;
@@ -407,7 +430,7 @@ function handleRepeatPrevious() {
     }
   }
   if (skipped > 0) {
-    alert(`Скопировано позиций: ${applied}. Пропущено (нет в шаблоне): ${skipped}.`);
+    showInfo('Готово', `Скопировано позиций: ${applied}.\nПропущено (нет в шаблоне): ${skipped}.`, 'success');
   }
 }
 
@@ -438,7 +461,7 @@ async function handleSubmit() {
       suppliers.value = await soStore.loadSuppliers();
     }
   } catch (e) {
-    alert(e.message || 'Ошибка отправки');
+    showInfo('Ошибка', e.message || 'Ошибка отправки', 'error');
   } finally {
     submitting.value = false;
   }

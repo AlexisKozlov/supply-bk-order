@@ -454,6 +454,17 @@
     <div v-if="!currentSupplierId" class="rom-empty" style="margin-top: 40px">
       Выберите поставщика для просмотра заявок
     </div>
+
+    <ConfirmModal
+      v-if="confirmModal.show"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :ok-text="confirmModal.okText"
+      :cancel-text="confirmModal.cancelText"
+      :danger="confirmModal.danger"
+      @confirm="onConfirm"
+      @cancel="onCancel"
+    />
   </div>
 </template>
 
@@ -464,6 +475,10 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useConfirm } from '@/composables/useConfirm.js';
+import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+
+const { confirmModal, confirm: showConfirm, onConfirm, onCancel } = useConfirm();
 
 const props = defineProps({
   supplierId: { type: String, default: '' },
@@ -726,12 +741,15 @@ function currentSettingsPayload(overrides = {}) {
 
 async function toggleAccepting() {
   const next = settings.value.is_accepting_orders ? 0 : 1;
-  if (next === 0 && !confirm('Приостановить приём заявок? Рестораны увидят сообщение о паузе.')) return;
+  if (next === 0) {
+    const ok = await showConfirm('Приостановить приём заявок?', 'Рестораны увидят сообщение о паузе.');
+    if (!ok) return;
+  }
   try {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ is_accepting_orders: next }));
     await loadSettings();
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -741,17 +759,17 @@ async function toggleAutoSubmit(ev) {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ auto_submit_previous: next }));
     await loadSettings();
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
 async function saveDefaultDeadline() {
   try {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
-    alert('Дедлайн по умолчанию сохранён');
+    toast.success('Сохранено', 'Дедлайн по умолчанию обновлён');
     await loadSettings();
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -759,7 +777,7 @@ async function savePauseMessage() {
   try {
     await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload());
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -768,9 +786,9 @@ async function saveNotifyUsers() {
   try {
     const data = await store.adminSaveSettings(currentSupplierId.value, currentSettingsPayload({ notify_users: notifyUsers.value }));
     notifyUsers.value = Array.isArray(data.notify_users) ? data.notify_users : [];
-    alert('Получатели сохранены');
+    toast.success('Сохранено', 'Получатели обновлены');
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   } finally {
     savingNotifyUsers.value = false;
   }
@@ -805,14 +823,14 @@ async function handleToggleCloseDay(date) {
   const d = weekDates.value.find(w => w.date === date);
   const label = d ? `${d.day_name} ${formatDateShort(date)}` : formatDateShort(date);
   if (closing) {
-    const ok = confirm(`Закрыть день ${label} для подачи заявок?\n\nРестораны не смогут отправить заявку на эту дату.`);
+    const ok = await showConfirm(`Закрыть день ${label}?`, 'Рестораны не смогут отправить заявку на эту дату.', { danger: true });
     if (!ok) return;
   }
   try {
     await store.adminCloseDay(currentSupplierId.value, date, closing);
     await loadSettings();
   } catch (e) {
-    alert('Ошибка: ' + (e.message || e));
+    toast.error('Ошибка', e.message || String(e));
   }
 }
 
@@ -821,27 +839,28 @@ async function handleExtendDeadline() {
   const time = prompt('Новое время дедлайна для этой даты (HH:MM):', '15:00');
   if (!time) return;
   if (!/^\d{1,2}:\d{2}$/.test(time)) {
-    alert('Введите время в формате HH:MM (например 15:00)');
+    toast.warning('Неверный формат', 'Введите время в формате HH:MM (например 15:00)');
     return;
   }
   try {
     await store.adminExtendDeadline(currentSupplierId.value, selectedDate.value, time);
-    alert(`Дедлайн на ${selectedDate.value} продлён до ${time}`);
+    toast.success('Дедлайн продлён', `Новый дедлайн на ${selectedDate.value}: ${time}`);
     await loadSettings();
     await loadStatus();
   } catch (e) {
-    alert('Ошибка: ' + (e.message || 'не удалось продлить дедлайн'));
+    toast.error('Ошибка', e.message || 'Не удалось продлить дедлайн');
   }
 }
 
 async function removeOverride(deliveryDate) {
-  if (!confirm(`Удалить разовое продление дедлайна на ${deliveryDate}?`)) return;
+  const ok = await showConfirm('Удалить продление?', `Убрать разовое продление дедлайна на ${deliveryDate}?`, { danger: true });
+  if (!ok) return;
   try {
     await store.adminRemoveDeadlineOverride(currentSupplierId.value, deliveryDate);
     await loadSettings();
     await loadStatus();
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -989,17 +1008,18 @@ async function saveScheduleGrid() {
   const addedDays   = Object.keys(addedByDay).map(Number).sort();
 
   if (removedDays.length || addedDays.length) {
-    const lines = ['Подтвердите изменения в графике:\n'];
+    const lines = [];
     if (removedDays.length) {
-      lines.push('❌ Будет удалено:');
+      lines.push('Будет удалено:');
       for (const d of removedDays) lines.push(`  ${dayNames[d]}: −${removedByDay[d]} рест.`);
     }
     if (addedDays.length) {
-      lines.push('\n✅ Будет добавлено:');
+      if (lines.length) lines.push('');
+      lines.push('Будет добавлено:');
       for (const d of addedDays) lines.push(`  ${dayNames[d]}: +${addedByDay[d]} рест.`);
     }
-    lines.push('\nПродолжить?');
-    if (!confirm(lines.join('\n'))) return;
+    const ok = await showConfirm('Изменения в графике', lines.join('\n'), { okText: 'Продолжить', danger: removedDays.length > 0 });
+    if (!ok) return;
   }
 
   savingScheduleGrid.value = true;
@@ -1015,9 +1035,9 @@ async function saveScheduleGrid() {
       }
     }
     await store.adminSaveSchedules(currentSupplierId.value, items);
-    alert('График сохранён');
+    toast.success('Сохранено', 'График обновлён');
     await loadSchedules();
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { toast.error('Ошибка', e.message); }
   finally { savingScheduleGrid.value = false; }
 }
 
@@ -1031,8 +1051,8 @@ async function saveDeadlineRules() {
       }
     }
     await store.adminSaveDeadlineRules(currentSupplierId.value, rules);
-    alert('Дедлайны сохранены');
-  } catch (e) { alert('Ошибка: ' + e.message); }
+    toast.success('Сохранено', 'Дедлайны обновлены');
+  } catch (e) { toast.error('Ошибка', e.message); }
   finally { savingDeadlines.value = false; }
 }
 
@@ -1052,9 +1072,9 @@ async function saveTemplates() {
   savingTemplates.value = true;
   try {
     await store.adminSaveTemplates(currentSupplierId.value, templateLe.value, templates.value);
-    alert('Шаблон сохранён');
+    toast.success('Сохранено', 'Шаблон обновлён');
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   } finally {
     savingTemplates.value = false;
   }
@@ -1065,7 +1085,7 @@ async function importFromProducts() {
   try {
     const products = await store.loadProducts(currentSupplierId.value);
     if (!products.length) {
-      alert('У этого поставщика нет товаров в справочнике');
+      toast.warning('Нет товаров', 'У этого поставщика нет товаров в справочнике');
       return;
     }
     templates.value = products.map((p, i) => ({
@@ -1077,7 +1097,7 @@ async function importFromProducts() {
       min_qty: p.min_qty || null,
     }));
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -1086,17 +1106,18 @@ async function viewOrder(orderId) {
     viewedOrder.value = await store.adminGetOrder(orderId);
     showOrderModal.value = true;
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
 async function deleteOrder(orderId) {
-  if (!confirm('Удалить эту заявку?')) return;
+  const ok = await showConfirm('Удалить заявку?', 'Действие нельзя отменить.', { danger: true, okText: 'Удалить' });
+  if (!ok) return;
   try {
     await store.adminDeleteOrder(orderId);
     await loadOrdersList();
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast.error('Ошибка', e.message);
   }
 }
 
@@ -1111,14 +1132,14 @@ async function sendSummary() {
   if (!currentSupplierId.value || !selectedDate.value) return;
   const date = selectedDate.value;
   const fmt = new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const ok = confirm(`Отправить сводку по заявкам на ${fmt} подписчикам в Telegram?`);
+  const ok = await showConfirm('Отправить сводку?', `Сводка по заявкам на ${fmt} будет отправлена подписчикам в Telegram.`);
   if (!ok) return;
   sendingSummary.value = true;
   try {
     const res = await store.adminSendSummary(currentSupplierId.value, date);
-    alert(`Сводка отправлена ${res.sent} из ${res.total_subs} подписчиков.`);
+    toast.success('Сводка отправлена', `${res.sent} из ${res.total_subs} подписчиков`);
   } catch (e) {
-    alert('Ошибка отправки: ' + (e.message || e));
+    toast.error('Ошибка отправки', e.message || String(e));
   } finally {
     sendingSummary.value = false;
   }
@@ -1132,7 +1153,7 @@ async function exportExcel() {
     ? [...exportSelectedDates.value].sort()
     : (selectedDate.value ? [selectedDate.value] : []);
 
-  if (!datesToExport.length) { exporting.value = false; alert('Выберите хотя бы один день'); return; }
+  if (!datesToExport.length) { exporting.value = false; toast.warning('Не выбрано', 'Выберите хотя бы один день'); return; }
 
   try {
     const XLSX = await import('xlsx-js-style');
@@ -1298,12 +1319,12 @@ async function exportExcel() {
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
     }
 
-    if (wb.SheetNames.length === 0) { alert('Нет данных для выгрузки'); return; }
+    if (wb.SheetNames.length === 0) { toast.warning('Нет данных', 'Нет данных для выгрузки'); return; }
     const firstDate = fmtDateDDMM(datesToExport[0]);
     const lastDate = datesToExport.length > 1 ? `-${fmtDateDDMM(datesToExport[datesToExport.length - 1])}` : '';
     XLSX.writeFile(wb, `Заявка ${supplierName} ${firstDate}${lastDate}.xlsx`);
   } catch (e) {
-    alert('Ошибка экспорта: ' + e.message);
+    toast.error('Ошибка экспорта', e.message);
   } finally {
     exporting.value = false;
   }
@@ -1465,14 +1486,14 @@ async function saveEdit() {
       }
     }
   } catch (e) {
-    alert('Ошибка сохранения: ' + e.message);
+    toast.error('Ошибка сохранения', e.message);
   }
 }
 
 function copyLink() {
   const url = window.location.origin + '/supplier-order';
   navigator.clipboard.writeText(url);
-  alert('Ссылка скопирована: ' + url);
+  toast.success('Скопировано', url);
 }
 
 function statusLabel(s) {
