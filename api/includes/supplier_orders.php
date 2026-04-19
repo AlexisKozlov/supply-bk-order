@@ -1736,34 +1736,47 @@ if ($soAction === 'admin') {
 
         $updatedBy = resolveActorName($pdo, $sessionUser);
 
-        // Сначала деактивируем все расписания поставщика, потом активируем присланные
-        $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
+        $pdo->beginTransaction();
+        try {
+            // Сначала деактивируем все расписания поставщика, потом активируем присланные
+            $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0, updated_at = NOW(), updated_by = ? WHERE supplier_id = ?")->execute([$updatedBy, $supplierId]);
 
-        // Upsert
-        $upsert = $pdo->prepare("
-            INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
-            VALUES (?, ?, ?, ?, ?, NOW(), ?)
-            ON DUPLICATE KEY UPDATE
-                order_day = VALUES(order_day),
-                delivery_day = VALUES(delivery_day),
-                is_active = VALUES(is_active),
-                updated_at = NOW(),
-                updated_by = VALUES(updated_by)
-        ");
+            // Upsert
+            $upsert = $pdo->prepare("
+                INSERT INTO so_supplier_schedules (supplier_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+                VALUES (?, ?, ?, ?, ?, NOW(), ?)
+                ON DUPLICATE KEY UPDATE
+                    order_day = VALUES(order_day),
+                    delivery_day = VALUES(delivery_day),
+                    is_active = VALUES(is_active),
+                    updated_at = NOW(),
+                    updated_by = VALUES(updated_by)
+            ");
 
-        $count = 0;
-        foreach ($schedules as $sch) {
-            $restId = $sch['restaurant_id'] ?? null;
-            if (!$restId) continue;
-            $upsert->execute([
-                $supplierId,
-                $restId,
-                (int)($sch['order_day'] ?? 1),
-                (int)($sch['delivery_day'] ?? 2),
-                (int)($sch['is_active'] ?? 1),
-                $updatedBy,
-            ]);
-            $count++;
+            $count = 0;
+            foreach ($schedules as $sch) {
+                $restId = $sch['restaurant_id'] ?? null;
+                if (!$restId) continue;
+                $upsert->execute([
+                    $supplierId,
+                    $restId,
+                    (int)($sch['order_day'] ?? 1),
+                    (int)($sch['delivery_day'] ?? 2),
+                    (int)($sch['is_active'] ?? 1),
+                    $updatedBy,
+                ]);
+                $count++;
+            }
+
+            // Физически удаляем записи, не вошедшие в новый набор,
+            // чтобы таблица не распухала от soft-off мусора.
+            $pdo->prepare("DELETE FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 0")
+                ->execute([$supplierId]);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
         }
 
         soRespond(['success' => true, 'updated' => $count]);
@@ -1892,32 +1905,44 @@ if ($soAction === 'admin') {
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         soRequireAdminEntityGroupAccess($sessionUser, $le);
 
-        // Деактивируем все текущие
-        $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ? AND legal_entity = ?")
-            ->execute([$supplierId, $le]);
-
-        $upsert = $pdo->prepare("
-            INSERT INTO so_templates (supplier_id, legal_entity, product_id, sku, product_name, sort_order, multiplicity, min_qty, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-            ON DUPLICATE KEY UPDATE product_name = VALUES(product_name), sort_order = VALUES(sort_order),
-              multiplicity = VALUES(multiplicity), min_qty = VALUES(min_qty), is_active = 1, product_id = VALUES(product_id)
-        ");
-
         $count = 0;
-        foreach ($items as $i => $item) {
-            $mult = isset($item['multiplicity']) && $item['multiplicity'] !== '' ? (float)$item['multiplicity'] : null;
-            $minQty = isset($item['min_qty']) && $item['min_qty'] !== '' ? (float)$item['min_qty'] : null;
-            $upsert->execute([
-                $supplierId,
-                $le,
-                $item['product_id'] ?? null,
-                $item['sku'] ?? '',
-                $item['product_name'] ?? '',
-                $item['sort_order'] ?? ($i * 10),
-                $mult,
-                $minQty,
-            ]);
-            $count++;
+        $pdo->beginTransaction();
+        try {
+            // Деактивируем все текущие
+            $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ? AND legal_entity = ?")
+                ->execute([$supplierId, $le]);
+
+            $upsert = $pdo->prepare("
+                INSERT INTO so_templates (supplier_id, legal_entity, product_id, sku, product_name, sort_order, multiplicity, min_qty, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ON DUPLICATE KEY UPDATE product_name = VALUES(product_name), sort_order = VALUES(sort_order),
+                  multiplicity = VALUES(multiplicity), min_qty = VALUES(min_qty), is_active = 1, product_id = VALUES(product_id)
+            ");
+
+            foreach ($items as $i => $item) {
+                $mult = isset($item['multiplicity']) && $item['multiplicity'] !== '' ? (float)$item['multiplicity'] : null;
+                $minQty = isset($item['min_qty']) && $item['min_qty'] !== '' ? (float)$item['min_qty'] : null;
+                $upsert->execute([
+                    $supplierId,
+                    $le,
+                    $item['product_id'] ?? null,
+                    $item['sku'] ?? '',
+                    $item['product_name'] ?? '',
+                    $item['sort_order'] ?? ($i * 10),
+                    $mult,
+                    $minQty,
+                ]);
+                $count++;
+            }
+
+            // Физически удаляем SKU, выпавшие из шаблона.
+            $pdo->prepare("DELETE FROM so_templates WHERE supplier_id = ? AND legal_entity = ? AND is_active = 0")
+                ->execute([$supplierId, $le]);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
         }
 
         try {
