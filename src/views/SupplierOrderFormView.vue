@@ -646,9 +646,13 @@ function formatDateShort(d) {
 
 /* Success screen */
 .ro-success-screen { display: flex; align-items: center; justify-content: center; min-height: 60vh; padding: 20px; }
-.ro-success-card { background: white; border-radius: 20px; padding: 40px 32px; text-align: center; max-width: 420px; width: 100%; box-shadow: 0 4px 24px rgba(80,35,20,0.1); }
-.ro-success-icon { width: 64px; height: 64px; border-radius: 50%; background: #16a34a; color: white; font-size: 32px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
-.ro-success-title { color: #502314; margin: 0 0 8px; font-size: 22px; }
+.ro-success-card { background: white; border-radius: 24px; padding: 44px 36px; text-align: center; max-width: 480px; width: 100%; box-shadow: 0 12px 40px rgba(80,35,20,0.08); border: 1px solid #EDE8E3; animation: roSuccessIn 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes roSuccessIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ro-success-icon { width: 76px; height: 76px; border-radius: 50%; background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-size: 38px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; box-shadow: 0 8px 24px rgba(22, 163, 74, 0.3); }
+.ro-success-title { color: #502314; margin: 0 0 8px; font-size: 24px; font-weight: 800; letter-spacing: -0.3px; }
 .ro-success-date { color: #8b7355; margin: 0 0 4px; font-size: 15px; }
 .ro-success-stats { color: #502314; margin: 0 0 24px; font-size: 14px; font-weight: 600; }
 .ro-success-actions { display: flex; flex-direction: column; gap: 10px; align-items: center; }

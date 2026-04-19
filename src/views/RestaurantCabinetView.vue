@@ -2697,7 +2697,7 @@ onUnmounted(() => {
 .day-tab-mark.closed { background: #9ca3af; color: white; }
 
 .sup-skip-banner {
-  padding: 7px 14px; background: #fef3c7; border-bottom: 1px solid #fbbf24;
+  padding: 8px 14px; background: #fef3c7; border-bottom: 1px solid #fbbf24;
   color: #92400e; font-size: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
   line-height: 1.3;
 }
