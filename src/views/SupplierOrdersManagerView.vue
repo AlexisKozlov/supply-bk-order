@@ -1477,6 +1477,7 @@ function copyLink() {
 
 function statusLabel(s) {
   if (s === 'submitted') return 'Подано';
+  if (s === 'edited') return 'Изменён';
   if (s === 'locked') return 'Закрыто';
   if (s === 'draft') return 'Черновик';
   return 'Не подано';

@@ -998,7 +998,7 @@
           </div>
         </div>
         <div v-else class="cab-success-skip-note">
-          Закупщик увидит, что на эту дату ваш ресторан ничего не заказывает.
+          Отдел закупок зафиксирует, что на эту дату заявка не подаётся.
         </div>
         <div class="cab-success-btns">
           <button class="btn btn-primary" @click="supShowSuccess = false">OK</button>
