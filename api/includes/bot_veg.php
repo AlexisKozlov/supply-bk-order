@@ -540,7 +540,7 @@ function restMenuSupplier($chatId, $msgId) {
         return;
     }
     $rIdList = implode(',', array_keys($restMap));
-    $sups = $pdo->query("SELECT DISTINCT s.id, s.short_name FROM so_supplier_schedules ss JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 WHERE ss.restaurant_id IN ({$rIdList}) AND ss.is_active = 1 ORDER BY s.short_name")->fetchAll();
+    $sups = $pdo->query("SELECT DISTINCT s.id, s.short_name FROM so_supplier_schedules ss JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1 WHERE ss.restaurant_id IN ({$rIdList}) AND ss.is_active = 1 ORDER BY s.short_name")->fetchAll();
 
     $text = "📦 <b>Заявки поставщикам</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";

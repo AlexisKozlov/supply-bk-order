@@ -897,10 +897,21 @@ if ($soAction === 'admin') {
     }
 
     // --- Отключение поставщика от SO-модуля (не удаление, просто скрыть) ---
+    // Каскадно гасим расписание и шаблоны: без этого крон и бот продолжат
+    // показывать поставщика, т.к. они фильтруют по so_supplier_schedules.is_active.
     if ($adminAction === 'disconnect-supplier' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
-        $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
+            $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
+            $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
         soRespond(['success' => true]);
     }
 

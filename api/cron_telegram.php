@@ -1538,7 +1538,7 @@ try {
         FROM suppliers s
         JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
         LEFT JOIN so_supplier_settings sst ON sst.supplier_id = s.id
-        WHERE s.is_active = 1
+        WHERE s.is_active = 1 AND s.so_enabled = 1
     ")->fetchAll();
 
     foreach ($suppliers as $sup) {
