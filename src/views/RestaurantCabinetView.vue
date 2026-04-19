@@ -1317,6 +1317,10 @@ const dashOrdersPending = computed(() => {
 
 const urgentItems = computed(() => {
   const items = [];
+  const earliest = (arr, field = 'deadline') => {
+    const stamps = arr.map(x => x?.[field]).filter(Boolean).sort();
+    return stamps[0] || '9999-12-31 23:59';
+  };
   // Delivery deadlines
   const openDays = roStore.deliveryDays.filter(d => (d.deadline_status === 'open' || d.deadline_status === 'warning') && !d.order);
   if (openDays.length) {
@@ -1324,6 +1328,7 @@ const urgentItems = computed(() => {
       key: 'del', type: 'warn',
       icon: '&#128230;', title: `Основная поставка: ${openDays.length} дн. без заявки`,
       subtitle: openDays.map(d => d.day_name).join(', '),
+      deadline: earliest(openDays),
       action: async () => { await switchTab('orders', 'delivery'); if (openDays[0]) delSelectDay(openDays[0].date); },
     });
   }
@@ -1335,6 +1340,7 @@ const urgentItems = computed(() => {
         key: 'sup_' + sup.id, type: 'orange',
         icon: '&#128230;', title: `${sup.name}: ${openDates.length} дн. без заявки`,
         subtitle: openDates.map(d => d.delivery_day_name).join(', '),
+        deadline: earliest(openDates),
         action: () => switchTab('orders', 'sup_' + sup.id),
       });
     }
@@ -1345,9 +1351,11 @@ const urgentItems = computed(() => {
       key: 'stock', type: 'alert',
       icon: '&#128203;', title: 'Сбор остатков',
       subtitle: stockCollection.collection?.name || 'Нужно заполнить',
+      deadline: '9999-12-31 23:59',
       action: () => switchTab('stock'),
     });
   }
+  items.sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)));
   return items;
 });
 
@@ -2016,7 +2024,11 @@ async function switchTab(tab, subTab) {
     if (sub && sub.startsWith('sup_')) {
       const supId = sub.slice(4);
       const sup = suppliers.value.find(s => String(s.id) === String(supId));
-      if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+      if (sup) {
+        const cur = supSelectedDates[sup.id];
+        const stillValid = cur && sup.available_dates?.some(d => d.delivery_date === cur);
+        if (!stillValid) supAutoSelectDate(sup);
+      }
     }
   }
   if (tab === 'surveys' && !surveyItems.value.length && !surveyListLoading.value) {
