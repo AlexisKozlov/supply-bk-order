@@ -139,6 +139,7 @@
           <div class="ro-deadline-bar" :class="'ro-deadline-' + currentDateInfo?.deadline_status">
             <template v-if="currentDateInfo?.deadline_status === 'open'">
               Дедлайн подачи: {{ currentDateInfo.deadline?.split(' ')[1] || '' }}, {{ formatDate(currentDateInfo.deadline?.split(' ')[0]) }}
+              <span v-if="deadlineTimeLeft" class="ro-deadline-timer">· осталось {{ deadlineTimeLeft }}</span>
             </template>
             <template v-else>
               Приём заявок на эту дату закрыт
@@ -228,6 +229,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
+import { useDeadlineCountdown } from '@/composables/useDeadlineCountdown.js';
 
 const router = useRouter();
 const roStore = useRestaurantOrderStore();
@@ -270,6 +272,10 @@ const currentDateInfo = computed(() => {
   if (!selectedSupplier.value || !selectedDeliveryDate.value) return null;
   return selectedSupplier.value.available_dates?.find(d => d.delivery_date === selectedDeliveryDate.value);
 });
+
+const { timeLeft: deadlineTimeLeft } = useDeadlineCountdown(
+  () => currentDateInfo.value?.deadline_status === 'open' ? currentDateInfo.value?.deadline : null
+);
 
 const filledCount = computed(() => Object.values(quantities.value).filter(v => v > 0).length);
 const filledTotal = computed(() => Object.values(quantities.value).reduce((s, v) => s + (v > 0 ? v : 0), 0));
@@ -555,6 +561,7 @@ function formatDateShort(d) {
 .ro-deadline-bar { padding: 10px 16px; font-size: 13px; font-weight: 600; text-align: center; }
 .ro-deadline-open { background: #ecfdf5; color: #16a34a; }
 .ro-deadline-closed { background: #fef2f2; color: #dc2626; }
+.ro-deadline-timer { margin-left: 6px; font-variant-numeric: tabular-nums; opacity: 0.85; }
 
 /* Products table */
 .ro-products { background: white; }

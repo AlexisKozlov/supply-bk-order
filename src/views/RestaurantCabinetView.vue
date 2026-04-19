@@ -388,7 +388,9 @@
                 <span class="deadline-icon" v-else>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                 </span>
-                <template v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'">Дедлайн: {{ formatDeadline(supCurrentDateInfo(sup)?.deadline) }}</template>
+                <template v-if="supCurrentDateInfo(sup)?.deadline_status === 'open'">
+                  Дедлайн: {{ formatDeadline(supCurrentDateInfo(sup)?.deadline) }}<span v-if="supDeadlineTimeLeft[sup.id]" class="deadline-timer"> · осталось {{ supDeadlineTimeLeft[sup.id] }}</span>
+                </template>
                 <template v-else>Приём заявок на эту дату закрыт</template>
               </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
@@ -1031,6 +1033,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
+import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 
@@ -1806,6 +1809,22 @@ const supShowPreviousOrder = reactive({}); // { supId: true } — раскрыт
 const supSubmitting = reactive({});
 const supShowSuccess = ref(false);
 const supSuccessInfo = ref({});
+const supDeadlineTimeLeft = reactive({}); // { supId: 'HH:MM:SS' } — обратный отсчёт до дедлайна
+let supDeadlineTimerInterval = null;
+
+function supUpdateDeadlineTimers() {
+  const nowMs = Date.now();
+  for (const sup of suppliers.value || []) {
+    const info = supCurrentDateInfo(sup);
+    if (info?.deadline_status === 'open' && info?.deadline) {
+      const left = deadlineTimeLeftString(info.deadline, nowMs);
+      if (left) supDeadlineTimeLeft[sup.id] = left;
+      else delete supDeadlineTimeLeft[sup.id];
+    } else {
+      delete supDeadlineTimeLeft[sup.id];
+    }
+  }
+}
 
 function supplierBadge(sup) { if (!sup.is_accepting_orders) return null; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
 function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; return sup.available_dates?.find(d => d.delivery_date === supSelectedDates[sup.id]); }
@@ -2399,6 +2418,8 @@ onMounted(async () => {
   try {
     await loadCabinetData();
     startRestaurantBroadcastPolling();
+    supUpdateDeadlineTimers();
+    supDeadlineTimerInterval = setInterval(supUpdateDeadlineTimers, 1000);
   } catch (e) {
     globalError.value = e.message || 'Ошибка загрузки кабинета';
   } finally { globalLoading.value = false; }
@@ -2406,6 +2427,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(delEditTimerInterval);
+  clearInterval(supDeadlineTimerInterval);
   if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
   window.removeEventListener('beforeunload', onBeforeUnload);
 });
@@ -2649,6 +2671,7 @@ onUnmounted(() => {
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
 .deadline-bar { padding: 8px 14px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 0; }
+.deadline-timer { font-variant-numeric: tabular-nums; opacity: 0.85; }
 .draft-restored { padding: 8px 18px; font-size: 12px; font-weight: 600; color: #b45309; background: #fffbeb; border-bottom: 1px solid #fde68a; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; animation: draftFadeIn 0.3s ease; }
 @keyframes draftFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .deadline-icon { display: inline-flex; align-items: center; flex-shrink: 0; }
