@@ -470,6 +470,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { db } from '@/lib/apiClient.js';
@@ -478,6 +479,8 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 
+const route = useRoute();
+const router = useRouter();
 const { confirmModal, confirm: showConfirm, onConfirm, onCancel } = useConfirm();
 
 const props = defineProps({
@@ -1540,6 +1543,39 @@ function formatDateTime(dt) {
     minute: '2-digit',
   });
 }
+
+// ═══ Сохранение фильтров в URL ═══
+// Восстанавливаем из query при монтировании
+{
+  const q = route.query || {};
+  if (q.tab) pageTab.value = String(q.tab);
+  if (q.date) selectedDate.value = String(q.date);
+  if (q.status) listStatus.value = String(q.status);
+  if (q.query) listQuery.value = String(q.query);
+  if (q.skipOnly === '1') listSkipOnly.value = true;
+  if (q.from) listDeliveryFrom.value = String(q.from);
+  if (q.to) listDeliveryTo.value = String(q.to);
+  if (q.scheduleFilter) scheduleFilter.value = String(q.scheduleFilter);
+}
+
+let urlSyncInit = false;
+watch(
+  [pageTab, selectedDate, listStatus, listQuery, listSkipOnly, listDeliveryFrom, listDeliveryTo, scheduleFilter],
+  () => {
+    if (!urlSyncInit) { urlSyncInit = true; return; }
+    const q = { ...route.query };
+    const set = (key, val) => { if (val) q[key] = val; else delete q[key]; };
+    set('tab', pageTab.value !== 'status' ? pageTab.value : '');
+    set('date', selectedDate.value);
+    set('status', listStatus.value);
+    set('query', listQuery.value);
+    set('skipOnly', listSkipOnly.value ? '1' : '');
+    set('from', listDeliveryFrom.value);
+    set('to', listDeliveryTo.value);
+    set('scheduleFilter', scheduleFilter.value);
+    router.replace({ query: q }).catch(() => {});
+  },
+);
 </script>
 
 <style scoped>
