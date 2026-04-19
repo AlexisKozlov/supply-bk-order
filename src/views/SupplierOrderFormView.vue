@@ -147,23 +147,16 @@
           </div>
 
           <!-- Предыдущая заявка (справочно) -->
-          <div v-if="previousOrderInfo && (!currentDateInfo?.order || currentDateInfo?.order?.status === 'draft')" class="so-prev-order-block">
-            <div class="so-prev-order-head" @click="showPreviousOrder = !showPreviousOrder">
-              <span>📋 Ваша предыдущая заявка от {{ formatDate(previousOrderInfo.delivery_date) }} — {{ previousOrderInfo.items?.length || 0 }} поз.</span>
-              <span class="so-prev-order-toggle">{{ showPreviousOrder ? '▲ скрыть' : '▼ показать' }}</span>
-            </div>
-            <div v-if="showPreviousOrder" class="so-prev-order-body">
-              <div v-for="it in previousOrderInfo.items" :key="it.sku" class="so-prev-order-row">
-                <span class="so-prev-name">{{ it.product_name }}</span>
-                <span class="so-prev-qty">{{ fmtNum(it.quantity) }}</span>
-              </div>
-            </div>
-            <div v-if="currentDateInfo?.deadline_status === 'open' && previousOrderInfo.items?.length" class="so-prev-order-actions">
-              <button type="button" class="so-prev-repeat-btn" @click="handleRepeatPrevious">
-                ↺ Повторить предыдущую заявку
-              </button>
-            </div>
-          </div>
+          <SupplierPreviousOrder
+            v-if="previousOrderInfo && (!currentDateInfo?.order || currentDateInfo?.order?.status === 'draft')"
+            :previous-order="previousOrderInfo"
+            v-model:expanded="showPreviousOrder"
+            :can-repeat="currentDateInfo?.deadline_status === 'open'"
+            :format-date="formatDate"
+            :fmt-num="fmtNum"
+            variant="standalone"
+            @repeat="handleRepeatPrevious"
+          />
 
           <!-- Products -->
           <div v-if="currentDateInfo?.deadline_status === 'open' || currentDateInfo?.order" class="ro-products">
@@ -256,6 +249,7 @@ import { useDeadlineCountdown } from '@/composables/useDeadlineCountdown.js';
 import { useConfirm } from '@/composables/useConfirm.js';
 import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import InfoModal from '@/components/modals/InfoModal.vue';
+import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const { confirmModal, confirm: showConfirm, onConfirm, onCancel, infoModal, info: showInfo, onInfoClose } = useConfirm();
 
@@ -524,17 +518,6 @@ function formatDateShort(d) {
 
 <style scoped>
 /* ═══ Блок «Предыдущая заявка» ═══ */
-.so-prev-order-block { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
-.so-prev-order-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 500; color: #334155; font-size: 14px; }
-.so-prev-order-toggle { font-size: 12px; color: #64748b; }
-.so-prev-order-body { margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 8px; }
-.so-prev-order-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
-.so-prev-name { color: #334155; }
-.so-prev-qty { color: #64748b; font-variant-numeric: tabular-nums; }
-.so-prev-order-actions { margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 10px; display: flex; justify-content: center; }
-.so-prev-repeat-btn { background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 500; color: #0f766e; cursor: pointer; transition: background 0.15s; }
-.so-prev-repeat-btn:hover { background: #ecfdf5; }
-.so-prev-repeat-btn:active { background: #d1fae5; }
 
 /* ═══ Базовые стили (из RestaurantOrderFormView) ═══ */
 .ro-page {

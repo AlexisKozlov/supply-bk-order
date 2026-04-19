@@ -395,23 +395,17 @@
               </div>
               <div v-if="supProductsLoading[sup.id]" class="mini-loader"><div class="cab-spin"></div></div>
               <template v-else>
-                <div v-if="supPreviousOrders[sup.id] && (!supCurrentDateInfo(sup)?.order || supCurrentDateInfo(sup)?.order?.status === 'draft')" class="sup-prev-order-block">
-                  <div class="sup-prev-order-head" @click="supShowPreviousOrder[sup.id] = !supShowPreviousOrder[sup.id]">
-                    <span>📋 Ваша предыдущая заявка от {{ fmtDate(supPreviousOrders[sup.id].delivery_date) }} — {{ supPreviousOrders[sup.id].items?.length || 0 }} поз.</span>
-                    <span class="sup-prev-order-toggle">{{ supShowPreviousOrder[sup.id] ? '▲ скрыть' : '▼ показать' }}</span>
-                  </div>
-                  <div v-if="supShowPreviousOrder[sup.id]" class="sup-prev-order-body">
-                    <div v-for="it in supPreviousOrders[sup.id].items" :key="it.sku" class="sup-prev-order-row">
-                      <span class="sup-prev-name">{{ it.product_name }}</span>
-                      <span class="sup-prev-qty">{{ supFmtNum(it.quantity) }}</span>
-                    </div>
-                  </div>
-                  <div v-if="supCurrentDateInfo(sup)?.deadline_status === 'open' && supPreviousOrders[sup.id].items?.length" class="sup-prev-order-actions">
-                    <button type="button" class="sup-prev-repeat-btn" @click="supHandleRepeatPrevious(sup)">
-                      ↺ Повторить предыдущую заявку
-                    </button>
-                  </div>
-                </div>
+                <SupplierPreviousOrder
+                  v-if="supPreviousOrders[sup.id] && (!supCurrentDateInfo(sup)?.order || supCurrentDateInfo(sup)?.order?.status === 'draft')"
+                  :previous-order="supPreviousOrders[sup.id]"
+                  :expanded="!!supShowPreviousOrder[sup.id]"
+                  @update:expanded="supShowPreviousOrder[sup.id] = $event"
+                  :can-repeat="supCurrentDateInfo(sup)?.deadline_status === 'open'"
+                  :format-date="fmtDate"
+                  :fmt-num="supFmtNum"
+                  variant="inline"
+                  @repeat="supHandleRepeatPrevious(sup)"
+                />
                 <div v-if="supIsSkipOrder[sup.id]" class="sup-skip-banner">
                   <span class="sup-skip-icon">🚫</span>
                   <strong>Поставка не нужна.</strong>
@@ -1041,6 +1035,7 @@ import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -2705,17 +2700,6 @@ onUnmounted(() => {
 .sup-skip-icon { font-size: 14px; }
 .sup-skip-hint { font-size: 11px; opacity: 0.75; }
 
-.sup-prev-order-block { background: #f1f5f9; border-bottom: 1px solid #cbd5e1; padding: 8px 14px; }
-.sup-prev-order-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 500; color: #334155; font-size: 13px; }
-.sup-prev-order-toggle { font-size: 11px; color: #64748b; }
-.sup-prev-order-body { margin-top: 6px; border-top: 1px dashed #cbd5e1; padding-top: 6px; max-height: 240px; overflow-y: auto; }
-.sup-prev-order-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
-.sup-prev-name { color: #334155; }
-.sup-prev-qty { color: #64748b; font-variant-numeric: tabular-nums; }
-.sup-prev-order-actions { margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 8px; display: flex; justify-content: center; }
-.sup-prev-repeat-btn { background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500; color: #0f766e; cursor: pointer; transition: background 0.15s; }
-.sup-prev-repeat-btn:hover { background: #ecfdf5; }
-.sup-prev-repeat-btn:active { background: #d1fae5; }
 
 .order-form { background: white; border-radius: 14px; margin-top: 6px; overflow: hidden; border: 1px solid #EDE8E3; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
 
@@ -2883,8 +2867,6 @@ tr.del-err { background: #fef2f2; }
   .item-hint, .item-edit-mark { font-size: 9px; }
   .item-input { width: 100%; justify-content: flex-end; }
   .item-qty { width: 88px; height: 44px; font-size: 16px; }
-  .sup-prev-order-block { padding: 8px 10px; }
-  .sup-prev-order-head { flex-wrap: wrap; gap: 4px; }
 }
 
 /* Unified item list (Планета, Камако, etc.) */
