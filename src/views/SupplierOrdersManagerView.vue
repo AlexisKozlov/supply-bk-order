@@ -1491,7 +1491,8 @@ async function saveEdit() {
 }
 
 function copyLink() {
-  const url = window.location.origin + '/supplier-order';
+  const base = window.location.origin + '/supplier-order';
+  const url = currentSupplierId.value ? `${base}?supplier=${currentSupplierId.value}` : base;
   navigator.clipboard.writeText(url);
   toast.success('Скопировано', url);
 }

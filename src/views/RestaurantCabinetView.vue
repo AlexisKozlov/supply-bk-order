@@ -1831,7 +1831,7 @@ function supUpdateDeadlineTimers() {
   }
 }
 
-function supplierBadge(sup) { if (!sup.is_accepting_orders) return null; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
+function supplierBadge(sup) { if (!sup.is_accepting_orders) return { text: 'пауза', type: 'pause' }; const submitted = sup.available_dates?.filter(d => d.order).length || 0; const open = sup.available_dates?.filter(d => d.deadline_status === 'open' && !d.order).length || 0; if (open > 0) return { text: open, type: 'warn' }; if (submitted > 0) return { text: submitted, type: 'ok' }; return null; }
 function supCurrentDateInfo(sup) { if (!supSelectedDates[sup.id]) return null; return sup.available_dates?.find(d => d.delivery_date === supSelectedDates[sup.id]); }
 function formatDeadline(dl) { if (!dl) return ''; const [date, time] = dl.split(' '); const d = new Date(date + 'T00:00:00'); const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' }); return (time || '') + ', ' + label; }
 
@@ -2507,6 +2507,7 @@ onUnmounted(() => {
 .sb-badge.warn { background: #f59e0b; }
 .sb-badge.ok { background: #16a34a; }
 .sb-badge.alert { background: #dc2626; }
+.sb-badge.pause { background: #9ca3af; font-size: 9px; padding: 0 7px; text-transform: uppercase; letter-spacing: 0.5px; }
 .sb-spacer { flex: 1; }
 .sb-help {
   display: flex;

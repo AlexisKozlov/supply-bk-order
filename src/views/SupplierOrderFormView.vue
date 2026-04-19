@@ -249,7 +249,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useDeadlineCountdown } from '@/composables/useDeadlineCountdown.js';
@@ -260,6 +260,7 @@ import InfoModal from '@/components/modals/InfoModal.vue';
 const { confirmModal, confirm: showConfirm, onConfirm, onCancel, infoModal, info: showInfo, onInfoClose } = useConfirm();
 
 const router = useRouter();
+const route = useRoute();
 const roStore = useRestaurantOrderStore();
 const soStore = useSupplierOrderStore();
 
@@ -361,6 +362,11 @@ async function loadData() {
   loading.value = true;
   try {
     suppliers.value = await soStore.loadSuppliers();
+    const initial = route.query.supplier;
+    if (initial) {
+      const sup = suppliers.value.find(s => String(s.id) === String(initial));
+      if (sup) selectSupplier(sup);
+    }
   } catch (e) {
     console.error('Ошибка загрузки поставщиков:', e);
   } finally {
