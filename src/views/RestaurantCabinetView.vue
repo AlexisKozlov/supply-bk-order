@@ -2874,6 +2874,17 @@ tr.del-err { background: #fef2f2; }
   .cab-success-btns .btn { max-width: none; }
   .hist-card-time { margin-left: 0; }
   .hist-modal-title-block { flex-wrap: wrap; }
+
+  /* Item list — узкие экраны */
+  .cab-section { padding: 12px; }
+  .item-row { padding: 8px 10px; gap: 6px; }
+  .item-info { margin-bottom: 4px; gap: 4px; }
+  .item-name { font-size: 13px; line-height: 1.25; }
+  .item-hint, .item-edit-mark { font-size: 9px; }
+  .item-input { width: 100%; justify-content: flex-end; }
+  .item-qty { width: 88px; height: 44px; font-size: 16px; }
+  .sup-prev-order-block { padding: 8px 10px; }
+  .sup-prev-order-head { flex-wrap: wrap; gap: 4px; }
 }
 
 /* Unified item list (Планета, Камако, etc.) */

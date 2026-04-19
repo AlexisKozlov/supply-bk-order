@@ -729,7 +729,7 @@ function formatDateShort(d) {
   .ro-table td { padding: 0; border: none; }
   .ro-td-name { flex: 1 1 100%; order: -1; }
   .ro-td-qty { order: 2; margin-left: auto; }
-  .ro-qty-input { width: 70px; padding: 8px 6px; font-size: 16px; }
+  .ro-qty-input { width: 80px; height: 44px; padding: 8px 6px; font-size: 16px; }
   .ro-submit-btn { width: 100%; padding: 14px; font-size: 16px; }
   .ro-success-card { padding: 28px 20px; }
 }
