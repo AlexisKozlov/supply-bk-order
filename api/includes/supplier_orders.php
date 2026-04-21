@@ -769,6 +769,13 @@ if ($soAction === 'submit-order' && $method === 'POST') {
         $lines = [];
         $lines[] = $title;
         $lines[] = '';
+        $restaurantLabel = roFormatRestaurantTelegramLabel(
+            $rest['restaurant_number'],
+            $rest['city'] ?? '',
+            $rest['address'] ?? '',
+            $rest['legal_entity_group'] ?? null
+        );
+        $lines[] = "🏪 <b>Ресторан:</b> " . $esc($restaurantLabel);
         $lines[] = "🏪 <b>Поставщик:</b> " . $esc($supplierName);
         $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
         if (!$isSkip) {
@@ -794,7 +801,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
             $msg = mb_substr($msg, 0, 3900) . "\n\n…(сообщение обрезано)";
         }
 
-        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg);
+        roNotifyRestaurant($pdo, $rest['restaurant_number'], $msg, $rest['legal_entity_group'] ?? 'BK_VM');
     } catch (Exception $e) {
         // Уведомление не критично — игнорируем ошибку
     }
@@ -1434,7 +1441,18 @@ if ($soAction === 'admin') {
         }
 
         // Уведомляем ресторан в Telegram (с итоговым составом)
-        $oi = $pdo->prepare("SELECT o.restaurant_number, o.delivery_date, s.short_name as supplier_name FROM so_orders o JOIN suppliers s ON s.id = o.supplier_id WHERE o.id = ?");
+        $oi = $pdo->prepare("
+            SELECT o.restaurant_number, o.delivery_date, o.legal_entity,
+                   r.city, r.address, r.legal_entity_group,
+                   s.short_name as supplier_name
+            FROM so_orders o
+            JOIN suppliers s ON s.id = o.supplier_id
+            LEFT JOIN restaurants r
+              ON r.number = o.restaurant_number
+             AND r.active = 1
+             AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
+            WHERE o.id = ?
+        ");
         $oi->execute([$orderId]);
         $orderInfo = $oi->fetch();
         if ($orderInfo) {
@@ -1456,6 +1474,13 @@ if ($soAction === 'admin') {
                 $finalItems = $updItems->fetchAll();
                 $lines = ["✏️ <b>Заявка изменена закупщиком</b>"];
                 $lines[] = '';
+                $restaurantLabel = roFormatRestaurantTelegramLabel(
+                    $orderInfo['restaurant_number'],
+                    $orderInfo['city'] ?? '',
+                    $orderInfo['address'] ?? '',
+                    $orderInfo['legal_entity_group'] ?? getEntityGroup($orderInfo['legal_entity'] ?? '')
+                );
+                $lines[] = "🏪 <b>Ресторан:</b> " . $esc($restaurantLabel);
                 $lines[] = "🏪 <b>Поставщик:</b> " . $esc($orderInfo['supplier_name']);
                 $lines[] = "📅 <b>Доставка:</b> {$dateStr}";
                 if (empty($finalItems)) {
@@ -1473,7 +1498,7 @@ if ($soAction === 'admin') {
                 }
                 $msg = implode("\n", $lines);
                 if (mb_strlen($msg) > 3900) $msg = mb_substr($msg, 0, 3900) . "\n\n…(обрезано)";
-                roNotifyRestaurant($pdo, $orderInfo['restaurant_number'], $msg);
+                roNotifyRestaurant($pdo, $orderInfo['restaurant_number'], $msg, $orderInfo['legal_entity_group'] ?? getEntityGroup($orderInfo['legal_entity'] ?? ''));
             } catch (Exception $e) { /* не критично */ }
         }
 
@@ -1516,10 +1541,16 @@ if ($soAction === 'admin') {
             $cur = $pdo->prepare("
                 SELECT oi.order_id, oi.product_name, oi.sku, oi.quantity, oi.admin_qty,
                        o.legal_entity,
-                       o.restaurant_number, o.delivery_date, s.short_name as supplier_name
+                       o.restaurant_number, o.delivery_date,
+                       r.city, r.address, r.legal_entity_group,
+                       s.short_name as supplier_name
                 FROM so_order_items oi
                 JOIN so_orders o ON o.id = oi.order_id
                 JOIN suppliers s ON s.id = o.supplier_id
+                LEFT JOIN restaurants r
+                  ON r.number = o.restaurant_number
+                 AND r.active = 1
+                 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
                 WHERE oi.id = ?
             ");
             $cur->execute([$itemId]);
@@ -1530,6 +1561,10 @@ if ($soAction === 'admin') {
                 $orderId = (int)$info['order_id'];
                 $notify = [
                     'restaurant_number' => $info['restaurant_number'],
+                    'legal_entity' => $info['legal_entity'],
+                    'legal_entity_group' => $info['legal_entity_group'] ?? getEntityGroup($info['legal_entity'] ?? ''),
+                    'city' => $info['city'] ?? '',
+                    'address' => $info['address'] ?? '',
                     'supplier_name' => $info['supplier_name'],
                     'delivery_date' => $info['delivery_date'],
                     'sku' => $info['sku'],
@@ -1543,7 +1578,7 @@ if ($soAction === 'admin') {
         } elseif ($restNum && $deliveryDate && $sku && $suppId) {
             soRequireAdminSupplierAccess($pdo, $sessionUser, $suppId);
             // Ищем заказ ресторана
-            $orderStmt = $pdo->prepare("SELECT id FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
+            $orderStmt = $pdo->prepare("SELECT id, legal_entity FROM so_orders WHERE supplier_id = ? AND restaurant_number = ? AND delivery_date = ?");
             $orderStmt->execute([$suppId, $restNum, $deliveryDate]);
             $order = $orderStmt->fetch();
 
@@ -1560,6 +1595,8 @@ if ($soAction === 'admin') {
                         ->execute([$restNum, $suppId, $deliveryDate, $le]);
                     $orderId = $pdo->lastInsertId();
                 } else {
+                    $le = $order['legal_entity'] ?? roGetLegalEntity($pdo, $restNum);
+                    soRequireAdminEntityGroupAccess($sessionUser, $le);
                     $orderId = $order['id'];
                 }
 
@@ -1590,6 +1627,10 @@ if ($soAction === 'admin') {
 
             $notify = [
                 'restaurant_number' => $restNum,
+                'legal_entity' => $le,
+                'legal_entity_group' => getEntityGroup($le),
+                'city' => '',
+                'address' => '',
                 'supplier_name' => $supplierName,
                 'delivery_date' => $deliveryDate,
                 'sku' => $sku,
@@ -1629,6 +1670,18 @@ if ($soAction === 'admin') {
                 $lines = [];
                 $lines[] = '✏️ <b>Закупщик изменил заявку</b>';
                 $lines[] = '';
+                if (($notify['city'] ?? '') === '' && ($notify['address'] ?? '') === '') {
+                    $restRow = roGetRestaurantRow($pdo, $notify['restaurant_number'], $notify['legal_entity_group'] ?? null);
+                    $notify['city'] = $restRow['city'] ?? '';
+                    $notify['address'] = $restRow['address'] ?? '';
+                }
+                $restaurantLabel = roFormatRestaurantTelegramLabel(
+                    $notify['restaurant_number'],
+                    $notify['city'] ?? '',
+                    $notify['address'] ?? '',
+                    $notify['legal_entity_group'] ?? getEntityGroup($notify['legal_entity'] ?? '')
+                );
+                $lines[] = '🏪 <b>Ресторан:</b> ' . $esc($restaurantLabel);
                 $lines[] = '🏪 <b>Поставщик:</b> ' . $esc($notify['supplier_name']);
                 $lines[] = '📅 <b>Доставка:</b> ' . $deliveryFmt;
                 $lines[] = '';
@@ -1638,7 +1691,7 @@ if ($soAction === 'admin') {
                 $lines[] = '<i>Изменил: ' . $esc($by) . '</i>';
 
                 $msg = implode("\n", $lines);
-                roNotifyRestaurant($pdo, $notify['restaurant_number'], $msg);
+                roNotifyRestaurant($pdo, $notify['restaurant_number'], $msg, $notify['legal_entity_group'] ?? getEntityGroup($notify['legal_entity'] ?? ''));
             } catch (Exception $e) {
                 // Уведомление не критично
             }
@@ -1687,7 +1740,8 @@ if ($soAction === 'admin') {
             $dow = (int)date('w', strtotime($orderInfo['delivery_date']));
             $dateStr = ($dowNames[$dow] ?? '') . ', ' . date('d.m', strtotime($orderInfo['delivery_date']));
             roNotifyRestaurant($pdo, $orderInfo['restaurant_number'],
-                "❌ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} удалена ({$by}).");
+                "❌ Рест. {$orderInfo['restaurant_number']} — заявка {$orderInfo['supplier_name']} на {$dateStr} удалена ({$by}).",
+                getEntityGroup($orderInfo['legal_entity'] ?? ''));
         }
 
         // Аудит

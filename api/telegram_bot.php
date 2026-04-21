@@ -213,6 +213,19 @@ function botOpenRestaurantCabinet($chatId, $msgId, $restNum) {
     );
 }
 
+function botEnsureRestaurantSubscription($chatId, $restNum, $from = []) {
+    global $pdo;
+    $firstName = mb_substr($from['first_name'] ?? '', 0, 255) ?: null;
+    $tgUsername = isset($from['username']) ? mb_substr($from['username'], 0, 255) : null;
+    $pdo->prepare("
+        INSERT INTO veg_telegram_subs (chat_id, restaurant_number, first_name, username)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            first_name = COALESCE(VALUES(first_name), first_name),
+            username = COALESCE(VALUES(username), username)
+    ")->execute([(string)$chatId, (string)$restNum, $firstName, $tgUsername]);
+}
+
 // ═══ Команды с данными ═══
 
 // Универсальная отправка: editMessage если есть $editMsgId, иначе sendMessage
@@ -2449,7 +2462,9 @@ if (preg_match('/^\d{6}$/', $text)) {
             $restGroup = ($tok['legal_entity_group'] ?? '') === 'PS' ? 'PS' : 'BK_VM';
             $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1")
                 ->execute([$chatId, $restNum, $restGroup]);
-            sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан №{$restNum} успешно привязан к вашему Telegram.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
+            botEnsureRestaurantSubscription($chatId, $restNum, $msg['from'] ?? []);
+            $prettyRest = botFormatSubscribedRestaurant($restNum, $restGroup);
+            sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан {$prettyRest} успешно привязан к вашему Telegram и добавлен в ваши рестораны.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
         }
     } else {
         sendMessage($chatId, "❌ Код недействителен или истёк.\n\nПолучите новый код в личном кабинете (Профиль → Telegram → Получить код).");

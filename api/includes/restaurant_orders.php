@@ -218,6 +218,24 @@ function roFormatCttRestaurantLabel($restaurantNumber, $city, $address) {
     return $number . ' — ' . $address;
 }
 
+function roFormatRestaurantTelegramLabel($restaurantNumber, $city = '', $address = '', $group = null) {
+    $number = (int)$restaurantNumber;
+    $group = roNormalizeLegalEntityGroup($group, $restaurantNumber);
+    $groupTitle = $group === 'PS' ? 'Пицца Стар' : 'БК/ВМ';
+    $city = trim((string)$city);
+    $address = trim((string)$address);
+    $location = '';
+    if ($address !== '') {
+        $location = ' — ' . $address;
+        if ($city !== '' && mb_strtolower($city) !== 'минск' && mb_stripos($address, $city) === false) {
+            $location = ' — г. ' . $city . ', ' . $address;
+        }
+    } elseif ($city !== '') {
+        $location = ' — ' . $city;
+    }
+    return '№' . $number . ' (' . $groupTitle . ')' . $location;
+}
+
 function roFormatCttWeight($weightBruttoGrams) {
     $tons = ((float)$weightBruttoGrams) / 1000000;
     $formatted = rtrim(rtrim(number_format($tons, 6, '.', ''), '0'), '.');
@@ -397,21 +415,40 @@ function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
     $group = func_num_args() >= 4 ? roNormalizeLegalEntityGroup(func_get_arg(3), $restaurantNumber) : null;
-    // Ищем telegram_chat_id из ro_users или veg_telegram_subs
+
+    $chatIds = [];
+    $disabledChatIds = [];
+
+    $disabled = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND notify_confirmations = 0");
+    $disabled->execute([(string)$restaurantNumber]);
+    foreach ($disabled->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+        $chatId = trim((string)$chatId);
+        if ($chatId !== '') $disabledChatIds[$chatId] = true;
+    }
+
+    // Старая привязка кабинета ресторана. Оставляем как запасной источник,
+    // чтобы не потерять тех, кто был привязан до перехода на подписки.
     if ($group) {
-        $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND telegram_chat_id > 0");
+        $s = $pdo->prepare("SELECT DISTINCT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND telegram_chat_id > 0");
         $s->execute([(int)$restaurantNumber, $group]);
     } else {
-        $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND telegram_chat_id > 0");
+        $s = $pdo->prepare("SELECT DISTINCT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND telegram_chat_id > 0");
         $s->execute([(int)$restaurantNumber]);
     }
-    $chatId = $s->fetchColumn();
-    if (!$chatId) {
-        $s2 = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? LIMIT 1");
-        $s2->execute([$restaurantNumber]);
-        $chatId = $s2->fetchColumn();
+    foreach ($s->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+        $chatId = trim((string)$chatId);
+        if ($chatId !== '' && !isset($disabledChatIds[$chatId])) $chatIds[$chatId] = true;
     }
-    if ($chatId) {
+
+    // Основной источник: все подписчики ресторана с включёнными подтверждениями.
+    $s2 = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND notify_confirmations = 1");
+    $s2->execute([(string)$restaurantNumber]);
+    foreach ($s2->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
+        $chatId = trim((string)$chatId);
+        if ($chatId !== '') $chatIds[$chatId] = true;
+    }
+
+    foreach (array_keys($chatIds) as $chatId) {
         sendTelegramMessage($botToken, $chatId, $message);
     }
 }
@@ -1801,9 +1838,16 @@ if ($roAction === 'submit-order' && $method === 'POST') {
         $catIcons = ['Сухой' => '📦', 'Холод' => '🧊', 'Мороз' => '❄️'];
 
         $title = $isNew ? '✅ <b>Заявка отправлена</b>' : '✏️ <b>Заявка обновлена</b>';
+        $restaurantLabel = roFormatRestaurantTelegramLabel(
+            $rest['restaurant_number'],
+            $rest['city'] ?? '',
+            $rest['address'] ?? '',
+            $rest['legal_entity_group'] ?? null
+        );
         $lines = [];
         $lines[] = $title;
         $lines[] = '';
+        $lines[] = "🏪 <b>Ресторан:</b> " . $esc($restaurantLabel);
         $lines[] = "📅 <b>Доставка:</b> {$deliveryDateFmt}";
         $lines[] = "📋 <b>Позиций:</b> {$totalItems}   📦 <b>Всего:</b> " . $fmtQty($totalQty) . " кор.";
 
@@ -2941,14 +2985,16 @@ if (strpos($roAction, 'admin') === 0) {
                 if ($depositPrice <= 0) {
                     $missingDepositPrice++;
                 }
+                $quantity = (float)($item['quantity'] ?? 0);
+                $positionWeightBrutto = (float)($item['weight_brutto'] ?? 0) * $quantity;
                 $cttItems[] = [
                     'o' => $cttPrefix . '-' . $restaurantNumber,
                     'r' => roFormatCttRestaurantLabel($restaurantNumber, $order['city'] ?? '', $order['address'] ?? ''),
                     's' => trim((string)($item['category'] ?? '')),
                     'g' => $gtin,
                     'n' => trim((string)($item['product_name'] ?? '')),
-                    'q' => (string)(0 + (float)($item['quantity'] ?? 0)),
-                    'w' => roFormatCttWeight($item['weight_brutto'] ?? 0),
+                    'q' => (string)(0 + $quantity),
+                    'w' => roFormatCttWeight($positionWeightBrutto),
                     'p' => $depositPrice,
                 ];
             }

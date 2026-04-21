@@ -482,59 +482,8 @@ if (!empty($recentUploads)) {
     }
 }
 
-// ═══ 6. Истекающие сроки годности (expiring_items) ═══
-// stock_malling использует поле «customer» (Бургер БК, Воглия Матта, Пицца Стар)
-$expiringItems = $pdo->query("
-    SELECT customer, COUNT(*) as cnt,
-           GROUP_CONCAT(DISTINCT product_name ORDER BY expiry_date SEPARATOR ', ') as products
-    FROM stock_malling
-    WHERE expiry_date BETWEEN CURDATE() AND CURDATE() + INTERVAL 3 DAY
-      AND expiry_status = 'Годен'
-    GROUP BY customer
-")->fetchAll();
-
-if (!empty($expiringItems)) {
-    $users = $pdo->query("
-        SELECT u.name, u.telegram_chat_id, u.legal_entities
-        FROM users u
-        JOIN telegram_settings ts ON ts.user_name = u.name
-        WHERE u.telegram_chat_id IS NOT NULL AND ts.expiring_items = 1
-    ")->fetchAll();
-
-    foreach ($expiringItems as $ei) {
-        $customer = $ei['customer'] ?? '';
-        // Ограничиваем список товаров (может быть очень длинным)
-        $prodList = mb_strlen($ei['products']) > 300 ? mb_substr($ei['products'], 0, 300) . '…' : $ei['products'];
-        $text = "⚠️ <b>Истекающие сроки годности</b>\n\n";
-        $text .= "Заказчик: <b>{$customer}</b>\n";
-        $text .= "Позиций: <b>{$ei['cnt']}</b>\n";
-        $text .= "Товары: {$prodList}";
-        foreach ($users as $user) {
-            $le = $user['legal_entities'];
-            $entities = ($le && is_string($le)) ? (json_decode($le, true) ?? []) : [];
-            if (!empty($entities)) {
-                // Маппинг customer → legal_entity: customer «Бургер БК» → содержит «Бургер» в legal_entity
-                $match = false;
-                foreach ($entities as $ent) {
-                    if ($customer && (
-                        (mb_strpos($customer, 'Бургер') !== false && mb_strpos($ent, 'Бургер') !== false) ||
-                        (mb_strpos($customer, 'Воглия') !== false && mb_strpos($ent, 'Воглия') !== false) ||
-                        (mb_strpos($customer, 'Пицца') !== false && mb_strpos($ent, 'Пицца') !== false)
-                    )) {
-                        $match = true;
-                        break;
-                    }
-                }
-                if (!$match) continue;
-            }
-            $notifKey = $customer ?: 'all';
-            if (wasNotified($pdo, 'expiring_items', $notifKey, $user['telegram_chat_id'], 3600)) continue;
-            tgSend($user['telegram_chat_id'], $text);
-            logNotification($pdo, 'expiring_items', $notifKey, $user['telegram_chat_id']);
-            $sent++;
-        }
-    }
-}
+// Истекающие сроки годности не рассылаем по cron.
+// Уведомление отправляется только после новой загрузки сроков в replace_stock_malling.
 
 // ═══ 7. Новые данные реализации ресторанов (restaurant_sales) ═══
 // Реализация хранится по группе юрлиц (BK_VM/PS) — уведомляем тех, у кого

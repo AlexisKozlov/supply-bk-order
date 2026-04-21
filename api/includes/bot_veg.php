@@ -826,7 +826,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         return;
     }
 
-    // Уведомление другим подписчикам этого ресторана (кто не нажимал сам)
+    // Уведомление всем подписчикам этого ресторана с включёнными подтверждениями.
     try {
         $deliveryFmt = (new DateTime($deliveryDate))->format('d.m.Y');
         $title = $isUpdate ? '🚫 <b>Поставка отменена</b>' : '🚫 <b>Поставка не нужна</b>';
@@ -835,13 +835,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
         $msg .= "📅 <b>Доставка:</b> " . $deliveryFmt . "\n\n";
         $msg .= "<i>Ресторан отметил, что поставка на эту дату не требуется.</i>";
 
-        $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND chat_id <> ?");
-        $subs->execute([$restNum, $chatId]);
-        foreach ($subs->fetchAll(PDO::FETCH_COLUMN) as $cid) {
-            if ($cid && function_exists('sendMessage')) {
-                @sendMessage($cid, $msg);
-            }
-        }
+        vegNotifySubscribers($pdo, $GLOBALS['BOT_TOKEN'] ?? '', $restNum, $msg);
     } catch (Exception $e) {
         // не критично
     }
@@ -983,7 +977,7 @@ function soOrderProcessInput($chatId, $text) {
         [['text' => '📦 К заявкам', 'callback_data' => "soord_sup_{$supplierId}"]],
         [['text' => '◂ В меню', 'callback_data' => 'veg_my_subs']],
     ]];
-    sendMessage($chatId, $confirmText, $btns);
+    vegNotifySubscribers($pdo, $GLOBALS['BOT_TOKEN'] ?? '', $restNum, $confirmText, $btns);
 }
 
 function soFormatOrders($orders) {
@@ -1659,13 +1653,19 @@ function restNotifToggle($chatId, $msgId, $field) {
     restNotifSettings($chatId, $msgId);
 }
 // Функция отправки уведомления подписчикам ресторана
-function vegNotifySubscribers($pdo, $botToken, $restaurantNumber, $text) {
+function vegNotifySubscribers($pdo, $botToken, $restaurantNumber, $text, $replyMarkup = null) {
     global $SITE_URL;
-    $s = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number=?");
+    $s = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
     $s->execute([$restaurantNumber]);
     $chatIds = $s->fetchAll(PDO::FETCH_COLUMN);
     foreach ($chatIds as $cid) {
-        $data = json_encode(['chat_id' => $cid, 'text' => $text, 'parse_mode' => 'HTML']);
+        if (function_exists('sendMessage')) {
+            @sendMessage($cid, $text, $replyMarkup);
+            continue;
+        }
+        $data = ['chat_id' => $cid, 'text' => $text, 'parse_mode' => 'HTML'];
+        if ($replyMarkup) $data['reply_markup'] = $replyMarkup;
+        $data = json_encode($data);
         $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $data, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
         curl_exec($ch); curl_close($ch);

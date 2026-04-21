@@ -3713,7 +3713,7 @@ if ($endpoint === 'rpc') {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
                 if ($botToken && $oldData['restaurant_number']) {
                     $rn = $oldData['restaurant_number'];
-                    $subs = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number=?");
+                    $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
                     $subs->execute([$rn]);
                     $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
                     if ($chatIds) {
@@ -3747,7 +3747,7 @@ if ($endpoint === 'rpc') {
             // Уведомление в Telegram о добавлении позиции
             $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
             if ($botToken && $restNum) {
-                $subs = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number=?");
+                $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
                 $subs->execute([$restNum]);
                 $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
                 if ($chatIds) {
