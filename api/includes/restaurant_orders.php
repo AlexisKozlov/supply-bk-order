@@ -352,6 +352,7 @@ function roRestaurantHasDeliveryDate($pdo, $restaurantNumber, $legalEntityGroup,
           AND r.active = 1
           AND r.legal_entity_group = ?
           AND ds.day_of_week = ?
+          AND TRIM(COALESCE(ds.delivery_time, '')) <> ''
         LIMIT 1
     ");
     $s->execute([(int)$restaurantNumber, $group, $dow]);
@@ -1163,13 +1164,15 @@ if ($roAction === 'my-info' && $method === 'GET') {
         roRespond(['session' => null, 'delivery_days' => []]);
     }
 
-    // Расписание доставки этого ресторана
+    // Расписание основной доставки этого ресторана. Дни, где заполнено только
+    // dough_time для теста Пицца Стар, не должны открывать основной заказ.
     $ds = $pdo->prepare("
         SELECT ds.day_of_week, ds.delivery_time
         FROM delivery_schedule ds
         JOIN restaurants r ON r.id = ds.restaurant_id
         WHERE r.number = ? AND r.active = 1
           AND r.legal_entity_group = ?
+          AND TRIM(COALESCE(ds.delivery_time, '')) <> ''
         ORDER BY ds.day_of_week
     ");
     $ds->execute([$rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM']);
@@ -1925,7 +1928,8 @@ if (strpos($roAction, 'admin') === 0) {
 
         $deadlineStatus = roGetDeadlineStatus($pdo, $session['id'], $date);
 
-        // Все активные рестораны группы юрлиц с расписанием на этот день.
+        // Все активные рестораны группы юрлиц с основной поставкой на этот день.
+        // Дни только с dough_time для теста Пицца Стар не считаем ожидаемой заявкой.
         // JOIN с ro_orders также привязан к legal_entity_group, чтобы заказ
         // БК-ресторана с номером 1 не показался в списке ПС-ресторанов.
         $dow = (int)(new DateTime($date))->format('N');
@@ -1937,13 +1941,17 @@ if (strpos($roAction, 'admin') === 0) {
                    (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
                    (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty
             FROM restaurants r
-            JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ?
+            LEFT JOIN delivery_schedule ds
+                ON ds.restaurant_id = r.id
+                AND ds.day_of_week = ?
+                AND TRIM(COALESCE(ds.delivery_time, '')) <> ''
             LEFT JOIN ro_orders o
                 ON o.restaurant_number = r.number
                 AND o.session_id = ?
                 AND o.delivery_date = ?
                 AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = r.legal_entity_group
             WHERE r.active = 1 AND r.legal_entity_group = ?
+              AND (ds.restaurant_id IS NOT NULL OR o.id IS NOT NULL)
             ORDER BY r.region, r.number
         ");
         $rests->execute([$dow, $session['id'], $date, $entityGroup]);
