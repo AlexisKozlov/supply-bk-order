@@ -41,7 +41,6 @@ const routes = [
       { path: 'marketing', name: 'marketing', component: () => import('@/views/MarketingView.vue'), meta: { title: 'Маркетинг', module: 'marketing' } },
       { path: 'marketing/new', name: 'marketing-new', component: () => import('@/views/MarketingDetailView.vue'), meta: { title: 'Новая активность', module: 'marketing' } },
       { path: 'marketing/:id', name: 'marketing-detail', component: () => import('@/views/MarketingDetailView.vue'), meta: { title: 'Маркетинговая активность', module: 'marketing' } },
-      { path: 'veg-admin', redirect: { name: 'supplier-orders' } },
       { path: 'distribution', name: 'distribution', component: () => import('@/views/DistributionView.vue'), meta: { title: 'Распределение', module: 'distribution' } },
       { path: 'pallet-calc', name: 'pallet-calc', component: () => import('@/views/PalletCalcView.vue'), meta: { title: 'Калькулятор паллет', module: 'pallet-calc' } },
       { path: 'pallet-storage', name: 'pallet-storage', component: () => import('@/views/PalletStorageView.vue'), meta: { title: 'Паллетовка склада', module: 'pallet-storage' } },
@@ -71,12 +70,6 @@ const routes = [
     name: 'stock-form',
     component: () => import('@/views/StockFormView.vue'),
     meta: { title: 'Остатки ресторана' },
-  },
-  {
-    path: '/veg-order/:token',
-    name: 'veg-order-form',
-    component: () => import('@/views/VegOrderFormView.vue'),
-    meta: { title: 'Планета Ресторанов' },
   },
   {
     path: '/restaurant/login',
@@ -196,10 +189,6 @@ router.beforeEach((to) => {
   }
   // Модульная проверка прав
   if (to.meta.module && !userStore.hasAccess(to.meta.module, 'view')) {
-    // supplier-orders доступен также тем, у кого есть доступ к veg
-    if (to.meta.module === 'supplier-orders' && userStore.hasAccess('veg', 'view')) {
-      return;
-    }
     // Редирект на первый доступный модуль
     const first = NAV_MODULES.find(m => userStore.hasAccess(m, 'view'));
     return first ? { name: first } : { name: 'home' };

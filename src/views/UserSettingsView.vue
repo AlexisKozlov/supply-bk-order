@@ -104,7 +104,6 @@ const allModulesRaw = [
   { module: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
   { module: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
   { module: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
-  { module: 'veg', icon: 'veg', label: 'Планета Ресторанов' },
   { module: 'distribution', icon: 'package', label: 'Распределение' },
   { module: 'tenders', icon: 'tender', label: 'Тендеры' },
   { module: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },

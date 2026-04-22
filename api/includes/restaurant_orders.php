@@ -2804,13 +2804,16 @@ if (strpos($roAction, 'admin') === 0) {
     if ($adminAction === 'report' && $method === 'GET') {
         $dateFrom = $_GET['date_from'] ?? date('Y-m-d', strtotime('-30 days'));
         $dateTo = $_GET['date_to'] ?? date('Y-m-d', strtotime('+7 days'));
+        $legalEntity = $_GET['legal_entity'] ?? 'ООО "Бургер БК"';
+        $entityGroup = getEntityGroup($legalEntity);
+        roEnsureGroupAccess($sessionUser, $entityGroup);
         $category = $_GET['category'] ?? '';
         $status = $_GET['status'] ?? '';
         $restaurants = $_GET['restaurants'] ?? ''; // comma-separated
 
-        $where = ["o.delivery_date BETWEEN ? AND ?", "o.status != 'draft'"];
-        $params = [$dateFrom, $dateTo];
-        roApplyAllowedGroupsSql($sessionUser, $where, $params, "(CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)");
+        $orderGroupExpr = "(CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)";
+        $where = ["o.delivery_date BETWEEN ? AND ?", "o.status != 'draft'", "{$orderGroupExpr} = ?"];
+        $params = [$dateFrom, $dateTo, $entityGroup];
 
         if ($status) {
             $where[] = "o.status = ?";
@@ -2824,6 +2827,7 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         $sql = "SELECT o.id, o.restaurant_number, o.delivery_date, o.status, o.session_id,
+                       {$orderGroupExpr} AS legal_entity_group,
                        r.city, r.address
                 FROM ro_orders o
                 LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
@@ -2853,9 +2857,8 @@ if (strpos($roAction, 'admin') === 0) {
         }
 
         // Список ресторанов для фильтра
-        $restWhere = ["o.status != 'draft'"];
-        $restParams = [];
-        roApplyAllowedGroupsSql($sessionUser, $restWhere, $restParams, "(CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)");
+        $restWhere = ["o.status != 'draft'", "{$orderGroupExpr} = ?"];
+        $restParams = [$entityGroup];
         $restSql = "SELECT DISTINCT o.restaurant_number FROM ro_orders o WHERE " . implode(' AND ', $restWhere) . " ORDER BY o.restaurant_number";
         $restStmt = $pdo->prepare($restSql);
         $restStmt->execute($restParams);
@@ -2863,9 +2866,8 @@ if (strpos($roAction, 'admin') === 0) {
 
         // Список сессий
         if (roSessionsSupportGroups($pdo)) {
-            $sessionsWhere = [];
-            $sessionsParams = [];
-            roApplyAllowedGroupsSql($sessionUser, $sessionsWhere, $sessionsParams, 'legal_entity_group');
+            $sessionsWhere = ["legal_entity_group = ?"];
+            $sessionsParams = [$entityGroup];
             $sessionsSql = "SELECT id, week_start, week_end, status, legal_entity_group FROM ro_sessions";
             if (!empty($sessionsWhere)) $sessionsSql .= " WHERE " . implode(' AND ', $sessionsWhere);
             $sessionsSql .= " ORDER BY id DESC LIMIT 20";

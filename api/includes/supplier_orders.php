@@ -1163,11 +1163,16 @@ if ($soAction === 'admin') {
             SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
                    ss.order_day,
                    o.id as order_id, o.status as order_status, o.submitted_at,
+                   CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
+                   asl.source_order_id AS auto_source_order_id,
+                   src.delivery_date AS auto_source_delivery_date,
                    (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
                    (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
+            LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
+            LEFT JOIN so_orders src ON src.id = asl.source_order_id
             WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
             ORDER BY r.region, r.number
         ");
@@ -1358,10 +1363,15 @@ if ($soAction === 'admin') {
             SELECT o.id, o.delivery_date, o.order_date, o.restaurant_number, o.status, o.submitted_at, o.supplier_id,
                    s.short_name as supplier_name,
                    r.region, r.city, r.address, r.legal_entity_group,
+                   CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
+                   asl.source_order_id AS auto_source_order_id,
+                   src.delivery_date AS auto_source_delivery_date,
                    (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
                    (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_orders o
             JOIN suppliers s ON s.id = o.supplier_id
+            LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
+            LEFT JOIN so_orders src ON src.id = asl.source_order_id
             LEFT JOIN restaurants r
               ON r.number = o.restaurant_number
              AND r.active = 1
@@ -1376,9 +1386,14 @@ if ($soAction === 'admin') {
     // --- Детали заявки ---
     if ($adminAction === 'order' && $method === 'GET' && $adminParam) {
         $s = $pdo->prepare("
-            SELECT o.*, s.short_name as supplier_name, r.region, r.city, r.address, r.legal_entity_group
+            SELECT o.*, s.short_name as supplier_name, r.region, r.city, r.address, r.legal_entity_group,
+                   CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
+                   asl.source_order_id AS auto_source_order_id,
+                   src.delivery_date AS auto_source_delivery_date
             FROM so_orders o
             JOIN suppliers s ON s.id = o.supplier_id
+            LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
+            LEFT JOIN so_orders src ON src.id = asl.source_order_id
             LEFT JOIN restaurants r
               ON r.number = o.restaurant_number
              AND r.active = 1
@@ -2038,11 +2053,19 @@ if ($soAction === 'admin') {
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         // Данные поставщика
-        $supRow = $pdo->prepare("SELECT short_name FROM suppliers WHERE id = ?");
+        $supRow = $pdo->prepare("SELECT short_name, legal_entity, legal_entity_group FROM suppliers WHERE id = ?");
         $supRow->execute([$supplierId]);
         $sup = $supRow->fetch();
         if (!$sup) soRespond(['error' => 'Поставщик не найден'], 404);
         $supName = $sup['short_name'];
+        $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
+        $supplierEntities = getEntitiesInGroup($supplierGroup);
+        $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+
+        $deadlineState = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+        if (!empty($deadlineState['forced_closed'])) {
+            soRespond(['error' => 'Дата доставки закрыта'], 400);
+        }
 
         // Подписчики
         $subsStmt = $pdo->prepare("
@@ -2069,19 +2092,25 @@ if ($soAction === 'admin') {
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
             WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
+              AND r.legal_entity_group = ?
             ORDER BY r.region, CAST(r.number AS UNSIGNED)
         ");
-        $expStmt->execute([$supplierId, $deliveryDow]);
+        $expStmt->execute([$supplierId, $deliveryDow, $supplierGroup]);
         $expectedRests = $expStmt->fetchAll();
 
         if (!$expectedRests) soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
+
+        $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'number'))));
+        $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
 
         // Кто подал заявку (по статусу, не зависимо от количеств)
         $subStmt = $pdo->prepare("
             SELECT restaurant_number FROM so_orders
             WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+              AND legal_entity IN ({$entityPh})
+              AND restaurant_number IN ({$expectedPh})
         ");
-        $subStmt->execute([$supplierId, $deliveryDate]);
+        $subStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
         $submittedNums = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
 
         // Позиции с ненулевыми количествами — для таблицы/пивота
@@ -2091,9 +2120,11 @@ if ($soAction === 'admin') {
             FROM so_orders o
             JOIN so_order_items oi ON oi.order_id = o.id
             WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+              AND o.legal_entity IN ({$entityPh})
+              AND o.restaurant_number IN ({$expectedPh})
               AND COALESCE(oi.admin_qty, oi.quantity) > 0
         ");
-        $ordStmt->execute([$supplierId, $deliveryDate]);
+        $ordStmt->execute(array_merge([$supplierId, $deliveryDate], $supplierEntities, $expectedNums));
         $orderRows = $ordStmt->fetchAll();
 
         // Пивот
@@ -2114,7 +2145,6 @@ if ($soAction === 'admin') {
         $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
         $dayShort = $dayNames[$deliveryDow] ?? '';
 
-        $expectedNums = array_column($expectedRests, 'number');
         // Считаем подавших по статусу заявки, а не по наличию позиций
         $submittedCount = count(array_intersect($expectedNums, array_keys($submittedNums)));
         $missingCount = count($expectedNums) - $submittedCount;
@@ -2242,10 +2272,15 @@ if ($soAction === 'admin') {
             SELECT o.restaurant_number, o.status, o.submitted_at,
                    r.region, r.address,
                    oi.sku, oi.product_name, oi.quantity, oi.admin_qty,
-                   COALESCE(oi.admin_qty, oi.quantity) as effective_qty
+                   COALESCE(oi.admin_qty, oi.quantity) as effective_qty,
+                   CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
+                   asl.source_order_id AS auto_source_order_id,
+                   src.delivery_date AS auto_source_delivery_date
             FROM so_orders o
             JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
             JOIN so_order_items oi ON oi.order_id = o.id
+            LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
+            LEFT JOIN so_orders src ON src.id = asl.source_order_id
             WHERE o.supplier_id = ? AND o.delivery_date = ?
             ORDER BY r.region, r.number, oi.product_name
         ");

@@ -28,6 +28,7 @@ if (!$BOT_TOKEN) { echo "No TELEGRAM_BOT_TOKEN\n"; exit; }
 $SITE_URL = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
 $GROQ_API_KEY = $_ENV['GROQ_API_KEY'] ?? '';
 $OPENROUTER_API_KEY = $_ENV['OPENROUTER_API_KEY'] ?? '';
+$ENABLE_LEGACY_VEG_TELEGRAM = false;
 
 $dsn = 'mysql:host=' . ($_ENV['DB_HOST'] ?? 'localhost') . ';dbname=' . ($_ENV['DB_NAME'] ?? 'supply_bk') . ';charset=utf8mb4';
 $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '', [
@@ -747,7 +748,8 @@ try {
     error_log('[cron_telegram] stock collection reminder error: ' . $e->getMessage());
 }
 
-// ═══ Напоминания о заявках на овощи ═══
+// ═══ Старые напоминания о заявках на овощи отключены: Планета перенесена в "Заявки поставщикам" ═══
+if ($ENABLE_LEGACY_VEG_TELEGRAM) {
 try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
@@ -966,6 +968,7 @@ try {
 } catch (Exception $e) {
     error_log('[cron_telegram] veg reminders error: ' . $e->getMessage());
 }
+}
 
 // ═══ ПРОТОКОЛЫ: напоминания о дедлайнах решений ═══
 try {
@@ -1116,23 +1119,21 @@ try {
         $schStmt->execute([$supId]);
         $schRows = $schStmt->fetchAll();
 
-        // Группируем по ресторану, chat_id'ы берём из обеих таблиц подписок
-        // (ro_telegram_subs — ЛК ресторана, veg_telegram_subs — бот), DISTINCT для защиты от дублей.
+        // Группируем по ресторану. Источник получателей — видимые подписки бота:
+        // чтобы человек получал напоминания только по тем ресторанам, которые видит в меню бота.
         $byRest = [];
         $chatIdsLookup = $pdo->prepare("
-            SELECT DISTINCT chat_id FROM (
-                SELECT chat_id FROM ro_telegram_subs
-                WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1
-                UNION
-                SELECT chat_id FROM veg_telegram_subs
-                WHERE restaurant_number = ?
-            ) u
+            SELECT DISTINCT chat_id
+            FROM ro_telegram_subs
+            WHERE restaurant_number = ?
+              AND legal_entity_group = ?
+              AND notify_so_reminders = 1
         ");
         foreach ($schRows as $s) {
             $rn = $s['restaurant_number'];
             if (!isset($byRest[$rn])) {
                 $grp = $s['legal_entity_group'] ?: 'BK_VM';
-                $chatIdsLookup->execute([$rn, $grp, $rn]);
+                $chatIdsLookup->execute([$rn, $grp]);
                 $cids = $chatIdsLookup->fetchAll(PDO::FETCH_COLUMN);
                 if (empty($cids)) continue; // ресторан без подписок — пропускаем
                 $byRest[$rn] = ['chat_ids' => $cids, 'group' => $grp, 'schedule' => []];
@@ -1446,17 +1447,15 @@ try {
                 continue;
             }
 
-            // Уведомление подписчикам ресторана (ЛК + бот, DISTINCT для защиты от дублей)
+            // Уведомление подписчикам ресторана из видимых подписок бота.
             $subStmt = $pdo->prepare("
-                SELECT DISTINCT chat_id FROM (
-                    SELECT chat_id FROM ro_telegram_subs
-                    WHERE restaurant_number = ? AND legal_entity_group = ? AND notify_so_reminders = 1
-                    UNION
-                    SELECT chat_id FROM veg_telegram_subs
-                    WHERE restaurant_number = ?
-                ) u
+                SELECT DISTINCT chat_id
+                FROM ro_telegram_subs
+                WHERE restaurant_number = ?
+                  AND legal_entity_group = ?
+                  AND notify_so_reminders = 1
             ");
-            $subStmt->execute([$rn, $c['group'], $rn]);
+            $subStmt->execute([$rn, $c['group']]);
             $subChats = $subStmt->fetchAll(PDO::FETCH_COLUMN);
             $dateObj = new DateTime($dd);
             $msg = "🤖 <b>Заявка выставлена автоматически</b>\n\n";
@@ -1531,9 +1530,15 @@ try {
             }
 
             foreach ($datesSet as $deliveryDate => $deliveryDow) {
-                // Дедлайн через ядро: override → rule → default. is_closed не учитываем,
-                // сводку отправляем и для закрытых дней, если смогли вычислить дедлайн по правилу/default.
-                $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                $deliveryDateObj = new DateTime($deliveryDate, $tz);
+                $actualDeliveryDow = (int)$deliveryDateObj->format('N');
+                if ($actualDeliveryDow !== (int)$deliveryDow) {
+                    error_log('[cron_telegram] so summary skipped: delivery date weekday mismatch for ' . $supId . ' ' . $deliveryDate . ' expected_dow=' . $deliveryDow . ' actual_dow=' . $actualDeliveryDow);
+                    continue;
+                }
+
+                // Дедлайн через ядро: override → rule → default. Закрытые дни пропускаем.
+                $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                 $ovStmt->execute([$supId, $deliveryDate]);
                 $override = $ovStmt->fetch() ?: null;
 
@@ -1542,7 +1547,7 @@ try {
                 $rule = $rlStmt->fetch() ?: null;
 
                 $r = soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $deliveryDate, $tz);
-                if (!$r['deadline_dt']) continue;
+                if (!empty($r['forced_closed']) || !$r['deadline_dt']) continue;
                 $deadline = $r['deadline_dt'];
                 $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
 
@@ -1569,13 +1574,17 @@ try {
 
                 if (!$expectedRests) continue;
 
+                $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'number'))));
+                $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
+
                 // Кто подал заявку (по статусу, независимо от количеств)
                 $subStmt = $pdo->prepare("
                     SELECT restaurant_number FROM so_orders
                     WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
                       AND legal_entity IN ({$entityPh})
+                      AND restaurant_number IN ({$expectedPh})
                 ");
-                $subStmt->execute(array_merge([$supId, $deliveryDate], $supplierEntities));
+                $subStmt->execute(array_merge([$supId, $deliveryDate], $supplierEntities, $expectedNums));
                 $submittedByStatus = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
 
                 // Позиции с ненулевыми количествами — для таблицы/пивота
@@ -1586,9 +1595,10 @@ try {
                     JOIN so_order_items oi ON oi.order_id = o.id
                     WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
                       AND o.legal_entity IN ({$entityPh})
+                      AND o.restaurant_number IN ({$expectedPh})
                       AND COALESCE(oi.admin_qty, oi.quantity) > 0
                 ");
-                $ordStmt->execute(array_merge([$supId, $deliveryDate], $supplierEntities));
+                $ordStmt->execute(array_merge([$supId, $deliveryDate], $supplierEntities, $expectedNums));
                 $orderRows = $ordStmt->fetchAll();
 
                 // Пивот: список товаров и матрица значений
@@ -1605,13 +1615,12 @@ try {
                 }
                 uasort($productsOrdered, function($a, $b) { return strcmp($a['name'], $b['name']); });
 
-                $expectedNums = array_column($expectedRests, 'number');
                 // Считаем подавших по статусу заявки, а не по наличию ненулевых позиций
                 $submittedCount = count(array_intersect($expectedNums, array_keys($submittedByStatus)));
                 $missingCount = count($expectedNums) - $submittedCount;
-                $dateFmt = (new DateTime($deliveryDate))->format('d.m.Y');
                 $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
-                $dayShort = $dayNames[$deliveryDow] ?? '';
+                $dateFmt = $deliveryDateObj->format('d.m.Y');
+                $dayShort = $dayNames[(int)$deliveryDateObj->format('N')] ?? '';
 
                 // Если вообще никто не подал — шлём только текст без файла
                 if (!$productsOrdered) {
@@ -1734,10 +1743,11 @@ try {
     error_log('[cron_telegram] so summary error: ' . $e->getMessage());
 }
 
-// ═══ ПЛАНЕТА РЕСТОРАНОВ (veg_*): сводка закупщикам после дедлайна ═══
+// ═══ Старая сводка ПЛАНЕТЫ РЕСТОРАНОВ (veg_*) отключена: работает новый модуль заявок поставщикам ═══
 // После прохождения дедлайна (не более 20 мин назад) — для ресторанов,
 // которые не подали заявку, автоматически подставляем их предыдущий заказ
 // (source='auto_prev'), затем шлём подписчикам Excel-файл со сводкой.
+if ($ENABLE_LEGACY_VEG_TELEGRAM) {
 try {
     $tz = new DateTimeZone('Europe/Minsk');
     $now = new DateTime('now', $tz);
@@ -2040,6 +2050,7 @@ try {
 } catch (Exception $e) {
     error_log('[cron_telegram] veg summary error: ' . $e->getMessage());
 }
+}
 
 // ═══ ОПРОСЫ: напоминания ресторанам, которые не ответили ═══
 try {
@@ -2076,25 +2087,6 @@ try {
         ");
         $roPendingChats->execute([$surveyId, $surveyGroup]);
         foreach ($roPendingChats->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
-            $chatId = trim((string)$chatId);
-            if ($chatId !== '') $chatIds[$chatId] = true;
-        }
-
-        $vegPendingChats = $pdo->prepare("
-            SELECT DISTINCT CAST(vs.chat_id AS CHAR) AS chat_id
-            FROM veg_telegram_subs vs
-            JOIN restaurants r
-              ON r.number = vs.restaurant_number
-             AND r.active = 1
-             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-            LEFT JOIN survey_responses sr
-              ON sr.survey_id = ?
-             AND sr.restaurant_number = vs.restaurant_number
-            WHERE vs.chat_id IS NOT NULL
-              AND sr.id IS NULL
-        ");
-        $vegPendingChats->execute([$surveyGroup, $surveyId]);
-        foreach ($vegPendingChats->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
             $chatId = trim((string)$chatId);
             if ($chatId !== '') $chatIds[$chatId] = true;
         }

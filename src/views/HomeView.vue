@@ -390,7 +390,6 @@ const toolsFolderItems = [
   { key: 'stock-collection',   name: 'Сбор остатков',          svg: svgIcons.stockCollection },
   { key: 'deficit',            name: 'Дефицит',                svg: svgIcons.deficit },
   { key: 'distribution',       name: 'Распределение',          svg: svgIcons.distribution },
-  { key: 'veg-admin',          name: 'Планета Ресторанов',     svg: svgIcons.veg },
   { key: 'tenders',            name: 'Тендеры',                svg: svgIcons.tenders },
   { key: 'pallet-calc',        name: 'Паллеты',                svg: svgIcons.palletCalc },
   { key: 'payments',           name: 'Оплаты',                 svg: svgIcons.payments },

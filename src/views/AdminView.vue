@@ -1086,7 +1086,7 @@ const AUDIT_ENTITY_LABELS = {
   user: 'Пользователь', price_agreement: 'Протокол цен',
   marketing: 'Маркетинг', tender: 'Тендер',
   correction: 'Корректировка', distribution: 'Распределение', stock_collection: 'Сбор остатков',
-  import: 'Импорт', veg: 'Планета Ресторанов', supplier_order: 'Заявка поставщику', system: 'Система',
+  import: 'Импорт', supplier_order: 'Заявка поставщику', system: 'Система',
 };
 
 function auditBadgeLabel(action) { return AUDIT_ACTION_LABELS[action] || action; }

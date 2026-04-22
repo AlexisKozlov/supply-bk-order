@@ -217,6 +217,7 @@ function botEnsureRestaurantSubscription($chatId, $restNum, $from = []) {
     global $pdo;
     $firstName = mb_substr($from['first_name'] ?? '', 0, 255) ?: null;
     $tgUsername = isset($from['username']) ? mb_substr($from['username'], 0, 255) : null;
+    $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
     $pdo->prepare("
         INSERT INTO veg_telegram_subs (chat_id, restaurant_number, first_name, username)
         VALUES (?, ?, ?, ?)
@@ -224,6 +225,13 @@ function botEnsureRestaurantSubscription($chatId, $restNum, $from = []) {
             first_name = COALESCE(VALUES(first_name), first_name),
             username = COALESCE(VALUES(username), username)
     ")->execute([(string)$chatId, (string)$restNum, $firstName, $tgUsername]);
+    $pdo->prepare("
+        INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            first_name = COALESCE(VALUES(first_name), first_name),
+            username = COALESCE(VALUES(username), username)
+    ")->execute([(int)$restNum, $restGroup, (int)$chatId, $firstName, $tgUsername]);
 }
 
 // ═══ Команды с данными ═══
@@ -2220,10 +2228,11 @@ if (isset($input['callback_query'])) {
         $parts = explode(':', $data, 3);
         $group = $parts[1] ?? 'BK_VM';
         $restNum = $parts[2] ?? '';
-        $exists = $pdo->prepare("SELECT id FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?");
-        $exists->execute([$chatId, $restNum]);
+        $exists = $pdo->prepare("SELECT id FROM ro_telegram_subs WHERE chat_id=? AND restaurant_number=? AND legal_entity_group=?");
+        $exists->execute([$chatId, $restNum, $group]);
         if ($exists->fetch()) {
             $pdo->prepare("DELETE FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?")->execute([$chatId, $restNum]);
+            $pdo->prepare("DELETE FROM ro_telegram_subs WHERE chat_id=? AND restaurant_number=? AND legal_entity_group=?")->execute([$chatId, $restNum, $group]);
             answerCallback($cb['id'], 'Отписано');
         } else {
             $from = $cb['from'] ?? [];
@@ -2232,6 +2241,9 @@ if (isset($input['callback_query'])) {
             $pdo->prepare("INSERT INTO veg_telegram_subs (chat_id, restaurant_number, first_name, username) VALUES (?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE first_name = VALUES(first_name), username = VALUES(username)")
                 ->execute([$chatId, $restNum, $firstName, $tgUsername]);
+            $pdo->prepare("INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username) VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE first_name = VALUES(first_name), username = VALUES(username)")
+                ->execute([$restNum, $group, $chatId, $firstName, $tgUsername]);
             answerCallback($cb['id'], 'Подписано');
         }
         // Обновить список
@@ -2266,8 +2278,10 @@ if (isset($input['callback_query'])) {
 
     if (str_starts_with($data, 'veg_unsub:')) {
         $parts = explode(':', $data, 3);
+        $group = $parts[1] ?? 'BK_VM';
         $restNum = $parts[2] ?? '';
         $pdo->prepare("DELETE FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?")->execute([$chatId, $restNum]);
+        $pdo->prepare("DELETE FROM ro_telegram_subs WHERE chat_id=? AND restaurant_number=? AND legal_entity_group=?")->execute([$chatId, $restNum, $group]);
         answerCallback($cb['id'], "Отписано от ресторана $restNum");
         vegShowSubsManage($chatId, $msgId);
         exit;

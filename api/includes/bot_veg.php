@@ -1650,6 +1650,9 @@ function restNotifToggle($chatId, $msgId, $field) {
     $newVal = $current ? 0 : 1;
 
     $pdo->prepare("UPDATE veg_telegram_subs SET {$col} = ? WHERE chat_id = ?")->execute([$newVal, $chatId]);
+    if ($field === 'veg_reminders') {
+        $pdo->prepare("UPDATE ro_telegram_subs SET notify_so_reminders = ? WHERE chat_id = ?")->execute([$newVal, $chatId]);
+    }
     restNotifSettings($chatId, $msgId);
 }
 // Функция отправки уведомления подписчикам ресторана

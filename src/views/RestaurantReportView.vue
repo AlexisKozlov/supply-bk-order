@@ -20,6 +20,12 @@
           <input type="date" v-model="dateTo" class="rr-input" />
         </div>
         <div class="rr-field">
+          <label>Юрлицо</label>
+          <select v-model="legalEntity" class="rr-input" @change="selectedRestaurants = []">
+            <option v-for="entity in reportEntityOptions" :key="entity.value" :value="entity.value">{{ entity.label }}</option>
+          </select>
+        </div>
+        <div class="rr-field">
           <label>Режим</label>
           <select v-model="category" class="rr-input">
             <option value="">Все</option>
@@ -49,7 +55,7 @@
             </div>
             <label v-for="r in restaurantList" :key="r" class="rr-rest-option">
               <input type="checkbox" :value="r" v-model="selectedRestaurants" />
-              {{ r }}
+              {{ formatRestaurantNumber(r, selectedGroupCode) }}
             </label>
           </div>
         </div>
@@ -300,11 +306,13 @@
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { EXCEL_HEADER_STYLE } from '@/lib/roUtils.js';
-import { formatRestaurantNumber } from '@/lib/legalEntities.js';
+import { DEFAULT_ENTITY, formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js';
 
 const store = useRestaurantOrderStore();
+const orderStore = useOrderStore();
 const toast = useToastStore();
 const router = useRouter();
 
@@ -313,6 +321,11 @@ const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
 const weekAhead = new Date(today); weekAhead.setDate(weekAhead.getDate() + 7);
 const dateFrom = ref(weekAgo.toISOString().slice(0, 10));
 const dateTo = ref(weekAhead.toISOString().slice(0, 10));
+const reportEntityOptions = [
+  { label: 'Бургер БК / Воглия Матта', value: DEFAULT_ENTITY },
+  { label: 'Пицца Стар', value: 'ООО "Пицца Стар"' },
+];
+const legalEntity = ref(defaultReportEntity(orderStore.settings.legalEntity));
 const category = ref('');
 const status = ref('');
 const selectedRestaurants = ref([]);
@@ -341,11 +354,16 @@ const groupOptions = [
 ];
 
 const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const selectedGroupCode = computed(() => getEntityGroupCode(legalEntity.value));
+
+function defaultReportEntity(entity) {
+  return getEntityGroupCode(entity) === 'PS' ? 'ООО "Пицца Стар"' : DEFAULT_ENTITY;
+}
 
 async function loadReport() {
   loading.value = true;
   try {
-    const params = new URLSearchParams({ date_from: dateFrom.value, date_to: dateTo.value });
+    const params = new URLSearchParams({ date_from: dateFrom.value, date_to: dateTo.value, legal_entity: legalEntity.value });
     if (category.value) params.set('category', category.value);
     if (status.value) params.set('status', status.value);
     if (selectedRestaurants.value.length) params.set('restaurants', selectedRestaurants.value.join(','));
@@ -355,12 +373,16 @@ async function loadReport() {
       headers: { 'X-Session-Token': token },
     });
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка загрузки отчёта');
     rawOrders.value = data.orders || [];
     rawItems.value = data.items || [];
     restaurantList.value = data.restaurant_list || [];
     loaded.value = true;
     sortKey.value = '';
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    console.error(e);
+    toast.error('Не удалось загрузить отчёт', e.message || '');
+  }
   finally { loading.value = false; }
 }
 
@@ -370,7 +392,7 @@ const reportData = computed(() => {
   for (const o of rawOrders.value) orderMap[o.id] = o;
   return rawItems.value.map(item => {
     const order = orderMap[item.order_id] || {};
-    return { ...item, restaurant_number: order.restaurant_number, delivery_date: order.delivery_date, city: order.city || '' };
+    return { ...item, restaurant_number: order.restaurant_number, legal_entity_group: order.legal_entity_group || selectedGroupCode.value, delivery_date: order.delivery_date, city: order.city || '' };
   });
 });
 
@@ -425,7 +447,7 @@ const restData = computed(() => {
   const map = {};
   for (const item of filteredData.value) {
     const key = item.restaurant_number;
-    if (!map[key]) map[key] = { number: key, city: item.city, totalQty: 0, itemCount: 0, orders: new Set() };
+    if (!map[key]) map[key] = { number: key, legal_entity_group: item.legal_entity_group || selectedGroupCode.value, city: item.city, totalQty: 0, itemCount: 0, orders: new Set() };
     map[key].totalQty += parseFloat(item.quantity) || 0;
     map[key].itemCount++;
     if (item.order_id) map[key].orders.add(item.order_id);
@@ -577,7 +599,7 @@ async function exportExcel() {
   XLSX.utils.book_append_sheet(wb, ws2, 'По ресторанам');
 
   // Sheet 3: Кросс-таблица
-  const crossHead = ['Артикул', 'Товар', ...crossRestaurants.value.map(r => `Рест ${formatRestaurantNumber(r)}`), 'Итого'];
+  const crossHead = ['Артикул', 'Товар', ...crossRestaurants.value.map(r => `Рест ${formatRestaurantNumber(r, selectedGroupCode.value)}`), 'Итого'];
   const crossRows = [crossHead];
   for (const r of crossData.value) {
     crossRows.push([r.sku, r.name, ...crossRestaurants.value.map(rest => r.byRest[rest] || ''), r.total]);

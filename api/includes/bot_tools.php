@@ -165,16 +165,6 @@ function getToolDefinitions() {
             ]
         ],
         [
-            'name' => 'get_veg_status',
-            'description' => 'Статус овощных заявок: текущая сессия, кто подал заявку, кто не ответил, объёмы.',
-            'input_schema' => [
-                'type' => 'object',
-                'properties' => [
-                    'restaurant' => ['type' => 'string', 'description' => 'Номер ресторана (необязательно — без параметра покажет сводку)']
-                ],
-            ]
-        ],
-        [
             'name' => 'get_tenders',
             'description' => 'Список тендеров: статус, позиции, предложения поставщиков.',
             'input_schema' => [
@@ -194,7 +184,7 @@ function getToolDefinitions() {
         ],
         [
             'name' => 'run_sql',
-            'description' => 'Выполнить произвольный SELECT-запрос к базе данных. Используй только когда другие инструменты не подходят. Доступные таблицы: products, analysis_data, orders, order_items, suppliers, plans, price_agreements, product_prices, price_history, stock_malling, restaurants, delivery_schedule, restaurant_sales, cards, veg_sessions, veg_orders, veg_session_products, tenders, tender_items, tender_offers. ТОЛЬКО SELECT, лимит 50 строк.',
+            'description' => 'Выполнить произвольный SELECT-запрос к базе данных. Используй только когда другие инструменты не подходят. Доступные таблицы: products, analysis_data, orders, order_items, suppliers, plans, price_agreements, product_prices, price_history, stock_malling, restaurants, delivery_schedule, restaurant_sales, cards, tenders, tender_items, tender_offers. ТОЛЬКО SELECT, лимит 50 строк.',
             'input_schema' => [
                 'type' => 'object',
                 'properties' => [
@@ -236,8 +226,6 @@ function executeTool($toolName, $input, $entity) {
             return toolSales($input['query'] ?? null);
         case 'search_card':
             return toolSearchCard($input['query'] ?? '');
-        case 'get_veg_status':
-            return toolVegStatus($input['restaurant'] ?? null);
         case 'get_tenders':
             return toolTenders($input['status'] ?? 'active', $entity);
         case 'get_summary':
@@ -515,53 +503,6 @@ function toolSales($query) {
 function toolSearchCard($query) {
     $result = lookupCards("карточка {$query}", null);
     return $result ?: "Карточка «{$query}» не найдена.";
-}
-
-function toolVegStatus($restaurant) {
-    global $pdo;
-    $session = $pdo->query("SELECT id, name, status, date_from, date_to FROM veg_sessions WHERE status='active' ORDER BY id DESC LIMIT 1")->fetch();
-    if (!$session) return "Нет активной сессии овощных заявок.";
-
-    $result = "Сессия: {$session['name']} ({$session['status']})";
-    if ($session['date_from']) $result .= ", период: " . date('d.m', strtotime($session['date_from'])) . "–" . date('d.m', strtotime($session['date_to']));
-    $result .= "\n\n";
-
-    // Товары сессии
-    $s = $pdo->prepare("SELECT product_name, unit, multiplicity FROM veg_session_products WHERE session_id = ? ORDER BY sort_order");
-    $s->execute([$session['id']]);
-    $products = $s->fetchAll();
-    $result .= "Товары: " . implode(', ', array_column($products, 'product_name')) . "\n\n";
-
-    if ($restaurant) {
-        // Заявки конкретного ресторана
-        $s = $pdo->prepare("SELECT sp.product_name, o.delivery_date, o.quantity, o.admin_qty
-                FROM veg_orders o JOIN veg_session_products sp ON sp.id = o.product_id
-                WHERE o.session_id = ? AND o.restaurant_number = ? ORDER BY o.delivery_date, sp.sort_order");
-        $s->execute([$session['id'], $restaurant]);
-        $orders = $s->fetchAll();
-        if (!$orders) return $result . "Ресторан {$restaurant}: заявок нет.";
-        $result .= "Заявки ресторана {$restaurant}:\n";
-        foreach ($orders as $o) {
-            $qty = ($o['admin_qty'] !== null && $o['admin_qty'] !== '') ? $o['admin_qty'] . ' (админ)' : $o['quantity'];
-            $result .= "  {$o['delivery_date']}: {$o['product_name']} — {$qty}\n";
-        }
-        return $result;
-    }
-
-    // Сводка: кто подал, кто нет
-    $s = $pdo->prepare("SELECT DISTINCT restaurant_number FROM veg_orders WHERE session_id = ?");
-    $s->execute([$session['id']]);
-    $submitted = $s->fetchAll(PDO::FETCH_COLUMN);
-
-    $s = $pdo->prepare("SELECT DISTINCT restaurant_number FROM veg_delivery_days");
-    $s->execute();
-    $allRests = $s->fetchAll(PDO::FETCH_COLUMN);
-
-    $notSubmitted = array_diff($allRests, $submitted);
-    $result .= "Подали заявку: " . count($submitted) . " рест. (" . implode(', ', $submitted) . ")\n";
-    $result .= "Не ответили: " . count($notSubmitted) . " рест. (" . implode(', ', $notSubmitted) . ")\n";
-
-    return $result;
 }
 
 function toolTenders($status, $entity) {
@@ -866,8 +807,6 @@ function selectRelevantTools($question) {
         $selected[] = 'get_sales';
     if (preg_match('/карточк|аналог|замен/u', $q))
         $selected[] = 'search_card';
-    if (preg_match('/овощ|заявк.*овощ|veg|сессия.*овощ/u', $q))
-        $selected[] = 'get_veg_status';
     if (preg_match('/тендер/u', $q))
         $selected[] = 'get_tenders';
     if (preg_match('/сводк|итог|общ|дашборд|сегодня/u', $q))

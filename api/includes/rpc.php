@@ -258,6 +258,10 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    if (str_starts_with($fn, 'veg_')) {
+        respond(['error' => 'Старый модуль Планеты Ресторанов отключён. Используйте раздел «Заявки поставщикам».'], 410);
+    }
+
     // ═══ VEG ORDER: публичные RPC (заказ овощей — форма ресторанов) ═══
 
     // Хелпер: dual-auth — работает через veg_token ИЛИ через ro_token (кабинет ресторанов)
@@ -1073,7 +1077,7 @@ if ($endpoint === 'rpc') {
                     WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''
                     UNION
                     SELECT chat_id
-                    FROM veg_telegram_subs
+                    FROM ro_telegram_subs
                     WHERE chat_id IS NOT NULL AND chat_id != ''
                 ");
                 $chatIds = array_values(array_unique(array_map('strval', $s->fetchAll(PDO::FETCH_COLUMN))));
@@ -5141,21 +5145,6 @@ if ($endpoint === 'rpc') {
             ");
             $roStmt->execute([$group]);
             foreach ($roStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
-                $chatId = trim((string)$chatId);
-                if ($chatId !== '') $chatIds[$chatId] = true;
-            }
-
-            $vegStmt = $pdo->prepare("
-                SELECT DISTINCT vs.chat_id
-                FROM veg_telegram_subs vs
-                JOIN restaurants r
-                  ON r.number = vs.restaurant_number
-                 AND r.active = 1
-                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-                WHERE vs.chat_id IS NOT NULL
-            ");
-            $vegStmt->execute([$group]);
-            foreach ($vegStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
                 $chatId = trim((string)$chatId);
                 if ($chatId !== '') $chatIds[$chatId] = true;
             }

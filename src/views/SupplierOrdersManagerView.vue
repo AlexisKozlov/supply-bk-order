@@ -175,6 +175,9 @@
                     <span v-else class="rom-status" :class="'st-' + (r.order_status || 'none')">
                       {{ statusLabel(r.order_status) }}
                     </span>
+                    <span v-if="isAutoSubmitted(r)" class="so-auto-badge" :title="autoSubmitTitle(r)">
+                      АВТО-ПОДАЧА
+                    </span>
                   </td>
                   <td v-for="p in displayProducts" :key="p.display_key"
                     class="so-td-qty"
@@ -283,6 +286,9 @@
               <td>
                 <span v-if="Number(o.item_count || 0) === 0 && (o.status === 'submitted' || o.status === 'locked')" class="rom-status st-skip">🚫 Не нужна</span>
                 <span v-else class="rom-status" :class="'st-' + o.status">{{ statusLabel(o.status) }}</span>
+                <span v-if="isAutoSubmitted(o)" class="so-auto-badge" :title="autoSubmitTitle(o)">
+                  АВТО-ПОДАЧА
+                </span>
               </td>
               <td>{{ o.item_count || '—' }}</td>
               <td>{{ o.total_qty ? (Number.isInteger(+o.total_qty) ? +o.total_qty : (+o.total_qty).toFixed(2)) : '—' }}</td>
@@ -435,6 +441,9 @@
           <p><strong>Поставщик:</strong> {{ viewedOrder.supplier_name }}</p>
           <p><strong>Доставка:</strong> {{ formatDate(viewedOrder.delivery_date) }}</p>
           <p><strong>Подано:</strong> {{ viewedOrder.submitted_at ? formatTime(viewedOrder.submitted_at) : '—' }}</p>
+          <p v-if="isAutoSubmitted(viewedOrder)" class="so-auto-detail">
+            АВТО-ПОДАЧА: скопировано из заявки #{{ viewedOrder.auto_source_order_id }}<template v-if="viewedOrder.auto_source_delivery_date"> от {{ formatDate(viewedOrder.auto_source_delivery_date) }}</template>
+          </p>
           <table class="rom-table">
             <thead><tr><th>Товар</th><th>Кол-во</th></tr></thead>
             <tbody>
@@ -1184,6 +1193,7 @@ async function exportExcel() {
     const qtyStyle = { font: { sz: 11, name: 'Calibri' }, alignment: { horizontal: 'center', vertical: 'center' }, border };
     const qtyFilledStyle = { ...qtyStyle, font: { bold: true, sz: 11, name: 'Calibri' }, fill: { fgColor: { rgb: 'E8F5E9' } } };
     const adminQtyStyle = { ...qtyStyle, font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'D62700' } }, fill: { fgColor: { rgb: 'FFEBEE' } } };
+    const autoQtyStyle = { ...qtyStyle, font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B91C1C' } } };
     const missQtyStyle = { font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B71C1C' } }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'center', vertical: 'center' }, border };
     const missRestStyle = { font: { bold: true, sz: 11, name: 'Calibri', color: { rgb: 'B71C1C' } }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'center', vertical: 'center' }, border };
     const missAddrStyle = { font: { sz: 10, bold: true, color: { rgb: 'B71C1C' }, name: 'Calibri' }, fill: { fgColor: { rgb: 'FFCDD2' } }, alignment: { horizontal: 'left', vertical: 'center' }, border };
@@ -1311,7 +1321,8 @@ async function exportExcel() {
             const c = 2 + pi; const cell = ws[XLSX.utils.encode_cell({ r: ri, c })]; if (!cell) continue;
             if (!meta.isSubmitted) { cell.s = missQtyStyle; continue; }
             const v = getQty(meta.row, prods[pi]);
-            if (v && v.isAdmin) cell.s = adminQtyStyle;
+            if (v && isAutoSubmitted(meta.row)) cell.s = autoQtyStyle;
+            else if (v && v.isAdmin) cell.s = adminQtyStyle;
             else if (v) cell.s = { ...qtyFilledStyle, ...(meta.isEven ? { fill: { fgColor: { rgb: 'E8F5E9' } } } : {}) };
             else cell.s = { ...qtyStyle, ...(meta.isEven ? { fill: evenRowBg } : {}) };
           }
@@ -1520,6 +1531,17 @@ function statusLabel(s) {
   return 'Не подано';
 }
 
+function isAutoSubmitted(row) {
+  return Number(row?.is_auto_submitted || 0) === 1;
+}
+
+function autoSubmitTitle(row) {
+  if (!isAutoSubmitted(row)) return '';
+  const source = row.auto_source_order_id ? `#${row.auto_source_order_id}` : 'предыдущей заявки';
+  const date = row.auto_source_delivery_date ? ` от ${formatDate(row.auto_source_delivery_date)}` : '';
+  return `Автоматически скопировано из заявки ${source}${date}`;
+}
+
 // Заявка-отказ: подана, но без позиций — ресторан отметил «Поставка не нужна»
 function isSkipOrder(r) {
   if (!r || !r.order_id) return false;
@@ -1700,6 +1722,16 @@ watch(
 .st-none { background: #fef2f2; color: #dc2626; }
 .st-locked { background: #fef3c7; color: #92400e; }
 .st-skip { background: #fff7ed; color: #c2410c; }
+.so-auto-badge {
+  display: inline-flex; align-items: center; margin-left: 6px; padding: 3px 7px;
+  border-radius: 6px; background: #fee2e2; color: #b91c1c;
+  font-size: 11px; font-weight: 800;
+}
+.so-auto-detail {
+  display: inline-block; margin: 4px 0 10px; padding: 6px 10px;
+  border-radius: 6px; background: #fee2e2; color: #b91c1c;
+  font-size: 13px; font-weight: 800;
+}
 .so-row-skip { background: #fff7ed !important; }
 .so-row-skip:hover { background: #ffedd5 !important; }
 .so-td-skip-cell { background: #fff7ed; }
