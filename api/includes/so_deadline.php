@@ -9,7 +9,8 @@
  * Приоритет расчёта для пары (supplier_id, delivery_date):
  *   1) so_deadline_overrides на конкретную дату:
  *      - is_closed = 1 → день принудительно закрыт;
- *      - иначе deadline_time из override + (delivery_date − 1 день).
+ *      - иначе deadline_date/deadline_time из override;
+ *      - если deadline_date не заполнена, дата берётся из правила дня недели.
  *   2) so_deadline_rules по дню недели доставки (указывает deadline_dow + deadline_time).
  *   3) default_deadline_time из so_supplier_settings, дедлайн = (delivery_date − 1 день).
  *
@@ -52,15 +53,16 @@ function soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $delive
     // 2. Вычисляем дату и время дедлайна
     $deliveryObj = new DateTime($deliveryDate, $tz);
     if ($override && !empty($override['deadline_time'])) {
-        $deadlineDate = (clone $deliveryObj)->modify('-1 day');
+        if (!empty($override['deadline_date'])) {
+            $deadlineDate = new DateTime($override['deadline_date'], $tz);
+        } elseif ($rule && !empty($rule['deadline_time'])) {
+            $deadlineDate = soDeadlineDateByRule($deliveryObj, $rule);
+        } else {
+            $deadlineDate = (clone $deliveryObj)->modify('-1 day');
+        }
         $deadlineTime = $override['deadline_time'];
     } elseif ($rule && !empty($rule['deadline_time'])) {
-        $deadlineDow = (int)$rule['deadline_dow'];
-        $deliveryDow = (int)$deliveryObj->format('N');
-        $deadlineDate = clone $deliveryObj;
-        $diff = $deliveryDow - $deadlineDow;
-        if ($diff <= 0) $diff += 7;
-        $deadlineDate->modify("-{$diff} days");
+        $deadlineDate = soDeadlineDateByRule($deliveryObj, $rule);
         $deadlineTime = $rule['deadline_time'];
     } else {
         $deadlineDate = (clone $deliveryObj)->modify('-1 day');
@@ -80,6 +82,16 @@ function soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $delive
     ];
 }
 
+function soDeadlineDateByRule($deliveryObj, $rule) {
+    $deadlineDow = (int)$rule['deadline_dow'];
+    $deliveryDow = (int)$deliveryObj->format('N');
+    $deadlineDate = clone $deliveryObj;
+    $diff = $deliveryDow - $deadlineDow;
+    if ($diff <= 0) $diff += 7;
+    $deadlineDate->modify("-{$diff} days");
+    return $deadlineDate;
+}
+
 /**
  * Обёртка с БД-запросами: сама достаёт override / rule / default для пары
  * (supplier_id, delivery_date) и считает через soCalculateDeadlineCore.
@@ -89,7 +101,7 @@ function soCalculateDeadlineCore($override, $rule, $defaultDeadlineTime, $delive
 function soCalculateDeadline($pdo, $supplierId, $deliveryDate) {
     // 1. Override по конкретной дате
     try {
-        $s = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+        $s = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
         $s->execute([$supplierId, $deliveryDate]);
         $override = $s->fetch() ?: null;
     } catch (PDOException $e) {

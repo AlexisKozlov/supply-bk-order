@@ -357,7 +357,7 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     $rangeStart = $today->format('Y-m-d');
     $rangeEnd = (clone $today)->modify('+21 days')->format('Y-m-d');
     $overParams = array_merge($supplierIds, [$rangeStart, $rangeEnd]);
-    $overRows = $pdo->prepare("SELECT supplier_id, delivery_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id IN ({$ph}) AND delivery_date BETWEEN ? AND ?");
+    $overRows = $pdo->prepare("SELECT supplier_id, delivery_date, deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id IN ({$ph}) AND delivery_date BETWEEN ? AND ?");
     $overRows->execute($overParams);
     $overridesMap = [];
     foreach ($overRows->fetchAll() as $r) {
@@ -908,7 +908,7 @@ if ($soAction === 'admin') {
     // показывать поставщика, т.к. они фильтруют по so_supplier_schedules.is_active.
     if ($adminAction === 'disconnect-supplier' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
-        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $pdo->beginTransaction();
         try {
             $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
@@ -1044,17 +1044,17 @@ if ($soAction === 'admin') {
     // --- Настройки поставщика (GET) ---
     if ($adminAction === 'settings' && $method === 'GET') {
         $supplierId = $_GET['supplier_id'] ?? '';
-        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $settings = soGetSupplierSettings($pdo, $supplierId);
         // Список разовых переопределений дедлайна
         $overridesList = [];
         try {
-            $ov = $pdo->prepare("SELECT delivery_date, deadline_time, is_closed, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
+            $ov = $pdo->prepare("SELECT delivery_date, deadline_date, deadline_time, is_closed, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
             $ov->execute([$supplierId]);
             $overridesList = $ov->fetchAll();
         } catch (PDOException $e) {
             // is_closed колонка не существует — миграция не применена, читаем без неё
-            $ov = $pdo->prepare("SELECT delivery_date, deadline_time, 0 as is_closed, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
+            $ov = $pdo->prepare("SELECT delivery_date, NULL as deadline_date, deadline_time, 0 as is_closed, created_by, created_at FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) ORDER BY delivery_date");
             $ov->execute([$supplierId]);
             $overridesList = $ov->fetchAll();
         }
@@ -1108,7 +1108,7 @@ if ($soAction === 'admin') {
         $supplierId = $_GET['supplier_id'] ?? '';
         $date = $_GET['date'] ?? '';
 
-        soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        $supplier = soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
         $settings = soGetSupplierSettings($pdo, $supplierId);
 
@@ -1155,6 +1155,10 @@ if ($soAction === 'admin') {
         $deliveryDow = (int)(new DateTime($date))->format('N');
 
         // Все рестораны, у которых поставка в этот день (без session_id)
+        $supplierGroup = $supplier['legal_entity_group'] ?: getEntityGroup($supplier['legal_entity'] ?? '');
+        $supplierEntities = getEntitiesInGroup($supplierGroup);
+        $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+
         $rests = $pdo->prepare("
             SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
                    ss.order_day,
@@ -1163,11 +1167,11 @@ if ($soAction === 'admin') {
                    (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_supplier_schedules ss
             JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-            LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.supplier_id = ? AND o.delivery_date = ?
+            LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
             WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
             ORDER BY r.region, r.number
         ");
-        $rests->execute([$supplierId, $date, $supplierId, $deliveryDow]);
+        $rests->execute(array_merge([$supplierId, $date], $supplierEntities, [$supplierId, $deliveryDow]));
         $restaurants = $rests->fetchAll();
 
         $total = count($restaurants);
@@ -1208,9 +1212,9 @@ if ($soAction === 'admin') {
                    oi.sku, oi.product_name, oi.quantity, oi.admin_qty, oi.id as item_id, o.id as order_id
             FROM so_orders o
             JOIN so_order_items oi ON oi.order_id = o.id
-            WHERE o.supplier_id = ? AND o.delivery_date = ?
+            WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
         ");
-        $itemsStmt->execute([$supplierId, $date]);
+        $itemsStmt->execute(array_merge([$supplierId, $date], $supplierEntities));
         $orderItems = $itemsStmt->fetchAll();
 
         // Товары для матрицы:
@@ -1221,10 +1225,10 @@ if ($soAction === 'admin') {
         $tplStmt = $pdo->prepare("
             SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.product_id
             FROM so_templates t
-            WHERE t.supplier_id = ? AND t.is_active = 1
+            WHERE t.supplier_id = ? AND t.legal_entity IN ({$entityPh}) AND t.is_active = 1
             ORDER BY t.sort_order, t.product_name
         ");
-        $tplStmt->execute([$supplierId]);
+        $tplStmt->execute(array_merge([$supplierId], $supplierEntities));
         $products = $tplStmt->fetchAll();
 
         $productMap = [];
@@ -1358,7 +1362,10 @@ if ($soAction === 'admin') {
                    (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
             FROM so_orders o
             JOIN suppliers s ON s.id = o.supplier_id
-            LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
+            LEFT JOIN restaurants r
+              ON r.number = o.restaurant_number
+             AND r.active = 1
+             AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)
             WHERE {$where}
             ORDER BY o.submitted_at DESC, o.restaurant_number
         ");
@@ -1372,7 +1379,10 @@ if ($soAction === 'admin') {
             SELECT o.*, s.short_name as supplier_name, r.region, r.city, r.address, r.legal_entity_group
             FROM so_orders o
             JOIN suppliers s ON s.id = o.supplier_id
-            LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1
+            LEFT JOIN restaurants r
+              ON r.number = o.restaurant_number
+             AND r.active = 1
+             AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)
             WHERE o.id = ?
         ");
         $s->execute([$adminParam]);
@@ -1862,12 +1872,20 @@ if ($soAction === 'admin') {
     if ($adminAction === 'extend-deadline' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? null;
         $deliveryDate = $body['delivery_date'] ?? '';
+        $deadlineDate = $body['deadline_date'] ?? '';
         $deadlineTime = $body['deadline_time'] ?? '';
 
         if (!$supplierId || !$deliveryDate || !$deadlineTime) {
             soRespond(['error' => 'Не указаны поставщик, дата доставки или новое время'], 400);
         }
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
+        if ($deadlineDate && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadlineDate)) {
+            soRespond(['error' => 'Неверный формат даты дедлайна'], 400);
+        }
+        if (!$deadlineDate) {
+            $currentDeadline = soCalculateDeadline($pdo, $supplierId, $deliveryDate);
+            $deadlineDate = $currentDeadline['deadline'] ? substr($currentDeadline['deadline'], 0, 10) : date('Y-m-d', strtotime($deliveryDate . ' -1 day'));
+        }
         // Нормализуем время к формату HH:MM:SS
         if (preg_match('/^(\d{1,2}):(\d{2})$/', $deadlineTime, $m)) {
             $deadlineTime = sprintf('%02d:%02d:00', (int)$m[1], (int)$m[2]);
@@ -1876,18 +1894,19 @@ if ($soAction === 'admin') {
         }
 
         $createdBy = resolveActorName($pdo, $sessionUser);
-        $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_time, created_by) VALUES (?, ?, ?, ?)
-                       ON DUPLICATE KEY UPDATE deadline_time = VALUES(deadline_time), created_by = VALUES(created_by)")
-            ->execute([$supplierId, $deliveryDate, $deadlineTime, $createdBy]);
+        $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_date, deadline_time, is_closed, created_by) VALUES (?, ?, ?, ?, 0, ?)
+                       ON DUPLICATE KEY UPDATE deadline_date = VALUES(deadline_date), deadline_time = VALUES(deadline_time), is_closed = 0, created_by = VALUES(created_by)")
+            ->execute([$supplierId, $deliveryDate, $deadlineDate, $deadlineTime, $createdBy]);
 
         try {
             auditLog($pdo, 'so_deadline_extended', 'supplier', $supplierId, $createdBy, [
                 'delivery_date' => $deliveryDate,
+                'deadline_date' => $deadlineDate,
                 'deadline_time' => $deadlineTime,
             ]);
         } catch (Exception $e) { /* не критично */ }
 
-        soRespond(['success' => true, 'supplier_id' => $supplierId, 'delivery_date' => $deliveryDate, 'deadline_time' => $deadlineTime]);
+        soRespond(['success' => true, 'supplier_id' => $supplierId, 'delivery_date' => $deliveryDate, 'deadline_date' => $deadlineDate, 'deadline_time' => $deadlineTime]);
     }
 
     // --- Удалить разовое продление дедлайна ---
@@ -1910,8 +1929,8 @@ if ($soAction === 'admin') {
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
         $createdBy = resolveActorName($pdo, $sessionUser);
         if ($isClosed) {
-            $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_time, is_closed, created_by)
-                           VALUES (?, ?, NULL, 1, ?)
+            $pdo->prepare("INSERT INTO so_deadline_overrides (supplier_id, delivery_date, deadline_date, deadline_time, is_closed, created_by)
+                           VALUES (?, ?, NULL, NULL, 1, ?)
                            ON DUPLICATE KEY UPDATE is_closed = 1, created_by = VALUES(created_by)")
                 ->execute([$supplierId, $deliveryDate, $createdBy]);
         } else {

@@ -1092,7 +1092,7 @@ try {
 
     // Все активные поставщики с графиком, принимающие заявки
     $suppliers = $pdo->query("
-        SELECT DISTINCT s.id, s.short_name,
+        SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
         FROM suppliers s
         JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
@@ -1164,7 +1164,7 @@ try {
 
                     // Дедлайн через ядро: override → rule → default. is_closed здесь не учитываем
                     // (для совместимости с прежней логикой напоминаний — она тоже не различала закрытые дни).
-                    $ovStmt = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                    $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                     $ovStmt->execute([$supId, $deliveryDate]);
                     $override = $ovStmt->fetch() ?: null;
 
@@ -1330,7 +1330,7 @@ try {
                 $deliveryDate = $deliveryDateObj->format('Y-m-d');
 
                 // Дедлайн через ядро: override → rule → default, forced_closed — пропускаем
-                $ovStmt = $pdo->prepare("SELECT deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time, is_closed FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                 $ovStmt->execute([$supId, $deliveryDate]);
                 $ov = $ovStmt->fetch() ?: null;
 
@@ -1482,7 +1482,7 @@ try {
     $now = new DateTime('now', $tz);
 
     $suppliers = $pdo->query("
-        SELECT DISTINCT s.id, s.short_name,
+        SELECT DISTINCT s.id, s.short_name, s.legal_entity, s.legal_entity_group,
                COALESCE(sst.default_deadline_time, '14:00:00') AS default_deadline_time
         FROM suppliers s
         JOIN so_supplier_schedules ss ON ss.supplier_id = s.id AND ss.is_active = 1
@@ -1509,6 +1509,9 @@ try {
             $supId = $sup['id'];
             $supName = $sup['short_name'];
             $defaultDeadlineTime = $sup['default_deadline_time'];
+            $supplierGroup = $sup['legal_entity_group'] ?: getEntityGroup($sup['legal_entity'] ?? '');
+            $supplierEntities = getEntitiesInGroup($supplierGroup);
+            $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
 
             // Уникальные дни доставки у этого поставщика
             $dowStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1");
@@ -1530,7 +1533,7 @@ try {
             foreach ($datesSet as $deliveryDate => $deliveryDow) {
                 // Дедлайн через ядро: override → rule → default. is_closed не учитываем,
                 // сводку отправляем и для закрытых дней, если смогли вычислить дедлайн по правилу/default.
-                $ovStmt = $pdo->prepare("SELECT deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
+                $ovStmt = $pdo->prepare("SELECT deadline_date, deadline_time FROM so_deadline_overrides WHERE supplier_id = ? AND delivery_date = ?");
                 $ovStmt->execute([$supId, $deliveryDate]);
                 $override = $ovStmt->fetch() ?: null;
 
@@ -1558,9 +1561,10 @@ try {
                     FROM so_supplier_schedules ss
                     JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
                     WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
+                      AND r.legal_entity_group = ?
                     ORDER BY r.region, CAST(r.number AS UNSIGNED)
                 ");
-                $expStmt->execute([$supId, $deliveryDow]);
+                $expStmt->execute([$supId, $deliveryDow, $supplierGroup]);
                 $expectedRests = $expStmt->fetchAll();
 
                 if (!$expectedRests) continue;
@@ -1569,8 +1573,9 @@ try {
                 $subStmt = $pdo->prepare("
                     SELECT restaurant_number FROM so_orders
                     WHERE supplier_id = ? AND delivery_date = ? AND status != 'draft'
+                      AND legal_entity IN ({$entityPh})
                 ");
-                $subStmt->execute([$supId, $deliveryDate]);
+                $subStmt->execute(array_merge([$supId, $deliveryDate], $supplierEntities));
                 $submittedByStatus = array_flip($subStmt->fetchAll(PDO::FETCH_COLUMN));
 
                 // Позиции с ненулевыми количествами — для таблицы/пивота
@@ -1580,9 +1585,10 @@ try {
                     FROM so_orders o
                     JOIN so_order_items oi ON oi.order_id = o.id
                     WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+                      AND o.legal_entity IN ({$entityPh})
                       AND COALESCE(oi.admin_qty, oi.quantity) > 0
                 ");
-                $ordStmt->execute([$supId, $deliveryDate]);
+                $ordStmt->execute(array_merge([$supId, $deliveryDate], $supplierEntities));
                 $orderRows = $ordStmt->fetchAll();
 
                 // Пивот: список товаров и матрица значений
@@ -1631,8 +1637,8 @@ try {
                 // Если ни один ресторан не подал — товаров нет, но нам всё равно нужен
                 // хоть один столбец-товар. В этом случае тянем шаблон поставщика.
                 if (!$productsOut) {
-                    $tplStmt = $pdo->prepare("SELECT DISTINCT sku, product_name FROM so_templates WHERE supplier_id = ? AND is_active = 1 ORDER BY sort_order, product_name");
-                    $tplStmt->execute([$supId]);
+                    $tplStmt = $pdo->prepare("SELECT DISTINCT sku, product_name FROM so_templates WHERE supplier_id = ? AND legal_entity IN ({$entityPh}) AND is_active = 1 ORDER BY sort_order, product_name");
+                    $tplStmt->execute(array_merge([$supId], $supplierEntities));
                     foreach ($tplStmt->fetchAll() as $t) {
                         $productsOut[] = ['sku' => $t['sku'], 'name' => $t['product_name']];
                     }

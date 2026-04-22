@@ -176,10 +176,10 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
-  async function adminExtendDeadline(supplierId, deliveryDate, deadlineTime) {
+  async function adminExtendDeadline(supplierId, deliveryDate, deadlineTime, deadlineDate = null) {
     return api('admin/extend-deadline', {
       method: 'POST',
-      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate, deadline_time: deadlineTime }),
+      body: JSON.stringify({ supplier_id: supplierId, delivery_date: deliveryDate, deadline_time: deadlineTime, deadline_date: deadlineDate }),
     });
   }
 

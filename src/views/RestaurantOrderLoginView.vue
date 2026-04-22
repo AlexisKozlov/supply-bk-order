@@ -261,7 +261,8 @@ async function handleLogin() {
   try {
     const result = await store.login(parsed.number, password.value, parsed.group);
     if (result.success) {
-      router.push({ name: 'restaurant-cabinet' });
+      const redirectTarget = safeRedirect(route.query.redirect);
+      router.push(redirectTarget || { name: 'restaurant-cabinet' });
     } else if (result.active_session) {
       sessionConflict.value = true;
       sessionConflictAgo.value = result.last_login_ago || '';
@@ -286,7 +287,8 @@ async function forceLogin() {
   try {
     const result = await store.login(parsed.number, password.value, parsed.group, true);
     if (result.success) {
-      router.push({ name: 'restaurant-cabinet' });
+      const redirectTarget = safeRedirect(route.query.redirect);
+      router.push(redirectTarget || { name: 'restaurant-cabinet' });
     } else {
       error.value = result.error || 'Ошибка входа';
       sessionConflict.value = false;

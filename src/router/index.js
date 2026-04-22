@@ -118,9 +118,13 @@ const routes = [
   },
   {
     path: '/supplier-order',
-    name: 'supplier-order-form',
-    component: () => import('@/views/SupplierOrderFormView.vue'),
-    meta: { title: 'Заявки поставщикам' },
+    redirect: to => {
+      const supplierId = to.query?.supplier;
+      if (supplierId) {
+        return { name: 'restaurant-orders-supplier', params: { supplierId: String(supplierId) } };
+      }
+      return { name: 'restaurant-orders-tab' };
+    },
   },
   {
     path: '/search-cards',

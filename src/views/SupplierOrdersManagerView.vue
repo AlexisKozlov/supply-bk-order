@@ -500,6 +500,7 @@ const loading = ref(false);
 const allSuppliers = ref([]);
 const currentSupplierId = ref(props.supplierId || '');
 const selectedDate = ref('');
+const selectedDeadline = ref('');
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const restaurants = ref([]);
 const weekDates = ref([]);
@@ -809,6 +810,7 @@ async function loadStatus() {
     weekDates.value = data.week_dates || [];
     if (data.settings) settings.value = data.settings;
     if (data.date) selectedDate.value = data.date;
+    selectedDeadline.value = data.deadline || '';
   } catch (e) {
     console.error(e);
   } finally {
@@ -839,15 +841,23 @@ async function handleToggleCloseDay(date) {
 
 async function handleExtendDeadline() {
   if (!selectedDate.value) return;
-  const time = prompt('Новое время дедлайна для этой даты (HH:MM):', '15:00');
+  const currentDeadlineDate = selectedDeadline.value?.split(' ')?.[0] || '';
+  const currentDeadlineTime = selectedDeadline.value?.split(' ')?.[1]?.substring(0, 5) || '15:00';
+  const deadlineDate = prompt('Дата дедлайна (YYYY-MM-DD):', currentDeadlineDate);
+  if (!deadlineDate) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(deadlineDate)) {
+    toast.warning('Неверная дата', 'Введите дату в формате YYYY-MM-DD');
+    return;
+  }
+  const time = prompt('Новое время дедлайна для этой даты (HH:MM):', currentDeadlineTime);
   if (!time) return;
   if (!/^\d{1,2}:\d{2}$/.test(time)) {
     toast.warning('Неверный формат', 'Введите время в формате HH:MM (например 15:00)');
     return;
   }
   try {
-    await store.adminExtendDeadline(currentSupplierId.value, selectedDate.value, time);
-    toast.success('Дедлайн продлён', `Новый дедлайн на ${selectedDate.value}: ${time}`);
+    await store.adminExtendDeadline(currentSupplierId.value, selectedDate.value, time, deadlineDate);
+    toast.success('Дедлайн продлён', `Новый дедлайн: ${deadlineDate} ${time}`);
     await loadSettings();
     await loadStatus();
   } catch (e) {
@@ -1494,8 +1504,10 @@ async function saveEdit() {
 }
 
 function copyLink() {
-  const base = window.location.origin + '/supplier-order';
-  const url = currentSupplierId.value ? `${base}?supplier=${currentSupplierId.value}` : base;
+  const path = currentSupplierId.value
+    ? `/restaurant/orders/supplier/${encodeURIComponent(currentSupplierId.value)}`
+    : '/restaurant/orders';
+  const url = window.location.origin + path;
   navigator.clipboard.writeText(url);
   toast.success('Скопировано', url);
 }

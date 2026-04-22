@@ -180,6 +180,26 @@
 
     <!-- ══════ TAB: Заказы ══════ -->
     <section v-if="activeTab === 'orders' && !globalLoading && !globalError" class="cab-section cab-section-orders">
+      <div class="ord-tabs mob-order-tabs" aria-label="Разделы заказов">
+        <button class="ord-tab" :class="{ active: orderSubTab === 'delivery' }" @click="switchTab('orders', 'delivery')">
+          Основная поставка
+          <span v-if="deliveryBadge" class="ord-tab-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
+        </button>
+        <button
+          v-for="sup in suppliers"
+          :key="'mob-ord-' + sup.id"
+          class="ord-tab"
+          :class="{ active: orderSubTab === 'sup_' + sup.id }"
+          @click="switchTab('orders', 'sup_' + sup.id)"
+        >
+          {{ sup.name }}
+          <span v-if="supplierBadge(sup)" class="ord-tab-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
+        </button>
+        <button class="ord-tab" :class="{ active: orderSubTab === 'history' }" @click="switchTab('orders', 'history')">
+          История
+        </button>
+      </div>
+
       <!-- ── Основная поставка ── -->
       <div v-if="orderSubTab === 'delivery'">
         <div v-if="!roStore.sessionInfo" class="cab-empty-card">
@@ -2439,11 +2459,11 @@ onMounted(async () => {
     try {
       const result = await roStore.loginByTelegram(tgTokenParam);
       if (!result.success) {
-        router.replace({ name: 'restaurant-order-login' });
+        router.replace({ name: 'restaurant-order-login', query: { redirect: route.fullPath } });
         return;
       }
     } catch {
-      router.replace({ name: 'restaurant-order-login' });
+      router.replace({ name: 'restaurant-order-login', query: { redirect: route.fullPath } });
       return;
     }
     // Убираем tg_token из URL, уходим на целевой путь. Компонент при этом НЕ перемонтируется,
@@ -2452,7 +2472,7 @@ onMounted(async () => {
   }
   if (!roStore.isAuthenticated) {
     const valid = await roStore.validate();
-    if (!valid) { router.replace({ name: 'restaurant-order-login' }); return; }
+    if (!valid) { router.replace({ name: 'restaurant-order-login', query: { redirect: route.fullPath } }); return; }
   }
   try {
     await loadCabinetData();
@@ -2655,6 +2675,8 @@ onUnmounted(() => {
 .ord-tab-badge { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
 .ord-tab-badge.warn { background: #f59e0b; color: white; }
 .ord-tab-badge.ok { background: #16a34a; color: white; }
+.ord-tab-badge.pause { background: #9ca3af; color: white; text-transform: uppercase; letter-spacing: 0.4px; }
+.mob-order-tabs { display: none; }
 
 /* Shared order components */
 /* Центрированная колонка для форм заказа (заявка, планета, поставщики) */
@@ -3381,6 +3403,22 @@ tr.del-err { background: #fef2f2; }
   .dash-action-grid { grid-template-columns: repeat(2, 1fr); }
 
   /* Order sub-tabs */
+  .mob-order-tabs {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 45;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin: -16px -12px 12px;
+    padding: 10px 12px;
+    background: #F5F0EB;
+    border-bottom: 1px solid #EDE8E3;
+    scrollbar-width: none;
+  }
+  .cab.cab-theme-ps .mob-order-tabs { background: #faf2eb; }
+  .mob-order-tabs::-webkit-scrollbar { display: none; }
   .ord-tabs { gap: 4px; flex-wrap: nowrap; overflow-x: auto; }
   .ord-tab { padding: 6px 12px; font-size: 12px; }
 
