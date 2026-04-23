@@ -124,6 +124,12 @@ function tgSendDocument($chatId, $filename, $content, $caption = '', $mime = 'ap
     return $result;
 }
 
+function dateFromWeekStartByDow(DateTime $weekStart, int $dow, int $weekOffset = 0): DateTime {
+    $offsetDays = $dow - 1 + $weekOffset * 7;
+    $modifier = ($offsetDays >= 0 ? '+' : '') . $offsetDays . ' days';
+    return (clone $weekStart)->modify($modifier);
+}
+
 // ═══ AI для утренней сводки ═══
 
 function askAIDigest($context) {
@@ -1158,7 +1164,7 @@ try {
                 $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
 
                 for ($w = 0; $w < 2; $w++) {
-                    $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+                    $deliveryDateObj = dateFromWeekStartByDow($weekStart, $deliveryDow, $w);
                     if ($deliveryDateObj < (clone $now)->setTime(0,0,0)) continue;
 
                     $deliveryDate = $deliveryDateObj->format('Y-m-d');
@@ -1326,7 +1332,7 @@ try {
             $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
 
             for ($w = 0; $w < 2; $w++) {
-                $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
+                $deliveryDateObj = dateFromWeekStartByDow($weekStart, $deliveryDow, $w);
                 if ($deliveryDateObj < (clone $now)->setTime(0, 0, 0)) continue;
                 $deliveryDate = $deliveryDateObj->format('Y-m-d');
 
@@ -1524,7 +1530,7 @@ try {
                 $weekStart->setTime(0, 0, 0);
                 $weekStart->modify('-' . ((int)$weekStart->format('N') - 1) . ' days');
                 for ($w = -1; $w < 2; $w++) {
-                    $dd = (clone $weekStart)->modify('+' . ($dow - 1 + $w * 7) . ' days')->format('Y-m-d');
+                    $dd = dateFromWeekStartByDow($weekStart, $dow, $w)->format('Y-m-d');
                     $datesSet[$dd] = $dow;
                 }
             }
@@ -1551,12 +1557,13 @@ try {
                 $deadline = $r['deadline_dt'];
                 $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
 
-                // Окно: дедлайн прошёл не более 20 мин назад и не в будущем
-                if ($minutesSince < 0 || $minutesSince > 20) continue;
+                // Отправляем после дедлайна, даже если cron пропустил стандартное окно.
+                // От дублей защищает notification_key ниже.
+                if ($minutesSince < 0) continue;
 
                 // Дедупликация
                 $dedupKey = "so_summary_{$supId}_{$deliveryDate}";
-                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_key = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
+                $dup = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary' AND notification_key = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
                 $dup->execute([$dedupKey]);
                 if ($dup->fetch()) continue;
 
@@ -1629,14 +1636,26 @@ try {
                     $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
                     $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
                     $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
+                    $sentCheck = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary_sent' AND notification_key = ? AND chat_id = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
+                    $successCount = 0;
                     foreach ($subs as $sub) {
+                        $sentCheck->execute([$dedupKey, $sub['telegram_chat_id']]);
+                        if ($sentCheck->fetch()) {
+                            $successCount++;
+                            continue;
+                        }
                         $ok = tgSend($sub['telegram_chat_id'], $caption, true);
                         $type = $ok !== false ? 'so_summary_sent' : 'so_summary_fail';
                         $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
-                        if ($ok !== false) $sent++;
+                        if ($ok !== false) {
+                            $sent++;
+                            $successCount++;
+                        }
                     }
-                    $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
-                        ->execute([$dedupKey]);
+                    if ($successCount >= count($subs)) {
+                        $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                            ->execute([$dedupKey]);
+                    }
                     continue;
                 }
 
@@ -1728,15 +1747,27 @@ try {
                 }
 
                 $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
+                $sentCheck = $pdo->prepare("SELECT id FROM tg_notification_log WHERE notification_type = 'so_summary_sent' AND notification_key = ? AND chat_id = ? AND sent_at > NOW() - INTERVAL 7 DAY LIMIT 1");
+                $successCount = 0;
                 foreach ($subs as $sub) {
+                    $sentCheck->execute([$dedupKey, $sub['telegram_chat_id']]);
+                    if ($sentCheck->fetch()) {
+                        $successCount++;
+                        continue;
+                    }
                     $ok = tgSendDocument($sub['telegram_chat_id'], $filename, $xlsxBinary, $caption);
                     $type = $ok !== false ? 'so_summary_sent' : 'so_summary_fail';
                     $perUser->execute([$type, $sub['telegram_chat_id'], $dedupKey]);
-                    if ($ok !== false) $sent++;
+                    if ($ok !== false) {
+                        $sent++;
+                        $successCount++;
+                    }
                 }
 
-                $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
-                    ->execute([$dedupKey]);
+                if ($successCount >= count($subs)) {
+                    $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
+                        ->execute([$dedupKey]);
+                }
             }
     }
 } catch (Exception $e) {
@@ -1797,8 +1828,9 @@ try {
                 $deadline->setTime((int)$tp[0], (int)($tp[1] ?? 0));
                 $minutesSince = ($now->getTimestamp() - $deadline->getTimestamp()) / 60;
 
-                // Окно: дедлайн прошёл не более 20 мин назад
-                if ($minutesSince < 0 || $minutesSince > 20) continue;
+                // Отправляем после дедлайна, даже если cron пропустил стандартное окно.
+                // От дублей защищает notification_key ниже.
+                if ($minutesSince < 0) continue;
 
                 // Дедупликация
                 $dedupKey = "veg_summary_{$sessId}_{$deliveryDate}";

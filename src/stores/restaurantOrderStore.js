@@ -56,6 +56,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
 
   const sessionInfo = ref(null);
   const deliveryDays = ref([]);
+  const restaurantOrdersEnabled = ref(true);
   const loading = ref(false);
 
   async function loginByTelegram(tgToken) {
@@ -119,6 +120,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     loading.value = true;
     try {
       const data = await api('my-info');
+      restaurantOrdersEnabled.value = data.restaurant_orders_enabled !== false;
       sessionInfo.value = data.session;
       deliveryDays.value = data.delivery_days || [];
     } finally {
@@ -163,6 +165,23 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     const params = new URLSearchParams({ date });
     if (legalEntity) params.set('legal_entity', legalEntity);
     return await api(`admin/status?${params}`);
+  }
+
+  async function adminGetModuleSettings(legalEntity = null) {
+    const params = new URLSearchParams();
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    const qs = params.toString() ? `?${params}` : '';
+    return await api(`admin/module-settings${qs}`);
+  }
+
+  async function adminSaveModuleSettings(legalEntity, restaurantOrdersEnabled) {
+    return await api('admin/module-settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        legal_entity: legalEntity,
+        restaurant_orders_enabled: !!restaurantOrdersEnabled,
+      }),
+    });
   }
 
   async function adminGetOrder(orderId) {
@@ -324,10 +343,16 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.preview;
   }
 
-  async function adminConfirmUtImport(payload, addMissingTemplates = false) {
+  async function adminConfirmUtImport(payload, addMissingTemplates = false, overwriteMode = 'none', overwriteRestaurants = []) {
     return await api('admin/import-ut', {
       method: 'POST',
-      body: JSON.stringify({ action: 'confirm', payload, add_missing_templates: addMissingTemplates }),
+      body: JSON.stringify({
+        action: 'confirm',
+        payload,
+        add_missing_templates: addMissingTemplates,
+        overwrite_mode: overwriteMode,
+        overwrite_restaurants: overwriteRestaurants,
+      }),
     });
   }
 
@@ -455,12 +480,12 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   }
 
   return {
-    restaurant, isAuthenticated, sessionInfo, deliveryDays, loading,
+    restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
     loadBroadcasts, loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
-    adminGetStatus, adminGetOrder, adminUpdateOrder,
+    adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,

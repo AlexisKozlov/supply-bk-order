@@ -52,6 +52,23 @@
             <span v-if="deadlineStatus.hard_deadline">жёсткий: <strong>{{ deadlineStatus.hard_deadline.slice(0,5) }}</strong></span>
           </div>
         </div>
+        <div class="rom-command-switch" :class="{ off: !moduleSettings.restaurant_orders_enabled }">
+          <div>
+            <div class="rom-cmd-label">Кабинет ресторанов</div>
+            <div class="rom-cmd-switch-text">
+              {{ moduleSettings.restaurant_orders_enabled ? 'Основная поставка включена' : 'Основная поставка выключена' }}
+            </div>
+          </div>
+          <button
+            class="rom-switch"
+            :class="{ on: moduleSettings.restaurant_orders_enabled }"
+            :disabled="moduleSettingsLoading || moduleSettingsSaving"
+            @click="toggleRestaurantOrders"
+            :title="moduleSettings.restaurant_orders_enabled ? 'Выключить для выбранного юрлица' : 'Включить для выбранного юрлица'"
+          >
+            <span></span>
+          </button>
+        </div>
         <div class="rom-command-actions">
           <button v-if="session && !isDateOpen" class="rom-btn rom-btn-success" @click="handleToggleDate(true)">
             Открыть приём
@@ -838,8 +855,12 @@
                 <b>{{ utImportPreview.summary.orders_to_create }}</b>
                 <span>заказов будет создано</span>
               </div>
+              <div class="rom-ut-stat info">
+                <b>{{ utImportOverwriteCount }}</b>
+                <span>заявок будет перезаписано</span>
+              </div>
               <div class="rom-ut-stat">
-                <b>{{ utImportPreview.summary.items_to_create }}</b>
+                <b>{{ utImportItemsTotal }}</b>
                 <span>позиций</span>
               </div>
               <div class="rom-ut-stat warn">
@@ -856,6 +877,29 @@
               <input type="checkbox" v-model="utAddMissingTemplates" />
               <span>Добавить {{ utImportPreview.missing_templates.length }} товаров в шаблон заказа после импорта</span>
             </label>
+
+            <div v-if="utImportPreview.skipped_existing.length" class="rom-ut-section rom-ut-overwrite">
+              <h3>Что делать с заявками, которые уже есть на эту дату</h3>
+              <label class="rom-ut-radio">
+                <input type="radio" value="none" v-model="utOverwriteMode" />
+                <span>Не трогать существующие заявки</span>
+              </label>
+              <label class="rom-ut-radio">
+                <input type="radio" value="all" v-model="utOverwriteMode" />
+                <span>Перезаписать все {{ utImportPreview.skipped_existing.length }} заявок</span>
+              </label>
+              <label class="rom-ut-radio">
+                <input type="radio" value="selected" v-model="utOverwriteMode" />
+                <span>Выбрать вручную</span>
+              </label>
+              <div v-if="utOverwriteMode === 'selected'" class="rom-ut-select-list">
+                <label v-for="r in utImportPreview.skipped_existing" :key="r.restaurant_number" class="rom-ut-select-row">
+                  <input type="checkbox" :value="r.restaurant_number" v-model="utSelectedOverwriteRestaurants" />
+                  <span>Ресторан №{{ r.restaurant_number }}</span>
+                  <em>{{ r.items_count }} поз.</em>
+                </label>
+              </div>
+            </div>
 
             <div class="rom-ut-sections">
               <div v-if="utImportPreview.unmatched.length" class="rom-ut-section">
@@ -883,7 +927,7 @@
               </div>
 
               <div v-if="utImportPreview.skipped_existing.length" class="rom-ut-section">
-                <h3>Будут пропущены, потому что заказ уже есть</h3>
+                <h3>{{ utOverwriteMode === 'none' ? 'Будут пропущены, потому что заявка уже есть' : 'Найдены существующие заявки' }}</h3>
                 <div class="rom-ut-chips">
                   <span v-for="r in utImportPreview.skipped_existing" :key="r.restaurant_number" class="rom-ut-chip">№{{ r.restaurant_number }}</span>
                 </div>
@@ -898,9 +942,9 @@
 
           <div class="rom-modal-actions">
             <button class="rom-btn" @click="closeUtImportModal" :disabled="utImportConfirming">Отмена</button>
-            <button class="rom-btn rom-btn-primary" @click="confirmUtImport" :disabled="utImportConfirming || !utImportPreview?.summary.orders_to_create">
+            <button class="rom-btn rom-btn-primary" @click="confirmUtImport" :disabled="utImportConfirming || !utImportCanConfirm">
               <BurgerSpinner v-if="utImportConfirming" size="xs" />
-              <span>{{ utImportConfirming ? 'Импорт...' : 'Создать заказы' }}</span>
+              <span>{{ utImportConfirming ? 'Импорт...' : 'Выполнить импорт' }}</span>
             </button>
           </div>
         </div>
@@ -1133,6 +1177,12 @@ const selectedDate = ref('');
 const restaurants = ref([]);
 const stats = ref({ total: 0, submitted: 0, pending: 0 });
 const deadlineStatus = ref(null);
+const moduleSettings = reactive({
+  legal_entity_group: '',
+  restaurant_orders_enabled: true,
+});
+const moduleSettingsLoading = ref(false);
+const moduleSettingsSaving = ref(false);
 
 // Order editing
 const showOrderModal = ref(false);
@@ -1155,6 +1205,33 @@ const utImportConfirming = ref(false);
 const showUtImportModal = ref(false);
 const utImportPreview = ref(null);
 const utAddMissingTemplates = ref(true);
+const utOverwriteMode = ref('none');
+const utSelectedOverwriteRestaurants = ref([]);
+
+const utImportOverwriteCount = computed(() => {
+  if (!utImportPreview.value) return 0;
+  if (utOverwriteMode.value === 'all') return utImportPreview.value.skipped_existing?.length || 0;
+  if (utOverwriteMode.value === 'selected') return utSelectedOverwriteRestaurants.value.length;
+  return 0;
+});
+
+const utImportItemsTotal = computed(() => {
+  const summary = utImportPreview.value?.summary || {};
+  let total = summary.items_to_create || 0;
+  if (utOverwriteMode.value === 'all') total += summary.items_can_overwrite || 0;
+  if (utOverwriteMode.value === 'selected') {
+    const selected = new Set(utSelectedOverwriteRestaurants.value.map(n => Number(n)));
+    for (const row of utImportPreview.value?.skipped_existing || []) {
+      if (selected.has(Number(row.restaurant_number))) total += row.items_count || 0;
+    }
+  }
+  return total;
+});
+
+const utImportCanConfirm = computed(() => {
+  const createCount = utImportPreview.value?.summary?.orders_to_create || 0;
+  return createCount + utImportOverwriteCount.value > 0;
+});
 
 const filteredRestaurants = computed(() => {
   const q = restFilter.value.trim().toLowerCase();
@@ -1626,6 +1703,7 @@ onMounted(async () => {
   } else {
     setTomorrow();
   }
+  await loadModuleSettings();
   await loadStatus();
   startAutoRefresh();
   if (route.query.order) {
@@ -1642,6 +1720,7 @@ watch(() => route.query.t, async () => {
 
 // Смена юрлица в сайдбаре — перезагрузка списка ресторанов и журнала
 watch(() => orderStore.settings.legalEntity, () => {
+  loadModuleSettings();
   loadStatus();
   if (pageTab.value === 'audit') loadAuditLog();
   if (pageTab.value === 'templates') loadFullTemplates();
@@ -1843,6 +1922,37 @@ async function loadStatus() {
   }
 }
 
+async function loadModuleSettings() {
+  moduleSettingsLoading.value = true;
+  try {
+    const data = await store.adminGetModuleSettings(orderStore.settings.legalEntity);
+    moduleSettings.legal_entity_group = data.legal_entity_group || '';
+    moduleSettings.restaurant_orders_enabled = data.restaurant_orders_enabled !== false;
+  } catch (e) {
+    toast.error('Ошибка', e.message || 'Не удалось загрузить настройки кабинета ресторанов');
+  } finally {
+    moduleSettingsLoading.value = false;
+  }
+}
+
+async function toggleRestaurantOrders() {
+  const nextValue = !moduleSettings.restaurant_orders_enabled;
+  moduleSettingsSaving.value = true;
+  try {
+    const data = await store.adminSaveModuleSettings(orderStore.settings.legalEntity, nextValue);
+    moduleSettings.legal_entity_group = data.legal_entity_group || moduleSettings.legal_entity_group;
+    moduleSettings.restaurant_orders_enabled = data.restaurant_orders_enabled !== false;
+    toast.success(
+      moduleSettings.restaurant_orders_enabled ? 'Основная поставка включена' : 'Основная поставка выключена',
+      orderStore.settings.legalEntity || ''
+    );
+  } catch (e) {
+    toast.error('Ошибка', e.message || 'Не удалось сохранить настройку');
+  } finally {
+    moduleSettingsSaving.value = false;
+  }
+}
+
 async function handleAutoSession() {
   try {
     const result = await store.adminAutoSession(orderStore.settings.legalEntity || undefined);
@@ -1908,6 +2018,8 @@ async function handleUtFile(e) {
     const preview = await store.adminPreviewUtImport(file, selectedDate.value, orderStore.settings.legalEntity || '');
     utImportPreview.value = preview;
     utAddMissingTemplates.value = (preview.missing_templates || []).length > 0;
+    utOverwriteMode.value = 'none';
+    utSelectedOverwriteRestaurants.value = [];
     showUtImportModal.value = true;
   } catch (err) {
     toast.error('Ошибка импорта', err.message || String(err));
@@ -1920,19 +2032,31 @@ function closeUtImportModal() {
   if (utImportConfirming.value) return;
   showUtImportModal.value = false;
   utImportPreview.value = null;
+  utOverwriteMode.value = 'none';
+  utSelectedOverwriteRestaurants.value = [];
 }
 
 async function confirmUtImport() {
   if (!utImportPreview.value) return;
   utImportConfirming.value = true;
   try {
-    const res = await store.adminConfirmUtImport(utImportPreview.value, utAddMissingTemplates.value);
+    const overwriteRestaurants = utOverwriteMode.value === 'selected'
+      ? utSelectedOverwriteRestaurants.value
+      : [];
+    const res = await store.adminConfirmUtImport(
+      utImportPreview.value,
+      utAddMissingTemplates.value,
+      utOverwriteMode.value,
+      overwriteRestaurants
+    );
     toast.success(
       'Импорт завершён',
-      `Создано заказов: ${res.created || 0}; позиций: ${res.items_created || 0}; добавлено в шаблон: ${res.templates_added || 0}`
+      `Создано: ${res.created || 0}; перезаписано: ${res.overwritten || 0}; позиций: ${(res.items_created || 0) + (res.items_overwritten || 0)}; добавлено в шаблон: ${res.templates_added || 0}`
     );
     showUtImportModal.value = false;
     utImportPreview.value = null;
+    utOverwriteMode.value = 'none';
+    utSelectedOverwriteRestaurants.value = [];
     await loadStatus();
     if (pageTab.value === 'templates' && (res.templates_added || 0) > 0) {
       await loadFullTemplates();
@@ -2743,7 +2867,7 @@ async function doUnifiedExport() {
 
 /* Командир: дата + дедлайн + действия */
 .rom-command {
-  display: grid; grid-template-columns: auto 1fr auto;
+  display: grid; grid-template-columns: auto 1fr minmax(250px, auto) auto;
   gap: 16px; align-items: stretch;
   background: white;
   border: 1px solid #e8dccd;
@@ -2751,7 +2875,7 @@ async function doUnifiedExport() {
   padding: 14px 18px; margin-bottom: 18px;
   box-shadow: 0 4px 16px rgba(80,35,20,0.06);
 }
-.rom-command-date, .rom-command-deadline { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rom-command-date, .rom-command-deadline, .rom-command-switch { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .rom-cmd-label {
   font-size: 10px; color: #8b7355; text-transform: uppercase;
   letter-spacing: 0.6px; font-weight: 700;
@@ -2780,6 +2904,45 @@ async function doUnifiedExport() {
 .rom-command-deadline.dl-not_yet { background: #eff6ff; border-left-color: #2563eb; }
 .rom-command-deadline.dl-not_yet .rom-cmd-deadline-text { color: #1d4ed8; }
 .rom-command-deadline.dl-not_open, .rom-command-deadline.dl-none { background: #f5f5f4; border-left-color: #a8a29e; }
+.rom-command-switch {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  border-left: 4px solid #16a34a;
+}
+.rom-command-switch.off {
+  background: #fef2f2;
+  border-left-color: #dc2626;
+}
+.rom-cmd-switch-text { font-size: 14px; font-weight: 700; color: #15803d; }
+.rom-command-switch.off .rom-cmd-switch-text { color: #b91c1c; }
+.rom-switch {
+  width: 46px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: #c7c2bb;
+  padding: 3px;
+  cursor: pointer;
+  transition: background .15s ease;
+  flex: 0 0 auto;
+}
+.rom-switch span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  transition: transform .15s ease;
+}
+.rom-switch.on { background: #16a34a; }
+.rom-switch.on span { transform: translateX(20px); }
+.rom-switch:disabled { opacity: .6; cursor: not-allowed; }
 .rom-command-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 /* Cards (карточки-сводка) */
@@ -3383,6 +3546,7 @@ async function doUnifiedExport() {
 .rom-ut-stat b { color: #502314; font-size: 24px; line-height: 1; }
 .rom-ut-stat span { color: #8b7355; font-size: 12px; }
 .rom-ut-stat.warn { background: #fffbeb; border-color: #fde68a; }
+.rom-ut-stat.info { background: #eff6ff; border-color: #bfdbfe; }
 .rom-ut-stat.danger { background: #fef2f2; border-color: #fecaca; }
 .rom-ut-check {
   display: flex; align-items: center; gap: 8px; padding: 10px 12px;
@@ -3405,6 +3569,24 @@ async function doUnifiedExport() {
 .rom-ut-row span { color: #502314; min-width: 0; }
 .rom-ut-row em { color: #6b7280; font-style: normal; white-space: nowrap; }
 .rom-ut-row.danger { background: #fef2f2; }
+.rom-ut-overwrite { display: flex; flex-direction: column; gap: 8px; }
+.rom-ut-radio, .rom-ut-select-row {
+  display: flex; align-items: center; gap: 8px;
+  color: #502314; font-size: 13px; cursor: pointer;
+}
+.rom-ut-select-list {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px; padding-top: 4px;
+}
+.rom-ut-select-row {
+  justify-content: space-between;
+  padding: 7px 9px;
+  border: 1px solid #EDE8E3;
+  border-radius: 6px;
+  background: #faf7f4;
+}
+.rom-ut-select-row span { flex: 1; }
+.rom-ut-select-row em { color: #8b7355; font-style: normal; font-size: 12px; }
 .rom-ut-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .rom-ut-chip {
   padding: 4px 8px; border-radius: 999px; background: #f3f4f6;

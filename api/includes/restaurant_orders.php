@@ -207,6 +207,34 @@ function roGetActiveSession($pdo, $group = 'BK_VM') {
     return $session;
 }
 
+function roNormalizeRestaurantOrdersLegalEntity($legalEntity, $group = null) {
+    $legalEntity = trim((string)$legalEntity);
+    if ($legalEntity !== '') return $legalEntity;
+    $group = roNormalizeLegalEntityGroup($group ?: 'BK_VM');
+    return $group === 'PS' ? 'ООО "Пицца Стар"' : 'ООО "Бургер БК"';
+}
+
+function roRestaurantOrdersEnabled($pdo = null, $legalEntity = null, $group = null) {
+    $legalEntity = roNormalizeRestaurantOrdersLegalEntity($legalEntity, $group);
+    if ($pdo) {
+        try {
+            $s = $pdo->prepare("SELECT restaurant_orders_enabled FROM ro_module_settings WHERE legal_entity = ? LIMIT 1");
+            $s->execute([$legalEntity]);
+            $row = $s->fetch();
+            if ($row) return (int)$row['restaurant_orders_enabled'] === 1;
+        } catch (Throwable $e) {
+            // Если миграция ещё не применена, считаем модуль включённым.
+        }
+    }
+    return true;
+}
+
+function roRequireRestaurantOrdersEnabled($pdo, $legalEntity = null, $group = null) {
+    if (!roRestaurantOrdersEnabled($pdo, $legalEntity, $group)) {
+        roRespond(['error' => 'Основная поставка временно отключена'], 403);
+    }
+}
+
 function roFormatCttRestaurantLabel($restaurantNumber, $city, $address) {
     $number = (int)$restaurantNumber;
     $city = trim((string)$city);
@@ -796,12 +824,12 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
         $order['items'] = array_values($order['items']);
         usort($order['items'], fn($a, $b) => strcmp(($a['category'] ?? '') . ($a['product_name'] ?? ''), ($b['category'] ?? '') . ($b['product_name'] ?? '')));
         if (isset($existingByRestaurant[$restNumber])) {
+            $order['existing_order_id'] = $existingByRestaurant[$restNumber];
             $skippedExisting[] = [
                 'restaurant_number' => (int)$restNumber,
                 'order_id' => $existingByRestaurant[$restNumber],
                 'items_count' => count($order['items']),
             ];
-            continue;
         }
         $ordersOut[] = $order;
     }
@@ -815,9 +843,11 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
             'rows_total' => $rowsTotal,
             'rows_matched' => $rowsMatched,
             'rows_skipped_deleted' => $rowsSkippedDeleted,
-            'orders_to_create' => count($ordersOut),
+            'orders_to_create' => count(array_filter($ordersOut, fn($o) => empty($o['existing_order_id']))),
             'orders_skipped_existing' => count($skippedExisting),
-            'items_to_create' => array_sum(array_map(fn($o) => count($o['items']), $ordersOut)),
+            'orders_can_overwrite' => count($skippedExisting),
+            'items_to_create' => array_sum(array_map(fn($o) => empty($o['existing_order_id']) ? count($o['items']) : 0, $ordersOut)),
+            'items_can_overwrite' => array_sum(array_map(fn($o) => !empty($o['existing_order_id']) ? count($o['items']) : 0, $ordersOut)),
             'unmatched_count' => count($unmatchedMap),
             'missing_template_count' => count($missingTemplateMap),
             'missing_restaurants_count' => count($missingRestaurants),
@@ -830,7 +860,7 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
     ];
 }
 
-function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates) {
+function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates, $overwriteMode = 'none', $overwriteRestaurants = []) {
     $selectedDate = $payload['selected_date'] ?? '';
     $entityGroup = $payload['legal_entity_group'] ?? 'BK_VM';
     $orders = $payload['orders'] ?? [];
@@ -844,9 +874,17 @@ function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates) {
 
     $actor = resolveActorName($pdo, $sessionUser, 'отдел закупок');
     $created = 0;
+    $overwritten = 0;
     $skipped = [];
     $itemsCreated = 0;
+    $itemsOverwritten = 0;
     $templatesAdded = 0;
+    $overwriteMode = in_array($overwriteMode, ['all', 'selected'], true) ? $overwriteMode : 'none';
+    $overwriteSet = [];
+    foreach ((array)$overwriteRestaurants as $rn) {
+        $rn = (int)$rn;
+        if ($rn > 0) $overwriteSet[$rn] = true;
+    }
 
     $pdo->beginTransaction();
     try {
@@ -877,6 +915,8 @@ function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates) {
 
         $existingStmt = $pdo->prepare("SELECT id FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ? LIMIT 1");
         $orderInsert = $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?)");
+        $orderUpdate = $pdo->prepare("UPDATE ro_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), updated_by = ?, legal_entity = ?, comment = ? WHERE id = ?");
+        $itemsDelete = $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?");
         $itemInsert = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
 
         foreach ($orders as $order) {
@@ -888,31 +928,40 @@ function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates) {
             $existingStmt->execute([$session['id'], $restNumber, $selectedDate]);
             $existingId = $existingStmt->fetchColumn();
             if ($existingId) {
-                $skipped[] = ['restaurant_number' => $restNumber, 'order_id' => (int)$existingId];
-                continue;
+                $shouldOverwrite = $overwriteMode === 'all' || ($overwriteMode === 'selected' && isset($overwriteSet[$restNumber]));
+                if (!$shouldOverwrite) {
+                    $skipped[] = ['restaurant_number' => $restNumber, 'order_id' => (int)$existingId];
+                    continue;
+                }
+                $orderId = (int)$existingId;
+                $orderUpdate->execute([$actor, $le, 'Перезаписано импортом из 1С УТ', $orderId]);
+                $itemsDelete->execute([$orderId]);
+            } else {
+                $orderInsert->execute([$session['id'], $restNumber, $selectedDate, $actor, $le, 'Импорт из 1С УТ']);
+                $orderId = (int)$pdo->lastInsertId();
             }
 
-            $orderInsert->execute([$session['id'], $restNumber, $selectedDate, $actor, $le, 'Импорт из 1С УТ']);
-            $orderId = (int)$pdo->lastInsertId();
             $totalQty = 0;
             $totalItems = 0;
             foreach (roAggregateOrderItems($order['items']) as $item) {
                 $itemInsert->execute([$orderId, $item['sku'], $item['product_name'], $item['category'], $item['quantity'], $item['comment']]);
                 $totalQty += (float)$item['quantity'];
                 $totalItems++;
-                $itemsCreated++;
+                if ($existingId) $itemsOverwritten++;
+                else $itemsCreated++;
             }
             roLogAudit($pdo, [
                 'order_id' => $orderId,
                 'restaurant_number' => $restNumber,
                 'delivery_date' => $selectedDate,
-                'action' => 'order_created',
+                'action' => $existingId ? 'order_updated' : 'order_created',
                 'actor_name' => $actor,
                 'actor_type' => 'admin',
                 'new_value' => $totalItems . ' поз. / ' . $totalQty . ' кор.',
-                'details' => ['source' => '1c_ut_import'],
+                'details' => ['source' => '1c_ut_import', 'overwrite' => (bool)$existingId],
             ]);
-            $created++;
+            if ($existingId) $overwritten++;
+            else $created++;
         }
 
         $pdo->commit();
@@ -925,7 +974,9 @@ function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates) {
     return [
         'success' => true,
         'created' => $created,
+        'overwritten' => $overwritten,
         'items_created' => $itemsCreated,
+        'items_overwritten' => $itemsOverwritten,
         'templates_added' => $templatesAdded,
         'skipped_existing' => $skipped,
     ];
@@ -1557,9 +1608,17 @@ if ($roAction === 'my-info' && $method === 'GET') {
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
 
     $group = $rest['legal_entity_group'] ?? 'BK_VM';
+    if (!roRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $group)) {
+        roRespond([
+            'restaurant_orders_enabled' => false,
+            'session' => null,
+            'delivery_days' => [],
+        ]);
+    }
+
     $session = roGetActiveSession($pdo, $group);
     if (!$session) {
-        roRespond(['session' => null, 'delivery_days' => []]);
+        roRespond(['restaurant_orders_enabled' => true, 'session' => null, 'delivery_days' => []]);
     }
 
     // Расписание основной доставки этого ресторана. Дни, где заполнено только
@@ -1633,6 +1692,7 @@ if ($roAction === 'my-info' && $method === 'GET') {
     usort($deliveryDays, function($a, $b) { return strcmp($a['date'], $b['date']); });
 
     roRespond([
+        'restaurant_orders_enabled' => true,
         'session' => [
             'id' => (int)$session['id'],
             'week_start' => $session['week_start'],
@@ -1647,6 +1707,7 @@ if ($roAction === 'my-info' && $method === 'GET') {
 if ($roAction === 'products' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $rest['legal_entity_group'] ?? 'BK_VM');
 
     $category = $_GET['category'] ?? '';
     $search = $_GET['search'] ?? '';
@@ -1703,6 +1764,7 @@ if ($roAction === 'products' && $method === 'GET') {
 if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $rest['legal_entity_group'] ?? 'BK_VM');
 
     $date = $roParam;
     $session = roGetActiveSession($pdo, $rest['legal_entity_group'] ?? 'BK_VM');
@@ -1752,6 +1814,7 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
 if ($roAction === 'my-orders' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $rest['legal_entity_group'] ?? 'BK_VM');
 
     $limit = min((int)($_GET['limit'] ?? 20), 50);
     $group = $rest['legal_entity_group'] ?? 'BK_VM';
@@ -1782,23 +1845,25 @@ if ($roAction === 'all-history' && $method === 'GET') {
     $limit = min((int)($_GET['limit'] ?? 30), 100);
     $allOrders = [];
 
-    // 1. Основная поставка (ro_orders) — с суммой залога
-    $s1 = $pdo->prepare("
-        SELECT o.id, o.delivery_date, o.status, o.submitted_at,
-               (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
-               (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty,
-               (SELECT SUM(oi.quantity * COALESCE(pp.price, 0))
-                  FROM ro_order_items oi
-                  LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit'
-                  WHERE oi.order_id = o.id) as total_deposit
-        FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
-        ORDER BY o.delivery_date DESC LIMIT {$limit}
-    ");
-    $s1->execute(array_merge([$rn], $entities));
-    foreach ($s1->fetchAll() as $r) {
-        $r['source'] = 'delivery';
-        $r['source_name'] = 'Основная поставка';
-        $allOrders[] = $r;
+    // 1. Основная поставка (ro_orders) — показываем в истории только если модуль включён
+    if (roRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $group)) {
+        $s1 = $pdo->prepare("
+            SELECT o.id, o.delivery_date, o.status, o.submitted_at,
+                   (SELECT COUNT(*) FROM ro_order_items WHERE order_id = o.id) as item_count,
+                   (SELECT SUM(quantity) FROM ro_order_items WHERE order_id = o.id) as total_qty,
+                   (SELECT SUM(oi.quantity * COALESCE(pp.price, 0))
+                      FROM ro_order_items oi
+                      LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'deposit'
+                      WHERE oi.order_id = o.id) as total_deposit
+            FROM ro_orders o WHERE o.restaurant_number = ? AND o.legal_entity IN ({$entityPh})
+            ORDER BY o.delivery_date DESC LIMIT {$limit}
+        ");
+        $s1->execute(array_merge([$rn], $entities));
+        foreach ($s1->fetchAll() as $r) {
+            $r['source'] = 'delivery';
+            $r['source_name'] = 'Основная поставка';
+            $allOrders[] = $r;
+        }
     }
 
     // 2. Заявки поставщикам (so_orders)
@@ -1877,6 +1942,7 @@ if ($roAction === 'history-order' && $method === 'GET') {
     $entityPh = implode(',', array_fill(0, count($entities), '?'));
 
     if ($source === 'delivery') {
+        roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $group);
         $params = array_merge([(int)$id, $rest['restaurant_number']], $entities);
         $s = $pdo->prepare("
             SELECT id, delivery_date, status, submitted_at, updated_at, updated_by, comment, legal_entity
@@ -2009,6 +2075,7 @@ if ($roAction === 'history-order' && $method === 'GET') {
 if ($roAction === 'submit-order' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $rest['legal_entity_group'] ?? 'BK_VM');
 
     $deliveryDate = $body['delivery_date'] ?? '';
     $items = $body['items'] ?? [];
@@ -2253,6 +2320,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
 if ($roAction === 'repeat-order' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    roRequireRestaurantOrdersEnabled($pdo, $rest['legal_entity'] ?? null, $rest['legal_entity_group'] ?? 'BK_VM');
 
     $sourceOrderId = $body['source_order_id'] ?? null;
     $deliveryDate = $body['delivery_date'] ?? '';
@@ -2314,6 +2382,47 @@ if (strpos($roAction, 'admin') === 0) {
 
     $adminAction = $roParts[2] ?? '';
     $adminParam = $roParts[3] ?? null;
+
+    // --- Настройки модуля для выбранной группы юрлиц ---
+    if ($adminAction === 'module-settings' && $method === 'GET') {
+        $legalEntity = roNormalizeRestaurantOrdersLegalEntity($_GET['legal_entity'] ?? null, $_GET['legal_entity_group'] ?? 'BK_VM');
+        $entityGroup = getEntityGroup($legalEntity);
+        $entityGroup = roNormalizeLegalEntityGroup($entityGroup);
+        roEnsureGroupAccess($sessionUser, $entityGroup);
+
+        roRespond([
+            'legal_entity' => $legalEntity,
+            'legal_entity_group' => $entityGroup,
+            'restaurant_orders_enabled' => roRestaurantOrdersEnabled($pdo, $legalEntity, $entityGroup),
+        ]);
+    }
+
+    if ($adminAction === 'module-settings' && $method === 'POST') {
+        $legalEntity = roNormalizeRestaurantOrdersLegalEntity($body['legal_entity'] ?? null, $body['legal_entity_group'] ?? 'BK_VM');
+        $entityGroup = getEntityGroup($legalEntity);
+        $entityGroup = roNormalizeLegalEntityGroup($entityGroup);
+        roEnsureGroupAccess($sessionUser, $entityGroup);
+
+        $enabled = !empty($body['restaurant_orders_enabled']) ? 1 : 0;
+        $updatedBy = $sessionUser['name'] ?? null;
+        $s = $pdo->prepare("
+            INSERT INTO ro_module_settings (legal_entity, legal_entity_group, restaurant_orders_enabled, updated_by)
+            VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              legal_entity_group = VALUES(legal_entity_group),
+              restaurant_orders_enabled = VALUES(restaurant_orders_enabled),
+              updated_by = VALUES(updated_by),
+              updated_at = CURRENT_TIMESTAMP
+        ");
+        $s->execute([$legalEntity, $entityGroup, $enabled, $updatedBy]);
+
+        roRespond([
+            'success' => true,
+            'legal_entity' => $legalEntity,
+            'legal_entity_group' => $entityGroup,
+            'restaurant_orders_enabled' => $enabled === 1,
+        ]);
+    }
 
     // --- Статус заявок ---
     if ($adminAction === 'status' && $method === 'GET') {
@@ -2451,7 +2560,9 @@ if (strpos($roAction, 'admin') === 0) {
         if ($action === 'confirm') {
             $payload = $body['payload'] ?? [];
             $addMissingTemplates = !empty($body['add_missing_templates']);
-            roRespond(roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates));
+            $overwriteMode = $body['overwrite_mode'] ?? 'none';
+            $overwriteRestaurants = $body['overwrite_restaurants'] ?? [];
+            roRespond(roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates, $overwriteMode, $overwriteRestaurants));
         }
 
         if (empty($_FILES['file'])) roRespond(['error' => 'Файл не загружен'], 400);

@@ -24,7 +24,7 @@
 
       <div class="sb-label">Заказы</div>
       <!-- Основная поставка -->
-      <button class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'delivery' }"
+      <button v-if="roStore.restaurantOrdersEnabled" class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'delivery' }"
         @click="switchTab('orders', 'delivery')">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5a2 2 0 01-2 2h-1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
         Основная поставка
@@ -181,7 +181,7 @@
     <!-- ══════ TAB: Заказы ══════ -->
     <section v-if="activeTab === 'orders' && !globalLoading && !globalError" class="cab-section cab-section-orders">
       <div class="ord-tabs mob-order-tabs" aria-label="Разделы заказов">
-        <button class="ord-tab" :class="{ active: orderSubTab === 'delivery' }" @click="switchTab('orders', 'delivery')">
+        <button v-if="roStore.restaurantOrdersEnabled" class="ord-tab" :class="{ active: orderSubTab === 'delivery' }" @click="switchTab('orders', 'delivery')">
           Основная поставка
           <span v-if="deliveryBadge" class="ord-tab-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
         </button>
@@ -1102,6 +1102,11 @@ const restaurantAddress = computed(() => {
 });
 const orderSubTab = ref('delivery');
 const suppliers = ref([]);
+const defaultOrderSubTab = computed(() => {
+  if (roStore.restaurantOrdersEnabled) return 'delivery';
+  const firstSupplier = suppliers.value[0];
+  return firstSupplier ? 'sup_' + firstSupplier.id : 'history';
+});
 
 // ═══ Stock collection ═══
 const stockCollection = reactive({ active: false, collection: null });
@@ -1312,8 +1317,9 @@ const filteredHistoryOrders = computed(() => {
 
 // ═══ Dashboard ═══
 const dashOrdersSubmitted = computed(() => {
-  // Основная поставка
-  let total = roStore.deliveryDays.filter(d => d.order?.status === 'submitted' || d.order?.status === 'edited').length;
+  let total = roStore.restaurantOrdersEnabled
+    ? roStore.deliveryDays.filter(d => d.order?.status === 'submitted' || d.order?.status === 'edited').length
+    : 0;
   // Поставщики (Камако и др.)
   for (const sup of suppliers.value) {
     total += (sup.available_dates || []).filter(d => !!d.order).length;
@@ -1321,8 +1327,9 @@ const dashOrdersSubmitted = computed(() => {
   return total;
 });
 const dashOrdersPending = computed(() => {
-  // Основная поставка: открытые дни без заявки
-  let total = roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && d.deadline_status !== 'not_open' && !d.order).length;
+  let total = roStore.restaurantOrdersEnabled
+    ? roStore.deliveryDays.filter(d => d.deadline_status !== 'closed' && d.deadline_status !== 'not_open' && !d.order).length
+    : 0;
   // Поставщики: открытые даты без заявки
   for (const sup of suppliers.value) {
     total += (sup.available_dates || []).filter(d => d.deadline_status === 'open' && !d.order).length;
@@ -1336,8 +1343,9 @@ const urgentItems = computed(() => {
     const stamps = arr.map(x => x?.[field]).filter(Boolean).sort();
     return stamps[0] || '9999-12-31 23:59';
   };
-  // Delivery deadlines
-  const openDays = roStore.deliveryDays.filter(d => (d.deadline_status === 'open' || d.deadline_status === 'warning') && !d.order);
+  const openDays = roStore.restaurantOrdersEnabled
+    ? roStore.deliveryDays.filter(d => (d.deadline_status === 'open' || d.deadline_status === 'warning') && !d.order)
+    : [];
   if (openDays.length) {
     items.push({
       key: 'del', type: 'warn',
@@ -2012,8 +2020,11 @@ async function switchTab(tab, subTab) {
   const curTab = activeTab.value;
   const curSub = orderSubTab.value;
   const nextTab = tab;
-  const requestedSub = (tab === 'orders') ? (subTab || orderSubTab.value) : null;
-  const nextSub = requestedSub;
+  const requestedSub = (tab === 'orders') ? (subTab || orderSubTab.value || defaultOrderSubTab.value) : null;
+  const normalizedSub = requestedSub === 'delivery' && !roStore.restaurantOrdersEnabled
+    ? defaultOrderSubTab.value
+    : requestedSub;
+  const nextSub = normalizedSub;
 
   // Определяем, какую под-вкладку пользователь реально покидает
   const leavingDelivery = curTab === 'orders' && curSub === 'delivery' && !(nextTab === 'orders' && nextSub === 'delivery');
@@ -2029,7 +2040,7 @@ async function switchTab(tab, subTab) {
   }
   activeTab.value = tab;
   if (tab === 'orders') {
-    orderSubTab.value = nextSub || 'delivery';
+    orderSubTab.value = nextSub || defaultOrderSubTab.value;
   } else if (subTab) {
     orderSubTab.value = subTab;
   }
@@ -2059,10 +2070,10 @@ function applyRouteToState() {
     activeTab.value = 'dashboard';
   } else if (name === 'restaurant-orders-tab' || name === 'restaurant-orders-delivery') {
     activeTab.value = 'orders';
-    orderSubTab.value = 'delivery';
+    orderSubTab.value = roStore.restaurantOrdersEnabled ? 'delivery' : defaultOrderSubTab.value;
   } else if (name === 'restaurant-orders-planeta') {
     activeTab.value = 'orders';
-    orderSubTab.value = 'delivery';
+    orderSubTab.value = roStore.restaurantOrdersEnabled ? 'delivery' : defaultOrderSubTab.value;
   } else if (name === 'restaurant-orders-history') {
     activeTab.value = 'orders';
     orderSubTab.value = 'history';
@@ -2099,12 +2110,14 @@ function syncStateToRoute() {
     target = { name: 'restaurant-profile' };
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
-    if (sub === 'delivery') target = { name: 'restaurant-orders-delivery' };
+    if (sub === 'delivery' && roStore.restaurantOrdersEnabled) target = { name: 'restaurant-orders-delivery' };
     else if (sub === 'history') target = { name: 'restaurant-orders-history' };
     else if (sub && sub.startsWith('sup_')) {
       target = { name: 'restaurant-orders-supplier', params: { supplierId: sub.slice(4) } };
     } else {
-      target = { name: 'restaurant-orders-delivery' };
+      target = roStore.restaurantOrdersEnabled
+        ? { name: 'restaurant-orders-delivery' }
+        : { name: 'restaurant-orders-history' };
     }
   }
   if (!target) return;
@@ -2419,12 +2432,14 @@ async function loadCabinetData() {
     showInfo('Поставщики', e.message || 'Не удалось загрузить список поставщиков', 'error');
   }
   applyRouteToState();
-  if (roStore.deliveryDays.length) {
+  if (roStore.restaurantOrdersEnabled && roStore.deliveryDays.length) {
     const today = delDateToLocalYmd(new Date());
     const nearest = roStore.deliveryDays.find(d => d.date >= today && d.deadline_status !== 'closed') || roStore.deliveryDays.find(d => d.date >= today) || roStore.deliveryDays[0];
     if (nearest) await delSelectDay(nearest.date);
   }
-  delPreviousOrders.value = (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited');
+  delPreviousOrders.value = roStore.restaurantOrdersEnabled
+    ? (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited')
+    : [];
   await loadHistory();
   await loadSurveyList();
   await checkStockCollection();
