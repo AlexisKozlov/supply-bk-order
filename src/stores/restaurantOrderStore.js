@@ -307,6 +307,30 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api(`admin/item/${itemId}${qs}`, { method: 'DELETE' });
   }
 
+  async function adminPreviewUtImport(file, deliveryDate, legalEntity = '') {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('delivery_date', deliveryDate);
+    if (legalEntity) formData.append('legal_entity', legalEntity);
+    const res = await fetch(`${API_BASE}/admin/import-ut`, {
+      method: 'POST',
+      headers: {
+        'X-Session-Token': localStorage.getItem('bk_session_token') || '',
+      },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok && data.error) throw new Error(data.error);
+    return data.preview;
+  }
+
+  async function adminConfirmUtImport(payload, addMissingTemplates = false) {
+    return await api('admin/import-ut', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'confirm', payload, add_missing_templates: addMissingTemplates }),
+    });
+  }
+
   // === Журнал изменений ===
   async function adminGetAuditLog(filters = {}) {
     const params = new URLSearchParams();
@@ -442,6 +466,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     adminExtendDeadline, adminGetTemplates, adminSaveTemplate, adminImportTemplateFromStock, adminSearchProducts,
     adminGetUsers, adminCreateUser, adminCreateBulkUsers, adminToggleUser, adminResetPassword,
     adminGetExportData, adminGetSessions, adminDeleteItem,
+    adminPreviewUtImport, adminConfirmUtImport,
     adminGetAuditLog, adminGetOrderHistory,
     adminUploadStock, adminGetStockBalances, adminGetStockDates,
   };

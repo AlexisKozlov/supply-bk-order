@@ -570,6 +570,367 @@ function roRespondMultiplicityError($violations) {
     roRespond(['error' => $message], 400);
 }
 
+function roNormalizeImportText($value) {
+    $s = mb_strtolower((string)$value, 'UTF-8');
+    $s = str_replace(['ё'], ['е'], $s);
+    $s = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $s);
+    return trim(preg_replace('/\s+/u', ' ', $s));
+}
+
+function roParseImportQty($value) {
+    $s = str_replace([' ', ','], ['', '.'], trim((string)$value));
+    return is_numeric($s) ? (float)$s : 0.0;
+}
+
+function roParseUtDate($value) {
+    $s = trim((string)$value);
+    if (preg_match('/^(\d{2})\.(\d{2})\.(\d{4})$/', $s, $m)) {
+        return "{$m[3]}-{$m[2]}-{$m[1]}";
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) return $s;
+    return '';
+}
+
+function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $legalEntity = null) {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+        roRespond(['error' => 'Выберите дату доставки перед импортом'], 400);
+    }
+
+    require_once __DIR__ . '/../lib/SimpleXLSX.php';
+    $xlsx = \Shuchkin\SimpleXLSX::parse($filePath);
+    if (!$xlsx) roRespond(['error' => 'Не удалось прочитать Excel файл'], 400);
+
+    $entityGroup = $legalEntity ? getEntityGroup($legalEntity) : null;
+    if (!$entityGroup) {
+        $allowedGroups = roGetSessionUserGroups($sessionUser);
+        $entityGroup = $allowedGroups[0] ?? 'BK_VM';
+    }
+    roEnsureGroupAccess($sessionUser, $entityGroup);
+
+    $session = roGetActiveSession($pdo, $entityGroup);
+    if (!$session) roRespond(['error' => 'Нет активной сессии приёма заявок'], 400);
+
+    $entities = getEntitiesInGroup($entityGroup);
+    $entityPh = implode(',', array_fill(0, count($entities), '?'));
+
+    $productsStmt = $pdo->prepare("
+        SELECT sku, name, category, legal_entity, COALESCE(multiplicity, 1) AS multiplicity
+        FROM products
+        WHERE legal_entity IN ({$entityPh})
+        ORDER BY is_active DESC, id ASC
+    ");
+    $productsStmt->execute($entities);
+    $productsBySku = [];
+    $productsByName = [];
+    foreach ($productsStmt->fetchAll() as $p) {
+        $sku = trim((string)$p['sku']);
+        if ($sku !== '' && !isset($productsBySku[$sku])) $productsBySku[$sku] = $p;
+        $n = roNormalizeImportText($p['name'] ?? '');
+        if ($n !== '' && !isset($productsByName[$n])) $productsByName[$n] = $p;
+    }
+
+    $tplStmt = $pdo->prepare("
+        SELECT sku, product_name, category, legal_entity, COALESCE(NULLIF(multiplicity, 0), 1) AS multiplicity
+        FROM ro_templates
+        WHERE legal_entity IN ({$entityPh}) AND is_active = 1
+    ");
+    $tplStmt->execute($entities);
+    $templatesByLeSku = [];
+    $templatesBySku = [];
+    foreach ($tplStmt->fetchAll() as $t) {
+        $templatesByLeSku[$t['legal_entity'] . '|' . $t['sku']] = $t;
+        if (!isset($templatesBySku[$t['sku']])) $templatesBySku[$t['sku']] = $t;
+    }
+
+    $restsStmt = $pdo->prepare("SELECT id, number, city, address, legal_entity_group FROM restaurants WHERE active = 1 AND legal_entity_group = ?");
+    $restsStmt->execute([$entityGroup]);
+    $restaurantsByNumber = [];
+    foreach ($restsStmt->fetchAll() as $r) {
+        $restaurantsByNumber[(string)(int)$r['number']] = $r;
+    }
+
+    $existingStmt = $pdo->prepare("SELECT restaurant_number, id FROM ro_orders WHERE session_id = ? AND delivery_date = ?");
+    $existingStmt->execute([$session['id'], $selectedDate]);
+    $existingByRestaurant = [];
+    foreach ($existingStmt->fetchAll() as $row) {
+        $existingByRestaurant[(string)(int)$row['restaurant_number']] = (int)$row['id'];
+    }
+
+    $orders = [];
+    $fileDates = [];
+    $unmatchedMap = [];
+    $missingRestaurants = [];
+    $missingTemplateMap = [];
+    $rowsTotal = 0;
+    $rowsMatched = 0;
+    $rowsSkippedDeleted = 0;
+
+    foreach ($xlsx->sheetNames() as $sheetIdx => $sheetName) {
+        $rows = $xlsx->rows($sheetIdx);
+        if (empty($rows)) continue;
+
+        $headerRow = -1;
+        $cols = ['del' => -1, 'product' => -1, 'restaurant' => -1, 'date' => -1, 'qty' => -1];
+        for ($r = 0; $r < min(20, count($rows)); $r++) {
+            foreach ($rows[$r] as $c => $value) {
+                $v = roNormalizeImportText($value);
+                if ($v === 'del') $cols['del'] = $c;
+                if ($v === 'номенклатура' || $v === 'товар') $cols['product'] = $c;
+                if ($v === 'ресторан') $cols['restaurant'] = $c;
+                if ($v === 'желаемая дата поступления' || $v === 'дата поступления') $cols['date'] = $c;
+                if ($v === 'кол во' || $v === 'количество') $cols['qty'] = $c;
+            }
+            if ($cols['product'] >= 0 && $cols['restaurant'] >= 0 && $cols['date'] >= 0 && $cols['qty'] >= 0) {
+                $headerRow = $r;
+                break;
+            }
+        }
+        if ($headerRow < 0) continue;
+
+        for ($r = $headerRow + 1; $r < count($rows); $r++) {
+            $del = mb_strtolower(trim((string)($rows[$r][$cols['del']] ?? '')), 'UTF-8');
+            if ($del === 'да' || $del === 'yes' || $del === 'true') {
+                $rowsSkippedDeleted++;
+                continue;
+            }
+
+            $productRaw = trim((string)($rows[$r][$cols['product']] ?? ''));
+            $restRaw = trim((string)($rows[$r][$cols['restaurant']] ?? ''));
+            $date = roParseUtDate($rows[$r][$cols['date']] ?? '');
+            $qty = roParseImportQty($rows[$r][$cols['qty']] ?? 0);
+            if ($productRaw === '' || $restRaw === '' || $date === '' || $qty <= 0) continue;
+
+            $rowsTotal++;
+            $fileDates[$date] = true;
+
+            if (!preg_match('/(\d+)/', $restRaw, $rm)) {
+                $missingRestaurants[$restRaw] = ['restaurant' => $restRaw, 'rows' => ($missingRestaurants[$restRaw]['rows'] ?? 0) + 1];
+                continue;
+            }
+            $restNumber = (string)(int)$rm[1];
+            if (!isset($restaurantsByNumber[$restNumber])) {
+                $missingRestaurants[$restNumber] = ['restaurant' => $restRaw, 'rows' => ($missingRestaurants[$restNumber]['rows'] ?? 0) + 1];
+                continue;
+            }
+
+            $sku = '';
+            $excelName = $productRaw;
+            if (preg_match('/^(\S+)\s+(.+)$/u', $productRaw, $pm)) {
+                $sku = trim($pm[1]);
+                $excelName = trim($pm[2]);
+            }
+
+            $product = $productsBySku[$sku]
+                ?? $productsByName[roNormalizeImportText($productRaw)]
+                ?? $productsByName[roNormalizeImportText($excelName)]
+                ?? null;
+            if (!$product) {
+                $key = ($sku ?: $productRaw) . '|' . $excelName;
+                if (!isset($unmatchedMap[$key])) {
+                    $unmatchedMap[$key] = ['sku' => $sku, 'name' => $excelName, 'rows' => 0, 'quantity' => 0];
+                }
+                $unmatchedMap[$key]['rows']++;
+                $unmatchedMap[$key]['quantity'] += $qty;
+                continue;
+            }
+
+            $le = roGetLegalEntity($pdo, $restNumber, $entityGroup);
+            if ($sessionUser && !checkLegalEntityAccess($sessionUser, $le)) continue;
+
+            $finalSku = trim((string)$product['sku']);
+            $template = $templatesByLeSku[$le . '|' . $finalSku] ?? $templatesBySku[$finalSku] ?? null;
+            $category = $template['category'] ?? ($product['category'] ?: 'Сухой');
+            $productName = $template['product_name'] ?? ($product['name'] ?: $excelName);
+            $multiplicity = (float)($template['multiplicity'] ?? $product['multiplicity'] ?? 1);
+
+            if (!$template) {
+                $mtKey = $le . '|' . $finalSku;
+                if (!isset($missingTemplateMap[$mtKey])) {
+                    $missingTemplateMap[$mtKey] = [
+                        'legal_entity' => $le,
+                        'sku' => $finalSku,
+                        'product_name' => $productName,
+                        'category' => $category,
+                        'multiplicity' => $multiplicity > 0 ? $multiplicity : 1,
+                    ];
+                }
+            }
+
+            if (!isset($orders[$restNumber])) {
+                $rest = $restaurantsByNumber[$restNumber];
+                $orders[$restNumber] = [
+                    'restaurant_number' => (int)$restNumber,
+                    'city' => $rest['city'] ?? '',
+                    'address' => $rest['address'] ?? '',
+                    'legal_entity' => $le,
+                    'items' => [],
+                ];
+            }
+            if (!isset($orders[$restNumber]['items'][$finalSku])) {
+                $orders[$restNumber]['items'][$finalSku] = [
+                    'sku' => $finalSku,
+                    'product_name' => $productName,
+                    'category' => $category,
+                    'quantity' => 0,
+                    'comment' => null,
+                ];
+            }
+            $orders[$restNumber]['items'][$finalSku]['quantity'] += $qty;
+            $rowsMatched++;
+        }
+    }
+
+    $dates = array_keys($fileDates);
+    sort($dates);
+    if (count($dates) !== 1 || $dates[0] !== $selectedDate) {
+        roRespond([
+            'error' => 'Дата в файле не совпадает с выбранной датой',
+            'file_dates' => $dates,
+            'selected_date' => $selectedDate,
+        ], 400);
+    }
+
+    $ordersOut = [];
+    $skippedExisting = [];
+    foreach ($orders as $restNumber => $order) {
+        $order['items'] = array_values($order['items']);
+        usort($order['items'], fn($a, $b) => strcmp(($a['category'] ?? '') . ($a['product_name'] ?? ''), ($b['category'] ?? '') . ($b['product_name'] ?? '')));
+        if (isset($existingByRestaurant[$restNumber])) {
+            $skippedExisting[] = [
+                'restaurant_number' => (int)$restNumber,
+                'order_id' => $existingByRestaurant[$restNumber],
+                'items_count' => count($order['items']),
+            ];
+            continue;
+        }
+        $ordersOut[] = $order;
+    }
+    usort($ordersOut, fn($a, $b) => $a['restaurant_number'] <=> $b['restaurant_number']);
+
+    return [
+        'selected_date' => $selectedDate,
+        'legal_entity_group' => $entityGroup,
+        'session_id' => (int)$session['id'],
+        'summary' => [
+            'rows_total' => $rowsTotal,
+            'rows_matched' => $rowsMatched,
+            'rows_skipped_deleted' => $rowsSkippedDeleted,
+            'orders_to_create' => count($ordersOut),
+            'orders_skipped_existing' => count($skippedExisting),
+            'items_to_create' => array_sum(array_map(fn($o) => count($o['items']), $ordersOut)),
+            'unmatched_count' => count($unmatchedMap),
+            'missing_template_count' => count($missingTemplateMap),
+            'missing_restaurants_count' => count($missingRestaurants),
+        ],
+        'orders' => $ordersOut,
+        'skipped_existing' => $skippedExisting,
+        'unmatched' => array_values($unmatchedMap),
+        'missing_templates' => array_values($missingTemplateMap),
+        'missing_restaurants' => array_values($missingRestaurants),
+    ];
+}
+
+function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates) {
+    $selectedDate = $payload['selected_date'] ?? '';
+    $entityGroup = $payload['legal_entity_group'] ?? 'BK_VM';
+    $orders = $payload['orders'] ?? [];
+    $missingTemplates = $payload['missing_templates'] ?? [];
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate) || empty($orders)) {
+        roRespond(['error' => 'Нет заказов для импорта'], 400);
+    }
+    roEnsureGroupAccess($sessionUser, $entityGroup);
+    $session = roGetActiveSession($pdo, $entityGroup);
+    if (!$session) roRespond(['error' => 'Нет активной сессии приёма заявок'], 400);
+
+    $actor = resolveActorName($pdo, $sessionUser, 'отдел закупок');
+    $created = 0;
+    $skipped = [];
+    $itemsCreated = 0;
+    $templatesAdded = 0;
+
+    $pdo->beginTransaction();
+    try {
+        if ($addMissingTemplates && !empty($missingTemplates)) {
+            $sortStmt = $pdo->prepare("SELECT COALESCE(MAX(sort_order), 0) FROM ro_templates WHERE legal_entity = ? AND category = ?");
+            $tplCheck = $pdo->prepare("SELECT id FROM ro_templates WHERE legal_entity = ? AND category = ? AND sku = ? LIMIT 1");
+            $tplInsert = $pdo->prepare("INSERT INTO ro_templates (legal_entity, category, sku, product_name, multiplicity, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)");
+            $sortCache = [];
+            foreach ($missingTemplates as $tpl) {
+                $le = $tpl['legal_entity'] ?? '';
+                $category = $tpl['category'] ?? 'Сухой';
+                $sku = trim((string)($tpl['sku'] ?? ''));
+                if (!$le || !$sku) continue;
+                if ($sessionUser && !checkLegalEntityAccess($sessionUser, $le)) continue;
+                $tplCheck->execute([$le, $category, $sku]);
+                if ($tplCheck->fetch()) continue;
+                $key = $le . '|' . $category;
+                if (!isset($sortCache[$key])) {
+                    $sortStmt->execute([$le, $category]);
+                    $sortCache[$key] = (int)$sortStmt->fetchColumn();
+                }
+                $sortCache[$key] += 10;
+                $mult = (float)($tpl['multiplicity'] ?? 1);
+                $tplInsert->execute([$le, $category, $sku, trim((string)($tpl['product_name'] ?? $sku)), $mult > 0 ? $mult : 1, $sortCache[$key]]);
+                $templatesAdded++;
+            }
+        }
+
+        $existingStmt = $pdo->prepare("SELECT id FROM ro_orders WHERE session_id = ? AND restaurant_number = ? AND delivery_date = ? LIMIT 1");
+        $orderInsert = $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?)");
+        $itemInsert = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
+
+        foreach ($orders as $order) {
+            $restNumber = (int)($order['restaurant_number'] ?? 0);
+            $le = $order['legal_entity'] ?? roGetLegalEntity($pdo, $restNumber, $entityGroup);
+            if (!$restNumber || empty($order['items'])) continue;
+            if ($sessionUser && !checkLegalEntityAccess($sessionUser, $le)) continue;
+
+            $existingStmt->execute([$session['id'], $restNumber, $selectedDate]);
+            $existingId = $existingStmt->fetchColumn();
+            if ($existingId) {
+                $skipped[] = ['restaurant_number' => $restNumber, 'order_id' => (int)$existingId];
+                continue;
+            }
+
+            $orderInsert->execute([$session['id'], $restNumber, $selectedDate, $actor, $le, 'Импорт из 1С УТ']);
+            $orderId = (int)$pdo->lastInsertId();
+            $totalQty = 0;
+            $totalItems = 0;
+            foreach (roAggregateOrderItems($order['items']) as $item) {
+                $itemInsert->execute([$orderId, $item['sku'], $item['product_name'], $item['category'], $item['quantity'], $item['comment']]);
+                $totalQty += (float)$item['quantity'];
+                $totalItems++;
+                $itemsCreated++;
+            }
+            roLogAudit($pdo, [
+                'order_id' => $orderId,
+                'restaurant_number' => $restNumber,
+                'delivery_date' => $selectedDate,
+                'action' => 'order_created',
+                'actor_name' => $actor,
+                'actor_type' => 'admin',
+                'new_value' => $totalItems . ' поз. / ' . $totalQty . ' кор.',
+                'details' => ['source' => '1c_ut_import'],
+            ]);
+            $created++;
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        error_log('roCommitUtImport error: ' . $e->getMessage());
+        roRespond(['error' => 'Ошибка импорта заказов'], 500);
+    }
+
+    return [
+        'success' => true,
+        'created' => $created,
+        'items_created' => $itemsCreated,
+        'templates_added' => $templatesAdded,
+        'skipped_existing' => $skipped,
+    ];
+}
+
 function roGetSessionUserGroups($sessionUser) {
     if (!$sessionUser) return [];
     if (($sessionUser['role'] ?? '') === 'admin') return ['BK_VM', 'PS'];
@@ -2082,6 +2443,22 @@ if (strpos($roAction, 'admin') === 0) {
                 'pending' => $total - $submitted,
             ],
         ]);
+    }
+
+    // --- Импорт заказов из Excel 1С УТ ---
+    if ($adminAction === 'import-ut' && $method === 'POST') {
+        $action = $body['action'] ?? ($_POST['action'] ?? 'preview');
+        if ($action === 'confirm') {
+            $payload = $body['payload'] ?? [];
+            $addMissingTemplates = !empty($body['add_missing_templates']);
+            roRespond(roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates));
+        }
+
+        if (empty($_FILES['file'])) roRespond(['error' => 'Файл не загружен'], 400);
+        $selectedDate = $_POST['delivery_date'] ?? '';
+        $legalEntity = $_POST['legal_entity'] ?? null;
+        $preview = roBuildUtImportPreview($pdo, $_FILES['file']['tmp_name'], $selectedDate, $sessionUser, $legalEntity);
+        roRespond(['success' => true, 'preview' => $preview]);
     }
 
     // --- Детали заказа ---

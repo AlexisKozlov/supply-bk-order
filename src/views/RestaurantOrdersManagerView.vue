@@ -68,6 +68,11 @@
           <button class="rom-btn rom-btn-export" @click="openExportModal" :disabled="exportExporting">
             Excel
           </button>
+          <button class="rom-btn" @click="utFileInput?.click()" :disabled="utImportLoading || !selectedDate" title="Импорт заказов из Excel 1С Управление торговлей">
+            <BurgerSpinner v-if="utImportLoading" size="xs" />
+            <span>{{ utImportLoading ? 'Проверка...' : 'Импорт 1С УТ' }}</span>
+          </button>
+          <input ref="utFileInput" type="file" accept=".xlsx,.xls" style="display:none" @change="handleUtFile" />
           <button class="rom-btn rom-btn-icon" @click="loadStatus" :disabled="loading" title="Обновить">
             {{ loading ? '...' : '↻' }}
           </button>
@@ -819,6 +824,89 @@
 
     <!-- Old templates modal removed -->
 
+    <!-- Import 1C UT preview modal -->
+    <div v-if="showUtImportModal" class="rom-modal-overlay" @click.self="closeUtImportModal">
+      <div class="rom-modal rom-ut-modal">
+        <div class="rom-modal-header">
+          <h2>Импорт заказов из 1С УТ</h2>
+          <button class="rom-modal-close" @click="closeUtImportModal">&times;</button>
+        </div>
+        <div class="rom-modal-body">
+          <div v-if="utImportPreview" class="rom-ut-preview">
+            <div class="rom-ut-summary">
+              <div class="rom-ut-stat">
+                <b>{{ utImportPreview.summary.orders_to_create }}</b>
+                <span>заказов будет создано</span>
+              </div>
+              <div class="rom-ut-stat">
+                <b>{{ utImportPreview.summary.items_to_create }}</b>
+                <span>позиций</span>
+              </div>
+              <div class="rom-ut-stat warn">
+                <b>{{ utImportPreview.summary.orders_skipped_existing }}</b>
+                <span>заказов уже есть</span>
+              </div>
+              <div class="rom-ut-stat danger">
+                <b>{{ utImportPreview.summary.unmatched_count }}</b>
+                <span>товаров не найдено</span>
+              </div>
+            </div>
+
+            <label v-if="utImportPreview.missing_templates.length" class="rom-ut-check">
+              <input type="checkbox" v-model="utAddMissingTemplates" />
+              <span>Добавить {{ utImportPreview.missing_templates.length }} товаров в шаблон заказа после импорта</span>
+            </label>
+
+            <div class="rom-ut-sections">
+              <div v-if="utImportPreview.unmatched.length" class="rom-ut-section">
+                <h3>Не найдено в базе товаров</h3>
+                <div class="rom-ut-list">
+                  <div v-for="p in utImportPreview.unmatched.slice(0, 20)" :key="(p.sku || '') + p.name" class="rom-ut-row danger">
+                    <b>{{ p.sku || '—' }}</b>
+                    <span>{{ p.name }}</span>
+                    <em>{{ fmtQty(p.quantity) }}</em>
+                  </div>
+                </div>
+                <p v-if="utImportPreview.unmatched.length > 20" class="rom-ut-note">Показаны первые 20 позиций.</p>
+              </div>
+
+              <div v-if="utImportPreview.missing_templates.length" class="rom-ut-section">
+                <h3>Есть в базе, но нет в шаблоне</h3>
+                <div class="rom-ut-list">
+                  <div v-for="p in utImportPreview.missing_templates.slice(0, 20)" :key="p.legal_entity + p.sku" class="rom-ut-row">
+                    <b>{{ p.sku }}</b>
+                    <span>{{ p.product_name }}</span>
+                    <em>{{ p.category }}</em>
+                  </div>
+                </div>
+                <p v-if="utImportPreview.missing_templates.length > 20" class="rom-ut-note">Показаны первые 20 позиций.</p>
+              </div>
+
+              <div v-if="utImportPreview.skipped_existing.length" class="rom-ut-section">
+                <h3>Будут пропущены, потому что заказ уже есть</h3>
+                <div class="rom-ut-chips">
+                  <span v-for="r in utImportPreview.skipped_existing" :key="r.restaurant_number" class="rom-ut-chip">№{{ r.restaurant_number }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rom-ut-note">
+              Дата файла совпала с выбранной датой: <b>{{ formatDate(utImportPreview.selected_date) }}</b>.
+              Не найденные товары не попадут в заказ.
+            </div>
+          </div>
+
+          <div class="rom-modal-actions">
+            <button class="rom-btn" @click="closeUtImportModal" :disabled="utImportConfirming">Отмена</button>
+            <button class="rom-btn rom-btn-primary" @click="confirmUtImport" :disabled="utImportConfirming || !utImportPreview?.summary.orders_to_create">
+              <BurgerSpinner v-if="utImportConfirming" size="xs" />
+              <span>{{ utImportConfirming ? 'Импорт...' : 'Создать заказы' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Deadline extend modal -->
     <div v-if="showDeadlineModal" class="rom-modal-overlay" @click.self="showDeadlineModal = false">
       <div class="rom-modal" style="max-width:380px">
@@ -1061,6 +1149,12 @@ const editSearch = ref('');
 const moreMenuOpen = ref(false);
 const restFilter = ref('');
 const restStatusFilter = ref('');
+const utFileInput = ref(null);
+const utImportLoading = ref(false);
+const utImportConfirming = ref(false);
+const showUtImportModal = ref(false);
+const utImportPreview = ref(null);
+const utAddMissingTemplates = ref(true);
 
 const filteredRestaurants = computed(() => {
   const q = restFilter.value.trim().toLowerCase();
@@ -1129,6 +1223,11 @@ function userStatusLabel(u) {
   if (!u.has_password) return 'Без пароля';
   if (!u.is_active) return 'Отключён';
   return 'Активен';
+}
+
+function fmtQty(value) {
+  const n = Number(value) || 0;
+  return Math.abs(n - Math.round(n)) < 0.001 ? String(Math.round(n)) : n.toFixed(2).replace(/\.?0+$/, '');
 }
 function shortLegalEntity(le) {
   if (!le) return '';
@@ -1795,6 +1894,55 @@ async function saveDeadlineExtend() {
 }
 
 // statusLabel imported from roUtils.js
+
+async function handleUtFile(e) {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!selectedDate.value) {
+    toast.warning('Выберите дату', 'Перед импортом нужно выбрать дату доставки');
+    return;
+  }
+  utImportLoading.value = true;
+  try {
+    const preview = await store.adminPreviewUtImport(file, selectedDate.value, orderStore.settings.legalEntity || '');
+    utImportPreview.value = preview;
+    utAddMissingTemplates.value = (preview.missing_templates || []).length > 0;
+    showUtImportModal.value = true;
+  } catch (err) {
+    toast.error('Ошибка импорта', err.message || String(err));
+  } finally {
+    utImportLoading.value = false;
+  }
+}
+
+function closeUtImportModal() {
+  if (utImportConfirming.value) return;
+  showUtImportModal.value = false;
+  utImportPreview.value = null;
+}
+
+async function confirmUtImport() {
+  if (!utImportPreview.value) return;
+  utImportConfirming.value = true;
+  try {
+    const res = await store.adminConfirmUtImport(utImportPreview.value, utAddMissingTemplates.value);
+    toast.success(
+      'Импорт завершён',
+      `Создано заказов: ${res.created || 0}; позиций: ${res.items_created || 0}; добавлено в шаблон: ${res.templates_added || 0}`
+    );
+    showUtImportModal.value = false;
+    utImportPreview.value = null;
+    await loadStatus();
+    if (pageTab.value === 'templates' && (res.templates_added || 0) > 0) {
+      await loadFullTemplates();
+    }
+  } catch (err) {
+    toast.error('Ошибка импорта', err.message || String(err));
+  } finally {
+    utImportConfirming.value = false;
+  }
+}
 
 async function viewOrder(orderId) {
   try {
@@ -3220,6 +3368,50 @@ async function doUnifiedExport() {
 .rom-deadline-fields { display: flex; flex-direction: column; gap: 12px; }
 .rom-deadline-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #502314; font-weight: 600; }
 .rom-deadline-label input[type="time"] { width: 140px; }
+
+/* 1C UT import */
+.rom-ut-modal { max-width: 860px; }
+.rom-ut-preview { display: flex; flex-direction: column; gap: 14px; }
+.rom-ut-summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.rom-ut-stat {
+  border: 1px solid #EDE8E3; border-radius: 8px; padding: 12px;
+  background: #faf7f4; display: flex; flex-direction: column; gap: 4px;
+}
+.rom-ut-stat b { color: #502314; font-size: 24px; line-height: 1; }
+.rom-ut-stat span { color: #8b7355; font-size: 12px; }
+.rom-ut-stat.warn { background: #fffbeb; border-color: #fde68a; }
+.rom-ut-stat.danger { background: #fef2f2; border-color: #fecaca; }
+.rom-ut-check {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 8px;
+  color: #166534; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.rom-ut-sections { display: grid; gap: 12px; }
+.rom-ut-section {
+  border: 1px solid #EDE8E3; border-radius: 8px; padding: 12px;
+  background: white;
+}
+.rom-ut-section h3 { margin: 0 0 8px; font-size: 14px; color: #502314; }
+.rom-ut-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.rom-ut-row {
+  display: grid; grid-template-columns: 90px 1fr auto; gap: 8px;
+  align-items: center; padding: 6px 8px; border-radius: 6px;
+  background: #faf7f4; font-size: 12px;
+}
+.rom-ut-row b { color: #8b7355; font-family: monospace; }
+.rom-ut-row span { color: #502314; min-width: 0; }
+.rom-ut-row em { color: #6b7280; font-style: normal; white-space: nowrap; }
+.rom-ut-row.danger { background: #fef2f2; }
+.rom-ut-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rom-ut-chip {
+  padding: 4px 8px; border-radius: 999px; background: #f3f4f6;
+  color: #374151; font-size: 12px; font-weight: 700;
+}
+.rom-ut-note { color: #8b7355; font-size: 12px; margin: 0; }
+.rom-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 /* Stock balances tab */
 .rom-stock-toolbar { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
