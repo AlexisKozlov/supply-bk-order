@@ -7,7 +7,7 @@
         <button class="dist-btn primary" @click="showCreate = true">+ Новая сессия</button>
       </div>
 
-      <div v-if="loading" class="dist-empty">Загрузка...</div>
+      <div v-if="loading" class="dist-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!sessions.length" class="dist-empty">
         <div class="dist-empty-icon">📦</div>
         <div class="dist-empty-text">Нет сессий</div>

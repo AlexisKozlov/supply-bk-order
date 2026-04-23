@@ -98,7 +98,7 @@
         </span>
       </div>
 
-        <div v-if="loading" class="rom-loading">Загрузка...</div>
+        <div v-if="loading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
         <template v-else>
           <!-- Stats -->
           <div class="rom-stats">
@@ -127,7 +127,8 @@
             </button>
             <button class="rom-btn" style="background:#f0fdf4;color:#166534;border-color:#166534"
               @click="sendSummary" :disabled="sendingSummary || !selectedDate" title="Сгенерировать Excel и отправить подписчикам в Telegram">
-              {{ sendingSummary ? 'Отправка...' : '📤 Отправить сводку' }}
+              <BurgerSpinner v-if="sendingSummary" size="xs" />
+              <span>{{ sendingSummary ? 'Отправка...' : '📤 Отправить сводку' }}</span>
             </button>
             <button class="rom-btn" @click="loadStatus" :disabled="loading">Обновить</button>
             <button class="rom-btn" @click="copyMissingRestaurants" :disabled="!selectedDate" title="Скопировать номера ресторанов, которые не подали заявку на эту дату">
@@ -261,7 +262,7 @@
         </label>
         <button class="rom-btn-sm" @click="resetOrdersFilters">Сбросить</button>
       </div>
-      <div v-if="loadingList" class="rom-loading">Загрузка...</div>
+      <div v-if="loadingList" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="ordersList.length === 0" class="rom-empty">Заявок за выбранный период нет.</div>
       <div v-else class="rom-table-wrap">
         <table class="rom-table">
@@ -304,7 +305,7 @@
 
     <!-- ═══ TAB: Графики ═══ -->
     <template v-if="pageTab === 'schedules' && currentSupplierId">
-      <div v-if="loadingSchedules" class="rom-loading">Загрузка...</div>
+      <div v-if="loadingSchedules" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else>
         <div class="so-notify-box" style="margin-bottom:20px">
           <div class="so-notify-head">
@@ -313,10 +314,11 @@
               <div class="so-section-hint" style="margin:4px 0 0 0">После дедлайна бот отправит результат только отмеченным сотрудникам этого поставщика.</div>
             </div>
             <button class="rom-btn-sm" @click="saveNotifyUsers" :disabled="savingNotifyUsers || loadingNotifyUsers">
-              {{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить получателей' }}
+              <BurgerSpinner v-if="savingNotifyUsers" size="xs" />
+              <span>{{ savingNotifyUsers ? 'Сохранение...' : 'Сохранить получателей' }}</span>
             </button>
           </div>
-          <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0">Загрузка пользователей...</div>
+          <div v-if="loadingNotifyUsers" class="rom-loading" style="padding:8px 0"><BurgerSpinner size="sm" text="Загрузка пользователей..." /></div>
           <div v-else class="so-notify-users">
             <label v-for="u in allNotifyUsers" :key="u.name" class="so-notify-user">
               <input type="checkbox" :value="u.name" v-model="notifyUsers" />
@@ -346,19 +348,21 @@
             </div>
           </div>
           <button class="rom-btn rom-btn-export" @click="saveDeadlineRules" :disabled="savingDeadlines" style="margin-top:10px">
-            {{ savingDeadlines ? 'Сохранение...' : 'Сохранить дедлайны' }}
+            <BurgerSpinner v-if="savingDeadlines" size="xs" />
+            <span>{{ savingDeadlines ? 'Сохранение...' : 'Сохранить дедлайны' }}</span>
           </button>
         </div>
 
         <!-- Графики по ресторанам -->
         <h3 class="so-section-title" style="margin-top:20px">Дни доставки по ресторанам</h3>
         <p class="so-section-hint">Отметьте дни недели, когда ресторан получает поставку.</p>
-        <div v-if="scheduleGridLoading" class="rom-loading">Загрузка...</div>
+        <div v-if="scheduleGridLoading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
         <template v-else-if="scheduleRestaurants.length">
           <div class="so-sched-filter">
             <input v-model="scheduleFilter" type="text" class="rom-input-sm" placeholder="Поиск ресторана..." style="min-width:200px" />
             <button class="rom-btn rom-btn-export" @click="saveScheduleGrid" :disabled="savingScheduleGrid">
-              {{ savingScheduleGrid ? 'Сохранение...' : 'Сохранить' }}
+              <BurgerSpinner v-if="savingScheduleGrid" size="xs" />
+              <span>{{ savingScheduleGrid ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
             <span class="so-schedule-count" style="margin:0">{{ scheduleActiveRests }} рест., {{ scheduleActiveDays }} дней</span>
           </div>
@@ -397,12 +401,35 @@
         <select v-model="templateLe" @change="loadTemplates" class="rom-select">
           <option v-for="e in templateEntities" :key="e" :value="e">{{ ENTITY_SHORT_NAMES[e] || e }}</option>
         </select>
+        <div class="so-template-search">
+          <input
+            v-model="templateProductSearch"
+            class="rom-input"
+            type="text"
+            placeholder="Найти товар в справочнике"
+            @input="searchTemplateProducts"
+          />
+          <div v-if="templateProductResults.length" class="so-template-dropdown">
+            <button
+              v-for="p in templateProductResults"
+              :key="p.id || p.sku"
+              type="button"
+              class="so-template-option"
+              @click="addTemplateProduct(p)"
+            >
+              <b>{{ p.sku }}</b>
+              <span>{{ p.name || p.product_name }}</span>
+            </button>
+          </div>
+        </div>
+        <button class="rom-btn-sm" @click="addManualTemplateRow">+ Строка вручную</button>
         <button class="rom-btn-sm" @click="importFromProducts">Импорт из справочника</button>
         <button class="rom-btn-sm rom-btn-primary" @click="saveTemplates" :disabled="savingTemplates">
-          {{ savingTemplates ? 'Сохранение...' : 'Сохранить' }}
+          <BurgerSpinner v-if="savingTemplates" size="xs" />
+          <span>{{ savingTemplates ? 'Сохранение...' : 'Сохранить' }}</span>
         </button>
       </div>
-      <div v-if="loadingTemplates" class="rom-loading">Загрузка...</div>
+      <div v-if="loadingTemplates" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else>
         <div class="rom-table-wrap">
           <table class="rom-table">
@@ -418,7 +445,12 @@
             <tbody>
               <tr v-for="(t, idx) in templates" :key="idx">
                 <td><input type="number" v-model.number="t.sort_order" class="rom-input-sm" style="width:50px" /></td>
-                <td><span class="so-tpl-sku">{{ t.sku }}</span> {{ t.product_name }}</td>
+                <td>
+                  <div class="so-template-product-cell">
+                    <input v-model="t.sku" class="rom-input-sm so-template-sku-input" placeholder="SKU" />
+                    <input v-model="t.product_name" class="rom-input-sm so-template-name-input" placeholder="Название товара" />
+                  </div>
+                </td>
                 <td><input type="number" v-model.number="t.multiplicity" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
                 <td><input type="number" v-model.number="t.min_qty" class="rom-input-sm" style="width:70px" min="0" step="0.01" placeholder="—" /></td>
                 <td><button class="rom-btn-sm rom-btn-danger" @click="templates.splice(idx, 1)">✕</button></td>
@@ -550,6 +582,9 @@ const loadingTemplates = ref(false);
 const savingTemplates = ref(false);
 const templates = ref([]);
 const templateLe = ref(orderStore.settings.legalEntity || 'ООО "Бургер БК"');
+const templateProductSearch = ref('');
+const templateProductResults = ref([]);
+let templateSearchTimer = null;
 
 // Группа юрлиц текущего поставщика (BK_VM | PS). Определяется из списка
 // поставщиков: он уже отфильтрован backend'ом по группе юрлица сайдбара.
@@ -567,6 +602,7 @@ const templateEntities = computed(() => {
   if (group === 'PS') return LEGAL_ENTITIES.filter(e => e.includes('Пицца Стар'));
   return LEGAL_ENTITIES.filter(e => !e.includes('Пицца Стар'));
 });
+const currentSupplier = computed(() => allSuppliers.value.find(s => String(s.id) === String(currentSupplierId.value)) || null);
 
 // Order modal
 const showOrderModal = ref(false);
@@ -1081,6 +1117,8 @@ async function saveDeadlineRules() {
 async function loadTemplates() {
   if (!currentSupplierId.value) return;
   loadingTemplates.value = true;
+  templateProductSearch.value = '';
+  templateProductResults.value = [];
   try {
     templates.value = await store.adminGetTemplates(currentSupplierId.value, templateLe.value);
   } catch (e) {
@@ -1090,10 +1128,68 @@ async function loadTemplates() {
   }
 }
 
+function addManualTemplateRow() {
+  templates.value.push({
+    product_id: null,
+    sku: '',
+    product_name: '',
+    sort_order: templates.value.length * 10,
+    multiplicity: null,
+    min_qty: null,
+  });
+}
+
+function addTemplateProduct(p) {
+  const sku = String(p.sku || '').trim();
+  if (!sku) return;
+  if (templates.value.some(t => String(t.sku || '').trim() === sku)) {
+    toast.info('Уже в шаблоне', sku);
+    return;
+  }
+  templates.value.push({
+    product_id: p.id || p.product_id || null,
+    sku,
+    product_name: p.name || p.product_name || '',
+    sort_order: templates.value.length * 10,
+    multiplicity: p.multiplicity || null,
+    min_qty: p.min_qty || null,
+  });
+  templateProductSearch.value = '';
+  templateProductResults.value = [];
+}
+
+function searchTemplateProducts() {
+  clearTimeout(templateSearchTimer);
+  const q = templateProductSearch.value.trim();
+  if (q.length < 2) {
+    templateProductResults.value = [];
+    return;
+  }
+  templateSearchTimer = setTimeout(async () => {
+    try {
+      const params = new URLSearchParams({ q, legal_entity: templateLe.value, limit: '20' });
+      if (currentSupplier.value?.short_name) params.set('supplier', currentSupplier.value.short_name);
+      const r = await fetch(`/api/search_products?${params}`, {
+        headers: { 'X-Session-Token': localStorage.getItem('bk_session_token') || '' },
+      });
+      templateProductResults.value = r.ok ? await r.json() : [];
+    } catch {
+      templateProductResults.value = [];
+    }
+  }, 250);
+}
+
 async function saveTemplates() {
   savingTemplates.value = true;
   try {
-    await store.adminSaveTemplates(currentSupplierId.value, templateLe.value, templates.value);
+    const items = templates.value
+      .filter(t => String(t.sku || '').trim() && String(t.product_name || '').trim())
+      .map(t => ({ ...t, sku: String(t.sku).trim(), product_name: String(t.product_name).trim() }));
+    if (items.length !== templates.value.length) {
+      toast.warning('Пустые строки пропущены', 'Для сохранения нужны SKU и название товара');
+    }
+    await store.adminSaveTemplates(currentSupplierId.value, templateLe.value, items);
+    templates.value = items;
     toast.success('Сохранено', 'Шаблон обновлён');
   } catch (e) {
     toast.error('Ошибка', e.message);
@@ -1105,7 +1201,20 @@ async function saveTemplates() {
 async function importFromProducts() {
   if (!currentSupplierId.value) return;
   try {
-    const products = await store.loadProducts(currentSupplierId.value);
+    const supplierName = currentSupplier.value?.short_name || '';
+    if (!supplierName) {
+      toast.warning('Поставщик не выбран', 'Не удалось определить поставщика');
+      return;
+    }
+    const { data, error } = await db.from('products')
+      .select('id,sku,name,multiplicity')
+      .eq('supplier', supplierName)
+      .eq('legal_entity', templateLe.value)
+      .eq('is_active', 1)
+      .order('name')
+      .limit(500);
+    if (error) throw new Error(error);
+    const products = data || [];
     if (!products.length) {
       toast.warning('Нет товаров', 'У этого поставщика нет товаров в справочнике');
       return;
@@ -1668,6 +1777,7 @@ watch(
   font-size: 14px; font-family: inherit;
 }
 .rom-select { padding: 6px 10px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; font-family: inherit; min-width: 200px; }
+.rom-input { padding: 6px 10px; border: 1px solid #e0d5c8; border-radius: 6px; font-size: 13px; font-family: inherit; }
 
 .rom-stats {
   display: flex; gap: 16px; margin-bottom: 16px;
@@ -1761,6 +1871,22 @@ watch(
 .rom-input-sm { padding: 4px 6px; border: 1px solid #e0d5c8; border-radius: 4px; font-size: 13px; }
 .so-date-nav { display: flex; gap: 4px; flex-wrap: wrap; }
 .so-schedule-count { font-size: 13px; color: #8b7355; margin: 8px 16px; }
+.so-template-search { position: relative; min-width: 260px; }
+.so-template-search .rom-input { width: 100%; }
+.so-template-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  background: white; border: 1px solid #e0d5c8; border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12); max-height: 260px; overflow-y: auto;
+}
+.so-template-option {
+  width: 100%; display: flex; gap: 8px; align-items: center;
+  padding: 8px 10px; border: 0; border-bottom: 1px solid #f0ebe4;
+  background: white; color: #502314; text-align: left; cursor: pointer; font-family: inherit;
+}
+.so-template-option:hover { background: #faf7f4; }
+.so-template-option b { color: #8b7355; min-width: 72px; font-size: 12px; }
+.so-template-product-cell { display: grid; grid-template-columns: minmax(90px, 130px) minmax(240px, 1fr); gap: 8px; }
+.so-template-sku-input, .so-template-name-input { width: 100%; }
 
 /* Deadline rules editor */
 .so-deadline-section { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }

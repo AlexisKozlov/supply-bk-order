@@ -12,7 +12,7 @@
  *   GET    so/my-order/:suppId/:date — моя заявка на дату
  *   POST   so/submit-order        — отправить заявку
  *
- * Маршруты для закупщиков (сессия основного приложения):
+ * Маршруты для отдела закупок (сессия основного приложения):
  *   GET    so/admin/status        — сводка заявок (по поставщику + дате)
  *   GET    so/admin/orders        — список заявок по дням
  *   GET    so/admin/order/:id     — детали заявки
@@ -536,7 +536,7 @@ if ($soAction === 'my-order' && $method === 'GET' && $soParam1 && $soParam2) {
 
     if (!$order) soRespond(['order' => null, 'previous_order' => $previousOrder]);
 
-    // quantity — исходное значение от ресторана, admin_qty — правка закупщика (если была)
+    // quantity — исходное значение от ресторана, admin_qty — правка отдела закупок (если была)
     $items = $pdo->prepare("SELECT product_id, sku, product_name, quantity, admin_qty FROM so_order_items WHERE order_id = ? AND COALESCE(admin_qty, quantity) > 0 ORDER BY product_name");
     $items->execute([$order['id']]);
 
@@ -663,7 +663,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
 
     $pdo->beginTransaction();
     try {
-        // Сохраняем правки закупщика по SKU, чтобы повторная подача рестораном их не затёрла.
+        // Сохраняем правки отдела закупок по SKU, чтобы повторная подача рестораном их не затёрла.
         $preservedAdminQty = [];
         if ($existingOrder) {
             $orderId = $existingOrder['id'];
@@ -835,7 +835,7 @@ if ($soAction === 'submit-order' && $method === 'POST') {
 }
 
 // ═══════════════════════════════════════════════
-// Маршруты для закупщиков (admin)
+// Маршруты для отдела закупок (admin)
 // ═══════════════════════════════════════════════
 
 if ($soAction === 'admin') {
@@ -1226,7 +1226,7 @@ if ($soAction === 'admin') {
         // 1. текущий шаблон
         // 2. плюс реальные SKU из заявок на выбранную дату, которых в шаблоне уже нет
         // Это нужно для старых заявок Планеты и других исторических данных, чтобы
-        // закупщик видел позиции, даже если шаблон потом поменяли.
+        // отдел закупок видел позиции, даже если шаблон потом поменяли.
         $tplStmt = $pdo->prepare("
             SELECT DISTINCT t.sku, t.product_name, t.sort_order, t.multiplicity, t.product_id
             FROM so_templates t
@@ -1497,7 +1497,7 @@ if ($soAction === 'admin') {
                 ");
                 $updItems->execute([$orderId]);
                 $finalItems = $updItems->fetchAll();
-                $lines = ["✏️ <b>Заявка изменена закупщиком</b>"];
+                $lines = ["✏️ <b>Заявка изменена отделом закупок</b>"];
                 $lines[] = '';
                 $restaurantLabel = roFormatRestaurantTelegramLabel(
                     $orderInfo['restaurant_number'],
@@ -1669,7 +1669,7 @@ if ($soAction === 'admin') {
             soRespond(['error' => 'Недостаточно данных'], 400);
         }
 
-        // Уведомление в Telegram о ручной правке закупщиком
+        // Уведомление в Telegram о ручной правке отделом закупок
         if ($notify) {
             try {
                 // Единица измерения товара
@@ -1687,13 +1687,13 @@ if ($soAction === 'admin') {
                     return htmlspecialchars((string)$s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
                 };
 
-                $by = resolveActorName($pdo, $sessionUser, 'закупщик');
+                $by = resolveActorName($pdo, $sessionUser, 'отдел закупок');
                 $deliveryFmt = (new DateTime($notify['delivery_date']))->format('d.m.Y');
                 $oldStr = $notify['old_val'] > 0 ? ($fmt($notify['old_val']) . $unitStr) : '—';
                 $newStr = $notify['new_val'] !== null && $notify['new_val'] > 0 ? ($fmt($notify['new_val']) . $unitStr) : '—';
 
                 $lines = [];
-                $lines[] = '✏️ <b>Закупщик изменил заявку</b>';
+                $lines[] = '✏️ <b>Отдел закупок изменил заявку</b>';
                 $lines[] = '';
                 if (($notify['city'] ?? '') === '' && ($notify['address'] ?? '') === '') {
                     $restRow = roGetRestaurantRow($pdo, $notify['restaurant_number'], $notify['legal_entity_group'] ?? null);
@@ -1725,7 +1725,7 @@ if ($soAction === 'admin') {
         // Аудит ручной правки количества
         if ($notify) {
             try {
-                $byName = resolveActorName($pdo, $sessionUser, 'закупщик');
+                $byName = resolveActorName($pdo, $sessionUser, 'отдел закупок');
                 auditLog($pdo, 'so_qty_adjusted', 'supplier_order', $orderId ?? null, $byName, [
                     'supplier' => $notify['supplier_name'] ?? null,
                     'restaurant_number' => $notify['restaurant_number'] ?? null,
@@ -2078,9 +2078,9 @@ if ($soAction === 'admin') {
         ");
         $subsStmt->execute([$supplierId]);
         $subs = $subsStmt->fetchAll();
-        if (!$subs) soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
 
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if (!$subs) soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
         if (!$botToken) soRespond(['error' => 'Telegram Bot Token не настроен'], 500);
 
         // День недели даты доставки (1=Пн..7=Вс)
@@ -2159,6 +2159,7 @@ if ($soAction === 'admin') {
             $caption .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
             $caption .= "📅 Доставка: <b>{$dateFmt} ({$dayShort})</b>\n";
             $caption .= "🏪 Ресторанов по графику: <b>" . count($expectedRests) . "</b>";
+
             $sentCount = 0;
             $perUser = $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES (?, '', ?, ?)");
             foreach ($subs as $sub) {
@@ -2169,7 +2170,12 @@ if ($soAction === 'admin') {
             }
             $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
                 ->execute([$dedupKey]);
-            soRespond(['success' => true, 'sent' => $sentCount, 'mode' => 'text_only']);
+            soRespond([
+                'success' => true,
+                'sent' => $sentCount,
+                'total_subs' => count($subs),
+                'mode' => 'text_only',
+            ]);
         }
 
         $productsOut = array_values($productsOrdered);
@@ -2256,7 +2262,11 @@ if ($soAction === 'admin') {
         $pdo->prepare("INSERT INTO tg_notification_log (notification_type, legal_entity, chat_id, notification_key) VALUES ('so_summary', '', 0, ?)")
             ->execute([$dedupKey]);
 
-        soRespond(['success' => true, 'sent' => $sentCount, 'total_subs' => count($subs)]);
+        soRespond([
+            'success' => true,
+            'sent' => $sentCount,
+            'total_subs' => count($subs),
+        ]);
     }
 
     // --- Экспорт ---

@@ -13,7 +13,7 @@
 
     <!-- Collections list -->
     <div v-if="!activeCollection" class="sc-list">
-      <div v-if="loading" class="sc-empty">Загрузка...</div>
+      <div v-if="loading" class="sc-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!collections.length && !loadError" class="sc-empty">Нет сессий сбора. Создайте первую.</div>
       <div
         v-for="c in collections" :key="c.id"

@@ -17,7 +17,7 @@
  *   POST   ro/submit-survey   — отправить ответ на опрос
  *   POST   ro/repeat-order    — повторить предыдущий заказ
  *
- *   Для закупщиков (требуется сессия основного приложения):
+ *   Для отдела закупок (требуется сессия основного приложения):
  *   GET    ro/admin/status         — статус заявок на дату
  *   GET    ro/admin/order/:id      — детали заказа
  *   PATCH  ro/admin/order/:id      — редактировать заказ
@@ -1927,11 +1927,11 @@ if ($roAction === 'repeat-order' && $method === 'POST') {
 }
 
 // ═══════════════════════════════════════════════
-// Маршруты для закупщиков (требуется сессия основного приложения)
+// Маршруты для отдела закупок (требуется сессия основного приложения)
 // ═══════════════════════════════════════════════
 
 if (strpos($roAction, 'admin') === 0) {
-    // Проверяем авторизацию закупщика
+    // Проверяем авторизацию отдела закупок
     $sessionUser = getSessionUser($pdo);
     if (!$sessionUser) {
         if (!checkApiKey($pdo)) roRespond(['error' => 'Unauthorized'], 401);
@@ -2090,7 +2090,7 @@ if (strpos($roAction, 'admin') === 0) {
         $s->execute([$adminParam]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
-        // Проверка доступа к юр. лицу заказа: закупщик одной группы не должен видеть чужие заказы
+        // Проверка доступа к юр. лицу заказа: отдел закупок одной группы не должен видеть чужие заказы
         if ($sessionUser && !checkLegalEntityAccess($sessionUser, $order['legal_entity'] ?? '')) {
             roRespond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         }
@@ -2117,7 +2117,7 @@ if (strpos($roAction, 'admin') === 0) {
         roRespond(['order' => $order]);
     }
 
-    // --- Редактирование заказа закупщиком ---
+    // --- Редактирование заказа отделом закупок ---
     if ($adminAction === 'order' && $method === 'PATCH' && $adminParam) {
         $orderId = (int)$adminParam;
         $items = $body['items'] ?? null;
@@ -2171,7 +2171,7 @@ if (strpos($roAction, 'admin') === 0) {
             roRespond(['error' => 'Ошибка сохранения'], 500);
         }
 
-        // ═══ Журнал: правка заказа закупщиком ═══
+        // ═══ Журнал: правка заказа отделом закупок ═══
         $actorName = resolveActorName($pdo, $sessionUser);
         if ($items !== null) {
             $newItemsAudit = [];
@@ -2320,7 +2320,7 @@ if (strpos($roAction, 'admin') === 0) {
         roRespond(['success' => true]);
     }
 
-    // --- Удаление заказа закупщиком ---
+    // --- Удаление заказа отделом закупок ---
     if ($adminAction === 'order' && $method === 'DELETE' && $adminParam) {
         $orderId = (int)$adminParam;
         // Сохраняем инфо для уведомления и журнала до удаления
@@ -2403,7 +2403,7 @@ if (strpos($roAction, 'admin') === 0) {
 
         $pdo->prepare("DELETE FROM ro_order_items WHERE id = ?")->execute([$item['id']]);
 
-        // ═══ Журнал: удаление одной позиции закупщиком ═══
+        // ═══ Журнал: удаление одной позиции отделом закупок ═══
         $actorName = resolveActorName($pdo, $sessionUser);
         roLogAudit($pdo, [
             'order_id' => $item['order_id'],

@@ -23,7 +23,7 @@
     <!-- ═══ TAB: Конструктор ═══ -->
     <template v-if="activeTab === 'constructor'">
       <!-- Loading -->
-      <div v-if="store.loading" class="tl-loading">Загрузка...</div>
+      <div v-if="store.loading" class="tl-loading"><BurgerSpinner text="Загрузка..." /></div>
 
       <!-- No orders -->
       <div v-else-if="!store.orders.length" class="tl-empty">Нет заказов на эту дату.</div>
@@ -286,7 +286,8 @@
           <button @click="handleReset" class="tl-btn tl-btn-outline">Сбросить</button>
           <button @click="handleExport" class="tl-btn tl-btn-export" :disabled="!store.trucks.length">Excel</button>
           <button @click="handleSave" class="tl-btn tl-btn-primary" :disabled="store.saving">
-            {{ store.saving ? 'Сохранение...' : 'Сохранить' }}
+            <BurgerSpinner v-if="store.saving" size="xs" />
+            <span>{{ store.saving ? 'Сохранение...' : 'Сохранить' }}</span>
           </button>
           <button v-if="store.plan?.status === 'draft'" @click="handleConfirm" class="tl-btn tl-btn-confirm">Подтвердить</button>
           <button v-if="store.plan?.status === 'confirmed'" @click="handleUnconfirm" class="tl-btn tl-btn-outline">В черновик</button>

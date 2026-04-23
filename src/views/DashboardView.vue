@@ -16,7 +16,7 @@
       </div>
     </div>
 
-    <div v-if="loading" class="dash-loading">Загрузка данных...</div>
+    <div v-if="loading" class="dash-loading"><BurgerSpinner text="Загрузка данных..." /></div>
 
     <template v-else>
       <!-- KPI Row 1 -->

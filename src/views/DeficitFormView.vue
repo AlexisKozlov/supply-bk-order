@@ -7,7 +7,7 @@
         <p class="deficit-form-entity" v-if="tokenInfo">{{ tokenInfo.legal_entity }}</p>
       </div>
 
-      <div v-if="loading" class="deficit-form-loading">Загрузка...</div>
+      <div v-if="loading" class="deficit-form-loading"><BurgerSpinner text="Загрузка..." /></div>
 
       <template v-else-if="tokenInfo">
         <div class="deficit-form-field">

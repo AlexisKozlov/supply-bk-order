@@ -24,7 +24,7 @@
         </div>
       </div>
 
-      <div v-if="loading" class="corr-empty">Загрузка...</div>
+      <div v-if="loading" class="corr-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!groupedCorrections.length" class="corr-empty">Нет заявок</div>
 
       <div v-else class="corr-table-wrap">
@@ -109,7 +109,7 @@
       <div class="corr-settings">
         <h3 class="corr-section-title">Кто получает уведомления о корректировках</h3>
         <p class="corr-hint">Отмеченные пользователи будут получать заявки в Telegram-бот с возможностью принять или отклонить.</p>
-        <div v-if="settingsLoading" class="corr-empty">Загрузка...</div>
+        <div v-if="settingsLoading" class="corr-empty"><BurgerSpinner text="Загрузка..." /></div>
         <div v-else-if="!settingsUsers.length" class="corr-empty">Нет привязанных пользователей</div>
         <div v-else class="corr-settings-list">
           <div v-for="u in settingsUsers" :key="u.name" class="corr-settings-row" @click="toggleNotification(u)">

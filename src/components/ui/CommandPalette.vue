@@ -13,7 +13,7 @@
           </div>
 
           <div class="cp-body" v-if="loading">
-            <div class="cp-loading">Поиск...</div>
+            <div class="cp-loading"><BurgerSpinner text="Поиск..." /></div>
           </div>
           <div class="cp-body" v-else-if="allResults.length">
             <div v-for="group in groupedResults" :key="group.title" class="cp-group">

@@ -237,7 +237,8 @@
                     Принять без расхождений
                   </button>
                   <button class="btn primary" @click="saveReceived" :disabled="saving || !hasAnyFact">
-                    {{ saving ? 'Сохранение...' : 'Принять с расхождениями' }}
+                    <BurgerSpinner v-if="saving" size="xs" />
+                    <span>{{ saving ? 'Сохранение...' : 'Принять с расхождениями' }}</span>
                   </button>
                 </div>
               </template>

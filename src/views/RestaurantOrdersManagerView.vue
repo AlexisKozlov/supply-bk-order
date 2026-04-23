@@ -75,7 +75,7 @@
       </div>
 
       <!-- Loading -->
-      <div v-if="loading" class="rom-loading">Загрузка...</div>
+      <div v-if="loading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
 
       <!-- No session -->
       <div v-else-if="!session" class="rom-empty">
@@ -210,7 +210,8 @@
               Импортировать из остатков склада
             </button>
             <button class="rom-btn rom-btn-primary" @click="saveFullTemplate" :disabled="tplSaving">
-              {{ tplSaving ? 'Сохранение...' : 'Сохранить шаблон' }}
+              <BurgerSpinner v-if="tplSaving" size="xs" />
+              <span>{{ tplSaving ? 'Сохранение...' : 'Сохранить шаблон' }}</span>
             </button>
           </div>
         </div>
@@ -271,7 +272,8 @@
         <div class="rom-stock-field rom-stock-upload">
           <input type="file" ref="stockFileInput" accept=".xlsx,.xls" style="display:none" @change="handleStockFile" />
           <button class="rom-btn" @click="$refs.stockFileInput.click()" :disabled="stockUploading">
-            {{ stockUploading ? 'Загрузка...' : 'Загрузить остатки из Excel' }}
+            <BurgerSpinner v-if="stockUploading" size="xs" />
+            <span>{{ stockUploading ? 'Загрузка...' : 'Загрузить остатки из Excel' }}</span>
           </button>
         </div>
       </div>
@@ -365,7 +367,7 @@
           {{ stockDates.length ? 'Нет данных. Выберите дату остатков и дату доставки.' : 'Остатки ещё не загружены. Нажмите «Загрузить остатки из Excel».' }}
         </div>
       </div>
-      <div v-else class="rom-loading">Загрузка...</div>
+      <div v-else class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
       </div>
     </template>
 
@@ -405,7 +407,7 @@
           <span v-if="auditLastRefresh"> · Обновлено: {{ auditLastRefresh }}</span>
         </div>
 
-        <div v-if="auditLoading && !auditEvents.length" class="rom-loading">Загрузка журнала…</div>
+        <div v-if="auditLoading && !auditEvents.length" class="rom-loading"><BurgerSpinner text="Загрузка журнала..." /></div>
         <div v-else-if="!auditEvents.length" class="rom-audit-empty">Событий не найдено</div>
         <div v-else class="rom-audit-list">
           <div v-for="ev in auditEvents" :key="ev.id" class="rom-audit-row" :class="'act-' + ev.action">
@@ -470,7 +472,8 @@
 
         <div v-if="auditEvents.length && auditEvents.length < auditTotal" class="rom-audit-more">
           <button class="rom-btn" @click="loadMoreAuditLog" :disabled="auditLoading">
-            {{ auditLoading ? 'Загрузка…' : 'Показать ещё' }}
+            <BurgerSpinner v-if="auditLoading" size="xs" />
+            <span>{{ auditLoading ? 'Загрузка...' : 'Показать ещё' }}</span>
           </button>
           <span class="rom-audit-more-hint">Показано {{ auditEvents.length }} из {{ auditTotal }}</span>
         </div>
@@ -614,7 +617,8 @@
               Excel
             </button>
             <button class="rom-btn rom-btn-primary" @click="saveEditedOrder" :disabled="saving">
-              {{ saving ? 'Сохранение...' : 'Сохранить изменения' }}
+              <BurgerSpinner v-if="saving" size="xs" />
+              <span>{{ saving ? 'Сохранение...' : 'Сохранить изменения' }}</span>
             </button>
           </div>
         </template>
@@ -629,7 +633,7 @@
           <button class="rom-modal-close" @click="showOrderHistoryModal = false">X</button>
         </div>
         <div class="rom-modal-body" style="max-height:70vh;overflow:auto">
-          <div v-if="historyLoading" class="rom-loading">Загрузка…</div>
+          <div v-if="historyLoading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="!historyEvents.length" class="rom-no-items">Событий пока нет</div>
           <div v-else class="rom-audit-list">
             <div v-for="ev in historyEvents" :key="ev.id" class="rom-audit-row" :class="'act-' + ev.action">
@@ -784,7 +788,7 @@
               </select>
             </div>
 
-            <div v-if="usersLoading" class="rom-no-items">Загрузка...</div>
+            <div v-if="usersLoading" class="rom-no-items"><BurgerSpinner size="sm" text="Загрузка..." /></div>
             <div v-else-if="!filteredUsers.length" class="rom-no-items">Ничего не найдено</div>
             <div v-else class="rom-users-list">
               <div v-for="u in filteredUsers" :key="(u.legal_entity_group || 'BK_VM') + '-' + u.restaurant_number" class="rom-user-row">
@@ -839,7 +843,8 @@
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px">
             <button class="rom-btn" @click="showDeadlineModal = false">Отмена</button>
             <button class="rom-btn rom-btn-primary" @click="saveDeadlineExtend" :disabled="deadlineSaving">
-              {{ deadlineSaving ? 'Сохранение...' : 'Продлить' }}
+              <BurgerSpinner v-if="deadlineSaving" size="xs" />
+              <span>{{ deadlineSaving ? 'Сохранение...' : 'Продлить' }}</span>
             </button>
           </div>
         </div>

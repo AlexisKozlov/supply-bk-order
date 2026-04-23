@@ -33,8 +33,7 @@
 
     <!-- Import overlay -->
     <div v-if="importing" class="rsv-overlay">
-      <BurgerSpinner />
-      <p class="rsv-overlay-text">Загрузка файла…</p>
+      <BurgerSpinner text="Загрузка файла..." />
     </div>
 
     <!-- Loading -->

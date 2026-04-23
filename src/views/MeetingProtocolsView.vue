@@ -38,7 +38,7 @@
     </div>
 
     <!-- Загрузка -->
-    <div v-if="loading" class="mp-loading">Загрузка...</div>
+    <div v-if="loading" class="mp-loading"><BurgerSpinner text="Загрузка..." /></div>
 
     <!-- Список протоколов -->
     <div v-else-if="filtered.length" class="mp-list">

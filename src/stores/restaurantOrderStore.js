@@ -158,7 +158,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
-  // === Admin (для закупщиков) ===
+  // === Admin (для отдела закупок) ===
   async function adminGetStatus(date, legalEntity = null) {
     const params = new URLSearchParams({ date });
     if (legalEntity) params.set('legal_entity', legalEntity);

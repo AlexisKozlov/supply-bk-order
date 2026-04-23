@@ -11,7 +11,7 @@
       </div>
       <div class="td-header-right">
         <button v-if="!isViewer && activity.id" class="td-btn td-btn-outline" @click="confirmDelete">Удалить</button>
-        <button v-if="!isViewer" class="td-btn td-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
+        <button v-if="!isViewer" class="td-btn td-btn-primary" @click="save" :disabled="saving"><BurgerSpinner v-if="saving" size="xs" /><span>{{ saving ? 'Сохранение...' : 'Сохранить' }}</span></button>
       </div>
     </div>
 
@@ -194,7 +194,7 @@
             <span v-if="!activity.files.length" class="mktd-muted" style="font-size:12px;">Нет вложений</span>
           </div>
           <label v-if="!isViewer && activity.id" class="btn small" style="flex-shrink:0;"><BkIcon name="import" size="sm" /> Загрузить<input type="file" style="display:none;" @change="uploadFile" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx,.doc" /></label>
-          <span v-if="uploading" style="font-size:11px;color:var(--text-muted);">Загрузка...</span>
+          <span v-if="uploading" style="font-size:11px;color:var(--text-muted);"><BurgerSpinner size="xs" text="Загрузка..." /></span>
         </div>
       </div>
 
@@ -313,7 +313,7 @@
               <span>{{ r.name }}</span>
             </label>
             <div v-if="subModal.query.length >= 2 && !subModal.results.length && !subModal.loading" class="mktd-muted" style="padding:12px;text-align:center;">Ничего не найдено</div>
-            <div v-if="subModal.loading" class="mktd-muted" style="padding:12px;text-align:center;">Поиск...</div>
+            <div v-if="subModal.loading" class="mktd-muted" style="padding:12px;text-align:center;"><BurgerSpinner size="sm" text="Поиск..." /></div>
             <div v-if="subModal.query.length < 2" class="mktd-muted" style="padding:12px;text-align:center;">Введите минимум 2 символа</div>
           </div>
           <div v-if="subModal.selected.size" class="mktd-modal-selected">

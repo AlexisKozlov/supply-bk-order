@@ -32,11 +32,11 @@
       </button>
     </div>
 
-    <div v-if="loading" style="text-align:center;padding:48px;color:var(--text-muted);">Загрузка...</div>
+    <div v-if="loading" style="text-align:center;padding:48px;color:var(--text-muted);"><BurgerSpinner text="Загрузка..." /></div>
 
     <!-- ═══ Бот ═══ -->
     <div v-else-if="tab === 'bot'" class="adm-section">
-      <div v-if="botLoading" class="tga-empty">Загрузка информации о боте...</div>
+      <div v-if="botLoading" class="tga-empty"><BurgerSpinner text="Загрузка информации о боте..." /></div>
       <template v-else-if="botInfo">
         <!-- Карточка бота -->
         <div class="tga-bot-card">
@@ -485,7 +485,7 @@
       <!-- История рассылок -->
       <div style="margin-top:32px;">
         <h3 class="tga-subtitle">История рассылок</h3>
-        <div v-if="broadcastHistoryLoading" class="tga-empty">Загрузка...</div>
+        <div v-if="broadcastHistoryLoading" class="tga-empty"><BurgerSpinner text="Загрузка..." /></div>
         <div v-else-if="!broadcastHistory.length" class="tga-empty">Нет рассылок</div>
         <div v-else class="tga-table-wrap">
           <table class="tga-table">
@@ -513,7 +513,7 @@
     <!-- ═══ Вопросы AI ═══ -->
     <div v-else-if="tab === 'questions'" class="adm-section">
       <p class="tga-hint">Последние вопросы, которые пользователи задавали боту через AI-ассистента.</p>
-      <div v-if="questionsLoading" class="tga-empty">Загрузка...</div>
+      <div v-if="questionsLoading" class="tga-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!questions.length" class="tga-empty">Нет вопросов</div>
       <div v-else class="tga-table-wrap">
         <table class="tga-table">

@@ -7,7 +7,7 @@
           <button class="modal-close" @click="$emit('close')"><BkIcon name="close" size="sm"/></button>
         </div>
         <div class="audit-log-body">
-          <div v-if="loading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+          <div v-if="loading" style="text-align:center;padding:24px;color:var(--text-muted);"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="!entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей в истории</div>
           <div v-else class="audit-log-entries">
             <div v-for="log in entries" :key="log.id" class="audit-log-entry">

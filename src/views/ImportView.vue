@@ -12,7 +12,8 @@
         </div>
         <div class="imp-card-action">
           <button class="imp-btn" @click="item.action" :disabled="uploading === item.key">
-            {{ uploading === item.key ? 'Загрузка...' : 'Загрузить' }}
+            <BurgerSpinner v-if="uploading === item.key" size="xs" />
+            <span>{{ uploading === item.key ? 'Загрузка...' : 'Загрузить' }}</span>
           </button>
         </div>
       </div>

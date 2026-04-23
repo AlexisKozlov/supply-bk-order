@@ -51,7 +51,7 @@
             <div class="uset-card-desc" v-else>Подключите <a href="https://t.me/supplyportal_bot" target="_blank">@supplyportal_bot</a> для настройки.</div>
           </div>
         </div>
-        <div v-if="tgLoading" class="uset-loading">Загрузка...</div>
+        <div v-if="tgLoading" class="uset-loading"><BurgerSpinner text="Загрузка..." /></div>
         <div v-else-if="userStore.currentUser?.telegram_connected" class="uset-list">
           <div v-for="(label, key) in tgLabels" :key="key" class="uset-list-item" @click="toggleTg(key)">
             <div class="uset-switch" :class="{ on: tgSettings[key] }">

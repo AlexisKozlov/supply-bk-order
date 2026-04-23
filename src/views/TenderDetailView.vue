@@ -10,7 +10,7 @@
       </div>
       <div class="td-header-right">
         <button v-if="hasFullAccess" class="td-btn td-btn-outline" @click="deleteTender">Удалить</button>
-        <button v-if="!isViewer" class="td-btn td-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
+        <button v-if="!isViewer" class="td-btn td-btn-primary" @click="save" :disabled="saving"><BurgerSpinner v-if="saving" size="xs" /><span>{{ saving ? 'Сохранение...' : 'Сохранить' }}</span></button>
       </div>
     </div>
 
@@ -66,7 +66,8 @@
               Позиции тендера
               <button v-if="!isViewer" class="btn small secondary" @click="addItem">+ Позиция</button>
               <button v-if="!isViewer && tender.items.some(it => it.sku)" class="btn small outline" @click="reloadConsumption" :disabled="reloadingConsumption" style="margin-left:4px;">
-                {{ reloadingConsumption ? 'Загрузка...' : 'Обновить расход' }}
+                <BurgerSpinner v-if="reloadingConsumption" size="xs" />
+                <span>{{ reloadingConsumption ? 'Загрузка...' : 'Обновить расход' }}</span>
               </button>
             </div>
             <div v-if="!tender.items.length" class="td-empty">Добавьте товары или услуги</div>

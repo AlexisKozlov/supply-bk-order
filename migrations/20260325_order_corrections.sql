@@ -23,6 +23,6 @@ CREATE TABLE IF NOT EXISTS order_corrections (
   INDEX idx_corr_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Настройка уведомлений о корректировках для закупщиков
+-- Настройка уведомлений о корректировках для отдела закупок
 ALTER TABLE telegram_settings
   ADD COLUMN IF NOT EXISTS correction_notifications TINYINT(1) NOT NULL DEFAULT 0;

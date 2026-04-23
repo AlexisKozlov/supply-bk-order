@@ -4348,7 +4348,7 @@ if ($endpoint === 'rpc') {
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
             curl_exec($ch); curl_close($ch);
 
-            // Обновляем сообщения закупщиков — перестраиваем с актуальными статусами
+            // Обновляем сообщения отдела закупок — перестраиваем с актуальными статусами
             $nm = json_decode($c['notify_messages'] ?? '{}', true);
             $messages = $nm['messages'] ?? [];
             $batchIdsNm = $nm['batch_ids'] ?? array_column($batchItems, 'id');

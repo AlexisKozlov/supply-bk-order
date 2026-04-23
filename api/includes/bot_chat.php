@@ -27,7 +27,7 @@ function chatStart($chatId, $msgId) {
         $btns[] = [['text' => "🏪 {$label} — {$addr}", 'callback_data' => "chat_rest_{$sub['restaurant_number']}"]];
     }
     $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
-    editMessage($chatId, $msgId, "💬 <b>Написать в закупки</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
+    editMessage($chatId, $msgId, "💬 <b>Написать в отдел закупок</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
 }
 
 // Шаг 2: режим ввода
@@ -95,7 +95,7 @@ function chatProcessMessage($chatId, $text, $restNum, $userMsgId, $from, $photoF
         [['text' => '◂ Выход', 'callback_data' => 'chat_cancel']],
     ]]);
 
-    // Уведомляем закупщиков
+    // Уведомляем отдел закупок
     chatNotifyPurchasers($pdo, $restNum, $senderName, $text ?: '📷 Фото');
 }
 
@@ -144,7 +144,7 @@ function chatShowHistory($chatId, $msgId, $restNum) {
     ]]);
 }
 
-// Уведомление закупщикам
+// Уведомление отделу закупок
 function chatNotifyPurchasers($pdo, $restNum, $senderName, $preview) {
     global $BOT_TOKEN;
     $st = $pdo->query("SELECT u.telegram_chat_id FROM telegram_settings ts JOIN users u ON u.name = ts.user_name WHERE ts.chat_notifications = 1 AND u.telegram_chat_id IS NOT NULL");

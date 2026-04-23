@@ -11,7 +11,7 @@
           </div>
         </div>
         <div class="chat-conv-list">
-          <div v-if="loadingConvs" class="chat-empty">Загрузка...</div>
+          <div v-if="loadingConvs" class="chat-empty"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="!conversations.length" class="chat-empty">Нет диалогов</div>
           <div
             v-for="c in conversations" :key="c.id"
@@ -52,7 +52,7 @@
                 <div v-if="m.message_text" class="chat-msg-text">{{ m.message_text }}</div>
                 <div v-if="m.photo_file_id" class="chat-msg-photo">
                   <img v-if="photoUrls[m.photo_file_id]" :src="photoUrls[m.photo_file_id]" @click="previewPhoto = photoUrls[m.photo_file_id]" />
-                  <span v-else class="chat-photo-loading">📷 Загрузка...</span>
+                  <span v-else class="chat-photo-loading"><BurgerSpinner size="xs" text="Загрузка..." /></span>
                 </div>
                 <div class="chat-msg-time">{{ fmtTime(m.created_at) }}</div>
               </div>

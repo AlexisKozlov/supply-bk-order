@@ -362,7 +362,7 @@
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="btn secondary" @click="showPriceModal = false">Отмена</button>
-          <button class="btn primary" @click="savePrice" :disabled="savingPrice">{{ savingPrice ? 'Сохранение...' : 'Сохранить' }}</button>
+          <button class="btn primary" @click="savePrice" :disabled="savingPrice"><BurgerSpinner v-if="savingPrice" size="xs" /><span>{{ savingPrice ? 'Сохранение...' : 'Сохранить' }}</span></button>
         </div>
       </div>
     </div>
@@ -416,7 +416,8 @@
           <input ref="pscFileInput" type="file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" @change="onPscFileSelected" style="display:none;" />
           <button class="file-upload-btn" @click="pscFileInput?.click()" :disabled="uploadingFile">
             <BkIcon name="import" size="sm"/>
-            {{ uploadingFile ? 'Загрузка...' : (pendingPscFile ? pendingPscFile.name : 'Выбрать файл') }}
+            <BurgerSpinner v-if="uploadingFile" size="xs" />
+            <span>{{ uploadingFile ? 'Загрузка...' : (pendingPscFile ? pendingPscFile.name : 'Выбрать файл') }}</span>
           </button>
         </div>
         <!-- Товары протокола -->
@@ -433,7 +434,7 @@
             </div>
           </div>
           <div class="ag-products-list">
-            <div v-if="agProductsLoading" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Загрузка товаров...</div>
+            <div v-if="agProductsLoading" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;"><BurgerSpinner size="sm" text="Загрузка товаров..." /></div>
             <div v-else-if="!filteredAgProducts.length" style="text-align:center;padding:12px;color:var(--text-muted);font-size:11px;">Товары не найдены</div>
             <div v-for="item in filteredAgProducts" :key="item.sku" class="ag-product-row" :class="{ selected: item.selected }" @click="item.selected = !item.selected">
               <span class="ag-toggle" :class="{ on: item.selected }">{{ item.selected ? '✓' : '' }}</span>
@@ -461,7 +462,7 @@
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
           <button class="btn secondary" @click="showAgreementModal = false; pendingPscFile = null">Отмена</button>
-          <button class="btn primary" @click="saveAgreement" :disabled="savingAgreement">{{ savingAgreement ? 'Сохранение...' : 'Сохранить' }}</button>
+          <button class="btn primary" @click="saveAgreement" :disabled="savingAgreement"><BurgerSpinner v-if="savingAgreement" size="xs" /><span>{{ savingAgreement ? 'Сохранение...' : 'Сохранить' }}</span></button>
         </div>
       </div>
     </div>
@@ -617,7 +618,8 @@
           <div style="flex:1"></div>
           <button class="btn secondary" @click="depositEdit.show = false" :disabled="depositEdit.saving">Отмена</button>
           <button class="btn primary" @click="doDepositSave" :disabled="depositEdit.saving || !depositEdit.price || !depositEdit.sku">
-            {{ depositEdit.saving ? 'Сохранение...' : 'Сохранить' }}
+            <BurgerSpinner v-if="depositEdit.saving" size="xs" />
+            <span>{{ depositEdit.saving ? 'Сохранение...' : 'Сохранить' }}</span>
           </button>
         </div>
       </div>

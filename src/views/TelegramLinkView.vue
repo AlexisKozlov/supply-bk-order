@@ -72,7 +72,8 @@
               </div>
               <div v-if="loginError" class="tgl-error">{{ loginError }}</div>
               <button type="submit" class="tgl-submit" :disabled="loggingIn || !email">
-                {{ loggingIn ? 'Вход...' : 'Войти и привязать' }}
+                <BurgerSpinner v-if="loggingIn" size="xs" />
+                <span>{{ loggingIn ? 'Вход...' : 'Войти и привязать' }}</span>
               </button>
             </form>
           </div>

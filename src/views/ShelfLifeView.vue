@@ -30,14 +30,15 @@
           :disabled="uploading"
         >
           <BkIcon name="send" size="sm"/>
-          {{ uploading ? 'Загрузка...' : 'Загрузить файл' }}
+          <BurgerSpinner v-if="uploading" size="xs" />
+          <span>{{ uploading ? 'Загрузка...' : 'Загрузить файл' }}</span>
         </button>
       </div>
     </div>
 
     <!-- ═══ Вкладка «Ячейки» ═══ -->
     <div v-if="slTab === 'cells'" class="sl-cells-section">
-      <div v-if="cellsLoading" class="sl-loader">Загрузка...</div>
+      <div v-if="cellsLoading" class="sl-loader"><BurgerSpinner text="Загрузка..." /></div>
       <template v-else-if="cellStats.length">
         <div class="sl-filter-bar" style="margin-bottom:10px;">
           <select v-model="cellPeriod" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:12px;">
@@ -125,7 +126,7 @@
 
     <!-- ═══ Вкладка «Сроки годности» ═══ -->
     <!-- Loading -->
-    <div v-if="slTab === 'shelf' && loading" class="sl-loader">Загрузка...</div>
+    <div v-if="slTab === 'shelf' && loading" class="sl-loader"><BurgerSpinner text="Загрузка..." /></div>
 
     <template v-if="slTab === 'shelf' && !loading && allData.length">
       <!-- KPI row -->

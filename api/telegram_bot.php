@@ -1832,7 +1832,7 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
-    // ═══ Чат ресторана с закупками ═══
+    // ═══ Чат ресторана с отделом закупок ═══
     if ($data === 'chat_start') {
         answerCallback($cb['id']);
         chatStart($chatId, $msgId);
@@ -2076,7 +2076,7 @@ if (isset($input['callback_query'])) {
         return true;
     }
 
-    // Закупщик: принять одну позицию (corr_a_{id})
+    // Отдел закупок: принять одну позицию (corr_a_{id})
     if (str_starts_with($data, 'corr_a_')) {
         $corrId = intval(substr($data, 7));
         if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
@@ -2084,7 +2084,7 @@ if (isset($input['callback_query'])) {
         corrReview($pdo, $chatId, $msgId, [$corrId], 'approve');
         exit;
     }
-    // Закупщик: отклонить одну позицию (corr_r_{id})
+    // Отдел закупок: отклонить одну позицию (corr_r_{id})
     if (str_starts_with($data, 'corr_r_')) {
         $corrId = intval(substr($data, 7));
         if (!corrCheckReviewer($pdo, $corrId, $chatId, $cb['id'])) exit;
@@ -2378,7 +2378,7 @@ if (!$msg) exit;
 
 $chatId = $msg['chat']['id'];
 
-// Режим чата с закупками — обрабатывает и текст, и фото
+// Режим чата с отделом закупок — обрабатывает и текст, и фото
 $chatModeFile = sys_get_temp_dir() . "/chat_{$chatId}.txt";
 if (file_exists($chatModeFile)) {
     if (time() - filemtime($chatModeFile) > 3600) {

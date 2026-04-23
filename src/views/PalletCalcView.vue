@@ -70,7 +70,8 @@
         <div v-if="calcSupplierName.trim()" class="plt-import-btns">
           <button class="plt-btn sm outline" @click="showBulkPaste = true" title="Вставить список товаров из 1С">Вставить список</button>
           <button class="plt-btn sm outline" @click="$refs.ocrFileInput.click()" :disabled="ocrLoading" title="Загрузить скриншот заказа из 1С">
-            {{ ocrLoading ? 'Распознаю...' : 'Загрузить скрин' }}
+            <BurgerSpinner v-if="ocrLoading" size="xs" />
+            <span>{{ ocrLoading ? 'Распознаю...' : 'Загрузить скрин' }}</span>
           </button>
           <button class="plt-btn sm outline" @click="$refs.excelFileInput.click()" title="Загрузить Excel-файл предзаказа">Загрузить файл</button>
           <span v-if="!ocrLoading" class="plt-import-hint">или Ctrl+V со скриншотом</span>
@@ -80,7 +81,7 @@
 
         <!-- OCR loading bar -->
         <div v-if="ocrLoading" class="plt-ocr-loading">
-          <div class="plt-ocr-loading-text">Распознаю изображение...</div>
+          <div class="plt-ocr-loading-text"><BurgerSpinner size="sm" text="Распознаю изображение..." /></div>
           <div class="plt-ocr-loading-bar"><div class="plt-ocr-loading-fill"></div></div>
         </div>
 
@@ -243,7 +244,7 @@
           </div>
         </div>
 
-        <div v-if="sumLoading" class="plt-empty">Загрузка...</div>
+        <div v-if="sumLoading" class="plt-empty"><BurgerSpinner text="Загрузка..." /></div>
         <div v-else class="plt-sum-table-wrap">
           <table class="plt-table sum-table">
             <thead>

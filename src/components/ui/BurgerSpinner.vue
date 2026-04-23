@@ -51,6 +51,12 @@ const sizeClass = computed(() => `ss-${props.size}`);
 .ss-sm .ss-svg { width: 28px; height: 28px; }
 .ss-md .ss-svg { width: 40px; height: 40px; }
 .ss-lg .ss-svg { width: 56px; height: 56px; }
+.ss-xs {
+  display: inline-flex;
+  flex-direction: row;
+  vertical-align: middle;
+  gap: 6px;
+}
 
 .ss-text {
   color: var(--text-muted, #9B8B7E);

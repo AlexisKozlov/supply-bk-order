@@ -126,7 +126,8 @@
           <div class="adm-timer-input-row">
             <input type="time" v-model="maintenanceTimeInput" class="adm-timer-input" />
             <button class="btn primary" style="font-size:13px;padding:7px 16px;" @click="saveExactTime" :disabled="maintenanceTimerSaving || !maintenanceTimeInput">
-              {{ maintenanceTimerSaving ? 'Сохранение...' : 'Установить' }}
+              <BurgerSpinner v-if="maintenanceTimerSaving" size="xs" />
+              <span>{{ maintenanceTimerSaving ? 'Сохранение...' : 'Установить' }}</span>
             </button>
           </div>
         </div>
@@ -145,7 +146,8 @@
         <p class="adm-maint-msg-hint">Отображается на экране технических работ. Если пусто — показывается стандартный текст.</p>
         <textarea v-model="maintenanceMsg" class="adm-maint-textarea" rows="3" placeholder="Например: Обновление системы до 18:00. Приносим извинения за неудобства."></textarea>
         <button class="btn primary" style="margin-top:8px;font-size:13px;padding:7px 16px;" @click="saveMaintenanceMsg" :disabled="maintenanceMsgSaving">
-          {{ maintenanceMsgSaving ? 'Сохранение...' : 'Сохранить сообщение' }}
+          <BurgerSpinner v-if="maintenanceMsgSaving" size="xs" />
+          <span>{{ maintenanceMsgSaving ? 'Сохранение...' : 'Сохранить сообщение' }}</span>
         </button>
       </div>
     </div>
@@ -191,7 +193,7 @@
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:12px;">
             <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
               <input type="checkbox" v-model="bcTargets.staffCabinet" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
-              <span>В кабинет закупщикам</span>
+              <span>В кабинет отдела закупок</span>
             </label>
             <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
               <input type="checkbox" v-model="bcTargets.restaurantCabinet" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
@@ -199,7 +201,7 @@
             </label>
             <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
               <input type="checkbox" v-model="bcTargets.staffTelegram" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
-              <span>В Telegram закупщикам</span>
+              <span>В Telegram отдела закупок</span>
             </label>
             <label class="adm-checkbox" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
               <input type="checkbox" v-model="bcTargets.restaurantTelegram" style="width:16px;height:16px;cursor:pointer;margin-top:2px;" />
@@ -372,7 +374,8 @@
 
           <div v-if="auditHasMore" style="text-align:center;padding:16px;">
             <button class="btn" @click="loadAudit(false)" :disabled="auditLoading">
-              {{ auditLoading ? 'Загрузка...' : 'Показать ещё' }}
+              <BurgerSpinner v-if="auditLoading" size="xs" />
+              <span>{{ auditLoading ? 'Загрузка...' : 'Показать ещё' }}</span>
             </button>
           </div>
         </div>
@@ -418,7 +421,8 @@
           </div>
           <div v-if="errorsHasMore" style="text-align:center;padding:16px;">
             <button class="btn" @click="loadErrors(false)" :disabled="errorsLoading">
-              {{ errorsLoading ? 'Загрузка...' : 'Показать ещё' }}
+              <BurgerSpinner v-if="errorsLoading" size="xs" />
+              <span>{{ errorsLoading ? 'Загрузка...' : 'Показать ещё' }}</span>
             </button>
           </div>
         </div>
@@ -765,7 +769,8 @@
           </div>
           <div style="display:flex;gap:8px;margin-top:20px;">
             <button class="btn primary" @click="saveChangelog" :disabled="changelogSaving || !changelogForm.version.trim() || !changelogForm.title.trim()">
-              {{ changelogSaving ? 'Сохранение...' : (changelogModal.entry ? 'Сохранить' : 'Создать') }}
+              <BurgerSpinner v-if="changelogSaving" size="xs" />
+              <span>{{ changelogSaving ? 'Сохранение...' : (changelogModal.entry ? 'Сохранить' : 'Создать') }}</span>
             </button>
             <button class="btn secondary" @click="tryCloseChangelog">Отмена</button>
           </div>
@@ -855,7 +860,8 @@
 
           <div style="display:flex;gap:8px;margin-top:20px;">
             <button class="btn primary" @click="saveUser" :disabled="saving">
-              {{ saving ? 'Сохранение...' : (userModal.user ? 'Сохранить' : 'Создать') }}
+              <BurgerSpinner v-if="saving" size="xs" />
+              <span>{{ saving ? 'Сохранение...' : (userModal.user ? 'Сохранить' : 'Создать') }}</span>
             </button>
             <button class="btn secondary" @click="tryCloseUserModal">Отмена</button>
           </div>
@@ -1072,7 +1078,7 @@ const AUDIT_ACTION_LABELS = {
   veg_session_created: 'Сессия создана', veg_order_updated: 'Заявка изменена', veg_order_submitted: 'Заявка подана',
   // Заявки поставщикам (so_*)
   so_order_submitted: 'Заявка подана', so_order_updated: 'Заявка обновлена',
-  so_order_skipped: 'Поставка не нужна', so_order_edited: 'Изменена закупщиком',
+  so_order_skipped: 'Поставка не нужна', so_order_edited: 'Изменена отделом закупок',
   so_order_deleted: 'Удалена', so_qty_adjusted: 'Правка количества',
   // Сбор остатков
   stock_collection_created: 'Создан', collection_created: 'Создан', collection_closed: 'Закрыт',
@@ -1233,7 +1239,7 @@ async function sendBroadcast() {
     });
     if (data?.success) {
       const tgParts = [];
-      if (data.staff_telegram_sent > 0) tgParts.push(`закупщики Telegram: ${data.staff_telegram_sent}`);
+      if (data.staff_telegram_sent > 0) tgParts.push(`отдел закупок Telegram: ${data.staff_telegram_sent}`);
       if (data.restaurant_telegram_sent > 0) tgParts.push(`рестораны Telegram: ${data.restaurant_telegram_sent}`);
       toast.success('Отправлено', tgParts.length ? tgParts.join(', ') : 'Рассылка отправлена');
       bcTitle.value = '';
@@ -1279,16 +1285,16 @@ const formatBcDate = formatMoscowDateTime;
 
 function formatBroadcastTargets(b) {
   const parts = [];
-  if (b.target_staff_cabinet) parts.push('кабинет закупщиков');
+  if (b.target_staff_cabinet) parts.push('кабинет отдела закупок');
   if (b.target_restaurant_cabinet) parts.push('кабинет ресторанов');
-  if (b.target_staff_telegram) parts.push('Telegram закупщиков');
+  if (b.target_staff_telegram) parts.push('Telegram отдела закупок');
   if (b.target_restaurant_telegram) parts.push('Telegram ресторанов');
   return parts.join(', ');
 }
 
 function broadcastTelegramStats(b) {
   const parts = [];
-  if (Number(b.staff_telegram_sent || 0) > 0) parts.push(`закупщики TG: ${b.staff_telegram_sent}`);
+  if (Number(b.staff_telegram_sent || 0) > 0) parts.push(`отдел закупок TG: ${b.staff_telegram_sent}`);
   if (Number(b.restaurant_telegram_sent || 0) > 0) parts.push(`рестораны TG: ${b.restaurant_telegram_sent}`);
   return parts.join(', ');
 }

@@ -6,7 +6,7 @@
         <span v-if="dirty" class="mpd-unsaved">Не сохранено</span>
       </div>
       <div class="mpd-top-actions">
-        <button v-if="canEdit" class="mpd-btn mpd-btn-primary" @click="save" :disabled="saving">{{ saving ? 'Сохранение...' : 'Сохранить' }}</button>
+        <button v-if="canEdit" class="mpd-btn mpd-btn-primary" @click="save" :disabled="saving"><BurgerSpinner v-if="saving" size="xs" /><span>{{ saving ? 'Сохранение...' : 'Сохранить' }}</span></button>
         <button v-if="canEdit && protocol.status === 'draft'" class="mpd-btn mpd-btn-finalize" @click="finalize">Финализировать</button>
         <button v-if="protocol.id" class="mpd-btn mpd-btn-export" @click="exportExcel">Excel</button>
         <button v-if="protocol.id" class="mpd-btn mpd-btn-export" @click="exportPdf">PDF</button>
@@ -14,7 +14,7 @@
       </div>
     </div>
 
-    <div v-if="loading" class="mpd-loading">Загрузка...</div>
+    <div v-if="loading" class="mpd-loading"><BurgerSpinner text="Загрузка..." /></div>
 
     <div v-else class="mpd-content">
       <!-- Основная информация -->
@@ -160,7 +160,8 @@
         </div>
         <div v-else class="mpd-files-empty">Нет прикреплённых файлов</div>
         <label v-if="canEdit" class="mpd-btn mpd-btn-upload">
-          {{ uploading ? 'Загрузка...' : '+ Прикрепить файл' }}
+          <BurgerSpinner v-if="uploading" size="xs" />
+          <span>{{ uploading ? 'Загрузка...' : '+ Прикрепить файл' }}</span>
           <input type="file" hidden @change="uploadFile" :disabled="uploading" accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx,.doc,.txt">
         </label>
       </div>

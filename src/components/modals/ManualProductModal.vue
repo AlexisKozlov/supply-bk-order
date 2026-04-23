@@ -50,7 +50,8 @@
 
         <div class="actions">
           <button class="btn primary" @click="submit" :disabled="saving">
-            {{ saving ? 'Сохранение...' : 'Добавить' }}
+            <BurgerSpinner v-if="saving" size="xs" />
+            <span>{{ saving ? 'Сохранение...' : 'Добавить' }}</span>
           </button>
           <button class="btn secondary" @click="tryClose">Отмена</button>
         </div>

@@ -22,8 +22,7 @@
       </div>
 
       <div v-if="loading" class="sf-loading">
-        <div class="sf-spinner"></div>
-        <span>Загрузка...</span>
+        <BurgerSpinner text="Загрузка..." />
       </div>
 
       <template v-else-if="info">

@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS ro_order_items (
   FOREIGN KEY (order_id) REFERENCES ro_orders(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Шаблон товаров по категориям хранения (настраивается закупщиками)
+-- Шаблон товаров по категориям хранения (настраивается отделом закупок)
 CREATE TABLE IF NOT EXISTS ro_templates (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   legal_entity    VARCHAR(100) NOT NULL DEFAULT 'ООО "Бург��р БК"',

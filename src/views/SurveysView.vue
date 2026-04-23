@@ -40,7 +40,7 @@
         </div>
 
         <div class="sv-list-scroll">
-          <div v-if="listLoading" class="sv-empty tight">Загрузка...</div>
+          <div v-if="listLoading" class="sv-empty tight"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="!filteredSurveys.length" class="sv-empty tight">
             {{ surveys.length ? 'Ничего не найдено' : 'Опросов пока нет' }}
           </div>
@@ -73,7 +73,7 @@
 
       <!-- ═══ Основная область ═══ -->
       <section class="sv-main">
-        <div v-if="detailLoading" class="sv-card sv-empty">Загрузка опроса...</div>
+        <div v-if="detailLoading" class="sv-card sv-empty"><BurgerSpinner text="Загрузка опроса..." /></div>
 
         <div v-else-if="!isCreating && !form.id" class="sv-card sv-hero-empty">
           <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
@@ -103,7 +103,8 @@
               <template v-if="canEditDraft">
                 <button class="sv-btn ghost" @click="resetFormFromDetail" v-if="!isCreating && hasUnsavedChanges">Сбросить</button>
                 <button class="sv-btn primary" @click="saveSurvey" :disabled="saving">
-                  {{ saving ? 'Сохранение...' : (isCreating ? 'Создать черновик' : 'Сохранить') }}
+                  <BurgerSpinner v-if="saving" size="xs" />
+                  <span>{{ saving ? 'Сохранение...' : (isCreating ? 'Создать черновик' : 'Сохранить') }}</span>
                 </button>
               </template>
               <button v-if="canSendSurvey" class="sv-btn accent" @click="sendSurvey" :disabled="sending">

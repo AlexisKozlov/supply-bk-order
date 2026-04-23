@@ -22,8 +22,7 @@
 
     <!-- Loading -->
     <div v-if="loading" class="ro-loading">
-      <div class="ro-spinner"></div>
-      <span>Загрузка...</span>
+      <BurgerSpinner text="Загрузка..." />
     </div>
 
     <!-- No suppliers -->
@@ -82,7 +81,7 @@
 
         <!-- История заявок -->
         <template v-else>
-          <div v-if="historyLoading" class="ro-loading"><div class="ro-spinner"></div><span>Загрузка...</span></div>
+          <div v-if="historyLoading" class="ro-loading"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="!history.length" class="ro-card ro-empty"><p>История заявок пуста.</p></div>
           <div v-else class="so-history-list">
             <div v-for="o in history" :key="o.id" class="so-history-item">
@@ -160,7 +159,7 @@
 
           <!-- Products -->
           <div v-if="currentDateInfo?.deadline_status === 'open' || currentDateInfo?.order" class="ro-products">
-            <div v-if="productsLoading" class="ro-loading"><div class="ro-spinner"></div></div>
+            <div v-if="productsLoading" class="ro-loading"><BurgerSpinner /></div>
             <div v-else-if="isSkipOrder" class="ro-skip-banner">
               <span class="ro-skip-icon">🚫</span>
               <strong>Поставка не нужна.</strong>

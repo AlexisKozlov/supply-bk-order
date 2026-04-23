@@ -287,7 +287,8 @@
             <div class="db-rest-modal-footer-right">
               <button class="btn" @click="tryCloseRestModal">Отмена</button>
               <button class="btn primary" @click="saveRestaurant" :disabled="restModal.saving">
-                {{ restModal.saving ? 'Сохранение...' : 'Сохранить' }}
+                <BurgerSpinner v-if="restModal.saving" size="xs" />
+                <span>{{ restModal.saving ? 'Сохранение...' : 'Сохранить' }}</span>
               </button>
             </div>
           </div>

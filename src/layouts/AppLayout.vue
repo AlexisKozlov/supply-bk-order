@@ -252,7 +252,8 @@
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
             <button class="btn" @click="showChangePassword = false; resetPwdForm()">Отмена</button>
             <button class="btn primary" @click="changePassword" :disabled="pwdLoading">
-              {{ pwdLoading ? 'Сохранение...' : 'Сохранить' }}
+              <BurgerSpinner v-if="pwdLoading" size="xs" />
+              <span>{{ pwdLoading ? 'Сохранение...' : 'Сохранить' }}</span>
             </button>
           </div>
         </div>
@@ -315,7 +316,7 @@
           <!-- Уведомления -->
           <template v-if="notifTab === 'notifications'">
             <div class="notif-list">
-              <div v-if="notificationStore.loading && !notificationStore.visibleNotifications.length" class="notif-empty">Загрузка...</div>
+              <div v-if="notificationStore.loading && !notificationStore.visibleNotifications.length" class="notif-empty"><BurgerSpinner text="Загрузка..." /></div>
               <div v-else-if="!notificationStore.visibleNotifications.length" class="notif-empty">Нет уведомлений</div>
               <div v-else>
                 <div v-for="n in notificationStore.visibleNotifications" :key="n.id" class="notif-item" :class="{ 'notif-unread': isUnread(n), 'notif-clickable': n.entity_id }">
@@ -345,7 +346,7 @@
           <!-- Что нового -->
           <template v-if="notifTab === 'changelog'">
             <div class="changelog-list">
-              <div v-if="changelogLoading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+              <div v-if="changelogLoading" style="text-align:center;padding:24px;color:var(--text-muted);"><BurgerSpinner text="Загрузка..." /></div>
               <div v-else-if="!changelogItems.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Пока нет записей об обновлениях</div>
               <div v-else>
                 <div v-for="entry in changelogItems" :key="entry.id" class="changelog-item">
@@ -384,7 +385,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useNotificationStore } from '@/stores/notificationStore.js';
-import { db } from '@/lib/apiClient.js';
+import { db, serverDown } from '@/lib/apiClient.js';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import SupplyLogo from '@/components/ui/SupplyLogo.vue';
@@ -736,6 +737,7 @@ function handleHotkeys(e) {
 const badgeCounts = ref({})
 async function loadBadges() {
   if (!userStore.isAuthenticated) return
+  if (isOffline.value || serverDown.value || document.hidden) return
   try {
     const [chatRes, corrRes] = await Promise.all([
       db.rpc('chat_unread_total'),
@@ -749,7 +751,7 @@ async function loadBadges() {
 let badgeTimer = null
 
 function sendHeartbeat() {
-  if (isOffline.value) return;
+  if (isOffline.value || serverDown.value) return;
   const name = userStore.currentUser?.name;
   if (!name) return;
   const page = pageNames[route.name] || route.name || '';
@@ -857,6 +859,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (maintenanceTimer) clearInterval(maintenanceTimer);
+  if (badgeTimer) clearInterval(badgeTimer);
   welcomeTimers.forEach(clearTimeout);
   welcomeTimers = [];
   if (removeAfterEach) removeAfterEach();

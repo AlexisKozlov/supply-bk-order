@@ -54,7 +54,9 @@
         <!-- Actions -->
         <div class="sm-actions">
           <button class="btn primary" @click="doConfirm" :disabled="saving">
-            <BkIcon name="save" size="sm"/> {{ saving ? 'Сохранение...' : (isEditing ? 'Обновить заказ' : 'Сохранить заказ') }}
+            <BurgerSpinner v-if="saving" size="xs" />
+            <BkIcon v-else name="save" size="sm"/>
+            <span>{{ saving ? 'Сохранение...' : (isEditing ? 'Обновить заказ' : 'Сохранить заказ') }}</span>
           </button>
           <button class="btn secondary" @click="tryClose" :disabled="saving">Отмена</button>
         </div>

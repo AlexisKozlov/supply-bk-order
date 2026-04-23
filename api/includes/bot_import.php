@@ -241,7 +241,7 @@ function botParseDate($val) {
     return null;
 }
 
-// ═══ Обработка файла от закупщика ═══
+// ═══ Обработка файла от отдела закупок ═══
 function botHandleImport($chatId, $fileId, $importType, $user) {
     global $pdo;
 

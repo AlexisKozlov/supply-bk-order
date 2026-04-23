@@ -153,7 +153,8 @@
                 </div>
                 <div v-if="loginError" class="login-error">{{ loginError }}</div>
                 <button class="login-submit" @click="doLogin" :disabled="loginLoading || !selectedUser">
-                  {{ loginLoading ? 'Вход...' : 'Войти' }}
+                  <BurgerSpinner v-if="loginLoading" size="xs" />
+                  <span>{{ loginLoading ? 'Вход...' : 'Войти' }}</span>
                 </button>
               </template>
               <!-- Форма для ресторана -->
@@ -169,7 +170,8 @@
                 </div>
                 <div v-if="loginError" class="login-error">{{ loginError }}</div>
                 <button class="login-submit" @click="doRoLogin" :disabled="loginLoading || !roNumber || !roPassword">
-                  {{ loginLoading ? 'Вход...' : 'Войти' }}
+                  <BurgerSpinner v-if="loginLoading" size="xs" />
+                  <span>{{ loginLoading ? 'Вход...' : 'Войти' }}</span>
                 </button>
               </template>
             </div>

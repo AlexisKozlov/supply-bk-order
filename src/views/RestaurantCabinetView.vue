@@ -205,7 +205,7 @@
         <div v-if="!roStore.sessionInfo" class="cab-empty-card">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#B0A090" stroke-width="1.5" stroke-linecap="round" style="margin:0 auto 16px; display:block"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5a2 2 0 01-2 2h-1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
           <h2>Основная поставка</h2>
-          <p>Сейчас приём заявок закрыт. Закупщик ещё не открыл сессию на эту неделю.</p>
+          <p>Сейчас приём заявок закрыт. Отдел закупок ещё не открыл сессию на эту неделю.</p>
           <p style="margin-top:10px; font-size:12px; color:#B0A090">Обратитесь в отдел закупок для уточнения</p>
         </div>
 
@@ -439,7 +439,7 @@
                       <span v-if="p.multiplicity" class="item-hint">кр. {{ supFmtNum(p.multiplicity) }}</span>
                       <span v-if="p.min_qty" class="item-hint item-hint-warn">мин. {{ supFmtNum(p.min_qty) }}</span>
                       <span v-if="supAdminEditInfo(sup.id, p.sku)" class="item-edit-mark"
-                        :title="`Изменено закупщиком: было ${supFmtNum(supAdminEditInfo(sup.id, p.sku).original)}, стало ${supFmtNum(supAdminEditInfo(sup.id, p.sku).edited)}`">
+                        :title="`Изменено отделом закупок: было ${supFmtNum(supAdminEditInfo(sup.id, p.sku).original)}, стало ${supFmtNum(supAdminEditInfo(sup.id, p.sku).edited)}`">
                         ✏ {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).original) }} → {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).edited) }}
                       </span>
                     </div>
@@ -525,7 +525,7 @@
           <button class="cab-modal-close" @click="closeHistoryOrderModal">&times;</button>
         </div>
         <div class="cab-modal-body">
-          <div v-if="historyOrderModal.loading" class="cab-empty-card"><p>Загрузка…</p></div>
+          <div v-if="historyOrderModal.loading" class="cab-empty-card"><BurgerSpinner text="Загрузка..." /></div>
           <div v-else-if="historyOrderModal.error" class="cab-empty-card"><p>{{ historyOrderModal.error }}</p></div>
           <template v-else-if="historyOrderModal.order">
             <div class="hist-modal-meta">
@@ -546,7 +546,7 @@
                     <span class="hist-qty-orig">{{ item.quantity }}</span>
                     <span class="hist-qty-arrow">→</span>
                     <span class="hist-qty-admin">{{ item.admin_qty }}</span>
-                    <span class="hist-edited-mark" title="Изменено закупщиком">✏</span>
+                    <span class="hist-edited-mark" title="Изменено отделом закупок">✏</span>
                   </template>
                   <span v-else class="hist-qty-val">{{ item.effective_qty ?? item.quantity }}</span>
                 </div>
@@ -564,7 +564,7 @@
 
       <!-- ─── Начальная загрузка ─── -->
       <div v-if="surveyListLoading && !surveyItems.length" class="cab-empty-card">
-        <p>Загрузка опросов...</p>
+        <BurgerSpinner text="Загрузка опросов..." />
       </div>
 
       <!-- ─── Пусто ─── -->
@@ -807,7 +807,7 @@
     <!-- ══════ TAB: Сбор остатков ══════ -->
     <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section">
       <div v-if="stockLoading" class="cab-empty-card">
-        <p>Загрузка…</p>
+        <BurgerSpinner text="Загрузка..." />
       </div>
       <div v-else-if="!stockCollection.active" class="cab-empty-card">
         <h2>Нет активного сбора</h2>
@@ -1829,7 +1829,7 @@ async function delExportExcel() {
 const supSelectedDates = reactive({});
 const supProducts = reactive({});
 const supQuantities = reactive({});
-const supAdminEdits = reactive({}); // { supId: { sku: { original, edited } } } — правки закупщика
+const supAdminEdits = reactive({}); // { supId: { sku: { original, edited } } } — правки отдела закупок
 const supProductsLoading = reactive({});
 const supIsSkipOrder = reactive({}); // { supId: true } — заявка с флагом «поставка не нужна»
 const supPreviousOrders = reactive({}); // { supId: previousOrder } — предыдущая заявка для справки
@@ -1881,7 +1881,7 @@ async function supSelectDate(sup, dateInfo) {
           const orig = parseFloat(item.quantity) || 0;
           const adminQ = (item.admin_qty !== null && item.admin_qty !== undefined && item.admin_qty !== '')
             ? parseFloat(item.admin_qty) : null;
-          // Эффективное значение: правка закупщика, если есть, иначе исходное
+          // Эффективное значение: правка отдела закупок, если есть, иначе исходное
           nextQuantities[item.sku] = adminQ !== null ? adminQ : orig;
           // Помечаем правку, если значение реально изменилось
           if (adminQ !== null && Math.abs(adminQ - orig) > 0.001) {

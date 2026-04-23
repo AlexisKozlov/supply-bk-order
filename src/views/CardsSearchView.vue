@@ -23,7 +23,7 @@
 
         <!-- Поиск -->
         <div class="search-wrap" ref="searchWrapRef">
-          <div v-if="loading" class="hero-status"><span class="hero-spinner"></span> Загрузка базы...</div>
+          <div v-if="loading" class="hero-status"><BurgerSpinner size="sm" text="Загрузка базы..." /></div>
           <p v-else-if="loadError" class="hero-status hero-error">{{ loadError }}</p>
           <div v-else class="search-box">
             <div class="search-field">
@@ -253,8 +253,7 @@
         <!-- Вкладка: Аудит -->
         <div v-if="adminTab === 'audit'" class="tab-content">
           <div v-if="auditLoading && !auditLogs.length" class="audit-loading">
-            <div class="audit-loading-spinner"></div>
-            Загрузка статистики...
+            <BurgerSpinner text="Загрузка статистики..." />
           </div>
           <template v-else-if="auditLoaded">
             <!-- Статистика в одну строку -->
@@ -327,7 +326,8 @@
                 :disabled="auditLoading"
                 @click="loadMoreAuditLogs"
               >
-                {{ auditLoading ? 'Загрузка...' : 'Ещё' }}
+                <BurgerSpinner v-if="auditLoading" size="xs" />
+                <span>{{ auditLoading ? 'Загрузка...' : 'Ещё' }}</span>
               </button>
             </div>
           </template>

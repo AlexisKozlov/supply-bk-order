@@ -5,6 +5,7 @@ import { router } from './router/index.js';
 import { setAuthErrorHandler } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
+import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import './assets/style.css';
 import './assets/components.css';
 import './assets/compact.css';
@@ -14,6 +15,7 @@ const pinia = createPinia();
 
 app.use(pinia);
 app.use(router);
+app.component('BurgerSpinner', BurgerSpinner);
 
 // Автовыход при истёкшей сессии (ответ 401 от сервера)
 setAuthErrorHandler(() => {

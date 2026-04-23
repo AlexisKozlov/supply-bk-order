@@ -21,7 +21,7 @@
 
             <!-- Collection picker -->
             <template v-if="stockSource === 'collection'">
-              <div v-if="loadingCollections" class="dfc-note">Загрузка сборов...</div>
+              <div v-if="loadingCollections" class="dfc-note"><BurgerSpinner size="sm" text="Загрузка сборов..." /></div>
               <div v-else-if="!availableCollections.length" class="dfc-note">
                 Нет сборов. <router-link :to="{ name: 'stock-collection' }" class="dfc-link">Создать сбор</router-link>
               </div>

@@ -18,7 +18,7 @@
 
     <!-- ═══ Расчёт ═══ -->
     <div v-if="tab === 'calc'">
-      <div v-if="loading" class="ps-empty">Загрузка...</div>
+      <div v-if="loading" class="ps-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!calcData.length" class="ps-empty">Справочник пуст. Загрузите файл «инфо по товарам».</div>
       <template v-else>
         <!-- KPI -->
@@ -110,7 +110,7 @@
 
     <!-- ═══ Справочник ═══ -->
     <div v-if="tab === 'ref'">
-      <div v-if="loading" class="ps-empty">Загрузка...</div>
+      <div v-if="loading" class="ps-empty"><BurgerSpinner text="Загрузка..." /></div>
       <div v-else-if="!calcData.length" class="ps-empty">Справочник пуст. Загрузите файл.</div>
       <template v-else>
         <div class="ps-filter-bar">

@@ -14,7 +14,7 @@
       </div>
     </div>
 
-    <div v-if="loading" class="pay-empty">Загрузка...</div>
+    <div v-if="loading" class="pay-empty"><BurgerSpinner text="Загрузка..." /></div>
     <div v-else-if="!payments.length" class="pay-empty">Нет оплат</div>
 
     <div v-else class="pay-table-wrap">

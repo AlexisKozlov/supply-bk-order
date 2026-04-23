@@ -435,7 +435,7 @@
           <label style="display:block;margin-bottom:8px;font-size:13px;font-weight:600;color:#555;">Примечание (необязательно)</label>
           <input v-model="saveNote" type="text" placeholder="Например: согласовано с поставщиком..." style="width:100%;margin-bottom:16px;" ref="saveNoteInput" @keydown.enter="confirmSave" @keydown.esc="tryCloseSaveModal"/>
           <div class="actions" style="display:flex;gap:8px;">
-            <button class="btn primary" @click="confirmSave" :disabled="saving">{{ saving ? 'Сохранение...' : (editingPlanId ? 'Обновить план' : 'Сохранить план') }}</button>
+            <button class="btn primary" @click="confirmSave" :disabled="saving"><BurgerSpinner v-if="saving" size="xs" /><span>{{ saving ? 'Сохранение...' : (editingPlanId ? 'Обновить план' : 'Сохранить план') }}</span></button>
             <button class="btn secondary" @click="tryCloseSaveModal" :disabled="saving">Отмена</button>
           </div>
         </div>
@@ -451,7 +451,7 @@
             <button class="modal-close" @click="logModal.show = false"><BkIcon name="close" size="sm"/></button>
           </div>
           <div style="max-height:450px;overflow-y:auto;padding:0 20px 16px;">
-            <div v-if="logModal.loading" style="text-align:center;padding:24px;color:var(--text-muted);">Загрузка...</div>
+            <div v-if="logModal.loading" style="text-align:center;padding:24px;color:var(--text-muted);"><BurgerSpinner text="Загрузка..." /></div>
             <div v-else-if="!logModal.entries.length" style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Нет записей</div>
             <div v-else class="log-entries">
               <div v-for="log in logModal.entries" :key="log.id" class="log-entry">

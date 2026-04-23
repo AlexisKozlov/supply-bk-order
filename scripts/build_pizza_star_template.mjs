@@ -198,7 +198,7 @@ const suppliersSheet = (() => {
   aoa.push(['Как заполнять:']);
   aoa.push(['1. «Короткое имя» — обязательно, именно это имя нужно указывать у товара в листе «Товары».']);
   aoa.push(['2. Срок доставки и частота заказа важны для расчёта потребностей — постарайтесь заполнить.']);
-  aoa.push(['3. Контакты (Telegram / WhatsApp / Viber / Email) — то, откуда закупщик будет отправлять заявку.']);
+  aoa.push(['3. Контакты (Telegram / WhatsApp / Viber / Email) — то, откуда отдел закупок будет отправлять заявку.']);
   aoa.push(['']);
   aoa.push(supplierCols.map(c => c.header));
   aoa.push(supplierCols.map(c => c.hint));
@@ -259,7 +259,7 @@ const restCols = [
   { header: 'Telegram-ID', width: 18, required: false,
     hint: 'ID чата для уведомлений (если есть).' },
   { header: 'Примечания',   width: 30, required: false,
-    hint: 'Любые заметки, которые полезно иметь закупщику.' },
+    hint: 'Любые заметки, которые полезно иметь отделу закупок.' },
 ];
 
 const restExamples = [

@@ -8,7 +8,7 @@ function buildHeaders() {
   // Для ресторанов
   const roToken = localStorage.getItem('ro_token');
   if (roToken) h['X-RO-Token'] = roToken;
-  // Для закупщиков
+  // Для отдела закупок
   const st = localStorage.getItem('bk_session_token');
   if (st) h['X-Session-Token'] = st;
   return h;
@@ -70,7 +70,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     });
   }
 
-  // ═══ Для закупщиков (admin) ═══
+  // ═══ Для отдела закупок (admin) ═══
 
   async function adminGetSuppliers(legalEntity = null) {
     const params = new URLSearchParams();
@@ -234,7 +234,7 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
     loading,
     // Ресторан
     loadSuppliers, loadProducts, loadMyOrder, loadMyOrders, submitOrder,
-    // Закупщик
+    // Отдел закупок
     adminGetSuppliers, adminGetAvailableSuppliers, adminRegisterSupplier, adminDisconnectSupplier,
     adminGetStatus, adminGetOrders, adminGetOrder,
     adminUpdateOrder, adminDeleteOrder,

@@ -846,7 +846,7 @@ function soOrderSkipDelivery($chatId, $msgId, $supplierId, $restNum, $deliveryDa
     $confirmText .= "Поставщик: <b>" . soEsc($supName) . "</b>\n";
     $confirmText .= "Ресторан: <b>" . soEsc($restNum) . "</b>\n";
     $confirmText .= "Дата: <b>{$deliveryFmt}</b>\n\n";
-    $confirmText .= "<i>Закупщик увидит, что на эту дату ваш ресторан ничего не заказывает.</i>";
+    $confirmText .= "<i>Отдел закупок увидит, что на эту дату ваш ресторан ничего не заказывает.</i>";
 
     $btns = ['inline_keyboard' => [
         [['text' => '📦 К дням поставщика', 'callback_data' => "soord_rest_{$supplierId}_{$restNum}"]],
@@ -1747,7 +1747,7 @@ function corrGetBatchAllIds($pdo, $oneId) {
     return $st->fetchAll(PDO::FETCH_COLUMN);
 }
 
-// Панель корректировок для закупщиков
+// Панель корректировок для отдела закупок
 function cmdCorrections($chatId, $msgId) {
     global $pdo;
 
@@ -2166,11 +2166,11 @@ function corrSubmitBatch($chatId) {
     if ($msgId) editMessage($chatId, $msgId, $doneText, $doneBtns);
     else sendMessage($chatId, $doneText, $doneBtns);
 
-    // Уведомляем закупщиков — одно сообщение со всеми позициями
+    // Уведомляем отдел закупок — одно сообщение со всеми позициями
     corrNotifyPurchasersBatch($pdo, $corrIds, $state, $submitterName);
 }
 
-// Уведомление закупщикам (пакетное)
+// Уведомление отделу закупок (пакетное)
 function corrNotifyPurchasersBatch($pdo, $corrIds, $state, $submitterName) {
     global $BOT_TOKEN;
     $st = $pdo->query("SELECT u.telegram_chat_id, u.name FROM telegram_settings ts JOIN users u ON u.name = ts.user_name WHERE ts.correction_notifications = 1 AND u.telegram_chat_id IS NOT NULL");
@@ -2203,7 +2203,7 @@ function corrNotifyPurchasersBatch($pdo, $corrIds, $state, $submitterName) {
     }
 }
 
-// Построить текст + кнопки для сообщения закупщику
+// Построить текст + кнопки для сообщения отделу закупок
 function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, $submitterName = null, $viewerChatId = null) {
     $dayNames = [1=>'Пн',2=>'Вт',3=>'Ср',4=>'Чт',5=>'Пт',6=>'Сб',7=>'Вс'];
 
@@ -2323,7 +2323,7 @@ function corrBuildReviewMessage($pdo, $batchIds, $restNum = null, $date = null, 
     return ['text' => $text, 'keyboard' => $keyboard];
 }
 
-// Обновить сообщения у всех закупщиков (перестроить текст+кнопки)
+// Обновить сообщения у отдела закупок (перестроить текст+кнопки)
 function corrUpdateAllReviewMessages($pdo, $batchIds) {
     if (empty($batchIds)) return;
     // Берём notify_messages из первой записи
@@ -2401,7 +2401,7 @@ function corrSendResultToRestaurant($pdo, $batchIds, $reviewerName, $finalCommen
     $ph2 = implode(',', array_fill(0, count($batchIds), '?'));
     $pdo->prepare("UPDATE order_corrections SET notify_messages = ? WHERE id IN ({$ph2})")->execute(array_merge([json_encode($nm)], $batchIds));
 
-    // Обновляем сообщения закупщиков — убираем кнопки, добавляем отметку «отправлено»
+    // Обновляем сообщения отдела закупок — убираем кнопки, добавляем отметку «отправлено»
     corrUpdateAllReviewMessages($pdo, $batchIds);
 }
 
@@ -2438,7 +2438,7 @@ function corrReview($pdo, $chatId, $msgId, $corrIds, $action, $comment = null) {
         return;
     }
 
-    // Обновляем сообщение у всех закупщиков
+    // Обновляем сообщение у отдела закупок
     corrUpdateAllReviewMessages($pdo, $batchIds);
 
     // Если все позиции батча обработаны — отбивка ресторану
@@ -2523,7 +2523,7 @@ function restRoOrders($chatId, $msgId) {
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
-// Статус заявок ресторанов (для закупщиков)
+// Статус заявок ресторанов (для отдела закупок)
 function cmdRoStatus($chatId, $user, $msgId) {
     global $pdo;
 
@@ -2581,7 +2581,7 @@ function cmdRoStatus($chatId, $user, $msgId) {
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
-// Рассылка логинов ресторанам (команда для закупщиков)
+// Рассылка логинов ресторанам (команда для отдела закупок)
 function restRoSendLogins($chatId, $msgId) {
     global $pdo;
 

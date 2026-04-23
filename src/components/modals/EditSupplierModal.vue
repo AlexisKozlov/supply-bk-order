@@ -66,7 +66,8 @@
 
         <div class="actions" style="display:flex;gap:8px;margin-top:16px;">
           <button class="btn primary" @click="save" :disabled="saving">
-            {{ saving ? 'Сохранение...' : (supplier ? 'Сохранить' : 'Создать') }}
+            <BurgerSpinner v-if="saving" size="xs" />
+            <span>{{ saving ? 'Сохранение...' : (supplier ? 'Сохранить' : 'Создать') }}</span>
           </button>
           <button class="btn secondary" @click="tryClose">Отмена</button>
         </div>
