@@ -1885,41 +1885,6 @@ if ($roAction === 'all-history' && $method === 'GET') {
         $allOrders[] = $r;
     }
 
-    // 3. Планета Ресторанов / овощи (veg_orders)
-    // Исключаем даты, для которых уже есть SO-заявка от этого ресторана —
-    // это дубли после перехода на модуль заявок поставщикам.
-    $s3 = $pdo->prepare("
-        SELECT vs.id as session_id, vs.name as session_name, vo.delivery_date,
-               vo.submitted_at,
-               SUM(CASE WHEN COALESCE(vo.admin_qty, vo.quantity) > 0 THEN 1 ELSE 0 END) as item_count,
-               SUM(CASE WHEN COALESCE(vo.admin_qty, vo.quantity) > 0 THEN COALESCE(vo.admin_qty, vo.quantity) ELSE 0 END) as total_qty
-        FROM veg_orders vo
-        JOIN veg_sessions vs ON vs.id = vo.session_id
-        WHERE vo.restaurant_number = ? AND COALESCE(vo.admin_qty, vo.quantity) > 0
-          AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
-          AND NOT EXISTS (
-              SELECT 1 FROM so_orders so
-              WHERE so.restaurant_number = vo.restaurant_number
-                AND so.delivery_date = vo.delivery_date
-                AND so.status != 'draft'
-          )
-        GROUP BY vo.session_id, vo.delivery_date
-        ORDER BY vo.delivery_date DESC LIMIT {$limit}
-    ");
-    $s3->execute([$rn, $group]);
-    foreach ($s3->fetchAll() as $r) {
-        $allOrders[] = [
-            'id' => 'veg_' . $r['session_id'] . '_' . $r['delivery_date'],
-            'delivery_date' => $r['delivery_date'],
-            'status' => 'submitted',
-            'submitted_at' => $r['submitted_at'],
-            'item_count' => $r['item_count'],
-            'total_qty' => $r['total_qty'],
-            'source' => 'planeta',
-            'source_name' => 'Планета Ресторанов',
-        ];
-    }
-
     // Сортировка по дате доставки
     usort($allOrders, function($a, $b) {
         return strcmp($b['delivery_date'], $a['delivery_date']);
@@ -2011,60 +1976,6 @@ if ($roAction === 'history-order' && $method === 'GET') {
             'updated_by' => null,
             'comment' => null,
             'items' => $items->fetchAll(),
-        ]]);
-    }
-
-    if ($source === 'planeta') {
-        if (!preg_match('/^veg_(\d+)_(\d{4}-\d{2}-\d{2})$/', $id, $m)) {
-            roRespond(['error' => 'Неверный идентификатор заказа'], 400);
-        }
-        $sessionId = (int)$m[1];
-        $deliveryDate = $m[2];
-
-        $meta = $pdo->prepare("
-            SELECT MIN(vo.submitted_at) AS submitted_at
-            FROM veg_orders vo
-            JOIN veg_sessions vs ON vs.id = vo.session_id
-            WHERE vo.session_id = ? AND vo.restaurant_number = ? AND vo.delivery_date = ?
-              AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
-        ");
-        $meta->execute([$sessionId, $rest['restaurant_number'], $deliveryDate, $group]);
-        $submittedAt = $meta->fetchColumn();
-
-        $items = $pdo->prepare("
-            SELECT COALESCE(sp.product_name, CONCAT('Товар #', vo.product_id)) AS product_name,
-                   COALESCE(vo.admin_qty, vo.quantity) AS quantity
-            FROM veg_orders vo
-            LEFT JOIN veg_session_products sp ON sp.id = vo.product_id
-            JOIN veg_sessions vs ON vs.id = vo.session_id
-            WHERE vo.session_id = ? AND vo.restaurant_number = ? AND vo.delivery_date = ?
-              AND COALESCE(vo.admin_qty, vo.quantity) > 0
-              AND COALESCE(vs.legal_entity_group, 'BK_VM') = ?
-            ORDER BY sp.sort_order, sp.product_name
-        ");
-        $items->execute([$sessionId, $rest['restaurant_number'], $deliveryDate, $group]);
-        $rows = $items->fetchAll();
-        if (empty($rows)) roRespond(['error' => 'Заказ не найден'], 404);
-
-        $mappedItems = array_map(function ($row) {
-            return [
-                'sku' => '',
-                'product_name' => $row['product_name'],
-                'quantity' => $row['quantity'],
-            ];
-        }, $rows);
-
-        roRespond(['order' => [
-            'id' => $id,
-            'source' => 'planeta',
-            'source_name' => 'Планета Ресторанов',
-            'delivery_date' => $deliveryDate,
-            'status' => 'submitted',
-            'submitted_at' => $submittedAt,
-            'updated_at' => null,
-            'updated_by' => null,
-            'comment' => null,
-            'items' => $mappedItems,
         ]]);
     }
 
