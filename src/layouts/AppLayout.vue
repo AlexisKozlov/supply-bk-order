@@ -79,7 +79,7 @@
                 >
                   <span class="sidebar-icon"><BkIcon :name="item.icon" size="sm" light/></span>
                   <span>{{ item.label }}</span>
-                  <span v-if="badgeCounts[item.module]" class="sidebar-badge sidebar-badge-inline">{{ badgeCounts[item.module] }}</span>
+                  <span v-if="badgeCounts[item.badgeKey || item.module]" class="sidebar-badge sidebar-badge-inline">{{ badgeCounts[item.badgeKey || item.module] }}</span>
                 </router-link>
               </template>
             </nav>
@@ -95,7 +95,7 @@
                   @contextmenu.prevent="togglePin(item.route)"
                 >
                   <BkIcon :name="item.icon" size="sm" light/>
-                  <span v-if="badgeCounts[item.module]" class="sidebar-badge">{{ badgeCounts[item.module] }}</span>
+                  <span v-if="badgeCounts[item.badgeKey || item.module]" class="sidebar-badge">{{ badgeCounts[item.badgeKey || item.module] }}</span>
                 </router-link>
               </template>
             </div>
@@ -471,6 +471,7 @@ const toolsGroups = [
   ]},
   { title: 'Рестораны', items: [
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
+    { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Неизвестные штрихкоды', badgeKey: 'scan-unknown' },
     { module: 'surveys', route: 'surveys', icon: 'document', label: 'Опросы' },
     { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
     { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
@@ -739,13 +740,22 @@ async function loadBadges() {
   if (!userStore.isAuthenticated) return
   if (isOffline.value || serverDown.value || document.hidden) return
   try {
-    const [chatRes, corrRes] = await Promise.all([
+    const token = localStorage.getItem('bk_session_token') || ''
+    const scanUnknownPromise = userStore.hasAccess('restaurant-orders', 'view')
+      ? fetch('/api/ro/admin/scan-unknown-count-new', { headers: { 'X-Session-Token': token } })
+          .then(r => r.ok ? r.json() : { count: 0 })
+          .catch(() => ({ count: 0 }))
+      : Promise.resolve({ count: 0 })
+
+    const [chatRes, corrRes, scanUnknownRes] = await Promise.all([
       db.rpc('chat_unread_total'),
       db.from('order_corrections').select('id').eq('status', 'pending').limit(100),
+      scanUnknownPromise,
     ])
     badgeCounts.value = {}
     if (chatRes.data?.count > 0) badgeCounts.value['chat'] = chatRes.data.count
     if (corrRes.data?.length > 0) badgeCounts.value['corrections'] = corrRes.data.length
+    if (scanUnknownRes?.count > 0) badgeCounts.value['scan-unknown'] = scanUnknownRes.count
   } catch {}
 }
 let badgeTimer = null

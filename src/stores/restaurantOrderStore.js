@@ -59,10 +59,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   const restaurantOrdersEnabled = ref(true);
   const loading = ref(false);
 
-  async function loginByTelegram(tgToken) {
+  async function loginByTelegram(tgToken, acceptedDataRules = false) {
     const data = await api('tg-auth', {
       method: 'POST',
-      body: JSON.stringify({ tg_token: tgToken }),
+      body: JSON.stringify({ tg_token: tgToken, accepted_data_rules: acceptedDataRules }),
     });
     if (data.success) {
       localStorage.setItem(TOKEN_KEY, data.token);
@@ -72,10 +72,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
-  async function login(restaurantNumber, password, legalEntityGroup = null, force = false) {
+  async function login(restaurantNumber, password, legalEntityGroup = null, force = false, acceptedDataRules = false) {
     const data = await api('login', {
       method: 'POST',
-      body: JSON.stringify({ restaurant_number: restaurantNumber, password, legal_entity_group: legalEntityGroup, force }),
+      body: JSON.stringify({ restaurant_number: restaurantNumber, password, legal_entity_group: legalEntityGroup, force, accepted_data_rules: acceptedDataRules }),
     });
     if (data.success) {
       localStorage.setItem(TOKEN_KEY, data.token);
@@ -134,6 +134,40 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     if (search) params.set('search', search);
     const data = await api(`products?${params}`);
     return data.products || [];
+  }
+
+  async function scanProduct(gtin) {
+    const data = await api(`scan-product?gtin=${encodeURIComponent(gtin)}`);
+    return data;
+  }
+
+  async function reportMissingGtin(gtin, opts = {}) {
+    const { name = '', comment = '', photo = null } = opts || {};
+    // Если есть фото — multipart/form-data, иначе JSON (обратная совместимость)
+    if (photo) {
+      const fd = new FormData();
+      fd.append('gtin', gtin);
+      if (name) fd.append('name', name);
+      if (comment) fd.append('comment', comment);
+      fd.append('photo', photo);
+      const url = `${API_BASE}/report-missing-gtin`;
+      const headers = {};
+      const t = getToken();
+      if (t) headers['X-RO-Token'] = t;
+      const st = localStorage.getItem('bk_session_token');
+      if (st) headers['X-Session-Token'] = st;
+      const res = await fetch(url, { method: 'POST', headers, body: fd });
+      const text = await res.text();
+      let data = {};
+      if (text) { try { data = JSON.parse(text); } catch {} }
+      if (!res.ok) throw new Error(data.error || `Ошибка сервера (${res.status})`);
+      return data;
+    }
+    const data = await api('report-missing-gtin', {
+      method: 'POST',
+      body: JSON.stringify({ gtin, name, comment }),
+    });
+    return data;
   }
 
   async function loadMyOrder(date) {
@@ -481,7 +515,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
 
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
-    login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
+    login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
     loadBroadcasts, loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,

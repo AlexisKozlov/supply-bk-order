@@ -47,6 +47,9 @@
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="notifyRestaurants" :disabled="notifying">
             {{ notifying ? 'Отправка...' : '🔔 Напомнить в Telegram' }}
           </button>
+          <button v-if="activeCollection.status === 'active'" class="sc-btn outline" @click="openEditProducts">
+            Изменить товары
+          </button>
           <button class="sc-btn outline" @click="openRename">Переименовать</button>
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline red-text" @click="askCloseCollection">
             Закрыть сбор
@@ -82,7 +85,7 @@
             <div class="sc-summary-lbl">Ответов</div>
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px;">
-            <button v-if="activeCollection.status === 'active'" class="sc-btn sm outline" @click="openEditProducts">Товары</button>
+            <button v-if="activeCollection.status === 'active'" class="sc-btn sm outline" @click="openEditProducts">Изменить товары</button>
             <button class="sc-btn sm outline" @click="exportExcel">Excel</button>
             <button class="sc-btn sm outline" @click="refreshData">Обновить</button>
           </div>

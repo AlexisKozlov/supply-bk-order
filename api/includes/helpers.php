@@ -554,6 +554,26 @@ function recordFailedLogin($pdo, $ip, $userName = '') {
     $pdo->prepare("INSERT INTO failed_login_attempts (ip_address, user_name, attempted_at) VALUES (?, ?, NOW())")->execute([$ip, $userName]);
 }
 
+function recordPortalConsent($pdo, $subjectType, $subjectKey, $displayName = null, $consentCode = 'portal_data_rules', $consentVersion = '2026-04-23') {
+    $subjectType = mb_substr((string)$subjectType, 0, 32);
+    $subjectKey = mb_substr((string)$subjectKey, 0, 120);
+    $displayName = $displayName !== null ? mb_substr((string)$displayName, 0, 255) : null;
+    $consentCode = mb_substr((string)$consentCode, 0, 64);
+    $consentVersion = mb_substr((string)$consentVersion, 0, 32);
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $ua = isset($_SERVER['HTTP_USER_AGENT']) ? mb_substr($_SERVER['HTTP_USER_AGENT'], 0, 512) : null;
+    try {
+        $s = $pdo->prepare("
+            INSERT INTO portal_user_consents
+              (subject_type, subject_key, display_name, consent_code, consent_version, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        $s->execute([$subjectType, $subjectKey, $displayName, $consentCode, $consentVersion, $ip, $ua]);
+    } catch (PDOException $e) {
+        error_log('recordPortalConsent error: ' . $e->getMessage());
+    }
+}
+
 function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $key)) return;
     $val = urldecode($val);

@@ -28,7 +28,30 @@
       </div>
 
       <!-- Telegram auto-login -->
-      <div v-if="tgLoading" class="ro-login-card" style="text-align:center; padding:40px">
+      <div v-if="pendingTgToken && !tgLoading" class="ro-login-card">
+        <div class="ro-card-header">
+          <div class="ro-card-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#E76F51" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 4.5L2.5 12l7 2.5 2.5 7 9.5-17z"/><path d="M9.5 14.5l4-4"/></svg>
+          </div>
+          <div>
+            <h1>Вход через Telegram</h1>
+            <p>Подтвердите правила перед входом</p>
+          </div>
+        </div>
+        <label class="ro-consent">
+          <input v-model="acceptedDataRules" type="checkbox" />
+          <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
+        </label>
+        <div v-if="error" class="ro-error">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          {{ error }}
+        </div>
+        <button type="button" class="ro-submit-btn" :disabled="!acceptedDataRules" @click="confirmTgLogin">
+          Войти через Telegram
+        </button>
+      </div>
+
+      <div v-else-if="tgLoading" class="ro-login-card" style="text-align:center; padding:40px">
         <div class="ro-spinner" style="margin:0 auto 16px"></div>
         <p style="color:#502314; font-size:15px; font-weight:600; margin:0">Вход через Telegram...</p>
       </div>
@@ -94,6 +117,11 @@
             {{ error }}
           </div>
 
+          <label class="ro-consent">
+            <input v-model="acceptedDataRules" type="checkbox" :disabled="loading" />
+            <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
+          </label>
+
           <!-- Диалог: кто-то уже в аккаунте -->
           <div v-if="sessionConflict" class="ro-conflict">
             <div class="ro-conflict-icon">
@@ -110,7 +138,7 @@
             </div>
           </div>
 
-          <button v-if="!sessionConflict" type="submit" class="ro-submit-btn" :disabled="loading || !restaurantNumber || !password">
+          <button v-if="!sessionConflict" type="submit" class="ro-submit-btn" :disabled="loading || !restaurantNumber || !password || !acceptedDataRules">
             <span v-if="loading" class="ro-spinner"></span>
             <template v-else>
               Войти
@@ -153,6 +181,9 @@ const showPassword = ref(false);
 const sessionConflict = ref(false);
 const sessionConflictAgo = ref('');
 const tgLoading = ref(false);
+const acceptedDataRules = ref(false);
+const pendingTgToken = ref('');
+const pendingTgRedirect = ref(null);
 
 const loginBrand = computed(() => {
   const parsed = parseRestaurantInput(restaurantNumber.value);
@@ -190,12 +221,17 @@ function safeRedirect(target) {
 }
 
 async function handleTgLogin(tgToken, redirectTarget) {
+  if (!acceptedDataRules.value) {
+    pendingTgToken.value = tgToken;
+    pendingTgRedirect.value = redirectTarget;
+    return;
+  }
   tgLoading.value = true;
   // Очищаем предыдущее состояние локально, не дергая серверный logout:
   // иначе убьётся session_token активной сессии того же ресторана на другом устройстве.
   store.logoutLocal();
   try {
-    const result = await store.loginByTelegram(tgToken);
+    const result = await store.loginByTelegram(tgToken, acceptedDataRules.value);
     if (result.success) {
       if (redirectTarget) {
         router.replace(redirectTarget);
@@ -212,6 +248,18 @@ async function handleTgLogin(tgToken, redirectTarget) {
   }
   // Убираем токен из URL
   router.replace({ query: {} });
+}
+
+async function confirmTgLogin() {
+  if (!acceptedDataRules.value) {
+    error.value = 'Подтвердите согласие с правилами использования портала';
+    return;
+  }
+  const token = pendingTgToken.value;
+  const redirect = pendingTgRedirect.value;
+  pendingTgToken.value = '';
+  pendingTgRedirect.value = null;
+  await handleTgLogin(token, redirect);
 }
 
 onMounted(async () => {
@@ -252,6 +300,10 @@ function parsedRestaurant() {
 async function handleLogin() {
   error.value = '';
   sessionConflict.value = false;
+  if (!acceptedDataRules.value) {
+    error.value = 'Подтвердите согласие с правилами использования портала';
+    return;
+  }
   const parsed = parsedRestaurant();
   if (!parsed?.number) {
     error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
@@ -259,7 +311,7 @@ async function handleLogin() {
   }
   loading.value = true;
   try {
-    const result = await store.login(parsed.number, password.value, parsed.group);
+    const result = await store.login(parsed.number, password.value, parsed.group, false, acceptedDataRules.value);
     if (result.success) {
       const redirectTarget = safeRedirect(route.query.redirect);
       router.push(redirectTarget || { name: 'restaurant-cabinet' });
@@ -278,6 +330,10 @@ async function handleLogin() {
 
 async function forceLogin() {
   error.value = '';
+  if (!acceptedDataRules.value) {
+    error.value = 'Подтвердите согласие с правилами использования портала';
+    return;
+  }
   const parsed = parsedRestaurant();
   if (!parsed?.number) {
     error.value = 'Неверный номер ресторана. Пример: 24 или PS01';
@@ -285,7 +341,7 @@ async function forceLogin() {
   }
   loading.value = true;
   try {
-    const result = await store.login(parsed.number, password.value, parsed.group, true);
+    const result = await store.login(parsed.number, password.value, parsed.group, true, acceptedDataRules.value);
     if (result.success) {
       const redirectTarget = safeRedirect(route.query.redirect);
       router.push(redirectTarget || { name: 'restaurant-cabinet' });
@@ -537,6 +593,29 @@ async function forceLogin() {
   cursor: not-allowed;
   box-shadow: none;
 }
+.ro-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 2px 0 16px;
+  color: #6f5948;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.ro-consent input {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  accent-color: #E76F51;
+  flex-shrink: 0;
+}
+.ro-consent a {
+  color: #b52200;
+  font-weight: 700;
+  text-decoration: none;
+}
+.ro-consent a:hover { text-decoration: underline; }
 .ro-spinner {
   width: 20px; height: 20px;
   border: 3px solid rgba(255,255,255,0.3);

@@ -12,7 +12,9 @@ if ($endpoint === 'rpc') {
 
     if ($fn === 'check_user_password') {
         $email = $body['user_email'] ?? ''; $pass = $body['user_password'] ?? '';
+        $acceptedDataRules = !empty($body['accepted_data_rules']);
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) respond(['success'=>false,'error'=>'invalid_email'], 400);
+        if (!$acceptedDataRules) respond(['success'=>false,'error'=>'data_rules_required'], 400);
         if (!checkRateLimit($pdo, $clientIp)) respond(['success'=>false,'error'=>'too_many_attempts'], 429);
         $s = $pdo->prepare("SELECT id,name,password,role,display_role,legal_entities,permissions,created_at,telegram_chat_id,hidden_modules FROM users WHERE email=?");
         $s->execute([$email]); $u = $s->fetch();
@@ -24,6 +26,7 @@ if ($endpoint === 'rpc') {
         $permsRaw = $u['permissions'] ?? null;
         $permsDecoded = ($permsRaw && is_string($permsRaw)) ? json_decode($permsRaw, true) : null;
         $sessionToken = createSessionToken($pdo, $u['name']);
+        recordPortalConsent($pdo, 'staff', $email, $u['name']);
         try { $pdo->prepare("INSERT INTO login_log (email, user_name, ip, created_at) VALUES (?, ?, ?, NOW())")->execute([$email, $u['name'], $clientIp]); } catch (PDOException $e) {}
         $mm = $pdo->prepare("SELECT `key`,`value` FROM settings WHERE `key` IN ('maintenance_mode','maintenance_message')"); $mm->execute();
         $mmRows = $mm->fetchAll(); $maintenanceVal = 'false'; $maintenanceMsg = '';

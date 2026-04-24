@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@zxing/browser": "^0.1.5",
     "jspdf": "^4.2.1",
     "pinia": "^2.1.0",
     "vue": "^3.4.0",

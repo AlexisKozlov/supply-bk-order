@@ -274,6 +274,89 @@ function roGetCttPrefixByGroup($group) {
     return strtoupper((string)$group) === 'PS' ? 'DODO' : 'BK';
 }
 
+// Полное название юрлица → короткое имя для stock_malling.customer
+// «ООО "Бургер БК"» → «Бургер БК», «ООО "Воглия Матта"» → «Воглия Матта», «ООО "Пицца Стар"» → «Пицца Стар»
+function roShortCustomerName($legalEntity) {
+    if (!$legalEntity) return null;
+    if (preg_match('/Пицца\s*Стар/u', $legalEntity)) return 'Пицца Стар';
+    if (preg_match('/Воглия\s*Матта/u', $legalEntity)) return 'Воглия Матта';
+    if (preg_match('/Бургер\s*БК/u', $legalEntity)) return 'Бургер БК';
+    return null;
+}
+
+// Остаток склада по SKU+юрлицу. Возвращает массив:
+//   ['qty' => float, 'date' => 'YYYY-MM-DD'|null, 'source' => 'shelf_life'|'ro_balances',
+//    'nearest_expiry' => 'YYYY-MM-DD'|null, 'expiry_status' => string|null, 'batches' => [...]?]
+// или null, если данных нет ни в одной таблице.
+// Источники:
+//   - stock_malling (модуль «Сроки годности») — количество + срок годности по партиям
+//   - ro_stock_balances (модуль «Заказы ресторанов» → «Остатки склада»)
+// Выбирается источник с самой свежей датой. При равенстве — stock_malling (там ещё и сроки годности).
+function roGetStockForSku($pdo, $sku, $legalEntity) {
+    if (!$sku || !$legalEntity) return null;
+
+    // === stock_malling ===
+    $shelfData = null;
+    $customer = roShortCustomerName($legalEntity);
+    if ($customer) {
+        $s = $pdo->prepare("
+            SELECT warehouse, production_date, expiry_date, expiry_status, quantity, uploaded_at
+            FROM stock_malling
+            WHERE customer = ? AND product_name LIKE CONCAT(?, ' %')
+            ORDER BY expiry_date IS NULL, expiry_date ASC
+        ");
+        $s->execute([$customer, $sku]);
+        $rows = $s->fetchAll();
+        if (!empty($rows)) {
+            $totalQty = 0;
+            $batches = [];
+            $uploadedAt = null;
+            foreach ($rows as $r) {
+                $q = (float)$r['quantity'];
+                $totalQty += $q;
+                $batches[] = [
+                    'qty' => $q,
+                    'expiry' => $r['expiry_date'],
+                    'production' => $r['production_date'],
+                    'status' => $r['expiry_status'],
+                    'warehouse' => $r['warehouse'],
+                ];
+                if (!$uploadedAt || $r['uploaded_at'] > $uploadedAt) $uploadedAt = $r['uploaded_at'];
+            }
+            $shelfData = [
+                'qty' => $totalQty,
+                'date' => $uploadedAt ? date('Y-m-d', strtotime($uploadedAt)) : null,
+                'source' => 'shelf_life',
+                'nearest_expiry' => $rows[0]['expiry_date'] ?: null,
+                'expiry_status' => $rows[0]['expiry_status'] ?: null,
+                'batches' => $batches,
+            ];
+        }
+    }
+
+    // === ro_stock_balances (самая свежая дата, сумма по складам) ===
+    $balData = null;
+    $s = $pdo->prepare("SELECT MAX(balance_date) FROM ro_stock_balances WHERE sku = ? AND legal_entity = ?");
+    $s->execute([$sku, $legalEntity]);
+    $lastDate = $s->fetchColumn();
+    if ($lastDate) {
+        $s = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM ro_stock_balances WHERE sku = ? AND legal_entity = ? AND balance_date = ?");
+        $s->execute([$sku, $legalEntity, $lastDate]);
+        $qty = (float)$s->fetchColumn();
+        $balData = [
+            'qty' => $qty, 'date' => $lastDate, 'source' => 'ro_balances',
+            'nearest_expiry' => null, 'expiry_status' => null, 'batches' => null,
+        ];
+    }
+
+    // === Выбор по свежести ===
+    if ($shelfData && $balData) {
+        // При равенстве дат — приоритет shelf_life (даёт ещё и сроки)
+        return ($balData['date'] > $shelfData['date']) ? $balData : $shelfData;
+    }
+    return $shelfData ?: $balData;
+}
+
 function roSessionsSupportGroups($pdo) {
     static $supported = null;
     if ($supported !== null) return $supported;
@@ -1053,8 +1136,12 @@ $roParam = $roParts[2] ?? null;
 // --- Авторизация через Telegram ---
 if ($roAction === 'tg-auth' && $method === 'POST') {
     $tgToken = $body['tg_token'] ?? '';
+    $acceptedDataRules = !empty($body['accepted_data_rules']);
     if (!$tgToken) {
         roRespond(['success' => false, 'error' => 'Токен не указан'], 400);
+    }
+    if (!$acceptedDataRules) {
+        roRespond(['success' => false, 'error' => 'Подтвердите согласие с правилами использования портала'], 400);
     }
 
     // Ищем токен
@@ -1100,6 +1187,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
+    recordPortalConsent($pdo, 'restaurant', $restGroup . ':' . $restNum, 'Ресторан ' . $restNum . ' ' . $restGroup);
 
     $rest = roGetRestaurantRow($pdo, $restNum, $restGroup);
     if (!$rest) {
@@ -1125,10 +1213,14 @@ if ($roAction === 'login' && $method === 'POST') {
     $restNum = intval($body['restaurant_number'] ?? 0);
     $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
     $password = $body['password'] ?? '';
+    $acceptedDataRules = !empty($body['accepted_data_rules']);
     $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
     if (!$restNum || !$password) {
         roRespond(['success' => false, 'error' => 'Введите номер ресторана и пароль'], 400);
+    }
+    if (!$acceptedDataRules) {
+        roRespond(['success' => false, 'error' => 'Подтвердите согласие с правилами использования портала'], 400);
     }
 
     if (!checkRateLimit($pdo, $clientIp, 15, 10)) {
@@ -1174,6 +1266,7 @@ if ($roAction === 'login' && $method === 'POST') {
     $activeUntil = date('Y-m-d H:i:s', strtotime('+3 hours'));
     $pdo->prepare("UPDATE ro_users SET session_token = ?, session_active_until = ?, last_login_at = NOW() WHERE id = ?")
         ->execute([$token, $activeUntil, $user['id']]);
+    recordPortalConsent($pdo, 'restaurant', $restGroup . ':' . $restNum, 'Ресторан ' . $restNum . ' ' . $restGroup);
 
     // Инфо о ресторане
     $rest = roGetRestaurantRow($pdo, $restNum, $restGroup);
@@ -1758,6 +1851,262 @@ if ($roAction === 'products' && $method === 'GET') {
     }
 
     roRespond(['products' => $products]);
+}
+
+// --- Сканер товаров (BETA): поиск товара по GTIN + аналоги + остаток склада ---
+if ($roAction === 'scan-product' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $gtin = trim((string)($_GET['gtin'] ?? ''));
+    if ($gtin === '') roRespond(['error' => 'Не указан штрихкод'], 400);
+
+    $le = $rest['legal_entity'];
+    $group = getEntityGroup($le);
+
+    // Ищем товар по GTIN среди всех юрлиц группы (товары — справочник, общий для группы)
+    $where = ["p.gtin = ?", "p.is_active = 1"];
+    $params = [$gtin];
+    applyEntityTextFilter($group, $where, $params, 'p.legal_entity');
+    $sql = "SELECT p.sku, p.name, p.gtin, p.unit_of_measure, p.qty_per_box, p.multiplicity, p.category,
+                   p.analog_group, p.legal_entity, p.supplier
+            FROM products p
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY (p.legal_entity = ?) DESC, p.name
+            LIMIT 5";
+    $params[] = $le;
+    $s = $pdo->prepare($sql);
+    $s->execute($params);
+    $found = $s->fetchAll();
+
+    if (empty($found)) {
+        roRespond(['found' => false, 'gtin' => $gtin]);
+    }
+
+    // Берём первый (приоритет — юрлицо ресторана)
+    $main = $found[0];
+    $multipleMatches = count($found) > 1 ? array_slice($found, 1) : [];
+
+    // Остаток склада для основного товара
+    $stockMain = roGetStockForSku($pdo, $main['sku'], $main['legal_entity']);
+
+    // Аналоги: все товары той же analog_group (включая основной), фильтр по группе юрлиц.
+    // Показываем и активные, и снятые с ассортимента (с пометкой is_active=0).
+    $analogs = [];
+    if (!empty($main['analog_group'])) {
+        $aWhere = ["p.analog_group = ?"];
+        $aParams = [$main['analog_group']];
+        applyEntityTextFilter($group, $aWhere, $aParams, 'p.legal_entity');
+        $aSql = "SELECT p.sku, p.name, p.gtin, p.unit_of_measure, p.qty_per_box, p.multiplicity, p.legal_entity, p.supplier, p.is_active
+                 FROM products p
+                 WHERE " . implode(' AND ', $aWhere) . "
+                 ORDER BY (p.sku = ?) DESC, p.is_active DESC, p.name
+                 LIMIT 30";
+        $aParams[] = $main['sku'];
+        $a = $pdo->prepare($aSql);
+        $a->execute($aParams);
+        foreach ($a->fetchAll() as $row) {
+            $row['stock_warehouse'] = roGetStockForSku($pdo, $row['sku'], $row['legal_entity']);
+            $row['is_main'] = ($row['sku'] === $main['sku']) ? 1 : 0;
+            $row['is_active'] = (int)$row['is_active'];
+            $row['multiplicity'] = (int)$row['multiplicity'];
+            $analogs[] = $row;
+        }
+    }
+
+    roRespond([
+        'found' => true,
+        'product' => [
+            'sku' => $main['sku'],
+            'name' => $main['name'],
+            'gtin' => $main['gtin'],
+            'unit_of_measure' => $main['unit_of_measure'],
+            'qty_per_box' => $main['qty_per_box'],
+            'multiplicity' => (int)$main['multiplicity'],
+            'category' => $main['category'],
+            'analog_group' => $main['analog_group'],
+            'supplier' => $main['supplier'],
+            'legal_entity' => $main['legal_entity'],
+            'stock_warehouse' => $stockMain,
+        ],
+        'analogs' => $analogs,
+        'multiple_matches' => array_map(function($r) {
+            return ['sku' => $r['sku'], 'name' => $r['name'], 'legal_entity' => $r['legal_entity']];
+        }, $multipleMatches),
+    ]);
+}
+
+// --- Сканер: сообщить о ненайденном штрихкоде (BETA) ---
+if ($roAction === 'report-missing-gtin' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    // Поддерживаем оба формата: JSON и multipart/form-data (с фото)
+    $isMultipart = (stripos($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data') !== false);
+    $src = $isMultipart ? $_POST : ($body ?: []);
+
+    $gtin = trim((string)($src['gtin'] ?? ''));
+    if ($gtin === '') roRespond(['error' => 'Не указан штрихкод'], 400);
+    if (strlen($gtin) > 64) roRespond(['error' => 'Слишком длинный штрихкод'], 400);
+
+    $reporterName = trim((string)($src['name'] ?? ''));
+    if (strlen($reporterName) > 500) $reporterName = substr($reporterName, 0, 500);
+
+    $reporterComment = trim((string)($src['comment'] ?? ''));
+    if (strlen($reporterComment) > 1000) $reporterComment = substr($reporterComment, 0, 1000);
+
+    $restNumber = (int)$rest['restaurant_number'];
+    $group = $rest['legal_entity_group'] ?: 'BK_VM';
+
+    // Обработка загруженного фото (опционально)
+    $photoRelPath = null; // относительный путь, что сохраним в БД
+    $photoAbsPath = null; // абсолютный путь для sendPhoto
+    if ($isMultipart && !empty($_FILES['photo']) && ($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $file = $_FILES['photo'];
+        $maxSize = 6 * 1024 * 1024; // 6 МБ
+        if ($file['size'] > $maxSize) {
+            roRespond(['error' => 'Фото слишком большое (максимум 6 МБ)'], 400);
+        }
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+        if (!isset($allowed[$mime])) {
+            roRespond(['error' => 'Допустимы только JPEG, PNG или WebP'], 400);
+        }
+        $ext = $allowed[$mime];
+        $subdir = date('Y/m');
+        $uploadBase = __DIR__ . '/../uploads/scan_unknown';
+        $dir = $uploadBase . '/' . $subdir;
+        if (!is_dir($dir) && !mkdir($dir, 0775, true)) {
+            error_log('[ro/report-missing-gtin] Не удалось создать папку: ' . $dir);
+            roRespond(['error' => 'Не удалось сохранить фото'], 500);
+        }
+        $fname = bin2hex(random_bytes(8)) . '.' . $ext;
+        $absPath = $dir . '/' . $fname;
+        if (!move_uploaded_file($file['tmp_name'], $absPath)) {
+            roRespond(['error' => 'Не удалось сохранить фото'], 500);
+        }
+        @chmod($absPath, 0644);
+        $photoRelPath = $subdir . '/' . $fname;
+        $photoAbsPath = $absPath;
+    }
+
+    // 1) Сохраняем в БД (UPSERT по gtin+restaurant_number)
+    // Новые поля (reporter_name/comment/photo) перезаписываем при каждом рапорте.
+    $dbOk = false;
+    try {
+        $s = $pdo->prepare("
+            INSERT INTO ro_scan_unknown
+                (gtin, restaurant_number, legal_entity_group, reporter_name, reporter_comment, reporter_photo_path)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                seen_count = seen_count + 1,
+                last_seen = CURRENT_TIMESTAMP,
+                status = 'new',
+                reporter_name = COALESCE(NULLIF(VALUES(reporter_name), ''), reporter_name),
+                reporter_comment = COALESCE(NULLIF(VALUES(reporter_comment), ''), reporter_comment),
+                reporter_photo_path = COALESCE(VALUES(reporter_photo_path), reporter_photo_path)
+        ");
+        $s->execute([
+            $gtin,
+            $restNumber,
+            $group,
+            $reporterName !== '' ? $reporterName : null,
+            $reporterComment !== '' ? $reporterComment : null,
+            $photoRelPath,
+        ]);
+        $dbOk = true;
+    } catch (Exception $e) {
+        error_log('[ro/report-missing-gtin] DB error: ' . $e->getMessage());
+    }
+
+    // 2) Telegram-уведомление подписчикам из ro_scan_unknown_subscribers
+    // Если таблица пустая — никому не шлём.
+    $tgSent = 0; $tgTotal = 0;
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? getenv('TELEGRAM_BOT_TOKEN') ?: '';
+    if ($botToken) {
+        try {
+            $a = $pdo->query("
+                SELECT u.telegram_chat_id
+                FROM ro_scan_unknown_subscribers s
+                JOIN users u ON u.name = s.user_name
+                WHERE u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id != ''
+            ");
+            $chatIds = $a->fetchAll(PDO::FETCH_COLUMN);
+            $tgTotal = count($chatIds);
+            $restLabel = formatRestaurantNumber($restNumber, $group);
+
+            // Базовый URL для ссылки в уведомлении
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'] ?? '';
+            $appUrl = $_ENV['APP_PUBLIC_URL'] ?? getenv('APP_PUBLIC_URL') ?: '';
+            if (!$appUrl && $host) $appUrl = "{$scheme}://{$host}";
+            $link = $appUrl ? rtrim($appUrl, '/') . '/restaurant-unknown-barcodes' : '';
+
+            $text = "🔎 <b>Сканер: товар не найден</b>\n"
+                  . "Штрихкод: <code>" . htmlspecialchars($gtin, ENT_QUOTES, 'UTF-8') . "</code>\n"
+                  . "Ресторан: {$restLabel} ({$group})";
+            if ($reporterName !== '') {
+                $text .= "\nНазвание: <b>" . htmlspecialchars($reporterName, ENT_QUOTES, 'UTF-8') . "</b>";
+            }
+            if ($reporterComment !== '') {
+                $text .= "\nКомментарий: " . htmlspecialchars($reporterComment, ENT_QUOTES, 'UTF-8');
+            }
+            if ($link) {
+                $text .= "\n🔗 <a href=\"" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "\">Разобрать</a>";
+            }
+            foreach ($chatIds as $chatId) {
+                // Если есть фото — шлём sendPhoto с caption, иначе sendMessage
+                if ($photoAbsPath && is_file($photoAbsPath)) {
+                    $url = "https://api.telegram.org/bot{$botToken}/sendPhoto";
+                    $cfile = new CURLFile($photoAbsPath);
+                    $payload = [
+                        'chat_id' => $chatId,
+                        'photo' => $cfile,
+                        'caption' => $text,
+                        'parse_mode' => 'HTML',
+                    ];
+                    $ch = curl_init($url);
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => $payload,
+                        CURLOPT_TIMEOUT => 15,
+                        CURLOPT_CONNECTTIMEOUT => 5,
+                    ]);
+                } else {
+                    $payload = json_encode(['chat_id' => $chatId, 'text' => $text, 'parse_mode' => 'HTML']);
+                    $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_POST => true,
+                        CURLOPT_POSTFIELDS => $payload,
+                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                        CURLOPT_TIMEOUT => 5,
+                        CURLOPT_CONNECTTIMEOUT => 3,
+                    ]);
+                }
+                $resp = curl_exec($ch);
+                $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if ($resp !== false && $http === 200) $tgSent++;
+            }
+        } catch (Exception $e) {
+            error_log('[ro/report-missing-gtin] TG error: ' . $e->getMessage());
+        }
+    }
+
+    // Считаем успехом, если хоть один канал сработал
+    if (!$dbOk && $tgSent === 0) {
+        roRespond(['error' => 'Не удалось сохранить сообщение'], 500);
+    }
+    roRespond([
+        'success' => true,
+        'db_saved' => $dbOk,
+        'telegram_sent' => $tgSent,
+        'telegram_total' => $tgTotal,
+    ]);
 }
 
 // --- Мой заказ на дату ---
@@ -3932,6 +4281,207 @@ if (strpos($roAction, 'admin') === 0) {
         $s = $pdo->query("SELECT DISTINCT balance_date FROM ro_stock_balances ORDER BY balance_date DESC LIMIT 30");
         $dates = array_column($s->fetchAll(), 'balance_date');
         roRespond(['dates' => $dates]);
+    }
+
+    // --- Неизвестные штрихкоды: список ---
+    if ($adminAction === 'scan-unknown' && $method === 'GET' && !$adminParam) {
+        $status = $_GET['status'] ?? 'new';
+        $group = strtoupper(trim((string)($_GET['group'] ?? '')));
+        $search = trim((string)($_GET['search'] ?? ''));
+
+        $where = [];
+        $params = [];
+        if ($status && $status !== 'all') {
+            $where[] = 'status = ?';
+            $params[] = $status;
+        }
+        if ($group === 'BK_VM' || $group === 'PS') {
+            $where[] = 'legal_entity_group = ?';
+            $params[] = $group;
+        }
+        if ($search !== '') {
+            $where[] = '(gtin LIKE ? OR restaurant_number LIKE ?)';
+            $params[] = '%' . $search . '%';
+            $params[] = '%' . $search . '%';
+        }
+        $sql = "SELECT id, gtin, restaurant_number, legal_entity_group, seen_count,
+                       first_seen, last_seen, status, notes,
+                       reporter_name, reporter_comment,
+                       CASE WHEN reporter_photo_path IS NOT NULL AND reporter_photo_path <> ''
+                            THEN 1 ELSE 0 END AS has_photo
+                FROM ro_scan_unknown";
+        if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
+        $sql .= ' ORDER BY last_seen DESC LIMIT 500';
+
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        roRespond(['items' => $s->fetchAll(PDO::FETCH_ASSOC)]);
+    }
+
+    // --- Неизвестные штрихкоды: счётчик новых (для бейджа) ---
+    if ($adminAction === 'scan-unknown-count-new' && $method === 'GET') {
+        $s = $pdo->query("SELECT COUNT(*) FROM ro_scan_unknown WHERE status = 'new'");
+        $count = (int)$s->fetchColumn();
+        roRespond(['count' => $count]);
+    }
+
+    // --- Неизвестные штрихкоды: отдача фото ---
+    if ($adminAction === 'scan-unknown' && $method === 'GET' && $adminParam && ($roParts[4] ?? '') === 'photo') {
+        $id = (int)$adminParam;
+        if ($id <= 0) roRespond(['error' => 'Bad id'], 400);
+
+        $s = $pdo->prepare("SELECT reporter_photo_path FROM ro_scan_unknown WHERE id = ?");
+        $s->execute([$id]);
+        $row = $s->fetch();
+        if (!$row || empty($row['reporter_photo_path'])) {
+            roRespond(['error' => 'Фото не найдено'], 404);
+        }
+
+        $uploadBase = __DIR__ . '/../uploads/scan_unknown';
+        $absPath = realpath($uploadBase . '/' . $row['reporter_photo_path']);
+        $baseReal = realpath($uploadBase);
+        // Защита от path traversal: реальный путь должен быть внутри uploadBase
+        if (!$absPath || !$baseReal || strpos($absPath, $baseReal) !== 0 || !is_file($absPath)) {
+            roRespond(['error' => 'Файл недоступен'], 404);
+        }
+
+        $mime = mime_content_type($absPath) ?: 'application/octet-stream';
+        header_remove('Content-Type');
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . filesize($absPath));
+        header('Cache-Control: private, max-age=3600');
+        readfile($absPath);
+        exit;
+    }
+
+    // --- Неизвестные штрихкоды: сменить статус ---
+    if ($adminAction === 'scan-unknown' && $method === 'POST' && $adminParam) {
+        $id = (int)$adminParam;
+        $op = $roParts[4] ?? '';
+        if ($id <= 0) roRespond(['error' => 'Bad id'], 400);
+
+        if ($op === 'status') {
+            $newStatus = (string)($body['status'] ?? '');
+            if (!in_array($newStatus, ['new', 'resolved', 'ignored'], true)) {
+                roRespond(['error' => 'Недопустимый статус'], 400);
+            }
+
+            // Сначала читаем текущую строку для уведомления
+            $curSt = $pdo->prepare("SELECT status, gtin, restaurant_number, legal_entity_group, reporter_name FROM ro_scan_unknown WHERE id = ?");
+            $curSt->execute([$id]);
+            $row = $curSt->fetch();
+            if (!$row) roRespond(['error' => 'Запись не найдена'], 404);
+
+            $oldStatus = $row['status'];
+
+            $s = $pdo->prepare("UPDATE ro_scan_unknown SET status = ? WHERE id = ?");
+            $s->execute([$newStatus, $id]);
+
+            // Уведомляем ресторан, только если переводим в resolved из другого статуса
+            $notified = false;
+            if ($newStatus === 'resolved' && $oldStatus !== 'resolved') {
+                $gtinSafe = htmlspecialchars($row['gtin'], ENT_QUOTES, 'UTF-8');
+                $reporter = trim((string)($row['reporter_name'] ?? ''));
+                $message = "✅ <b>Штрихкод добавлен в базу</b>\n"
+                         . "Код: <code>{$gtinSafe}</code>";
+                if ($reporter !== '') {
+                    $message .= "\nТовар: " . htmlspecialchars($reporter, ENT_QUOTES, 'UTF-8');
+                }
+                $message .= "\n\nСпасибо за сигнал! Теперь при сканировании товар будет находиться.";
+                try {
+                    roNotifyRestaurant(
+                        $pdo,
+                        (int)$row['restaurant_number'],
+                        $message,
+                        $row['legal_entity_group']
+                    );
+                    $notified = true;
+                } catch (Exception $e) {
+                    error_log('[scan-unknown status] notify error: ' . $e->getMessage());
+                }
+            }
+
+            roRespond(['success' => true, 'notified' => $notified]);
+        }
+
+        if ($op === 'notes') {
+            $notes = trim((string)($body['notes'] ?? ''));
+            if (strlen($notes) > 500) $notes = substr($notes, 0, 500);
+            $s = $pdo->prepare("UPDATE ro_scan_unknown SET notes = ? WHERE id = ?");
+            $s->execute([$notes === '' ? null : $notes, $id]);
+            roRespond(['success' => true]);
+        }
+
+        roRespond(['error' => 'Unknown op'], 400);
+    }
+
+    // --- Подписчики на уведомления: список + кандидаты ---
+    if ($adminAction === 'scan-unknown-subscribers' && $method === 'GET') {
+        global $ROLE_TEMPLATES;
+
+        $cur = $pdo->query("SELECT user_name FROM ro_scan_unknown_subscribers ORDER BY user_name");
+        $current = $cur->fetchAll(PDO::FETCH_COLUMN);
+
+        // Кандидаты: пользователи с привязанным Telegram + доступом к модулю restaurant-orders
+        $cand = $pdo->query("
+            SELECT name, role, display_role, telegram_chat_id, permissions
+            FROM users
+            WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''
+            ORDER BY name
+        ");
+        $rows = $cand->fetchAll(PDO::FETCH_ASSOC);
+
+        $candidates = [];
+        foreach ($rows as $r) {
+            $perms = resolvePermissions($r['role'] ?? 'user', $r['permissions'] ?? null, $ROLE_TEMPLATES);
+            $level = $perms['restaurant-orders'] ?? 'none';
+            if ($level && $level !== 'none') {
+                $candidates[] = [
+                    'name' => $r['name'],
+                    'role' => $r['role'],
+                    'display_role' => $r['display_role'],
+                    'access_level' => $level,
+                ];
+            }
+        }
+
+        roRespond(['subscribers' => $current, 'candidates' => $candidates]);
+    }
+
+    // --- Подписчики на уведомления: сохранить ---
+    if ($adminAction === 'scan-unknown-subscribers' && $method === 'POST') {
+        $list = $body['subscribers'] ?? [];
+        if (!is_array($list)) $list = [];
+
+        $names = [];
+        foreach ($list as $n) {
+            $n = trim((string)$n);
+            if ($n !== '') $names[$n] = true;
+        }
+        $names = array_keys($names);
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec("DELETE FROM ro_scan_unknown_subscribers");
+            if (!empty($names)) {
+                $ph = implode(',', array_fill(0, count($names), '?'));
+                $valid = $pdo->prepare("SELECT name FROM users WHERE name IN ($ph)");
+                $valid->execute($names);
+                $validNames = $valid->fetchAll(PDO::FETCH_COLUMN);
+
+                if (!empty($validNames)) {
+                    $ins = $pdo->prepare("INSERT INTO ro_scan_unknown_subscribers (user_name) VALUES (?)");
+                    foreach ($validNames as $n) $ins->execute([$n]);
+                }
+            }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            roRespond(['error' => 'Не удалось сохранить: ' . $e->getMessage()], 500);
+        }
+
+        $cur = $pdo->query("SELECT user_name FROM ro_scan_unknown_subscribers ORDER BY user_name");
+        roRespond(['success' => true, 'subscribers' => $cur->fetchAll(PDO::FETCH_COLUMN)]);
     }
 
     roRespond(['error' => 'Not found'], 404);

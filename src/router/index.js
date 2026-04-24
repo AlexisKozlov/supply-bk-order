@@ -52,6 +52,7 @@ const routes = [
       { path: 'chat', name: 'chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'Чат с ресторанами', module: 'chat' } },
       { path: 'restaurant-orders', name: 'restaurant-orders', component: () => import('@/views/RestaurantOrdersManagerView.vue'), meta: { title: 'Заказы ресторанов', module: 'restaurant-orders' } },
       { path: 'restaurant-report', name: 'restaurant-report', component: () => import('@/views/RestaurantReportView.vue'), meta: { title: 'Отчёт по заказам', module: 'restaurant-orders' } },
+      { path: 'restaurant-unknown-barcodes', name: 'restaurant-unknown-barcodes', component: () => import('@/views/RestaurantUnknownBarcodesView.vue'), meta: { title: 'Неизвестные штрихкоды', module: 'restaurant-orders' } },
       { path: 'surveys', name: 'surveys', component: () => import('@/views/SurveysView.vue'), meta: { title: 'Опросы', module: 'surveys' } },
       { path: 'supplier-orders', name: 'supplier-orders', component: () => import('@/views/SupplierOrdersHubView.vue'), meta: { title: 'Заявки поставщикам', module: 'supplier-orders' } },
       { path: 'truck-loading', name: 'truck-loading', component: () => import('@/views/TruckLoadingView.vue'), meta: { title: 'Загрузка машин', module: 'truck-loading' } },
@@ -90,6 +91,7 @@ const routes = [
       { path: 'orders/history', name: 'restaurant-orders-history', component: EmptySlot, meta: { title: 'История заказов' } },
       { path: 'surveys', name: 'restaurant-surveys', component: EmptySlot, meta: { title: 'Опросы' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Остатки' } },
+      { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
     ],
   },
@@ -130,6 +132,12 @@ const routes = [
     name: 'telegram-link',
     component: () => import('@/views/TelegramLinkView.vue'),
     meta: { title: 'Привязка Telegram' },
+  },
+  {
+    path: '/data-rules',
+    name: 'data-rules',
+    component: () => import('@/views/DataRulesView.vue'),
+    meta: { title: 'Правила использования и данные' },
   },
   {
     path: '/login',

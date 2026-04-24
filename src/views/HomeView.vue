@@ -151,8 +151,12 @@
                   <label>Пароль</label>
                   <input ref="passwordInput" v-model="password" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doLogin" :disabled="loginLoading" />
                 </div>
+                <label class="login-consent">
+                  <input v-model="acceptedDataRules" type="checkbox" :disabled="loginLoading" />
+                  <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
+                </label>
                 <div v-if="loginError" class="login-error">{{ loginError }}</div>
-                <button class="login-submit" @click="doLogin" :disabled="loginLoading || !selectedUser">
+                <button class="login-submit" @click="doLogin" :disabled="loginLoading || !selectedUser || !acceptedDataRules">
                   <BurgerSpinner v-if="loginLoading" size="xs" />
                   <span>{{ loginLoading ? 'Вход...' : 'Войти' }}</span>
                 </button>
@@ -168,8 +172,12 @@
                   <label>Пароль</label>
                   <input ref="roPasswordInput" v-model="roPassword" type="password" placeholder="Введите пароль" autocomplete="current-password" @keydown.enter="doRoLogin" :disabled="loginLoading" />
                 </div>
+                <label class="login-consent">
+                  <input v-model="acceptedDataRules" type="checkbox" :disabled="loginLoading" />
+                  <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
+                </label>
                 <div v-if="loginError" class="login-error">{{ loginError }}</div>
-                <button class="login-submit" @click="doRoLogin" :disabled="loginLoading || !roNumber || !roPassword">
+                <button class="login-submit" @click="doRoLogin" :disabled="loginLoading || !roNumber || !roPassword || !acceptedDataRules">
                   <BurgerSpinner v-if="loginLoading" size="xs" />
                   <span>{{ loginLoading ? 'Вход...' : 'Войти' }}</span>
                 </button>
@@ -267,6 +275,7 @@ const loginMode = ref('staff');
 const roNumber = ref('');
 const roPassword = ref('');
 const roPasswordInput = ref(null);
+const acceptedDataRules = ref(false);
 const isMaintenance = ref(false);
 const maintenanceBannerText = ref('');
 const maintenanceEndTimeRaw = ref(null);
@@ -499,10 +508,14 @@ function goPublic(key) {
 
 async function doLogin() {
   if (!selectedUser.value) return;
+  if (!acceptedDataRules.value) {
+    loginError.value = 'Подтвердите согласие с правилами использования портала';
+    return;
+  }
   loginError.value = '';
   loginLoading.value = true;
   try {
-    await userStore.login(selectedUser.value, password.value);
+    await userStore.login(selectedUser.value, password.value, acceptedDataRules.value);
     sessionStorage.setItem('bk_just_logged_in', '1');
     showLoginModal.value = false;
     const redirect = loginRedirectTo.value;
@@ -529,6 +542,10 @@ const roForceLogin = ref(false);
 
 async function doRoLogin() {
   if (!roNumber.value || !roPassword.value) return;
+  if (!acceptedDataRules.value) {
+    loginError.value = 'Подтвердите согласие с правилами использования портала';
+    return;
+  }
   loginError.value = '';
   loginLoading.value = true;
   try {
@@ -538,7 +555,7 @@ async function doRoLogin() {
       roForceLogin.value = false;
       return;
     }
-    const result = await roStore.login(parsed.number, roPassword.value, parsed.group, roForceLogin.value);
+    const result = await roStore.login(parsed.number, roPassword.value, parsed.group, roForceLogin.value, acceptedDataRules.value);
     if (result.success) {
       roForceLogin.value = false;
       showLoginModal.value = false;
@@ -674,6 +691,10 @@ function confirmLogout() {
 .login-field input[type="number"]::-webkit-inner-spin-button,
 .login-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .login-error { color: #E76F51; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.login-consent { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0 12px; color: #6f5948; font-size: 12px; line-height: 1.35; cursor: pointer; }
+.login-consent input { width: 15px; height: 15px; margin-top: 1px; accent-color: #E76F51; flex-shrink: 0; }
+.login-consent a { color: #B52200; font-weight: 700; text-decoration: none; }
+.login-consent a:hover { text-decoration: underline; }
 .login-submit { width: 100%; padding: 11px; border: none; border-radius: 10px; background: #E76F51; color: #fff; font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .2s; }
 .login-submit:hover { background: #B52200; }
 .login-submit:disabled { opacity: .5; cursor: default; }

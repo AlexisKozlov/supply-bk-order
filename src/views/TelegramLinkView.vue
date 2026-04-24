@@ -70,8 +70,12 @@
                 <label>Пароль</label>
                 <input v-model="password" type="password" placeholder="Введите пароль" />
               </div>
+              <label class="tgl-consent">
+                <input v-model="acceptedDataRules" type="checkbox" :disabled="loggingIn" />
+                <span>Я ознакомлен с <router-link to="/data-rules" target="_blank">правилами использования и обработки данных</router-link></span>
+              </label>
               <div v-if="loginError" class="tgl-error">{{ loginError }}</div>
-              <button type="submit" class="tgl-submit" :disabled="loggingIn || !email">
+              <button type="submit" class="tgl-submit" :disabled="loggingIn || !email || !acceptedDataRules">
                 <BurgerSpinner v-if="loggingIn" size="xs" />
                 <span>{{ loggingIn ? 'Вход...' : 'Войти и привязать' }}</span>
               </button>
@@ -107,6 +111,7 @@ const email = ref('');
 const password = ref('');
 const loggingIn = ref(false);
 const loginError = ref('');
+const acceptedDataRules = ref(false);
 
 const bgCanvas = ref(null);
 const { start: startBg, stop: stopBg } = useCanvasParticles(bgCanvas);
@@ -178,10 +183,14 @@ async function login() {
     loginError.value = 'Заполните email и пароль';
     return;
   }
+  if (!acceptedDataRules.value) {
+    loginError.value = 'Подтвердите согласие с правилами использования портала';
+    return;
+  }
   loggingIn.value = true;
   loginError.value = '';
   try {
-    await userStore.login(email.value, password.value);
+    await userStore.login(email.value, password.value, acceptedDataRules.value);
     await confirm();
   } catch (e) {
     loginError.value = 'Неверный email или пароль';
@@ -327,6 +336,30 @@ async function login() {
   outline: none;
 }
 .tgl-field input::placeholder { color: #C4B8A8; }
+
+.tgl-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 12px;
+  color: #8a7a6b;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.tgl-consent input {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  accent-color: #E76F51;
+  flex-shrink: 0;
+}
+.tgl-consent a {
+  color: #E76F51;
+  font-weight: 700;
+  text-decoration: none;
+}
+.tgl-consent a:hover { text-decoration: underline; }
 
 .tgl-error {
   color: #E76F51;

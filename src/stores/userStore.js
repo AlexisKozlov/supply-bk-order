@@ -114,10 +114,11 @@ export const useUserStore = defineStore('user', () => {
     return await validateSession(currentUser.value);
   }
 
-  async function login(email, password) {
+  async function login(email, password, acceptedDataRules = false) {
     const { data, error } = await db.rpc('check_user_password', {
       user_email: email,
       user_password: password,
+      accepted_data_rules: acceptedDataRules,
     });
     if (!error && data?.success) {
       if (data.session_token) setSessionToken(data.session_token);
