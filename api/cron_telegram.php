@@ -1240,11 +1240,28 @@ try {
             $subStmt->execute([$rn, $c['group']]);
             $subChats = $subStmt->fetchAll(PDO::FETCH_COLUMN);
             $dateObj = new DateTime($dd);
+            $itemsStmt = $pdo->prepare("
+                SELECT sku, product_name, quantity
+                FROM so_order_items
+                WHERE order_id = ?
+                ORDER BY product_name, id
+            ");
+            $itemsStmt->execute([$newOrderId]);
+            $items = $itemsStmt->fetchAll();
             $msg = "🤖 <b>Заявка выставлена автоматически</b>\n\n";
             $msg .= "🏪 Ресторан <b>" . formatRestaurantNumber($rn) . "</b>\n";
             $msg .= "📦 Поставщик: <b>" . htmlspecialchars($supName, ENT_QUOTES) . "</b>\n";
             $msg .= "📅 Доставка: <b>" . $dateObj->format('d.m.Y') . "</b>\n\n";
             $msg .= "Дедлайн прошёл — подали копию вашей предыдущей заявки.";
+            if ($items) {
+                $msg .= "\n\n📋 <b>Что подали:</b>\n";
+                foreach ($items as $item) {
+                    $name = trim(($item['sku'] ?: '') . ' ' . ($item['product_name'] ?: ''));
+                    if ($name === '') $name = 'Товар без названия';
+                    $qty = rtrim(rtrim(number_format((float)$item['quantity'], 2, '.', ''), '0'), '.');
+                    $msg .= "• " . htmlspecialchars($name, ENT_QUOTES) . " — <b>{$qty}</b>\n";
+                }
+            }
             foreach ($subChats as $cid) {
                 tgSend($cid, $msg, true);
                 $sent++;

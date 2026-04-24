@@ -107,7 +107,7 @@ function roGetSurveyForRestaurant($pdo, $surveyId, $rest) {
     $stmt->execute([(int)$rest['restaurant_number'], (int)$surveyId, $group]);
     $survey = $stmt->fetch();
     if (!$survey) return null;
-    if (($survey['status'] ?? '') !== 'active' && empty($survey['response_id'])) return null;
+    if (($survey['status'] ?? '') !== 'active') return null;
 
     $questionsStmt = $pdo->prepare("
         SELECT id, text, sort_order
@@ -1464,7 +1464,7 @@ if ($roAction === 'my-surveys' && $method === 'GET') {
           ON sr.survey_id = s.id
          AND sr.restaurant_number = ?
         WHERE s.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-          AND (s.status = 'active' OR sr.id IS NOT NULL)
+          AND s.status = 'active'
         ORDER BY
           CASE WHEN sr.id IS NULL AND s.status = 'active' THEN 0 ELSE 1 END,
           COALESCE(s.sent_at, s.created_at) DESC,
