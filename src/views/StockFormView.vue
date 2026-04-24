@@ -50,7 +50,7 @@
 
         <div v-for="(prod, idx) in info.products" :key="prod.id" class="sf-product">
           <div class="sf-product-top">
-            <div class="sf-product-name">{{ prod.product_name }}</div>
+            <div class="sf-product-name">{{ prod.product_sku ? `${prod.product_sku} ${prod.product_name}` : prod.product_name }}</div>
             <div class="sf-product-unit">{{ unitFull(prod.unit) }}</div>
           </div>
           <div v-if="prod.note" class="sf-product-note">{{ prod.note }}</div>
@@ -104,7 +104,7 @@
         <div class="sf-success-rest">Ресторан {{ selectedRestaurantLabel }}</div>
         <div class="sf-success-details">
           <div v-for="prod in info.products" :key="prod.id" class="sf-success-item">
-            <span>{{ prod.product_name }}</span>
+            <span>{{ prod.product_sku ? `${prod.product_sku} ${prod.product_name}` : prod.product_name }}</span>
             <strong>{{ stockValues[prod.id] || 0 }} {{ unitShort(prod.unit) }}</strong>
           </div>
         </div>
@@ -124,7 +124,7 @@
         <div class="sf-edit-timer">Осталось {{ editTimeFormatted }}</div>
         <div v-for="prod in info.products" :key="prod.id" class="sf-product">
           <div class="sf-product-top">
-            <div class="sf-product-name">{{ prod.product_name }}</div>
+            <div class="sf-product-name">{{ prod.product_sku ? `${prod.product_sku} ${prod.product_name}` : prod.product_name }}</div>
             <div class="sf-product-unit">{{ unitFull(prod.unit) }}</div>
           </div>
           <div class="sf-product-input-wrap">

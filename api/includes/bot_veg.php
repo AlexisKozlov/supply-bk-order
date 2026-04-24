@@ -1398,7 +1398,8 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
         foreach ($products as $p) {
             if (isset($existing[$p['id']])) {
                 $u = $unitLabels[$p['unit']] ?? $p['unit'];
-                $text .= "  • {$p['product_name']} — <b>{$existing[$p['id']]}</b> {$u}\n";
+                $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
+                $text .= "  • {$label} — <b>{$existing[$p['id']]}</b> {$u}\n";
             }
         }
         $text .= "─────────────────────\n";
@@ -1409,7 +1410,8 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     foreach ($products as $p) {
         $u = $unitLabels[$p['unit']] ?? $p['unit'];
         $val = $existing[$p['id']] ?? 0;
-        $text .= "{$p['product_name']} ({$u}): {$val}\n";
+        $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
+        $text .= "{$label} ({$u}): {$val}\n";
     }
     $text .= "</code>\n";
     $text .= "<i>Скопируйте, измените числа и отправьте.</i>";
@@ -1507,7 +1509,8 @@ function restScProcessInput($chatId, $text, $userMsgId) {
     foreach ($products as $i => $p) {
         $u = $unitLabels[$p['unit']] ?? $p['unit'];
         $v = rtrim(rtrim(number_format($values[$i], 2, '.', ''), '0'), '.');
-        $confirmText .= "  • {$p['product_name']} — <b>{$v}</b> {$u}\n";
+        $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
+        $confirmText .= "  • {$label} — <b>{$v}</b> {$u}\n";
     }
 
     // Антиспам — удаляем сообщение пользователя, обновляем бота

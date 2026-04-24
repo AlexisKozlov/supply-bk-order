@@ -52,8 +52,10 @@
           <span class="sb-icon">
             <svg v-if="tab.id === 'surveys'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
             <svg v-else-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <svg v-else-if="tab.id === 'scanner'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
           </span>
           {{ tab.label }}
+          <span v-if="tab.beta" class="sb-beta">BETA</span>
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
       </template>
@@ -91,9 +93,13 @@
     <div class="cab-main">
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Остатки' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Остатки' : activeTab === 'scanner' ? 'Сканер товаров' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
+        <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров (BETA)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
+          <span class="cab-topbar-scan-beta">BETA</span>
+        </button>
       </div>
 
     <!-- ══════ Loading ══════ -->
@@ -827,7 +833,7 @@
         <div v-else class="stock-inline-list">
           <div v-for="p in stockProducts" :key="p.id" class="stock-row">
             <div class="stock-row-main">
-              <div class="stock-row-name">{{ p.product_name }}</div>
+              <div class="stock-row-name">{{ p.product_sku ? `${p.product_sku} ${p.product_name}` : p.product_name }}</div>
               <div v-if="p.note" class="stock-row-note">{{ p.note }}</div>
             </div>
             <div class="stock-row-input">
@@ -857,6 +863,11 @@
           <span v-if="stockSavedFlash" class="stock-saved-flash">Сохранено ✓</span>
         </div>
       </div>
+    </section>
+
+    <!-- ══════ TAB: Сканер товаров (BETA) ══════ -->
+    <section v-if="activeTab === 'scanner' && !globalLoading && !globalError" class="cab-section">
+      <ScannerView />
     </section>
 
     <!-- ══════ TAB: Профиль ══════ -->
@@ -1030,7 +1041,7 @@
     <!-- ══════ Mobile tab bar ══════ -->
     <div class="mob-tabbar">
       <button v-for="tab in mainTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
-        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'surveys' ? '\u{2705}' : tab.id === 'stock' ? '\u{1F4CB}' : '\u{2699}' }}</span>
+        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'surveys' ? '\u{2705}' : tab.id === 'stock' ? '\u{1F4CB}' : tab.id === 'scanner' ? '\u{1F4F7}' : '\u{2699}' }}</span>
         <span class="mob-tab-label">{{ tab.label }}</span>
         <span v-if="tab.badge" class="mob-tab-badge">{{ tab.badge }}</span>
       </button>
@@ -1056,6 +1067,7 @@ import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
+import ScannerView from '@/views/restaurant/ScannerView.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -1288,7 +1300,6 @@ function chooseOption(questionId, optionId) {
 }
 
 // Уникальные источники для фильтра, сгруппированные по названию
-// (чтобы «Планета Ресторанов» из veg_orders и из so_orders давала один чип)
 const historySourceOptions = computed(() => {
   const groups = new Map(); // label -> { keys: Set, source }
   for (const o of historyOrders.value) {
@@ -1398,6 +1409,7 @@ const mainTabs = computed(() => {
       badge: '!', badgeType: 'alert',
     });
   }
+  tabs.push({ id: 'scanner', label: 'Сканер', beta: true });
   return tabs;
 });
 // ═══ Delivery (основная поставка) ═══
@@ -2093,6 +2105,8 @@ function applyRouteToState() {
     }
   } else if (name === 'restaurant-stock') {
     activeTab.value = 'stock';
+  } else if (name === 'restaurant-scanner') {
+    activeTab.value = 'scanner';
   } else if (name === 'restaurant-profile') {
     activeTab.value = 'profile';
   }
@@ -2106,6 +2120,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-surveys' };
   } else if (activeTab.value === 'stock') {
     target = { name: 'restaurant-stock' };
+  } else if (activeTab.value === 'scanner') {
+    target = { name: 'restaurant-scanner' };
   } else if (activeTab.value === 'profile') {
     target = { name: 'restaurant-profile' };
   } else if (activeTab.value === 'orders') {
@@ -2467,23 +2483,14 @@ onMounted(async () => {
   if (tgTokenParam) {
     const redirectQ = route.query.redirect;
     const redirectPath = (typeof redirectQ === 'string' && /^\/restaurant(\/|$)/.test(redirectQ)) ? redirectQ : null;
-    // Сбрасываем старую сессию ТОЛЬКО локально. Если позвать обычный logout(),
-    // он дернёт /api/ro/logout и убьёт session_token на сервере — а это та же запись,
-    // которую используют открытые вкладки других устройств. Tg-auth сам перезапишет session_token ниже.
-    roStore.logoutLocal();
-    try {
-      const result = await roStore.loginByTelegram(tgTokenParam);
-      if (!result.success) {
-        router.replace({ name: 'restaurant-order-login', query: { redirect: route.fullPath } });
-        return;
-      }
-    } catch {
-      router.replace({ name: 'restaurant-order-login', query: { redirect: route.fullPath } });
-      return;
-    }
-    // Убираем tg_token из URL, уходим на целевой путь. Компонент при этом НЕ перемонтируется,
-    // поэтому продолжаем инициализацию ниже — иначе данные не загрузятся и экран будет пустым.
-    router.replace(redirectPath || { name: 'restaurant-cabinet' });
+    router.replace({
+      name: 'restaurant-order-login',
+      query: {
+        tg_token: tgTokenParam,
+        redirect: redirectPath || '/restaurant',
+      },
+    });
+    return;
   }
   if (!roStore.isAuthenticated) {
     const valid = await roStore.validate();
@@ -2550,6 +2557,7 @@ onUnmounted(() => {
 .sb-badge.ok { background: #16a34a; }
 .sb-badge.alert { background: #dc2626; }
 .sb-badge.pause { background: #9ca3af; font-size: 9px; padding: 0 7px; text-transform: uppercase; letter-spacing: 0.5px; }
+.sb-beta { margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; background: linear-gradient(90deg, #FFD54F, #F4A261); color: #3d2400; flex-shrink: 0; }
 .sb-spacer { flex: 1; }
 .sb-help {
   display: flex;
@@ -2618,6 +2626,20 @@ onUnmounted(() => {
 .cab-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 28px; background: white; border-bottom: 1px solid #EDE8E3; position: sticky; top: 0; z-index: 50; }
 .cab-topbar-title { font-size: 17px; font-weight: 800; color: #502314; letter-spacing: -0.3px; }
 .cab-topbar-sub { font-size: 11px; color: #8B7355; margin-top: 1px; }
+.cab-topbar-scan {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; background: #FFF4E6; color: #502314;
+  border: 1px solid #F4A261; border-radius: 8px;
+  cursor: pointer; transition: background 0.15s;
+  font-family: inherit;
+}
+.cab-topbar-scan:hover { background: #FFE8C9; }
+.cab-topbar-scan:active { transform: translateY(1px); }
+.cab-topbar-scan-beta {
+  font-size: 9px; font-weight: 800; letter-spacing: 0.5px;
+  background: linear-gradient(90deg, #FFD54F, #F4A261);
+  color: #3d2400; padding: 2px 6px; border-radius: 4px;
+}
 
 /* Section */
 .cab-section { padding: 24px 28px; }
