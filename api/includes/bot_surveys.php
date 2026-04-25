@@ -48,18 +48,22 @@ function surveyGetChatRestaurants($chatId, $group) {
         ];
     }
 
+    // Раньше мы читали ro_users.telegram_chat_id, но это поле теперь не источник правды
+    // (один сотрудник может иметь свою привязку, а у учётки колонка одна на всех).
+    // Берём подписки текущего chat_id из ro_telegram_subs.
     $roUsers = $pdo->prepare("
-        SELECT ru.restaurant_number, ru.legal_entity_group, r.address, r.city
-        FROM ro_users ru
+        SELECT rs.restaurant_number, rs.legal_entity_group, r.address, r.city
+        FROM ro_telegram_subs rs
         LEFT JOIN restaurants r
-          ON r.number = ru.restaurant_number
-         AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = ru.legal_entity_group COLLATE utf8mb4_unicode_ci
+          ON r.number = rs.restaurant_number
+         AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
          AND r.active = 1
-        WHERE ru.telegram_chat_id = ?
-          AND ru.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-          AND ru.is_active = 1
+        WHERE rs.chat_id = ?
+          AND rs.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          AND (rs.verified_at IS NOT NULL
+               OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
     ");
-    $roUsers->execute([$chatId, $group]);
+    $roUsers->execute([(int)$chatId, $group]);
 
     foreach ($roUsers->fetchAll() as $row) {
         $rowGroup = $row['legal_entity_group'] ?: $group;
@@ -124,7 +128,7 @@ function surveyShowRestaurantPicker($chatId, $msgId, $survey, $restaurants) {
             'callback_data' => "srv_rest_{$survey['id']}_{$restaurant['restaurant_number']}",
         ]];
     }
-    $buttons[] = [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']];
+    $buttons[] = [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']];
 
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $buttons]);
 }
@@ -144,7 +148,7 @@ function surveyStartForRestaurant($chatId, $msgId, $survey, $restaurant) {
 
     if (!$firstQuestionId) {
         editMessage($chatId, $msgId, "❌ Опрос не содержит вопросов.", ['inline_keyboard' => [
-            [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -167,7 +171,7 @@ function surveyStart($chatId, $msgId, $surveyId) {
     $survey = surveyGetActiveSurvey($surveyId);
     if (!$survey) {
         editMessage($chatId, $msgId, "❌ Этот опрос уже закрыт или не найден.", ['inline_keyboard' => [
-            [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -175,7 +179,7 @@ function surveyStart($chatId, $msgId, $surveyId) {
     $allRestaurants = surveyGetChatRestaurants($chatId, $survey['legal_entity_group']);
     if (!$allRestaurants) {
         editMessage($chatId, $msgId, "❌ Для этого опроса у вас не найдено ресторанов нужного юрлица.", ['inline_keyboard' => [
-            [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -183,7 +187,7 @@ function surveyStart($chatId, $msgId, $surveyId) {
     $pendingRestaurants = surveyGetPendingRestaurants($surveyId, $chatId, $survey['legal_entity_group']);
     if (!$pendingRestaurants) {
         editMessage($chatId, $msgId, "✅ По всем вашим ресторанам в этом опросе ответы уже записаны.", ['inline_keyboard' => [
-            [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -200,7 +204,7 @@ function surveySelectRestaurant($chatId, $msgId, $surveyId, $restaurantNumber) {
     $survey = surveyGetActiveSurvey($surveyId);
     if (!$survey) {
         editMessage($chatId, $msgId, "❌ Этот опрос уже закрыт или не найден.", ['inline_keyboard' => [
-            [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -362,7 +366,7 @@ function surveyFinish($chatId, $msgId, $state, $comment) {
     if ($dupStmt->fetch()) {
         surveyClearState($chatId);
         editMessage($chatId, $msgId, "✅ Ответ по этому ресторану уже был записан.", ['inline_keyboard' => [
-            [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -409,14 +413,14 @@ function surveyFinish($chatId, $msgId, $state, $comment) {
                 'callback_data' => "srv_start_{$surveyId}",
             ]];
         }
-        $buttons[] = [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']];
+        $buttons[] = [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']];
 
         editMessage($chatId, $msgId, "✅ <b>Спасибо!</b>\n\nОтвет по опросу «{$safeTitle}» записан.\nУ вас ещё остались рестораны без ответа.", ['inline_keyboard' => $buttons]);
         return;
     }
 
     editMessage($chatId, $msgId, "✅ <b>Спасибо!</b>\n\nОтветы по опросу «{$safeTitle}» записаны.", ['inline_keyboard' => [
-        [['text' => '◂ Меню', 'callback_data' => 'veg_my_subs']],
+        [['text' => '◂ Меню', 'callback_data' => 'rest_my_subs']],
     ]]);
 }
 

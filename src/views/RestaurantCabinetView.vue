@@ -886,15 +886,17 @@
       <!-- Telegram -->
       <div class="profile-block">
         <h3>Telegram</h3>
+
+        <!-- Моя привязка -->
         <div v-if="tgStatus.linked" class="profile-tg-linked">
           <div class="profile-tg-ok">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            Telegram подключён
+            Мой Telegram привязан<span v-if="tgStatus.username"> (@{{ tgStatus.username }})</span>
           </div>
-          <button class="btn btn-sm btn-danger-outline" @click="tgUnlink">Отключить</button>
+          <button class="btn btn-sm btn-danger-outline" @click="tgUnlink(tgStatus.chat_id, true)">Отвязать мой</button>
         </div>
         <div v-else class="profile-tg-unlinked">
-          <p>Подключите Telegram для уведомлений о дедлайнах и быстрого входа.</p>
+          <p>Привяжите Telegram, чтобы получать уведомления о дедлайнах и быстро входить в кабинет. Каждый сотрудник получает свой код.</p>
           <div v-if="tgError" class="error-msg">{{ tgError }}</div>
           <div v-if="tgLinkCode" class="tg-code-box">
             <p>Отправьте этот код боту <a href="https://t.me/supplyportal_bot" target="_blank">@supplyportal_bot</a>:</p>
@@ -905,6 +907,28 @@
             <span v-if="tgLinkLoading" class="cab-spin cab-spin-sm"></span>
             Получить код привязки
           </button>
+        </div>
+
+        <!-- Все привязки ресторана -->
+        <div v-if="tgLinksList.length" class="profile-tg-links">
+          <div class="profile-tg-links-title">Все привязки этого ресторана ({{ tgLinksList.length }})</div>
+          <ul class="tg-links">
+            <li v-for="link in tgLinksList" :key="link.chat_id" class="tg-link-row">
+              <div class="tg-link-info">
+                <div class="tg-link-name">
+                  {{ link.first_name || 'Без имени' }}
+                  <span v-if="link.username" class="tg-link-username">@{{ link.username }}</span>
+                  <span v-if="link.is_self" class="tg-link-self">— это вы</span>
+                </div>
+                <div class="tg-link-meta">
+                  <span v-if="link.verified">✓ привязан {{ formatTgDate(link.verified_at) }}</span>
+                  <span v-else-if="link.must_reverify_by" class="tg-link-warn">⚠ нужно перепривязать до {{ formatTgDate(link.must_reverify_by) }}</span>
+                  <span v-else class="tg-link-warn">⚠ не подтверждён</span>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-danger-outline" @click="tgUnlink(link.chat_id, link.is_self)">Отвязать</button>
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -1143,10 +1167,11 @@ const stockDirty = computed(() => {
 const stockSavedSnapshot = reactive({}); // последние сохранённые значения
 
 // ═══ Telegram ═══
-const tgStatus = reactive({ linked: false, chat_id: null });
+const tgStatus = reactive({ linked: false, chat_id: null, username: null, first_name: null });
 const tgLinkCode = ref('');
 const tgLinkLoading = ref(false);
 const tgError = ref('');
+const tgLinksList = ref([]);
 
 // ═══ Password ═══
 const pwOld = ref('');
@@ -2298,10 +2323,33 @@ async function loadTgStatus() {
   tgError.value = '';
   try {
     const data = await roStore.getTelegramStatus();
-    tgStatus.linked = data.linked; tgStatus.chat_id = data.chat_id;
+    tgStatus.linked = data.linked;
+    tgStatus.chat_id = data.chat_id;
+    tgStatus.username = data.username;
+    tgStatus.first_name = data.first_name;
   } catch (e) {
     tgError.value = e.message || 'Не удалось получить статус Telegram';
   }
+  await loadTgLinks();
+}
+
+async function loadTgLinks() {
+  try {
+    tgLinksList.value = await roStore.telegramLinks();
+  } catch (e) {
+    console.warn('[restaurant cabinet] telegram-links:', e);
+  }
+}
+
+function formatTgDate(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return s;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}.${mm} ${hh}:${mi}`;
 }
 
 async function loadRestaurantBroadcasts() {
@@ -2344,13 +2392,19 @@ async function tgGetCode() {
   }
   finally { tgLinkLoading.value = false; }
 }
-async function tgUnlink() {
-  const ok = await showConfirm('Telegram', 'Отключить Telegram?', { okText: 'Отключить', danger: true });
+async function tgUnlink(chatId, isSelf) {
+  const title = isSelf ? 'Отключить мой Telegram?' : 'Отвязать этот Telegram?';
+  const ok = await showConfirm('Telegram', title, { okText: 'Отвязать', danger: true });
   if (!ok) return;
   try {
-    await roStore.telegramUnlink();
-    tgStatus.linked = false; tgStatus.chat_id = null; tgLinkCode.value = '';
+    await roStore.telegramUnlink(chatId);
+    if (isSelf) {
+      tgStatus.linked = false; tgStatus.chat_id = null;
+      tgStatus.username = null; tgStatus.first_name = null;
+      tgLinkCode.value = '';
+    }
     tgError.value = '';
+    await loadTgLinks();
   } catch (e) {
     tgError.value = e.message || 'Не удалось отключить Telegram';
   }
@@ -3396,6 +3450,17 @@ tr.del-err { background: #fef2f2; }
 .tg-code-box a { color: #2563eb; font-weight: 600; }
 .tg-code { font-size: 28px; font-weight: 800; color: #E76F51; letter-spacing: 5px; font-variant-numeric: tabular-nums; margin: 6px 0; }
 .tg-code-hint { font-size: 10px; color: #8b7355; margin: 0; }
+
+.profile-tg-links { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EDE8E3; }
+.profile-tg-links-title { font-size: 12px; font-weight: 600; color: #502314; margin-bottom: 8px; }
+.tg-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tg-link-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; background: #FAF7F3; border-radius: 8px; }
+.tg-link-info { min-width: 0; flex: 1; }
+.tg-link-name { font-size: 13px; font-weight: 600; color: #502314; }
+.tg-link-username { color: #8b7355; font-weight: 500; margin-left: 4px; }
+.tg-link-self { color: #2563eb; font-weight: 500; margin-left: 6px; font-size: 11px; }
+.tg-link-meta { font-size: 11px; color: #8b7355; margin-top: 2px; }
+.tg-link-warn { color: #dc2626; font-weight: 600; }
 
 .pw-form { display: flex; flex-direction: column; gap: 10px; }
 .input-field { padding: 10px 14px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 14px; font-family: inherit; }

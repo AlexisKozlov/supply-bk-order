@@ -18,8 +18,8 @@
       <button class="adm-tab" :class="{ active: tab === 'settings' }" @click="tab = 'settings'">
         ⚙️ Уведомления
       </button>
-      <button class="adm-tab" :class="{ active: tab === 'veg' }" @click="tab = 'veg'">
-        🏪 Рестораны <span class="adm-tab-count" :class="{ active: tab === 'veg' }">{{ vegSubCount }}</span>
+      <button class="adm-tab" :class="{ active: tab === 'restaurants' }" @click="tab = 'restaurants'">
+        🏪 Рестораны <span class="adm-tab-count" :class="{ active: tab === 'restaurants' }">{{ restaurantSubCount }}</span>
       </button>
       <button class="adm-tab" :class="{ active: tab === 'questions' }" @click="tab = 'questions'; loadQuestions()">
         💬 Вопросы AI
@@ -133,7 +133,7 @@
               <div class="tga-stat-label">Сотрудников</div>
             </div>
             <div class="tga-stat-card">
-              <div class="tga-stat-val">{{ vegUniqueChatIds.length }}</div>
+              <div class="tga-stat-val">{{ restaurantUniqueChatIds.length }}</div>
               <div class="tga-stat-label">Подписчиков рест.</div>
             </div>
             <div class="tga-stat-card">
@@ -289,10 +289,10 @@
     </div>
 
     <!-- ═══ Рестораны: подписки ═══ -->
-    <div v-else-if="tab === 'veg'" class="adm-section">
+    <div v-else-if="tab === 'restaurants'" class="adm-section">
       <div class="tga-stats-row">
         <div class="tga-stat-card">
-          <div class="tga-stat-val">{{ vegSubCount }}</div>
+          <div class="tga-stat-val">{{ restaurantSubCount }}</div>
           <div class="tga-stat-label">Подписчиков</div>
         </div>
         <div class="tga-stat-card">
@@ -307,19 +307,19 @@
 
       <!-- Подтабы: Рестораны / Уведомления -->
       <div class="tga-subtabs">
-        <button class="tga-subtab" :class="{ active: vegSubTab === 'rests' }" @click="vegSubTab = 'rests'">Рестораны</button>
-        <button class="tga-subtab" :class="{ active: vegSubTab === 'notif' }" @click="vegSubTab = 'notif'">Уведомления подписчиков</button>
+        <button class="tga-subtab" :class="{ active: restaurantSubTab === 'rests' }" @click="restaurantSubTab = 'rests'">Рестораны</button>
+        <button class="tga-subtab" :class="{ active: restaurantSubTab === 'notif' }" @click="restaurantSubTab = 'notif'">Уведомления подписчиков</button>
       </div>
 
       <!-- Рестораны -->
-      <template v-if="vegSubTab === 'rests'">
+      <template v-if="restaurantSubTab === 'rests'">
         <div class="tga-filter-row">
-          <select v-model="vegFilter" class="tga-select">
+          <select v-model="restaurantFilter" class="tga-select">
             <option value="all">Все</option>
             <option value="subscribed">С подпиской</option>
             <option value="unsubscribed">Без подписки</option>
           </select>
-          <input v-model="vegSearch" class="tga-input" placeholder="Поиск по номеру или адресу..."/>
+          <input v-model="restaurantSearch" class="tga-input" placeholder="Поиск по номеру или адресу..."/>
         </div>
 
         <div class="tga-table-wrap">
@@ -361,7 +361,7 @@
       </template>
 
       <!-- Уведомления подписчиков -->
-      <template v-if="vegSubTab === 'notif'">
+      <template v-if="restaurantSubTab === 'notif'">
         <p class="tga-hint">Настройки уведомлений ресторанных подписчиков. Нажмите, чтобы переключить.</p>
         <div class="tga-table-wrap">
           <table class="tga-table tga-table-compact">
@@ -377,14 +377,14 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="sub in vegUniqueSubscribers" :key="sub.chat_id">
+              <tr v-for="sub in restaurantUniqueSubscribers" :key="sub.chat_id">
                 <td style="text-align:left">
                   <b>{{ sub.first_name || 'Без имени' }}</b>
                   <span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
                 </td>
                 <td style="text-align:left" class="tga-sub-text">{{ sub.restaurants.join(', ') }}</td>
-                <td :class="cellClass(sub.notify_veg_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_veg_reminders')">{{ sub.notify_veg_reminders ? '✓' : '✕' }}</td>
-                <td :class="cellClass(sub.notify_veg_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_veg_sessions')">{{ sub.notify_veg_sessions ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_so_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_so_reminders')">{{ sub.notify_so_reminders ? '✓' : '✕' }}</td>
+                <td :class="cellClass(sub.notify_so_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_so_sessions')">{{ sub.notify_so_sessions ? '✓' : '✕' }}</td>
                 <td :class="cellClass(sub.notify_confirmations)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_confirmations')">{{ sub.notify_confirmations ? '✓' : '✕' }}</td>
                 <td :class="cellClass(sub.notify_stock_reminders)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_reminders')">{{ sub.notify_stock_reminders ? '✓' : '✕' }}</td>
                 <td :class="cellClass(sub.notify_stock_sessions)" class="tga-cell-toggle" @click="toggleRestNotif(sub, 'notify_stock_sessions')">{{ sub.notify_stock_sessions ? '✓' : '✕' }}</td>
@@ -460,8 +460,8 @@
             <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'all_users' }" @click="broadcastTarget = 'all_users'">
               Все сотрудники ({{ linkedUsers.length }})
             </button>
-            <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'all_veg' }" @click="broadcastTarget = 'all_veg'">
-              Все рестораны ({{ vegUniqueChatIds.length }})
+            <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'all_restaurants' }" @click="broadcastTarget = 'all_restaurants'">
+              Все рестораны ({{ restaurantUniqueChatIds.length }})
             </button>
             <button class="tga-btn-chip" :class="{ active: broadcastTarget === 'everyone' }" @click="broadcastTarget = 'everyone'">
               Все ({{ allUniqueChatIds.length }})
@@ -560,7 +560,7 @@ const loading = ref(true)
 
 const linkedUsers = ref([])
 const unlinkedUsers = ref([])
-const vegSubs = ref([])
+const restaurantSubs = ref([])
 const allRestaurants = ref([])
 const reminderLog = ref([])
 
@@ -581,10 +581,10 @@ const questions = ref([])
 const questionsLoading = ref(false)
 
 // Veg filters
-const vegFilter = ref('all')
-const vegSearch = ref('')
+const restaurantFilter = ref('all')
+const restaurantSearch = ref('')
 const expandedRest = ref(null)
-const vegSubTab = ref('rests')
+const restaurantSubTab = ref('rests')
 
 // Corrections
 const corrStats = ref(null)
@@ -609,7 +609,7 @@ async function loadData() {
     const { data } = await db.rpc('tg_admin_stats')
     linkedUsers.value = data.linked_users || []
     unlinkedUsers.value = data.unlinked_users || []
-    vegSubs.value = data.veg_subs || []
+    restaurantSubs.value = data.restaurant_subs || []
     allRestaurants.value = data.all_restaurants || []
     reminderLog.value = data.reminder_log || []
     corrStats.value = data.correction_stats || null
@@ -692,11 +692,11 @@ onMounted(() => { loadData(); loadBotInfo() })
 
 // ═══ Computed ═══
 
-const vegSubCount = computed(() => vegSubs.value.length)
+const restaurantSubCount = computed(() => restaurantSubs.value.length)
 
-const vegRestMap = computed(() => {
+const restaurantSubMap = computed(() => {
   const map = {}
-  for (const s of vegSubs.value) {
+  for (const s of restaurantSubs.value) {
     if (!map[s.restaurant_number]) {
       map[s.restaurant_number] = { count: 0, firstSub: s.created_at, subscribers: [] }
     }
@@ -713,8 +713,8 @@ const vegRestMap = computed(() => {
   return map
 })
 
-const subscribedRests = computed(() => allRestaurants.value.filter(r => vegRestMap.value[r.number]))
-const unsubscribedRests = computed(() => allRestaurants.value.filter(r => !vegRestMap.value[r.number]))
+const subscribedRests = computed(() => allRestaurants.value.filter(r => restaurantSubMap.value[r.number]))
+const unsubscribedRests = computed(() => allRestaurants.value.filter(r => !restaurantSubMap.value[r.number]))
 
 const filteredVegRests = computed(() => {
   let list = allRestaurants.value.map(r => ({
@@ -722,15 +722,15 @@ const filteredVegRests = computed(() => {
     address: r.address,
     city: r.city,
     region: r.region,
-    subCount: vegRestMap.value[r.number]?.count || 0,
-    subscribers: vegRestMap.value[r.number]?.subscribers || [],
-    firstSub: vegRestMap.value[r.number]?.firstSub || null,
+    subCount: restaurantSubMap.value[r.number]?.count || 0,
+    subscribers: restaurantSubMap.value[r.number]?.subscribers || [],
+    firstSub: restaurantSubMap.value[r.number]?.firstSub || null,
   }))
 
-  if (vegFilter.value === 'subscribed') list = list.filter(r => r.subCount > 0)
-  if (vegFilter.value === 'unsubscribed') list = list.filter(r => !r.subCount)
+  if (restaurantFilter.value === 'subscribed') list = list.filter(r => r.subCount > 0)
+  if (restaurantFilter.value === 'unsubscribed') list = list.filter(r => !r.subCount)
 
-  const q = vegSearch.value.toLowerCase().trim()
+  const q = restaurantSearch.value.toLowerCase().trim()
   if (q) {
     list = list.filter(r =>
       String(r.number).toLowerCase().includes(q) ||
@@ -742,8 +742,8 @@ const filteredVegRests = computed(() => {
   return list
 })
 
-const vegUniqueChatIds = computed(() => {
-  return [...new Set(vegSubs.value.map(s => s.chat_id))]
+const restaurantUniqueChatIds = computed(() => {
+  return [...new Set(restaurantSubs.value.map(s => s.chat_id))]
 })
 
 const filteredReminderLog = computed(() => {
@@ -767,17 +767,17 @@ const filteredReminderLog = computed(() => {
   return list
 })
 
-const vegUniqueSubscribers = computed(() => {
+const restaurantUniqueSubscribers = computed(() => {
   const map = {}
-  for (const s of vegSubs.value) {
+  for (const s of restaurantSubs.value) {
     if (!map[s.chat_id]) {
       map[s.chat_id] = {
         chat_id: s.chat_id,
         first_name: s.first_name,
         username: s.username,
         restaurants: [],
-        notify_veg_reminders: s.notify_veg_reminders,
-        notify_veg_sessions: s.notify_veg_sessions,
+        notify_so_reminders: s.notify_so_reminders,
+        notify_so_sessions: s.notify_so_sessions,
         notify_confirmations: s.notify_confirmations,
         notify_stock_reminders: s.notify_stock_reminders,
         notify_stock_sessions: s.notify_stock_sessions,
@@ -791,7 +791,7 @@ const vegUniqueSubscribers = computed(() => {
 const allUniqueChatIds = computed(() => {
   const ids = new Set()
   linkedUsers.value.forEach(u => { if (u.telegram_chat_id) ids.add(String(u.telegram_chat_id)) })
-  vegSubs.value.forEach(s => ids.add(String(s.chat_id)))
+  restaurantSubs.value.forEach(s => ids.add(String(s.chat_id)))
   return [...ids]
 })
 
@@ -838,7 +838,7 @@ async function sendVegReminder(rest) {
   const msg = prompt('Текст напоминания:', defaultMsg)
   if (!msg) return
   try {
-    const { data } = await db.rpc('tg_admin_send_veg_reminder', { restaurant_number: rest.number, message: msg })
+    const { data } = await db.rpc('tg_admin_send_restaurant_reminder', { restaurant_number: rest.number, message: msg })
     alert(`Отправлено: ${data.sent} из ${data.total}`)
   } catch (e) {
     alert('Ошибка: ' + (e.message || e))
@@ -849,8 +849,8 @@ async function toggleRestNotif(sub, field) {
   try {
     const { data } = await db.rpc('tg_admin_toggle_rest_notif', { chat_id: String(sub.chat_id), field })
     sub[field] = data.value ? 1 : 0
-    // Обновить и в vegSubs
-    for (const s of vegSubs.value) {
+    // Обновить и в restaurantSubs
+    for (const s of restaurantSubs.value) {
       if (String(s.chat_id) === String(sub.chat_id)) s[field] = sub[field]
     }
   } catch (e) {
@@ -885,8 +885,8 @@ async function sendBroadcast() {
   let chatIds = []
   if (broadcastTarget.value === 'all_users') {
     chatIds = linkedUsers.value.map(u => String(u.telegram_chat_id))
-  } else if (broadcastTarget.value === 'all_veg') {
-    chatIds = vegUniqueChatIds.value.map(String)
+  } else if (broadcastTarget.value === 'all_restaurants') {
+    chatIds = restaurantUniqueChatIds.value.map(String)
   } else {
     chatIds = allUniqueChatIds.value
   }

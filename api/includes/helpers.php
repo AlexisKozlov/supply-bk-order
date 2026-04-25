@@ -303,7 +303,7 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     if (!$botToken) return 0;
 
     // Все подписанные рестораны с включёнными уведомлениями о новых сборах (chat_id уникальные)
-    $st = $pdo->query("SELECT DISTINCT chat_id, GROUP_CONCAT(DISTINCT restaurant_number ORDER BY CAST(restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests FROM veg_telegram_subs WHERE notify_stock_sessions = 1 GROUP BY chat_id");
+    $st = $pdo->query("SELECT DISTINCT chat_id, GROUP_CONCAT(DISTINCT restaurant_number ORDER BY CAST(restaurant_number AS UNSIGNED) SEPARATOR ', ') as rests FROM ro_telegram_subs WHERE notify_stock_sessions = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW())) GROUP BY chat_id");
     $subs = $st->fetchAll();
     if (!$subs) return 0;
 

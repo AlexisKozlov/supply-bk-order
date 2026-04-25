@@ -154,13 +154,17 @@ export const useSupplierOrderStore = defineStore('supplierOrder', () => {
 
   async function adminGetSchedules(supplierId) {
     const data = await api(`admin/schedules?supplier_id=${supplierId}`);
-    return { schedules: data.schedules || [], deadlineRules: data.deadline_rules || [] };
+    return {
+      schedules: data.schedules || [],
+      temporarySchedule: data.temporary_schedule || null,
+      deadlineRules: data.deadline_rules || [],
+    };
   }
 
-  async function adminSaveSchedules(supplierId, schedules) {
+  async function adminSaveSchedules(supplierId, schedules, temporarySchedule = null) {
     return api('admin/schedules', {
       method: 'POST',
-      body: JSON.stringify({ supplier_id: supplierId, schedules }),
+      body: JSON.stringify({ supplier_id: supplierId, schedules, temporary_schedule: temporarySchedule }),
     });
   }
 

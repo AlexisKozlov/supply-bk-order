@@ -525,36 +525,18 @@ function roLogAudit($pdo, $e) {
 function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
-    $group = func_num_args() >= 4 ? roNormalizeLegalEntityGroup(func_get_arg(3), $restaurantNumber) : null;
 
+    // Источник правды о подписках ресторана — ro_telegram_subs.
+    // ro_users.telegram_chat_id больше не используется (см. миграцию verified_*).
     $chatIds = [];
-    $disabledChatIds = [];
-
-    $disabled = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND notify_confirmations = 0");
-    $disabled->execute([(string)$restaurantNumber]);
-    foreach ($disabled->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
-        $chatId = trim((string)$chatId);
-        if ($chatId !== '') $disabledChatIds[$chatId] = true;
-    }
-
-    // Старая привязка кабинета ресторана. Оставляем как запасной источник,
-    // чтобы не потерять тех, кто был привязан до перехода на подписки.
-    if ($group) {
-        $s = $pdo->prepare("SELECT DISTINCT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND telegram_chat_id > 0");
-        $s->execute([(int)$restaurantNumber, $group]);
-    } else {
-        $s = $pdo->prepare("SELECT DISTINCT telegram_chat_id FROM ro_users WHERE restaurant_number = ? AND telegram_chat_id > 0");
-        $s->execute([(int)$restaurantNumber]);
-    }
+    $s = $pdo->prepare("
+        SELECT DISTINCT chat_id FROM ro_telegram_subs
+        WHERE restaurant_number = ?
+          AND notify_confirmations = 1
+          AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+    ");
+    $s->execute([(int)$restaurantNumber]);
     foreach ($s->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
-        $chatId = trim((string)$chatId);
-        if ($chatId !== '' && !isset($disabledChatIds[$chatId])) $chatIds[$chatId] = true;
-    }
-
-    // Основной источник: все подписчики ресторана с включёнными подтверждениями.
-    $s2 = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ? AND notify_confirmations = 1");
-    $s2->execute([(string)$restaurantNumber]);
-    foreach ($s2->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
         $chatId = trim((string)$chatId);
         if ($chatId !== '') $chatIds[$chatId] = true;
     }
@@ -1164,7 +1146,7 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
     $restNum = $tgAuth['restaurant_number'] ?? null;
     if (!$restNum) {
         // Иначе берём первую подписку этого чата
-        $s = $pdo->prepare("SELECT restaurant_number FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+        $s = $pdo->prepare("SELECT restaurant_number FROM ro_telegram_subs WHERE chat_id = ? LIMIT 1");
         $s->execute([$tgAuth['telegram_chat_id']]);
         $sub = $s->fetch();
         if (!$sub) {
@@ -1471,38 +1453,91 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
 if ($roAction === 'telegram-link' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    // Проверяем, привязан ли уже Telegram
-    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE id = ?");
-    $s->execute([$rest['id']]);
-    $user = $s->fetch();
-    if ($user && $user['telegram_chat_id']) {
-        roRespond(['already_linked' => true, 'chat_id' => $user['telegram_chat_id']]);
-    }
-    // Генерируем токен привязки (6-значный код)
+    // Каждый сотрудник может иметь свою привязку, поэтому код выдаём всегда —
+    // даже если у этой учётки уже есть какие-то связанные chat_id. Источник
+    // правды о связях — ro_telegram_subs.
     $code = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
-    // Сохраняем в ro_tg_tokens (переиспользуем таблицу)
-    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
-        ->execute([$code, 0, (string)$rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM']);
+    // Привязываем код к конкретному ro_user, чтобы бот знал, чьё подтверждение получено.
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, ro_user_id, expires_at, used) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
+        ->execute([$code, 0, (string)$rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM', (int)$rest['id']]);
     roRespond(['success' => true, 'code' => $code, 'expires_in' => 600]);
 }
 
-// --- Отвязка Telegram ---
+// --- Отвязка Telegram (по chat_id) ---
+// Любой залогиненный сотрудник того же ресторана может отвязать любой Telegram —
+// это нужно, например, чтобы быстро отрубить уволенного.
 if ($roAction === 'telegram-unlink' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    $pdo->prepare("UPDATE ro_users SET telegram_chat_id = NULL WHERE id = ?")
-        ->execute([$rest['id']]);
+    $chatId = isset($body['chat_id']) ? (string)$body['chat_id'] : '';
+    $restNum = (int)($rest['restaurant_number'] ?? 0);
+    $restGroup = $rest['legal_entity_group'] ?? 'BK_VM';
+    if ($chatId === '') {
+        // Старая семантика: «отвязать всё на этой учётке».
+        $pdo->prepare("UPDATE ro_users SET telegram_chat_id = NULL WHERE id = ?")
+            ->execute([$rest['id']]);
+        $pdo->prepare("DELETE FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ?")
+            ->execute([$restNum, $restGroup]);
+    } else {
+        // Удаляем подписку только этого chat_id у текущего ресторана.
+        $pdo->prepare("DELETE FROM ro_telegram_subs WHERE chat_id = ? AND restaurant_number = ? AND legal_entity_group = ?")
+            ->execute([(int)$chatId, $restNum, $restGroup]);
+        // Если это был «основной» chat_id у ro_users — тоже сбросим, иначе он повиснет.
+        $pdo->prepare("UPDATE ro_users SET telegram_chat_id = NULL WHERE telegram_chat_id = ? AND restaurant_number = ? AND legal_entity_group = ?")
+            ->execute([(int)$chatId, $restNum, $restGroup]);
+    }
     roRespond(['success' => true]);
 }
 
-// --- Статус привязки Telegram ---
+// --- Статус привязки текущего сотрудника ---
 if ($roAction === 'telegram-status' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    $s = $pdo->prepare("SELECT telegram_chat_id FROM ro_users WHERE id = ?");
+    // Подписка считается своей, если она привязана через код именно этого ro_user.
+    $s = $pdo->prepare("
+        SELECT chat_id, first_name, username, verified_at
+        FROM ro_telegram_subs
+        WHERE verified_ro_user_id = ? AND verified_at IS NOT NULL
+        LIMIT 1
+    ");
     $s->execute([$rest['id']]);
-    $user = $s->fetch();
-    roRespond(['linked' => !empty($user['telegram_chat_id']), 'chat_id' => $user['telegram_chat_id'] ?? null]);
+    $row = $s->fetch();
+    roRespond([
+        'linked' => (bool)$row,
+        'chat_id' => $row['chat_id'] ?? null,
+        'first_name' => $row['first_name'] ?? null,
+        'username' => $row['username'] ?? null,
+        'linked_at' => $row['verified_at'] ?? null,
+    ]);
+}
+
+// --- Список всех привязанных Telegram-аккаунтов этого ресторана ---
+if ($roAction === 'telegram-links' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $restNum = (int)($rest['restaurant_number'] ?? 0);
+    $restGroup = $rest['legal_entity_group'] ?? 'BK_VM';
+    $s = $pdo->prepare("
+        SELECT rs.chat_id, rs.first_name, rs.username, rs.verified_at, rs.must_reverify_by,
+               rs.verified_via, rs.verified_ro_user_id
+        FROM ro_telegram_subs rs
+        WHERE rs.restaurant_number = ? AND rs.legal_entity_group = ?
+        ORDER BY (rs.verified_at IS NOT NULL) DESC, rs.created_at DESC
+    ");
+    $s->execute([$restNum, $restGroup]);
+    $links = [];
+    foreach ($s->fetchAll() as $r) {
+        $links[] = [
+            'chat_id' => (string)$r['chat_id'],
+            'first_name' => $r['first_name'],
+            'username' => $r['username'],
+            'verified' => !empty($r['verified_at']),
+            'verified_at' => $r['verified_at'],
+            'must_reverify_by' => $r['must_reverify_by'],
+            'is_self' => ((int)($r['verified_ro_user_id'] ?? 0)) === (int)$rest['id'],
+        ];
+    }
+    roRespond(['links' => $links]);
 }
 
 if ($roAction === 'broadcasts' && $method === 'GET') {

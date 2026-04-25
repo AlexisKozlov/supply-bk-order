@@ -10,7 +10,7 @@ function chatStart($chatId, $msgId) {
 
     if (!$subs) {
         editMessage($chatId, $msgId, "💬 Сначала подпишитесь на ресторан.", ['inline_keyboard' => [
-            [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -26,7 +26,7 @@ function chatStart($chatId, $msgId) {
         $label = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
         $btns[] = [['text' => "🏪 {$label} — {$addr}", 'callback_data' => "chat_rest_{$sub['restaurant_number']}"]];
     }
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage($chatId, $msgId, "💬 <b>Написать в отдел закупок</b>\n\nВыберите ресторан:", ['inline_keyboard' => $btns]);
 }
 

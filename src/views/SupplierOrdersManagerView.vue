@@ -391,6 +391,55 @@
         <div v-else>
           <button class="rom-btn" @click="loadRestaurantsForSchedule">Загрузить рестораны</button>
         </div>
+
+        <div class="so-deadline-section" style="margin-top:20px">
+          <div class="so-notify-head">
+            <div>
+              <h3 class="so-section-title" style="margin:0">Временный график</h3>
+              <p class="so-section-hint" style="margin:4px 0 0 0">На выбранный период этот график полностью заменяет основной. После окончания периода система сама вернётся к обычному графику.</p>
+            </div>
+            <div class="so-temp-actions">
+              <button class="rom-btn-sm" @click="copyMainScheduleToTemporary">Скопировать из основного</button>
+              <button class="rom-btn-sm" @click="clearTemporarySchedule">Очистить</button>
+              <button class="rom-btn rom-btn-export" @click="saveTemporarySchedule" :disabled="savingTemporarySchedule">
+                <BurgerSpinner v-if="savingTemporarySchedule" size="xs" />
+                <span>{{ savingTemporarySchedule ? 'Сохранение...' : 'Сохранить временный график' }}</span>
+              </button>
+            </div>
+          </div>
+          <div class="so-temp-period">
+            <label>
+              <span>С даты</span>
+              <input v-model="temporaryDateFrom" type="date" class="rom-input-sm" />
+            </label>
+            <label>
+              <span>По дату</span>
+              <input v-model="temporaryDateTo" type="date" class="rom-input-sm" />
+            </label>
+            <span class="so-schedule-count" style="margin:0">{{ temporaryScheduleActiveRests }} рест., {{ temporaryScheduleActiveDays }} дней</span>
+          </div>
+          <div v-if="scheduleRestaurants.length" class="rom-table-wrap" style="margin-top:12px">
+            <table class="rom-table so-grid-table">
+              <thead>
+                <tr>
+                  <th class="so-grid-rest">Ресторан</th>
+                  <th v-for="d in 7" :key="'tmp-'+d" class="so-grid-day">{{ daysShort[d] }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in filteredScheduleRestaurants" :key="'tmp-rest-' + r.id">
+                  <td class="so-grid-rest-cell">
+                    <span class="so-grid-num">{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</span>
+                    <span class="so-grid-addr">{{ r.city }}{{ r.address ? ', ' + r.address : '' }}</span>
+                  </td>
+                  <td v-for="d in 7" :key="'tmp-cell-' + r.id + '-' + d" class="so-grid-check" @click="toggleTemporaryScheduleDay(r, d)">
+                    <input type="checkbox" :checked="!!temporaryScheduleGrid[r.id]?.[d]" @click.stop="toggleTemporaryScheduleDay(r, d)" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -570,6 +619,7 @@ const listSkipOnly = ref(false);
 // Schedules
 const loadingSchedules = ref(false);
 const schedules = ref([]);
+const temporarySchedule = ref(null);
 const deadlineRulesMap = reactive({});
 const savingDeadlines = ref(false);
 // Инициализируем пустые правила для всех дней
@@ -959,6 +1009,9 @@ async function loadSchedules() {
   try {
     const result = await store.adminGetSchedules(currentSupplierId.value);
     schedules.value = result.schedules;
+    temporarySchedule.value = result.temporarySchedule || null;
+    temporaryDateFrom.value = result.temporarySchedule?.date_from || '';
+    temporaryDateTo.value = result.temporarySchedule?.date_to || '';
     // Заполняем дедлайны
     for (let d = 1; d <= 7; d++) deadlineRulesMap[d].active = false;
     for (const r of result.deadlineRules) {
@@ -982,9 +1035,13 @@ async function loadSchedules() {
 // ═══ Schedule grid ═══
 const scheduleRestaurants = ref([]);
 const scheduleGrid = reactive({});
+const temporaryScheduleGrid = reactive({});
 const savingScheduleGrid = ref(false);
+const savingTemporarySchedule = ref(false);
 const scheduleGridLoading = ref(false);
 const scheduleFilter = ref('');
+const temporaryDateFrom = ref('');
+const temporaryDateTo = ref('');
 
 const filteredScheduleRestaurants = computed(() => {
   if (!scheduleFilter.value) return scheduleRestaurants.value;
@@ -1004,6 +1061,57 @@ const scheduleActiveRests = computed(() => {
   for (const rId of Object.keys(scheduleGrid)) { for (let d = 1; d <= 7; d++) { if (scheduleGrid[rId]?.[d]) { count++; break; } } }
   return count;
 });
+const temporaryScheduleActiveDays = computed(() => {
+  let count = 0;
+  for (const rId of Object.keys(temporaryScheduleGrid)) { for (let d = 1; d <= 7; d++) { if (temporaryScheduleGrid[rId]?.[d]) count++; } }
+  return count;
+});
+const temporaryScheduleActiveRests = computed(() => {
+  let count = 0;
+  for (const rId of Object.keys(temporaryScheduleGrid)) { for (let d = 1; d <= 7; d++) { if (temporaryScheduleGrid[rId]?.[d]) { count++; break; } } }
+  return count;
+});
+
+function resetGrid(grid) {
+  for (const key of Object.keys(grid)) delete grid[key];
+}
+
+function fillGridFromItems(grid, restaurants, items = []) {
+  resetGrid(grid);
+  for (const r of restaurants) grid[r.id] = {};
+  for (const s of items || []) {
+    const rest = restaurants.find(r => r.number == s.restaurant_number);
+    if (!rest || s.is_active != 1) continue;
+    if (!grid[rest.id]) grid[rest.id] = {};
+    grid[rest.id][s.delivery_day] = true;
+  }
+}
+
+function buildSchedulesFromGrid(grid) {
+  const items = [];
+  for (const r of scheduleRestaurants.value) {
+    for (let d = 1; d <= 7; d++) {
+      if (grid[r.id]?.[d]) {
+        const rule = deadlineRulesMap[d];
+        const orderDay = rule?.active ? rule.deadline_dow : (d > 1 ? d - 1 : 7);
+        items.push({ restaurant_id: r.id, order_day: orderDay, delivery_day: d, is_active: 1 });
+      }
+    }
+  }
+  return items;
+}
+
+function buildTemporarySchedulePayload() {
+  const items = buildSchedulesFromGrid(temporaryScheduleGrid);
+  const dateFrom = temporaryDateFrom.value || '';
+  const dateTo = temporaryDateTo.value || '';
+  if (!dateFrom && !dateTo && !items.length) return null;
+  return {
+    date_from: dateFrom,
+    date_to: dateTo,
+    items,
+  };
+}
 
 async function loadRestaurantsForSchedule() {
   scheduleGridLoading.value = true;
@@ -1018,15 +1126,8 @@ async function loadRestaurantsForSchedule() {
     const data = await res.json();
     const allRests = (data.data || data || []).sort((a, b) => parseInt(a.number) - parseInt(b.number));
     scheduleRestaurants.value = allRests;
-    // Заполняем сетку из текущих schedules
-    for (const r of scheduleRestaurants.value) scheduleGrid[r.id] = {};
-    for (const s of schedules.value) {
-      const rest = scheduleRestaurants.value.find(r => r.number == s.restaurant_number);
-      if (rest && s.is_active == 1) {
-        if (!scheduleGrid[rest.id]) scheduleGrid[rest.id] = {};
-        scheduleGrid[rest.id][s.delivery_day] = true;
-      }
-    }
+    fillGridFromItems(scheduleGrid, scheduleRestaurants.value, schedules.value);
+    fillGridFromItems(temporaryScheduleGrid, scheduleRestaurants.value, temporarySchedule.value?.items || []);
   } catch (e) { console.error(e); }
   finally { scheduleGridLoading.value = false; }
 }
@@ -1034,6 +1135,11 @@ async function loadRestaurantsForSchedule() {
 function toggleScheduleDay(restaurant, dow) {
   if (!scheduleGrid[restaurant.id]) scheduleGrid[restaurant.id] = {};
   scheduleGrid[restaurant.id][dow] = !scheduleGrid[restaurant.id][dow];
+}
+
+function toggleTemporaryScheduleDay(restaurant, dow) {
+  if (!temporaryScheduleGrid[restaurant.id]) temporaryScheduleGrid[restaurant.id] = {};
+  temporaryScheduleGrid[restaurant.id][dow] = !temporaryScheduleGrid[restaurant.id][dow];
 }
 
 async function saveScheduleGrid() {
@@ -1082,21 +1188,80 @@ async function saveScheduleGrid() {
 
   savingScheduleGrid.value = true;
   try {
-    const items = [];
-    for (const r of scheduleRestaurants.value) {
-      for (let d = 1; d <= 7; d++) {
-        if (scheduleGrid[r.id]?.[d]) {
-          const rule = deadlineRulesMap[d];
-          const orderDay = rule?.active ? rule.deadline_dow : (d > 1 ? d - 1 : 7);
-          items.push({ restaurant_id: r.id, order_day: orderDay, delivery_day: d, is_active: 1 });
-        }
-      }
-    }
-    await store.adminSaveSchedules(currentSupplierId.value, items);
+    await store.adminSaveSchedules(
+      currentSupplierId.value,
+      buildSchedulesFromGrid(scheduleGrid),
+      buildTemporarySchedulePayload()
+    );
     toast.success('Сохранено', 'График обновлён');
     await loadSchedules();
   } catch (e) { toast.error('Ошибка', e.message); }
   finally { savingScheduleGrid.value = false; }
+}
+
+async function saveTemporarySchedule() {
+  if ((temporaryDateFrom.value && !temporaryDateTo.value) || (!temporaryDateFrom.value && temporaryDateTo.value)) {
+    toast.warning('Нужно две даты', 'Укажите и начало, и окончание временного периода');
+    return;
+  }
+  if (temporaryDateFrom.value && temporaryDateTo.value && temporaryDateFrom.value > temporaryDateTo.value) {
+    toast.warning('Проверьте даты', 'Дата окончания не может быть раньше даты начала');
+    return;
+  }
+  savingTemporarySchedule.value = true;
+  try {
+    await store.adminSaveSchedules(
+      currentSupplierId.value,
+      buildSchedulesFromGrid(scheduleGrid),
+      buildTemporarySchedulePayload()
+    );
+    toast.success('Сохранено', 'Временный график обновлён');
+    await loadSchedules();
+  } catch (e) {
+    toast.error('Ошибка', e.message);
+  } finally {
+    savingTemporarySchedule.value = false;
+  }
+}
+
+function clearTemporarySchedule() {
+  temporaryDateFrom.value = '';
+  temporaryDateTo.value = '';
+  fillGridFromItems(temporaryScheduleGrid, scheduleRestaurants.value, []);
+}
+
+async function copyMainScheduleToTemporary() {
+  let hasTemporaryData = !!temporaryDateFrom.value || !!temporaryDateTo.value;
+  if (!hasTemporaryData) {
+    for (const rId of Object.keys(temporaryScheduleGrid)) {
+      for (let d = 1; d <= 7; d++) {
+        if (temporaryScheduleGrid[rId]?.[d]) {
+          hasTemporaryData = true;
+          break;
+        }
+      }
+      if (hasTemporaryData) break;
+    }
+  }
+
+  if (hasTemporaryData) {
+    const ok = await showConfirm(
+      'Перезаписать временный график?',
+      'Текущие отметки во временном графике будут заменены копией основного графика.'
+    );
+    if (!ok) return;
+  }
+
+  resetGrid(temporaryScheduleGrid);
+  for (const r of scheduleRestaurants.value) {
+    temporaryScheduleGrid[r.id] = {};
+    for (let d = 1; d <= 7; d++) {
+      if (scheduleGrid[r.id]?.[d]) {
+        temporaryScheduleGrid[r.id][d] = true;
+      }
+    }
+  }
+  toast.success('Скопировано', 'Основной график перенесён во временный');
 }
 
 async function saveDeadlineRules() {
@@ -2085,5 +2250,25 @@ watch(
 }
 .so-notify-muted {
   color: #b45309 !important;
+}
+.so-temp-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.so-temp-period {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.so-temp-period label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #8b7355;
 }
 </style>

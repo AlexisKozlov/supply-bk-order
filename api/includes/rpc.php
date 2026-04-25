@@ -317,7 +317,7 @@ if ($endpoint === 'rpc') {
         // Если передан tg_chat_id — возвращаем только рестораны, на которые подписан этот чат
         $tgChatId = isset($body['tg_chat_id']) ? trim((string)$body['tg_chat_id']) : '';
         if ($tgChatId !== '' && preg_match('/^-?\d+$/', $tgChatId)) {
-            $subs = $pdo->prepare("SELECT DISTINCT restaurant_number FROM veg_telegram_subs WHERE chat_id = ?");
+            $subs = $pdo->prepare("SELECT DISTINCT restaurant_number FROM ro_telegram_subs WHERE chat_id = ?");
             $subs->execute([$tgChatId]);
             $allowedNums = array_column($subs->fetchAll(), 'restaurant_number');
             if (empty($allowedNums)) {
@@ -563,7 +563,7 @@ if ($endpoint === 'rpc') {
             try {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
                 if ($botToken && $restNum) {
-                    $subs = $pdo->prepare("SELECT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
+                    $subs = $pdo->prepare("SELECT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
                     $subs->execute([$restNum]);
                     $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
                     if ($chatIds) {
@@ -3481,7 +3481,7 @@ if ($endpoint === 'rpc') {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
                 $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
                 if ($botToken) {
-                    $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE notify_veg_sessions = 1")->fetchAll(PDO::FETCH_COLUMN);
+                    $allSubs = $pdo->query("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE notify_so_sessions = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))")->fetchAll(PDO::FETCH_COLUMN);
                     if ($allSubs) {
                         $dateRange = '';
                         if ($dateFrom && $dateTo) {
@@ -3495,7 +3495,7 @@ if ($endpoint === 'rpc') {
                             if ($pname) $prodList[] = $pname;
                         }
                         $prodLine = $prodList ? "\n📦 Товары: " . implode(', ', $prodList) : '';
-                        $webLink = "{$siteUrl}/veg-order/{$autoToken}";
+                        $webLink = "{$siteUrl}/restaurant/order/{$autoToken}";
                         $msgText = "📢 <b>Открыт сбор заявок на овощи</b>\n\n";
                         $msgText .= "🗂 Сессия: <b>" . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "</b>";
                         $msgText .= $dateRange;
@@ -3720,7 +3720,7 @@ if ($endpoint === 'rpc') {
                 $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
                 if ($botToken && $oldData['restaurant_number']) {
                     $rn = $oldData['restaurant_number'];
-                    $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
+                    $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
                     $subs->execute([$rn]);
                     $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
                     if ($chatIds) {
@@ -3754,7 +3754,7 @@ if ($endpoint === 'rpc') {
             // Уведомление в Telegram о добавлении позиции
             $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
             if ($botToken && $restNum) {
-                $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1");
+                $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number=? AND notify_confirmations = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
                 $subs->execute([$restNum]);
                 $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
                 if ($chatIds) {
@@ -4162,13 +4162,13 @@ if ($endpoint === 'rpc') {
         // Все пользователи без Telegram
         $unlinked = $pdo->query("SELECT name, email, role, display_role FROM users WHERE telegram_chat_id IS NULL ORDER BY name")->fetchAll();
 
-        // Подписки ресторанов на овощи (с настройками уведомлений)
-        $vegSubs = $pdo->query("SELECT vs.chat_id, vs.restaurant_number, vs.created_at,
+        // Подписки ресторанов (с настройками уведомлений)
+        $restaurantSubs = $pdo->query("SELECT vs.chat_id, vs.restaurant_number, vs.created_at,
             vs.first_name, vs.username,
-            vs.notify_veg_reminders, vs.notify_veg_sessions, vs.notify_confirmations,
+            vs.notify_so_reminders, vs.notify_so_sessions, vs.notify_confirmations,
             vs.notify_stock_reminders, vs.notify_stock_sessions,
             r.address, r.city, r.region
-            FROM veg_telegram_subs vs
+            FROM ro_telegram_subs vs
             LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
             ORDER BY CAST(vs.restaurant_number AS UNSIGNED)")->fetchAll();
 
@@ -4194,7 +4194,7 @@ if ($endpoint === 'rpc') {
         respond([
             'linked_users' => $linked,
             'unlinked_users' => $unlinked,
-            'veg_subs' => $vegSubs,
+            'restaurant_subs' => $restaurantSubs,
             'all_restaurants' => $allRests,
             'reminder_log' => $reminders,
             'correction_stats' => $corrStats ?: ['pending' => 0, 'in_progress' => 0, 'approved' => 0, 'rejected' => 0],
@@ -4232,7 +4232,7 @@ if ($endpoint === 'rpc') {
         respond(['broadcasts' => $rows]);
     }
 
-    if ($fn === 'tg_admin_send_veg_reminder') {
+    if ($fn === 'tg_admin_send_restaurant_reminder') {
         $restNumber = $body['restaurant_number'] ?? '';
         $message = trim($body['message'] ?? '');
         if (!$restNumber || !$message) respond(['error' => 'Укажите ресторан и текст'], 400);
@@ -4241,7 +4241,7 @@ if ($endpoint === 'rpc') {
         if (!$botToken) respond(['error' => 'Нет TELEGRAM_BOT_TOKEN'], 500);
 
         // Найти всех подписчиков этого ресторана
-        $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM veg_telegram_subs WHERE restaurant_number = ?");
+        $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ?");
         $subs->execute([$restNumber]);
         $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
 
@@ -4274,10 +4274,10 @@ if ($endpoint === 'rpc') {
     if ($fn === 'tg_admin_toggle_rest_notif') {
         $chatId = $body['chat_id'] ?? '';
         $field = $body['field'] ?? '';
-        $allowed = ['notify_veg_reminders', 'notify_veg_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions'];
+        $allowed = ['notify_so_reminders', 'notify_so_sessions', 'notify_confirmations', 'notify_stock_reminders', 'notify_stock_sessions'];
         if (!$chatId || !in_array($field, $allowed)) respond(['error' => 'Неверные параметры'], 400);
-        $pdo->prepare("UPDATE veg_telegram_subs SET `$field` = NOT `$field` WHERE chat_id = ?")->execute([$chatId]);
-        $newVal = $pdo->prepare("SELECT `$field` FROM veg_telegram_subs WHERE chat_id = ? LIMIT 1");
+        $pdo->prepare("UPDATE ro_telegram_subs SET `$field` = NOT `$field` WHERE chat_id = ?")->execute([$chatId]);
+        $newVal = $pdo->prepare("SELECT `$field` FROM ro_telegram_subs WHERE chat_id = ? LIMIT 1");
         $newVal->execute([$chatId]);
         $val = $newVal->fetchColumn();
         respond(['success' => true, 'value' => (bool)$val]);
@@ -4357,7 +4357,7 @@ if ($endpoint === 'rpc') {
             $batchIdsNm = $nm['batch_ids'] ?? array_column($batchItems, 'id');
             if ($messages && $batchIdsNm) {
                 // Перестраиваем текст и кнопки
-                require_once __DIR__ . '/bot_veg.php';
+                require_once __DIR__ . '/bot_rest.php';
                 $msgData = corrBuildReviewMessage($pdo, $batchIdsNm);
                 foreach ($messages as $m) {
                     $epayload = json_encode(['chat_id' => $m['chat_id'], 'message_id' => $m['message_id'], 'text' => $msgData['text'], 'parse_mode' => 'HTML', 'reply_markup' => json_encode($msgData['keyboard'])]);
@@ -5088,7 +5088,7 @@ if ($endpoint === 'rpc') {
                     )
                     OR EXISTS (
                         SELECT 1
-                        FROM veg_telegram_subs vs
+                        FROM ro_telegram_subs vs
                         WHERE vs.restaurant_number = r.number
                     )
                   )
@@ -5115,7 +5115,7 @@ if ($endpoint === 'rpc') {
                     )
                     OR EXISTS (
                         SELECT 1
-                        FROM veg_telegram_subs vs
+                        FROM ro_telegram_subs vs
                         WHERE vs.restaurant_number = r.number
                     )
                   )
@@ -5136,15 +5136,16 @@ if ($endpoint === 'rpc') {
             $chatIds = [];
 
             $roStmt = $pdo->prepare("
-                SELECT DISTINCT ru.telegram_chat_id
-                FROM ro_users ru
+                SELECT DISTINCT rs.chat_id AS telegram_chat_id
+                FROM ro_telegram_subs rs
                 JOIN restaurants r
-                  ON r.number = ru.restaurant_number
+                  ON r.number = rs.restaurant_number
                  AND r.active = 1
-                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = ru.legal_entity_group COLLATE utf8mb4_unicode_ci
-                WHERE ru.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-                  AND ru.is_active = 1
-                  AND ru.telegram_chat_id IS NOT NULL
+                 AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
+                WHERE rs.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                  AND rs.chat_id IS NOT NULL
+                  AND (rs.verified_at IS NOT NULL
+                       OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
             ");
             $roStmt->execute([$group]);
             foreach ($roStmt->fetchAll(PDO::FETCH_COLUMN) as $chatId) {

@@ -125,7 +125,7 @@ require_once __DIR__ . '/includes/bot_ai.php';
 require_once __DIR__ . '/includes/bot_lookup.php';
 require_once __DIR__ . '/includes/bot_helpers.php';
 require_once __DIR__ . '/includes/bot_tools.php';
-require_once __DIR__ . '/includes/bot_veg.php';
+require_once __DIR__ . '/includes/bot_rest.php';
 require_once __DIR__ . '/includes/bot_surveys.php';
 require_once __DIR__ . '/includes/bot_chat.php';
 require_once __DIR__ . '/includes/bot_import.php';
@@ -189,7 +189,7 @@ function botOpenRestaurantCabinet($chatId, $msgId, $restNum) {
     $ru->execute([$restNum, $restGroup]);
     if (!$ru->fetch()) {
         editMessage($chatId, $msgId, "Учётная запись ресторана " . botFormatSubscribedRestaurant($restNum, $restGroup) . " не найдена. Обратитесь в отдел закупок.", ['inline_keyboard' => [
-            [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+            [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']],
         ]]);
         return;
     }
@@ -213,25 +213,75 @@ function botOpenRestaurantCabinet($chatId, $msgId, $restNum) {
     );
 }
 
-function botEnsureRestaurantSubscription($chatId, $restNum, $from = []) {
+function botEnsureRestaurantSubscription($chatId, $restNum, $from = [], $verifiedRoUserId = null, $verifiedVia = null) {
     global $pdo;
     $firstName = mb_substr($from['first_name'] ?? '', 0, 255) ?: null;
     $tgUsername = isset($from['username']) ? mb_substr($from['username'], 0, 255) : null;
     $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
-    $pdo->prepare("
-        INSERT INTO veg_telegram_subs (chat_id, restaurant_number, first_name, username)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            first_name = COALESCE(VALUES(first_name), first_name),
-            username = COALESCE(VALUES(username), username)
-    ")->execute([(string)$chatId, (string)$restNum, $firstName, $tgUsername]);
-    $pdo->prepare("
-        INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username)
-        VALUES (?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            first_name = COALESCE(VALUES(first_name), first_name),
-            username = COALESCE(VALUES(username), username)
-    ")->execute([(int)$restNum, $restGroup, (int)$chatId, $firstName, $tgUsername]);
+    if ($verifiedVia !== null) {
+        // Подписка с подтверждением: дополнительно фиксируем verified_at и сбрасываем дедлайн перепривязки.
+        $pdo->prepare("
+            INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username,
+                                          verified_at, verified_via, verified_ro_user_id, must_reverify_by)
+            VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, NULL)
+            ON DUPLICATE KEY UPDATE
+                first_name = COALESCE(VALUES(first_name), first_name),
+                username = COALESCE(VALUES(username), username),
+                verified_at = NOW(),
+                verified_via = VALUES(verified_via),
+                verified_ro_user_id = VALUES(verified_ro_user_id),
+                must_reverify_by = NULL
+        ")->execute([(int)$restNum, $restGroup, (int)$chatId, $firstName, $tgUsername, $verifiedVia, $verifiedRoUserId]);
+    } else {
+        $pdo->prepare("
+            INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                first_name = COALESCE(VALUES(first_name), first_name),
+                username = COALESCE(VALUES(username), username)
+        ")->execute([(int)$restNum, $restGroup, (int)$chatId, $firstName, $tgUsername]);
+    }
+}
+
+// Сколько подтверждённых ресторанов привязано к chat_id (с учётом переходного периода).
+// Если у подписки есть must_reverify_by и срок ещё не истёк — она тоже считается активной.
+function botCountActiveSubs($chatId) {
+    global $pdo;
+    $s = $pdo->prepare("
+        SELECT COUNT(*) FROM ro_telegram_subs
+        WHERE chat_id = ?
+          AND (verified_at IS NOT NULL
+               OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+    ");
+    $s->execute([(int)$chatId]);
+    return (int)$s->fetchColumn();
+}
+
+// Сколько у подписок этого chat_id осталось до дедлайна (если они не подтверждены).
+// Возвращает NULL, если все подписки подтверждены или истекли.
+function botGetReverifyDeadline($chatId) {
+    global $pdo;
+    $s = $pdo->prepare("
+        SELECT MAX(must_reverify_by) AS dl
+        FROM ro_telegram_subs
+        WHERE chat_id = ?
+          AND verified_at IS NULL
+          AND must_reverify_by IS NOT NULL
+          AND must_reverify_by > NOW()
+    ");
+    $s->execute([(int)$chatId]);
+    return $s->fetchColumn() ?: null;
+}
+
+// Текст-инструкция о привязке аккаунта ресторана через 6-значный код.
+function botRestaurantLinkInstructions() {
+    global $SITE_URL;
+    return "🏪 <b>Кабинет ресторана</b>\n\n"
+         . "Чтобы пользоваться ботом, привяжите аккаунт ресторана:\n\n"
+         . "1. Откройте <a href=\"{$SITE_URL}\">{$SITE_URL}</a>, войдите как ресторан.\n"
+         . "2. Профиль → Telegram → «Получить код».\n"
+         . "3. Пришлите 6-значный код в этот чат.\n\n"
+         . "<i>Код действует 10 минут. Каждый сотрудник получает свой код.</i>";
 }
 
 // ═══ Команды с данными ═══
@@ -827,7 +877,7 @@ function cmdCards($chatId, $user = null, $editMsgId = null) {
     if ($user) {
         $btns[] = [['text' => '◂ Меню', 'callback_data' => 'cmd_menu']];
     } else {
-        $btns[] = [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']];
+        $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     }
     botSend($chatId, $text, ['inline_keyboard' => $btns], $editMsgId);
 }
@@ -1492,7 +1542,7 @@ function getMenuButtons($user) {
         // Рестораны
         [
             ['text' => '✏️ Корректировки', 'callback_data' => 'cmd_corrections'],
-            ['text' => '🏪 Рестораны', 'callback_data' => 'cmd_veg_stats'],
+            ['text' => '🏪 Рестораны', 'callback_data' => 'cmd_rest_subs_stats'],
         ],
         [
             ['text' => '🛒 Заказы рестов', 'callback_data' => 'cmd_ro_status'],
@@ -1627,7 +1677,7 @@ if (isset($input['callback_query'])) {
                     setUserMode($user['name'], null);
                     editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
                 } else {
-                    vegShowMySubs($chatId, $msgId);
+                    restShowMySubs($chatId, $msgId);
                 }
             }
             exit;
@@ -1642,7 +1692,7 @@ if (isset($input['callback_query'])) {
             case 'menu':
                 setUserMode($user['name'], null);
                 @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
-                @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
+                @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода заявки
                 editMessage($chatId, $msgId, getMenuText($user), ['inline_keyboard' => getMenuButtons($user)]);
                 break;
             case 'orders': cmdOrders($chatId, $user, $msgId); break;
@@ -1676,7 +1726,7 @@ if (isset($input['callback_query'])) {
                 break;
             case 'sales': cmdSales($chatId, $user, $msgId); break;
             // cards обрабатывается выше в отдельном блоке (доступен без аккаунта)
-            case 'veg_stats': cmdVegStats($chatId, $msgId); break;
+            case 'rest_subs_stats': cmdRestSubsStats($chatId, $msgId); break;
             case 'corrections': cmdCorrections($chatId, $msgId); break;
             case 'ro_status': cmdRoStatus($chatId, $user, $msgId); break;
             case 'ro_send_logins': restRoSendLogins($chatId, $msgId); break;
@@ -1818,7 +1868,19 @@ if (isset($input['callback_query'])) {
 
     if ($data === 'start_role_restaurant') {
         answerCallback($cb['id']);
-        vegShowMySubs($chatId, $msgId);
+        if (botCountActiveSubs($chatId) === 0) {
+            $kb = ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'start_back']]]];
+            editMessage($chatId, $msgId, botRestaurantLinkInstructions(), $kb);
+        } else {
+            restShowMySubs($chatId, $msgId);
+        }
+        exit;
+    }
+
+    if ($data === 'rest_link_help') {
+        answerCallback($cb['id']);
+        $kb = ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'start_role_restaurant']]]];
+        editMessage($chatId, $msgId, botRestaurantLinkInstructions(), $kb);
         exit;
     }
 
@@ -1851,7 +1913,7 @@ if (isset($input['callback_query'])) {
     if ($data === 'chat_cancel') {
         answerCallback($cb['id']);
         @unlink(sys_get_temp_dir() . "/chat_{$chatId}.txt");
-        vegShowMySubs($chatId, $msgId);
+        restShowMySubs($chatId, $msgId);
         exit;
     }
 
@@ -1879,7 +1941,7 @@ if (isset($input['callback_query'])) {
         $subs = botGetSubscribedRestaurants($pdo, $chatId);
         if (!$subs) {
             editMessage($chatId, $msgId, "Вы не подписаны ни на один ресторан.", ['inline_keyboard' => [
-                [['text' => '◂ Назад', 'callback_data' => 'veg_my_subs']],
+                [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']],
             ]]);
             exit;
         }
@@ -1910,7 +1972,7 @@ if (isset($input['callback_query'])) {
         restMenuMain($chatId, $msgId);
         exit;
     }
-    if ($data === 'rest_menu_veg') {
+    if ($data === 'rest_menu_supplier_legacy') {
         // Старый callback — теперь всё через единое меню поставщиков
         answerCallback($cb['id']);
         restMenuSupplier($chatId, $msgId);
@@ -2193,27 +2255,27 @@ if (isset($input['callback_query'])) {
     }
 
     // ═══ Овощи: просмотр заявок ресторана ═══
-    if ($data === 'veg_my_orders') {
+    if ($data === 'rest_my_orders') {
         answerCallback($cb['id']);
         soShowMyOrders($chatId, $msgId, soGetPlanetaSupplierId());
         exit;
     }
 
-    if (str_starts_with($data, 'veg_orders_rest_')) {
+    if (str_starts_with($data, 'rest_orders_for_')) {
         answerCallback($cb['id']);
         $restNum = substr($data, 16);
         soShowRestOrders($chatId, $msgId, soGetPlanetaSupplierId(), $restNum);
         exit;
     }
 
-    if (str_starts_with($data, 'veg_history_')) {
+    if (str_starts_with($data, 'rest_history_')) {
         answerCallback($cb['id']);
         $restNum = substr($data, 12);
         soShowRestOrders($chatId, $msgId, soGetPlanetaSupplierId(), $restNum);
         exit;
     }
 
-    if (str_starts_with($data, 'veg_hist_')) {
+    if (str_starts_with($data, 'rest_hist_')) {
         answerCallback($cb['id']);
         // Старые кнопки истории переводим на новый просмотр заявок поставщика
         $parts = explode('_', substr($data, 9), 2);
@@ -2223,43 +2285,18 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
-    // ═══ Овощи: выбор ресторана для подписки ═══
-    if (str_starts_with($data, 'veg_sub:')) {
-        $parts = explode(':', $data, 3);
-        $group = $parts[1] ?? 'BK_VM';
-        $restNum = $parts[2] ?? '';
-        $exists = $pdo->prepare("SELECT id FROM ro_telegram_subs WHERE chat_id=? AND restaurant_number=? AND legal_entity_group=?");
-        $exists->execute([$chatId, $restNum, $group]);
-        if ($exists->fetch()) {
-            $pdo->prepare("DELETE FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?")->execute([$chatId, $restNum]);
-            $pdo->prepare("DELETE FROM ro_telegram_subs WHERE chat_id=? AND restaurant_number=? AND legal_entity_group=?")->execute([$chatId, $restNum, $group]);
-            answerCallback($cb['id'], 'Отписано');
-        } else {
-            $from = $cb['from'] ?? [];
-            $firstName = mb_substr($from['first_name'] ?? '', 0, 255) ?: null;
-            $tgUsername = isset($from['username']) ? mb_substr($from['username'], 0, 255) : null;
-            $pdo->prepare("INSERT INTO veg_telegram_subs (chat_id, restaurant_number, first_name, username) VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE first_name = VALUES(first_name), username = VALUES(username)")
-                ->execute([$chatId, $restNum, $firstName, $tgUsername]);
-            $pdo->prepare("INSERT INTO ro_telegram_subs (restaurant_number, legal_entity_group, chat_id, first_name, username) VALUES (?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE first_name = VALUES(first_name), username = VALUES(username)")
-                ->execute([$restNum, $group, $chatId, $firstName, $tgUsername]);
-            answerCallback($cb['id'], 'Подписано');
-        }
-        // Обновить список
-        vegShowRestaurants($chatId, $msgId, 0, $group);
+    // Открытая подписка через бот удалена. Подписка теперь возможна только через
+    // 6-значный код, выдаваемый в личном кабинете ресторана. См. botRestaurantLinkInstructions().
+
+    if ($data === 'rest_my_subs') {
+        answerCallback($cb['id']);
+        restShowMySubs($chatId, $msgId);
         exit;
     }
 
-    if ($data === 'veg_my_subs') {
+    if ($data === 'rest_my_subs_manage') {
         answerCallback($cb['id']);
-        vegShowMySubs($chatId, $msgId);
-        exit;
-    }
-
-    if ($data === 'veg_my_subs_manage') {
-        answerCallback($cb['id']);
-        vegShowSubsManage($chatId, $msgId);
+        restShowSubsManage($chatId, $msgId);
         exit;
     }
 
@@ -2270,48 +2307,37 @@ if (isset($input['callback_query'])) {
     }
 
     if (str_starts_with($data, 'rest_notif_toggle_')) {
-        $field = substr($data, 18); // veg_reminders, veg_sessions, confirmations, stock_reminders, stock_sessions
+        $field = substr($data, 18); // so_reminders, so_sessions, confirmations, stock_reminders, stock_sessions
         answerCallback($cb['id']);
         restNotifToggle($chatId, $msgId, $field);
         exit;
     }
 
-    if (str_starts_with($data, 'veg_unsub:')) {
+    if (str_starts_with($data, 'rest_unsub:')) {
         $parts = explode(':', $data, 3);
         $group = $parts[1] ?? 'BK_VM';
         $restNum = $parts[2] ?? '';
-        $pdo->prepare("DELETE FROM veg_telegram_subs WHERE chat_id=? AND restaurant_number=?")->execute([$chatId, $restNum]);
         $pdo->prepare("DELETE FROM ro_telegram_subs WHERE chat_id=? AND restaurant_number=? AND legal_entity_group=?")->execute([$chatId, $restNum, $group]);
         answerCallback($cb['id'], "Отписано от ресторана $restNum");
-        vegShowSubsManage($chatId, $msgId);
+        restShowSubsManage($chatId, $msgId);
         exit;
     }
 
-    if ($data === 'veg_pick_rest') {
-        answerCallback($cb['id']);
-        vegShowRestaurantGroups($chatId, $msgId);
-        exit;
-    }
-
-    if (str_starts_with($data, 'veg_pick_group:')) {
-        answerCallback($cb['id']);
-        vegShowRestaurants($chatId, $msgId, 0, substr($data, 15));
-        exit;
-    }
+    // Колбэки veg_pick_rest / veg_pick_group: удалены — выбор ресторана в боте больше не выдаёт подписку.
 
     // Подача заявки через бота
-    if ($data === 'vegord_start') {
+    if ($data === 'restord_start') {
         answerCallback($cb['id']);
         soOrderSelectRest($chatId, $msgId, soGetPlanetaSupplierId());
         exit;
     }
-    if (str_starts_with($data, 'vegord_rest_')) {
+    if (str_starts_with($data, 'restord_rest_')) {
         answerCallback($cb['id']);
-        @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода
+        @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода
         soOrderSelectDay($chatId, $msgId, soGetPlanetaSupplierId(), substr($data, 12));
         exit;
     }
-    if (str_starts_with($data, 'vegord_day_')) {
+    if (str_starts_with($data, 'restord_day_')) {
         answerCallback($cb['id']);
         $rest = substr($data, 11); // "27_2026-03-19"
         $sep = strpos($rest, '_');
@@ -2322,7 +2348,7 @@ if (isset($input['callback_query'])) {
         }
         exit;
     }
-    if (str_starts_with($data, 'vegord_skip_')) {
+    if (str_starts_with($data, 'restord_skip_')) {
         answerCallback($cb['id']);
         $rest = substr($data, 12); // "27_2026-03-19"
         $sep = strpos($rest, '_');
@@ -2334,14 +2360,7 @@ if (isset($input['callback_query'])) {
         exit;
     }
 
-    if (str_starts_with($data, 'veg_page:')) {
-        answerCallback($cb['id']);
-        $parts = explode(':', $data, 3);
-        $group = $parts[1] ?? 'BK_VM';
-        $page = intval($parts[2] ?? 0);
-        vegShowRestaurants($chatId, $msgId, $page, $group);
-        exit;
-    }
+    // Старый экран пагинации выбора ресторана удалён вместе с открытой подпиской.
 
     // ═══ Опросы ═══
     if (preg_match('/^srv_start_(\d+)$/', $data, $m)) {
@@ -2422,8 +2441,11 @@ if (file_exists($importModeFile) && isset($msg['document'])) {
             $pdo->prepare("INSERT INTO order_file (file_name, file_path, telegram_file_id, uploaded_by) VALUES (?, '', ?, ?)")
                 ->execute([$fileName, $fileId, $user['name']]);
 
-            // Уведомляем подписчиков ресторанов о новом файле
-            $restSubs = $pdo->query("SELECT DISTINCT chat_id FROM veg_telegram_subs")->fetchAll(PDO::FETCH_COLUMN);
+            // Уведомляем подписчиков ресторанов о новом файле — только подтверждённые подписки.
+            $restSubs = $pdo->query("
+                SELECT DISTINCT chat_id FROM ro_telegram_subs
+                WHERE verified_at IS NOT NULL
+            ")->fetchAll(PDO::FETCH_COLUMN);
             $notifSent = 0;
             foreach ($restSubs as $subCid) {
                 if ((string)$subCid === (string)$chatId) continue; // не отправляем загрузившему
@@ -2462,7 +2484,7 @@ $text = trim($msg['text'] ?? '');
 // 6-значный код — привязка аккаунта ресторана к Telegram
 if (preg_match('/^\d{6}$/', $text)) {
     $code = $text;
-    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group, ro_user_id FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
     $s->execute([$code]);
     $tok = $s->fetch();
     if ($tok && (int)($tok['telegram_chat_id'] ?? 0) === 0 && !empty($tok['restaurant_number'])) {
@@ -2474,9 +2496,11 @@ if (preg_match('/^\d{6}$/', $text)) {
         } else {
             $restNum = (int)$tok['restaurant_number'];
             $restGroup = ($tok['legal_entity_group'] ?? '') === 'PS' ? 'PS' : 'BK_VM';
-            $pdo->prepare("UPDATE ro_users SET telegram_chat_id = ? WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1")
-                ->execute([$chatId, $restNum, $restGroup]);
-            botEnsureRestaurantSubscription($chatId, $restNum, $msg['from'] ?? []);
+            $roUserId = !empty($tok['ro_user_id']) ? (int)$tok['ro_user_id'] : null;
+            // Подтверждённая подписка: пишем verified_at + verified_via, дедлайн перепривязки сбрасывается.
+            // ro_users.telegram_chat_id больше не трогаем — это ломало других сотрудников ресторана.
+            // Источник правды: ro_telegram_subs.
+            botEnsureRestaurantSubscription($chatId, $restNum, $msg['from'] ?? [], $roUserId, 'code');
             $prettyRest = botFormatSubscribedRestaurant($restNum, $restGroup);
             sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан {$prettyRest} успешно привязан к вашему Telegram и добавлен в ваши рестораны.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
         }
@@ -2486,12 +2510,8 @@ if (preg_match('/^\d{6}$/', $text)) {
     exit;
 }
 
-// /veg — подписка на уведомления о заявках (доступна всем, без привязки аккаунта)
-if ($text === '/veg') {
-    @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
-    vegShowMySubs($chatId);
-    exit;
-}
+// Старая команда /veg удалена: открытая подписка по выбору ресторана отключена.
+// Привязка к ресторану теперь возможна только через 6-значный код из личного кабинета.
 
 // /start
 if ($text === '/start') {
@@ -2517,7 +2537,7 @@ if ($text === '/help' || $text === '/menu') {
     if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     setUserMode($user['name'], null); // сброс режима
     @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
-    @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt"); // сброс режима ввода заявки
+    @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода заявки
     @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt"); // сброс режима ввода заявки поставщику
     $tips = "\n\n💡 <i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Что скоро просрочится?\n• Когда доставка в ресторан 45?";
     sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
@@ -2705,7 +2725,7 @@ if (file_exists($soOrderFile)) {
             if (str_starts_with($text, '/')) {
                 @unlink($soOrderFile);
             } else {
-                @unlink(sys_get_temp_dir() . "/vegord_{$chatId}.txt");
+                @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt");
                 $userMsgId = $msg['message_id'] ?? null;
                 if ($userMsgId) @deleteMessage($chatId, $userMsgId);
                 soOrderProcessInput($chatId, $text);

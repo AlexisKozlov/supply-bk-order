@@ -465,8 +465,16 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api('telegram-link', { method: 'POST' });
   }
 
-  async function telegramUnlink() {
-    return await api('telegram-unlink', { method: 'POST' });
+  async function telegramUnlink(chatId = null) {
+    return await api('telegram-unlink', {
+      method: 'POST',
+      body: JSON.stringify(chatId !== null ? { chat_id: String(chatId) } : {}),
+    });
+  }
+
+  async function telegramLinks() {
+    const data = await api('telegram-links');
+    return data.links || [];
   }
 
   async function loadBroadcasts() {
@@ -516,7 +524,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
-    loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink,
+    loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
     loadBroadcasts, loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,

@@ -156,34 +156,115 @@ function soDeadlineTimeLabel($deadline) {
     return preg_match('/^\d{2}:\d{2}/', (string)$deadline) ? substr((string)$deadline, 0, 5) : '';
 }
 
-function soRestaurantHasDeliveryDate($pdo, $restaurantId, $supplierId, $deliveryDate) {
-    if (!$restaurantId || !$supplierId || !$deliveryDate) return false;
-    $sch = $pdo->prepare("
-        SELECT order_day, delivery_day
-        FROM so_supplier_schedules
-        WHERE supplier_id = ? AND restaurant_id = ? AND is_active = 1
+function soDeliveryDateMatchesDow($deliveryDate, $deliveryDow) {
+    if (!$deliveryDate || !$deliveryDow) return false;
+    return (int)(new DateTime($deliveryDate))->format('N') === (int)$deliveryDow;
+}
+
+function soOrderDateByDeliveryDate($deliveryDate, $orderDow) {
+    $deliveryObj = new DateTime($deliveryDate, new DateTimeZone('Europe/Minsk'));
+    $deliveryDow = (int)$deliveryObj->format('N');
+    $diff = $deliveryDow - (int)$orderDow;
+    if ($diff <= 0) $diff += 7;
+    return $deliveryObj->modify("-{$diff} days")->format('Y-m-d');
+}
+
+function soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate = null) {
+    if (!$supplierId) return null;
+
+    if ($deliveryDate) {
+        $s = $pdo->prepare("
+            SELECT id, supplier_id, date_from, date_to, updated_at, updated_by
+            FROM so_supplier_temp_schedule_periods
+            WHERE supplier_id = ? AND date_from <= ? AND date_to >= ?
+            LIMIT 1
+        ");
+        $s->execute([$supplierId, $deliveryDate, $deliveryDate]);
+        return $s->fetch() ?: null;
+    }
+
+    $s = $pdo->prepare("
+        SELECT id, supplier_id, date_from, date_to, updated_at, updated_by
+        FROM so_supplier_temp_schedule_periods
+        WHERE supplier_id = ?
+        LIMIT 1
     ");
-    $sch->execute([$supplierId, (int)$restaurantId]);
-    $schedule = $sch->fetchAll();
-    if (!$schedule) return false;
+    $s->execute([$supplierId]);
+    return $s->fetch() ?: null;
+}
+
+function soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate = null, $restaurantId = null, $withRestaurantMeta = false) {
+    if (!$supplierId) return [];
+
+    $period = $deliveryDate ? soGetTempSchedulePeriod($pdo, $supplierId, $deliveryDate) : null;
+    if ($period) {
+        $fields = "ssi.restaurant_id, ssi.order_day, ssi.delivery_day, ssi.is_active";
+        $joins = '';
+        if ($withRestaurantMeta) {
+            $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
+            $joins = " JOIN restaurants r ON r.id = ssi.restaurant_id AND r.active = 1";
+        }
+        $sql = "SELECT {$fields} FROM so_supplier_temp_schedule_items ssi{$joins} WHERE ssi.period_id = ? AND ssi.is_active = 1";
+        $params = [(int)$period['id']];
+        if ($restaurantId) {
+            $sql .= " AND ssi.restaurant_id = ?";
+            $params[] = (int)$restaurantId;
+        }
+        $sql .= " ORDER BY ssi.delivery_day, ssi.order_day";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        return $s->fetchAll();
+    }
+
+    $fields = "ss.restaurant_id, ss.order_day, ss.delivery_day, ss.is_active";
+    $joins = '';
+    if ($withRestaurantMeta) {
+        $fields .= ", r.number AS restaurant_number, r.region, r.city, r.address, r.legal_entity_group";
+        $joins = " JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1";
+    }
+    $sql = "SELECT {$fields} FROM so_supplier_schedules ss{$joins} WHERE ss.supplier_id = ? AND ss.is_active = 1";
+    $params = [$supplierId];
+    if ($restaurantId) {
+        $sql .= " AND ss.restaurant_id = ?";
+        $params[] = (int)$restaurantId;
+    }
+    $sql .= " ORDER BY ss.delivery_day, ss.order_day";
+    $s = $pdo->prepare($sql);
+    $s->execute($params);
+    return $s->fetchAll();
+}
+
+function soGetScheduleDatesInRange($pdo, $supplierId, $dateFrom, $dateTo, $restaurantId = null) {
+    if (!$supplierId || !$dateFrom || !$dateTo) return [];
 
     $tz = new DateTimeZone('Europe/Minsk');
-    $today = new DateTime('now', $tz);
-    $today->setTime(0, 0, 0);
-    $weekStart = clone $today;
-    $weekStart->modify('-' . ((int)$today->format('N') - 1) . ' days');
-
-    foreach ($schedule as $sc) {
-        $orderDow = (int)$sc['order_day'];
-        $deliveryDow = (int)$sc['delivery_day'];
-        for ($w = 0; $w < 2; $w++) {
-            $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
-            if ($deliveryDow <= $orderDow) {
-                $deliveryDateObj->modify('+7 days');
-            }
-            if ($deliveryDateObj < $today) continue;
-            if ($deliveryDateObj->format('Y-m-d') === $deliveryDate) return true;
+    $from = new DateTime($dateFrom, $tz);
+    $to = new DateTime($dateTo, $tz);
+    $dates = [];
+    while ($from <= $to) {
+        $dateStr = $from->format('Y-m-d');
+        $deliveryDow = (int)$from->format('N');
+        $rows = soGetEffectiveScheduleRows($pdo, $supplierId, $dateStr, $restaurantId, false);
+        foreach ($rows as $row) {
+            if ((int)$row['delivery_day'] !== $deliveryDow) continue;
+            $dates[$dateStr] = [
+                'delivery_date' => $dateStr,
+                'delivery_day' => $deliveryDow,
+                'order_day' => (int)$row['order_day'],
+                'order_date' => soOrderDateByDeliveryDate($dateStr, (int)$row['order_day']),
+            ];
+            break;
         }
+        $from->modify('+1 day');
+    }
+    return array_values($dates);
+}
+
+function soRestaurantHasDeliveryDate($pdo, $restaurantId, $supplierId, $deliveryDate) {
+    if (!$restaurantId || !$supplierId || !$deliveryDate) return false;
+    $rows = soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, (int)$restaurantId, false);
+    foreach ($rows as $row) {
+        if (soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])) return true;
     }
     return false;
 }
@@ -391,9 +472,6 @@ if ($soAction === 'suppliers' && $method === 'GET') {
         ];
     };
 
-    $weekStart = (clone $today)->modify('-' . ((int)$today->format('N') - 1) . ' days');
-    $WEEKS_AHEAD = 2;
-
     $result = [];
     foreach ($suppliersMap as $sid => $sup) {
         $settings = $settingsMap[$sid] ?? ['is_accepting_orders' => 1, 'default_deadline_time' => '14:00:00', 'pause_message' => null];
@@ -411,35 +489,29 @@ if ($soAction === 'suppliers' && $method === 'GET') {
 
         $availableDates = [];
         if ($isAccepting) {
-            foreach ($sup['schedule'] as $sc) {
-                $orderDow = $sc['order_day'];
-                $deliveryDow = $sc['delivery_day'];
-                for ($w = 0; $w < $WEEKS_AHEAD; $w++) {
-                    $orderDateObj    = (clone $weekStart)->modify('+' . ($orderDow - 1 + $w * 7) . ' days');
-                    $deliveryDateObj = (clone $weekStart)->modify('+' . ($deliveryDow - 1 + $w * 7) . ' days');
-                    if ($deliveryDow <= $orderDow) $deliveryDateObj->modify('+7 days');
-                    if ($deliveryDateObj < $today) continue;
-                    $orderDateStr    = $orderDateObj->format('Y-m-d');
-                    $deliveryDateStr = $deliveryDateObj->format('Y-m-d');
-                    $deadlineInfo = $checkDeadline($sid, $deliveryDateStr);
-                    $order = $ordersMap[$sid][$deliveryDateStr] ?? null;
-                    if ($deadlineInfo['status'] === 'closed' && !$order) continue;
-                    $availableDates[] = [
-                        'order_date'       => $orderDateStr,
-                        'order_day_name'   => $dayNamesFull[$orderDow] ?? '',
-                        'delivery_date'    => $deliveryDateStr,
-                        'delivery_day_name'=> $dayNamesFull[$deliveryDow] ?? '',
-                        'deadline'         => $deadlineInfo['deadline'],
-                        'deadline_status'  => $deadlineInfo['status'],
-                        'order' => $order ? [
-                            'id'           => (int)$order['id'],
-                            'status'       => $order['status'],
-                            'submitted_at' => $order['submitted_at'],
-                            'item_count'   => (int)$order['item_count'],
-                            'is_skip'      => ((int)$order['item_count']) === 0,
-                        ] : null,
-                    ];
-                }
+            $supplierDates = soGetScheduleDatesInRange($pdo, $sid, $rangeStart, $rangeEnd, $rest['restaurant_id']);
+            foreach ($supplierDates as $dateInfo) {
+                $deliveryDateStr = $dateInfo['delivery_date'];
+                $deliveryDow = (int)$dateInfo['delivery_day'];
+                $orderDow = (int)$dateInfo['order_day'];
+                $deadlineInfo = $checkDeadline($sid, $deliveryDateStr);
+                $order = $ordersMap[$sid][$deliveryDateStr] ?? null;
+                if ($deadlineInfo['status'] === 'closed' && !$order) continue;
+                $availableDates[] = [
+                    'order_date'       => $dateInfo['order_date'],
+                    'order_day_name'   => $dayNamesFull[$orderDow] ?? '',
+                    'delivery_date'    => $deliveryDateStr,
+                    'delivery_day_name'=> $dayNamesFull[$deliveryDow] ?? '',
+                    'deadline'         => $deadlineInfo['deadline'],
+                    'deadline_status'  => $deadlineInfo['status'],
+                    'order' => $order ? [
+                        'id'           => (int)$order['id'],
+                        'status'       => $order['status'],
+                        'submitted_at' => $order['submitted_at'],
+                        'item_count'   => (int)$order['item_count'],
+                        'is_skip'      => ((int)$order['item_count']) === 0,
+                    ] : null,
+                ];
             }
 
             // Убираем дубли по delivery_date
@@ -459,6 +531,10 @@ if ($soAction === 'suppliers' && $method === 'GET') {
             'name'               => $sup['name'],
             'full_name'          => $sup['full_name'],
             'schedule'           => $scheduleFormatted,
+            'temporary_schedule' => (($period = soGetTempSchedulePeriod($pdo, $sid)) ? [
+                'date_from' => $period['date_from'],
+                'date_to' => $period['date_to'],
+            ] : null),
             'is_accepting_orders'=> $isAccepting,
             'pause_message'      => $settings['pause_message'] ?? null,
             'available_dates'    => $availableDates,
@@ -913,8 +989,15 @@ if ($soAction === 'admin') {
         try {
             $pdo->prepare("UPDATE suppliers SET so_enabled = 0 WHERE id = ?")->execute([$supplierId]);
             $pdo->prepare("UPDATE so_supplier_schedules SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
+            $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE supplier_id = ?")->execute([$supplierId]);
             $pdo->prepare("UPDATE so_templates SET is_active = 0 WHERE supplier_id = ?")->execute([$supplierId]);
             $pdo->commit();
+        } catch (InvalidArgumentException $e) {
+            $pdo->rollBack();
+            soRespond(['error' => $e->getMessage()], 400);
+        } catch (InvalidArgumentException $e) {
+            $pdo->rollBack();
+            soRespond(['error' => $e->getMessage()], 400);
         } catch (Throwable $e) {
             $pdo->rollBack();
             throw $e;
@@ -1112,72 +1195,63 @@ if ($soAction === 'admin') {
 
         $settings = soGetSupplierSettings($pdo, $supplierId);
 
-        // Если дата не указана: открываем поставку, соответствующую сегодняшнему
-        // дню подачи заявок. Если сегодня не день заказа — берём ближайший следующий
-        // день заказа и его поставку.
+        $tz = new DateTimeZone('Europe/Minsk');
+        $today = (new DateTime('now', $tz))->setTime(0, 0, 0);
+        $rangeStart = $today->format('Y-m-d');
+        $rangeEnd = (clone $today)->modify('+21 days')->format('Y-m-d');
+        $weekDates = soGetScheduleDatesInRange($pdo, $supplierId, $rangeStart, $rangeEnd);
+
         if (!$date) {
-            $tz = new DateTimeZone('Europe/Minsk');
-            $now = new DateTime('now', $tz);
-            $todayDow = (int)$now->format('N');
-            $s = $pdo->prepare("SELECT DISTINCT order_day, delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1 ORDER BY order_day, delivery_day");
-            $s->execute([$supplierId]);
-            $pairs = $s->fetchAll();
-
-            $targetOrderDow = null;
-            $targetDeliveryDow = null;
-            // Сначала ищем пары с order_day >= сегодня
-            foreach ($pairs as $p) {
-                if ((int)$p['order_day'] >= $todayDow) {
-                    $targetOrderDow = (int)$p['order_day'];
-                    $targetDeliveryDow = (int)$p['delivery_day'];
-                    break;
-                }
-            }
-            // Если всё позади — берём первую пару (следующая неделя)
-            if ($targetOrderDow === null && !empty($pairs)) {
-                $targetOrderDow = (int)$pairs[0]['order_day'];
-                $targetDeliveryDow = (int)$pairs[0]['delivery_day'];
-            }
-
-            if ($targetOrderDow !== null) {
-                // сколько дней до дня заказа
-                $orderDiff = $targetOrderDow - $todayDow;
-                if ($orderDiff < 0) $orderDiff += 7;
-                // сколько дней от дня заказа до дня поставки (0..6)
-                $delivDiff = $targetDeliveryDow - $targetOrderDow;
-                if ($delivDiff < 0) $delivDiff += 7;
-                $date = (clone $now)->modify('+' . ($orderDiff + $delivDiff) . ' days')->format('Y-m-d');
-            } else {
-                $date = date('Y-m-d');
-            }
+            $date = !empty($weekDates) ? $weekDates[0]['delivery_date'] : $today->format('Y-m-d');
         }
-
-        $deliveryDow = (int)(new DateTime($date))->format('N');
 
         // Все рестораны, у которых поставка в этот день (без session_id)
         $supplierGroup = $supplier['legal_entity_group'] ?: getEntityGroup($supplier['legal_entity'] ?? '');
         $supplierEntities = getEntitiesInGroup($supplierGroup);
         $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
+        $effectiveRows = soGetEffectiveScheduleRows($pdo, $supplierId, $date, null, true);
+        $deliveryDow = (int)(new DateTime($date))->format('N');
+        $restaurants = [];
+        foreach ($effectiveRows as $row) {
+            if ((int)$row['delivery_day'] !== $deliveryDow) continue;
+            $restStmt = $pdo->prepare("
+                SELECT o.id as order_id, o.status as order_status, o.submitted_at,
+                       CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
+                       asl.source_order_id AS auto_source_order_id,
+                       src.delivery_date AS auto_source_delivery_date,
+                       (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
+                       (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
+                FROM so_orders o
+                LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
+                LEFT JOIN so_orders src ON src.id = asl.source_order_id
+                WHERE o.restaurant_number = ? AND o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
+                LIMIT 1
+            ");
+            $restStmt->execute(array_merge([(string)$row['restaurant_number'], $supplierId, $date], $supplierEntities));
+            $orderRow = $restStmt->fetch() ?: [];
 
-        $rests = $pdo->prepare("
-            SELECT r.number, r.region, r.city, r.address, r.legal_entity_group,
-                   ss.order_day,
-                   o.id as order_id, o.status as order_status, o.submitted_at,
-                   CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
-                   asl.source_order_id AS auto_source_order_id,
-                   src.delivery_date AS auto_source_delivery_date,
-                   (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
-                   (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
-            FROM so_supplier_schedules ss
-            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-            LEFT JOIN so_orders o ON o.restaurant_number = r.number AND o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
-            LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
-            LEFT JOIN so_orders src ON src.id = asl.source_order_id
-            WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
-            ORDER BY r.region, r.number
-        ");
-        $rests->execute(array_merge([$supplierId, $date], $supplierEntities, [$supplierId, $deliveryDow]));
-        $restaurants = $rests->fetchAll();
+            $restaurants[] = [
+                'number' => $row['restaurant_number'],
+                'region' => $row['region'],
+                'city' => $row['city'],
+                'address' => $row['address'],
+                'legal_entity_group' => $row['legal_entity_group'],
+                'order_day' => (int)$row['order_day'],
+                'order_id' => $orderRow['order_id'] ?? null,
+                'order_status' => $orderRow['order_status'] ?? null,
+                'submitted_at' => $orderRow['submitted_at'] ?? null,
+                'is_auto_submitted' => isset($orderRow['is_auto_submitted']) ? (int)$orderRow['is_auto_submitted'] : 0,
+                'auto_source_order_id' => $orderRow['auto_source_order_id'] ?? null,
+                'auto_source_delivery_date' => $orderRow['auto_source_delivery_date'] ?? null,
+                'item_count' => isset($orderRow['item_count']) ? (int)$orderRow['item_count'] : 0,
+                'total_qty' => $orderRow['total_qty'] ?? null,
+            ];
+        }
+        usort($restaurants, function ($a, $b) {
+            $regionCmp = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
+            if ($regionCmp !== 0) return $regionCmp;
+            return (int)($a['number'] ?? 0) <=> (int)($b['number'] ?? 0);
+        });
 
         $total = count($restaurants);
         $submitted = 0;
@@ -1185,31 +1259,14 @@ if ($soAction === 'admin') {
             if ($r['order_status'] === 'submitted' || $r['order_status'] === 'locked') $submitted++;
         }
 
-        // Навигационные даты: ближайшие 2 цикла поставок по графику от сегодня
-        $weekDates = [];
-        $tz = new DateTimeZone('Europe/Minsk');
-        $today = (new DateTime('now', $tz))->setTime(0, 0, 0);
-        $weekStart = (clone $today)->modify('-' . ((int)$today->format('N') - 1) . ' days');
-        $schStmt = $pdo->prepare("SELECT DISTINCT delivery_day FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 1 ORDER BY delivery_day");
-        $schStmt->execute([$supplierId]);
-        $deliveryDaysAll = array_column($schStmt->fetchAll(), 'delivery_day');
-        $seenWD = [];
-        foreach ([0, 1] as $w) {
-            foreach ($deliveryDaysAll as $dd) {
-                $dd = (int)$dd;
-                $dObj = (clone $weekStart)->modify('+' . ($dd - 1 + $w * 7) . ' days');
-                if ($dObj < $today) continue;
-                $dateStr = $dObj->format('Y-m-d');
-                if (isset($seenWD[$dateStr])) continue;
-                $seenWD[$dateStr] = true;
-                $weekDates[] = [
-                    'date' => $dateStr,
-                    'day_name' => $dayNames[$dd] ?? '',
-                    'day_name_full' => $dayNamesFull[$dd] ?? '',
-                ];
-            }
-        }
-        usort($weekDates, fn($a, $b) => strcmp($a['date'], $b['date']));
+        $weekDates = array_map(function ($item) use ($dayNames, $dayNamesFull) {
+            $dow = (int)$item['delivery_day'];
+            return [
+                'date' => $item['delivery_date'],
+                'day_name' => $dayNames[$dow] ?? '',
+                'day_name_full' => $dayNamesFull[$dow] ?? '',
+            ];
+        }, $weekDates);
 
         // Все позиции заявок для этой даты
         $itemsStmt = $pdo->prepare("
@@ -1800,16 +1857,35 @@ if ($soAction === 'admin') {
         ");
         $s->execute([$supplierId]);
         $schedules = $s->fetchAll();
+        $tempPeriod = soGetTempSchedulePeriod($pdo, $supplierId);
+        $temporarySchedule = null;
+        if ($tempPeriod) {
+            $tsi = $pdo->prepare("
+                SELECT ssi.id, ssi.order_day, ssi.delivery_day, ssi.is_active,
+                       r.number as restaurant_number, r.region, r.city, r.address
+                FROM so_supplier_temp_schedule_items ssi
+                JOIN restaurants r ON r.id = ssi.restaurant_id AND r.active = 1
+                WHERE ssi.period_id = ?
+                ORDER BY r.region, CAST(r.number AS UNSIGNED), ssi.order_day
+            ");
+            $tsi->execute([(int)$tempPeriod['id']]);
+            $temporarySchedule = [
+                'date_from' => $tempPeriod['date_from'],
+                'date_to' => $tempPeriod['date_to'],
+                'items' => $tsi->fetchAll(),
+            ];
+        }
         // Также подгружаем правила дедлайнов
         $dr = $pdo->prepare("SELECT delivery_dow, deadline_dow, deadline_time FROM so_deadline_rules WHERE supplier_id = ? ORDER BY delivery_dow");
         $dr->execute([$supplierId]);
-        soRespond(['schedules' => $schedules, 'deadline_rules' => $dr->fetchAll()]);
+        soRespond(['schedules' => $schedules, 'temporary_schedule' => $temporarySchedule, 'deadline_rules' => $dr->fetchAll()]);
     }
 
     // --- Сохранение графиков ---
     if ($adminAction === 'schedules' && $method === 'POST') {
         $supplierId = $body['supplier_id'] ?? '';
         $schedules = $body['schedules'] ?? [];
+        $temporarySchedule = $body['temporary_schedule'] ?? null;
 
         soRequireAdminSupplierAccess($pdo, $sessionUser, $supplierId);
 
@@ -1851,6 +1927,59 @@ if ($soAction === 'admin') {
             // чтобы таблица не распухала от soft-off мусора.
             $pdo->prepare("DELETE FROM so_supplier_schedules WHERE supplier_id = ? AND is_active = 0")
                 ->execute([$supplierId]);
+
+            $tempDateFrom = trim((string)($temporarySchedule['date_from'] ?? ''));
+            $tempDateTo = trim((string)($temporarySchedule['date_to'] ?? ''));
+            $tempItems = is_array($temporarySchedule['items'] ?? null) ? $temporarySchedule['items'] : [];
+            if (($tempDateFrom && !$tempDateTo) || (!$tempDateFrom && $tempDateTo)) {
+                throw new InvalidArgumentException('Для временного графика нужно указать обе даты периода');
+            }
+            if ($tempDateFrom && $tempDateTo && $tempDateFrom > $tempDateTo) {
+                throw new InvalidArgumentException('Дата окончания временного графика раньше даты начала');
+            }
+
+            if ($tempDateFrom && $tempDateTo && !empty($tempItems)) {
+                $tempUpsert = $pdo->prepare("
+                    INSERT INTO so_supplier_temp_schedule_periods (supplier_id, date_from, date_to, updated_at, updated_by)
+                    VALUES (?, ?, ?, NOW(), ?)
+                    ON DUPLICATE KEY UPDATE
+                        date_from = VALUES(date_from),
+                        date_to = VALUES(date_to),
+                        updated_at = NOW(),
+                        updated_by = VALUES(updated_by)
+                ");
+                $tempUpsert->execute([$supplierId, $tempDateFrom, $tempDateTo, $updatedBy]);
+
+                $tempPeriod = soGetTempSchedulePeriod($pdo, $supplierId);
+                $periodId = (int)($tempPeriod['id'] ?? 0);
+                if ($periodId <= 0) {
+                    throw new RuntimeException('Не удалось сохранить временный график');
+                }
+
+                $pdo->prepare("DELETE FROM so_supplier_temp_schedule_items WHERE period_id = ?")->execute([$periodId]);
+                $tempItemIns = $pdo->prepare("
+                    INSERT INTO so_supplier_temp_schedule_items (period_id, restaurant_id, order_day, delivery_day, is_active, updated_at, updated_by)
+                    VALUES (?, ?, ?, ?, ?, NOW(), ?)
+                ");
+                foreach ($tempItems as $sch) {
+                    $restId = $sch['restaurant_id'] ?? null;
+                    if (!$restId) continue;
+                    $tempItemIns->execute([
+                        $periodId,
+                        (int)$restId,
+                        (int)($sch['order_day'] ?? 1),
+                        (int)($sch['delivery_day'] ?? 2),
+                        (int)($sch['is_active'] ?? 1),
+                        $updatedBy,
+                    ]);
+                }
+            } else {
+                $existingTemp = soGetTempSchedulePeriod($pdo, $supplierId);
+                if ($existingTemp) {
+                    $pdo->prepare("DELETE FROM so_supplier_temp_schedule_periods WHERE id = ?")
+                        ->execute([(int)$existingTemp['id']]);
+                }
+            }
 
             $pdo->commit();
         } catch (Throwable $e) {
@@ -2083,24 +2212,21 @@ if ($soAction === 'admin') {
         if (!$subs) soRespond(['error' => 'Нет подписчиков для этого поставщика'], 400);
         if (!$botToken) soRespond(['error' => 'Telegram Bot Token не настроен'], 500);
 
-        // День недели даты доставки (1=Пн..7=Вс)
-        $deliveryDow = (int)(new DateTime($deliveryDate))->format('N');
-
         // Ожидаемые рестораны по графику на этот день
-        $expStmt = $pdo->prepare("
-            SELECT DISTINCT r.number, r.region, r.address, r.city
-            FROM so_supplier_schedules ss
-            JOIN restaurants r ON r.id = ss.restaurant_id AND r.active = 1
-            WHERE ss.supplier_id = ? AND ss.delivery_day = ? AND ss.is_active = 1
-              AND r.legal_entity_group = ?
-            ORDER BY r.region, CAST(r.number AS UNSIGNED)
-        ");
-        $expStmt->execute([$supplierId, $deliveryDow, $supplierGroup]);
-        $expectedRests = $expStmt->fetchAll();
+        $expectedRests = array_values(array_filter(
+            soGetEffectiveScheduleRows($pdo, $supplierId, $deliveryDate, null, true),
+            fn($row) => soDeliveryDateMatchesDow($deliveryDate, (int)$row['delivery_day'])
+                && (($row['legal_entity_group'] ?? '') === $supplierGroup)
+        ));
+        usort($expectedRests, function ($a, $b) {
+            $regionCmp = strcmp((string)($a['region'] ?? ''), (string)($b['region'] ?? ''));
+            if ($regionCmp !== 0) return $regionCmp;
+            return (int)($a['restaurant_number'] ?? 0) <=> (int)($b['restaurant_number'] ?? 0);
+        });
 
         if (!$expectedRests) soRespond(['error' => 'Нет ресторанов в графике на этот день'], 400);
 
-        $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'number'))));
+        $expectedNums = array_values(array_unique(array_map('strval', array_column($expectedRests, 'restaurant_number'))));
         $expectedPh = implode(',', array_fill(0, count($expectedNums), '?'));
 
         // Кто подал заявку (по статусу, не зависимо от количеств)

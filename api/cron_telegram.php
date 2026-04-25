@@ -726,7 +726,7 @@ try {
         $filledSet = array_flip($filled->fetchAll(PDO::FETCH_COLUMN));
 
         // Все подписанные рестораны (с учётом настроек уведомлений)
-        $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number, notify_stock_reminders FROM veg_telegram_subs")->fetchAll();
+        $subs = $pdo->query("SELECT DISTINCT chat_id, restaurant_number, notify_stock_reminders FROM ro_telegram_subs")->fetchAll();
         foreach ($subs as $sub) {
             if (isset($filledSet[$sub['restaurant_number']])) continue;
             if (!$sub['notify_stock_reminders']) continue;
@@ -818,23 +818,26 @@ try {
         $tomorrowDow = (int)(new DateTime($tomorrow))->format('N');
         $sessGroup = $roSess['legal_entity_group'] ?: 'BK_VM';
 
+        // Источник чатов — ro_telegram_subs (несколько сотрудников на ресторан).
         $s = $pdo->prepare("
-            SELECT ru.restaurant_number, ru.legal_entity_group, ru.telegram_chat_id
-            FROM ro_users ru
-            WHERE ru.is_active = 1 AND ru.telegram_chat_id IS NOT NULL
-            AND ru.legal_entity_group = ?
-            AND EXISTS (
-                SELECT 1 FROM restaurants r
-                JOIN delivery_schedule ds ON ds.restaurant_id = r.id
-                WHERE r.number = ru.restaurant_number
-                  AND r.legal_entity_group = ru.legal_entity_group COLLATE utf8mb4_general_ci
-                  AND r.active = 1
-                  AND ds.day_of_week = ?
-            )
-            AND ru.restaurant_number NOT IN (
-                SELECT o.restaurant_number FROM ro_orders o
-                WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
-            )
+            SELECT rs.restaurant_number, rs.legal_entity_group, rs.chat_id AS telegram_chat_id
+            FROM ro_telegram_subs rs
+            WHERE rs.chat_id IS NOT NULL
+              AND rs.legal_entity_group = ?
+              AND (rs.verified_at IS NOT NULL
+                   OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
+              AND EXISTS (
+                  SELECT 1 FROM restaurants r
+                  JOIN delivery_schedule ds ON ds.restaurant_id = r.id
+                  WHERE r.number = rs.restaurant_number
+                    AND r.legal_entity_group = rs.legal_entity_group COLLATE utf8mb4_general_ci
+                    AND r.active = 1
+                    AND ds.day_of_week = ?
+              )
+              AND rs.restaurant_number NOT IN (
+                  SELECT o.restaurant_number FROM ro_orders o
+                  WHERE o.session_id = ? AND o.delivery_date = ? AND o.status != 'draft'
+              )
         ");
         $s->execute([$sessGroup, $tomorrowDow, $roSess['id'], $tomorrow]);
         $missing = $s->fetchAll();
@@ -909,7 +912,7 @@ try {
             FROM ro_telegram_subs
             WHERE restaurant_number = ?
               AND legal_entity_group = ?
-              AND notify_so_reminders = 1
+              AND notify_so_reminders = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
         ");
         foreach ($schRows as $s) {
             $rn = $s['restaurant_number'];
@@ -1235,7 +1238,7 @@ try {
                 FROM ro_telegram_subs
                 WHERE restaurant_number = ?
                   AND legal_entity_group = ?
-                  AND notify_so_reminders = 1
+                  AND notify_so_reminders = 1 AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
             ");
             $subStmt->execute([$rn, $c['group']]);
             $subChats = $subStmt->fetchAll(PDO::FETCH_COLUMN);
@@ -1589,18 +1592,19 @@ try {
         $chatIds = [];
 
         $roPendingChats = $pdo->prepare("
-            SELECT DISTINCT CAST(ru.telegram_chat_id AS CHAR) AS chat_id
-            FROM ro_users ru
+            SELECT DISTINCT CAST(rs.chat_id AS CHAR) AS chat_id
+            FROM ro_telegram_subs rs
             JOIN restaurants r
-              ON r.number = ru.restaurant_number
+              ON r.number = rs.restaurant_number
              AND r.active = 1
-             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = ru.legal_entity_group COLLATE utf8mb4_unicode_ci
+             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = rs.legal_entity_group COLLATE utf8mb4_unicode_ci
             LEFT JOIN survey_responses sr
               ON sr.survey_id = ?
-             AND sr.restaurant_number = ru.restaurant_number
-            WHERE ru.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
-              AND ru.is_active = 1
-              AND ru.telegram_chat_id IS NOT NULL
+             AND sr.restaurant_number = rs.restaurant_number
+            WHERE rs.legal_entity_group COLLATE utf8mb4_unicode_ci = CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              AND rs.chat_id IS NOT NULL
+              AND (rs.verified_at IS NOT NULL
+                   OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))
               AND sr.id IS NULL
         ");
         $roPendingChats->execute([$surveyId, $surveyGroup]);
