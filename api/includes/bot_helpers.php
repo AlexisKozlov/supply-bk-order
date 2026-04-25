@@ -148,7 +148,7 @@ function handleFreeText($chatId, $text, $user) {
 
     // Без ключа — подсказка по командам
     if (!$GEMINI_API_KEY && !$GROQ_API_KEY && !$DEEPSEEK_API_KEY && !$OPENROUTER_API_KEY) {
-        sendMessage($chatId, "Доступные команды:\n/orders — заказы за 7 дней\n/stock — низкие остатки\n/consumption — топ расхода\n/prices — изменения цен\n/psc — протоколы\n/settings — настройки уведомлений");
+        sendMessage($chatId, "Доступные команды:\n/menu — главное меню\n/restaurant — меню ресторана\n/cards — поиск карточек\n/today — сводка на сегодня\n/orders — заказы за 7 дней\n/deliveries — ближайшие поставки\n/plans — планирование\n/stock — критичные остатки\n/analysis — анализ запасов\n/consumption — топ расхода\n/prices — изменения цен\n/psc — протоколы\n/schedule — график доставок\n/sales — реализация ресторанов\n/export — выгрузки CSV\n/settings — настройки уведомлений");
         return;
     }
 

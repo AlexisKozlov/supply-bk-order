@@ -1493,21 +1493,15 @@ if ($roAction === 'telegram-unlink' && $method === 'POST') {
 if ($roAction === 'telegram-status' && $method === 'GET') {
     $rest = roGetRestaurantSession($pdo);
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
-    // Подписка считается своей, если она привязана через код именно этого ro_user.
-    $s = $pdo->prepare("
-        SELECT chat_id, first_name, username, verified_at
-        FROM ro_telegram_subs
-        WHERE verified_ro_user_id = ? AND verified_at IS NOT NULL
-        LIMIT 1
-    ");
-    $s->execute([$rest['id']]);
-    $row = $s->fetch();
+    // У ресторанов общий аккаунт, отдельных логинов сотрудников нет.
+    // Поэтому кабинет не может честно определить "мой Telegram":
+    // каждый сотрудник должен иметь возможность получить новый код привязки.
     roRespond([
-        'linked' => (bool)$row,
-        'chat_id' => $row['chat_id'] ?? null,
-        'first_name' => $row['first_name'] ?? null,
-        'username' => $row['username'] ?? null,
-        'linked_at' => $row['verified_at'] ?? null,
+        'linked' => false,
+        'chat_id' => null,
+        'first_name' => null,
+        'username' => null,
+        'linked_at' => null,
     ]);
 }
 
@@ -1534,7 +1528,7 @@ if ($roAction === 'telegram-links' && $method === 'GET') {
             'verified' => !empty($r['verified_at']),
             'verified_at' => $r['verified_at'],
             'must_reverify_by' => $r['must_reverify_by'],
-            'is_self' => ((int)($r['verified_ro_user_id'] ?? 0)) === (int)$rest['id'],
+            'is_self' => false,
         ];
     }
     roRespond(['links' => $links]);

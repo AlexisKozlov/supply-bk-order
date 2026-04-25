@@ -19,7 +19,7 @@
         ⚙️ Уведомления
       </button>
       <button class="adm-tab" :class="{ active: tab === 'restaurants' }" @click="tab = 'restaurants'">
-        🏪 Рестораны <span class="adm-tab-count" :class="{ active: tab === 'restaurants' }">{{ restaurantSubCount }}</span>
+        🏪 Рестораны <span class="adm-tab-count" :class="{ active: tab === 'restaurants' }">{{ restaurantActiveSubCount }}</span>
       </button>
       <button class="adm-tab" :class="{ active: tab === 'questions' }" @click="tab = 'questions'; loadQuestions()">
         💬 Вопросы AI
@@ -292,16 +292,20 @@
     <div v-else-if="tab === 'restaurants'" class="adm-section">
       <div class="tga-stats-row">
         <div class="tga-stat-card">
-          <div class="tga-stat-val">{{ restaurantSubCount }}</div>
-          <div class="tga-stat-label">Подписчиков</div>
+          <div class="tga-stat-val">{{ restaurantActiveSubCount }}</div>
+          <div class="tga-stat-label">Активных привязок</div>
         </div>
         <div class="tga-stat-card">
-          <div class="tga-stat-val">{{ subscribedRests.length }}</div>
-          <div class="tga-stat-label">Ресторанов с подпиской</div>
+          <div class="tga-stat-val">{{ restaurantTemporarySubCount }}</div>
+          <div class="tga-stat-label">Ждут перепривязки</div>
         </div>
         <div class="tga-stat-card">
-          <div class="tga-stat-val">{{ unsubscribedRests.length }}</div>
-          <div class="tga-stat-label">Без подписки</div>
+          <div class="tga-stat-val">{{ restaurantExpiredSubCount }}</div>
+          <div class="tga-stat-label">Истёк срок</div>
+        </div>
+        <div class="tga-stat-card">
+          <div class="tga-stat-val">{{ inactiveRests.length }}</div>
+          <div class="tga-stat-label">Без активной привязки</div>
         </div>
       </div>
 
@@ -316,8 +320,10 @@
         <div class="tga-filter-row">
           <select v-model="restaurantFilter" class="tga-select">
             <option value="all">Все</option>
-            <option value="subscribed">С подпиской</option>
-            <option value="unsubscribed">Без подписки</option>
+            <option value="active">Есть активная</option>
+            <option value="temporary">Ждут перепривязки</option>
+            <option value="expired">Срок истёк</option>
+            <option value="unsubscribed">Без активной</option>
           </select>
           <input v-model="restaurantSearch" class="tga-input" placeholder="Поиск по номеру или адресу..."/>
         </div>
@@ -329,22 +335,28 @@
                 <th style="width:80px">Ресторан</th>
                 <th>Адрес</th>
                 <th>Город</th>
+                <th>Статус</th>
                 <th>Подписчики</th>
                 <th>Дата подписки</th>
                 <th style="width:50px"></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in filteredVegRests" :key="r.number" :class="{ 'tga-row-muted': !r.subCount }">
+              <tr v-for="r in filteredVegRests" :key="r.key" :class="{ 'tga-row-muted': !r.activeSubCount }">
                 <td><b>{{ formatRestaurantNumber(r.number, r.legal_entity_group) }}</b></td>
                 <td>{{ r.address || '—' }}</td>
                 <td>{{ r.city || '—' }}</td>
-                <td :class="r.subCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
+                <td>
+                  <span class="tga-status-pill" :class="'tga-status-' + r.status">{{ restaurantStatusLabel(r) }}</span>
+                </td>
+                <td :class="r.activeSubCount ? 'tga-cell-ok' : 'tga-cell-warn'" style="text-align:center;">
                   <template v-if="r.subscribers.length">
-                    <span class="tga-sub-count-link" @click="toggleSubsList(r.number)">{{ r.subCount }}</span>
-                    <div v-if="expandedRest === r.number" class="tga-sub-list">
+                    <span class="tga-sub-count-link" @click="toggleSubsList(r.key)">{{ r.activeSubCount }} / {{ r.subCount }}</span>
+                    <div v-if="expandedRest === r.key" class="tga-sub-list">
                       <div v-for="(sub, si) in r.subscribers" :key="si" class="tga-sub-person">
+                        <span class="tga-sub-status-dot" :class="'tga-sub-status-' + sub.verify_status"></span>
                         {{ sub.first_name || 'Без имени' }}<span v-if="sub.username" class="tga-sub-username"> @{{ sub.username }}</span>
+                        <div class="tga-sub-text">{{ subStatusLabel(sub) }}</div>
                       </div>
                     </div>
                   </template>
@@ -352,7 +364,7 @@
                 </td>
                 <td>{{ r.firstSub ? formatDate(r.firstSub) : '—' }}</td>
                 <td>
-                  <button v-if="r.subCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание">📨</button>
+                  <button v-if="r.activeSubCount" class="tga-btn-sm" @click="sendVegReminder(r)" title="Отправить напоминание">📨</button>
                 </td>
               </tr>
             </tbody>
@@ -692,43 +704,78 @@ onMounted(() => { loadData(); loadBotInfo() })
 
 // ═══ Computed ═══
 
-const restaurantSubCount = computed(() => restaurantSubs.value.length)
+function restKey(number, group = 'BK_VM') {
+  return `${group || 'BK_VM'}:${number}`
+}
+
+function isActiveRestaurantSub(sub) {
+  return sub.verify_status === 'verified' || sub.verify_status === 'temporary'
+}
+
+const restaurantActiveSubCount = computed(() => restaurantSubs.value.filter(isActiveRestaurantSub).length)
+const restaurantTemporarySubCount = computed(() => restaurantSubs.value.filter(s => s.verify_status === 'temporary').length)
+const restaurantExpiredSubCount = computed(() => restaurantSubs.value.filter(s => s.verify_status === 'expired' || s.verify_status === 'unverified').length)
 
 const restaurantSubMap = computed(() => {
   const map = {}
   for (const s of restaurantSubs.value) {
-    if (!map[s.restaurant_number]) {
-      map[s.restaurant_number] = { count: 0, firstSub: s.created_at, subscribers: [] }
+    const key = restKey(s.restaurant_number, s.legal_entity_group)
+    if (!map[key]) {
+      map[key] = { count: 0, activeCount: 0, temporaryCount: 0, expiredCount: 0, firstSub: s.created_at, subscribers: [] }
     }
-    map[s.restaurant_number].count++
-    map[s.restaurant_number].subscribers.push({
+    map[key].count++
+    if (isActiveRestaurantSub(s)) map[key].activeCount++
+    if (s.verify_status === 'temporary') map[key].temporaryCount++
+    if (s.verify_status === 'expired' || s.verify_status === 'unverified') map[key].expiredCount++
+    map[key].subscribers.push({
       first_name: s.first_name,
       username: s.username,
-      chat_id: s.chat_id
+      chat_id: s.chat_id,
+      verify_status: s.verify_status,
+      verified_at: s.verified_at,
+      must_reverify_by: s.must_reverify_by,
+      created_at: s.created_at,
     })
-    if (s.created_at < map[s.restaurant_number].firstSub) {
-      map[s.restaurant_number].firstSub = s.created_at
+    if (s.created_at < map[key].firstSub) {
+      map[key].firstSub = s.created_at
     }
   }
   return map
 })
 
-const subscribedRests = computed(() => allRestaurants.value.filter(r => restaurantSubMap.value[r.number]))
-const unsubscribedRests = computed(() => allRestaurants.value.filter(r => !restaurantSubMap.value[r.number]))
+const inactiveRests = computed(() => allRestaurants.value.filter(r => !(restaurantSubMap.value[restKey(r.number, r.legal_entity_group)]?.activeCount || 0)))
 
 const filteredVegRests = computed(() => {
-  let list = allRestaurants.value.map(r => ({
-    number: r.number,
-    address: r.address,
-    city: r.city,
-    region: r.region,
-    subCount: restaurantSubMap.value[r.number]?.count || 0,
-    subscribers: restaurantSubMap.value[r.number]?.subscribers || [],
-    firstSub: restaurantSubMap.value[r.number]?.firstSub || null,
-  }))
+  let list = allRestaurants.value.map(r => {
+    const key = restKey(r.number, r.legal_entity_group)
+    const subInfo = restaurantSubMap.value[key]
+    const activeSubCount = subInfo?.activeCount || 0
+    const temporarySubCount = subInfo?.temporaryCount || 0
+    const expiredSubCount = subInfo?.expiredCount || 0
+    let status = 'none'
+    if (activeSubCount > 0) status = temporarySubCount > 0 ? 'temporary' : 'active'
+    else if (expiredSubCount > 0) status = 'expired'
+    return {
+      key,
+      number: r.number,
+      legal_entity_group: r.legal_entity_group,
+      address: r.address,
+      city: r.city,
+      region: r.region,
+      status,
+      subCount: subInfo?.count || 0,
+      activeSubCount,
+      temporarySubCount,
+      expiredSubCount,
+      subscribers: subInfo?.subscribers || [],
+      firstSub: subInfo?.firstSub || null,
+    }
+  })
 
-  if (restaurantFilter.value === 'subscribed') list = list.filter(r => r.subCount > 0)
-  if (restaurantFilter.value === 'unsubscribed') list = list.filter(r => !r.subCount)
+  if (restaurantFilter.value === 'active') list = list.filter(r => r.activeSubCount > 0)
+  if (restaurantFilter.value === 'temporary') list = list.filter(r => r.temporarySubCount > 0)
+  if (restaurantFilter.value === 'expired') list = list.filter(r => r.expiredSubCount > 0 && r.activeSubCount === 0)
+  if (restaurantFilter.value === 'unsubscribed') list = list.filter(r => !r.activeSubCount)
 
   const q = restaurantSearch.value.toLowerCase().trim()
   if (q) {
@@ -743,7 +790,7 @@ const filteredVegRests = computed(() => {
 })
 
 const restaurantUniqueChatIds = computed(() => {
-  return [...new Set(restaurantSubs.value.map(s => s.chat_id))]
+  return [...new Set(restaurantSubs.value.filter(isActiveRestaurantSub).map(s => s.chat_id))]
 })
 
 const filteredReminderLog = computed(() => {
@@ -769,7 +816,7 @@ const filteredReminderLog = computed(() => {
 
 const restaurantUniqueSubscribers = computed(() => {
   const map = {}
-  for (const s of restaurantSubs.value) {
+  for (const s of restaurantSubs.value.filter(isActiveRestaurantSub)) {
     if (!map[s.chat_id]) {
       map[s.chat_id] = {
         chat_id: s.chat_id,
@@ -783,7 +830,7 @@ const restaurantUniqueSubscribers = computed(() => {
         notify_stock_sessions: s.notify_stock_sessions,
       }
     }
-    map[s.chat_id].restaurants.push(formatRestaurantNumber(s.restaurant_number))
+    map[s.chat_id].restaurants.push(formatRestaurantNumber(s.restaurant_number, s.legal_entity_group))
   }
   return Object.values(map)
 })
@@ -791,7 +838,7 @@ const restaurantUniqueSubscribers = computed(() => {
 const allUniqueChatIds = computed(() => {
   const ids = new Set()
   linkedUsers.value.forEach(u => { if (u.telegram_chat_id) ids.add(String(u.telegram_chat_id)) })
-  restaurantSubs.value.forEach(s => ids.add(String(s.chat_id)))
+  restaurantSubs.value.filter(isActiveRestaurantSub).forEach(s => ids.add(String(s.chat_id)))
   return [...ids]
 })
 
@@ -816,6 +863,20 @@ function formatDateShort(d) {
   if (!d) return ''
   const dt = new Date(d)
   return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+}
+
+function subStatusLabel(sub) {
+  if (sub.verify_status === 'verified') return `Привязан ${formatDate(sub.verified_at)}`
+  if (sub.verify_status === 'temporary') return `Работает временно до ${formatDate(sub.must_reverify_by)}`
+  if (sub.verify_status === 'expired') return `Срок перепривязки истёк ${formatDate(sub.must_reverify_by)}`
+  return 'Не подтверждён'
+}
+
+function restaurantStatusLabel(rest) {
+  if (rest.status === 'active') return `Активно: ${rest.activeSubCount}`
+  if (rest.status === 'temporary') return `Активно: ${rest.activeSubCount}, ждут: ${rest.temporarySubCount}`
+  if (rest.status === 'expired') return 'Срок истёк'
+  return 'Нет активной'
 }
 
 function reminderLabel(type) {
@@ -987,6 +1048,16 @@ async function sendBroadcast() {
 .tga-cell-toggle { cursor: pointer; user-select: none; transition: background .15s; }
 .tga-cell-toggle:hover { background: rgba(139,115,85,.08); }
 
+.tga-status-pill {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 96px; padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.tga-status-active { background: #e8f5e9; color: #2e7d32; }
+.tga-status-temporary { background: #fff3e0; color: #e65100; }
+.tga-status-expired { background: #ffebee; color: #c62828; }
+.tga-status-none { background: #f5f5f5; color: #777; }
+
 /* ═══ Подписчики (раскрывающийся список) ═══ */
 .tga-sub-count-link {
   cursor: pointer; font-weight: 600; text-decoration: underline;
@@ -998,8 +1069,15 @@ async function sendBroadcast() {
   background: var(--bg, #fafafa); border-radius: 6px;
   padding: 6px 8px; border: 1px solid var(--border-light, #f0f0f0);
 }
-.tga-sub-person { padding: 2px 0; color: var(--text, #333); font-weight: 400; }
+.tga-sub-person { position: relative; padding: 3px 0 3px 14px; color: var(--text, #333); font-weight: 400; }
 .tga-sub-username { color: #2AABEE; font-size: 11px; }
+.tga-sub-status-dot {
+  position: absolute; left: 0; top: 8px; width: 7px; height: 7px;
+  border-radius: 50%; background: #bbb;
+}
+.tga-sub-status-verified { background: #2e7d32; }
+.tga-sub-status-temporary { background: #e65100; }
+.tga-sub-status-expired, .tga-sub-status-unverified { background: #c62828; }
 
 .tga-empty {
   padding: 48px; text-align: center; color: var(--text-muted, #999);

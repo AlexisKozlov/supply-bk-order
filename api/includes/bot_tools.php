@@ -29,7 +29,7 @@ DLT — срок доставки. DOC — срок документооборо
 - Цены: всегда «без НДС» и «с НДС», указывай ставку
 - Не повторяй вопрос. Ответ сразу по существу
 - Если вопрос неоднозначный — уточни
-- Если тема лучше раскрыта командой — предложи: /orders, /stock, /analysis, /consumption, /prices, /psc, /deliveries, /plans, /schedule, /sales, /cards, /entity
+- Если тема лучше раскрыта командой — предложи одну подходящую команду: /menu, /restaurant, /cards, /today, /orders, /deliveries, /plans, /stock, /analysis, /consumption, /prices, /psc, /schedule, /sales, /export, /settings
 PROMPT;
 }
 

@@ -284,6 +284,27 @@ function botRestaurantLinkInstructions() {
          . "<i>Код действует 10 минут. Каждый сотрудник получает свой код.</i>";
 }
 
+function botCommandsHelpText() {
+    return "📋 <b>Команды бота</b>\n\n"
+         . "/start — начать и выбрать роль\n"
+         . "/menu — главное меню\n"
+         . "/restaurant — меню ресторана\n"
+         . "/cards — поиск карточек товаров\n"
+         . "/today — сводка на сегодня\n"
+         . "/orders — заказы за 7 дней\n"
+         . "/deliveries — ближайшие поставки\n"
+         . "/plans — планирование\n"
+         . "/stock — критичные остатки\n"
+         . "/analysis — анализ запасов\n"
+         . "/consumption — топ расхода\n"
+         . "/prices — изменения цен\n"
+         . "/psc — протоколы согласования цен\n"
+         . "/schedule — график доставок\n"
+         . "/sales — реализация ресторанов\n"
+         . "/export — выгрузки CSV\n"
+         . "/settings — настройки уведомлений";
+}
+
 // ═══ Команды с данными ═══
 
 // Универсальная отправка: editMessage если есть $editMsgId, иначе sendMessage
@@ -2539,7 +2560,12 @@ if ($text === '/help' || $text === '/menu') {
     @unlink(sys_get_temp_dir() . "/cards_mode_{$chatId}.txt");
     @unlink(sys_get_temp_dir() . "/restord_{$chatId}.txt"); // сброс режима ввода заявки
     @unlink(sys_get_temp_dir() . "/soord_{$chatId}.txt"); // сброс режима ввода заявки поставщику
-    $tips = "\n\n💡 <i>Примеры вопросов:</i>\n• Какой остаток молока?\n• Товары с запасом на 3 дня\n• Что скоро просрочится?\n• Когда доставка в ресторан 45?";
+    $tips = "\n\n" . botCommandsHelpText()
+          . "\n\n💡 <i>Можно также спросить текстом:</i>\n"
+          . "• Какой остаток молока?\n"
+          . "• Товары с запасом на 3 дня\n"
+          . "• Что скоро просрочится?\n"
+          . "• Когда доставка в ресторан 45?";
     sendMessage($chatId, getMenuText($user) . $tips, ['inline_keyboard' => getMenuButtons($user)]);
     exit;
 }
@@ -2560,11 +2586,45 @@ if ($text === '/export') {
     exit;
 }
 
+// /restaurant — меню ресторана
+if ($text === '/restaurant') {
+    if (botCountActiveSubs($chatId) === 0) {
+        sendMessage($chatId, botRestaurantLinkInstructions());
+    } else {
+        restShowMySubs($chatId, null);
+    }
+    exit;
+}
+
 // /analysis — полный анализ запасов
 if ($text === '/analysis') {
     $user = getUser($chatId);
     if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
     cmdAnalysis($chatId, $user);
+    exit;
+}
+
+// /deliveries — ближайшие поставки
+if ($text === '/deliveries') {
+    $user = getUser($chatId);
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    cmdDeliveries($chatId, $user);
+    exit;
+}
+
+// /plans — планирование
+if ($text === '/plans') {
+    $user = getUser($chatId);
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    cmdPlans($chatId, $user);
+    exit;
+}
+
+// /schedule — график доставок
+if ($text === '/schedule') {
+    $user = getUser($chatId);
+    if (!$user) { sendMessage($chatId, "🔒 Нажмите /start чтобы привязать Telegram к аккаунту."); exit; }
+    cmdSchedule($chatId, $user);
     exit;
 }
 

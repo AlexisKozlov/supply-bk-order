@@ -4162,18 +4162,29 @@ if ($endpoint === 'rpc') {
         // Все пользователи без Telegram
         $unlinked = $pdo->query("SELECT name, email, role, display_role FROM users WHERE telegram_chat_id IS NULL ORDER BY name")->fetchAll();
 
-        // Подписки ресторанов (с настройками уведомлений)
-        $restaurantSubs = $pdo->query("SELECT vs.chat_id, vs.restaurant_number, vs.created_at,
-            vs.first_name, vs.username,
+        // Подписки ресторанов (с настройками уведомлений и статусом безопасности)
+        $restaurantSubs = $pdo->query("SELECT vs.chat_id, vs.restaurant_number, vs.legal_entity_group, vs.created_at,
+            vs.first_name, vs.username, vs.verified_at, vs.verified_via, vs.must_reverify_by,
+            CASE
+                WHEN vs.verified_at IS NOT NULL THEN 'verified'
+                WHEN vs.must_reverify_by IS NOT NULL AND vs.must_reverify_by > NOW() THEN 'temporary'
+                WHEN vs.must_reverify_by IS NOT NULL AND vs.must_reverify_by <= NOW() THEN 'expired'
+                ELSE 'unverified'
+            END AS verify_status,
             vs.notify_so_reminders, vs.notify_so_sessions, vs.notify_confirmations,
             vs.notify_stock_reminders, vs.notify_stock_sessions,
             r.address, r.city, r.region
             FROM ro_telegram_subs vs
-            LEFT JOIN restaurants r ON r.number = vs.restaurant_number AND r.legal_entity_group = 'BK_VM'
-            ORDER BY CAST(vs.restaurant_number AS UNSIGNED)")->fetchAll();
+            LEFT JOIN restaurants r
+              ON r.number = vs.restaurant_number
+             AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = vs.legal_entity_group COLLATE utf8mb4_unicode_ci
+            ORDER BY vs.legal_entity_group, CAST(vs.restaurant_number AS UNSIGNED), vs.created_at")->fetchAll();
 
         // Все рестораны для сравнения
-        $allRests = $pdo->query("SELECT number, address, city, region FROM restaurants WHERE active=1 AND legal_entity_group='BK_VM' ORDER BY CAST(number AS UNSIGNED)")->fetchAll();
+        $allRests = $pdo->query("SELECT number, legal_entity_group, address, city, region
+            FROM restaurants
+            WHERE active=1 AND legal_entity_group IN ('BK_VM', 'PS')
+            ORDER BY legal_entity_group, CAST(number AS UNSIGNED)")->fetchAll();
 
         // Лог напоминаний (последние 100)
         $reminders = $pdo->query("SELECT vrl.session_id, vrl.restaurant_number, vrl.delivery_date, vrl.reminder_type, vrl.sent_at,
