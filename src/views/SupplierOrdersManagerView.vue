@@ -1426,14 +1426,32 @@ function fmtDateDDMM(dateStr) {
 
 async function sendSummary() {
   if (!currentSupplierId.value || !selectedDate.value) return;
-  const date = selectedDate.value;
-  const fmt = new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const ok = await showConfirm('Отправить сводку?', `Сводка по заявкам на ${fmt} будет отправлена подписчикам в Telegram.`);
+  const datesToSend = exportSelectedDates.value.size > 0
+    ? [...exportSelectedDates.value].sort()
+    : [selectedDate.value];
+  const fmt = datesToSend
+    .map(date => new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }))
+    .join(', ');
+  const ok = await showConfirm(
+    'Отправить сводку?',
+    datesToSend.length > 1
+      ? `Сводки по датам ${fmt} будут отправлены подписчикам в Telegram отдельными сообщениями.`
+      : `Сводка по заявкам на ${fmt} будет отправлена подписчикам в Telegram.`
+  );
   if (!ok) return;
   sendingSummary.value = true;
   try {
-    const res = await store.adminSendSummary(currentSupplierId.value, date);
-    toast.success('Сводка отправлена', `${res.sent} из ${res.total_subs} подписчиков`);
+    let sent = 0;
+    let total = 0;
+    for (const date of datesToSend) {
+      const res = await store.adminSendSummary(currentSupplierId.value, date);
+      sent += Number(res.sent || 0);
+      total += Number(res.total_subs || 0);
+    }
+    toast.success(
+      datesToSend.length > 1 ? 'Сводки отправлены' : 'Сводка отправлена',
+      `${sent} из ${total} отправок`
+    );
   } catch (e) {
     toast.error('Ошибка отправки', e.message || String(e));
   } finally {

@@ -33,6 +33,7 @@
         <div class="imp-stat"><b>{{ cttResult.stats.converted }}</b><span>попало в JSON</span></div>
         <div class="imp-stat"><b>{{ cttResult.stats.unmatched }}</b><span>не распознано</span></div>
         <div class="imp-stat"><b>{{ cttResult.stats.missing_price }}</b><span>без цены</span></div>
+        <div class="imp-stat"><b>{{ cttResult.stats.missing_weight }}</b><span>без веса</span></div>
       </div>
 
       <div v-if="cttResult.items.length" class="imp-preview-wrap">
@@ -124,7 +125,7 @@ const imports = computed(() => [
   },
   {
     key: 'ctt-preorder', icon: '🧾', title: 'XLSX → JSON для СТТ',
-    desc: `Преобразование предзаказа в data-*.json (${orderStore.settings.legalEntity || 'выберите юрлицо'})`,
+    desc: `ТТН по GTIN: цена и количество из файла, брутто из справочника × количество (${orderStore.settings.legalEntity || 'выберите юрлицо'})`,
     action: () => pickFile('ctt-preorder'),
   },
 ])
@@ -255,6 +256,9 @@ async function uploadFile(type, file) {
       }
       if (result.stats.missing_price) {
         toast.warning('Часть строк без цены', `Без цены: ${result.stats.missing_price}`)
+      }
+      if (result.stats.missing_weight) {
+        toast.warning('Часть строк без веса', `Проверьте weight_brutto в справочнике: ${result.stats.missing_weight}`)
       }
     }
 

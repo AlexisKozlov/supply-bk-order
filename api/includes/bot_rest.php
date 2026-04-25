@@ -73,6 +73,45 @@ function botFormatSubscribedRestaurant($restaurantNumber, $group) {
     return formatRestaurantNumber($restaurantNumber) . ' (' . botGetRestaurantGroupShort($group) . ')';
 }
 
+function botNormalizeRestaurantOrdersLegalEntity($legalEntity, $group = null) {
+    $legalEntity = trim((string)$legalEntity);
+    if ($legalEntity !== '') return $legalEntity;
+    return $group === 'PS' ? 'ООО "Пицца Стар"' : 'ООО "Бургер БК"';
+}
+
+function botRestaurantOrdersEnabled($pdo, $legalEntity = null, $group = null) {
+    $legalEntity = botNormalizeRestaurantOrdersLegalEntity($legalEntity, $group);
+    try {
+        $s = $pdo->prepare("SELECT restaurant_orders_enabled FROM ro_module_settings WHERE legal_entity = ? LIMIT 1");
+        $s->execute([$legalEntity]);
+        $row = $s->fetch();
+        if ($row) return (int)$row['restaurant_orders_enabled'] === 1;
+    } catch (Throwable $e) {
+        // Если таблицы настроек ещё нет, оставляем старое поведение.
+    }
+    return true;
+}
+
+function botRestaurantOrdersEnabledForSub($pdo, $sub) {
+    $group = $sub['legal_entity_group'] ?? 'BK_VM';
+    $legalEntity = null;
+    if ($group === 'PS') {
+        $legalEntity = 'ООО "Пицца Стар"';
+    } else {
+        $s = $pdo->prepare("SELECT legal_entity FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1 LIMIT 1");
+        $s->execute([(int)$sub['restaurant_number'], $group]);
+        $legalEntity = $s->fetchColumn() ?: 'ООО "Бургер БК"';
+    }
+    return botRestaurantOrdersEnabled($pdo, $legalEntity, $group);
+}
+
+function botAnyRestaurantOrdersEnabled($pdo, $subs) {
+    foreach ($subs as $sub) {
+        if (botRestaurantOrdersEnabledForSub($pdo, $sub)) return true;
+    }
+    return false;
+}
+
 function botGetSubscribedRestaurants($pdo, $chatId) {
     // Подписка считается «активной» если она подтверждена (verified_at) либо
     // ещё в переходном периоде (must_reverify_by > NOW()). Непривязанные старые
@@ -401,14 +440,10 @@ function restShowMySubs($chatId, $msgId = null) {
     $btns = [];
 
     if ($subs) {
-        $restList = implode(', ', array_map(
-            fn($sub) => botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']),
-            $subs
-        ));
-
         // Статистика для приветствия
         $activeSc = $pdo->query("SELECT id, name FROM stock_collections WHERE status = 'active' LIMIT 1")->fetch();
         $orderFile = $pdo->query("SELECT file_name, uploaded_at FROM order_file ORDER BY id DESC LIMIT 1")->fetch();
+        $mainOrdersEnabled = botAnyRestaurantOrdersEnabled($pdo, $subs);
 
         // Считаем непрочитанные корректировки
         $pendingCorr = 0;
@@ -418,29 +453,40 @@ function restShowMySubs($chatId, $msgId = null) {
             $pendingCorr += intval($pc->fetchColumn());
         }
 
-        $text = "🍔 <b>Supply Department</b>\n";
-        $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-        $text .= "🏪 Рестораны: <b>{$restList}</b>\n";
-
-        if ($pendingCorr > 0) {
-            $text .= "📬 Новых ответов на корректировки: <b>{$pendingCorr}</b>\n";
+        $text = "🏪 <b>Меню ресторана</b>\n";
+        $text .= "━━━━━━━━━━━━━━━━━━━━\n";
+        foreach ($subs as $sub) {
+            $label = botFormatSubscribedRestaurant($sub['restaurant_number'], $sub['legal_entity_group']);
+            $addr = trim((string)($sub['address'] ?: $sub['city'] ?: ''));
+            $addr = $addr !== '' ? mb_substr($addr, 0, 42) : 'адрес не указан';
+            $text .= "• <b>{$label}</b> — {$addr}\n";
         }
         $text .= "\n";
 
-        // ── Разделы ──
-        $text .= "🏠 <b>Кабинет</b> — заказы, заявки, профиль\n";
-        $text .= "📦 <b>Поставки</b> — график, корректировки\n";
-        $text .= "🛒 <b>Заявки поставщикам</b> — Планета Ресторанов и другие\n";
-        if ($activeSc) $text .= "📋 <b>Сбор остатков</b> — {$activeSc['name']}\n";
+        $text .= "<b>Доступно сейчас</b>\n";
+        $text .= "🏠 Кабинет: профиль и быстрый вход\n";
+        $text .= "📦 Поставки: график, остатки, корректировки";
+        if ($pendingCorr > 0) {
+            $text .= " <b>({$pendingCorr} ответа)</b>";
+        }
+        $text .= "\n";
+        $text .= "🛒 Заявки поставщикам: Планета и другие\n";
+        if ($mainOrdersEnabled) {
+            $text .= "✅ Основная поставка: заявки открыты\n";
+        }
+        if ($activeSc) $text .= "📋 Сбор остатков: {$activeSc['name']}\n";
 
         $btns[] = [
-            ['text' => '🏠 Личный кабинет', 'callback_data' => 'rest_cabinet'],
+            ['text' => '🏠 Кабинет', 'callback_data' => 'rest_cabinet'],
+            ['text' => '💬 Чат', 'callback_data' => 'chat_start'],
         ];
         $btns[] = [
             ['text' => '📦 Поставки', 'callback_data' => 'rest_menu_main'],
-            ['text' => '🛒 Заказы', 'callback_data' => 'rest_ro_orders'],
+            ['text' => '🛒 Поставщики', 'callback_data' => 'rest_menu_supplier'],
         ];
-        $btns[] = [['text' => '🛒 Заявки поставщикам', 'callback_data' => 'rest_menu_supplier']];
+        if ($mainOrdersEnabled) {
+            $btns[] = [['text' => '🛒 Основная поставка', 'callback_data' => 'rest_ro_orders']];
+        }
         if ($activeSc) {
             $btns[] = [['text' => "📋 Сбор остатков", 'callback_data' => 'rest_sc_start']];
         }
@@ -448,7 +494,7 @@ function restShowMySubs($chatId, $msgId = null) {
         // ── Инструменты ──
         $btns[] = [
             ['text' => '🔍 Карточки', 'web_app' => ['url' => 'https://supply-department.online/search-cards']],
-            ['text' => '💬 Чат', 'callback_data' => 'chat_start'],
+            ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
         ];
 
         if ($orderFile) {
@@ -456,9 +502,11 @@ function restShowMySubs($chatId, $msgId = null) {
             $btns[] = [['text' => "📄 Файл заказа ({$updDate})", 'callback_data' => 'rest_order_file']];
         }
     } else {
-        $text = "🍔 <b>Supply Department</b>\n";
+        $text = "🏪 <b>Меню ресторана</b>\n";
         $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-        $text .= "Добро пожаловать!\nПодпишитесь на ресторан для доступа.\n";
+        $text .= "Telegram ещё не привязан к ресторану.\n\n";
+        $text .= "Получите 6-значный код в кабинете ресторана:\n";
+        $text .= "<b>Профиль → Telegram → Получить код</b>\n";
 
         $btns[] = [['text' => '🔍 Поиск карточек', 'web_app' => ['url' => 'https://supply-department.online/search-cards']]];
     }
@@ -466,9 +514,8 @@ function restShowMySubs($chatId, $msgId = null) {
     if ($subs) {
         $btns[] = [
             ['text' => '🔔 Подписки', 'callback_data' => 'rest_my_subs_manage'],
-            ['text' => '⚙️ Уведомления', 'callback_data' => 'rest_notif_settings'],
+            ['text' => '➕ Ещё ресторан', 'callback_data' => 'rest_link_help'],
         ];
-        $btns[] = [['text' => '➕ Привязать ещё ресторан', 'callback_data' => 'rest_link_help']];
     } else {
         $btns[] = [['text' => '🔐 Привязать аккаунт', 'callback_data' => 'rest_link_help']];
     }
@@ -478,9 +525,9 @@ function restShowMySubs($chatId, $msgId = null) {
     $deadline = botGetReverifyDeadline($chatId);
     if ($deadline) {
         $dl = date('d.m H:i', strtotime($deadline));
-        $warn = "\n\n⚠️ <b>До {$dl} нужно перепривязать Telegram</b>\n"
-              . "Иначе доступ к боту закроется.\n"
-              . "Получите код: Профиль → Telegram → «Получить код».";
+        $warn = "\n\n⚠️ <b>Перепривязка до {$dl}</b>\n"
+              . "После этого старые неподтверждённые подписки отключатся.\n"
+              . "Код: Профиль → Telegram → «Получить код».";
         $text .= $warn;
     }
 
@@ -492,23 +539,34 @@ function restShowMySubs($chatId, $msgId = null) {
 
 // Подменю: Основные поставки
 function restMenuMain($chatId, $msgId) {
-    $text = "📦 <b>Основные поставки</b>\n";
+    global $pdo;
+    $subs = botGetSubscribedRestaurants($pdo, $chatId);
+    $mainOrdersEnabled = botAnyRestaurantOrdersEnabled($pdo, $subs);
+
+    $text = "📦 <b>Поставки</b>\n";
     $text .= "━━━━━━━━━━━━━━━━━━━━\n\n";
-    $text .= "📅 <b>График</b> — когда и во сколько доставки\n";
-    $text .= "✏️ <b>Корректировка</b> — добавить или убрать товар\n";
-    $text .= "📦 <b>Остатки</b> — что есть на складе";
+    $text .= "Выберите, что нужно открыть:\n\n";
+    $text .= "📅 <b>График</b>\n";
+    $text .= "Дни и время доставок по ресторану.\n\n";
+    $text .= "✏️ <b>Корректировка</b>\n";
+    $text .= "Добавить или убрать товар по основной поставке.\n\n";
+    $text .= "📦 <b>Остатки склада</b>\n";
+    $text .= "Быстрый поиск товара на складе.";
+    if ($mainOrdersEnabled) {
+        $text .= "\n\n🛒 <b>Мои заказы</b>\nИстория и статусы основной поставки.";
+    }
 
     $btns = [
         [
             ['text' => '📅 График', 'callback_data' => 'rest_schedule'],
             ['text' => '✏️ Корректировка', 'callback_data' => 'corr_start'],
         ],
-        [
-            ['text' => '📦 Остатки склада', 'callback_data' => 'rest_stock'],
-            ['text' => '🛒 Мои заказы', 'callback_data' => 'rest_ro_orders'],
-        ],
-        [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']],
+        [['text' => '📦 Остатки склада', 'callback_data' => 'rest_stock']],
     ];
+    if ($mainOrdersEnabled) {
+        $btns[] = [['text' => '🛒 Мои заказы', 'callback_data' => 'rest_ro_orders']];
+    }
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']];
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }
 
@@ -2417,11 +2475,15 @@ function corrReview($pdo, $chatId, $msgId, $corrIds, $action, $comment = null) {
 function restRoOrders($chatId, $msgId) {
     global $pdo;
 
-    // Получаем подписки ресторан��
-    $restNums = array_column(botGetSubscribedRestaurants($pdo, $chatId), 'restaurant_number');
+    // Получаем подписки ресторанов, где основная поставка включена.
+    $subs = array_values(array_filter(
+        botGetSubscribedRestaurants($pdo, $chatId),
+        fn($sub) => botRestaurantOrdersEnabledForSub($pdo, $sub)
+    ));
+    $restNums = array_column($subs, 'restaurant_number');
 
     if (empty($restNums)) {
-        editMessage($chatId, $msgId, "Нет подписок на рестораны.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
+        editMessage($chatId, $msgId, "🛒 <b>Основная поставка временно отключена</b>\n\nЗаявки поставщикам остаются доступны в отдельном разделе.", ['inline_keyboard' => [[['text' => '◂ Назад', 'callback_data' => 'rest_my_subs']]]]);
         return;
     }
 
