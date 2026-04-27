@@ -5,6 +5,7 @@ import { getQpb, getMultiplicity, applyEntityGroupFilter } from '@/lib/utils.js'
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
+import { useToastStore } from './toastStore.js';
 
 const _clone = typeof structuredClone === 'function'
   ? structuredClone
@@ -229,7 +230,12 @@ export const useOrderStore = defineStore('order', () => {
     const { error } = await db.rpc('replace_item_order', {
       supplier, legal_entity: legalEntity, items: orderData,
     });
-    if (error) console.error('saveItemOrder error:', error);
+    if (error) {
+      console.error('saveItemOrder error:', error);
+      try {
+        useToastStore().error('Не удалось сохранить порядок товаров', error.message || '');
+      } catch (_) { /* toast store недоступен */ }
+    }
   }
 
   async function restoreItemOrder() {

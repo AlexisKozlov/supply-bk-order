@@ -1597,8 +1597,8 @@ if ($endpoint === 'rpc') {
             $pdo->beginTransaction();
             $pdo->prepare("DELETE FROM `item_order` WHERE `supplier`=? AND `legal_entity`=?")->execute([$supplier, $legalEntity]);
             foreach ($items as $item) {
-                $pdo->prepare("INSERT INTO `item_order` (`supplier`,`legal_entity`,`item_id`,`position`) VALUES (?,?,?,?)")
-                    ->execute([$supplier, $legalEntity, $item['item_id'], $item['position']]);
+                $pdo->prepare("INSERT INTO `item_order` (`id`,`supplier`,`legal_entity`,`item_id`,`position`) VALUES (?,?,?,?,?)")
+                    ->execute([uuid(), $supplier, $legalEntity, $item['item_id'], $item['position']]);
             }
             $pdo->commit();
             respond(['success' => true, 'count' => count($items)]);
