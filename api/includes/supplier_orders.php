@@ -388,16 +388,22 @@ if ($soAction === 'suppliers' && $method === 'GET') {
     if (!$rest) soRespond(['error' => 'Не авторизован'], 401);
 
     $restGroup = getEntityGroup($rest['legal_entity'] ?? '');
+    $restGroupEntities = getEntitiesInGroup($restGroup);
+    $restGroupEntityPh = implode(',', array_fill(0, count($restGroupEntities), '?'));
 
     // 1. Все поставщики + их расписание для этого ресторана — один запрос
     $suppStmt = $pdo->prepare("
         SELECT s.id, s.short_name, s.full_name, ss.order_day, ss.delivery_day
         FROM so_supplier_schedules ss
-        JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1
-        WHERE ss.restaurant_id = ? AND ss.is_active = 1 AND s.legal_entity_group = ?
+        JOIN suppliers s ON s.id = ss.supplier_id AND s.is_active = 1 AND s.so_enabled = 1
+        WHERE ss.restaurant_id = ? AND ss.is_active = 1
+          AND (
+            s.legal_entity_group = ?
+            OR (COALESCE(s.legal_entity_group, '') = '' AND s.legal_entity IN ({$restGroupEntityPh}))
+          )
         ORDER BY s.short_name, ss.order_day
     ");
-    $suppStmt->execute([$rest['restaurant_id'], $restGroup]);
+    $suppStmt->execute(array_merge([$rest['restaurant_id'], $restGroup], $restGroupEntities));
 
     // Группируем: поставщик → расписание
     $suppliersMap = [];

@@ -1095,6 +1095,273 @@ function roEnsureRestaurantAccess($pdo, $sessionUser, $restaurantNumber, $group 
     roEnsureGroupAccess($sessionUser, $group);
 }
 
+function roCabinetPostMatchesRestaurantSql($alias = 'p') {
+    return "(
+        {$alias}.target_mode = 'all'
+        OR ({$alias}.target_mode = 'group' AND {$alias}.target_group = ?)
+        OR EXISTS (
+            SELECT 1
+            FROM ro_cabinet_post_restaurants rcp
+            WHERE rcp.post_id = {$alias}.id
+              AND rcp.restaurant_number = ?
+              AND rcp.legal_entity_group = ?
+        )
+    )";
+}
+
+function roCabinetAttachFiles($pdo, &$posts) {
+    if (!$posts) return;
+    $ids = array_values(array_filter(array_map(fn($p) => (int)($p['id'] ?? 0), $posts)));
+    if (!$ids) return;
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $s = $pdo->prepare("
+        SELECT id, post_id, file_path, file_name, mime_type, file_size, created_at
+        FROM ro_cabinet_post_files
+        WHERE post_id IN ($ph)
+        ORDER BY id
+    ");
+    $s->execute($ids);
+    $filesByPost = [];
+    foreach ($s->fetchAll() as $file) {
+        $file['url'] = '/api/' . ltrim($file['file_path'], '/');
+        $filesByPost[(int)$file['post_id']][] = $file;
+    }
+    foreach ($posts as &$post) {
+        $post['files'] = $filesByPost[(int)$post['id']] ?? [];
+    }
+    unset($post);
+}
+
+function roCabinetParseRestaurantTargets($value) {
+    if (is_string($value)) {
+        $decoded = json_decode($value, true);
+        if (is_array($decoded)) {
+            $value = $decoded;
+        } else {
+            $value = preg_split('/[\s,;]+/', $value);
+        }
+    }
+    if (!is_array($value)) return [];
+    $out = [];
+    foreach ($value as $item) {
+        $number = null;
+        $group = null;
+        if (is_array($item)) {
+            $number = $item['number'] ?? $item['restaurant_number'] ?? null;
+            $group = $item['legal_entity_group'] ?? $item['group'] ?? null;
+        } else {
+            $parsed = parseRestaurantInput($item);
+            if ($parsed) {
+                $number = $parsed['number'];
+                $group = $parsed['group'];
+            }
+        }
+        if ($number !== null) {
+            $n = (int)$number;
+            if ($n > 0) {
+                $g = roNormalizeLegalEntityGroup($group, $n);
+                $out[$n . '|' . $g] = ['number' => $n, 'group' => $g];
+            }
+        }
+    }
+    return array_values($out);
+}
+
+function roCabinetSaveUploadedFiles($pdo, $postId) {
+    if (empty($_FILES['files'])) return [];
+    $files = $_FILES['files'];
+    $names = is_array($files['name']) ? $files['name'] : [$files['name']];
+    $tmpNames = is_array($files['tmp_name']) ? $files['tmp_name'] : [$files['tmp_name']];
+    $errors = is_array($files['error']) ? $files['error'] : [$files['error']];
+    $sizes = is_array($files['size']) ? $files['size'] : [$files['size']];
+
+    $uploadDir = __DIR__ . '/../uploads/restaurant_info/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
+    $allowed = [
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+        'application/vnd.ms-excel' => 'xls',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/msword' => 'doc',
+        'text/plain' => 'txt',
+    ];
+    $saved = [];
+    for ($i = 0; $i < count($names); $i++) {
+        if (($errors[$i] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) continue;
+        if (($errors[$i] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) roRespond(['error' => 'Ошибка загрузки файла'], 400);
+        if (($sizes[$i] ?? 0) > 15 * 1024 * 1024) roRespond(['error' => 'Файл слишком большой. Максимум 15 МБ'], 400);
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $tmpNames[$i]);
+        finfo_close($finfo);
+        if (!isset($allowed[$mime])) roRespond(['error' => 'Недопустимый формат файла'], 400);
+        $ext = $allowed[$mime];
+        $filename = 'ro_info_' . (int)$postId . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+        $dest = $uploadDir . $filename;
+        if (!move_uploaded_file($tmpNames[$i], $dest)) roRespond(['error' => 'Не удалось сохранить файл'], 500);
+        $path = 'uploads/restaurant_info/' . $filename;
+        $origName = mb_substr((string)$names[$i], 0, 255);
+        $stmt = $pdo->prepare("
+            INSERT INTO ro_cabinet_post_files (post_id, file_path, file_name, mime_type, file_size)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([(int)$postId, $path, $origName, $mime, (int)$sizes[$i]]);
+        $saved[] = [
+            'id' => (int)$pdo->lastInsertId(),
+            'post_id' => (int)$postId,
+            'file_path' => $path,
+            'file_name' => $origName,
+            'mime_type' => $mime,
+            'file_size' => (int)$sizes[$i],
+            'url' => '/api/' . $path,
+        ];
+    }
+    return $saved;
+}
+
+function roCabinetTelegramChatIds($pdo, $targetMode, $targetGroup, $targets) {
+    $verifiedSql = "(rs.verified_at IS NOT NULL OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))";
+    $params = [];
+    $where = [
+        "rs.chat_id IS NOT NULL",
+        "rs.chat_id != ''",
+        $verifiedSql,
+    ];
+
+    if ($targetMode === 'group') {
+        $where[] = "rs.legal_entity_group = ?";
+        $params[] = roNormalizeLegalEntityGroup($targetGroup ?: 'BK_VM');
+    } elseif ($targetMode === 'restaurants') {
+        if (!$targets) return [];
+        $parts = [];
+        foreach ($targets as $target) {
+            $parts[] = "(rs.restaurant_number = ? AND rs.legal_entity_group = ?)";
+            $params[] = (int)$target['number'];
+            $params[] = roNormalizeLegalEntityGroup($target['group'] ?? null, (int)$target['number']);
+        }
+        $where[] = '(' . implode(' OR ', $parts) . ')';
+    }
+
+    $sql = "
+        SELECT DISTINCT rs.chat_id
+        FROM ro_telegram_subs rs
+        JOIN restaurants r
+          ON r.number = rs.restaurant_number
+         AND r.legal_entity_group = rs.legal_entity_group
+         AND r.active = 1
+        WHERE " . implode(' AND ', $where) . "
+    ";
+    $s = $pdo->prepare($sql);
+    $s->execute($params);
+    return array_values(array_unique(array_map('strval', $s->fetchAll(PDO::FETCH_COLUMN))));
+}
+
+function roCabinetTelegramRequest($botToken, $method, $payload, $multipart = false) {
+    $ch = curl_init("https://api.telegram.org/bot{$botToken}/{$method}");
+    $opts = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $multipart ? $payload : json_encode($payload),
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_CONNECTTIMEOUT => 5,
+    ];
+    if (!$multipart) {
+        $opts[CURLOPT_HTTPHEADER] = ['Content-Type: application/json'];
+    }
+    curl_setopt_array($ch, $opts);
+    $result = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+    if ($result === false || $curlErr) {
+        error_log("[roCabinetTelegramRequest] {$method} curl error: " . ($curlErr ?: 'unknown'));
+        return false;
+    }
+    $data = json_decode($result, true);
+    if ($httpCode !== 200 || !is_array($data) || empty($data['ok'])) {
+        $desc = is_array($data) ? ($data['description'] ?? 'no description') : 'bad response';
+        error_log("[roCabinetTelegramRequest] {$method} error http={$httpCode}: {$desc}");
+        return false;
+    }
+    return true;
+}
+
+function roCabinetTelegramFileAbsPath($file) {
+    $rel = ltrim((string)($file['file_path'] ?? ''), '/');
+    if ($rel === '') return '';
+    $abs = realpath(__DIR__ . '/../' . $rel);
+    $base = realpath(__DIR__ . '/../uploads/restaurant_info');
+    if (!$abs || !$base || strpos($abs, $base) !== 0 || !is_file($abs)) return '';
+    return $abs;
+}
+
+function roCabinetTelegramSendFile($botToken, $chatId, $file, $caption = '', $keyboard = null) {
+    $abs = roCabinetTelegramFileAbsPath($file);
+    if (!$abs) return false;
+    $mime = (string)($file['mime_type'] ?? 'application/octet-stream');
+    $name = (string)($file['file_name'] ?? basename($abs));
+    $isImage = str_starts_with($mime, 'image/');
+    $field = $isImage ? 'photo' : 'document';
+    $method = $isImage ? 'sendPhoto' : 'sendDocument';
+    $payload = [
+        'chat_id' => $chatId,
+        $field => new CURLFile($abs, $mime, $name),
+    ];
+    if ($caption !== '') {
+        $payload['caption'] = $caption;
+        $payload['parse_mode'] = 'HTML';
+    }
+    if ($keyboard) {
+        $payload['reply_markup'] = json_encode($keyboard, JSON_UNESCAPED_UNICODE);
+    }
+    return roCabinetTelegramRequest($botToken, $method, $payload, true);
+}
+
+function roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetGroup, $targets, $files = []) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? getenv('TELEGRAM_BOT_TOKEN') ?: '';
+    if (!$botToken) return 0;
+
+    $chatIds = roCabinetTelegramChatIds($pdo, $targetMode, $targetGroup, $targets);
+    if (!$chatIds) return 0;
+
+    $safeTitle = htmlspecialchars(mb_substr($title ?: 'Важная информация', 0, 255), ENT_QUOTES, 'UTF-8');
+    $safeMessage = htmlspecialchars(mb_substr($message ?: '', 0, 3000), ENT_QUOTES, 'UTF-8');
+    $text = "ℹ️ <b>{$safeTitle}</b>\n\n{$safeMessage}";
+    if (count($files) > 1) {
+        $text .= "\n\nВложения доступны в личном кабинете ресторана.";
+    }
+
+    $siteUrl = rtrim($_ENV['SITE_URL'] ?? getenv('SITE_URL') ?: 'https://supply-department.online', '/');
+    $keyboard = ['inline_keyboard' => [[
+        ['text' => 'Открыть кабинет', 'url' => $siteUrl . '/restaurant/info'],
+    ]]];
+
+    if (count($files) === 1) {
+        $captionTitle = htmlspecialchars(mb_substr($title ?: 'Важная информация', 0, 150), ENT_QUOTES, 'UTF-8');
+        $captionMessageRaw = mb_substr($message ?: '', 0, 800);
+        if (mb_strlen($message ?: '') > 800) $captionMessageRaw .= '...';
+        $captionMessage = htmlspecialchars($captionMessageRaw, ENT_QUOTES, 'UTF-8');
+        $fileCaption = "ℹ️ <b>{$captionTitle}</b>\n\n{$captionMessage}";
+        $sent = 0;
+        foreach ($chatIds as $chatId) {
+            if (roCabinetTelegramSendFile($botToken, $chatId, $files[0], $fileCaption, $keyboard)) $sent++;
+        }
+        return $sent;
+    }
+
+    $sent = sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
+    if (count($files) > 1) {
+        foreach ($chatIds as $chatId) {
+            foreach ($files as $file) {
+                roCabinetTelegramSendFile($botToken, $chatId, $file);
+            }
+        }
+    }
+    return $sent;
+}
+
 function roApplyAllowedGroupsSql($sessionUser, &$where, &$params, $expr) {
     if (!$sessionUser) return;
     if (($sessionUser['role'] ?? '') === 'admin') return;
@@ -1569,6 +1836,72 @@ if ($roAction === 'broadcast-read' && $method === 'POST') {
           AND type = 'ro_broadcast'
           AND NOT JSON_CONTAINS(COALESCE(read_by, '[]'), JSON_QUOTE(?))
     ")->execute($params);
+    roRespond(['success' => true]);
+}
+
+if ($roAction === 'cabinet-posts' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $group = roNormalizeLegalEntityGroup($rest['legal_entity_group'] ?? null, $rest['restaurant_number']);
+    $restaurantNumber = (int)$rest['restaurant_number'];
+    $limit = max(1, min(100, (int)($_GET['limit'] ?? 50)));
+
+    $sql = "
+        SELECT p.id, p.title, p.message, p.target_mode, p.target_group, p.show_popup,
+               p.published_at, p.created_by, p.created_at,
+               r.read_at
+        FROM ro_cabinet_posts p
+        LEFT JOIN ro_cabinet_post_reads r
+          ON r.post_id = p.id
+         AND r.restaurant_number = ?
+         AND r.legal_entity_group = ?
+        WHERE p.is_published = 1
+          AND p.deleted_at IS NULL
+          AND (p.published_at IS NULL OR p.published_at <= NOW())
+          AND " . roCabinetPostMatchesRestaurantSql('p') . "
+        ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC
+        LIMIT {$limit}
+    ";
+    $s = $pdo->prepare($sql);
+    $s->execute([$restaurantNumber, $group, $group, $restaurantNumber, $group]);
+    $posts = $s->fetchAll();
+    roCabinetAttachFiles($pdo, $posts);
+    foreach ($posts as &$post) {
+        $post['is_read'] = !empty($post['read_at']);
+    }
+    unset($post);
+    roRespond(['posts' => $posts]);
+}
+
+if ($roAction === 'cabinet-post-read' && $method === 'POST') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+    $ids = $body['ids'] ?? [];
+    if (!is_array($ids)) $ids = [$ids];
+    $ids = array_values(array_filter(array_map('intval', $ids)));
+    if (!$ids) roRespond(['error' => 'Нет ID'], 400);
+    $group = roNormalizeLegalEntityGroup($rest['legal_entity_group'] ?? null, $rest['restaurant_number']);
+    $restaurantNumber = (int)$rest['restaurant_number'];
+    $check = $pdo->prepare("
+        SELECT p.id
+        FROM ro_cabinet_posts p
+        WHERE p.id = ?
+          AND p.is_published = 1
+          AND p.deleted_at IS NULL
+          AND " . roCabinetPostMatchesRestaurantSql('p') . "
+        LIMIT 1
+    ");
+    $ins = $pdo->prepare("
+        INSERT INTO ro_cabinet_post_reads (post_id, restaurant_number, legal_entity_group, read_at)
+        VALUES (?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE read_at = VALUES(read_at)
+    ");
+    foreach ($ids as $id) {
+        $check->execute([$id, $group, $restaurantNumber, $group]);
+        if ($check->fetchColumn()) {
+            $ins->execute([$id, $restaurantNumber, $group]);
+        }
+    }
     roRespond(['success' => true]);
 }
 
@@ -2711,6 +3044,186 @@ if (strpos($roAction, 'admin') === 0) {
             'legal_entity_group' => $entityGroup,
             'restaurant_orders_enabled' => $enabled === 1,
         ]);
+    }
+
+    // --- Настройщик кабинета ресторанов: важная информация ---
+    if ($adminAction === 'cabinet-posts' && $method === 'GET') {
+        $where = ["p.deleted_at IS NULL"];
+        $params = [];
+        $allowedGroups = roGetSessionUserGroups($sessionUser);
+        if (($sessionUser['role'] ?? '') !== 'admin') {
+            if (!$allowedGroups) {
+                $where[] = '1=0';
+            } else {
+                $ph = implode(',', array_fill(0, count($allowedGroups), '?'));
+                $where[] = "(p.target_mode = 'all' OR p.target_group IN ($ph) OR EXISTS (
+                    SELECT 1 FROM ro_cabinet_post_restaurants rcp
+                    WHERE rcp.post_id = p.id AND rcp.legal_entity_group IN ($ph)
+                ))";
+                $params = array_merge($params, $allowedGroups, $allowedGroups);
+            }
+        }
+        $group = $_GET['group'] ?? '';
+        if ($group === 'BK_VM' || $group === 'PS') {
+            roEnsureGroupAccess($sessionUser, $group);
+            $where[] = "(p.target_mode = 'all' OR p.target_group = ? OR EXISTS (
+                SELECT 1 FROM ro_cabinet_post_restaurants rcp
+                WHERE rcp.post_id = p.id AND rcp.legal_entity_group = ?
+            ))";
+            $params[] = $group;
+            $params[] = $group;
+        }
+        $sql = "
+            SELECT p.*,
+                   (SELECT COUNT(*) FROM ro_cabinet_post_files f WHERE f.post_id = p.id) AS file_count,
+                   (SELECT COUNT(*) FROM ro_cabinet_post_reads rr WHERE rr.post_id = p.id) AS read_count
+            FROM ro_cabinet_posts p
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC
+            LIMIT 100
+        ";
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        $posts = $s->fetchAll();
+        roCabinetAttachFiles($pdo, $posts);
+        if ($posts) {
+            $ids = array_map(fn($p) => (int)$p['id'], $posts);
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $t = $pdo->prepare("
+                SELECT post_id, restaurant_number, legal_entity_group
+                FROM ro_cabinet_post_restaurants
+                WHERE post_id IN ($ph)
+                ORDER BY legal_entity_group, restaurant_number
+            ");
+            $t->execute($ids);
+            $targets = [];
+            foreach ($t->fetchAll() as $row) {
+                $targets[(int)$row['post_id']][] = [
+                    'restaurant_number' => (int)$row['restaurant_number'],
+                    'legal_entity_group' => $row['legal_entity_group'],
+                ];
+            }
+            foreach ($posts as &$post) {
+                $post['restaurants'] = $targets[(int)$post['id']] ?? [];
+            }
+            unset($post);
+        }
+        roRespond(['posts' => $posts]);
+    }
+
+    if ($adminAction === 'cabinet-posts' && $method === 'POST') {
+        $payload = $_POST ?: $body;
+        $title = trim((string)($payload['title'] ?? ''));
+        $message = trim((string)($payload['message'] ?? ''));
+        $targetMode = trim((string)($payload['target_mode'] ?? 'all'));
+        $targetGroup = trim((string)($payload['target_group'] ?? ''));
+        $isPublished = !isset($payload['is_published']) || filter_var($payload['is_published'], FILTER_VALIDATE_BOOLEAN);
+        $showPopup = !isset($payload['show_popup']) || filter_var($payload['show_popup'], FILTER_VALIDATE_BOOLEAN);
+        $notifyTelegram = !empty($payload['notify_telegram']);
+        if ($title === '') $title = 'Важная информация';
+        if ($message === '') roRespond(['error' => 'Введите текст сообщения'], 400);
+        if (!in_array($targetMode, ['all', 'group', 'restaurants'], true)) $targetMode = 'all';
+        if ($targetMode === 'group') {
+            $targetGroup = roNormalizeLegalEntityGroup($targetGroup ?: 'BK_VM');
+            roEnsureGroupAccess($sessionUser, $targetGroup);
+        } elseif ($targetMode === 'restaurants') {
+            $targetGroup = null;
+        } else {
+            $targetGroup = null;
+        }
+
+        $targets = roCabinetParseRestaurantTargets($payload['restaurants'] ?? []);
+        if ($targetMode === 'restaurants' && !$targets) {
+            roRespond(['error' => 'Выберите рестораны-получатели'], 400);
+        }
+        foreach ($targets as $target) {
+            roEnsureRestaurantAccess($pdo, $sessionUser, $target['number'], $target['group']);
+        }
+        $pdo->beginTransaction();
+        try {
+            $s = $pdo->prepare("
+                INSERT INTO ro_cabinet_posts
+                  (title, message, target_mode, target_group, is_published, show_popup, published_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $s->execute([
+                mb_substr($title, 0, 255),
+                $message,
+                $targetMode,
+                $targetGroup,
+                $isPublished ? 1 : 0,
+                $showPopup ? 1 : 0,
+                $isPublished ? date('Y-m-d H:i:s') : null,
+                $sessionUser['name'] ?? 'Отдел закупок',
+            ]);
+            $postId = (int)$pdo->lastInsertId();
+            if ($targetMode === 'restaurants') {
+                $ins = $pdo->prepare("
+                    INSERT INTO ro_cabinet_post_restaurants (post_id, restaurant_number, legal_entity_group)
+                    VALUES (?, ?, ?)
+                ");
+                foreach ($targets as $target) {
+                    $ins->execute([$postId, $target['number'], $target['group']]);
+                }
+            }
+            $savedFiles = roCabinetSaveUploadedFiles($pdo, $postId);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('ro cabinet-post create error: ' . $e->getMessage());
+            roRespond(['error' => 'Не удалось сохранить сообщение'], 500);
+        }
+        $telegramSent = 0;
+        if ($notifyTelegram && $isPublished) {
+            try {
+                $telegramSent = roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetGroup, $targets, $savedFiles ?? []);
+            } catch (Throwable $e) {
+                error_log('ro cabinet-post telegram notify error: ' . $e->getMessage());
+            }
+        }
+        roRespond(['success' => true, 'id' => $postId, 'telegram_sent' => $telegramSent]);
+    }
+
+    if ($adminAction === 'cabinet-posts' && $adminParam && $method === 'PATCH') {
+        $postId = (int)$adminParam;
+        $s = $pdo->prepare("SELECT * FROM ro_cabinet_posts WHERE id = ? AND deleted_at IS NULL");
+        $s->execute([$postId]);
+        $post = $s->fetch();
+        if (!$post) roRespond(['error' => 'Сообщение не найдено'], 404);
+        if (($post['target_mode'] ?? '') === 'group' && !empty($post['target_group'])) {
+            roEnsureGroupAccess($sessionUser, $post['target_group']);
+        }
+        $fields = [];
+        $params = [];
+        if (array_key_exists('is_published', $body)) {
+            $published = !empty($body['is_published']) ? 1 : 0;
+            $fields[] = 'is_published = ?';
+            $params[] = $published;
+            if ($published && empty($post['published_at'])) {
+                $fields[] = 'published_at = NOW()';
+            }
+        }
+        if (array_key_exists('show_popup', $body)) {
+            $fields[] = 'show_popup = ?';
+            $params[] = !empty($body['show_popup']) ? 1 : 0;
+        }
+        if (!$fields) roRespond(['success' => true]);
+        $params[] = $postId;
+        $pdo->prepare("UPDATE ro_cabinet_posts SET " . implode(', ', $fields) . " WHERE id = ?")->execute($params);
+        roRespond(['success' => true]);
+    }
+
+    if ($adminAction === 'cabinet-posts' && $adminParam && $method === 'DELETE') {
+        $postId = (int)$adminParam;
+        $s = $pdo->prepare("SELECT * FROM ro_cabinet_posts WHERE id = ? AND deleted_at IS NULL");
+        $s->execute([$postId]);
+        $post = $s->fetch();
+        if (!$post) roRespond(['error' => 'Сообщение не найдено'], 404);
+        if (($post['target_mode'] ?? '') === 'group' && !empty($post['target_group'])) {
+            roEnsureGroupAccess($sessionUser, $post['target_group']);
+        }
+        $pdo->prepare("UPDATE ro_cabinet_posts SET deleted_at = NOW(), is_published = 0 WHERE id = ?")->execute([$postId]);
+        roRespond(['success' => true]);
     }
 
     // --- Статус заявок ---

@@ -95,6 +95,7 @@ const modules = [
   // Остатки
   { title: 'Сбор остатков', icon: '📝', route: 'stock-collection', module: 'stock-collection' },
   // Рестораны
+  { title: 'Кабинеты ресторанов', icon: 'ℹ️', route: 'restaurant-cabinet-manager', module: 'restaurant-orders', keywords: 'управление ресторанами важная информация кабинет' },
   { title: 'Заказы ресторанов', icon: '🍔', route: 'restaurant-orders', module: 'restaurant-orders', keywords: 'рестораны ро' },
   { title: 'Отчёт по заказам ресторанов', icon: '📄', route: 'restaurant-report', module: 'restaurant-orders' },
   { title: 'Опросы', icon: '📋', route: 'surveys', module: 'surveys', keywords: 'анкета опросник ответы рестораны' },

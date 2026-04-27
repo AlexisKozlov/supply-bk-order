@@ -838,6 +838,25 @@ if ($endpoint === 'rpc') {
         auditLog($pdo, 'collection_closed', 'stock_collection', $collId, $authUserName, ['legal_entity' => $collRow['legal_entity']]);
         respond(['success' => true]);
     }
+    if ($fn === 'sc_reopen_collection') {
+        $collId = intval($body['collection_id'] ?? 0);
+        $uname = $authUserName ?: ($body['user_name'] ?? '');
+        if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
+        $collCheck = $pdo->prepare("SELECT id, name, legal_entity, status FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
+        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        if ($collRow['status'] === 'active') respond(['success' => true, 'already_active' => true]);
+
+        $pdo->prepare("UPDATE stock_collections SET status = 'active', closed_at = NULL WHERE id = ?")->execute([$collId]);
+        $token = bin2hex(random_bytes(32));
+        $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
+        $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)")
+            ->execute([$collId, $token, $uname, $expires]);
+        auditLog($pdo, 'collection_reopened', 'stock_collection', $collId, $uname, ['legal_entity' => $collRow['legal_entity']]);
+        respond(['success' => true, 'token' => $token, 'expires_at' => $expires]);
+    }
     if ($fn === 'sc_delete_collection') {
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);

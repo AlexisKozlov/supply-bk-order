@@ -54,6 +54,9 @@
           <button v-if="activeCollection.status === 'active'" class="sc-btn outline red-text" @click="askCloseCollection">
             Закрыть сбор
           </button>
+          <button v-else class="sc-btn outline green-text" @click="askReopenCollection">
+            Переоткрыть сбор
+          </button>
           <button class="sc-btn outline" @click="duplicateCollection">Копировать сбор</button>
           <button class="sc-btn outline red-text" @click="askDeleteCollection">Удалить</button>
         </div>
@@ -751,8 +754,32 @@ async function doCloseCollection() {
   try {
     await db.rpc('sc_close_collection', { collection_id: activeCollection.value.id });
     activeCollection.value.status = 'closed';
+    tokenLink.value = '';
     toastStore.success('Закрыт', 'Сбор закрыт');
   } catch { toastStore.error('Ошибка', 'Не удалось закрыть'); }
+}
+
+function askReopenCollection() {
+  confirmModal.value = {
+    show: true, title: 'Переоткрыть сбор', danger: false,
+    text: 'Рестораны снова смогут открыть сбор и отправить остатки. Будет создана новая ссылка.',
+    btnText: 'Переоткрыть',
+    action: doReopenCollection,
+  };
+}
+
+async function doReopenCollection() {
+  try {
+    const { data, error } = await db.rpc('sc_reopen_collection', { collection_id: activeCollection.value.id });
+    if (error) throw new Error(error);
+    activeCollection.value.status = 'active';
+    if (data?.token) {
+      tokenLink.value = `${window.location.origin}/stock-form/${data.token}`;
+    }
+    toastStore.success('Открыт', 'Сбор снова доступен ресторанам');
+  } catch (e) {
+    toastStore.error('Ошибка', e.message || 'Не удалось переоткрыть');
+  }
 }
 
 // Delete collection
@@ -1356,6 +1383,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-btn.sm { padding: 4px 10px; font-size: 11px; }
 .sc-btn.full { width: 100%; justify-content: center; }
 .red-text { color: var(--red) !important; }
+.green-text { color: #15803d !important; }
 .sc-x { width: 28px; height: 28px; border: none; background: none; color: #bbb; cursor: pointer; font-size: 14px; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
 .sc-x:hover { background: #FFEBEE; color: var(--red); }
 .sc-x.sm { width: 24px; height: 24px; font-size: 12px; }

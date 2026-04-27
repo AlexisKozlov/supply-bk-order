@@ -12,6 +12,77 @@ function sanitizeHeaderFilename($name) {
     return mb_substr($name, 0, 255);
 }
 
+function canDownloadRestaurantInfoFile($pdo, $fileId) {
+    if (checkAuth($pdo)) {
+        $su = getSessionUser($pdo);
+        if ($su) {
+            global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+            $p = resolvePermissions($su['role'] ?? 'user', $su['permissions'] ?? null, $ROLE_TEMPLATES);
+            if (($ACCESS_LEVELS[$p['restaurant-orders'] ?? 'none'] ?? 0) >= $ACCESS_LEVELS['view']) return true;
+        }
+    }
+    $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+    if (!$token) return false;
+    $s = $pdo->prepare("
+        SELECT restaurant_number, legal_entity_group, session_active_until
+        FROM ro_users
+        WHERE session_token = ? AND is_active = 1
+        LIMIT 1
+    ");
+    $s->execute([$token]);
+    $rest = $s->fetch();
+    if (!$rest) return false;
+    if (!empty($rest['session_active_until']) && strtotime($rest['session_active_until']) < time()) return false;
+    $group = $rest['legal_entity_group'] ?: (((int)$rest['restaurant_number'] >= 1000) ? 'PS' : 'BK_VM');
+    $q = $pdo->prepare("
+        SELECT p.id
+        FROM ro_cabinet_post_files f
+        JOIN ro_cabinet_posts p ON p.id = f.post_id
+        WHERE f.id = ?
+          AND p.is_published = 1
+          AND p.deleted_at IS NULL
+          AND (
+            p.target_mode = 'all'
+            OR (p.target_mode = 'group' AND p.target_group = ?)
+            OR EXISTS (
+              SELECT 1 FROM ro_cabinet_post_restaurants rcp
+              WHERE rcp.post_id = p.id
+                AND rcp.restaurant_number = ?
+                AND rcp.legal_entity_group = ?
+            )
+          )
+        LIMIT 1
+    ");
+    $q->execute([(int)$fileId, $group, (int)$rest['restaurant_number'], $group]);
+    return (bool)$q->fetchColumn();
+}
+
+// ═══ DOWNLOAD RESTAURANT INFO FILE ═══
+if ($endpoint === 'uploads' && ($parts[1] ?? '') === 'restaurant_info' && isset($parts[2])) {
+    $filename = basename($parts[2]);
+    $filepath = __DIR__ . '/../uploads/restaurant_info/' . $filename;
+    if (!file_exists($filepath)) { http_response_code(404); echo json_encode(['error' => 'Файл не найден']); exit; }
+    $safeName = str_replace(['%', '_'], ['\\%', '\\_'], $filename);
+    $s = $pdo->prepare("
+        SELECT id, file_name, mime_type
+        FROM ro_cabinet_post_files
+        WHERE file_path LIKE ? ESCAPE '\\\\'
+        LIMIT 1
+    ");
+    $s->execute(['%' . $safeName]);
+    $file = $s->fetch();
+    if (!$file) respond(['error' => 'Файл не найден'], 404);
+    if (!canDownloadRestaurantInfoFile($pdo, (int)$file['id'])) respond(['error' => 'Нет доступа'], 403);
+
+    $mime = $file['mime_type'] ?: 'application/octet-stream';
+    $disposition = isset($_GET['download']) ? 'attachment' : 'inline';
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: ' . $disposition . '; filename="' . sanitizeHeaderFilename($file['file_name'] ?: $filename) . '"');
+    header('Content-Length: ' . filesize($filepath));
+    readfile($filepath);
+    exit;
+}
+
 // ═══ DELETE ACT ═══
 if ($endpoint === 'upload' && $subpoint === 'act' && $method === 'DELETE') {
     if (!checkAuth($pdo)) respond(['error' => 'Требуется авторизация'], 401);

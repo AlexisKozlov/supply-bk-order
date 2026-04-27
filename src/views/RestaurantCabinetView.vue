@@ -18,7 +18,7 @@
       </div>
 
       <button class="sb-item" :class="{ active: activeTab === 'dashboard' }" @click="switchTab('dashboard')">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>
+        <span class="sb-icon" v-html="cabIconSvg.dashboard"></span>
         Главная
       </button>
 
@@ -26,7 +26,7 @@
       <!-- Основная поставка -->
       <button v-if="roStore.restaurantOrdersEnabled" class="sb-item" :class="{ active: activeTab === 'orders' && orderSubTab === 'delivery' }"
         @click="switchTab('orders', 'delivery')">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5a2 2 0 01-2 2h-1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+        <span class="sb-icon" v-html="cabIconSvg.orders"></span>
         Основная поставка
         <span v-if="deliveryBadge" class="sb-badge" :class="deliveryBadge.type">{{ deliveryBadge.text }}</span>
       </button>
@@ -34,43 +34,50 @@
       <button v-for="sup in suppliers" :key="'sb-'+sup.id" class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'sup_' + sup.id }"
         @click="switchTab('orders', 'sup_' + sup.id)">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg></span>
+        <span class="supplier-icon supplier-icon-sm" :class="supplierIcon(sup.name).className" v-html="supplierIcon(sup.name).svg"></span>
         {{ sup.name }}
         <span v-if="supplierBadge(sup)" class="sb-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
       </button>
+      <a
+        v-for="link in externalSupplierLinks"
+        :key="'sb-ext-' + link.id"
+        class="sb-item sb-item-link"
+        :href="link.url"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span class="supplier-icon supplier-icon-sm" :class="link.iconClass" v-html="link.iconSvg"></span>
+        {{ link.name }}
+        <span class="sb-ext" v-html="cabIconSvg.external"></span>
+      </a>
       <!-- История заказов -->
       <button class="sb-item"
         :class="{ active: activeTab === 'orders' && orderSubTab === 'history' }"
         @click="switchTab('orders', 'history')">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></span>
+        <span class="sb-icon" v-html="cabIconSvg.history"></span>
         История заказов
       </button>
 
       <div class="sb-label">Другое</div>
       <template v-for="tab in mainTabs.filter(t => t.id !== 'dashboard' && t.id !== 'orders')" :key="tab.id">
         <button class="sb-item" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
-          <span class="sb-icon">
-            <svg v-if="tab.id === 'info'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v5h1"/></svg>
-            <svg v-else-if="tab.id === 'surveys'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-            <svg v-else-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            <svg v-else-if="tab.id === 'scanner'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
-          </span>
+          <span class="sb-icon" v-html="tabIconSvg(tab.id)"></span>
           {{ tab.label }}
           <span v-if="tab.beta" class="sb-beta">BETA</span>
           <span v-if="tab.badge" class="sb-badge" :class="tab.badgeType">{{ tab.badge }}</span>
         </button>
       </template>
       <router-link v-if="canUseCardSearch" :to="{ name: 'search-cards' }" target="_blank" class="sb-item sb-item-link">
-        <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></span>
+        <span class="sb-icon" v-html="cabIconSvg.search"></span>
         Поиск карточек
-        <span class="sb-item-ext" title="Откроется в новой вкладке">↗</span>
+        <span class="sb-item-ext" title="Откроется в новой вкладке" v-html="cabIconSvg.external"></span>
       </router-link>
 
       <div class="sb-spacer"></div>
       <a href="https://t.me/alexiskozlov" target="_blank" rel="noopener noreferrer" class="sb-help">
-        <span class="sb-help-icon">?</span>
+        <span class="sb-help-icon" v-html="cabIconSvg.help"></span>
         <span>Помощь</span>
-        <span class="sb-item-ext" title="Откроется в Telegram">↗</span>
+        <span class="sb-item-ext" title="Откроется в Telegram" v-html="cabIconSvg.external"></span>
       </a>
       <div class="sb-rest" :class="{ active: activeTab === 'profile' }">
         <button class="sb-rest-main" @click="switchTab('profile')" title="Открыть профиль">
@@ -153,19 +160,19 @@
             <h3 class="dash-section-title">Быстрые действия</h3>
             <div class="dash-action-grid">
               <button class="dash-action" @click="switchTab('orders')">
-                <span class="dash-action-icon">&#128230;</span>
+                <span class="dash-action-icon" v-html="cabIconSvg.orders"></span>
                 <span>Заказы</span>
               </button>
               <a v-if="canUseCardSearch" class="dash-action" href="/search-cards" target="_blank">
-                <span class="dash-action-icon">&#128269;</span>
+                <span class="dash-action-icon" v-html="cabIconSvg.search"></span>
                 <span>Карточки</span>
               </a>
               <button class="dash-action" @click="switchTab('profile')">
-                <span class="dash-action-icon">&#9881;</span>
+                <span class="dash-action-icon" v-html="cabIconSvg.profile"></span>
                 <span>Профиль</span>
               </button>
               <button v-if="stockCollection.active" class="dash-action dash-action--alert" @click="switchTab('stock')">
-                <span class="dash-action-icon">&#128203;</span>
+                <span class="dash-action-icon" v-html="cabIconSvg.stock"></span>
                 <span>Сбор остатков</span>
               </button>
             </div>
@@ -208,7 +215,7 @@
                 @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
               >
                 <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
-                <span v-else class="info-file-icon">📄</span>
+                <span v-else class="info-file-icon" v-html="cabIconSvg.file"></span>
                 <span>{{ file.file_name }}</span>
                 <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
               </button>
@@ -250,7 +257,7 @@
               @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
             >
               <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
-              <span v-else class="info-file-icon">📄</span>
+              <span v-else class="info-file-icon" v-html="cabIconSvg.file"></span>
               <span>{{ file.file_name }}</span>
               <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
             </button>
@@ -274,9 +281,22 @@
           :class="{ active: orderSubTab === 'sup_' + sup.id }"
           @click="switchTab('orders', 'sup_' + sup.id)"
         >
+          <span class="supplier-icon supplier-icon-xs" :class="supplierIcon(sup.name).className" v-html="supplierIcon(sup.name).svg"></span>
           {{ sup.name }}
           <span v-if="supplierBadge(sup)" class="ord-tab-badge" :class="supplierBadge(sup).type">{{ supplierBadge(sup).text }}</span>
         </button>
+        <a
+          v-for="link in externalSupplierLinks"
+          :key="'mob-ext-' + link.id"
+          class="ord-tab ord-tab-link"
+          :href="link.url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span class="supplier-icon supplier-icon-xs" :class="link.iconClass" v-html="link.iconSvg"></span>
+          {{ link.name }}
+          <span class="ord-tab-ext" v-html="cabIconSvg.external"></span>
+        </a>
         <button class="ord-tab" :class="{ active: orderSubTab === 'history' }" @click="switchTab('orders', 'history')">
           История
         </button>
@@ -293,7 +313,7 @@
 
         <div v-else-if="delShowSuccess" class="cab-success">
           <div class="cab-success-inner">
-            <div class="cab-success-check">&#10003;</div>
+            <div class="cab-success-check" v-html="cabIconSvg.check"></div>
             <h2>Заказ {{ delWasEdited ? 'обновлён' : 'отправлен' }}</h2>
             <div class="cab-success-date">Доставка {{ fmtDate(delSelectedDate) }}</div>
 
@@ -334,8 +354,8 @@
                 <span class="day-tab-name">{{ day.day_name }}</span>
                 <span class="day-tab-date">{{ fmtDateShort(day.date) }}</span>
               </span>
-              <span v-if="day.order?.status === 'submitted' || day.order?.status === 'edited'" class="day-tab-mark done">&#10003;</span>
-              <span v-else-if="day.deadline_status === 'closed' || day.deadline_status === 'not_open'" class="day-tab-mark closed">&#10005;</span>
+              <span v-if="day.order?.status === 'submitted' || day.order?.status === 'edited'" class="day-tab-mark done" v-html="cabIconSvg.check"></span>
+              <span v-else-if="day.deadline_status === 'closed' || day.deadline_status === 'not_open'" class="day-tab-mark closed" v-html="cabIconSvg.x"></span>
             </button>
           </div>
           <div v-else class="cab-empty-card">
@@ -477,9 +497,9 @@
                   <span class="day-tab-name">{{ d.delivery_day_name }}</span>
                   <span class="day-tab-date">{{ fmtDateShort(d.delivery_date) }}</span>
                 </span>
-                <span v-if="d.order?.is_skip" class="day-tab-mark skipped" title="Поставка не нужна">&#128683;</span>
-                <span v-else-if="d.order" class="day-tab-mark done">&#10003;</span>
-                <span v-else-if="d.deadline_status === 'closed'" class="day-tab-mark closed">&#10005;</span>
+                <span v-if="d.order?.is_skip" class="day-tab-mark skipped" title="Поставка не нужна" v-html="cabIconSvg.skip"></span>
+                <span v-else-if="d.order" class="day-tab-mark done" v-html="cabIconSvg.check"></span>
+                <span v-else-if="d.deadline_status === 'closed'" class="day-tab-mark closed" v-html="cabIconSvg.x"></span>
               </button>
             </div>
             <div v-if="supSelectedDates[sup.id]" class="order-form">
@@ -509,7 +529,7 @@
                   @repeat="supHandleRepeatPrevious(sup)"
                 />
                 <div v-if="supIsSkipOrder[sup.id]" class="sup-skip-banner">
-                  <span class="sup-skip-icon">🚫</span>
+                  <span class="sup-skip-icon" v-html="cabIconSvg.skip"></span>
                   <strong>Поставка не нужна.</strong>
                   <span class="sup-skip-hint">Впишите количества, чтобы отменить.</span>
                 </div>
@@ -522,7 +542,8 @@
                       <span v-if="p.min_qty" class="item-hint item-hint-warn">мин. {{ supFmtNum(p.min_qty) }}</span>
                       <span v-if="supAdminEditInfo(sup.id, p.sku)" class="item-edit-mark"
                         :title="`Изменено отделом закупок: было ${supFmtNum(supAdminEditInfo(sup.id, p.sku).original)}, стало ${supFmtNum(supAdminEditInfo(sup.id, p.sku).edited)}`">
-                        ✏ {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).original) }} → {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).edited) }}
+                        <span class="inline-ui-icon" v-html="cabIconSvg.edit"></span>
+                        {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).original) }} → {{ supFmtNum(supAdminEditInfo(sup.id, p.sku).edited) }}
                       </span>
                     </div>
                     <div class="item-input">
@@ -628,7 +649,7 @@
                     <span class="hist-qty-orig">{{ item.quantity }}</span>
                     <span class="hist-qty-arrow">→</span>
                     <span class="hist-qty-admin">{{ item.admin_qty }}</span>
-                    <span class="hist-edited-mark" title="Изменено отделом закупок">✏</span>
+                    <span class="hist-edited-mark" title="Изменено отделом закупок" v-html="cabIconSvg.edit"></span>
                   </template>
                   <span v-else class="hist-qty-val">{{ item.effective_qty ?? item.quantity }}</span>
                 </div>
@@ -1044,7 +1065,7 @@
               @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
             >
               <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
-              <span v-else class="info-file-icon">📄</span>
+              <span v-else class="info-file-icon" v-html="cabIconSvg.file"></span>
               <span>{{ file.file_name }}</span>
               <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
             </button>
@@ -1146,10 +1167,11 @@
     <!-- Supplier success overlay -->
     <div v-if="supShowSuccess" class="modal-overlay" @click.self="supShowSuccess = false">
       <div class="cab-success-inner">
-        <div class="cab-success-check" :class="{ 'cab-success-check-skip': supSuccessInfo.skipped }">
-          <template v-if="supSuccessInfo.skipped">&#10005;</template>
-          <template v-else>&#10003;</template>
-        </div>
+        <div
+          class="cab-success-check"
+          :class="{ 'cab-success-check-skip': supSuccessInfo.skipped }"
+          v-html="supSuccessInfo.skipped ? cabIconSvg.x : cabIconSvg.check"
+        ></div>
         <h2>{{ supSuccessInfo.skipped ? 'Поставка отмечена как ненужная' : 'Заявка отправлена' }}</h2>
         <div class="cab-success-date">{{ supSuccessInfo.supplier_name }} — {{ fmtDate(supSuccessInfo.delivery_date) }}</div>
         <div v-if="!supSuccessInfo.skipped" class="cab-success-stats">
@@ -1175,12 +1197,12 @@
     <!-- ══════ Mobile tab bar ══════ -->
     <div class="mob-tabbar">
       <button v-for="tab in mainTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
-        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'info' ? '\u{2139}' : tab.id === 'surveys' ? '\u{2705}' : tab.id === 'stock' ? '\u{1F4CB}' : tab.id === 'scanner' ? '\u{1F4F7}' : '\u{2699}' }}</span>
+        <span class="mob-tab-icon" v-html="tabIconSvg(tab.id)"></span>
         <span class="mob-tab-label">{{ tab.label }}</span>
         <span v-if="tab.badge" class="mob-tab-badge">{{ tab.badge }}</span>
       </button>
       <button class="mob-tab" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">
-        <span class="mob-tab-icon">&#128100;</span>
+        <span class="mob-tab-icon" v-html="cabIconSvg.profile"></span>
         <span class="mob-tab-label">Профиль</span>
       </button>
     </div>
@@ -1230,6 +1252,49 @@ const cabBrand = computed(() => {
 });
 const isPizzaStarCabinet = computed(() => roStore.restaurant?.legal_entity_group === 'PS');
 const canUseCardSearch = computed(() => !isPizzaStarCabinet.value);
+const cabIconSvg = {
+  dashboard: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/><path d="M9.5 20v-6h5v6"/></svg>',
+  orders: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4-8-4Z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></svg>',
+  history: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/><path d="M12 8v4l3 2"/></svg>',
+  info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5h.01"/></svg>',
+  surveys: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M9 9h6"/><path d="M9 13h6"/><path d="M8.5 17l1.5 1.5 3-3"/></svg>',
+  stock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>',
+  scanner: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8"/><path d="M12 8v8"/><path d="M16 8v8"/></svg>',
+  search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>',
+  profile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
+  external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h8v8"/><path d="M16 8 7 17"/></svg>',
+  help: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 0 1 4.6 1.2c0 1.8-2.4 2-2.4 3.8"/><path d="M12 17.5h.01"/></svg>',
+  file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l3 3v15H7z"/><path d="M14 3v4h4"/><path d="M9.5 12h5"/><path d="M9.5 16h5"/></svg>',
+  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17l9-10"/></svg>',
+  x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10"/><path d="M17 7 7 17"/></svg>',
+  skip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M7 17 17 7"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.5 4 4-.5L18.5 9 15 5.5 4 16.5Z"/><path d="m13.5 7 3.5 3.5"/></svg>',
+};
+const supplierIconSvg = {
+  drinks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h4"/><path d="M9 3v3l-2 2v11a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V8l-2-2V3"/><path d="M7 12h6"/><path d="M16 7h2l1 3v9a2 2 0 0 1-2 2h-1"/><path d="M16 11h3"/></svg>',
+  vegetables: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14c-2.2-2.8-.4-6.5 4.5-8 0 4-1.5 6.5-4.5 8Z"/><path d="M14 14c.2-3.8 3-6.2 6.5-5.8-1 3.5-3.4 5.6-6.5 5.8Z"/><path d="M5 15h14l-1.2 3.4A4 4 0 0 1 14 21h-4a4 4 0 0 1-3.8-2.6L5 15Z"/><path d="M10 16.5h4"/></svg>',
+  sauce: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v4l-2 3v8a3 3 0 0 0 3 3h2a3 3 0 0 0 3-3v-8l-2-3V3"/><path d="M8 12h8"/><path d="M9 16h6"/><path d="M12 8v1"/></svg>',
+  package: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4-8-4Z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/><path d="M8 6.2 16 10"/></svg>',
+};
+const externalOrderLinks = [
+  { id: 'lidskae', name: 'Лидское пиво', url: 'https://client.lidskae.by/catalog', iconSvg: supplierIconSvg.drinks, iconClass: 'supplier-icon-drinks' },
+  { id: 'salatoria', name: 'Салатория', url: 'http://salatoria.liam.by/my_zakaz/ru_RU', iconSvg: supplierIconSvg.vegetables, iconClass: 'supplier-icon-vegetables' },
+];
+const externalSupplierLinks = computed(() => (
+  roStore.restaurant?.legal_entity_group === 'BK_VM' ? externalOrderLinks : []
+));
+
+function supplierIcon(name) {
+  const n = String(name || '').toLowerCase();
+  if (n.includes('камако')) return { svg: supplierIconSvg.sauce, className: 'supplier-icon-sauce' };
+  if (n.includes('лидск')) return { svg: supplierIconSvg.drinks, className: 'supplier-icon-drinks' };
+  if (n.includes('салатор') || n.includes('планета')) return { svg: supplierIconSvg.vegetables, className: 'supplier-icon-vegetables' };
+  return { svg: supplierIconSvg.package, className: 'supplier-icon-neutral' };
+}
+
+function tabIconSvg(tabId) {
+  return cabIconSvg[tabId] || cabIconSvg.profile;
+}
 
 // Адрес без дублирования города
 const restaurantAddress = computed(() => {
@@ -1501,7 +1566,7 @@ const urgentItems = computed(() => {
   if (openDays.length) {
     items.push({
       key: 'del', type: 'warn',
-      icon: '&#128230;', title: `Основная поставка: ${openDays.length} дн. без заявки`,
+      icon: cabIconSvg.orders, title: `Основная поставка: ${openDays.length} дн. без заявки`,
       subtitle: openDays.map(d => d.day_name).join(', '),
       deadline: earliest(openDays),
       action: async () => { await switchTab('orders', 'delivery'); if (openDays[0]) delSelectDay(openDays[0].date); },
@@ -1513,7 +1578,7 @@ const urgentItems = computed(() => {
     if (openDates.length) {
       items.push({
         key: 'sup_' + sup.id, type: 'orange',
-        icon: '&#128230;', title: `${sup.name}: ${openDates.length} дн. без заявки`,
+        icon: supplierIcon(sup.name).svg, title: `${sup.name}: ${openDates.length} дн. без заявки`,
         subtitle: openDates.map(d => d.delivery_day_name).join(', '),
         deadline: earliest(openDates),
         action: () => switchTab('orders', 'sup_' + sup.id),
@@ -1524,7 +1589,7 @@ const urgentItems = computed(() => {
   if (stockCollection.active && !stockCollection.collection?.submitted) {
     items.push({
       key: 'stock', type: 'alert',
-      icon: '&#128203;', title: 'Сбор остатков',
+      icon: cabIconSvg.stock, title: 'Сбор остатков',
       subtitle: stockCollection.collection?.name || 'Нужно заполнить',
       deadline: '9999-12-31 23:59',
       action: () => switchTab('stock'),
@@ -2853,8 +2918,8 @@ onUnmounted(() => {
 .sb-item:hover { background: rgba(255,255,255,0.12); color: white; }
 .sb-item.active { background: rgba(231,111,81,0.3); color: #F4A261; }
 .sb-item-link { text-decoration: none; }
-.sb-item-ext { margin-left: auto; font-size: 11px; color: rgba(255,255,255,0.4); }
-.sb-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
+.sb-item-ext { margin-left: auto; width: 16px; height: 16px; color: rgba(255,255,255,0.4); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sb-icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sb-badge { margin-left: auto; min-width: 20px; height: 20px; border-radius: 10px; background: #E76F51; color: white; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 6px; flex-shrink: 0; }
 .sb-badge.warn { background: #f59e0b; }
 .sb-badge.ok { background: #16a34a; }
@@ -2891,8 +2956,6 @@ onUnmounted(() => {
   flex-shrink: 0;
   background: rgba(42,171,238,0.22);
   color: #8fd8ff;
-  font-size: 13px;
-  font-weight: 900;
 }
 .sb-rest {
   background: rgba(255,255,255,0.06); border-radius: 13px;
@@ -2994,7 +3057,58 @@ onUnmounted(() => {
 .dash-card--green { border-left-color: #16a34a; }
 .dash-card--orange { border-left-color: #ea580c; }
 .dash-card--alert { border-left-color: #dc2626; }
-.dash-card-icon { font-size: 26px; flex-shrink: 0; }
+.dash-card-icon {
+  width: 34px; height: 34px; border-radius: 12px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #FFF5F2; color: #E76F51; border: 1px solid rgba(231,111,81,.18);
+}
+.dash-card-icon svg,
+.dash-action-icon svg,
+.mob-tab-icon svg,
+.sb-icon svg,
+.sb-help-icon svg,
+.sb-item-ext svg,
+.sb-ext svg,
+.ord-tab-ext svg,
+.info-file-icon svg,
+.sup-skip-icon svg,
+.inline-ui-icon svg,
+.hist-edited-mark svg {
+  width: 20px; height: 20px; display: block; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round;
+}
+:deep(.dash-card-icon svg),
+:deep(.dash-action-icon svg),
+:deep(.mob-tab-icon svg),
+:deep(.sb-icon svg),
+:deep(.sb-help-icon svg),
+:deep(.sb-item-ext svg),
+:deep(.sb-ext svg),
+:deep(.ord-tab-ext svg),
+:deep(.info-file-icon svg),
+:deep(.sup-skip-icon svg),
+:deep(.inline-ui-icon svg),
+:deep(.hist-edited-mark svg),
+:deep(.supplier-icon svg) {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+:deep(.dash-card-icon svg),
+:deep(.dash-action-icon svg),
+:deep(.mob-tab-icon svg),
+:deep(.sb-icon svg),
+:deep(.sb-help-icon svg),
+:deep(.sb-item-ext svg),
+:deep(.sb-ext svg),
+:deep(.ord-tab-ext svg),
+:deep(.info-file-icon svg),
+:deep(.sup-skip-icon svg) {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2.1;
+}
 .dash-card-body { flex: 1; min-width: 0; }
 .dash-card-title { font-size: 13px; font-weight: 700; color: #502314; }
 .dash-card-sub { font-size: 11px; color: #8b7355; margin-top: 1px; }
@@ -3015,7 +3129,11 @@ onUnmounted(() => {
 .dash-action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
 .dash-action { display: flex; flex-direction: column; align-items: center; gap: 8px; background: white; border-radius: 16px; padding: 20px 12px; border: 1px solid #EDE8E3; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 700; color: #502314; text-decoration: none; transition: all 0.18s; }
 .dash-action:hover { border-color: rgba(231,111,81,0.3); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-.dash-action-icon { font-size: 28px; }
+.dash-action-icon {
+  width: 34px; height: 34px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  background: #FFF5F2; color: #E76F51; border: 1px solid rgba(231,111,81,.18);
+}
+.dash-action:hover .dash-action-icon { background: #E76F51; color: white; }
 .dash-action--alert { border-color: rgba(231,111,81,0.2); }
 
 .dash-recent { }
@@ -3036,6 +3154,24 @@ onUnmounted(() => {
 .st-draft { background: #f5f0eb; color: #8b7355; }
 .st-locked { background: #fef2f2; color: #dc2626; }
 
+.supplier-icon {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; line-height: 1; background: #FAF7F4; border: 1px solid #EDE8E3;
+}
+.supplier-icon svg { width: 70%; height: 70%; display: block; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+:deep(.supplier-icon svg) { width: 70%; height: 70%; stroke-width: 2.1; }
+.supplier-icon-sm { width: 24px; height: 24px; }
+.supplier-icon-xs { width: 18px; height: 18px; border-radius: 6px; }
+.supplier-icon-xs svg { width: 72%; height: 72%; stroke-width: 2.4; }
+:deep(.supplier-icon-xs svg) { width: 72%; height: 72%; stroke-width: 2.4; }
+.supplier-icon-drinks { color: #0f766e; background: #ecfeff; border-color: rgba(15,118,110,.18); }
+.supplier-icon-vegetables { color: #15803d; background: #f0fdf4; border-color: rgba(21,128,61,.18); }
+.supplier-icon-sauce { color: #c2410c; background: #fff7ed; border-color: rgba(194,65,12,.18); }
+.supplier-icon-neutral { color: #6b3e2c; background: #FAF7F4; border-color: #EDE8E3; }
+
+.sb-item-link { text-decoration: none; }
+.sb-ext { margin-left: auto; width: 16px; height: 16px; color: #b08a70; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
 .dash-important {
   background: white; border: 1px solid #EDE8E3; border-radius: 16px; padding: 16px 18px; margin-bottom: 20px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
@@ -3051,6 +3187,8 @@ onUnmounted(() => {
 .ord-tab { flex-shrink: 0; padding: 6px 14px; border-radius: 10px; border: 1.5px solid #EDE8E3; background: white; cursor: pointer; font-size: 12px; font-weight: 700; color: #8b7355; font-family: inherit; transition: all 0.18s; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ord-tab:hover:not(.active) { border-color: #502314; color: #502314; }
 .ord-tab.active { background: #502314; color: white; border-color: #502314; }
+.ord-tab-link { text-decoration: none; }
+.ord-tab-ext { width: 15px; height: 15px; color: #b08a70; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .ord-tab-badge { font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
 .ord-tab-badge.warn { background: #f59e0b; color: white; }
 .ord-tab-badge.ok { background: #16a34a; color: white; }
@@ -3087,9 +3225,11 @@ onUnmounted(() => {
 .day-tab-label { display: flex; align-items: center; gap: 5px; }
 .day-tab-name { display: block; font-size: 12px; font-weight: 700; color: #502314; }
 .day-tab-date { display: block; font-size: 10px; color: #8b7355; margin-top: 1px; }
-.day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
+.day-tab-mark { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #F5F0EB; }
+.day-tab-mark svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+:deep(.day-tab-mark svg) { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .day-tab-mark.done { background: #16a34a; color: white; }
-.day-tab-mark.skipped { background: #9ca3af; color: white; font-size: 11px; }
+.day-tab-mark.skipped { background: #9ca3af; color: white; }
 .day-tab-mark.closed { background: #9ca3af; color: white; }
 
 .sup-skip-banner {
@@ -3098,7 +3238,7 @@ onUnmounted(() => {
   line-height: 1.3;
 }
 .sup-skip-banner strong { font-size: 13px; }
-.sup-skip-icon { font-size: 14px; }
+.sup-skip-icon { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sup-skip-hint { font-size: 11px; opacity: 0.75; }
 
 
@@ -3208,11 +3348,13 @@ tr.del-err { background: #fef2f2; }
 .cab-success-check {
   width: 76px; height: 76px; border-radius: 50%;
   background: linear-gradient(135deg, #22c55e, #16a34a);
-  color: white; font-size: 38px; font-weight: 700;
+  color: white;
   display: flex; align-items: center; justify-content: center;
   margin: 0 auto 18px;
   box-shadow: 0 8px 24px rgba(22, 163, 74, 0.3);
 }
+.cab-success-check svg { width: 38px; height: 38px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+:deep(.cab-success-check svg) { width: 38px; height: 38px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .cab-success-check-skip {
   background: linear-gradient(135deg, #fb923c, #ea580c);
   box-shadow: 0 8px 24px rgba(234, 88, 12, 0.3);
@@ -3282,7 +3424,10 @@ tr.del-err { background: #fef2f2; }
 .item-name { font-size: 14px; font-weight: 500; color: #502314; }
 .item-hint { font-size: 10px; color: #2563eb; background: #eff6ff; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
 .item-hint-warn { color: #92400e; background: #fef3c7; }
-.item-edit-mark { font-size: 10px; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; font-weight: 700; cursor: help; white-space: nowrap; }
+.item-edit-mark { font-size: 10px; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; font-weight: 700; cursor: help; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
+.inline-ui-icon { width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.inline-ui-icon svg { width: 12px; height: 12px; stroke-width: 2.4; }
+:deep(.inline-ui-icon svg) { width: 12px; height: 12px; stroke-width: 2.4; }
 .item-admin-edited { background: #fffbeb; }
 .item-admin-edited:hover { background: #fef3c7; }
 .item-input { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -3352,7 +3497,9 @@ tr.del-err { background: #fef2f2; }
 .hist-qty-orig { font-size: 13px; color: #9e8a7a; text-decoration: line-through; }
 .hist-qty-arrow { font-size: 12px; color: #9e8a7a; }
 .hist-qty-admin { font-weight: 700; color: #E76F51; font-size: 15px; }
-.hist-edited-mark { font-size: 11px; color: #d97706; }
+.hist-edited-mark { width: 14px; height: 14px; color: #d97706; display: inline-flex; align-items: center; justify-content: center; }
+.hist-edited-mark svg { width: 14px; height: 14px; stroke-width: 2.2; }
+:deep(.hist-edited-mark svg) { width: 14px; height: 14px; stroke-width: 2.2; }
 
 /* Stock */
 .stock-card { background: white; border-radius: 18px; padding: 32px 24px; margin: 0 0 16px; text-align: center; border: 1px solid #EDE8E3; }
@@ -3795,7 +3942,7 @@ tr.del-err { background: #fef2f2; }
 }
 .info-attachment.image { padding: 0; background: white; }
 .info-attachment img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #F4ECE4; }
-.info-file-icon { display: block; font-size: 24px; padding: 8px 8px 2px; }
+.info-file-icon { display: flex; width: 38px; height: 38px; align-items: center; justify-content: center; padding: 8px 8px 2px; color: #8b7355; }
 .info-attachment span:not(.info-file-icon) { display: block; padding: 7px 8px 2px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .info-attachment small { display: block; padding: 0 8px 8px; color: #8b7355; white-space: nowrap; font-size: 12px; }
 .info-attachment:hover { border-color: #E76F51; background: #F4ECE4; }
@@ -3946,7 +4093,7 @@ tr.del-err { background: #fef2f2; }
   color: #B0A090; transition: color 0.15s; position: relative;
 }
 .mob-tab.active { color: #E76F51; }
-.mob-tab-icon { font-size: 20px; }
+.mob-tab-icon { height: 20px; display: flex; align-items: center; justify-content: center; }
 .mob-tab-label { font-size: 9px; font-weight: 700; }
 .mob-tab-badge {
   position: absolute; top: 2px; right: calc(50% - 16px);

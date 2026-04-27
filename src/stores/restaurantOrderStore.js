@@ -16,6 +16,15 @@ function buildHeaders() {
   return h;
 }
 
+function buildAuthHeaders() {
+  const h = {};
+  const t = getToken();
+  if (t) h['X-RO-Token'] = t;
+  const st = localStorage.getItem('bk_session_token');
+  if (st) h['X-Session-Token'] = st;
+  return h;
+}
+
 async function api(path, opts = {}) {
   const url = `${API_BASE}/${path}`;
   const res = await fetch(url, { headers: buildHeaders(), ...opts });
@@ -482,6 +491,92 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data.broadcasts || [];
   }
 
+  async function loadCabinetPosts(limit = 50) {
+    const data = await api(`cabinet-posts?limit=${encodeURIComponent(limit)}`);
+    return data.posts || [];
+  }
+
+  async function markCabinetPostsRead(ids) {
+    return await api('cabinet-post-read', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  }
+
+  async function adminGetCabinetPosts(group = '') {
+    const qs = group ? `?group=${encodeURIComponent(group)}` : '';
+    const data = await api(`admin/cabinet-posts${qs}`);
+    return data.posts || [];
+  }
+
+  async function adminCreateCabinetPost(payload, files = []) {
+    const fd = new FormData();
+    for (const [key, value] of Object.entries(payload || {})) {
+      if (Array.isArray(value) || (value && typeof value === 'object')) {
+        fd.append(key, JSON.stringify(value));
+      } else {
+        fd.append(key, value == null ? '' : String(value));
+      }
+    }
+    for (const file of files || []) {
+      fd.append('files[]', file);
+    }
+    const res = await fetch(`${API_BASE}/admin/cabinet-posts`, {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: fd,
+    });
+    const text = await res.text();
+    let data = {};
+    if (text) { try { data = JSON.parse(text); } catch {} }
+    if (!res.ok) throw new Error(data.error || `Ошибка сервера (${res.status})`);
+    return data;
+  }
+
+  async function adminUpdateCabinetPost(postId, payload) {
+    return await api(`admin/cabinet-posts/${postId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    });
+  }
+
+  async function adminDeleteCabinetPost(postId) {
+    return await api(`admin/cabinet-posts/${postId}`, { method: 'DELETE' });
+  }
+
+  async function downloadCabinetFile(file) {
+    const url = file?.url || ('/api/' + String(file?.file_path || '').replace(/^\/+/, ''));
+    if (!url || url === '/api/') throw new Error('Файл не найден');
+    const res = await fetch(url, { headers: buildAuthHeaders() });
+    const blob = await res.blob();
+    if (!res.ok) {
+      let data = null;
+      try { data = JSON.parse(await blob.text()); } catch {}
+      throw new Error(data?.error || `Ошибка сервера (${res.status})`);
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = file.file_name || 'file';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  async function getCabinetFileObjectUrl(file) {
+    const url = file?.url || ('/api/' + String(file?.file_path || '').replace(/^\/+/, ''));
+    if (!url || url === '/api/') throw new Error('Файл не найден');
+    const res = await fetch(url, { headers: buildAuthHeaders() });
+    const blob = await res.blob();
+    if (!res.ok) {
+      let data = null;
+      try { data = JSON.parse(await blob.text()); } catch {}
+      throw new Error(data?.error || `Ошибка сервера (${res.status})`);
+    }
+    return URL.createObjectURL(blob);
+  }
+
   async function loadSurveys() {
     const data = await api('my-surveys');
     return data.surveys || [];
@@ -525,7 +620,9 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
-    loadBroadcasts, loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
+    loadBroadcasts, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
+    adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
+    loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
     getStockCollectionStatus, getStockCollectionData, submitStockCollection,
     adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,

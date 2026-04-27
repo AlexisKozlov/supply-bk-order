@@ -469,7 +469,8 @@ const toolsGroups = [
     { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
     { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
   ]},
-  { title: 'Рестораны', items: [
+  { title: 'Управление ресторанами', items: [
+    { module: 'restaurant-orders', route: 'restaurant-cabinet-manager', icon: 'building', label: 'Кабинеты ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Неизвестные штрихкоды', badgeKey: 'scan-unknown' },
     { module: 'surveys', route: 'surveys', icon: 'document', label: 'Опросы' },
