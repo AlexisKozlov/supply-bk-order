@@ -49,11 +49,10 @@ $auto = $pdo->exec("
 ");
 echo "Автоверифицировано подписок (по уже привязанным ro_users): {$auto}\n";
 
-// Шаг 2. Дедлайн = сейчас + 48 часов. Помечаем только те старые подписки,
-// у которых дедлайн ещё не был выставлен, чтобы повторный запуск не сдвигал срок.
+// Шаг 2. Дедлайн ставим только тем, у кого он ещё не выставлен (повторный
+// запуск его не сдвигает). Большинству он уже стоит с предыдущего запуска.
 $deadlineDt = (new DateTime('now', new DateTimeZone('Europe/Minsk')))->modify('+48 hours');
 $deadlineSql = $deadlineDt->format('Y-m-d H:i:s');
-$deadlineHuman = $deadlineDt->format('d.m H:i');
 
 $pdo->prepare("
     UPDATE ro_telegram_subs
@@ -61,6 +60,15 @@ $pdo->prepare("
     WHERE verified_at IS NULL
       AND must_reverify_by IS NULL
 ")->execute([$deadlineSql]);
+
+// Реальный дедлайн берём из БД (он мог быть выставлен ранее и продлён вручную).
+$dlRow = $pdo->query("
+    SELECT MIN(must_reverify_by) min_dl, MAX(must_reverify_by) max_dl
+    FROM ro_telegram_subs
+    WHERE verified_at IS NULL
+")->fetch();
+$dlForText = $dlRow['min_dl'] ?: $deadlineSql;
+$deadlineHuman = (new DateTime($dlForText, new DateTimeZone('Europe/Minsk')))->format('d.m H:i');
 
 $rows = $pdo->query("
     SELECT DISTINCT chat_id
@@ -74,13 +82,16 @@ echo "Уникальных непроверенных chat_id: " . count($rows) 
 echo "Крайний срок (Минск): {$deadlineHuman}\n\n";
 
 // Текст рассылки.
-$text = "⚠️ <b>Важно: до {$deadlineHuman} привяжите Telegram заново</b>\n\n"
-     . "Мы усиливаем безопасность бота: подписки на рестораны больше не выдаются «по выбору в боте». "
-     . "Чтобы продолжать пользоваться ботом, привяжите свой Telegram через личный кабинет:\n\n"
-     . "1. Зайдите на {$SITE_URL} → войдите как ресторан.\n"
-     . "2. Профиль → Telegram → «Получить код».\n"
-     . "3. Пришлите 6-значный код в этот чат.\n\n"
-     . "После {$deadlineHuman} все непривязанные подписки будут отключены.";
+$profileUrl = $SITE_URL . '/restaurant/profile';
+$text = "⚠️ <b>Важно: сегодня в {$deadlineHuman} истекает срок перепривязки бота</b>\n\n"
+     . "Мы усилили безопасность: получать данные по ресторану в боте теперь могут только подтверждённые сотрудники. "
+     . "Ваша подписка ещё не подтверждена и сегодня будет отключена.\n\n"
+     . "Чтобы не потерять доступ:\n"
+     . "1. Откройте профиль ресторана: {$profileUrl}\n"
+     . "2. Нажмите «Получить код привязки» (код действует 10 минут).\n"
+     . "3. Пришлите этот код мне сюда, в чат.\n\n"
+     . "После подтверждения в профиле появится «✓ привязан», и бот продолжит работать как обычно. "
+     . "Если ботом пользуются несколько сотрудников ресторана — код получает каждый со своего входа в кабинет.";
 
 $sent = 0; $fail = 0;
 foreach ($rows as $row) {

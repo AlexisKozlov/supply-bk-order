@@ -4301,6 +4301,37 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    // Массовая отвязка просроченных подписок ресторанов: удаляем только те
+    // строки, у которых дедлайн перепривязки уже прошёл и подтверждения нет.
+    if ($fn === 'tg_admin_unlink_expired') {
+        $confirm = !empty($body['confirm']);
+        $countSt = $pdo->query("
+            SELECT COUNT(*) c
+            FROM ro_telegram_subs
+            WHERE verified_at IS NULL
+              AND must_reverify_by IS NOT NULL
+              AND must_reverify_by < NOW()
+        ");
+        $count = (int)($countSt->fetch()['c'] ?? 0);
+
+        if (!$confirm) {
+            respond(['count' => $count]);
+        }
+
+        $del = $pdo->exec("
+            DELETE FROM ro_telegram_subs
+            WHERE verified_at IS NULL
+              AND must_reverify_by IS NOT NULL
+              AND must_reverify_by < NOW()
+        ");
+
+        $caller = getSessionUser($pdo);
+        $callerName = $caller['name'] ?? 'unknown';
+        auditLog($pdo, 'tg_unlink_expired', 'ro_telegram_subs', '', $callerName, ['deleted' => $del]);
+
+        respond(['success' => true, 'deleted' => $del]);
+    }
+
     // ═══ Корректировки заказов ═══
 
     if ($fn === 'correction_review') {

@@ -313,6 +313,9 @@
       <div class="tga-subtabs">
         <button class="tga-subtab" :class="{ active: restaurantSubTab === 'rests' }" @click="restaurantSubTab = 'rests'">Рестораны</button>
         <button class="tga-subtab" :class="{ active: restaurantSubTab === 'notif' }" @click="restaurantSubTab = 'notif'">Уведомления подписчиков</button>
+        <button v-if="restaurantExpiredSubCount > 0" class="btn secondary" style="margin-left:auto;color:#d32f2f;" @click="unlinkExpiredSubs" :disabled="unlinkExpiredLoading">
+          {{ unlinkExpiredLoading ? 'Отвязываем…' : `Отвязать просроченные (${restaurantExpiredSubCount})` }}
+        </button>
       </div>
 
       <!-- Рестораны -->
@@ -597,6 +600,7 @@ const restaurantFilter = ref('all')
 const restaurantSearch = ref('')
 const expandedRest = ref(null)
 const restaurantSubTab = ref('rests')
+const unlinkExpiredLoading = ref(false)
 
 // Corrections
 const corrStats = ref(null)
@@ -891,6 +895,33 @@ async function unlinkUser(u) {
     loadData()
   } catch (e) {
     alert('Ошибка: ' + (e.message || e))
+  }
+}
+
+async function unlinkExpiredSubs() {
+  if (unlinkExpiredLoading.value) return
+  unlinkExpiredLoading.value = true
+  try {
+    const { data: pre } = await db.rpc('tg_admin_unlink_expired', { confirm: false })
+    const count = pre?.count || 0
+    if (!count) {
+      alert('Просроченных подписок нет.')
+      return
+    }
+    const ok = confirm(
+      `Удалить ${count} просроченных Telegram-подписок?\n\n`
+      + `Удалятся только записи без подтверждения, у которых истёк срок перепривязки. `
+      + `Активные подписки и переходный период не затрагиваются. `
+      + `Сотрудники смогут привязаться заново обычным способом — через код в личном кабинете.`
+    )
+    if (!ok) return
+    const { data } = await db.rpc('tg_admin_unlink_expired', { confirm: true })
+    alert(`Удалено: ${data?.deleted || 0}`)
+    loadData()
+  } catch (e) {
+    alert('Ошибка: ' + (e.message || e))
+  } finally {
+    unlinkExpiredLoading.value = false
   }
 }
 
