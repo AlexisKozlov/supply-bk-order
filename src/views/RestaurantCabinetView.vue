@@ -43,14 +43,15 @@
         :class="{ active: activeTab === 'orders' && orderSubTab === 'history' }"
         @click="switchTab('orders', 'history')">
         <span class="sb-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></span>
-        История
+        История заказов
       </button>
 
       <div class="sb-label">Другое</div>
       <template v-for="tab in mainTabs.filter(t => t.id !== 'dashboard' && t.id !== 'orders')" :key="tab.id">
         <button class="sb-item" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
           <span class="sb-icon">
-            <svg v-if="tab.id === 'surveys'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            <svg v-if="tab.id === 'info'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v5h1"/></svg>
+            <svg v-else-if="tab.id === 'surveys'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
             <svg v-else-if="tab.id === 'stock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             <svg v-else-if="tab.id === 'scanner'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
           </span>
@@ -93,7 +94,7 @@
     <div class="cab-main">
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Остатки' : activeTab === 'scanner' ? 'Сканер товаров' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'scanner' ? 'Сканер товаров' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров (BETA)">
@@ -116,71 +117,146 @@
 
     <!-- ══════ TAB: Дашборд ══════ -->
     <section v-if="activeTab === 'dashboard' && !globalLoading && !globalError" class="cab-section">
-      <!-- Срочные карточки -->
-      <div v-if="urgentItems.length" class="dash-urgent">
-        <div v-for="item in urgentItems" :key="item.key" class="dash-card" :class="'dash-card--' + item.type" @click="item.action">
-          <div class="dash-card-icon" v-html="item.icon"></div>
-          <div class="dash-card-body">
-            <div class="dash-card-title">{{ item.title }}</div>
-            <div class="dash-card-sub">{{ item.subtitle }}</div>
+      <div class="dash-wrap">
+        <div class="dash-col-main">
+          <!-- Срочные карточки -->
+          <div v-if="urgentItems.length" class="dash-urgent">
+            <div v-for="item in urgentItems" :key="item.key" class="dash-card" :class="'dash-card--' + item.type" @click="item.action">
+              <div class="dash-card-icon" v-html="item.icon"></div>
+              <div class="dash-card-body">
+                <div class="dash-card-title">{{ item.title }}</div>
+                <div class="dash-card-sub">{{ item.subtitle }}</div>
+              </div>
+              <div v-if="item.countdown" class="dash-card-time">{{ item.countdown }}</div>
+              <svg class="dash-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
           </div>
-          <div v-if="item.countdown" class="dash-card-time">{{ item.countdown }}</div>
-          <svg class="dash-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+
+          <!-- Сводка -->
+          <div class="dash-grid">
+            <div class="dash-stat" @click="switchTab('orders')">
+              <div class="dash-stat-num">{{ dashOrdersSubmitted }}</div>
+              <div class="dash-stat-label">Заказов подано</div>
+            </div>
+            <div class="dash-stat" @click="switchTab('orders')">
+              <div class="dash-stat-num">{{ dashOrdersPending }}</div>
+              <div class="dash-stat-label">Ожидают заявку</div>
+            </div>
+            <div class="dash-stat" v-if="stockCollection.active" @click="switchTab('stock')">
+              <div class="dash-stat-num dash-stat-alert">!</div>
+              <div class="dash-stat-label">Сбор остатков</div>
+            </div>
+          </div>
+
+          <!-- Быстрые действия -->
+          <div class="dash-actions">
+            <h3 class="dash-section-title">Быстрые действия</h3>
+            <div class="dash-action-grid">
+              <button class="dash-action" @click="switchTab('orders')">
+                <span class="dash-action-icon">&#128230;</span>
+                <span>Заказы</span>
+              </button>
+              <a v-if="canUseCardSearch" class="dash-action" href="/search-cards" target="_blank">
+                <span class="dash-action-icon">&#128269;</span>
+                <span>Карточки</span>
+              </a>
+              <button class="dash-action" @click="switchTab('profile')">
+                <span class="dash-action-icon">&#9881;</span>
+                <span>Профиль</span>
+              </button>
+              <button v-if="stockCollection.active" class="dash-action dash-action--alert" @click="switchTab('stock')">
+                <span class="dash-action-icon">&#128203;</span>
+                <span>Сбор остатков</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Последние заказы -->
+          <div v-if="historyOrders.length" class="dash-recent">
+            <h3 class="dash-section-title">Последние заказы</h3>
+            <div v-for="order in historyOrders.slice(0, 5)" :key="order.id" class="dash-order" @click="openHistoryOrder(order)">
+              <div class="dash-order-left">
+                <span class="dash-order-source" :class="'src-' + order.source">{{ order.source_name }}</span>
+                <span class="dash-order-date">{{ fmtDate(order.delivery_date) }}</span>
+              </div>
+              <div class="dash-order-right">
+                <span>{{ order.item_count }} поз.</span>
+                <span class="dash-order-status" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dash-col-side">
+          <article v-if="latestImportantPost" class="dash-important" :class="{ unread: !latestImportantPost.is_read }">
+            <div class="dash-important-head">
+              <div>
+                <h2>{{ latestImportantPost.title || 'Важная информация' }}</h2>
+                <div class="dash-important-meta">
+                  {{ latestImportantPost.created_by || 'Отдел закупок' }} · {{ fmtDateTime(latestImportantPost.published_at || latestImportantPost.created_at) }}
+                </div>
+              </div>
+              <span v-if="!latestImportantPost.is_read" class="info-unread">Новое</span>
+            </div>
+            <p>{{ latestImportantPost.message }}</p>
+            <div v-if="latestImportantPost.files?.length" class="info-attachments">
+              <button
+                v-for="file in latestImportantPost.files"
+                :key="file.id"
+                class="info-attachment"
+                :class="{ image: isImportantImage(file) }"
+                @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
+              >
+                <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
+                <span v-else class="info-file-icon">📄</span>
+                <span>{{ file.file_name }}</span>
+                <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
+              </button>
+            </div>
+            <button v-if="!latestImportantPost.is_read" class="info-read-btn" @click="markImportantRead(latestImportantPost)">Отметить прочитанным</button>
+          </article>
         </div>
       </div>
+    </section>
 
-      <!-- Сводка -->
-      <div class="dash-grid">
-        <div class="dash-stat" @click="switchTab('orders')">
-          <div class="dash-stat-num">{{ dashOrdersSubmitted }}</div>
-          <div class="dash-stat-label">Заказов подано</div>
-        </div>
-        <div class="dash-stat" @click="switchTab('orders')">
-          <div class="dash-stat-num">{{ dashOrdersPending }}</div>
-          <div class="dash-stat-label">Ожидают заявку</div>
-        </div>
-        <div class="dash-stat" v-if="stockCollection.active" @click="switchTab('stock')">
-          <div class="dash-stat-num dash-stat-alert">!</div>
-          <div class="dash-stat-label">Сбор остатков</div>
-        </div>
+    <!-- ══════ TAB: Важная информация ══════ -->
+    <section v-if="activeTab === 'info' && !globalLoading && !globalError" class="cab-section">
+      <div class="info-toolbar">
+        <button class="btn btn-outline btn-sm" @click="loadImportantPosts" :disabled="importantLoading">
+          {{ importantLoading ? 'Загрузка...' : 'Обновить' }}
+        </button>
       </div>
-
-      <!-- Быстрые действия -->
-      <div class="dash-actions">
-        <h3 class="dash-section-title">Быстрые действия</h3>
-        <div class="dash-action-grid">
-          <button class="dash-action" @click="switchTab('orders')">
-            <span class="dash-action-icon">&#128230;</span>
-            <span>Заказы</span>
-          </button>
-          <a v-if="canUseCardSearch" class="dash-action" href="/search-cards" target="_blank">
-            <span class="dash-action-icon">&#128269;</span>
-            <span>Карточки</span>
-          </a>
-          <button class="dash-action" @click="switchTab('profile')">
-            <span class="dash-action-icon">&#9881;</span>
-            <span>Профиль</span>
-          </button>
-          <button v-if="stockCollection.active" class="dash-action dash-action--alert" @click="switchTab('stock')">
-            <span class="dash-action-icon">&#128203;</span>
-            <span>Остатки</span>
-          </button>
-        </div>
+      <div v-if="importantLoading" class="cab-empty-card">Загрузка...</div>
+      <div v-else-if="!importantPosts.length" class="cab-empty-card">
+        <h2>Сообщений пока нет</h2>
+        <p>Когда отдел закупок опубликует информацию, она появится здесь.</p>
       </div>
-
-      <!-- Последние заказы -->
-      <div v-if="historyOrders.length" class="dash-recent">
-        <h3 class="dash-section-title">Последние заказы</h3>
-        <div v-for="order in historyOrders.slice(0, 5)" :key="order.id" class="dash-order" @click="openHistoryOrder(order)">
-          <div class="dash-order-left">
-            <span class="dash-order-source" :class="'src-' + order.source">{{ order.source_name }}</span>
-            <span class="dash-order-date">{{ fmtDate(order.delivery_date) }}</span>
+      <div v-else class="info-posts">
+        <article v-for="post in importantPosts" :key="post.id" class="info-post" :class="{ unread: !post.is_read }">
+          <div class="info-post-head">
+            <div>
+              <h3>{{ post.title || 'Важная информация' }}</h3>
+              <div class="info-post-meta">{{ post.created_by || 'Отдел закупок' }} · {{ fmtDateTime(post.published_at || post.created_at) }}</div>
+            </div>
+            <span v-if="!post.is_read" class="info-unread">Новое</span>
           </div>
-          <div class="dash-order-right">
-            <span>{{ order.item_count }} поз.</span>
-            <span class="dash-order-status" :class="'st-' + order.status">{{ statusLabel(order.status) }}</span>
+          <p>{{ post.message }}</p>
+          <div v-if="post.files?.length" class="info-attachments">
+            <button
+              v-for="file in post.files"
+              :key="file.id"
+              class="info-attachment"
+              :class="{ image: isImportantImage(file) }"
+              @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
+            >
+              <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
+              <span v-else class="info-file-icon">📄</span>
+              <span>{{ file.file_name }}</span>
+              <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
+            </button>
           </div>
-        </div>
+          <button v-if="!post.is_read" class="info-read-btn" @click="markImportantRead(post)">Отметить прочитанным</button>
+        </article>
       </div>
     </section>
 
@@ -951,7 +1027,40 @@
       <button class="btn btn-danger-outline btn-lg logout-full" @click="handleLogout">Выйти из аккаунта</button>
     </section>
 
-    <div v-if="currentBroadcast" class="modal-overlay" @click.self="dismissCurrentBroadcast">
+    <div v-if="currentImportantPost" class="modal-overlay" @click.self="dismissCurrentImportantPost">
+      <div class="cab-modal cab-modal-important">
+        <div class="cab-modal-head">
+          <h2>{{ currentImportantPost.title || 'Важная информация' }}</h2>
+          <button class="cab-modal-close" @click="dismissCurrentImportantPost">&times;</button>
+        </div>
+        <div class="cab-modal-body">
+          <p class="cab-info-text cab-info-text-broadcast">{{ currentImportantPost.message }}</p>
+          <div v-if="currentImportantPost.files?.length" class="info-attachments info-files-modal">
+            <button
+              v-for="file in currentImportantPost.files"
+              :key="file.id"
+              class="info-attachment"
+              :class="{ image: isImportantImage(file) }"
+              @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
+            >
+              <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
+              <span v-else class="info-file-icon">📄</span>
+              <span>{{ file.file_name }}</span>
+              <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
+            </button>
+          </div>
+          <div class="cab-info-meta">
+            {{ currentImportantPost.created_by || 'Отдел закупок' }} · {{ fmtDateTime(currentImportantPost.published_at || currentImportantPost.created_at) }}
+          </div>
+          <div class="cab-info-actions">
+            <button class="btn btn-outline" @click="switchTab('info'); dismissCurrentImportantPost()">Открыть раздел</button>
+            <button class="btn btn-primary" @click="dismissCurrentImportantPost">Понятно</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-else-if="currentBroadcast" class="modal-overlay" @click.self="dismissCurrentBroadcast">
       <div class="cab-modal cab-modal-info">
         <div class="cab-modal-head">
           <h2>{{ currentBroadcast.title || 'Сообщение от отдела закупок' }}</h2>
@@ -966,6 +1075,16 @@
             <button class="btn btn-primary" @click="dismissCurrentBroadcast">Понятно</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div v-if="importantImagePreview.show" class="modal-overlay image-preview-overlay" @click.self="closeImportantPreview">
+      <div class="important-image-modal">
+        <div class="important-image-head">
+          <span>{{ importantImagePreview.name }}</span>
+          <button @click="closeImportantPreview">&times;</button>
+        </div>
+        <img :src="importantImagePreview.url" :alt="importantImagePreview.name" />
       </div>
     </div>
 
@@ -1056,7 +1175,7 @@
     <!-- ══════ Mobile tab bar ══════ -->
     <div class="mob-tabbar">
       <button v-for="tab in mainTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
-        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'surveys' ? '\u{2705}' : tab.id === 'stock' ? '\u{1F4CB}' : tab.id === 'scanner' ? '\u{1F4F7}' : '\u{2699}' }}</span>
+        <span class="mob-tab-icon">{{ tab.id === 'dashboard' ? '\u{1F3E0}' : tab.id === 'orders' ? '\u{1F4E6}' : tab.id === 'info' ? '\u{2139}' : tab.id === 'surveys' ? '\u{2705}' : tab.id === 'stock' ? '\u{1F4CB}' : tab.id === 'scanner' ? '\u{1F4F7}' : '\u{2699}' }}</span>
         <span class="mob-tab-label">{{ tab.label }}</span>
         <span v-if="tab.badge" class="mob-tab-badge">{{ tab.badge }}</span>
       </button>
@@ -1147,6 +1266,13 @@ const stockSavedFlash = ref(false);
 const restaurantBroadcasts = ref([]);
 let restaurantBroadcastTimer = null;
 const currentBroadcast = computed(() => restaurantBroadcasts.value[0] || null);
+const importantPosts = ref([]);
+const importantLoading = ref(false);
+const importantPreviewUrls = reactive({});
+const importantImagePreview = reactive({ show: false, url: '', name: '' });
+const latestImportantPost = computed(() => importantPosts.value[0] || null);
+const currentImportantPost = computed(() => importantPosts.value.find(p => !p.is_read && Number(p.show_popup || 0) === 1) || null);
+let cabinetBackgroundRunId = 0;
 const stockDirty = computed(() => {
   for (const p of stockProducts.value) {
     const saved = stockSavedSnapshot[p.id];
@@ -1412,6 +1538,7 @@ const urgentItems = computed(() => {
 const mainTabs = computed(() => {
   const tabs = [
     { id: 'dashboard', label: 'Главная' },
+    { id: 'info', label: 'Информация', badge: importantPosts.value.filter(p => !p.is_read).length || null, badgeType: 'warn' },
     { id: 'orders', label: 'Заказы', badge: dashOrdersPending.value || null, badgeType: dashOrdersPending.value ? 'warn' : '' },
   ];
   if (surveyItems.value.length) {
@@ -1419,7 +1546,7 @@ const mainTabs = computed(() => {
   }
   if (stockCollection.active) {
     tabs.push({
-      id: 'stock', label: 'Остатки',
+      id: 'stock', label: 'Сбор остатков',
       blink: !stockCollection.collection?.submitted,
       badge: '!', badgeType: 'alert',
     });
@@ -2073,6 +2200,10 @@ async function switchTab(tab, subTab) {
   }
   if (tab === 'orders') {
     const sub = nextSub || orderSubTab.value;
+    if (sub === 'delivery') {
+      ensureDeliveryDaySelected();
+      loadPreviousDeliveryOrders();
+    }
     if (sub === 'history' && !historyOrders.value.length) loadHistory();
     if (sub && sub.startsWith('sup_')) {
       const supId = sub.slice(4);
@@ -2086,6 +2217,13 @@ async function switchTab(tab, subTab) {
   }
   if (tab === 'surveys' && !surveyItems.value.length && !surveyListLoading.value) {
     loadSurveyList();
+  }
+  if (tab === 'info') {
+    if (!importantPosts.value.length && !importantLoading.value) {
+      loadImportantPosts({ previewAll: true });
+    } else {
+      loadImportantImagePreviews(importantPosts.value.length);
+    }
   }
   if (tab === 'stock' && stockCollection.active) loadStockInline();
 }
@@ -2111,6 +2249,9 @@ function applyRouteToState() {
     orderSubTab.value = 'sup_' + supId;
     const sup = suppliers.value.find(s => String(s.id) === supId);
     if (sup && !supSelectedDates[sup.id]) supAutoSelectDate(sup);
+  } else if (name === 'restaurant-info') {
+    activeTab.value = 'info';
+    if (!importantPosts.value.length && !importantLoading.value) loadImportantPostsWithOptions({ previewAll: true });
   } else if (name === 'restaurant-surveys') {
     if (surveyItems.value.length) {
       activeTab.value = 'surveys';
@@ -2131,6 +2272,8 @@ function syncStateToRoute() {
   let target = null;
   if (activeTab.value === 'dashboard') {
     target = { name: 'restaurant-dashboard' };
+  } else if (activeTab.value === 'info') {
+    target = { name: 'restaurant-info' };
   } else if (activeTab.value === 'surveys') {
     target = { name: 'restaurant-surveys' };
   } else if (activeTab.value === 'stock') {
@@ -2346,6 +2489,91 @@ async function loadRestaurantBroadcasts() {
   }
 }
 
+async function loadImportantPosts(options = {}) {
+  return loadImportantPostsWithOptions(options);
+}
+
+async function loadImportantPostsWithOptions({ previewAll = false } = {}) {
+  importantLoading.value = true;
+  try {
+    importantPosts.value = await roStore.loadCabinetPosts(50);
+    await loadImportantImagePreviews(previewAll ? importantPosts.value.length : 1);
+  } catch (e) {
+    console.warn('[restaurant cabinet] important-posts:', e);
+  } finally {
+    importantLoading.value = false;
+  }
+}
+
+function isImportantImage(file) {
+  return String(file?.mime_type || '').startsWith('image/');
+}
+
+async function loadImportantImagePreviews(maxPosts = 1) {
+  const posts = (importantPosts.value || []).slice(0, Math.max(0, maxPosts));
+  for (const post of posts) {
+    for (const file of post.files || []) {
+      if (!isImportantImage(file) || importantPreviewUrls[file.id]) continue;
+      try {
+        importantPreviewUrls[file.id] = await roStore.getCabinetFileObjectUrl(file);
+      } catch (e) {
+        console.warn('[restaurant cabinet] image-preview:', e);
+      }
+    }
+  }
+}
+
+async function markImportantRead(post) {
+  if (!post?.id) return;
+  try {
+    await roStore.markCabinetPostsRead([post.id]);
+  } catch (e) {
+    console.warn('[restaurant cabinet] important-read:', e);
+  } finally {
+    post.is_read = true;
+  }
+}
+
+async function dismissCurrentImportantPost() {
+  const current = currentImportantPost.value;
+  if (!current?.id) return;
+  await markImportantRead(current);
+}
+
+async function downloadImportantFile(file) {
+  try {
+    await roStore.downloadCabinetFile(file);
+  } catch (e) {
+    showInfo('Файл', e.message || 'Не удалось скачать файл', 'error');
+  }
+}
+
+async function previewImportantFile(file) {
+  try {
+    if (!importantPreviewUrls[file.id]) {
+      importantPreviewUrls[file.id] = await roStore.getCabinetFileObjectUrl(file);
+    }
+    importantImagePreview.url = importantPreviewUrls[file.id];
+    importantImagePreview.name = file.file_name || 'Изображение';
+    importantImagePreview.show = true;
+  } catch (e) {
+    showInfo('Изображение', e.message || 'Не удалось открыть изображение', 'error');
+  }
+}
+
+function closeImportantPreview() {
+  importantImagePreview.show = false;
+  importantImagePreview.url = '';
+  importantImagePreview.name = '';
+}
+
+function formatImportantFileSize(size) {
+  const n = Number(size || 0);
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+  if (n >= 1024) return `${Math.round(n / 1024)} КБ`;
+  return `${n} Б`;
+}
+
 async function dismissCurrentBroadcast() {
   const current = currentBroadcast.value;
   if (!current?.id) return;
@@ -2408,6 +2636,27 @@ async function checkStockCollection() {
     if (activeTab.value === 'stock') {
       stockError.value = e.message || 'Не удалось проверить сбор остатков';
     }
+  }
+}
+
+async function ensureDeliveryDaySelected() {
+  if (!roStore.restaurantOrdersEnabled || !roStore.deliveryDays.length || delSelectedDate.value) return;
+  const today = delDateToLocalYmd(new Date());
+  const nearest = roStore.deliveryDays.find(d => d.date >= today && d.deadline_status !== 'closed')
+    || roStore.deliveryDays.find(d => d.date >= today)
+    || roStore.deliveryDays[0];
+  if (nearest) await delSelectDay(nearest.date);
+}
+
+async function loadPreviousDeliveryOrders() {
+  if (!roStore.restaurantOrdersEnabled) {
+    delPreviousOrders.value = [];
+    return;
+  }
+  try {
+    delPreviousOrders.value = (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited');
+  } catch (e) {
+    console.warn('[restaurant cabinet] previous-orders:', e);
   }
 }
 
@@ -2482,19 +2731,37 @@ async function loadCabinetData() {
     showInfo('Поставщики', e.message || 'Не удалось загрузить список поставщиков', 'error');
   }
   applyRouteToState();
-  if (roStore.restaurantOrdersEnabled && roStore.deliveryDays.length) {
-    const today = delDateToLocalYmd(new Date());
-    const nearest = roStore.deliveryDays.find(d => d.date >= today && d.deadline_status !== 'closed') || roStore.deliveryDays.find(d => d.date >= today) || roStore.deliveryDays[0];
-    if (nearest) await delSelectDay(nearest.date);
+  if (activeTab.value === 'orders' && orderSubTab.value === 'delivery') {
+    await ensureDeliveryDaySelected();
+    await loadPreviousDeliveryOrders();
   }
-  delPreviousOrders.value = roStore.restaurantOrdersEnabled
-    ? (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited')
-    : [];
-  await loadHistory();
-  await loadSurveyList();
-  await checkStockCollection();
-  await loadTgStatus();
-  await loadRestaurantBroadcasts();
+  if (activeTab.value === 'orders' && orderSubTab.value === 'history') await loadHistory();
+  if (activeTab.value === 'info') await loadImportantPostsWithOptions({ previewAll: true });
+  if (activeTab.value === 'surveys') await loadSurveyList();
+  if (activeTab.value === 'stock') await checkStockCollection();
+  if (activeTab.value === 'profile') await loadTgStatus();
+  startCabinetBackgroundLoading();
+}
+
+function startCabinetBackgroundLoading() {
+  const runId = ++cabinetBackgroundRunId;
+  const run = async (label, task) => {
+    try {
+      if (runId !== cabinetBackgroundRunId) return;
+      await task();
+    } catch (e) {
+      console.warn(`[restaurant cabinet] ${label}:`, e);
+    }
+  };
+  setTimeout(() => {
+    run('history', () => historyOrders.value.length ? null : loadHistory());
+    run('surveys', () => surveyItems.value.length ? null : loadSurveyList());
+    run('stock-status', checkStockCollection);
+    run('telegram', loadTgStatus);
+    run('important-posts', () => importantPosts.value.length ? loadImportantImagePreviews(1) : loadImportantPostsWithOptions({ previewAll: false }));
+    run('broadcasts', loadRestaurantBroadcasts);
+    run('previous-orders', loadPreviousDeliveryOrders);
+  }, 0);
 }
 
 async function retryCabinetLoad() {
@@ -2541,9 +2808,11 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  cabinetBackgroundRunId++;
   clearInterval(delEditTimerInterval);
   clearInterval(supDeadlineTimerInterval);
   if (restaurantBroadcastTimer) clearInterval(restaurantBroadcastTimer);
+  for (const url of Object.values(importantPreviewUrls)) URL.revokeObjectURL(url);
   window.removeEventListener('beforeunload', onBeforeUnload);
 });
 </script>
@@ -2689,6 +2958,35 @@ onUnmounted(() => {
 .mini-loader { padding: 24px; text-align: center; }
 
 /* ═══ Dashboard ═══ */
+/* Wrap: контейнер дашборда не растягивается на широких экранах */
+.dash-wrap { display: flex; flex-direction: column; gap: 20px; max-width: 1180px; margin: 0 auto; }
+.dash-col-main, .dash-col-side { display: contents; }
+.dash-wrap .dash-urgent,
+.dash-wrap .dash-grid,
+.dash-wrap .dash-actions,
+.dash-wrap .dash-important,
+.dash-wrap .dash-recent { margin-bottom: 0; }
+/* Порядок на мобилке: срочные → сводка → действия → важное → последние */
+.dash-wrap .dash-urgent { order: 1; }
+.dash-wrap .dash-grid { order: 2; }
+.dash-wrap .dash-actions { order: 3; }
+.dash-wrap .dash-important { order: 4; }
+.dash-wrap .dash-recent { order: 5; }
+
+@media (min-width: 960px) {
+  .dash-wrap { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); column-gap: 24px; row-gap: 0; align-items: start; }
+  .dash-col-main, .dash-col-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .dash-wrap .dash-urgent,
+  .dash-wrap .dash-grid,
+  .dash-wrap .dash-actions,
+  .dash-wrap .dash-important,
+  .dash-wrap .dash-recent { order: initial; }
+  /* Сводка — карточки растягиваются по ширине левой колонки поровну */
+  .dash-col-main .dash-grid { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+  /* Кнопки быстрых действий не растягиваются на десктопе */
+  .dash-action-grid { grid-template-columns: repeat(auto-fill, 130px); }
+}
+
 .dash-urgent { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
 .dash-card { display: flex; align-items: center; gap: 14px; background: white; border-radius: 16px; padding: 16px 18px; cursor: pointer; transition: all 0.18s; border: 1px solid #EDE8E3; border-left: 4px solid #f59e0b; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
 .dash-card:hover { transform: translateX(4px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
@@ -2737,6 +3035,16 @@ onUnmounted(() => {
 .st-edited { background: #eff6ff; color: #2563eb; }
 .st-draft { background: #f5f0eb; color: #8b7355; }
 .st-locked { background: #fef2f2; color: #dc2626; }
+
+.dash-important {
+  background: white; border: 1px solid #EDE8E3; border-radius: 16px; padding: 16px 18px; margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.dash-important.unread { border-color: #E76F51; box-shadow: 0 8px 24px rgba(231,111,81,.08); }
+.dash-important-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dash-important h2 { margin: 0 0 4px; color: #502314; font-size: 17px; }
+.dash-important-meta { color: #8b7355; font-size: 12px; }
+.dash-important p { margin: 12px 0; color: #4b3527; line-height: 1.45; white-space: pre-line; }
 
 /* ═══ Orders ═══ */
 .ord-tabs { display: flex; gap: 6px; padding: 0 0 12px; overflow-x: auto; flex-wrap: wrap; -webkit-overflow-scrolling: touch; }
@@ -3457,9 +3765,54 @@ tr.del-err { background: #fef2f2; }
 .cab-modal-close:hover { color: #502314; }
 .cab-modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
 .cab-modal-info { max-width: 380px; }
+.cab-modal-important { max-width: min(860px, 96vw); max-height: 88vh; }
+.cab-modal-important .cab-modal-body { padding: 20px 24px; }
+.cab-modal-important .info-files-modal { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .cab-info-text { color: #502314; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
 .cab-info-text.cab-info-error { color: #b91c1c; }
 .cab-info-text-broadcast { white-space: pre-line; }
+
+.info-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.info-posts { display: flex; flex-direction: column; gap: 12px; }
+.info-post {
+  background: white; border: 1px solid #EDE8E3; border-radius: 12px; padding: 16px;
+}
+.info-post.unread { border-color: #E76F51; box-shadow: 0 8px 24px rgba(231,111,81,.08); }
+.info-post-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.info-post h3 { margin: 0 0 4px; color: #502314; font-size: 17px; }
+.info-post-meta { color: #8b7355; font-size: 12px; }
+.info-post p { margin: 12px 0; color: #4b3527; line-height: 1.45; white-space: pre-line; }
+.info-unread {
+  flex-shrink: 0; padding: 4px 8px; border-radius: 999px; background: #FFF3E0; color: #B45309;
+  font-size: 11px; font-weight: 800;
+}
+.info-files { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
+.info-files-modal { margin-bottom: 12px; }
+.info-attachments { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; margin-top: 12px; }
+.info-attachment {
+  min-width: 0; border: 1px solid #EDE8E3; border-radius: 10px; padding: 8px; background: #FAF7F4;
+  color: #502314; font: inherit; font-size: 13px; text-align: left; cursor: pointer; overflow: hidden;
+}
+.info-attachment.image { padding: 0; background: white; }
+.info-attachment img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #F4ECE4; }
+.info-file-icon { display: block; font-size: 24px; padding: 8px 8px 2px; }
+.info-attachment span:not(.info-file-icon) { display: block; padding: 7px 8px 2px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.info-attachment small { display: block; padding: 0 8px 8px; color: #8b7355; white-space: nowrap; font-size: 12px; }
+.info-attachment:hover { border-color: #E76F51; background: #F4ECE4; }
+.info-read-btn {
+  border: 0; background: transparent; color: #C05621; font-weight: 800; padding: 0; cursor: pointer; font-size: 13px;
+}
+.image-preview-overlay { z-index: 4000; }
+.important-image-modal {
+  max-width: min(960px, 96vw); max-height: 92vh; background: white; border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.important-image-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px;
+  border-bottom: 1px solid #EDE8E3; color: #502314; font-weight: 800; font-size: 14px;
+}
+.important-image-head button { border: 0; background: transparent; color: #502314; font-size: 26px; line-height: 1; cursor: pointer; }
+.important-image-modal img { max-width: 100%; max-height: calc(92vh - 48px); object-fit: contain; display: block; }
 .cab-info-meta { color: #8b7355; font-size: 12px; margin: -8px 0 16px; }
 .cab-info-actions { display: flex; justify-content: flex-end; }
 .cab-info-actions-two { gap: 8px; }
