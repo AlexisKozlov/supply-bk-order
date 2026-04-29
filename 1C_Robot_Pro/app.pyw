@@ -6,6 +6,8 @@ Run by double-clicking app.pyw or 1C_Robot.exe after building.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import time
 import threading
@@ -168,10 +170,14 @@ class RobotApp:
         header = ttk.Frame(outer)
         header.pack(fill="x", pady=(0, 14))
 
-        ttk.Label(header, text="Загрузка накладных в 1С", style="Title.TLabel").pack(anchor="w")
+        header_top = ttk.Frame(header)
+        header_top.pack(fill="x")
+        ttk.Label(header_top, text="Загрузка накладных в 1С", style="Title.TLabel").pack(side="left", anchor="w")
+        ttk.Button(header_top, text="Проверить обновления", style="Accent.TButton", command=self.check_updates).pack(side="right")
+
         ttk.Label(
             header,
-            text="Выберите файл накладной, откройте заявку в 1С и запустите робота. Все пути работают относительно папки программы.",
+            text="Скачайте с сайта файл *_queue_ok.xlsx, положите его в папку output, откройте заявку в 1С и запустите робота.",
             style="Sub.TLabel",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -193,10 +199,11 @@ class RobotApp:
 
         ttk.Button(line, text="Найти", style="Accent.TButton", command=self.search_files).pack(side="left", padx=(0, 6))
         ttk.Button(line, text="Обновить", command=self.refresh_files).pack(side="left")
+        ttk.Button(line, text="Открыть output", command=self.open_output_dir).pack(side="left", padx=(6, 0))
 
         hint = ttk.Label(
             search_card,
-            text=f"Папка файлов: {OUTPUT_DIR}",
+            text=f"Папка для файлов накладных: {OUTPUT_DIR}",
             background="#ffffff",
             foreground="#6b7280",
         )
@@ -348,6 +355,20 @@ class RobotApp:
             self.status_var.set("Статус: ничего не найдено")
             if show_message:
                 self.log("ОШИБКА: ничего не найдено", "error")
+
+    def open_output_dir(self):
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(OUTPUT_DIR))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(OUTPUT_DIR)])
+            else:
+                subprocess.Popen(["xdg-open", str(OUTPUT_DIR)])
+            self.log(f"Открыта папка output: {OUTPUT_DIR}", "info")
+        except Exception as exc:
+            self.log(f"ОШИБКА: не удалось открыть папку output: {exc}", "error")
+            messagebox.showerror("Папка output", f"Не удалось открыть папку:\n{OUTPUT_DIR}\n\n{exc}")
 
     def on_select(self, _event=None):
         sel = self.listbox.curselection()
