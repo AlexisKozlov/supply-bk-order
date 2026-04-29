@@ -1,0 +1,78 @@
+# 1C Robot Pro
+
+Локальная Windows-программа вводит подготовленный `queue_ok.xlsx` в открытую 1С. Сервер 1С не управляет.
+
+## Как пользоваться
+
+1. Скачайте `queue_ok.xlsx` на сайте.
+2. Положите файл в папку `output` рядом с программой.
+3. Откройте 1С и поставьте курсор в нужное место ввода.
+4. Запустите `1C_Robot.exe`.
+5. Выберите файл, режим `Безопасный` или `Быстрый`, нажмите `Запустить`.
+
+## Проверка обновлений
+
+В `settings.json` хранится текущая версия и ссылка на `version.json`:
+
+```json
+{
+  "version": "1.0.0",
+  "update_url": "https://supply-department.online/version.json"
+}
+```
+
+Программа скачивает `version.json`, сравнивает версии и предлагает открыть ссылку на установщик. Автоматическая замена `.exe` не выполняется.
+
+## Сборка exe
+
+На Windows выполните:
+
+```bat
+build_exe.bat
+```
+
+Скрипт установит зависимости, соберёт `1C_Robot.exe` и подготовит папку `release`.
+
+## Сборка установщика
+
+Установите Inno Setup, затем выполните:
+
+```bat
+make_installer.bat
+```
+
+Итоговый файл появится здесь:
+
+```text
+installer_output\1C_Robot_Setup.exe
+```
+
+Установщик ставит программу в `%LOCALAPPDATA%\1C_Robot_Pro`, не требует прав администратора и не удаляет пользовательские папки `output`, `stt`, `done`, `logs`, `reference` при обновлении.
+
+## Как выложить обновление на сайт
+
+1. Соберите установщик.
+2. Скопируйте `installer_output\1C_Robot_Setup.exe` в `1c_robot_web/storage/releases/1C_Robot_Setup.exe`.
+3. Обновите версию и описание в `1c_robot_web/storage/releases/version.json`.
+
+## Сборка через GitHub Actions
+
+В репозитории есть workflow `.github/workflows/build-1c-robot.yml`.
+
+Как выпустить новую версию:
+
+1. Откройте GitHub.
+2. Перейдите в `Actions`.
+3. Выберите `Build 1C Robot Pro`.
+4. Нажмите `Run workflow`.
+5. Укажите номер версии, например `1.0.1`.
+6. Укажите описание изменений.
+7. После сборки скачайте артефакт `1C_Robot_Pro_версия`.
+
+Внутри артефакта будут:
+
+- `1C_Robot_Setup.exe`
+- `1C_Robot.exe`
+- `version.json`
+
+Если в GitHub настроить секреты `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, можно включить `publish_to_vps`, и workflow сам выложит установщик на сайт.

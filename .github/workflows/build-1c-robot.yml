@@ -1,0 +1,102 @@
+name: Build 1C Robot Pro
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия программы, например 1.0.1"
+        required: true
+        default: "1.0.0"
+      notes:
+        description: "Описание изменений для version.json"
+        required: true
+        default: "Обновление программы"
+      publish_to_vps:
+        description: "Выложить на VPS, если настроены секреты"
+        type: boolean
+        required: true
+        default: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: 1C_Robot_Pro
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Prepare version files
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          $notes = "${{ github.event.inputs.notes }}"
+
+          $settings = Get-Content settings.json -Raw | ConvertFrom-Json
+          $settings.version = $version
+          $settings.update_url = "https://supply-department.online/version.json"
+          $settings | ConvertTo-Json -Depth 10 | Set-Content settings.json -Encoding UTF8
+
+          (Get-Content installer.iss) -replace '^AppVersion=.*$', "AppVersion=$version" | Set-Content installer.iss -Encoding UTF8
+
+          $versionJson = [ordered]@{
+            version = $version
+            installer_url = "/releases/1C_Robot_Setup.exe"
+            notes = $notes
+          } | ConvertTo-Json -Depth 10
+          Set-Content ../public/version.json $versionJson -Encoding UTF8
+
+      - name: Build installer
+        shell: cmd
+        run: make_installer.bat
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ../release_artifacts | Out-Null
+          Copy-Item installer_output/1C_Robot_Setup.exe ../release_artifacts/1C_Robot_Setup.exe
+          Copy-Item dist/1C_Robot.exe ../release_artifacts/1C_Robot.exe
+          Copy-Item ../public/version.json ../release_artifacts/version.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 1C_Robot_Pro_${{ github.event.inputs.version }}
+          path: release_artifacts/*
+
+  publish:
+    needs: build
+    if: ${{ github.event.inputs.publish_to_vps == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: 1C_Robot_Pro_${{ github.event.inputs.version }}
+          path: release_artifacts
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Publish to VPS
+        run: |
+          ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "mkdir -p /var/www/bk-calc/dist/releases /var/www/bk-calc/public/releases"
+          scp release_artifacts/1C_Robot_Setup.exe "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/bk-calc/dist/releases/1C_Robot_Setup.exe"
+          scp release_artifacts/1C_Robot_Setup.exe "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/bk-calc/public/releases/1C_Robot_Setup.exe"
+          scp release_artifacts/version.json "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/bk-calc/dist/version.json"
+          scp release_artifacts/version.json "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/bk-calc/public/version.json"

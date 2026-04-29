@@ -142,6 +142,12 @@ const routes = [
     meta: { title: 'Правила использования и данные' },
   },
   {
+    path: '/download',
+    name: 'robot-download',
+    component: () => import('@/views/RobotDownloadView.vue'),
+    meta: { title: 'Скачать 1C Robot Pro' },
+  },
+  {
     path: '/login',
     name: 'login',
     redirect: (to) => ({ name: 'home', query: { showLogin: 'true', redirect: to.query.redirect || '' } }),
