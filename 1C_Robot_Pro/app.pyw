@@ -75,12 +75,43 @@ class KEYBDINPUT(ctypes.Structure):
     ]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
 class INPUT_UNION(ctypes.Union):
-    _fields_ = [("ki", KEYBDINPUT)]
+    _fields_ = [
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
+        ("hi", HARDWAREINPUT),
+    ]
 
 
 class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
+
+
+if sys.platform.startswith("win"):
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    _user32.SendInput.restype = wintypes.UINT
+else:
+    _user32 = None
 
 
 def load_update_settings() -> dict:
@@ -701,7 +732,6 @@ class RobotApp:
             return
         value = str(text).strip()
         if sys.platform.startswith("win"):
-            user32 = ctypes.windll.user32
             for char in value:
                 if self.stop_event.is_set():
                     return
@@ -710,9 +740,10 @@ class RobotApp:
                     INPUT(type=INPUT_KEYBOARD, union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, 0))),
                     INPUT(type=INPUT_KEYBOARD, union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, 0))),
                 )
-                sent = user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
+                sent = _user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
                 if sent != 2:
-                    raise RuntimeError("Windows не принял Unicode-ввод символа")
+                    err = ctypes.get_last_error()
+                    raise RuntimeError(f"Windows не принял Unicode-ввод символа '{char}'. Код ошибки: {err}")
                 time.sleep(interval)
         else:
             pyautogui.write(value, interval=interval)
@@ -808,6 +839,9 @@ class RobotApp:
                 except Exception as e:
                     error_count += 1
                     write_both(f"ERROR | Строка {row_num} | Ошибка: {e}", "error")
+                    self.stop_event.set()
+                    write_both("ВНИМАНИЕ: робот остановлен после ошибки ввода, чтобы не прогонять накладную неверно", "warn")
+                    break
 
             write_both("--------------- ИТОГ ---------------", "start")
             write_both(f"Успешно: {success_count}", "ok")
