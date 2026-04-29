@@ -87,7 +87,7 @@ def absolute_update_url(base_url: str, maybe_relative: str) -> str:
 
 @dataclass
 class RobotSettings:
-    mode: str = "fast"  # fast / safe
+    mode: str = "safe"  # fast / safe
     start_delay: int = 5
     # Text is inserted with Windows Unicode input because some 1C windows
     # ignore Latin letters typed as key names and Ctrl+V opens selection forms.
@@ -95,10 +95,10 @@ class RobotSettings:
     fast_enter_delay: float = 0.25
     fast_step_delay: float = 0.35
     fast_qty_wait: float = 0.50
-    safe_type_interval: float = 0.04
-    safe_enter_delay: float = 0.45
-    safe_step_delay: float = 0.80
-    safe_qty_wait: float = 1.20
+    safe_type_interval: float = 0.06
+    safe_enter_delay: float = 0.65
+    safe_step_delay: float = 1.20
+    safe_qty_wait: float = 1.80
 
     @property
     def type_interval(self) -> float:
@@ -298,9 +298,27 @@ class RobotApp:
         ttk.Label(right, textvariable=self.status_var, style="Status.TLabel", background="#ffffff", wraplength=240).pack(anchor="w", pady=(0, 12))
 
         ttk.Label(right, text="Режим скорости", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 0))
-        self.mode_var = tk.StringVar(value="fast")
+        self.mode_var = tk.StringVar(value="safe")
         ttk.Radiobutton(right, text="Быстро", value="fast", variable=self.mode_var, command=self.change_mode).pack(anchor="w")
         ttk.Radiobutton(right, text="Надежно", value="safe", variable=self.mode_var, command=self.change_mode).pack(anchor="w")
+
+        ttk.Label(right, text="Защита от перегрузки 1С", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 0))
+        throttle = ttk.Frame(right, style="Card.TFrame")
+        throttle.pack(fill="x", pady=(6, 0))
+        ttk.Label(throttle, text="Пауза каждые", background="#ffffff").grid(row=0, column=0, sticky="w")
+        self.batch_size_var = tk.StringVar(value="10")
+        ttk.Entry(throttle, textvariable=self.batch_size_var, width=5).grid(row=0, column=1, padx=4)
+        ttk.Label(throttle, text="стр.", background="#ffffff").grid(row=0, column=2, sticky="w")
+        ttk.Label(throttle, text="на", background="#ffffff").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.batch_pause_var = tk.StringVar(value="8")
+        ttk.Entry(throttle, textvariable=self.batch_pause_var, width=5).grid(row=1, column=1, padx=4, pady=(4, 0))
+        ttk.Label(throttle, text="сек.", background="#ffffff").grid(row=1, column=2, sticky="w", pady=(4, 0))
+
+        limit_frame = ttk.Frame(right, style="Card.TFrame")
+        limit_frame.pack(fill="x", pady=(8, 0))
+        ttk.Label(limit_frame, text="Лимит строк", background="#ffffff").pack(side="left")
+        self.max_rows_var = tk.StringVar(value="")
+        ttk.Entry(limit_frame, textvariable=self.max_rows_var, width=7).pack(side="left", padx=(8, 0))
 
         ttk.Separator(right).pack(fill="x", pady=12)
         ttk.Label(
@@ -353,6 +371,13 @@ class RobotApp:
     def change_mode(self):
         self.settings.mode = self.mode_var.get()
         self.log(f"Режим скорости: {self.settings.mode}", "info")
+
+    def int_setting(self, var: tk.StringVar, default: int, minimum: int = 0) -> int:
+        try:
+            value = int(str(var.get()).strip())
+        except ValueError:
+            return default
+        return max(minimum, value)
 
     def choose_reference_file(self):
         filename = filedialog.askopenfilename(
@@ -678,10 +703,20 @@ class RobotApp:
             write_both(f"Файл загрузки: {self.selected_path}", "info")
             write_both(f"Всего строк: {len(df)}", "info")
             write_both("Перед стартом: 1С открыта, курсор в Номенклатуре, ENG, Caps Lock выкл.", "warn")
+            batch_size = self.int_setting(self.batch_size_var, 10, 0)
+            batch_pause = self.int_setting(self.batch_pause_var, 8, 0)
+            max_rows = self.int_setting(self.max_rows_var, 0, 0)
+            if max_rows:
+                write_both(f"Тестовый лимит строк: {max_rows}", "warn")
+            if batch_size and batch_pause:
+                write_both(f"Пауза защиты 1С: каждые {batch_size} строк на {batch_pause} сек.", "warn")
 
             for i, row in df.iterrows():
                 if self.stop_event.is_set():
                     write_both("ВНИМАНИЕ: робот остановлен пользователем", "warn")
+                    break
+                if max_rows and success_count >= max_rows:
+                    write_both(f"ВНИМАНИЕ: достигнут лимит строк: {max_rows}", "warn")
                     break
 
                 row_num = i + 1
@@ -715,6 +750,13 @@ class RobotApp:
 
                     success_count += 1
                     write_both(f"OK    | Строка {row_num} | Артикул: {article} | Количество: {qty}", "ok")
+                    time.sleep(self.settings.step_delay)
+                    if batch_size and batch_pause and success_count % batch_size == 0:
+                        write_both(f"Пауза {batch_pause} сек. после {success_count} строк, чтобы 1С успела обработать данные", "warn")
+                        for _ in range(batch_pause):
+                            if self.stop_event.is_set():
+                                break
+                            time.sleep(1)
                 except Exception as e:
                     error_count += 1
                     write_both(f"ERROR | Строка {row_num} | Ошибка: {e}", "error")
