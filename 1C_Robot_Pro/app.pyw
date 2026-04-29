@@ -710,6 +710,8 @@ class RobotApp:
                     time.sleep(self.settings.step_delay)
                     if self.stop_event.is_set():
                         break
+                    pyautogui.press("down")
+                    time.sleep(self.settings.step_delay)
 
                     success_count += 1
                     write_both(f"OK    | Строка {row_num} | Артикул: {article} | Количество: {qty}", "ok")
