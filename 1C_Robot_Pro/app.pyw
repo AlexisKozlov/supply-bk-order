@@ -15,7 +15,6 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +38,7 @@ BASE_DIR = app_dir()
 OUTPUT_DIR = BASE_DIR / "output"
 LOG_DIR = BASE_DIR / "logs"
 SETTINGS_FILE = BASE_DIR / "settings.json"
+DOWNLOADS_DIR = Path.home() / "Downloads"
 
 DEFAULT_UPDATE_SETTINGS = {
     "version": "1.0.0",
@@ -449,14 +449,52 @@ class RobotApp:
         if version_tuple(latest_version) > version_tuple(current_version):
             def show_update():
                 self.log(f"Доступно обновление: {latest_version}", "warn")
-                message = f"Доступна новая версия {latest_version}.\n\n{notes}\n\nОткрыть скачивание установщика?"
+                message = f"Доступна новая версия {latest_version}.\n\n{notes}\n\nСкачать установщик сейчас?"
                 if messagebox.askyesno("Доступно обновление", message):
-                    webbrowser.open(installer_url)
+                    threading.Thread(
+                        target=self.download_update_worker,
+                        args=(installer_url, latest_version),
+                        daemon=True,
+                    ).start()
 
             self.root.after(0, show_update)
         else:
             self.root.after(0, lambda: self.log("Установлена актуальная версия", "ok"))
             self.root.after(0, lambda: messagebox.showinfo("Проверка обновлений", "Установлена актуальная версия"))
+
+    def download_update_worker(self, installer_url: str, latest_version: str):
+        try:
+            target_dir = DOWNLOADS_DIR if DOWNLOADS_DIR.exists() else BASE_DIR
+            target_path = target_dir / f"1C_Robot_Setup_{latest_version}.exe"
+            self.root.after(0, lambda: self.log(f"Скачивание обновления: {target_path}", "info"))
+
+            request = urllib.request.Request(installer_url, headers={"User-Agent": "1C-Robot-Pro"})
+            with urllib.request.urlopen(request, timeout=60) as response, open(target_path, "wb") as fh:
+                total = response.headers.get("Content-Length")
+                total_size = int(total) if total and total.isdigit() else 0
+                downloaded = 0
+                next_report = 0
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size:
+                        percent = int(downloaded * 100 / total_size)
+                        if percent >= next_report:
+                            self.root.after(0, lambda p=percent: self.log(f"Скачано: {p}%", "info"))
+                            next_report += 20
+
+            def ask_run():
+                self.log(f"Обновление скачано: {target_path}", "ok")
+                if messagebox.askyesno("Обновление скачано", f"Файл скачан:\n{target_path}\n\nЗапустить установщик?"):
+                    os.startfile(str(target_path))
+
+            self.root.after(0, ask_run)
+        except Exception as exc:
+            self.root.after(0, lambda: self.log(f"ОШИБКА: не удалось скачать обновление: {exc}", "error"))
+            self.root.after(0, lambda: messagebox.showerror("Скачивание обновления", f"Не удалось скачать обновление.\n\n{exc}"))
 
     # ---------- robot engine integrated in app: no subprocess, no console ----------
     def cleanup_value(self, value) -> str:
