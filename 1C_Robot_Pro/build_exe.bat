@@ -16,6 +16,7 @@ if not exist release\reference mkdir release\reference
 
 copy /Y dist\1C_Robot.exe release\1C_Robot.exe
 copy /Y app.pyw release\app.pyw
+copy /Y excel_service.py release\excel_service.py
 copy /Y prepare_from_summary.py release\prepare_from_summary.py
 copy /Y settings.json release\settings.json
 copy /Y README.md release\README.md

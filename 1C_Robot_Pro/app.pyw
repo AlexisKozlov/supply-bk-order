@@ -24,6 +24,8 @@ import pyautogui
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
+from excel_service import MODE_SINGLE, MODE_SUMMARY, process_to_output
+
 
 # ---------- paths ----------
 def app_dir() -> Path:
@@ -124,6 +126,8 @@ class RobotApp:
         self.update_settings = load_update_settings()
         self.files: list[Path] = []
         self.selected_path: Path | None = None
+        self.reference_path: Path | None = None
+        self.invoice_path: Path | None = None
         self.stop_event = threading.Event()
         self.worker: threading.Thread | None = None
         self.is_running = False
@@ -133,6 +137,7 @@ class RobotApp:
         self.setup_style()
         self.build_ui()
         self.refresh_files(silent=True)
+        self.root.after(2000, self.auto_check_updates)
 
         # Auto-paste clipboard into search field if it looks useful.
         try:
@@ -213,6 +218,37 @@ class RobotApp:
             foreground="#6b7280",
         )
         hint.pack(anchor="w", pady=(8, 0))
+
+        prepare_card = ttk.Frame(outer, style="Card.TFrame", padding=14)
+        prepare_card.pack(fill="x", pady=(0, 12))
+        ttk.Label(
+            prepare_card,
+            text="Подготовить файлы output из Excel",
+            background="#ffffff",
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w")
+
+        prep_actions = ttk.Frame(prepare_card, style="Card.TFrame")
+        prep_actions.pack(fill="x", pady=(10, 0))
+        ttk.Button(prep_actions, text="Справочник товаров", command=self.choose_reference_file).pack(side="left")
+        ttk.Button(prep_actions, text="Накладная / сводная", command=self.choose_invoice_file).pack(side="left", padx=(8, 0))
+        ttk.Button(prep_actions, text="Сформировать output", style="Accent.TButton", command=self.prepare_output_files).pack(side="right")
+
+        prep_mode = ttk.Frame(prepare_card, style="Card.TFrame")
+        prep_mode.pack(fill="x", pady=(10, 0))
+        self.prepare_mode_var = tk.StringVar(value=MODE_SUMMARY)
+        ttk.Label(prep_mode, text="Режим:", background="#ffffff").pack(side="left")
+        ttk.Radiobutton(prep_mode, text="Сводная ЭТТН", value=MODE_SUMMARY, variable=self.prepare_mode_var).pack(side="left", padx=(8, 0))
+        ttk.Radiobutton(prep_mode, text="Одна СТТ", value=MODE_SINGLE, variable=self.prepare_mode_var).pack(side="left", padx=(8, 0))
+
+        self.prepare_status_var = tk.StringVar(value="Выберите справочник и файл накладной.")
+        ttk.Label(
+            prepare_card,
+            textvariable=self.prepare_status_var,
+            background="#ffffff",
+            foreground="#6b7280",
+            wraplength=850,
+        ).pack(anchor="w", pady=(8, 0))
 
         # Main area
         middle = ttk.Frame(outer)
@@ -315,6 +351,69 @@ class RobotApp:
     def change_mode(self):
         self.settings.mode = self.mode_var.get()
         self.log(f"Режим скорости: {self.settings.mode}", "info")
+
+    def choose_reference_file(self):
+        filename = filedialog.askopenfilename(
+            title="Выберите справочник товаров",
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Все файлы", "*.*")],
+        )
+        if filename:
+            self.reference_path = Path(filename)
+            self.update_prepare_status()
+
+    def choose_invoice_file(self):
+        filename = filedialog.askopenfilename(
+            title="Выберите накладную или сводную таблицу",
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Все файлы", "*.*")],
+        )
+        if filename:
+            self.invoice_path = Path(filename)
+            self.update_prepare_status()
+
+    def update_prepare_status(self):
+        ref = self.reference_path.name if self.reference_path else "справочник не выбран"
+        invoice = self.invoice_path.name if self.invoice_path else "накладная не выбрана"
+        self.prepare_status_var.set(f"Справочник: {ref} | Файл: {invoice}")
+
+    def prepare_output_files(self):
+        if not self.reference_path or not self.reference_path.exists():
+            messagebox.showwarning("Нет справочника", "Выберите справочник товаров Excel.")
+            return
+        if not self.invoice_path or not self.invoice_path.exists():
+            messagebox.showwarning("Нет накладной", "Выберите файл накладной или сводной таблицы.")
+            return
+        if not messagebox.askyesno(
+            "Перезаписать output",
+            "Старые Excel-файлы в папке output будут удалены и заменены новыми. Продолжить?",
+        ):
+            return
+        threading.Thread(target=self.prepare_output_worker, daemon=True).start()
+
+    def prepare_output_worker(self):
+        try:
+            self.root.after(0, lambda: self.log("Старт обработки Excel для output", "start"))
+            result = process_to_output(
+                self.reference_path,
+                self.invoice_path,
+                OUTPUT_DIR,
+                self.prepare_mode_var.get(),
+                clear_output=True,
+            )
+            stats = result["stats"]
+            created_count = len(result["created"])
+            message = (
+                f"Output сформирован. Всего: {stats['total']}, OK: {stats['ok']}, "
+                f"NOT_FOUND: {stats['not_found']}, DUPLICATE_GTIN: {stats['duplicate']}. "
+                f"Файлов создано: {created_count}"
+            )
+            self.root.after(0, lambda: self.log(message, "ok"))
+            self.root.after(0, lambda: self.prepare_status_var.set(message))
+            self.root.after(0, self.refresh_files)
+            self.root.after(0, lambda: messagebox.showinfo("Output готов", message))
+        except Exception as exc:
+            error_text = str(exc)
+            self.root.after(0, lambda: self.log(f"ОШИБКА обработки Excel: {error_text}", "error"))
+            self.root.after(0, lambda: messagebox.showerror("Ошибка обработки Excel", error_text))
 
     def log(self, text: str, tag: str | None = None):
         if tag is None:
@@ -429,7 +528,10 @@ class RobotApp:
         self.log("Проверка обновлений...", "info")
         threading.Thread(target=self.check_updates_worker, daemon=True).start()
 
-    def check_updates_worker(self):
+    def auto_check_updates(self):
+        threading.Thread(target=self.check_updates_worker, args=(True,), daemon=True).start()
+
+    def check_updates_worker(self, silent=False):
         update_url = self.update_settings.get("update_url", DEFAULT_UPDATE_SETTINGS["update_url"])
         current_version = self.update_settings.get("version", DEFAULT_UPDATE_SETTINGS["version"])
         try:
@@ -437,14 +539,16 @@ class RobotApp:
             with urllib.request.urlopen(request, timeout=12) as response:
                 remote = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-            self.root.after(0, lambda: self.log(f"ОШИБКА: не удалось проверить обновления: {exc}", "error"))
-            self.root.after(
-                0,
-                lambda: messagebox.showerror(
-                    "Проверка обновлений",
-                    f"Не удалось проверить обновления.\nПроверьте интернет или ссылку в settings.json.\n\n{exc}",
-                ),
-            )
+            error_text = str(exc)
+            if not silent:
+                self.root.after(0, lambda: self.log(f"ОШИБКА: не удалось проверить обновления: {error_text}", "error"))
+                self.root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Проверка обновлений",
+                        f"Не удалось проверить обновления.\nПроверьте интернет или ссылку в settings.json.\n\n{error_text}",
+                    ),
+                )
             return
 
         latest_version = str(remote.get("version", "0.0.0"))
@@ -464,8 +568,9 @@ class RobotApp:
 
             self.root.after(0, show_update)
         else:
-            self.root.after(0, lambda: self.log("Установлена актуальная версия", "ok"))
-            self.root.after(0, lambda: messagebox.showinfo("Проверка обновлений", "Установлена актуальная версия"))
+            if not silent:
+                self.root.after(0, lambda: self.log("Установлена актуальная версия", "ok"))
+                self.root.after(0, lambda: messagebox.showinfo("Проверка обновлений", "Установлена актуальная версия"))
 
     def download_update_worker(self, installer_url: str, latest_version: str):
         try:
@@ -498,8 +603,9 @@ class RobotApp:
 
             self.root.after(0, ask_run)
         except Exception as exc:
-            self.root.after(0, lambda: self.log(f"ОШИБКА: не удалось скачать обновление: {exc}", "error"))
-            self.root.after(0, lambda: messagebox.showerror("Скачивание обновления", f"Не удалось скачать обновление.\n\n{exc}"))
+            error_text = str(exc)
+            self.root.after(0, lambda: self.log(f"ОШИБКА: не удалось скачать обновление: {error_text}", "error"))
+            self.root.after(0, lambda: messagebox.showerror("Скачивание обновления", f"Не удалось скачать обновление.\n\n{error_text}"))
 
     # ---------- robot engine integrated in app: no subprocess, no console ----------
     def cleanup_value(self, value) -> str:
