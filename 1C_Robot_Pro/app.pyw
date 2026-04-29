@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyautogui
+import pyperclip
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
@@ -87,8 +88,8 @@ def absolute_update_url(base_url: str, maybe_relative: str) -> str:
 class RobotSettings:
     mode: str = "fast"  # fast / safe
     start_delay: int = 5
-    # Stable version: article and quantity are typed, not pasted.
-    # It is slower, but reliable for 1C fields that open selection dialogs on Ctrl+V.
+    # Text is inserted through the clipboard because some 1C windows ignore
+    # Latin letters typed as key presses and accept only digits.
     fast_type_interval: float = 0.02
     fast_enter_delay: float = 0.25
     fast_step_delay: float = 0.35
@@ -625,11 +626,13 @@ class RobotApp:
             pyautogui.press("enter")
             time.sleep(self.settings.enter_delay)
 
-    def type_text(self, text: str, interval: float | None = None):
-        interval = self.settings.type_interval if interval is None else interval
+    def paste_text(self, text: str):
         if self.stop_event.is_set():
             return
-        pyautogui.write(str(text).strip(), interval=interval)
+        pyperclip.copy(str(text).strip())
+        time.sleep(0.15)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(self.settings.enter_delay)
 
     def robot_worker(self):
         success_count = skip_count = error_count = 0
@@ -654,7 +657,7 @@ class RobotApp:
                 raise RuntimeError("Файл загрузки пустой")
 
             write_both("==================================================", "start")
-            write_both(f"Запуск робота. Режим: {self.settings.mode} / стабильный ввод печатью", "start")
+            write_both(f"Запуск робота. Режим: {self.settings.mode} / ввод через буфер обмена", "start")
             write_both(f"Файл загрузки: {self.selected_path}", "info")
             write_both(f"Всего строк: {len(df)}", "info")
             write_both("Перед стартом: 1С открыта, курсор в Номенклатуре, ENG, Caps Lock выкл.", "warn")
@@ -680,18 +683,16 @@ class RobotApp:
 
                     write_both(f"START | Строка {row_num} | Артикул: {article} | Количество: {qty}", "start")
 
-                    self.type_text(article, self.settings.type_interval)
+                    self.paste_text(article)
                     time.sleep(self.settings.step_delay)
                     self.press_enter(4)
                     time.sleep(self.settings.step_delay)
-                    self.type_text(qty, 0.02)
+                    self.paste_text(qty)
                     time.sleep(self.settings.qty_wait)
                     self.press_enter(2)
                     time.sleep(self.settings.step_delay)
                     if self.stop_event.is_set():
                         break
-                    pyautogui.press("down")
-                    time.sleep(self.settings.step_delay)
 
                     success_count += 1
                     write_both(f"OK    | Строка {row_num} | Артикул: {article} | Количество: {qty}", "ok")
