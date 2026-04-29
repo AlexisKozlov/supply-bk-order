@@ -14,7 +14,7 @@ DisableProgramGroupPage=yes
 Source: "release\1C_Robot.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release\app.pyw"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release\prepare_from_summary.py"; DestDir: "{app}"; Flags: ignoreversion
-Source: "release\settings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+Source: "release\settings.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "release\output\*"; DestDir: "{app}\output"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist skipifsourcedoesntexist
 Source: "release\stt\*"; DestDir: "{app}\stt"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist skipifsourcedoesntexist

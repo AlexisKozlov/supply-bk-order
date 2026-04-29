@@ -173,6 +173,11 @@ class RobotApp:
         header_top = ttk.Frame(header)
         header_top.pack(fill="x")
         ttk.Label(header_top, text="Загрузка накладных в 1С", style="Title.TLabel").pack(side="left", anchor="w")
+        ttk.Label(
+            header_top,
+            text=f"Версия {self.update_settings.get('version', '1.0.0')}",
+            style="Sub.TLabel",
+        ).pack(side="left", padx=(14, 0))
         ttk.Button(header_top, text="Проверить обновления", style="Accent.TButton", command=self.check_updates).pack(side="right")
 
         ttk.Label(
@@ -516,11 +521,9 @@ class RobotApp:
 
     def type_text(self, text: str, interval: float | None = None):
         interval = self.settings.type_interval if interval is None else interval
-        for ch in str(text).strip():
-            if self.stop_event.is_set():
-                return
-            pyautogui.press(ch)
-            time.sleep(interval)
+        if self.stop_event.is_set():
+            return
+        pyautogui.write(str(text).strip(), interval=interval)
 
     def robot_worker(self):
         success_count = skip_count = error_count = 0
