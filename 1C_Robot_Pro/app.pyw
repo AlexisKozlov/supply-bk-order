@@ -182,8 +182,8 @@ class RobotApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("1C Robot Pro — загрузка накладных")
-        self.root.geometry("980x720")
-        self.root.minsize(900, 650)
+        self.root.geometry("1180x760")
+        self.root.minsize(1080, 700)
 
         self.settings = RobotSettings()
         self.update_settings = load_update_settings()
@@ -230,6 +230,8 @@ class RobotApp:
         style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), padding=8)
         style.configure("TEntry", padding=6)
         style.configure("TRadiobutton", background="#f5f7fb", font=("Segoe UI", 10))
+        style.configure("TNotebook", background="#f5f7fb", borderwidth=0)
+        style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"), padding=(16, 9))
 
     def build_ui(self):
         self.root.configure(bg="#f5f7fb")
@@ -251,20 +253,44 @@ class RobotApp:
 
         ttk.Label(
             header,
-            text="Скачайте с сайта файл *_queue_ok.xlsx, положите его в папку output, откройте заявку в 1С и запустите робота.",
+            text="Подготовьте output, выберите файл накладной, откройте заявку в 1С и запустите робота. F8 останавливает работу.",
             style="Sub.TLabel",
         ).pack(anchor="w", pady=(4, 0))
 
-        # Search card
-        search_card = ttk.Frame(outer, style="Card.TFrame", padding=14)
-        search_card.pack(fill="x", pady=(0, 12))
+        notebook = ttk.Notebook(outer)
+        notebook.pack(fill="both", expand=True)
+
+        robot_tab = ttk.Frame(notebook, padding=12)
+        prepare_tab = ttk.Frame(notebook, padding=12)
+        log_tab = ttk.Frame(notebook, padding=12)
+        notebook.add(robot_tab, text="Загрузка в 1С")
+        notebook.add(prepare_tab, text="Подготовка output")
+        notebook.add(log_tab, text="Лог")
+
+        # Robot tab
+        robot_body = ttk.Frame(robot_tab)
+        robot_body.pack(fill="both", expand=True)
+
+        left = ttk.Frame(robot_body, style="Card.TFrame", padding=14)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 12))
+
+        ttk.Label(left, text="Файлы для загрузки", background="#ffffff", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            left,
+            text=f"Папка output: {OUTPUT_DIR}",
+            background="#ffffff",
+            foreground="#6b7280",
+        ).pack(anchor="w", pady=(4, 10))
+
+        search_card = ttk.Frame(left, style="Card.TFrame")
+        search_card.pack(fill="x", pady=(0, 10))
 
         line = ttk.Frame(search_card, style="Card.TFrame")
         line.pack(fill="x")
 
-        ttk.Label(line, text="Номер накладной / часть номера:", background="#ffffff").pack(side="left")
+        ttk.Label(line, text="Поиск:", background="#ffffff").pack(side="left")
         self.search_var = tk.StringVar()
-        entry = ttk.Entry(line, textvariable=self.search_var, width=48)
+        entry = ttk.Entry(line, textvariable=self.search_var, width=36)
         entry.pack(side="left", padx=10, fill="x", expand=True)
         entry.bind("<Return>", lambda _e: self.search_files())
         entry.bind("<Control-v>", self.paste_to_search)
@@ -275,59 +301,11 @@ class RobotApp:
         ttk.Button(line, text="Обновить", command=self.refresh_files).pack(side="left")
         ttk.Button(line, text="Открыть output", command=self.open_output_dir).pack(side="left", padx=(6, 0))
 
-        hint = ttk.Label(
-            search_card,
-            text=f"Папка для файлов накладных: {OUTPUT_DIR}",
-            background="#ffffff",
-            foreground="#6b7280",
-        )
-        hint.pack(anchor="w", pady=(8, 0))
-
-        prepare_card = ttk.Frame(outer, style="Card.TFrame", padding=14)
-        prepare_card.pack(fill="x", pady=(0, 12))
-        ttk.Label(
-            prepare_card,
-            text="Подготовить файлы output из Excel",
-            background="#ffffff",
-            font=("Segoe UI", 11, "bold"),
-        ).pack(anchor="w")
-
-        prep_actions = ttk.Frame(prepare_card, style="Card.TFrame")
-        prep_actions.pack(fill="x", pady=(10, 0))
-        ttk.Button(prep_actions, text="Справочник товаров", command=self.choose_reference_file).pack(side="left")
-        ttk.Button(prep_actions, text="Накладная / сводная", command=self.choose_invoice_file).pack(side="left", padx=(8, 0))
-        ttk.Button(prep_actions, text="Сформировать output", style="Accent.TButton", command=self.prepare_output_files).pack(side="right")
-
-        prep_mode = ttk.Frame(prepare_card, style="Card.TFrame")
-        prep_mode.pack(fill="x", pady=(10, 0))
-        self.prepare_mode_var = tk.StringVar(value=MODE_SUMMARY)
-        ttk.Label(prep_mode, text="Режим:", background="#ffffff").pack(side="left")
-        ttk.Radiobutton(prep_mode, text="Сводная ЭТТН", value=MODE_SUMMARY, variable=self.prepare_mode_var).pack(side="left", padx=(8, 0))
-        ttk.Radiobutton(prep_mode, text="Одна СТТ", value=MODE_SINGLE, variable=self.prepare_mode_var).pack(side="left", padx=(8, 0))
-
-        self.prepare_status_var = tk.StringVar(value="Выберите справочник и файл накладной.")
-        ttk.Label(
-            prepare_card,
-            textvariable=self.prepare_status_var,
-            background="#ffffff",
-            foreground="#6b7280",
-            wraplength=850,
-        ).pack(anchor="w", pady=(8, 0))
-
-        # Main area
-        middle = ttk.Frame(outer)
-        middle.pack(fill="both", expand=True)
-
-        left = ttk.Frame(middle, style="Card.TFrame", padding=12)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 10))
-
-        ttk.Label(left, text="Найденные файлы", background="#ffffff", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-
         list_frame = ttk.Frame(left, style="Card.TFrame")
-        list_frame.pack(fill="both", expand=True, pady=(8, 0))
+        list_frame.pack(fill="both", expand=True)
         self.listbox = tk.Listbox(
             list_frame,
-            height=12,
+            height=18,
             font=("Consolas", 10),
             borderwidth=0,
             highlightthickness=1,
@@ -341,20 +319,20 @@ class RobotApp:
         self.listbox.config(yscrollcommand=scrollbar.set)
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
 
-        right = ttk.Frame(middle, style="Card.TFrame", padding=12, width=270)
+        right = ttk.Frame(robot_body, style="Card.TFrame", padding=14, width=300)
         right.pack(side="right", fill="y")
         right.pack_propagate(False)
 
-        ttk.Label(right, text="Управление", background="#ffffff", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(right, text="Управление роботом", background="#ffffff", font=("Segoe UI", 13, "bold")).pack(anchor="w")
 
-        self.start_btn = ttk.Button(right, text="▶ Запустить робота", style="Accent.TButton", command=self.run_selected)
+        self.start_btn = ttk.Button(right, text="Запустить", style="Accent.TButton", command=self.run_selected)
         self.start_btn.pack(fill="x", pady=(12, 6))
 
-        self.stop_btn = ttk.Button(right, text="■ СТОП", style="Danger.TButton", command=self.stop_robot, state="disabled")
+        self.stop_btn = ttk.Button(right, text="СТОП  F8", style="Danger.TButton", command=self.stop_robot, state="disabled")
         self.stop_btn.pack(fill="x", pady=(0, 12))
 
         self.countdown_label = ttk.Label(right, text="", font=("Segoe UI", 22, "bold"), background="#ffffff", foreground="#2563eb")
-        self.countdown_label.pack(pady=(4, 12))
+        self.countdown_label.pack(anchor="w", pady=(4, 10))
 
         self.status_var = tk.StringVar(value="Статус: ожидание")
         ttk.Label(right, textvariable=self.status_var, style="Status.TLabel", background="#ffffff", wraplength=240).pack(anchor="w", pady=(0, 12))
@@ -402,13 +380,55 @@ class RobotApp:
         )
         ttk.Label(right, text=info, background="#ffffff", foreground="#374151", wraplength=240).pack(anchor="w")
 
-        # Log panel
-        log_card = ttk.Frame(outer, style="Card.TFrame", padding=12)
-        log_card.pack(fill="both", expand=False, pady=(12, 0))
-        ttk.Label(log_card, text="Лог работы", background="#ffffff", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        # Prepare tab
+        prepare_card = ttk.Frame(prepare_tab, style="Card.TFrame", padding=18)
+        prepare_card.pack(fill="both", expand=True)
+        ttk.Label(
+            prepare_card,
+            text="Подготовить файлы output из Excel",
+            background="#ffffff",
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            prepare_card,
+            text="Выберите справочник товаров и накладную. После обработки старые Excel-файлы в output будут заменены новыми.",
+            background="#ffffff",
+            foreground="#6b7280",
+            wraplength=900,
+        ).pack(anchor="w", pady=(4, 18))
+
+        prep_actions = ttk.Frame(prepare_card, style="Card.TFrame")
+        prep_actions.pack(fill="x")
+        ttk.Button(prep_actions, text="Выбрать справочник", command=self.choose_reference_file).pack(side="left")
+        ttk.Button(prep_actions, text="Выбрать накладную / сводную", command=self.choose_invoice_file).pack(side="left", padx=(8, 0))
+        ttk.Button(prep_actions, text="Сформировать output", style="Accent.TButton", command=self.prepare_output_files).pack(side="right")
+
+        prep_mode = ttk.Frame(prepare_card, style="Card.TFrame")
+        prep_mode.pack(fill="x", pady=(18, 0))
+        self.prepare_mode_var = tk.StringVar(value=MODE_SUMMARY)
+        ttk.Label(prep_mode, text="Режим обработки:", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(side="left")
+        ttk.Radiobutton(prep_mode, text="Сводная ЭТТН", value=MODE_SUMMARY, variable=self.prepare_mode_var).pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(prep_mode, text="Одна СТТ", value=MODE_SINGLE, variable=self.prepare_mode_var).pack(side="left", padx=(10, 0))
+
+        self.prepare_status_var = tk.StringVar(value="Выберите справочник и файл накладной.")
+        ttk.Label(
+            prepare_card,
+            textvariable=self.prepare_status_var,
+            background="#ffffff",
+            foreground="#374151",
+            wraplength=900,
+        ).pack(anchor="w", pady=(18, 0))
+
+        # Log tab
+        log_card = ttk.Frame(log_tab, style="Card.TFrame", padding=14)
+        log_card.pack(fill="both", expand=True)
+        log_top = ttk.Frame(log_card, style="Card.TFrame")
+        log_top.pack(fill="x")
+        ttk.Label(log_top, text="Лог работы", background="#ffffff", font=("Segoe UI", 14, "bold")).pack(side="left")
+        ttk.Button(log_top, text="Очистить лог", command=lambda: self.log_box.delete("1.0", "end")).pack(side="right")
         self.log_box = tk.Text(
             log_card,
-            height=12,
+            height=28,
             font=("Consolas", 9),
             borderwidth=0,
             highlightthickness=1,
