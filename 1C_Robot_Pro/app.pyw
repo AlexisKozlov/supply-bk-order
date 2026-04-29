@@ -634,6 +634,13 @@ class RobotApp:
         pyautogui.hotkey("ctrl", "v")
         time.sleep(self.settings.enter_delay)
 
+    def type_digits_text(self, text: str, interval: float | None = None):
+        interval = self.settings.type_interval if interval is None else interval
+        if self.stop_event.is_set():
+            return
+        cleaned = str(text).strip().replace(",", ".")
+        pyautogui.write(cleaned, interval=interval)
+
     def robot_worker(self):
         success_count = skip_count = error_count = 0
         log_file = LOG_DIR / f"robot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -657,7 +664,7 @@ class RobotApp:
                 raise RuntimeError("Файл загрузки пустой")
 
             write_both("==================================================", "start")
-            write_both(f"Запуск робота. Режим: {self.settings.mode} / ввод через буфер обмена", "start")
+            write_both(f"Запуск робота. Режим: {self.settings.mode} / артикул через буфер, количество печатью", "start")
             write_both(f"Файл загрузки: {self.selected_path}", "info")
             write_both(f"Всего строк: {len(df)}", "info")
             write_both("Перед стартом: 1С открыта, курсор в Номенклатуре, ENG, Caps Lock выкл.", "warn")
@@ -687,7 +694,7 @@ class RobotApp:
                     time.sleep(self.settings.step_delay)
                     self.press_enter(4)
                     time.sleep(self.settings.step_delay)
-                    self.paste_text(qty)
+                    self.type_digits_text(qty, 0.02)
                     time.sleep(self.settings.qty_wait)
                     self.press_enter(2)
                     time.sleep(self.settings.step_delay)
