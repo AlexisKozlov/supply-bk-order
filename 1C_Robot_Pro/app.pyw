@@ -13,6 +13,7 @@ import time
 import threading
 import traceback
 import ctypes
+from ctypes import wintypes
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,6 +28,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 from excel_service import MODE_SINGLE, MODE_SUMMARY, process_to_output
+
+try:
+    import keyboard
+except ImportError:
+    keyboard = None
 
 
 # ---------- paths ----------
@@ -51,6 +57,30 @@ DEFAULT_UPDATE_SETTINGS = {
 
 for p in [OUTPUT_DIR, LOG_DIR]:
     p.mkdir(exist_ok=True)
+
+
+INPUT_KEYBOARD = 1
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+ULONG_PTR = wintypes.WPARAM
+
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class INPUT_UNION(ctypes.Union):
+    _fields_ = [("ki", KEYBDINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
 
 
 def load_update_settings() -> dict:
@@ -95,10 +125,10 @@ class RobotSettings:
     fast_enter_delay: float = 0.25
     fast_step_delay: float = 0.35
     fast_qty_wait: float = 0.50
-    safe_type_interval: float = 0.06
-    safe_enter_delay: float = 0.65
-    safe_step_delay: float = 1.20
-    safe_qty_wait: float = 1.80
+    safe_type_interval: float = 0.03
+    safe_enter_delay: float = 0.35
+    safe_step_delay: float = 0.60
+    safe_qty_wait: float = 0.90
 
     @property
     def type_interval(self) -> float:
@@ -138,6 +168,7 @@ class RobotApp:
 
         self.setup_style()
         self.build_ui()
+        self.setup_hotkeys()
         self.refresh_files(silent=True)
         self.root.after(2000, self.auto_check_updates)
 
@@ -310,7 +341,7 @@ class RobotApp:
         ttk.Entry(throttle, textvariable=self.batch_size_var, width=5).grid(row=0, column=1, padx=4)
         ttk.Label(throttle, text="стр.", background="#ffffff").grid(row=0, column=2, sticky="w")
         ttk.Label(throttle, text="на", background="#ffffff").grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self.batch_pause_var = tk.StringVar(value="8")
+        self.batch_pause_var = tk.StringVar(value="4")
         ttk.Entry(throttle, textvariable=self.batch_pause_var, width=5).grid(row=1, column=1, padx=4, pady=(4, 0))
         ttk.Label(throttle, text="сек.", background="#ffffff").grid(row=1, column=2, sticky="w", pady=(4, 0))
 
@@ -335,7 +366,8 @@ class RobotApp:
             "1. Откройте 1С и нужную заявку.\n"
             "2. Поставьте курсор в Номенклатуру.\n"
             "3. Раскладка ENG, Caps Lock выкл.\n"
-            "4. Не трогайте мышь во время работы."
+            "4. Не трогайте мышь во время работы.\n"
+            "5. F8 — остановить робота."
         )
         ttk.Label(right, text=info, background="#ffffff", foreground="#374151", wraplength=240).pack(anchor="w")
 
@@ -371,6 +403,17 @@ class RobotApp:
     def change_mode(self):
         self.settings.mode = self.mode_var.get()
         self.log(f"Режим скорости: {self.settings.mode}", "info")
+
+    def setup_hotkeys(self):
+        self.root.bind("<F8>", lambda _event: self.stop_robot())
+        if keyboard is None:
+            self.log("Глобальная остановка F8 недоступна: не установлен модуль keyboard", "warn")
+            return
+        try:
+            keyboard.add_hotkey("f8", self.stop_robot)
+            self.log("Горячая клавиша остановки: F8", "info")
+        except Exception as exc:
+            self.log(f"Глобальная F8 недоступна, F8 работает только при активном окне программы: {exc}", "warn")
 
     def int_setting(self, var: tk.StringVar, default: int, minimum: int = 0) -> int:
         try:
@@ -663,8 +706,13 @@ class RobotApp:
                 if self.stop_event.is_set():
                     return
                 code = ord(char)
-                user32.keybd_event(0, code, 0x0004, 0)
-                user32.keybd_event(0, code, 0x0004 | 0x0002, 0)
+                inputs = (INPUT * 2)(
+                    INPUT(type=INPUT_KEYBOARD, union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, 0))),
+                    INPUT(type=INPUT_KEYBOARD, union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, 0))),
+                )
+                sent = user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
+                if sent != 2:
+                    raise RuntimeError("Windows не принял Unicode-ввод символа")
                 time.sleep(interval)
         else:
             pyautogui.write(value, interval=interval)
