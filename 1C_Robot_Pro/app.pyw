@@ -194,6 +194,11 @@ class RobotApp:
         self.stop_event = threading.Event()
         self.worker: threading.Thread | None = None
         self.is_running = False
+        self.overlay: tk.Toplevel | None = None
+        self.overlay_vars: dict[str, tk.StringVar] = {}
+        self.overlay_progress: ttk.Progressbar | None = None
+        self.current_log_file: Path | None = None
+        self.last_run_summary: dict | None = None
 
         pyautogui.PAUSE = 0.08
 
@@ -442,6 +447,127 @@ class RobotApp:
         self.log_box.tag_config("start", foreground="#1d4ed8")
         self.log_box.tag_config("info", foreground="#111827")
 
+    def create_progress_overlay(self, total_rows: int):
+        if self.overlay and self.overlay.winfo_exists():
+            self.overlay.destroy()
+
+        overlay = tk.Toplevel(self.root)
+        overlay.title("1C Robot")
+        overlay.geometry("330x180+40+40")
+        overlay.resizable(False, False)
+        overlay.attributes("-topmost", True)
+        overlay.configure(bg="#111827")
+        try:
+            overlay.attributes("-toolwindow", True)
+        except Exception:
+            pass
+
+        self.overlay = overlay
+        self.overlay_vars = {
+            "title": tk.StringVar(value="1C Robot работает"),
+            "progress": tk.StringVar(value=f"0 / {total_rows}"),
+            "percent": tk.StringVar(value="0%"),
+            "article": tk.StringVar(value="Артикул: —"),
+            "qty": tk.StringVar(value="Кол-во: —"),
+            "stats": tk.StringVar(value="OK: 0  Ошибок: 0  Пропусков: 0"),
+        }
+
+        frame = tk.Frame(overlay, bg="#111827", padx=14, pady=12)
+        frame.pack(fill="both", expand=True)
+        tk.Label(frame, textvariable=self.overlay_vars["title"], bg="#111827", fg="#ffffff", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        line = tk.Frame(frame, bg="#111827")
+        line.pack(fill="x", pady=(8, 4))
+        tk.Label(line, textvariable=self.overlay_vars["progress"], bg="#111827", fg="#d1d5db", font=("Segoe UI", 10, "bold")).pack(side="left")
+        tk.Label(line, textvariable=self.overlay_vars["percent"], bg="#111827", fg="#60a5fa", font=("Segoe UI", 10, "bold")).pack(side="right")
+        self.overlay_progress = ttk.Progressbar(frame, maximum=max(total_rows, 1), value=0)
+        self.overlay_progress.pack(fill="x", pady=(0, 10))
+        tk.Label(frame, textvariable=self.overlay_vars["article"], bg="#111827", fg="#f9fafb", font=("Segoe UI", 9), anchor="w").pack(fill="x")
+        tk.Label(frame, textvariable=self.overlay_vars["qty"], bg="#111827", fg="#f9fafb", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(2, 0))
+        tk.Label(frame, textvariable=self.overlay_vars["stats"], bg="#111827", fg="#d1d5db", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(8, 8))
+        controls = tk.Frame(frame, bg="#111827")
+        controls.pack(fill="x")
+        tk.Button(
+            controls,
+            text="СТОП  F8",
+            command=self.stop_robot,
+            bg="#dc2626",
+            fg="#ffffff",
+            activebackground="#b91c1c",
+            activeforeground="#ffffff",
+            relief="flat",
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=5,
+        ).pack(side="left")
+        tk.Button(
+            controls,
+            text="Открыть окно",
+            command=self.restore_main_window,
+            bg="#374151",
+            fg="#ffffff",
+            activebackground="#4b5563",
+            activeforeground="#ffffff",
+            relief="flat",
+            font=("Segoe UI", 9),
+            padx=10,
+            pady=5,
+        ).pack(side="right")
+
+        overlay.protocol("WM_DELETE_WINDOW", self.restore_main_window)
+
+    def update_progress_overlay(self, current: int, total: int, article: str = "", qty: str = "", ok: int = 0, errors: int = 0, skipped: int = 0):
+        if not self.overlay or not self.overlay.winfo_exists():
+            return
+        total = max(total, 1)
+        percent = int(current * 100 / total)
+        self.overlay_vars["progress"].set(f"{current} / {total}")
+        self.overlay_vars["percent"].set(f"{percent}%")
+        self.overlay_vars["article"].set(f"Артикул: {article or '—'}")
+        self.overlay_vars["qty"].set(f"Кол-во: {qty or '—'}")
+        self.overlay_vars["stats"].set(f"OK: {ok}  Ошибок: {errors}  Пропусков: {skipped}")
+        if self.overlay_progress:
+            self.overlay_progress.config(maximum=total, value=current)
+
+    def restore_main_window(self):
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        except Exception:
+            pass
+
+    def close_progress_overlay(self):
+        if self.overlay and self.overlay.winfo_exists():
+            self.overlay.destroy()
+        self.overlay = None
+        self.overlay_vars = {}
+        self.overlay_progress = None
+
+    def open_current_log(self):
+        if not self.current_log_file or not self.current_log_file.exists():
+            messagebox.showinfo("Лог", "Файл лога ещё не создан.")
+            return
+        try:
+            os.startfile(str(self.current_log_file))
+        except Exception as exc:
+            messagebox.showerror("Лог", f"Не удалось открыть лог:\n{self.current_log_file}\n\n{exc}")
+
+    def show_run_report(self):
+        summary = self.last_run_summary
+        if not summary:
+            return
+        status = "остановлено" if summary.get("stopped") else ("завершено с ошибками" if summary.get("errors") else "завершено")
+        message = (
+            f"Загрузка {status}.\n\n"
+            f"Всего строк: {summary.get('total', 0)}\n"
+            f"Успешно: {summary.get('success', 0)}\n"
+            f"Пропущено: {summary.get('skipped', 0)}\n"
+            f"Ошибок: {summary.get('errors', 0)}\n\n"
+            f"Лог: {summary.get('log_file', '')}"
+        )
+        if messagebox.askyesno("Отчёт загрузки", message + "\n\nОткрыть лог?"):
+            self.open_current_log()
+
     def paste_to_search(self, event=None):
         try:
             text = self.root.clipboard_get().strip()
@@ -632,6 +758,7 @@ class RobotApp:
         else:
             self.countdown_label.config(text="Работает")
             self.status_var.set("Статус: робот работает")
+            self.root.iconify()
             self.worker = threading.Thread(target=self.robot_worker, daemon=True)
             self.worker.start()
 
@@ -644,6 +771,10 @@ class RobotApp:
         self.is_running = False
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
+        self.restore_main_window()
+        self.close_progress_overlay()
+        if self.last_run_summary:
+            self.root.after(200, self.show_run_report)
 
     def check_updates(self):
         self.log("Проверка обновлений...", "info")
@@ -778,6 +909,8 @@ class RobotApp:
     def robot_worker(self):
         success_count = skip_count = error_count = 0
         log_file = LOG_DIR / f"robot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        self.current_log_file = log_file
+        total_rows = 0
 
         def write_both(msg: str, tag: str | None = None):
             line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
@@ -796,12 +929,14 @@ class RobotApp:
                     raise RuntimeError(f"В файле отсутствует колонка: {col}")
             if df.empty:
                 raise RuntimeError("Файл загрузки пустой")
+            total_rows = len(df)
 
             write_both("==================================================", "start")
             write_both(f"Запуск робота. Режим: {self.settings.mode} / ввод Unicode-символами", "start")
             write_both(f"Файл загрузки: {self.selected_path}", "info")
-            write_both(f"Всего строк: {len(df)}", "info")
+            write_both(f"Всего строк: {total_rows}", "info")
             write_both("Перед стартом: 1С открыта, курсор в Номенклатуре, ENG, Caps Lock выкл.", "warn")
+            self.root.after(0, lambda total=total_rows: self.create_progress_overlay(total))
             batch_size = self.int_setting(self.batch_size_var, 10, 0)
             batch_pause = self.int_setting(self.batch_pause_var, 8, 0)
             max_rows = self.int_setting(self.max_rows_var, 0, 0)
@@ -823,13 +958,20 @@ class RobotApp:
                 qty = self.cleanup_value(row["Количество"])
 
                 try:
+                    self.root.after(
+                        0,
+                        lambda rn=row_num, total=total_rows, a=article, q=qty, ok=success_count, err=error_count, sk=skip_count:
+                            self.update_progress_overlay(rn, total, a, q, ok, err, sk),
+                    )
                     if not article:
                         skip_count += 1
                         write_both(f"SKIP | Строка {row_num} | Пустой артикул", "warn")
+                        self.root.after(0, lambda rn=row_num, total=total_rows, ok=success_count, err=error_count, sk=skip_count: self.update_progress_overlay(rn, total, "", "", ok, err, sk))
                         continue
                     if not qty:
                         skip_count += 1
                         write_both(f"SKIP | Строка {row_num} | Пустое количество | Артикул: {article}", "warn")
+                        self.root.after(0, lambda rn=row_num, total=total_rows, a=article, ok=success_count, err=error_count, sk=skip_count: self.update_progress_overlay(rn, total, a, "", ok, err, sk))
                         continue
 
                     write_both(f"START | Строка {row_num} | Артикул: {article} | Количество: {qty}", "start")
@@ -849,6 +991,7 @@ class RobotApp:
 
                     success_count += 1
                     write_both(f"OK    | Строка {row_num} | Артикул: {article} | Количество: {qty}", "ok")
+                    self.root.after(0, lambda rn=row_num, total=total_rows, a=article, q=qty, ok=success_count, err=error_count, sk=skip_count: self.update_progress_overlay(rn, total, a, q, ok, err, sk))
                     time.sleep(self.settings.step_delay)
                     if batch_size and batch_pause and success_count % batch_size == 0:
                         write_both(f"Пауза {batch_pause} сек. после {success_count} строк, чтобы 1С успела обработать данные", "warn")
@@ -859,6 +1002,7 @@ class RobotApp:
                 except Exception as e:
                     error_count += 1
                     write_both(f"ERROR | Строка {row_num} | Ошибка: {e}", "error")
+                    self.root.after(0, lambda rn=row_num, total=total_rows, a=article, q=qty, ok=success_count, err=error_count, sk=skip_count: self.update_progress_overlay(rn, total, a, q, ok, err, sk))
                     self.stop_event.set()
                     write_both("ВНИМАНИЕ: робот остановлен после ошибки ввода, чтобы не прогонять накладную неверно", "warn")
                     break
@@ -868,6 +1012,14 @@ class RobotApp:
             write_both(f"Пропущено: {skip_count}", "warn" if skip_count else "info")
             write_both(f"Ошибок: {error_count}", "error" if error_count else "info")
             write_both(f"Лог сохранен: {log_file.name}", "info")
+            self.last_run_summary = {
+                "total": total_rows,
+                "success": success_count,
+                "skipped": skip_count,
+                "errors": error_count,
+                "stopped": self.stop_event.is_set(),
+                "log_file": str(log_file),
+            }
 
             if self.stop_event.is_set():
                 self.root.after(0, lambda: self.countdown_label.config(text="Остановлено"))
@@ -879,6 +1031,14 @@ class RobotApp:
         except Exception as e:
             write_both(f"ОШИБКА: {e}", "error")
             write_both(traceback.format_exc(), "error")
+            self.last_run_summary = {
+                "total": total_rows,
+                "success": success_count,
+                "skipped": skip_count,
+                "errors": error_count + 1,
+                "stopped": self.stop_event.is_set(),
+                "log_file": str(log_file),
+            }
             self.root.after(0, lambda: self.countdown_label.config(text="Ошибка"))
             self.root.after(0, lambda: self.status_var.set("Статус: ошибка"))
         finally:
