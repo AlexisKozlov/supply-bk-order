@@ -850,14 +850,39 @@ class RobotApp:
 
             def ask_run():
                 self.log(f"Обновление скачано: {target_path}", "ok")
-                if messagebox.askyesno("Обновление скачано", f"Файл скачан:\n{target_path}\n\nЗапустить установщик?"):
-                    os.startfile(str(target_path))
+                if messagebox.askyesno(
+                    "Обновление скачано",
+                    "Файл обновления скачан.\n\n"
+                    "Сейчас программа закроется, после этого запустится установщик.\n"
+                    "Если в конце установщика будет галочка запуска программы, снимите её и запустите программу обычным ярлыком.\n\n"
+                    "Продолжить?",
+                ):
+                    self.start_installer_and_exit(target_path)
 
             self.root.after(0, ask_run)
         except Exception as exc:
             error_text = str(exc)
             self.root.after(0, lambda: self.log(f"ОШИБКА: не удалось скачать обновление: {error_text}", "error"))
             self.root.after(0, lambda: messagebox.showerror("Скачивание обновления", f"Не удалось скачать обновление.\n\n{error_text}"))
+
+    def start_installer_and_exit(self, installer_path: Path):
+        if self.is_running:
+            messagebox.showwarning("Робот работает", "Сначала остановите загрузку в 1С, затем запустите обновление.")
+            return
+        try:
+            self.stop_event.set()
+            self.close_progress_overlay()
+            # Запускаем установщик из отдельного cmd после закрытия текущего exe.
+            # Так PyInstaller успевает освободить временную папку _MEI и не остаётся фоновый процесс.
+            command = f'timeout /t 2 /nobreak >nul & start "" "{installer_path}"'
+            subprocess.Popen(
+                ["cmd", "/c", command],
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0,
+            )
+            self.root.after(100, self.root.destroy)
+        except Exception as exc:
+            self.log(f"ОШИБКА: не удалось запустить установщик: {exc}", "error")
+            messagebox.showerror("Запуск установщика", f"Не удалось запустить установщик.\n\n{exc}")
 
     # ---------- robot engine integrated in app: no subprocess, no console ----------
     def cleanup_value(self, value) -> str:

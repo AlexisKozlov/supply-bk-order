@@ -1,6 +1,6 @@
 [Setup]
 AppName=1C Robot Pro
-AppVersion=1.0.0
+AppVersion=1.0.15
 DefaultDirName={localappdata}\1C_Robot_Pro
 DefaultGroupName=1C Robot Pro
 OutputDir=installer_output
@@ -34,5 +34,12 @@ Name: "{app}\reference"
 Name: "{autodesktop}\1C Robot Pro"; Filename: "{app}\1C_Robot.exe"
 Name: "{group}\1C Robot Pro"; Filename: "{app}\1C_Robot.exe"
 
-[Run]
-Filename: "{app}\1C_Robot.exe"; Description: "Запустить 1C Robot Pro"; Flags: nowait postinstall skipifsilent
+[Code]
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM 1C_Robot.exe /F /T >nul 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+  Result := True;
+end;
