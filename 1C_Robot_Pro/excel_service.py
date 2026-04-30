@@ -164,48 +164,51 @@ def parse_summary_ettn(invoice_path: Path):
     return rows
 
 
-def parse_mercury_dodo(invoice_path: Path, restaurant_address: str, stock: str):
-    sheet_name = MERCURY_STOCK_SHEETS.get(normalize_text(stock))
-    if not sheet_name:
-        raise ValueError("Выберите склад Меркурия: сухой, холод или мороз")
-
-    restaurant_query = normalize_text(restaurant_address)
-    if not restaurant_query:
-        raise ValueError("Введите адрес ресторана для Меркурия")
-
+def parse_mercury_dodo_all(invoice_path: Path):
     sheets = pd.read_excel(invoice_path, sheet_name=None, dtype=str)
-    matching_sheet = None
-    for name, df in sheets.items():
-        if normalize_text(name) == normalize_text(sheet_name):
-            matching_sheet = df
-            break
-    if matching_sheet is None:
-        raise ValueError(f"В файле нет листа: {sheet_name}")
+    frames = []
 
-    df = matching_sheet.copy()
-    required = ["Адрес ресторана", "Товар", "Количество"]
-    missing = [name for name in required if name not in df.columns]
-    if missing:
-        raise ValueError(f"На листе {sheet_name} нет колонок: {', '.join(missing)}")
+    for sheet_name in ("СУХОЙ", "ХОЛОД", "МОРОЗ"):
+        matching_sheet = None
+        for name, df in sheets.items():
+            if normalize_text(name) == normalize_text(sheet_name):
+                matching_sheet = df
+                break
+        if matching_sheet is None:
+            continue
 
-    df["Адрес ресторана"] = df["Адрес ресторана"].fillna("").astype(str).str.strip()
-    df["Товар"] = df["Товар"].fillna("").astype(str).str.strip()
-    df["Количество"] = df["Количество"].fillna("").astype(str).str.strip()
-    df = df[df["Адрес ресторана"].map(normalize_text).str.contains(restaurant_query, regex=False)]
-    df = df[(df["Товар"] != "") & (df["Количество"] != "")]
+        df = matching_sheet.copy()
+        required = ["№ ресторана", "Адрес ресторана", "Товар", "Количество"]
+        missing = [name for name in required if name not in df.columns]
+        if missing:
+            raise ValueError(f"На листе {sheet_name} нет колонок: {', '.join(missing)}")
 
-    result = pd.DataFrame(
-        {
-            "Артикул": df["Товар"].map(first_product_token),
-            "Количество": df["Количество"],
-            "Адрес ресторана": df["Адрес ресторана"],
-            "Склад": sheet_name,
-            "Товар": df["Товар"],
-        }
-    )
+        df["№ ресторана"] = df["№ ресторана"].fillna("").astype(str).str.strip()
+        df["Адрес ресторана"] = df["Адрес ресторана"].fillna("").astype(str).str.strip()
+        df["Товар"] = df["Товар"].fillna("").astype(str).str.strip()
+        df["Количество"] = df["Количество"].fillna("").astype(str).str.strip()
+        df = df[(df["№ ресторана"] != "") & (df["Адрес ресторана"] != "") & (df["Товар"] != "") & (df["Количество"] != "")]
+
+        frame = pd.DataFrame(
+            {
+                "№ ресторана": df["№ ресторана"],
+                "Адрес ресторана": df["Адрес ресторана"],
+                "Артикул": df["Товар"].map(first_product_token),
+                "Количество": df["Количество"],
+                "Склад": sheet_name,
+                "Товар": df["Товар"],
+            }
+        )
+        frame = frame[(frame["Артикул"] != "") & (frame["Артикул"].map(normalize_text) != "товар")]
+        frames.append(frame)
+
+    if not frames:
+        raise ValueError("В файле не найдены листы СУХОЙ, ХОЛОД или МОРОЗ")
+
+    result = pd.concat(frames, ignore_index=True)
     result = result[(result["Артикул"] != "") & (result["Количество"] != "")].reset_index(drop=True)
     if result.empty:
-        raise ValueError(f"По адресу '{restaurant_address}' на складе {sheet_name} строки не найдены")
+        raise ValueError("В файле Меркурия нет строк для загрузки")
     return result
 
 
@@ -239,21 +242,24 @@ def simple_stats_for(result_df):
     }
 
 
-def process_mercury_to_output(invoice_path: Path, output_dir: Path, restaurant_address: str, stock: str, clear_output=True):
-    result_df = parse_mercury_dodo(invoice_path, restaurant_address, stock)
+def process_mercury_to_output(invoice_path: Path, output_dir: Path, clear_output=True):
+    result_df = parse_mercury_dodo_all(invoice_path)
     if clear_output:
         clear_output_xlsx(output_dir)
     else:
         output_dir.mkdir(exist_ok=True)
 
-    load_df = result_df[["Артикул", "Количество"]].copy()
-    stock_name = MERCURY_STOCK_SHEETS[normalize_text(stock)]
-    output_name = f"{safe_filename(restaurant_address)}_{stock_name}_mercury_queue_ok.xlsx"
-    load_df.to_excel(output_dir / output_name, index=False)
     result_df.to_excel(output_dir / "mercury_queue.xlsx", index=False)
+    created = ["mercury_queue.xlsx"]
+
+    for (rest_number, rest_address, stock_name), group in result_df.groupby(["№ ресторана", "Адрес ресторана", "Склад"], sort=True):
+        load_df = group[["Артикул", "Количество"]].copy()
+        output_name = f"{safe_filename(rest_number)}_{safe_filename(rest_address)}_{stock_name}_mercury_queue_ok.xlsx"
+        load_df.to_excel(output_dir / output_name, index=False)
+        created.append(output_name)
 
     return {
-        "created": [output_name, "mercury_queue.xlsx"],
+        "created": created,
         "stats": simple_stats_for(result_df),
     }
 

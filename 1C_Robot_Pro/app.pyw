@@ -358,6 +358,19 @@ class RobotApp:
         ttk.Radiobutton(right, text="1С", value="1c", variable=self.target_system_var, command=self.change_target_system).pack(anchor="w")
         ttk.Radiobutton(right, text="Меркурий", value="mercury", variable=self.target_system_var, command=self.change_target_system).pack(anchor="w")
 
+        mercury_run_frame = ttk.Frame(right, style="Card.TFrame")
+        mercury_run_frame.pack(fill="x", pady=(6, 0))
+        ttk.Label(mercury_run_frame, text="Склад Меркурия", background="#ffffff").pack(side="left")
+        self.mercury_stock_var = tk.StringVar(value="Сухой")
+        ttk.Combobox(
+            mercury_run_frame,
+            textvariable=self.mercury_stock_var,
+            values=("Сухой", "Холод", "Мороз"),
+            state="readonly",
+            width=10,
+        ).pack(side="left", padx=(8, 0))
+        self.mercury_stock_var.trace_add("write", lambda *_args: self.search_files(show_message=False))
+
         ttk.Label(right, text="Режим скорости", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 0))
         self.mode_var = tk.StringVar(value="safe")
         ttk.Radiobutton(right, text="Быстро", value="fast", variable=self.mode_var, command=self.change_mode).pack(anchor="w")
@@ -432,22 +445,13 @@ class RobotApp:
         ttk.Radiobutton(prep_mode, text="Одна СТТ", value=MODE_SINGLE, variable=self.prepare_mode_var, command=self.update_prepare_status).pack(side="left", padx=(10, 0))
         ttk.Radiobutton(prep_mode, text="Меркурий Додо", value=MODE_MERCURY_DODO, variable=self.prepare_mode_var, command=self.update_prepare_status).pack(side="left", padx=(10, 0))
 
-        mercury_box = ttk.Frame(prepare_card, style="Card.TFrame")
-        mercury_box.pack(fill="x", pady=(14, 0))
-        ttk.Label(mercury_box, text="Для Меркурия:", background="#ffffff", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Label(mercury_box, text="адрес ресторана", background="#ffffff").grid(row=0, column=1, sticky="w")
-        self.mercury_address_var = tk.StringVar(value="")
-        ttk.Entry(mercury_box, textvariable=self.mercury_address_var, width=38).grid(row=0, column=2, sticky="we", padx=(8, 14))
-        ttk.Label(mercury_box, text="склад", background="#ffffff").grid(row=0, column=3, sticky="w")
-        self.mercury_stock_var = tk.StringVar(value="Сухой")
-        ttk.Combobox(
-            mercury_box,
-            textvariable=self.mercury_stock_var,
-            values=("Сухой", "Холод", "Мороз"),
-            state="readonly",
-            width=12,
-        ).grid(row=0, column=4, sticky="w", padx=(8, 0))
-        mercury_box.columnconfigure(2, weight=1)
+        ttk.Label(
+            prepare_card,
+            text="Для Меркурия выберите файл додозаказы.xlsx. Output будет создан сразу по всем ресторанам и складам.",
+            background="#ffffff",
+            foreground="#374151",
+            wraplength=900,
+        ).pack(anchor="w", pady=(14, 0))
 
         self.prepare_status_var = tk.StringVar(value="Выберите справочник и файл накладной.")
         ttk.Label(
@@ -701,6 +705,7 @@ class RobotApp:
     def change_target_system(self):
         target = "Меркурий" if self.target_system_var.get() == "mercury" else "1С"
         self.log(f"Система загрузки: {target}", "info")
+        self.search_files(show_message=False)
 
     def setup_hotkeys(self):
         self.root.bind("<F8>", lambda _event: self.stop_robot())
@@ -754,9 +759,6 @@ class RobotApp:
         if not self.invoice_path or not self.invoice_path.exists():
             messagebox.showwarning("Нет накладной", "Выберите файл накладной или сводной таблицы.")
             return
-        if mode == MODE_MERCURY_DODO and not self.mercury_address_var.get().strip():
-            messagebox.showwarning("Нет адреса", "Введите адрес ресторана для Меркурия.")
-            return
         if not messagebox.askyesno(
             "Перезаписать output",
             "Старые Excel-файлы в папке output будут удалены и заменены новыми. Продолжить?",
@@ -772,8 +774,6 @@ class RobotApp:
                 result = process_mercury_to_output(
                     self.invoice_path,
                     OUTPUT_DIR,
-                    self.mercury_address_var.get().strip(),
-                    self.mercury_stock_var.get(),
                     clear_output=True,
                 )
             else:
@@ -848,6 +848,12 @@ class RobotApp:
     def search_files(self, show_message=True):
         query = self.search_var.get().strip().lower()
         files = getattr(self, "all_files", sorted(OUTPUT_DIR.glob("*_queue_ok.xlsx"), key=lambda x: x.name))
+        target_system = self.target_system_var.get()
+        if target_system == "mercury":
+            stock = self.mercury_stock_var.get().strip().upper()
+            files = [f for f in files if "_mercury_queue_ok" in f.name.lower() and stock in f.name.upper()]
+        else:
+            files = [f for f in files if "_mercury_queue_ok" not in f.name.lower()]
         self.files = [f for f in files if query in f.name.lower()]
         self.listbox.delete(0, "end")
         for f in self.files:
