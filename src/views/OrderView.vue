@@ -306,6 +306,8 @@ const supplierStore = useSupplierStore();
 const toast         = useToastStore();
 const userStore     = useUserStore();
 
+const ORDER_PRODUCT_FIELDS = 'id, sku, name, unit_of_measure, qty_per_box, boxes_per_pallet, multiplicity, analog_group';
+
 const isViewer = computed(() => !userStore.hasAccess('order', 'edit'));
 const setTabTitle = inject('setTabTitle', () => {});
 let _orderLoadId = 0;
@@ -520,7 +522,7 @@ onMounted(async () => {
     orderStore.items = [];
     supplierLoading.value = true;
     try {
-      let pq = db.from('products').select('*').eq('supplier', sup).eq('is_active', 1);
+      let pq = db.from('products').select(ORDER_PRODUCT_FIELDS).eq('supplier', sup).eq('is_active', 1);
       pq = applyEntityGroupFilter(pq, orderStore.settings.legalEntity);
       const { data } = await pq;
       (data || []).forEach(p => orderStore.addItem(p, true));
@@ -660,7 +662,7 @@ async function onSupplierChange(e) {
   supplierLoading.value = true;
   const myGen = ++_supplierLoadGen;
   try {
-    let pq2 = db.from('products').select('*').eq('supplier', newSupplier).eq('is_active', 1);
+    let pq2 = db.from('products').select(ORDER_PRODUCT_FIELDS).eq('supplier', newSupplier).eq('is_active', 1);
     pq2 = applyEntityGroupFilter(pq2, orderStore.settings.legalEntity);
     const { data } = await pq2;
     if (myGen !== _supplierLoadGen) return; // пользователь уже сменил поставщика
@@ -986,49 +988,23 @@ async function loadTrends() {
     }
     if (!groups.size) { trendMap.value = {}; salesMap.value = {}; return; }
 
-    // 2) Реализация за periodDays дней (минимум 28 для тренда)
-    const now = new Date();
     const cpd = orderStore.settings.periodDays || 30;
-    const loadDays = Math.max(cpd, 28);
-    const dLoad = new Date(now); dLoad.setDate(dLoad.getDate() - loadDays);
-    const dateFrom = toLocalDateStr(dLoad);
     const groupList = [...groups];
-    let allSales = [];
-    const trendsGroupCode = getEntityGroupCode(orderStore.settings.legalEntity);
-    for (let i = 0; i < groupList.length; i += 50) {
-      const batch = groupList.slice(i, i + 50);
-      const { data: sales, error } = await db.from('restaurant_sales')
-        .select('sale_date, analog_group, quantity')
-        .eq('legal_entity_group', trendsGroupCode)
-        .gte('sale_date', dateFrom)
-        .in('analog_group', batch)
-        .limit(500000);
-      if (error) console.error('[Trends] API error:', error);
-      if (gen !== _loadTrendsGen) return;
-      if (sales) allSales = allSales.concat(sales);
-    }
+    const { data: summary, error } = await db.rpc('get_restaurant_sales_summary', {
+      legal_entity: orderStore.settings.legalEntity,
+      analog_groups: groupList,
+      period_days: cpd,
+    });
+    if (error) console.error('[Trends] API error:', error);
+    if (gen !== _loadTrendsGen) return;
 
     // 3) Считаем тренд (14к14) и реализацию (за periodDays)
-    const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
-    const d14str = toLocalDateStr(d14);
-    const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
-    const d28str = toLocalDateStr(d28);
-    const dCpd = new Date(now); dCpd.setDate(dCpd.getDate() - cpd);
-    const dCpdStr = toLocalDateStr(dCpd);
     const groupStats = {};
     const groupTotals = {};
-    for (const s of allSales) {
+    for (const s of (summary?.rows || [])) {
       const g = s.analog_group;
-      const qty = parseFloat(s.quantity) || 0;
-      if (s.sale_date >= d28str) {
-        if (!groupStats[g]) groupStats[g] = { cur: 0, prev: 0 };
-        if (s.sale_date >= d14str) groupStats[g].cur += qty;
-        else groupStats[g].prev += qty;
-      }
-      if (s.sale_date >= dCpdStr) {
-        if (!groupTotals[g]) groupTotals[g] = 0;
-        groupTotals[g] += qty;
-      }
+      groupStats[g] = { cur: parseFloat(s.cur) || 0, prev: parseFloat(s.prev) || 0 };
+      groupTotals[g] = parseFloat(s.total) || 0;
     }
 
     // 4) Маппим на SKU

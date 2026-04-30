@@ -312,7 +312,7 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
-import { getEntityGroup } from '@/lib/utils.js';
+import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import EditCardModal from '@/components/modals/EditCardModal.vue';
 import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
@@ -554,11 +554,12 @@ async function loadProducts() {
   const myId = ++_dbLoadId;
   loading.value = true;
   try {
-    const { data, error } = await db.from('products').select('*').order('name');
+    let query = db.from('products').select('*').order('name');
+    query = applyEntityGroupFilter(query, orderStore.settings.legalEntity);
+    const { data, error } = await query;
     if (myId !== _dbLoadId) return; // Новый запрос перехватил
     if (error) { toast.error('Ошибка', ''); return; }
-    const group = getEntityGroup(orderStore.settings.legalEntity);
-    products.value = (data || []).filter(p => group.includes(p.legal_entity));
+    products.value = data || [];
   } finally { if (myId === _dbLoadId) loading.value = false; }
 }
 
@@ -569,11 +570,12 @@ async function loadSuppliers() {
   const showLoading = activeTab.value === 'suppliers';
   if (showLoading) loading.value = true;
   try {
-    const { data, error } = await db.from('suppliers').select('*').order('short_name');
+    let query = db.from('suppliers').select('*').order('short_name');
+    query = applyEntityGroupFilter(query, orderStore.settings.legalEntity);
+    const { data, error } = await query;
     if (myId !== _suppLoadId) return;
     if (error) { toast.error('Ошибка', ''); return; }
-    const group = getEntityGroup(orderStore.settings.legalEntity);
-    suppliers.value = (data || []).filter(s => group.includes(s.legal_entity));
+    suppliers.value = data || [];
   } finally { if (myId === _suppLoadId && showLoading) loading.value = false; }
 }
 

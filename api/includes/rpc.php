@@ -736,6 +736,49 @@ if ($endpoint === 'rpc') {
         ]);
     }
 
+    // Сводка реализации ресторанов для трендов в заказе и планировании.
+    // Возвращает агрегированные суммы, чтобы фронтенд не тянул тысячи строк restaurant_sales.
+    if ($fn === 'get_restaurant_sales_summary') {
+        $le = $body['legal_entity'] ?? '';
+        $groups = $body['analog_groups'] ?? [];
+        $periodDays = max(1, min((int)($body['period_days'] ?? 30), 365));
+        if (!$le) respond(['error' => 'Не указано юр. лицо'], 400);
+        if (!checkLegalEntityAccess($authUser, $le)) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        requireModuleAccess($authUser, 'restaurant-sales', 'view', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+
+        if (!is_array($groups)) $groups = [];
+        $groups = array_values(array_unique(array_filter(array_map(static function ($g) {
+            $g = trim((string)$g);
+            return $g !== '' ? mb_substr($g, 0, 255) : '';
+        }, $groups))));
+        if (!$groups) respond(['rows' => []]);
+        $groups = array_slice($groups, 0, 300);
+
+        $loadDays = max($periodDays, 28);
+        $dateFrom = date('Y-m-d', strtotime("-{$loadDays} days"));
+        $d14 = date('Y-m-d', strtotime('-14 days'));
+        $d28 = date('Y-m-d', strtotime('-28 days'));
+        $dPeriod = date('Y-m-d', strtotime("-{$periodDays} days"));
+        $groupCode = getEntityGroup($le);
+        $ph = implode(',', array_fill(0, count($groups), '?'));
+        $sql = "
+            SELECT
+                analog_group,
+                SUM(CASE WHEN sale_date >= ? THEN quantity ELSE 0 END) AS cur,
+                SUM(CASE WHEN sale_date >= ? AND sale_date < ? THEN quantity ELSE 0 END) AS prev,
+                SUM(CASE WHEN sale_date >= ? THEN quantity ELSE 0 END) AS total
+            FROM restaurant_sales
+            WHERE legal_entity_group = ?
+              AND sale_date >= ?
+              AND analog_group IN ($ph)
+            GROUP BY analog_group
+        ";
+        $params = array_merge([$d14, $d28, $d14, $dPeriod, $groupCode, $dateFrom], $groups);
+        $s = $pdo->prepare($sql);
+        $s->execute($params);
+        respond(['rows' => cleanNumeric($s->fetchAll())]);
+    }
+
     // ═══ DEFICIT: приватные RPC ═══
     if ($fn === 'deficit_create_token') {
         $le = $body['legal_entity'] ?? '';

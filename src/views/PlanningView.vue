@@ -519,6 +519,8 @@ const toast = useToastStore();
 const userStore = useUserStore();
 const draftStore = useDraftStore();
 
+const PLAN_PRODUCT_FIELDS = 'id, sku, name, legal_entity, legal_entity_group, unit_of_measure, qty_per_box, boxes_per_pallet, multiplicity, analog_group, is_active';
+
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 
 const isViewer = computed(() => !userStore.hasAccess('planning', 'edit'));
@@ -628,7 +630,7 @@ async function loadSupplierProducts() {
   const sup = supplier.value;
   if (!sup) { allSupplierProducts.value = []; return; }
   try {
-    let q = db.from('products').select('*').eq('supplier', sup);
+    let q = db.from('products').select(PLAN_PRODUCT_FIELDS).eq('supplier', sup);
     q = applyEntityGroupFilter(q, orderStore.settings.legalEntity);
     const { data } = await q;
     allSupplierProducts.value = data || [];
@@ -1181,7 +1183,7 @@ async function createOrderFromPeriod(pi) {
   const skus = planItems.map(i => i.sku).filter(Boolean);
   let productMap = {};
   if (skus.length) {
-    let prodQuery = db.from('products').select('*').in('sku', skus);
+    let prodQuery = db.from('products').select(PLAN_PRODUCT_FIELDS).in('sku', skus);
     prodQuery = applyEntityGroupFilter(prodQuery, orderStore.settings.legalEntity);
     const { data: products } = await prodQuery;
     if (products) productMap = Object.fromEntries(products.map(p => [p.sku, p]));
@@ -1857,7 +1859,7 @@ async function loadProducts() {
   const gen = ++_loadProductsGen;
   suppLoading.value = true;
   try {
-    const { data, error } = await db.from('products').select('*').eq('supplier', supplier.value).eq('is_active', 1).order('name');
+    const { data, error } = await db.from('products').select(PLAN_PRODUCT_FIELDS).eq('supplier', supplier.value).eq('is_active', 1).order('name');
     if (gen !== _loadProductsGen) return; // устаревший запрос
     if (error) { toast.error('Ошибка', ''); return; }
     const group = getEntityGroup(orderStore.settings.legalEntity);
@@ -1892,49 +1894,22 @@ async function loadTrends() {
     }
     if (!groups.size) { trendMap.value = {}; salesMap.value = {}; return; }
 
-    const now = new Date();
     const cpd = consumptionPeriodDays.value || 30;
-    const loadDays = Math.max(cpd, 28);
-    const dLoad = new Date(now); dLoad.setDate(dLoad.getDate() - loadDays);
-    const dateFrom = toLocalDateStr(dLoad);
     const groupList = [...groups];
-    let allSales = [];
-    const planGroupCode = getEntityGroupCode(orderStore.settings.legalEntity);
-    for (let i = 0; i < groupList.length; i += 50) {
-      const batch = groupList.slice(i, i + 50);
-      const { data: sales } = await db.from('restaurant_sales')
-        .select('sale_date, analog_group, quantity')
-        .eq('legal_entity_group', planGroupCode)
-        .gte('sale_date', dateFrom)
-        .in('analog_group', batch)
-        .limit(500000);
-      if (gen !== _loadTrendsGen) return;
-      if (sales) allSales = allSales.concat(sales);
-    }
+    const { data: summary } = await db.rpc('get_restaurant_sales_summary', {
+      legal_entity: orderStore.settings.legalEntity,
+      analog_groups: groupList,
+      period_days: cpd,
+    });
+    if (gen !== _loadTrendsGen) return;
 
     // Тренд: 14 к 14 (из последних 28 дней)
-    const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
-    const d14str = toLocalDateStr(d14);
-    const d28 = new Date(now); d28.setDate(d28.getDate() - 28);
-    const d28str = toLocalDateStr(d28);
-    const dCpd = new Date(now); dCpd.setDate(dCpd.getDate() - cpd);
-    const dCpdStr = toLocalDateStr(dCpd);
     const groupStats = {};
     const groupTotals = {};
-    for (const s of allSales) {
+    for (const s of (summary?.rows || [])) {
       const g = s.analog_group;
-      const qty = parseFloat(s.quantity) || 0;
-      // Тренд — только последние 28 дней
-      if (s.sale_date >= d28str) {
-        if (!groupStats[g]) groupStats[g] = { cur: 0, prev: 0 };
-        if (s.sale_date >= d14str) groupStats[g].cur += qty;
-        else groupStats[g].prev += qty;
-      }
-      // Реализация — за период расхода
-      if (s.sale_date >= dCpdStr) {
-        if (!groupTotals[g]) groupTotals[g] = 0;
-        groupTotals[g] += qty;
-      }
+      groupStats[g] = { cur: parseFloat(s.cur) || 0, prev: parseFloat(s.prev) || 0 };
+      groupTotals[g] = parseFloat(s.total) || 0;
     }
 
     const map = {};

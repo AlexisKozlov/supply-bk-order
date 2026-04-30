@@ -37,7 +37,16 @@ if ($endpoint === 'search_products') {
         $params[] = $supplier;
     }
     
-    $sql = "SELECT * FROM `products` WHERE " . implode(' AND ', $where) . " LIMIT " . $limit;
+    $sql = "
+        SELECT
+            `id`, `sku`, `name`, `supplier`, `qty_per_box`, `boxes_per_pallet`,
+            `unit_of_measure`, `legal_entity`, `legal_entity_group`, `multiplicity`,
+            `analog_group`, `is_active`, `category`, `weight_netto`, `weight_brutto`,
+            `external_code`, `gtin`, `is_traceable`
+        FROM `products`
+        WHERE " . implode(' AND ', $where) . "
+        ORDER BY `name`
+        LIMIT " . $limit;
     $s = $pdo->prepare($sql);
     $s->execute($params);
     respond(cleanNumeric($s->fetchAll()));

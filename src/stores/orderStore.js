@@ -7,6 +7,8 @@ import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
 import { useToastStore } from './toastStore.js';
 
+const ORDER_PRODUCT_FIELDS = 'id, sku, name, unit_of_measure, qty_per_box, boxes_per_pallet, multiplicity';
+
 const _clone = typeof structuredClone === 'function'
   ? structuredClone
   : (v) => JSON.parse(JSON.stringify(v));
@@ -259,7 +261,7 @@ export const useOrderStore = defineStore('order', () => {
     const skus = (order.order_items || []).map(i => i.sku).filter(Boolean);
     let productMap = {};
     if (skus.length > 0) {
-      let prodQuery = db.from('products').select('*').in('sku', skus);
+      let prodQuery = db.from('products').select(ORDER_PRODUCT_FIELDS).in('sku', skus);
       prodQuery = applyEntityGroupFilter(prodQuery, legalEntity);
       const { data: productsData } = await prodQuery;
       if (myRequestId !== _loadRequestId) return; // Новый вызов перехватил — выходим

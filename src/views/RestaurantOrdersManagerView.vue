@@ -1165,11 +1165,18 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { formatDate, formatTime, formatDateTime, statusLabel, EXCEL_HEADER_STYLE, EXCEL_SUBTOTAL_STYLE, EXCEL_TOTAL_STYLE, EXCEL_TRACEABLE_STYLE } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
-import * as XLSX from 'xlsx-js-style';
 
 const store = useRestaurantOrderStore();
 const orderStore = useOrderStore();
 const toast = useToastStore();
+let xlsxLoader = null;
+
+function loadXlsx() {
+  if (!xlsxLoader) {
+    xlsxLoader = import('xlsx-js-style').then(mod => mod.default || mod);
+  }
+  return xlsxLoader;
+}
 
 const loading = ref(true);
 const session = ref(null);
@@ -2523,7 +2530,7 @@ function buildExportRows(orders, itemsByRest, restInfoMap, date, showTotals = fa
   return { rows, subtotalRows, subtotalColIdx, colDefs: cols };
 }
 
-function styleExportSheet(ws, rowCount, subtotalRows, colCount, subtotalColIdx, colDefs) {
+function styleExportSheet(XLSX, ws, rowCount, subtotalRows, colCount, subtotalColIdx, colDefs) {
   for (let c = 0; c < colCount; c++) {
     const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
     if (cell) cell.s = EXCEL_HEADER_STYLE;
@@ -2545,21 +2552,22 @@ function styleExportSheet(ws, rowCount, subtotalRows, colCount, subtotalColIdx, 
   ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowCount - 1, c: colCount - 1 } }) };
 }
 
-function buildSingleOrderXlsx(order, items) {
+function buildSingleOrderXlsx(XLSX, order, items) {
   const wb = XLSX.utils.book_new();
   const restInfo = { [order.restaurant_number]: { city: order.city || '', address: order.address || '', region: order.region || '', delivery_time: '' } };
   const byRest = { [order.restaurant_number]: items.filter(i => (parseFloat(i.quantity) || 0) > 0) };
   const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows([order], byRest, restInfo, order.delivery_date || selectedDate.value, false, DEFAULT_EXPORT_COLUMNS, exportWeightUnit.value);
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
+  styleExportSheet(XLSX, ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
   const prettyRest = formatRestaurantNumber(order.restaurant_number, order.legal_entity_group);
   XLSX.utils.book_append_sheet(wb, ws, `Рест ${prettyRest}`);
   return wb;
 }
 
-function exportSingleOrder(order) {
+async function exportSingleOrder(order) {
   if (!order || !editItems.value.length) return;
-  const wb = buildSingleOrderXlsx(order, editItems.value);
+  const XLSX = await loadXlsx();
+  const wb = buildSingleOrderXlsx(XLSX, order, editItems.value);
   const prettyRest = formatRestaurantNumber(order.restaurant_number, order.legal_entity_group);
   XLSX.writeFile(wb, `Заказ_рест_${prettyRest}_${order.delivery_date}.xlsx`);
 }
@@ -2569,7 +2577,8 @@ async function quickExportOrder(orderId, restaurantNumber, legalEntityGroup) {
     const order = await store.adminGetOrder(orderId);
     const items = (order.items || []).map(i => ({ ...i, quantity: parseFloat(i.quantity) || 0 }));
     if (!items.length) { toast.warning('Заказ пуст'); return; }
-    const wb = buildSingleOrderXlsx(order, items);
+    const XLSX = await loadXlsx();
+    const wb = buildSingleOrderXlsx(XLSX, order, items);
     const prettyRest = formatRestaurantNumber(restaurantNumber, legalEntityGroup);
     XLSX.writeFile(wb, `Заказ_рест_${prettyRest}_${selectedDate.value}.xlsx`);
   } catch (e) {
@@ -2770,6 +2779,7 @@ async function doUnifiedExport() {
     const restWithItems = new Set(items.map(i => i.restaurant_number));
     const filteredOrders = orders.filter(o => restWithItems.has(o.restaurant_number));
 
+    const XLSX = await loadXlsx();
     const wb = XLSX.utils.book_new();
 
     const totals = exportShowTotals.value;
@@ -2781,7 +2791,7 @@ async function doUnifiedExport() {
     const writeSheet = (orders, byRestArg, name) => {
       const { rows, subtotalRows, subtotalColIdx, colDefs } = buildExportRows(orders, byRestArg, restInfoMap, selectedDate.value, totals, columns, exportWeightUnit.value);
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      styleExportSheet(ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
+      styleExportSheet(XLSX, ws, rows.length, subtotalRows, colDefs.length, subtotalColIdx, colDefs);
       XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
     };
 
