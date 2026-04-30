@@ -315,7 +315,7 @@ class RobotApp:
         list_frame.pack(fill="both", expand=True)
         self.listbox = tk.Listbox(
             list_frame,
-            height=18,
+            height=10,
             font=("Consolas", 10),
             borderwidth=0,
             highlightthickness=1,
@@ -328,6 +328,29 @@ class RobotApp:
         scrollbar.pack(side="right", fill="y")
         self.listbox.config(yscrollcommand=scrollbar.set)
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
+
+        preview_header = ttk.Frame(left, style="Card.TFrame")
+        preview_header.pack(fill="x", pady=(12, 6))
+        ttk.Label(preview_header, text="Состав выбранной накладной", background="#ffffff", font=("Segoe UI", 12, "bold")).pack(side="left")
+        self.preview_status_var = tk.StringVar(value="Файл не выбран")
+        ttk.Label(preview_header, textvariable=self.preview_status_var, background="#ffffff", foreground="#6b7280").pack(side="right")
+
+        preview_frame = ttk.Frame(left, style="Card.TFrame")
+        preview_frame.pack(fill="both", expand=True)
+        self.preview_table = ttk.Treeview(
+            preview_frame,
+            columns=("article", "qty"),
+            show="headings",
+            height=9,
+        )
+        self.preview_table.heading("article", text="Артикул")
+        self.preview_table.heading("qty", text="Количество")
+        self.preview_table.column("article", width=180, anchor="w")
+        self.preview_table.column("qty", width=110, anchor="e")
+        self.preview_table.pack(side="left", fill="both", expand=True)
+        preview_scrollbar = ttk.Scrollbar(preview_frame, orient="vertical", command=self.preview_table.yview)
+        preview_scrollbar.pack(side="right", fill="y")
+        self.preview_table.config(yscrollcommand=preview_scrollbar.set)
 
         right = ttk.Frame(robot_body, style="Card.TFrame", padding=14, width=300)
         right.pack(side="right", fill="y")
@@ -817,6 +840,7 @@ class RobotApp:
             except Exception as exc:
                 self.log(f"ОШИБКА: не удалось удалить {path.name}: {exc}", "error")
         self.selected_path = None
+        self.clear_preview("Файл не выбран")
         self.refresh_files(silent=True)
         self.log(f"Output очищен. Удалено файлов: {deleted}", "ok")
         self.status_var.set("Статус: output очищен")
@@ -864,10 +888,14 @@ class RobotApp:
                 self.listbox.selection_set(0)
                 self.listbox.activate(0)
                 self.selected_path = self.files[0]
+                self.load_preview(self.selected_path)
+            else:
+                self.clear_preview("Выберите файл")
             if show_message:
                 self.log(f"Найдено файлов: {len(self.files)}", "info")
         else:
             self.selected_path = None
+            self.clear_preview("Файл не выбран")
             self.status_var.set("Статус: ничего не найдено")
             if show_message:
                 self.log("ОШИБКА: ничего не найдено", "error")
@@ -891,6 +919,33 @@ class RobotApp:
         if sel:
             self.selected_path = self.files[sel[0]]
             self.status_var.set(f"Выбрано: {self.selected_path.name}")
+            self.load_preview(self.selected_path)
+
+    def clear_preview(self, status="Файл не выбран"):
+        if not hasattr(self, "preview_table"):
+            return
+        for item in self.preview_table.get_children():
+            self.preview_table.delete(item)
+        self.preview_status_var.set(status)
+
+    def load_preview(self, path: Path):
+        self.clear_preview("Загрузка...")
+        try:
+            df = pd.read_excel(path, dtype=str).fillna("")
+            if "Артикул" not in df.columns or "Количество" not in df.columns:
+                self.preview_status_var.set("Нет колонок Артикул / Количество")
+                return
+            rows = df[["Артикул", "Количество"]].copy()
+            rows["Артикул"] = rows["Артикул"].astype(str).str.strip()
+            rows["Количество"] = rows["Количество"].astype(str).str.strip()
+            rows = rows[(rows["Артикул"] != "") | (rows["Количество"] != "")]
+            for index, row in rows.head(300).iterrows():
+                self.preview_table.insert("", "end", values=(row["Артикул"], row["Количество"]))
+            suffix = " · показаны первые 300" if len(rows) > 300 else ""
+            self.preview_status_var.set(f"Строк: {len(rows)}{suffix}")
+        except Exception as exc:
+            self.preview_status_var.set("Не удалось прочитать файл")
+            self.log(f"ОШИБКА предпросмотра {path.name}: {exc}", "error")
 
     def run_selected(self):
         if self.is_running:
