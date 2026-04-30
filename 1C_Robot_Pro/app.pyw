@@ -192,6 +192,7 @@ class RobotApp:
         self.reference_path: Path | None = None
         self.invoice_path: Path | None = None
         self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
         self.worker: threading.Thread | None = None
         self.is_running = False
         self.overlay: tk.Toplevel | None = None
@@ -199,6 +200,9 @@ class RobotApp:
         self.overlay_progress: ttk.Progressbar | None = None
         self.current_log_file: Path | None = None
         self.last_run_summary: dict | None = None
+        self.run_started_at: float | None = None
+        self.pause_started_at: float | None = None
+        self.total_paused_seconds = 0.0
 
         pyautogui.PAUSE = 0.08
 
@@ -336,6 +340,12 @@ class RobotApp:
         self.stop_btn = ttk.Button(right, text="СТОП  F8", style="Danger.TButton", command=self.stop_robot, state="disabled")
         self.stop_btn.pack(fill="x", pady=(0, 12))
 
+        resume_frame = ttk.Frame(right, style="Card.TFrame")
+        resume_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(resume_frame, text="Начать со строки", background="#ffffff").pack(side="left")
+        self.start_row_var = tk.StringVar(value="1")
+        ttk.Entry(resume_frame, textvariable=self.start_row_var, width=7).pack(side="left", padx=(8, 0))
+
         self.countdown_label = ttk.Label(right, text="", font=("Segoe UI", 22, "bold"), background="#ffffff", foreground="#2563eb")
         self.countdown_label.pack(anchor="w", pady=(4, 10))
 
@@ -453,7 +463,7 @@ class RobotApp:
 
         overlay = tk.Toplevel(self.root)
         overlay.title("1C Robot")
-        overlay.geometry("330x180+40+40")
+        overlay.geometry("430x260+40+40")
         overlay.resizable(False, False)
         overlay.attributes("-topmost", True)
         overlay.configure(bg="#111827")
@@ -470,6 +480,9 @@ class RobotApp:
             "article": tk.StringVar(value="Артикул: —"),
             "qty": tk.StringVar(value="Кол-во: —"),
             "stats": tk.StringVar(value="OK: 0  Ошибок: 0  Пропусков: 0"),
+            "time": tk.StringVar(value="Прошло: 00:00  Осталось: —"),
+            "eta": tk.StringVar(value="Ожидаемо всего: —"),
+            "pause": tk.StringVar(value="Пауза"),
         }
 
         frame = tk.Frame(overlay, bg="#111827", padx=14, pady=12)
@@ -483,7 +496,9 @@ class RobotApp:
         self.overlay_progress.pack(fill="x", pady=(0, 10))
         tk.Label(frame, textvariable=self.overlay_vars["article"], bg="#111827", fg="#f9fafb", font=("Segoe UI", 9), anchor="w").pack(fill="x")
         tk.Label(frame, textvariable=self.overlay_vars["qty"], bg="#111827", fg="#f9fafb", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(2, 0))
-        tk.Label(frame, textvariable=self.overlay_vars["stats"], bg="#111827", fg="#d1d5db", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(8, 8))
+        tk.Label(frame, textvariable=self.overlay_vars["stats"], bg="#111827", fg="#d1d5db", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(8, 2))
+        tk.Label(frame, textvariable=self.overlay_vars["time"], bg="#111827", fg="#d1d5db", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 2))
+        tk.Label(frame, textvariable=self.overlay_vars["eta"], bg="#111827", fg="#d1d5db", font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 8))
         controls = tk.Frame(frame, bg="#111827")
         controls.pack(fill="x")
         tk.Button(
@@ -499,6 +514,19 @@ class RobotApp:
             padx=12,
             pady=5,
         ).pack(side="left")
+        tk.Button(
+            controls,
+            textvariable=self.overlay_vars["pause"],
+            command=self.toggle_pause,
+            bg="#f59e0b",
+            fg="#111827",
+            activebackground="#d97706",
+            activeforeground="#111827",
+            relief="flat",
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=5,
+        ).pack(side="left", padx=(8, 0))
         tk.Button(
             controls,
             text="Открыть окно",
@@ -520,13 +548,78 @@ class RobotApp:
             return
         total = max(total, 1)
         percent = int(current * 100 / total)
+        elapsed = self.active_elapsed_seconds()
+        done_for_eta = max(ok + errors + skipped, 0)
+        if done_for_eta > 0:
+            seconds_per_row = elapsed / done_for_eta
+            remaining_rows = max(0, total - current)
+            expected_total = elapsed + seconds_per_row * remaining_rows
+            remaining = max(0, expected_total - elapsed)
+            remaining_text = self.format_duration(remaining)
+            total_text = self.format_duration(expected_total)
+        else:
+            remaining_text = "—"
+            total_text = "—"
         self.overlay_vars["progress"].set(f"{current} / {total}")
         self.overlay_vars["percent"].set(f"{percent}%")
         self.overlay_vars["article"].set(f"Артикул: {article or '—'}")
         self.overlay_vars["qty"].set(f"Кол-во: {qty or '—'}")
         self.overlay_vars["stats"].set(f"OK: {ok}  Ошибок: {errors}  Пропусков: {skipped}")
+        self.overlay_vars["time"].set(f"Прошло: {self.format_duration(elapsed)}  Осталось: {remaining_text}")
+        self.overlay_vars["eta"].set(f"Ожидаемо всего: {total_text}")
+        self.overlay_vars["title"].set("1C Robot на паузе" if self.pause_event.is_set() else "1C Robot работает")
+        self.overlay_vars["pause"].set("Продолжить" if self.pause_event.is_set() else "Пауза")
         if self.overlay_progress:
             self.overlay_progress.config(maximum=total, value=current)
+
+    def format_duration(self, seconds: float | int | None) -> str:
+        if seconds is None:
+            return "—"
+        seconds = max(0, int(seconds))
+        hours, rem = divmod(seconds, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    def active_elapsed_seconds(self) -> float:
+        if not self.run_started_at:
+            return 0.0
+        paused_now = 0.0
+        if self.pause_event.is_set() and self.pause_started_at:
+            paused_now = time.monotonic() - self.pause_started_at
+        return max(0.0, time.monotonic() - self.run_started_at - self.total_paused_seconds - paused_now)
+
+    def toggle_pause(self):
+        if not self.is_running:
+            return
+        if self.pause_event.is_set():
+            if self.pause_started_at:
+                self.total_paused_seconds += time.monotonic() - self.pause_started_at
+            self.pause_started_at = None
+            self.pause_event.clear()
+            self.status_var.set("Статус: робот работает")
+            self.log("Пауза снята, робот продолжает работу", "warn")
+        else:
+            self.pause_started_at = time.monotonic()
+            self.pause_event.set()
+            self.status_var.set("Статус: пауза")
+            self.log("ВНИМАНИЕ: робот поставлен на паузу", "warn")
+        if self.overlay and self.overlay.winfo_exists():
+            self.overlay_vars["title"].set("1C Robot на паузе" if self.pause_event.is_set() else "1C Robot работает")
+            self.overlay_vars["pause"].set("Продолжить" if self.pause_event.is_set() else "Пауза")
+
+    def wait_if_paused(self) -> bool:
+        while self.pause_event.is_set() and not self.stop_event.is_set():
+            time.sleep(0.15)
+        return self.stop_event.is_set()
+
+    def sleep_with_controls(self, seconds: float):
+        end_at = time.monotonic() + max(0.0, seconds)
+        while time.monotonic() < end_at:
+            if self.stop_event.is_set() or self.wait_if_paused():
+                return
+            time.sleep(min(0.1, end_at - time.monotonic()))
 
     def restore_main_window(self):
         try:
@@ -739,6 +832,10 @@ class RobotApp:
         self.log_box.delete("1.0", "end")
         self.log(f"Выбрано: {self.selected_path.name}", "start")
         self.stop_event.clear()
+        self.pause_event.clear()
+        self.pause_started_at = None
+        self.total_paused_seconds = 0.0
+        self.run_started_at = None
         self.is_running = True
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
@@ -764,11 +861,16 @@ class RobotApp:
 
     def stop_robot(self):
         self.stop_event.set()
+        if self.pause_event.is_set():
+            self.pause_event.clear()
+            self.pause_started_at = None
         self.status_var.set("Статус: остановка...")
         self.log("ВНИМАНИЕ: нажата кнопка СТОП", "warn")
 
     def finish_run(self):
         self.is_running = False
+        self.pause_event.clear()
+        self.pause_started_at = None
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.restore_main_window()
@@ -906,7 +1008,7 @@ class RobotApp:
 
     def press_enter(self, times: int):
         for _ in range(times):
-            if self.stop_event.is_set():
+            if self.stop_event.is_set() or self.wait_if_paused():
                 return
             pyautogui.press("enter")
             time.sleep(self.settings.enter_delay)
@@ -918,7 +1020,7 @@ class RobotApp:
         value = str(text).strip()
         if sys.platform.startswith("win"):
             for char in value:
-                if self.stop_event.is_set():
+                if self.stop_event.is_set() or self.wait_if_paused():
                     return
                 code = ord(char)
                 inputs = (INPUT * 2)(
@@ -931,11 +1033,13 @@ class RobotApp:
                     raise RuntimeError(f"Windows не принял Unicode-ввод символа '{char}'. Код ошибки: {err}")
                 time.sleep(interval)
         else:
+            if self.wait_if_paused():
+                return
             pyautogui.write(value, interval=interval)
 
     def type_digits_text(self, text: str, interval: float | None = None):
         interval = self.settings.type_interval if interval is None else interval
-        if self.stop_event.is_set():
+        if self.stop_event.is_set() or self.wait_if_paused():
             return
         cleaned = str(text).strip().replace(",", ".")
         pyautogui.write(cleaned, interval=interval)
@@ -964,11 +1068,20 @@ class RobotApp:
             if df.empty:
                 raise RuntimeError("Файл загрузки пустой")
             total_rows = len(df)
+            start_row = self.int_setting(self.start_row_var, 1, 1)
+            if start_row > total_rows:
+                raise RuntimeError(f"Стартовая строка {start_row} больше количества строк в файле ({total_rows})")
+            self.start_row_var.set(str(start_row))
+            self.run_started_at = time.monotonic()
+            self.total_paused_seconds = 0.0
+            self.pause_started_at = None
 
             write_both("==================================================", "start")
             write_both(f"Запуск робота. Режим: {self.settings.mode} / ввод Unicode-символами", "start")
             write_both(f"Файл загрузки: {self.selected_path}", "info")
             write_both(f"Всего строк: {total_rows}", "info")
+            if start_row > 1:
+                write_both(f"Продолжение с строки: {start_row}", "warn")
             write_both("Перед стартом: 1С открыта, курсор в Номенклатуре, ENG, Caps Lock выкл.", "warn")
             self.root.after(0, lambda total=total_rows: self.create_progress_overlay(total))
             batch_size = self.int_setting(self.batch_size_var, 10, 0)
@@ -979,8 +1092,11 @@ class RobotApp:
             if batch_size and batch_pause:
                 write_both(f"Пауза защиты 1С: каждые {batch_size} строк на {batch_pause} сек.", "warn")
 
-            for i, row in df.iterrows():
+            for i, row in df.iloc[start_row - 1:].iterrows():
                 if self.stop_event.is_set():
+                    write_both("ВНИМАНИЕ: робот остановлен пользователем", "warn")
+                    break
+                if self.wait_if_paused():
                     write_both("ВНИМАНИЕ: робот остановлен пользователем", "warn")
                     break
                 if max_rows and success_count >= max_rows:
@@ -1011,28 +1127,28 @@ class RobotApp:
                     write_both(f"START | Строка {row_num} | Артикул: {article} | Количество: {qty}", "start")
 
                     self.send_unicode_text(article, self.settings.type_interval)
-                    time.sleep(self.settings.step_delay)
+                    self.sleep_with_controls(self.settings.step_delay)
                     self.press_enter(4)
-                    time.sleep(self.settings.step_delay)
+                    self.sleep_with_controls(self.settings.step_delay)
                     self.type_digits_text(qty, 0.02)
-                    time.sleep(self.settings.qty_wait)
+                    self.sleep_with_controls(self.settings.qty_wait)
                     self.press_enter(2)
-                    time.sleep(self.settings.step_delay)
+                    self.sleep_with_controls(self.settings.step_delay)
                     if self.stop_event.is_set():
                         break
                     pyautogui.press("down")
-                    time.sleep(self.settings.step_delay)
+                    self.sleep_with_controls(self.settings.step_delay)
 
                     success_count += 1
                     write_both(f"OK    | Строка {row_num} | Артикул: {article} | Количество: {qty}", "ok")
                     self.root.after(0, lambda rn=row_num, total=total_rows, a=article, q=qty, ok=success_count, err=error_count, sk=skip_count: self.update_progress_overlay(rn, total, a, q, ok, err, sk))
-                    time.sleep(self.settings.step_delay)
+                    self.sleep_with_controls(self.settings.step_delay)
                     if batch_size and batch_pause and success_count % batch_size == 0:
                         write_both(f"Пауза {batch_pause} сек. после {success_count} строк, чтобы 1С успела обработать данные", "warn")
                         for _ in range(batch_pause):
                             if self.stop_event.is_set():
                                 break
-                            time.sleep(1)
+                            self.sleep_with_controls(1)
                 except Exception as e:
                     error_count += 1
                     write_both(f"ERROR | Строка {row_num} | Ошибка: {e}", "error")

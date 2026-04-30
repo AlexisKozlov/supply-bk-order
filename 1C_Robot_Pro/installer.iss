@@ -1,6 +1,6 @@
 [Setup]
 AppName=1C Robot Pro
-AppVersion=1.0.16
+AppVersion=1.0.17
 DefaultDirName={localappdata}\1C_Robot_Pro
 DefaultGroupName=1C Robot Pro
 OutputDir=installer_output
