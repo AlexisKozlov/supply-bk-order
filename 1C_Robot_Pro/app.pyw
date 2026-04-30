@@ -872,12 +872,21 @@ class RobotApp:
         try:
             self.stop_event.set()
             self.close_progress_overlay()
-            # Запускаем установщик из отдельного cmd после закрытия текущего exe.
-            # Так PyInstaller успевает освободить временную папку _MEI и не остаётся фоновый процесс.
-            command = f'timeout /t 2 /nobreak >nul & start "" "{installer_path}"'
+            launcher_path = installer_path.with_name("start_1c_robot_update.bat")
+            launcher_path.write_text(
+                "@echo off\n"
+                f'set "INSTALLER={installer_path}"\n'
+                "ping 127.0.0.1 -n 3 >nul\n"
+                'start "" "%INSTALLER%"\n'
+                'del "%~f0" >nul 2>nul\n',
+                encoding="utf-8",
+            )
+            flags = 0
+            if sys.platform.startswith("win"):
+                flags = subprocess.CREATE_NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0)
             subprocess.Popen(
-                ["cmd", "/c", command],
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0,
+                ["cmd", "/c", str(launcher_path)],
+                creationflags=flags,
             )
             self.root.after(100, self.root.destroy)
         except Exception as exc:
