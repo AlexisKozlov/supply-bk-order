@@ -57,7 +57,16 @@ def process_row(article, quantity, pause):
     time.sleep(pause)
 
 
-def run(queue_file, mode):
+def process_mercury_row(article, quantity, pause):
+    type_value(article, pause)
+    pyautogui.press("down")
+    time.sleep(pause)
+    press_enter(1, pause)
+    type_value(quantity, pause)
+    press_enter(1, pause)
+
+
+def run(queue_file, mode, target):
     if pyautogui is None:
         raise RuntimeError("Не установлен пакет pyautogui")
 
@@ -68,6 +77,7 @@ def run(queue_file, mode):
     pause = delay_for_mode(mode)
     logging.info("Файл: %s", queue_file)
     logging.info("Режим: %s", mode)
+    logging.info("Система загрузки: %s", target)
     logging.info("Строк: %s", len(df))
 
     for index, row in df.iterrows():
@@ -77,22 +87,26 @@ def run(queue_file, mode):
             logging.warning("Строка %s пропущена: нет артикула или количества", index + 1)
             continue
         logging.info("Строка %s: артикул %s, количество %s", index + 1, article, quantity)
-        process_row(article, quantity, pause)
+        if target == "mercury":
+            process_mercury_row(article, quantity, pause)
+        else:
+            process_row(article, quantity, pause)
 
     logging.info("Готово")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ввод queue_ok.xlsx в 1С")
+    parser = argparse.ArgumentParser(description="Ввод queue_ok.xlsx в 1С или Меркурий")
     parser.add_argument("queue_file", help="Путь к файлу queue_ok.xlsx")
     parser.add_argument("--mode", choices=["fast", "safe"], default="safe")
+    parser.add_argument("--target", choices=["1c", "mercury"], default="1c")
     args = parser.parse_args()
 
     setup_logging()
     queue_file = Path(args.queue_file)
     if not queue_file.exists():
         raise FileNotFoundError(f"Файл не найден: {queue_file}")
-    run(queue_file, args.mode)
+    run(queue_file, args.mode, args.target)
 
 
 if __name__ == "__main__":

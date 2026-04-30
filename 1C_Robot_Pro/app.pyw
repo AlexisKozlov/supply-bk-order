@@ -27,7 +27,7 @@ import pyperclip
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from excel_service import MODE_SINGLE, MODE_SUMMARY, process_to_output
+from excel_service import MODE_MERCURY_DODO, MODE_SINGLE, MODE_SUMMARY, process_mercury_to_output, process_to_output
 
 try:
     import keyboard
@@ -252,7 +252,7 @@ class RobotApp:
 
         header_top = ttk.Frame(header)
         header_top.pack(fill="x")
-        ttk.Label(header_top, text="Загрузка накладных в 1С", style="Title.TLabel").pack(side="left", anchor="w")
+        ttk.Label(header_top, text="Загрузка накладных", style="Title.TLabel").pack(side="left", anchor="w")
         ttk.Label(
             header_top,
             text=f"Версия {self.update_settings.get('version', '1.0.0')}",
@@ -262,7 +262,7 @@ class RobotApp:
 
         ttk.Label(
             header,
-            text="Подготовьте output, выберите файл накладной, откройте заявку в 1С и запустите робота. F8 останавливает работу.",
+            text="Подготовьте output, выберите файл накладной, откройте нужную систему и запустите робота. F8 останавливает работу.",
             style="Sub.TLabel",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -272,7 +272,7 @@ class RobotApp:
         robot_tab = ttk.Frame(notebook, padding=12)
         prepare_tab = ttk.Frame(notebook, padding=12)
         log_tab = ttk.Frame(notebook, padding=12)
-        notebook.add(robot_tab, text="Загрузка в 1С")
+        notebook.add(robot_tab, text="Загрузка")
         notebook.add(prepare_tab, text="Подготовка output")
         notebook.add(log_tab, text="Лог")
 
@@ -309,6 +309,7 @@ class RobotApp:
         ttk.Button(line, text="Найти", style="Accent.TButton", command=self.search_files).pack(side="left", padx=(0, 6))
         ttk.Button(line, text="Обновить", command=self.refresh_files).pack(side="left")
         ttk.Button(line, text="Открыть output", command=self.open_output_dir).pack(side="left", padx=(6, 0))
+        ttk.Button(line, text="Очистить output", command=self.clear_output_files).pack(side="left", padx=(6, 0))
 
         list_frame = ttk.Frame(left, style="Card.TFrame")
         list_frame.pack(fill="both", expand=True)
@@ -352,12 +353,17 @@ class RobotApp:
         self.status_var = tk.StringVar(value="Статус: ожидание")
         ttk.Label(right, textvariable=self.status_var, style="Status.TLabel", background="#ffffff", wraplength=240).pack(anchor="w", pady=(0, 12))
 
+        ttk.Label(right, text="Куда загружаем", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 0))
+        self.target_system_var = tk.StringVar(value="1c")
+        ttk.Radiobutton(right, text="1С", value="1c", variable=self.target_system_var, command=self.change_target_system).pack(anchor="w")
+        ttk.Radiobutton(right, text="Меркурий", value="mercury", variable=self.target_system_var, command=self.change_target_system).pack(anchor="w")
+
         ttk.Label(right, text="Режим скорости", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 0))
         self.mode_var = tk.StringVar(value="safe")
         ttk.Radiobutton(right, text="Быстро", value="fast", variable=self.mode_var, command=self.change_mode).pack(anchor="w")
         ttk.Radiobutton(right, text="Надежно", value="safe", variable=self.mode_var, command=self.change_mode).pack(anchor="w")
 
-        ttk.Label(right, text="Защита от перегрузки 1С", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 0))
+        ttk.Label(right, text="Защита от перегрузки", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(10, 0))
         throttle = ttk.Frame(right, style="Card.TFrame")
         throttle.pack(fill="x", pady=(6, 0))
         ttk.Label(throttle, text="Пауза каждые", background="#ffffff").grid(row=0, column=0, sticky="w")
@@ -387,8 +393,8 @@ class RobotApp:
         ttk.Separator(right).pack(fill="x", pady=12)
         info = (
             "Перед стартом:\n"
-            "1. Откройте 1С и нужную заявку.\n"
-            "2. Поставьте курсор в Номенклатуру.\n"
+            "1. Откройте 1С или Меркурий и нужную накладную.\n"
+            "2. Поставьте курсор в первую строку ввода.\n"
             "3. Раскладка ENG, Caps Lock выкл.\n"
             "4. Не трогайте мышь во время работы.\n"
             "5. F8 — остановить робота."
@@ -422,8 +428,26 @@ class RobotApp:
         prep_mode.pack(fill="x", pady=(18, 0))
         self.prepare_mode_var = tk.StringVar(value=MODE_SUMMARY)
         ttk.Label(prep_mode, text="Режим обработки:", background="#ffffff", font=("Segoe UI", 10, "bold")).pack(side="left")
-        ttk.Radiobutton(prep_mode, text="Сводная ЭТТН", value=MODE_SUMMARY, variable=self.prepare_mode_var).pack(side="left", padx=(10, 0))
-        ttk.Radiobutton(prep_mode, text="Одна СТТ", value=MODE_SINGLE, variable=self.prepare_mode_var).pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(prep_mode, text="Сводная ЭТТН", value=MODE_SUMMARY, variable=self.prepare_mode_var, command=self.update_prepare_status).pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(prep_mode, text="Одна СТТ", value=MODE_SINGLE, variable=self.prepare_mode_var, command=self.update_prepare_status).pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(prep_mode, text="Меркурий Додо", value=MODE_MERCURY_DODO, variable=self.prepare_mode_var, command=self.update_prepare_status).pack(side="left", padx=(10, 0))
+
+        mercury_box = ttk.Frame(prepare_card, style="Card.TFrame")
+        mercury_box.pack(fill="x", pady=(14, 0))
+        ttk.Label(mercury_box, text="Для Меркурия:", background="#ffffff", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(mercury_box, text="адрес ресторана", background="#ffffff").grid(row=0, column=1, sticky="w")
+        self.mercury_address_var = tk.StringVar(value="")
+        ttk.Entry(mercury_box, textvariable=self.mercury_address_var, width=38).grid(row=0, column=2, sticky="we", padx=(8, 14))
+        ttk.Label(mercury_box, text="склад", background="#ffffff").grid(row=0, column=3, sticky="w")
+        self.mercury_stock_var = tk.StringVar(value="Сухой")
+        ttk.Combobox(
+            mercury_box,
+            textvariable=self.mercury_stock_var,
+            values=("Сухой", "Холод", "Мороз"),
+            state="readonly",
+            width=12,
+        ).grid(row=0, column=4, sticky="w", padx=(8, 0))
+        mercury_box.columnconfigure(2, weight=1)
 
         self.prepare_status_var = tk.StringVar(value="Выберите справочник и файл накладной.")
         ttk.Label(
@@ -674,6 +698,10 @@ class RobotApp:
         self.settings.mode = self.mode_var.get()
         self.log(f"Режим скорости: {self.settings.mode}", "info")
 
+    def change_target_system(self):
+        target = "Меркурий" if self.target_system_var.get() == "mercury" else "1С"
+        self.log(f"Система загрузки: {target}", "info")
+
     def setup_hotkeys(self):
         self.root.bind("<F8>", lambda _event: self.stop_robot())
         if keyboard is None:
@@ -713,14 +741,21 @@ class RobotApp:
     def update_prepare_status(self):
         ref = self.reference_path.name if self.reference_path else "справочник не выбран"
         invoice = self.invoice_path.name if self.invoice_path else "накладная не выбрана"
-        self.prepare_status_var.set(f"Справочник: {ref} | Файл: {invoice}")
+        if self.prepare_mode_var.get() == MODE_MERCURY_DODO:
+            self.prepare_status_var.set(f"Файл Меркурия: {invoice}")
+        else:
+            self.prepare_status_var.set(f"Справочник: {ref} | Файл: {invoice}")
 
     def prepare_output_files(self):
-        if not self.reference_path or not self.reference_path.exists():
+        mode = self.prepare_mode_var.get()
+        if mode != MODE_MERCURY_DODO and (not self.reference_path or not self.reference_path.exists()):
             messagebox.showwarning("Нет справочника", "Выберите справочник товаров Excel.")
             return
         if not self.invoice_path or not self.invoice_path.exists():
             messagebox.showwarning("Нет накладной", "Выберите файл накладной или сводной таблицы.")
+            return
+        if mode == MODE_MERCURY_DODO and not self.mercury_address_var.get().strip():
+            messagebox.showwarning("Нет адреса", "Введите адрес ресторана для Меркурия.")
             return
         if not messagebox.askyesno(
             "Перезаписать output",
@@ -732,13 +767,23 @@ class RobotApp:
     def prepare_output_worker(self):
         try:
             self.root.after(0, lambda: self.log("Старт обработки Excel для output", "start"))
-            result = process_to_output(
-                self.reference_path,
-                self.invoice_path,
-                OUTPUT_DIR,
-                self.prepare_mode_var.get(),
-                clear_output=True,
-            )
+            mode = self.prepare_mode_var.get()
+            if mode == MODE_MERCURY_DODO:
+                result = process_mercury_to_output(
+                    self.invoice_path,
+                    OUTPUT_DIR,
+                    self.mercury_address_var.get().strip(),
+                    self.mercury_stock_var.get(),
+                    clear_output=True,
+                )
+            else:
+                result = process_to_output(
+                    self.reference_path,
+                    self.invoice_path,
+                    OUTPUT_DIR,
+                    mode,
+                    clear_output=True,
+                )
             stats = result["stats"]
             created_count = len(result["created"])
             message = (
@@ -754,6 +799,27 @@ class RobotApp:
             error_text = str(exc)
             self.root.after(0, lambda: self.log(f"ОШИБКА обработки Excel: {error_text}", "error"))
             self.root.after(0, lambda: messagebox.showerror("Ошибка обработки Excel", error_text))
+
+    def clear_output_files(self):
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        files = list(OUTPUT_DIR.glob("*.xlsx"))
+        if not files:
+            self.log("Папка output уже пустая", "info")
+            self.refresh_files(silent=True)
+            return
+        if not messagebox.askyesno("Очистить output", f"Удалить Excel-файлы из output? Найдено: {len(files)}"):
+            return
+        deleted = 0
+        for path in files:
+            try:
+                path.unlink()
+                deleted += 1
+            except Exception as exc:
+                self.log(f"ОШИБКА: не удалось удалить {path.name}: {exc}", "error")
+        self.selected_path = None
+        self.refresh_files(silent=True)
+        self.log(f"Output очищен. Удалено файлов: {deleted}", "ok")
+        self.status_var.set("Статус: output очищен")
 
     def log(self, text: str, tag: str | None = None):
         if tag is None:
@@ -1082,7 +1148,7 @@ class RobotApp:
             write_both(f"Всего строк: {total_rows}", "info")
             if start_row > 1:
                 write_both(f"Продолжение с строки: {start_row}", "warn")
-            write_both("Перед стартом: 1С открыта, курсор в Номенклатуре, ENG, Caps Lock выкл.", "warn")
+            write_both("Перед стартом: нужная система открыта, курсор стоит в первой строке ввода, ENG, Caps Lock выкл.", "warn")
             self.root.after(0, lambda total=total_rows: self.create_progress_overlay(total))
             batch_size = self.int_setting(self.batch_size_var, 10, 0)
             batch_pause = self.int_setting(self.batch_pause_var, 8, 0)
@@ -1090,7 +1156,10 @@ class RobotApp:
             if max_rows:
                 write_both(f"Тестовый лимит строк: {max_rows}", "warn")
             if batch_size and batch_pause:
-                write_both(f"Пауза защиты 1С: каждые {batch_size} строк на {batch_pause} сек.", "warn")
+                write_both(f"Пауза защиты: каждые {batch_size} строк на {batch_pause} сек.", "warn")
+            target_system = self.target_system_var.get()
+            target_label = "Меркурий" if target_system == "mercury" else "1С"
+            write_both(f"Система загрузки: {target_label}", "info")
 
             for i, row in df.iloc[start_row - 1:].iterrows():
                 if self.stop_event.is_set():
@@ -1128,16 +1197,26 @@ class RobotApp:
 
                     self.send_unicode_text(article, self.settings.type_interval)
                     self.sleep_with_controls(self.settings.step_delay)
-                    self.press_enter(4)
-                    self.sleep_with_controls(self.settings.step_delay)
-                    self.type_digits_text(qty, 0.02)
-                    self.sleep_with_controls(self.settings.qty_wait)
-                    self.press_enter(2)
-                    self.sleep_with_controls(self.settings.step_delay)
-                    if self.stop_event.is_set():
-                        break
-                    pyautogui.press("down")
-                    self.sleep_with_controls(self.settings.step_delay)
+                    if target_system == "mercury":
+                        pyautogui.press("down")
+                        self.sleep_with_controls(self.settings.step_delay)
+                        self.press_enter(1)
+                        self.sleep_with_controls(self.settings.step_delay)
+                        self.type_digits_text(qty, 0.02)
+                        self.sleep_with_controls(self.settings.qty_wait)
+                        self.press_enter(1)
+                        self.sleep_with_controls(self.settings.step_delay)
+                    else:
+                        self.press_enter(4)
+                        self.sleep_with_controls(self.settings.step_delay)
+                        self.type_digits_text(qty, 0.02)
+                        self.sleep_with_controls(self.settings.qty_wait)
+                        self.press_enter(2)
+                        self.sleep_with_controls(self.settings.step_delay)
+                        if self.stop_event.is_set():
+                            break
+                        pyautogui.press("down")
+                        self.sleep_with_controls(self.settings.step_delay)
 
                     success_count += 1
                     write_both(f"OK    | Строка {row_num} | Артикул: {article} | Количество: {qty}", "ok")

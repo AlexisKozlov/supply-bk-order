@@ -8,6 +8,16 @@ import pandas as pd
 
 MODE_SINGLE = "single_stt"
 MODE_SUMMARY = "summary_ettn"
+MODE_MERCURY_DODO = "mercury_dodo"
+
+MERCURY_STOCK_SHEETS = {
+    "dry": "СУХОЙ",
+    "cold": "ХОЛОД",
+    "frozen": "МОРОЗ",
+    "сухой": "СУХОЙ",
+    "холод": "ХОЛОД",
+    "мороз": "МОРОЗ",
+}
 
 
 def normalize_gtin(value):
@@ -25,6 +35,21 @@ def safe_filename(value):
     for char in text:
         result.append(char if char.isalnum() or char in ("-", "_") else "_")
     return "".join(result)[:120]
+
+
+def normalize_text(value):
+    if pd.isna(value):
+        return ""
+    return " ".join(str(value).strip().lower().split())
+
+
+def first_product_token(value):
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    return text.split()[0].strip()
 
 
 def load_reference(reference_path: Path):
@@ -139,6 +164,51 @@ def parse_summary_ettn(invoice_path: Path):
     return rows
 
 
+def parse_mercury_dodo(invoice_path: Path, restaurant_address: str, stock: str):
+    sheet_name = MERCURY_STOCK_SHEETS.get(normalize_text(stock))
+    if not sheet_name:
+        raise ValueError("Выберите склад Меркурия: сухой, холод или мороз")
+
+    restaurant_query = normalize_text(restaurant_address)
+    if not restaurant_query:
+        raise ValueError("Введите адрес ресторана для Меркурия")
+
+    sheets = pd.read_excel(invoice_path, sheet_name=None, dtype=str)
+    matching_sheet = None
+    for name, df in sheets.items():
+        if normalize_text(name) == normalize_text(sheet_name):
+            matching_sheet = df
+            break
+    if matching_sheet is None:
+        raise ValueError(f"В файле нет листа: {sheet_name}")
+
+    df = matching_sheet.copy()
+    required = ["Адрес ресторана", "Товар", "Количество"]
+    missing = [name for name in required if name not in df.columns]
+    if missing:
+        raise ValueError(f"На листе {sheet_name} нет колонок: {', '.join(missing)}")
+
+    df["Адрес ресторана"] = df["Адрес ресторана"].fillna("").astype(str).str.strip()
+    df["Товар"] = df["Товар"].fillna("").astype(str).str.strip()
+    df["Количество"] = df["Количество"].fillna("").astype(str).str.strip()
+    df = df[df["Адрес ресторана"].map(normalize_text).str.contains(restaurant_query, regex=False)]
+    df = df[(df["Товар"] != "") & (df["Количество"] != "")]
+
+    result = pd.DataFrame(
+        {
+            "Артикул": df["Товар"].map(first_product_token),
+            "Количество": df["Количество"],
+            "Адрес ресторана": df["Адрес ресторана"],
+            "Склад": sheet_name,
+            "Товар": df["Товар"],
+        }
+    )
+    result = result[(result["Артикул"] != "") & (result["Количество"] != "")].reset_index(drop=True)
+    if result.empty:
+        raise ValueError(f"По адресу '{restaurant_address}' на складе {sheet_name} строки не найдены")
+    return result
+
+
 def clear_output_xlsx(output_dir: Path):
     output_dir.mkdir(exist_ok=True)
     for path in output_dir.glob("*.xlsx"):
@@ -157,6 +227,34 @@ def stats_for(result_df):
         "ok": int((result_df["Статус"] == "OK").sum()),
         "not_found": int((result_df["Статус"] == "NOT_FOUND").sum()),
         "duplicate": int((result_df["Статус"] == "DUPLICATE_GTIN").sum()),
+    }
+
+
+def simple_stats_for(result_df):
+    return {
+        "total": int(len(result_df)),
+        "ok": int(len(result_df)),
+        "not_found": 0,
+        "duplicate": 0,
+    }
+
+
+def process_mercury_to_output(invoice_path: Path, output_dir: Path, restaurant_address: str, stock: str, clear_output=True):
+    result_df = parse_mercury_dodo(invoice_path, restaurant_address, stock)
+    if clear_output:
+        clear_output_xlsx(output_dir)
+    else:
+        output_dir.mkdir(exist_ok=True)
+
+    load_df = result_df[["Артикул", "Количество"]].copy()
+    stock_name = MERCURY_STOCK_SHEETS[normalize_text(stock)]
+    output_name = f"{safe_filename(restaurant_address)}_{stock_name}_mercury_queue_ok.xlsx"
+    load_df.to_excel(output_dir / output_name, index=False)
+    result_df.to_excel(output_dir / "mercury_queue.xlsx", index=False)
+
+    return {
+        "created": [output_name, "mercury_queue.xlsx"],
+        "stats": simple_stats_for(result_df),
     }
 
 
