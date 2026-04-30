@@ -339,12 +339,14 @@ class RobotApp:
         preview_frame.pack(fill="both", expand=True)
         self.preview_table = ttk.Treeview(
             preview_frame,
-            columns=("article", "qty"),
+            columns=("row", "article", "qty"),
             show="headings",
             height=9,
         )
+        self.preview_table.heading("row", text="№")
         self.preview_table.heading("article", text="Артикул")
         self.preview_table.heading("qty", text="Количество")
+        self.preview_table.column("row", width=50, anchor="e")
         self.preview_table.column("article", width=180, anchor="w")
         self.preview_table.column("qty", width=110, anchor="e")
         self.preview_table.pack(side="left", fill="both", expand=True)
@@ -939,8 +941,8 @@ class RobotApp:
             rows["Артикул"] = rows["Артикул"].astype(str).str.strip()
             rows["Количество"] = rows["Количество"].astype(str).str.strip()
             rows = rows[(rows["Артикул"] != "") | (rows["Количество"] != "")]
-            for index, row in rows.head(300).iterrows():
-                self.preview_table.insert("", "end", values=(row["Артикул"], row["Количество"]))
+            for row_number, (_index, row) in enumerate(rows.head(300).iterrows(), start=1):
+                self.preview_table.insert("", "end", values=(row_number, row["Артикул"], row["Количество"]))
             suffix = " · показаны первые 300" if len(rows) > 300 else ""
             self.preview_status_var.set(f"Строк: {len(rows)}{suffix}")
         except Exception as exc:
