@@ -15,7 +15,7 @@
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">или перетащите его сюда</div>
           </div>
           <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.6;">
-            <b>Ожидаемые колонки:</b> Артикул, Внешний код, Штрихкод, Наименование, Поставщик, Коэффициент единицы для отчетов, Единица хранения, Количество кор. в паллете, Количество штук в блоке, Количество блоков в коробе, Вес нетто, Вес брутто, Прослеживаемый, Активная, Группа аналогов, Хранение
+            <b>Ожидаемые колонки:</b> Артикул, id Goods / Внешний код, GTIN / Штрихкод, Наименование, Поставщик, Коэффициент единицы для отчетов, Единица хранения, Количество кор. в паллете, Количество штук в блоке, Количество блоков в коробе, Вес упаковки нетто/брутто, Прослеживаемый, Активная, Группа аналогов, Условия хранения
           </div>
           <input ref="fileInput" type="file" accept=".xlsx,.xls" style="display:none;" @change="onFileSelected" />
         </div>
@@ -30,6 +30,19 @@
             <div style="display:flex;align-items:center;gap:8px;">
               <span style="font-size:12px;color:var(--text-muted);">Юр. лицо:</span>
               <span style="font-size:12px;font-weight:600;">{{ legalEntity }}</span>
+            </div>
+          </div>
+
+          <div class="import-supplier-pick">
+            <label>
+              <span>Поставщик для строк без поставщика</span>
+              <select v-model="selectedSupplier" @change="applySelectedSupplierToRows">
+                <option value="">Не выбран</option>
+                <option v-for="s in supplierOptions" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </label>
+            <div class="import-supplier-hint">
+              В файле «Новинка форма» поставщика нет, поэтому выберите его здесь. Прослеживаемость по умолчанию: нет, активность: да.
             </div>
           </div>
 
@@ -181,6 +194,8 @@ const fileInput = ref(null);
 const result = ref({ added: 0, updated: 0, suppliersCreated: 0, duplicates: 0, errors: 0 });
 const availableFields = ref({});
 const existingSupplierKeys = ref(new Set());
+const supplierOptions = ref([]);
+const selectedSupplier = ref('');
 
 const fieldModeOptions = [
   { value: 'skip', label: 'Не трогать' },
@@ -233,6 +248,9 @@ const COLUMN_MAP = {
   'внешний код':                       'external_code',
   'внутренний код':                    'external_code',
   'код 1с':                            'external_code',
+  'id goods':                          'external_code',
+  'id товар':                          'external_code',
+  'id товара':                         'external_code',
   'штрихкод':                          'gtin',
   'штрих-код':                         'gtin',
   'gtin':                              'gtin',
@@ -250,9 +268,17 @@ const COLUMN_MAP = {
   'количество штук в блоке':           'block_qty',
   'количество блоков в коробе':        'case_blocks',
   'кратность':                         'multiplicity_direct',
+  'вес упаковки, нетто, гр.':          'weight_netto',
+  'вес упаковки нетто гр':             'weight_netto',
   'вес нетто (кг)':                    'weight_netto',
+  'вес нетто (гр)':                    'weight_netto',
+  'вес нетто, гр.':                    'weight_netto',
   'вес нетто':                         'weight_netto',
+  'вес упаковки, брутто, гр.':         'weight_brutto',
+  'вес упаковки брутто гр':            'weight_brutto',
   'вес брутто (кг)':                   'weight_brutto',
+  'вес брутто (гр)':                   'weight_brutto',
+  'вес брутто, гр.':                   'weight_brutto',
   'вес брутто':                        'weight_brutto',
   'прослеживаемый':                    'is_traceable',
   'прослеживаемость':                  'is_traceable',
@@ -261,6 +287,7 @@ const COLUMN_MAP = {
   'видимость':                         'active',
   'группа аналогов (new)':             'analog_group',
   'группа аналогов':                   'analog_group',
+  'условия хранения':                  'category',
   'хранение':                          'category',
 };
 
@@ -287,6 +314,14 @@ function normalizeUnit(raw) {
 
 function hasCellValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function cleanCodeCell(value) {
+  if (!hasCellValue(value)) return '';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Number.isInteger(value) ? String(value) : String(value).replace(/\.0$/, '');
+  }
+  return String(value).trim().replace(/\.0$/, '');
 }
 
 function parseNumberCell(value, { round = false } = {}) {
@@ -330,6 +365,16 @@ function cleanName(raw, sku) {
   return name;
 }
 
+function normalizeCategory(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const lower = value.toLowerCase();
+  if (lower.includes('мороз') || lower.includes('заморож')) return 'Мороз';
+  if (lower.includes('холод') || lower.includes('охлажд')) return 'Холод';
+  if (lower.includes('сух')) return 'Сухой';
+  return value;
+}
+
 function findColIndex(headers, keyword) {
   const kw = keyword.toLowerCase().trim();
   return headers.findIndex(h => h.toLowerCase().trim() === kw);
@@ -371,6 +416,13 @@ function applyRulePreset(mode) {
     if (!isFieldAvailable(field.key)) continue;
     fieldModes[field.key] = mode;
   }
+}
+
+function applySelectedSupplierToRows() {
+  const supplier = selectedSupplier.value.trim();
+  if (!supplier) return;
+  parsedRows.value = parsedRows.value.map(row => row.supplier ? row : { ...row, supplier });
+  availableFields.value = { ...availableFields.value, supplier: true };
 }
 
 function getExistingProduct(row) {
@@ -529,7 +581,7 @@ async function parseExcel(file) {
     const r = rawData[i];
     if (!r || r.length < 2) continue;
 
-    const rawSku = colIdx.sku !== undefined ? String(r[colIdx.sku] || '').trim() : '';
+    const rawSku = colIdx.sku !== undefined ? cleanCodeCell(r[colIdx.sku]) : '';
     const rawName = colIdx.raw_name !== undefined ? String(r[colIdx.raw_name] || '').trim() : '';
 
     // Если артикул есть в наименовании — берём оттуда, иначе из колонки «Артикул»; убираем префиксы DDI/BK
@@ -554,17 +606,17 @@ async function parseExcel(file) {
     const multiplicity = hasMultiplicitySource ? (directMult || Math.max(blockQty || 0, caseBlocks || 0) || 1) : null;
 
     const analogGroup = colIdx.analog_group !== undefined ? String(r[colIdx.analog_group] || '').trim() : '';
-    const category = colIdx.category !== undefined ? String(r[colIdx.category] || '').trim() : '';
+    const category = colIdx.category !== undefined ? normalizeCategory(r[colIdx.category]) : '';
 
     // Дополнительные поля (внешний код, штрихкод, вес, прослеживаемость)
-    const externalCode = colIdx.external_code !== undefined ? String(r[colIdx.external_code] || '').trim() : '';
-    const gtin = colIdx.gtin !== undefined ? String(r[colIdx.gtin] || '').trim() : '';
+    const externalCode = colIdx.external_code !== undefined ? cleanCodeCell(r[colIdx.external_code]) : '';
+    const gtin = colIdx.gtin !== undefined ? cleanCodeCell(r[colIdx.gtin]) : '';
     const weightNetto = colIdx.weight_netto !== undefined ? parseNumberCell(r[colIdx.weight_netto]) : null;
     const weightBrutto = colIdx.weight_brutto !== undefined ? parseNumberCell(r[colIdx.weight_brutto]) : null;
     const isTraceable = colIdx.is_traceable !== undefined ? parseFlagCell(r[colIdx.is_traceable]) : null;
     const isActive = colIdx.active !== undefined ? parseFlagCell(r[colIdx.active]) : null;
 
-    const row = { sku, legal_entity: props.legalEntity };
+    const row = { sku, legal_entity: props.legalEntity, is_active: 1, is_traceable: 0 };
     if (name) row.name = name;
     if (supplier) row.supplier = supplier;
     if (qtyPerBox !== null) row.qty_per_box = qtyPerBox;
@@ -586,7 +638,12 @@ async function parseExcel(file) {
   parsedRows.value = rows;
 
   const { data: existing } = await db.from('suppliers').select('short_name, legal_entity');
-  existingSupplierKeys.value = new Set((existing || []).map(s => `${s.short_name}|${s.legal_entity}`));
+  const suppliers = existing || [];
+  existingSupplierKeys.value = new Set(suppliers.map(s => `${s.short_name}|${s.legal_entity}`));
+  supplierOptions.value = [...new Set(suppliers
+    .filter(s => s.legal_entity === props.legalEntity && s.short_name)
+    .map(s => s.short_name))]
+    .sort((a, b) => a.localeCompare(b, 'ru'));
 
   step.value = 'preview';
 }
@@ -700,6 +757,7 @@ function reset() {
   fileName.value = '';
   availableFields.value = {};
   existingSupplierKeys.value = new Set();
+  selectedSupplier.value = '';
   Object.assign(fieldModes, createDefaultFieldModes());
   result.value = { added: 0, updated: 0, suppliersCreated: 0, duplicates: 0, errors: 0 };
   if (fileInput.value) fileInput.value.value = '';
@@ -743,6 +801,41 @@ onUnmounted(() => document.removeEventListener('keydown', onKey));
 .import-drop-zone:hover {
   border-color: var(--bk-orange);
   background: rgba(255, 135, 50, 0.04);
+}
+
+.import-supplier-pick {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: 10px;
+  align-items: end;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #faf7f4;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+.import-supplier-pick label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.import-supplier-pick select {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--text);
+}
+.import-supplier-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+@media (max-width: 720px) {
+  .import-supplier-pick { grid-template-columns: 1fr; }
 }
 
 .import-table-wrap {
