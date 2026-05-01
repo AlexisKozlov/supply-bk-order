@@ -242,7 +242,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useHistoryStore } from '@/stores/historyStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -255,10 +255,11 @@ import { db } from '@/lib/apiClient.js';
 import { copyToClipboard, getQpb, getMultiplicity, formatDate, formatDateTime, parseLocalDate as parseDate } from '@/lib/utils.js';
 const formatDateShort = formatDate; // в этом файле обе функции показывают дд.мм.гггг
 import { useConfirm } from '@/composables/useConfirm.js';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
-import AuditLogModal from '@/components/modals/AuditLogModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
-import CompareOrdersModal from '@/components/modals/CompareOrdersModal.vue';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
+const CompareOrdersModal = defineAsyncComponent(() => import('@/components/modals/CompareOrdersModal.vue'));
 
 const historyStore  = useHistoryStore();
 const orderStore    = useOrderStore();

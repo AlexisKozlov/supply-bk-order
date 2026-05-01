@@ -2,10 +2,32 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 import { resolve } from 'path';
+import { existsSync, readdirSync, rmSync } from 'fs';
+import { join } from 'path';
+
+function cleanupCopiedLegacyPublicAssets() {
+  let outDir = 'dist';
+  return {
+    name: 'cleanup-copied-legacy-public-assets',
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    writeBundle() {
+      const sourceDir = resolve(__dirname, 'public/assets');
+      const targetDir = resolve(__dirname, outDir, 'assets');
+      if (!existsSync(sourceDir) || !existsSync(targetDir)) return;
+      for (const file of readdirSync(sourceDir)) {
+        const target = join(targetDir, file);
+        if (existsSync(target)) rmSync(target, { force: true });
+      }
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
     vue(),
+    cleanupCopiedLegacyPublicAssets(),
     VitePWA({
       registerType: 'prompt',
       manifest: {
@@ -24,6 +46,22 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,otf,woff,woff2}'],
+        globIgnores: [
+          '**/xlsx-*.js',
+          '**/zxing-*.js',
+          '**/ScannerView-*.js',
+          '**/ScannerView-*.css',
+          '**/BarcodeScanner-*.js',
+          '**/BarcodeScanner-*.css',
+          '**/*Modal-*.js',
+          '**/*Modal-*.css',
+          'cda-*.html',
+          'presentation.html',
+          'sidebar-variants.html',
+          'faq-for-management.html',
+          'mockups/**',
+          'edi-autofill.user.js',
+        ],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
@@ -72,6 +110,7 @@ export default defineConfig({
         manualChunks: {
           'vue-vendor': ['vue', 'vue-router', 'pinia'],
           'xlsx': ['xlsx-js-style'],
+          'zxing': ['@zxing/browser'],
         },
       },
     },

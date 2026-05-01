@@ -240,15 +240,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, defineAsyncComponent, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useDeadlineCountdown } from '@/composables/useDeadlineCountdown.js';
 import { useConfirm } from '@/composables/useConfirm.js';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
-import InfoModal from '@/components/modals/InfoModal.vue';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const InfoModal = defineAsyncComponent(() => import('@/components/modals/InfoModal.vue'));
 
 const { confirmModal, confirm: showConfirm, onConfirm, onCancel, infoModal, info: showInfo, onInfoClose } = useConfirm();
 

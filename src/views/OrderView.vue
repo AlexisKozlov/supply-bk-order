@@ -273,7 +273,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch, inject } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, watch, inject } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
@@ -287,16 +287,16 @@ import { saveOrder } from '@/lib/saveOrder.js';
 import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import OrderTable from '@/components/order/OrderTable.vue';
-import SaveOrderModal from '@/components/modals/SaveOrderModal.vue';
-import ManualProductModal from '@/components/modals/ManualProductModal.vue';
-import EditCardModal from '@/components/modals/EditCardModal.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
-import AnalogMergeModal from '@/components/modals/AnalogMergeModal.vue';
-import AuditLogModal from '@/components/modals/AuditLogModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ViewerBanner from '@/components/ViewerBanner.vue';
 
+const SaveOrderModal = defineAsyncComponent(() => import('@/components/modals/SaveOrderModal.vue'));
+const ManualProductModal = defineAsyncComponent(() => import('@/components/modals/ManualProductModal.vue'));
+const EditCardModal = defineAsyncComponent(() => import('@/components/modals/EditCardModal.vue'));
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const AnalogMergeModal = defineAsyncComponent(() => import('@/components/modals/AnalogMergeModal.vue'));
+const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
 
 const route         = useRoute();
 const router        = useRouter();

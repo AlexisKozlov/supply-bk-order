@@ -1215,7 +1215,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
@@ -1223,7 +1223,8 @@ import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
-import ScannerView from '@/views/restaurant/ScannerView.vue';
+
+const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
 
 const router = useRouter();
 const route = useRoute();

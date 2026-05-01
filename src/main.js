@@ -4,6 +4,7 @@ import App from './App.vue';
 import { router } from './router/index.js';
 import { setAuthErrorHandler } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
+import { useToastStore } from '@/stores/toastStore.js';
 import { db } from '@/lib/apiClient.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import './assets/style.css';
@@ -90,12 +91,10 @@ window.onunhandledrejection = (event) => {
 app.config.errorHandler = (err, instance, info) => {
   console.error(`[Vue error] ${info}:`, err);
   logErrorToServer('error', `[Vue ${info}] ${err?.message || err}`, err?.stack || null);
-  import('./stores/toastStore.js').then(({ useToastStore }) => {
-    try {
-      const toast = useToastStore();
-      toast.error('Произошла ошибка', err?.message || 'Неизвестная ошибка');
-    } catch (e) { /* store not ready */ }
-  }).catch(() => {});
+  try {
+    const toast = useToastStore();
+    toast.error('Произошла ошибка', err?.message || 'Неизвестная ошибка');
+  } catch (e) { /* store not ready */ }
 };
 
 app.mount('#app');

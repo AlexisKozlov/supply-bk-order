@@ -559,7 +559,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -567,7 +567,8 @@ import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber, LEGAL_ENTITIES, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useConfirm } from '@/composables/useConfirm.js';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
 const route = useRoute();
 const router = useRouter();

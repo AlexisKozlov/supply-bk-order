@@ -56,7 +56,6 @@
 
 <script setup>
 import { ref, onBeforeUnmount, nextTick } from 'vue';
-import { BrowserMultiFormatReader } from '@zxing/browser';
 
 const emit = defineEmits(['detected']);
 
@@ -74,6 +73,14 @@ let controls = null;
 let currentTrack = null;
 let lastCode = '';
 let lastCodeAt = 0;
+let barcodeReaderLoader = null;
+
+async function loadBarcodeReader() {
+  if (!barcodeReaderLoader) {
+    barcodeReaderLoader = import('@zxing/browser').then(mod => mod.BrowserMultiFormatReader);
+  }
+  return barcodeReaderLoader;
+}
 
 async function startCamera() {
   error.value = '';
@@ -84,6 +91,7 @@ async function startCamera() {
     cameraStarted.value = true;
     await nextTick();
 
+    const BrowserMultiFormatReader = await loadBarcodeReader();
     reader = new BrowserMultiFormatReader();
 
     // Запрашиваем заднюю камеру

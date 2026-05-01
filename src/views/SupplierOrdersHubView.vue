@@ -45,12 +45,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, defineAsyncComponent, onMounted, watch } from 'vue';
 import SupplierOrdersManagerView from '@/views/SupplierOrdersManagerView.vue';
-import SupplierConnectModal from '@/components/modals/SupplierConnectModal.vue';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
+
+const SupplierConnectModal = defineAsyncComponent(() => import('@/components/modals/SupplierConnectModal.vue'));
 
 const soStore = useSupplierOrderStore();
 const orderStore = useOrderStore();

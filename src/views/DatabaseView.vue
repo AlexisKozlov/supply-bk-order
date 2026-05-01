@@ -304,7 +304,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -314,13 +314,14 @@ import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
-import EditCardModal from '@/components/modals/EditCardModal.vue';
-import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
-import ImportCardsModal from '@/components/modals/ImportCardsModal.vue';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import { exportProductsToExcel } from '@/lib/excelExport.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
+
+const EditCardModal = defineAsyncComponent(() => import('@/components/modals/EditCardModal.vue'));
+const EditSupplierModal = defineAsyncComponent(() => import('@/components/modals/EditSupplierModal.vue'));
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const ImportCardsModal = defineAsyncComponent(() => import('@/components/modals/ImportCardsModal.vue'));
 
 const route = useRoute();
 const router = useRouter();

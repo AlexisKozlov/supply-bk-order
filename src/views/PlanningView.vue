@@ -490,7 +490,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, triggerRef, inject } from 'vue';
+import { ref, computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch, nextTick, triggerRef, inject } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -503,13 +503,13 @@ import { getQpb, getMultiplicity, copyToClipboard, getEntityGroup, applyEntityGr
 import { DEFAULT_ENTITY, getEntityGroupCode } from '@/lib/legalEntities.js';
 import { importFromFile, applyAnalogMerges, loadFromAnalysis } from '@/lib/importStock.js';
 import { useCalculator } from '@/lib/useCalculator.js';
-import EditCardModal from '@/components/modals/EditCardModal.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
-import AnalogMergeModal from '@/components/modals/AnalogMergeModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import ViewerBanner from '@/components/ViewerBanner.vue';
 
+const EditCardModal = defineAsyncComponent(() => import('@/components/modals/EditCardModal.vue'));
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const AnalogMergeModal = defineAsyncComponent(() => import('@/components/modals/AnalogMergeModal.vue'));
 
 const route = useRoute();
 const router = useRouter();

@@ -323,17 +323,18 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, defineAsyncComponent, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
-import AuditLogModal from '@/components/modals/AuditLogModal.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { db } from '@/lib/apiClient.js';
 import { exportScheduleToExcel } from '@/lib/excelExport.js';
+
+const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
 const store = useRestaurantStore();
 const orderStore = useOrderStore();

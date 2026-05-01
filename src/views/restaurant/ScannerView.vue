@@ -188,9 +188,10 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue';
-import BarcodeScanner from '@/components/restaurant/BarcodeScanner.vue';
+import { ref, defineAsyncComponent, nextTick } from 'vue';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
+
+const BarcodeScanner = defineAsyncComponent(() => import('@/components/restaurant/BarcodeScanner.vue'));
 
 const roStore = useRestaurantOrderStore();
 
@@ -572,4 +573,3 @@ function nearestExpiryShort(value) {
   .scn-card-name { font-size: 16px; }
 }
 </style>
-
