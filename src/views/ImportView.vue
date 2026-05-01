@@ -89,7 +89,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { db } from '@/lib/apiClient.js'
 import { parseFile } from '@/lib/importStock.js'
-import { parseStockMalling } from '@/lib/shelfLifeImport.js'
+import { parseStockMalling, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js'
 import { parseSalesFile } from '@/lib/salesImport.js'
 import { parseCttPreorderXlsx, resolveCttPreorderRows, buildCttPreorderFilename, buildCttPreorderLabel } from '@/lib/cttJsonImport.js'
 import { getEntityGroupCode } from '@/lib/legalEntities.js'
@@ -103,6 +103,7 @@ const userStore = useUserStore()
 const uploading = ref(null)
 const lastUpdates = ref({})
 const cttResult = ref(null)
+const STORAGE_RULES_KEY = 'shelfLifeStorageRules.v1'
 
 const imports = computed(() => [
   {
@@ -152,6 +153,56 @@ function localNow() {
   const d = new Date()
   const pad = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function localTimeForDate(dateStr) {
+  const d = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  const date = dateStr || `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+  return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function promptReportDate(file) {
+  const d = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  const fallback = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+  const suggested = extractStockReportDateFromName(file.name) || fallback
+  const value = window.prompt('На какую дату загрузить остатки? Формат: ГГГГ-ММ-ДД', suggested)
+  if (value == null) return null
+  const clean = value.trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    toast.error('Неверная дата', 'Введите дату в формате ГГГГ-ММ-ДД')
+    return null
+  }
+  return clean
+}
+
+function loadStorageRules() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_RULES_KEY) || '{}') || {} }
+  catch { return {} }
+}
+
+function saveStorageRules(rules) {
+  localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules || {}))
+}
+
+async function loadProductCategories() {
+  const map = {}
+  const { data } = await db.from('products').select('sku,category').eq('is_active', 1)
+  for (const p of data || []) {
+    if (p.sku && p.category && !map[p.sku]) map[p.sku] = p.category
+  }
+  return map
+}
+
+function applyStorageRules(items, rules) {
+  for (const item of items) {
+    const category = rules[item._storage_key] || rules[item._storage_sku]
+    if (item._needs_storage_choice && category) {
+      item.warehouse = category
+      item._needs_storage_choice = false
+    }
+  }
 }
 
 function downloadJsonFile(filename, payload) {
@@ -216,10 +267,20 @@ async function uploadFile(type, file) {
 
     } else if (type === 'shelf') {
       // Идентично ShelfLifeView: parseStockMalling → replace_stock_malling
-      const items = await parseStockMalling(file)
+      const reportDate = promptReportDate(file)
+      if (!reportDate) return
+      const storageRules = loadStorageRules()
+      const productCategories = await loadProductCategories()
+      const items = await parseStockMalling(file, { productCategories, manualStorageCategories: storageRules })
       if (!items.length) { toast.error('Не распознано', 'Не удалось распознать данные в файле'); return }
+      applyStorageRules(items, storageRules)
+      const unknownCount = new Set(items.filter(i => i._needs_storage_choice).map(i => i._storage_key || i.product_name)).size
+      if (unknownCount) {
+        toast.error('Нужно уточнить хранение', `Откройте раздел «Сроки годности» и загрузите файл там: нужно выбрать Холод/Мороз для ${unknownCount} товаров`)
+        return
+      }
       const userName = userStore.currentUser?.name || ''
-      const now = localNow()
+      const now = localTimeForDate(reportDate)
       const payload = items.map(item => ({ ...item, uploaded_at: now, uploaded_by: userName }))
       const { data, error } = await db.rpc('replace_stock_malling', { items: payload })
       if (error) throw new Error(error)

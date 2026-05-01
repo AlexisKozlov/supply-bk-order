@@ -221,13 +221,56 @@
         @click="handleUpload"
       >Загрузить stock_mailing</button>
     </div>
+
+    <div v-if="storageChoiceModal.open" class="sl-modal-backdrop" @click.self="cancelStorageChoices">
+      <div class="sl-storage-modal" role="dialog" aria-modal="true" aria-labelledby="storage-modal-title">
+        <div class="sl-storage-modal-head">
+          <div>
+            <h2 id="storage-modal-title">Уточните хранение товаров</h2>
+            <p>Для этих товаров не удалось автоматически определить, это холод или мороз. Выбор запомнится для следующих загрузок.</p>
+          </div>
+          <button class="sl-modal-close" type="button" @click="cancelStorageChoices" aria-label="Закрыть">&times;</button>
+        </div>
+
+        <div class="sl-storage-modal-body">
+          <div v-for="row in storageChoiceModal.rows" :key="row.key" class="sl-storage-choice-row">
+            <div class="sl-storage-choice-info">
+              <div class="sl-storage-choice-sku">{{ row.sku || 'Без артикула' }}</div>
+              <div class="sl-storage-choice-name">{{ row.product_name }}</div>
+            </div>
+            <div class="sl-storage-choice-actions">
+              <button
+                type="button"
+                class="sl-choice-btn sl-choice-cold"
+                :class="{ active: row.choice === 'Холод' }"
+                @click="row.choice = 'Холод'"
+              >Холод</button>
+              <button
+                type="button"
+                class="sl-choice-btn sl-choice-frozen"
+                :class="{ active: row.choice === 'Мороз' }"
+                @click="row.choice = 'Мороз'"
+              >Мороз</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sl-storage-modal-foot">
+          <span>{{ chosenStorageCount }} из {{ storageChoiceModal.rows.length }} выбрано</span>
+          <div class="sl-storage-modal-actions">
+            <button class="sl-modal-secondary" type="button" @click="cancelStorageChoices">Отмена</button>
+            <button class="sl-modal-primary" type="button" @click="confirmStorageChoices">Продолжить загрузку</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { db } from '@/lib/apiClient.js';
-import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats } from '@/lib/shelfLifeImport.js';
+import { normalizeCustomer, normalizeWarehouse, parseStockMalling, parseCellStats, extractStockReportDateFromName } from '@/lib/shelfLifeImport.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -252,6 +295,8 @@ const lastLoadedAt = ref(null);
 const uploading = ref(false);
 const uploadedAt = ref(null);
 const uploadedBy = ref('');
+const STORAGE_RULES_KEY = 'shelfLifeStorageRules.v1';
+const storageChoiceModal = ref({ open: false, rows: [], items: [], rules: {}, resolve: null });
 
 // По умолчанию фильтр настроен на юрлицо из боковой панели, чтобы не показывать
 // чужие данные при переключении. «Все» включается кнопкой вручную.
@@ -653,6 +698,104 @@ function formatTimeAgo(date) {
   return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+function localTimeForDate(dateStr) {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const date = dateStr || `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  return `${date} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function promptReportDate(file) {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fallback = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const suggested = extractStockReportDateFromName(file.name) || fallback;
+  const value = window.prompt('На какую дату загрузить остатки? Формат: ГГГГ-ММ-ДД', suggested);
+  if (value == null) return null;
+  const clean = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    toastStore.error('Неверная дата', 'Введите дату в формате ГГГГ-ММ-ДД');
+    return null;
+  }
+  return clean;
+}
+
+function loadStorageRules() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_RULES_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+
+function saveStorageRules(rules) {
+  localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules || {}));
+}
+
+async function loadProductCategories() {
+  const map = {};
+  const { data } = await db.from('products').select('sku,category').eq('is_active', 1);
+  for (const p of data || []) {
+    if (p.sku && p.category && !map[p.sku]) map[p.sku] = p.category;
+  }
+  return map;
+}
+
+const chosenStorageCount = computed(() => storageChoiceModal.value.rows.filter(r => r.choice).length);
+
+function requestStorageChoices(items, rules) {
+  const unknown = [];
+  const seen = new Set();
+  for (const item of items) {
+    if (!item._needs_storage_choice || !item._storage_key || seen.has(item._storage_key)) continue;
+    seen.add(item._storage_key);
+    unknown.push({
+      key: item._storage_key,
+      sku: item._storage_sku,
+      product_name: item.product_name,
+      choice: '',
+    });
+  }
+  if (!unknown.length) return Promise.resolve(true);
+
+  return new Promise(resolve => {
+    storageChoiceModal.value = { open: true, rows: unknown, items, rules, resolve };
+  });
+}
+
+function applyStorageRulesToItems(items, rules) {
+  for (const item of items) {
+    const category = rules[item._storage_key] || rules[item._storage_sku];
+    if (item._needs_storage_choice && category) {
+      item.warehouse = category;
+      item._needs_storage_choice = false;
+    }
+  }
+}
+
+function closeStorageChoiceModal(result) {
+  const resolve = storageChoiceModal.value.resolve;
+  storageChoiceModal.value = { open: false, rows: [], items: [], rules: {}, resolve: null };
+  if (resolve) resolve(result);
+}
+
+function cancelStorageChoices() {
+  closeStorageChoiceModal(false);
+}
+
+function confirmStorageChoices() {
+  const missing = storageChoiceModal.value.rows.filter(r => !r.choice);
+  if (missing.length) {
+    toastStore.error('Не всё выбрано', `Осталось выбрать: ${missing.length}`);
+    return;
+  }
+  const rules = storageChoiceModal.value.rules;
+  for (const row of storageChoiceModal.value.rows) {
+    rules[row.key] = row.choice;
+    if (row.sku) rules[row.sku] = row.choice;
+  }
+  saveStorageRules(rules);
+  applyStorageRulesToItems(storageChoiceModal.value.items, rules);
+  closeStorageChoiceModal(true);
+}
+
 // ═══ Data loading ═══
 
 async function loadData() {
@@ -687,16 +830,19 @@ async function handleUpload() {
     if (!file) return;
     uploading.value = true;
     try {
-      const items = await parseStockMalling(file);
+      const reportDate = promptReportDate(file);
+      if (!reportDate) return;
+      const storageRules = loadStorageRules();
+      const productCategories = await loadProductCategories();
+      const items = await parseStockMalling(file, { productCategories, manualStorageCategories: storageRules });
       if (!items.length) { toastStore.error('Не удалось распознать данные в файле'); return; }
+      if (!(await requestStorageChoices(items, storageRules))) return;
       const userName = userStore.currentUser?.name || '';
-      const d = new Date();
-      const pad = n => String(n).padStart(2, '0');
-      const now = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      const now = localTimeForDate(reportDate);
       const payload = items.map(item => ({ ...item, uploaded_at: now, uploaded_by: userName }));
       const [{ data, error }, cellResult] = await Promise.all([
         db.rpc('replace_stock_malling', { items: payload }),
-        parseCellStats(file),
+        parseCellStats(file, { reportDate, productCategories, manualStorageCategories: storageRules }),
       ]);
       if (error) throw error;
       // Сохраняем статистику ячеек если распознана
@@ -974,4 +1120,152 @@ watch(() => orderStore.settings.legalEntity, (v) => {
 
 .data-freshness { font-size: 11px; color: var(--text-muted, #999); display: inline-flex; align-items: center; gap: 4px; }
 .data-freshness::before { content: '●'; font-size: 6px; color: #4CAF50; }
+
+/* Выбор хранения при загрузке */
+.sl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(24, 20, 16, .42);
+}
+.sl-storage-modal {
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.24);
+  overflow: hidden;
+}
+.sl-storage-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+.sl-storage-modal-head h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  color: var(--text);
+}
+.sl-storage-modal-head p {
+  margin: 6px 0 0;
+  max-width: 680px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.sl-modal-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sl-storage-modal-body {
+  overflow: auto;
+  padding: 10px 14px;
+}
+.sl-storage-choice-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--border-light);
+}
+.sl-storage-choice-row:last-child { border-bottom: none; }
+.sl-storage-choice-info { min-width: 0; }
+.sl-storage-choice-sku {
+  margin-bottom: 3px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--bk-brown);
+  font-variant-numeric: tabular-nums;
+}
+.sl-storage-choice-name {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.sl-storage-choice-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+.sl-choice-btn {
+  min-width: 84px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+.sl-choice-btn:hover { border-color: var(--bk-orange); }
+.sl-choice-cold.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.sl-choice-frozen.active {
+  border-color: #7c3aed;
+  background: #f3e8ff;
+  color: #6d28d9;
+}
+.sl-storage-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sl-storage-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+.sl-modal-secondary,
+.sl-modal-primary {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sl-modal-secondary {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+}
+.sl-modal-primary {
+  border: 1px solid var(--bk-brown);
+  background: var(--bk-brown);
+  color: #fff;
+}
+@media (max-width: 640px) {
+  .sl-modal-backdrop { padding: 10px; align-items: stretch; }
+  .sl-storage-modal { max-height: calc(100dvh - 20px); }
+  .sl-storage-choice-row { grid-template-columns: 1fr; }
+  .sl-storage-choice-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .sl-storage-modal-foot { align-items: stretch; flex-direction: column; }
+  .sl-storage-modal-actions { display: grid; grid-template-columns: 1fr 1fr; }
+}
 </style>

@@ -144,7 +144,7 @@
   </Teleport>
 </template>
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, defineAsyncComponent, watch, onMounted, onUnmounted } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
@@ -153,9 +153,10 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useFormDirty } from '@/composables/useFormDirty.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
-import EditSupplierModal from '@/components/modals/EditSupplierModal.vue';
-import AuditLogModal from '@/components/modals/AuditLogModal.vue';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const EditSupplierModal = defineAsyncComponent(() => import('@/components/modals/EditSupplierModal.vue'));
+const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
 
 const orderStore = useOrderStore();
 const userStore = useUserStore();

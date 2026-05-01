@@ -331,7 +331,6 @@ import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { db } from '@/lib/apiClient.js';
-import { exportScheduleToExcel } from '@/lib/excelExport.js';
 
 const AuditLogModal = defineAsyncComponent(() => import('@/components/modals/AuditLogModal.vue'));
 const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
@@ -709,6 +708,7 @@ async function saveCardEdit() {
 
 async function exportExcel() {
   try {
+    const { exportScheduleToExcel } = await import('@/lib/excelExport.js');
     await exportScheduleToExcel(filteredRestaurants.value, store.scheduleByRestaurant, store.lastUpdate);
   } catch (e) {
     console.error('Export error:', e);

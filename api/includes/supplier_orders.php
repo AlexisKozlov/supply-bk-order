@@ -1217,24 +1217,37 @@ if ($soAction === 'admin') {
         $entityPh = implode(',', array_fill(0, count($supplierEntities), '?'));
         $effectiveRows = soGetEffectiveScheduleRows($pdo, $supplierId, $date, null, true);
         $deliveryDow = (int)(new DateTime($date))->format('N');
+        $orderRowsStmt = $pdo->prepare("
+            SELECT o.id as order_id, o.restaurant_number, o.status as order_status, o.submitted_at,
+                   CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
+                   asl.source_order_id AS auto_source_order_id,
+                   src.delivery_date AS auto_source_delivery_date,
+                   COALESCE(oi.item_count, 0) AS item_count,
+                   oi.total_qty
+            FROM so_orders o
+            LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
+            LEFT JOIN so_orders src ON src.id = asl.source_order_id
+            LEFT JOIN (
+                SELECT soi.order_id,
+                       SUM(CASE WHEN COALESCE(soi.admin_qty, soi.quantity) > 0 THEN 1 ELSE 0 END) AS item_count,
+                       SUM(COALESCE(soi.admin_qty, soi.quantity)) AS total_qty
+                FROM so_order_items soi
+                JOIN so_orders so ON so.id = soi.order_id
+                WHERE so.supplier_id = ? AND so.delivery_date = ? AND so.legal_entity IN ({$entityPh})
+                GROUP BY soi.order_id
+            ) oi ON oi.order_id = o.id
+            WHERE o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
+        ");
+        $orderRowsStmt->execute(array_merge([$supplierId, $date], $supplierEntities, [$supplierId, $date], $supplierEntities));
+        $ordersByRestaurant = [];
+        foreach ($orderRowsStmt->fetchAll() as $orderRow) {
+            $ordersByRestaurant[(string)$orderRow['restaurant_number']] = $orderRow;
+        }
+
         $restaurants = [];
         foreach ($effectiveRows as $row) {
             if ((int)$row['delivery_day'] !== $deliveryDow) continue;
-            $restStmt = $pdo->prepare("
-                SELECT o.id as order_id, o.status as order_status, o.submitted_at,
-                       CASE WHEN asl.id IS NULL THEN 0 ELSE 1 END AS is_auto_submitted,
-                       asl.source_order_id AS auto_source_order_id,
-                       src.delivery_date AS auto_source_delivery_date,
-                       (SELECT COUNT(*) FROM so_order_items WHERE order_id = o.id AND COALESCE(admin_qty, quantity) > 0) as item_count,
-                       (SELECT SUM(COALESCE(admin_qty, quantity)) FROM so_order_items WHERE order_id = o.id) as total_qty
-                FROM so_orders o
-                LEFT JOIN so_auto_submit_log asl ON asl.new_order_id = o.id
-                LEFT JOIN so_orders src ON src.id = asl.source_order_id
-                WHERE o.restaurant_number = ? AND o.supplier_id = ? AND o.delivery_date = ? AND o.legal_entity IN ({$entityPh})
-                LIMIT 1
-            ");
-            $restStmt->execute(array_merge([(string)$row['restaurant_number'], $supplierId, $date], $supplierEntities));
-            $orderRow = $restStmt->fetch() ?: [];
+            $orderRow = $ordersByRestaurant[(string)$row['restaurant_number']] ?? [];
 
             $restaurants[] = [
                 'number' => $row['restaurant_number'],
@@ -1386,13 +1399,13 @@ if ($soAction === 'admin') {
             $where .= " AND " . implode(' AND ', $orderWhereParts);
             $params = array_merge($params, $orderWhereParams);
         }
-        if ($submittedFrom) {
-            $where .= " AND DATE(o.submitted_at) >= ?";
-            $params[] = $submittedFrom;
+        if ($submittedFrom && preg_match('/^\d{4}-\d{2}-\d{2}$/', $submittedFrom)) {
+            $where .= " AND o.submitted_at >= ?";
+            $params[] = $submittedFrom . ' 00:00:00';
         }
-        if ($submittedTo) {
-            $where .= " AND DATE(o.submitted_at) <= ?";
-            $params[] = $submittedTo;
+        if ($submittedTo && preg_match('/^\d{4}-\d{2}-\d{2}$/', $submittedTo)) {
+            $where .= " AND o.submitted_at < ?";
+            $params[] = date('Y-m-d', strtotime($submittedTo . ' +1 day')) . ' 00:00:00';
         }
         if ($deliveryFrom) {
             $where .= " AND o.delivery_date >= ?";

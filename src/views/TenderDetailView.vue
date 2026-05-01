@@ -441,7 +441,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick, inject, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, nextTick, inject, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatDate, applyEntityGroupFilter } from '@/lib/utils.js';
@@ -450,9 +450,10 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
 import { useCalculator } from '@/lib/useCalculator.js';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
 const { confirmModal, confirm, onConfirm, onCancel } = useConfirm();
 

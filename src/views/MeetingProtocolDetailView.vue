@@ -180,7 +180,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue';
+import { ref, computed, defineAsyncComponent, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -188,8 +188,9 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 
 const orderStore = useOrderStore();
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
 import { useConfirm } from '@/composables/useConfirm.js';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
 const router = useRouter();
 const route = useRoute();

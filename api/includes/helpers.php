@@ -162,13 +162,18 @@ function notifyTelegramExpiringItems($pdo, $userName) {
     if (!$botToken) return;
 
     try {
+        $tz = new DateTimeZone('Europe/Minsk');
+        $today = new DateTime('today', $tz);
+        $limitDate = (clone $today)->modify('+30 days')->format('Y-m-d');
+        $todayDate = $today->format('Y-m-d');
+
         $s = $pdo->prepare("SELECT customer, product_name, expiry_date, quantity
             FROM stock_malling
             WHERE expiry_date IS NOT NULL
-              AND expiry_date >= CURDATE()
-              AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+              AND expiry_date >= ?
+              AND expiry_date <= ?
             ORDER BY customer, expiry_date ASC");
-        $s->execute();
+        $s->execute([$todayDate, $limitDate]);
         $rows = $s->fetchAll(PDO::FETCH_ASSOC);
         if (empty($rows)) return;
 
@@ -178,8 +183,6 @@ function notifyTelegramExpiringItems($pdo, $userName) {
             $grouped[$r['customer']][] = $r;
         }
 
-        $tz = new DateTimeZone('Europe/Minsk');
-        $today = new DateTime('now', $tz);
         $safeUser = htmlspecialchars($userName, ENT_QUOTES, 'UTF-8');
 
         $text = "⚠️ <b>Истекающие сроки годности</b> (до 30 дней)\n";
@@ -193,13 +196,15 @@ function notifyTelegramExpiringItems($pdo, $userName) {
             $shown = 0;
             foreach ($items as $item) {
                 if ($shown >= 10) { $text .= "   … и ещё " . ($count - 10) . "\n"; break; }
-                $exp = new DateTime($item['expiry_date']);
-                $days = (int)$today->diff($exp)->days;
+                $exp = DateTime::createFromFormat('!Y-m-d', $item['expiry_date'], $tz);
+                if (!$exp) $exp = new DateTime($item['expiry_date'], $tz);
+                $days = (int)$today->diff($exp)->format('%r%a');
                 $daysStr = $days === 0 ? 'сегодня!' : ($days === 1 ? 'завтра' : "через {$days} д.");
+                $expiryDate = htmlspecialchars($exp->format('d.m.Y'), ENT_QUOTES, 'UTF-8');
                 $name = htmlspecialchars(mb_substr($item['product_name'], 0, 40), ENT_QUOTES, 'UTF-8');
                 $qty = floatval($item['quantity']);
                 $qtyStr = ($qty == intval($qty)) ? intval($qty) : $qty;
-                $text .= "   • {$name} — {$qtyStr} шт, {$daysStr}\n";
+                $text .= "   • {$name} — {$qtyStr} шт, конечный срок {$expiryDate}, {$daysStr}\n";
                 $shown++;
             }
             $text .= "\n";

@@ -333,7 +333,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityFilter, toLocalDateStr } from '@/lib/utils.js';
@@ -343,7 +343,8 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
-import ConfirmModal from '@/components/modals/ConfirmModal.vue';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
 
 const route = useRoute();
 const router = useRouter();

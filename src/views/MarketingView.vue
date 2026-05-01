@@ -186,7 +186,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import { formatDate, applyEntityFilter } from '@/lib/utils.js';
@@ -196,7 +196,8 @@ import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
-import MarketingGantt from '@/components/marketing/MarketingGantt.vue';
+
+const MarketingGantt = defineAsyncComponent(() => import('@/components/marketing/MarketingGantt.vue'));
 
 const router = useRouter();
 const orderStore = useOrderStore();

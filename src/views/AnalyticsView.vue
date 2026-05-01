@@ -662,7 +662,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, reactive, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { getOrdersAnalytics, getSeasonalityData, getForecastData } from '@/lib/analytics.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -673,8 +673,8 @@ import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
-import AbcXyzPanel from '@/views/AbcXyzView.vue';
 
+const AbcXyzPanel = defineAsyncComponent(() => import('@/views/AbcXyzView.vue'));
 
 const router = useRouter();
 const orderStore = useOrderStore();

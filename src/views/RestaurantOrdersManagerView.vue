@@ -283,13 +283,13 @@
       <div class="rom-stock-toolbar">
         <div class="rom-stock-field">
           <label>Дата остатков:</label>
-          <select v-model="stockBalanceDate" @change="loadStockData" class="rom-input">
+          <select v-model="stockBalanceDate" @change="handleStockDateChange" class="rom-input">
             <option v-for="d in stockDates" :key="d" :value="d">{{ formatDate(d) }}</option>
           </select>
         </div>
         <div class="rom-stock-field">
           <label>На дату доставки:</label>
-          <input type="date" v-model="stockDeliveryDate" @change="loadStockData" class="rom-input" />
+          <input type="date" v-model="stockDeliveryDate" @change="handleStockDateChange" class="rom-input" />
         </div>
         <div class="rom-stock-field rom-stock-upload">
           <input type="file" ref="stockFileInput" accept=".xlsx,.xls" style="display:none" @change="handleStockFile" />
@@ -297,6 +297,27 @@
             <BurgerSpinner v-if="stockUploading" size="xs" />
             <span>{{ stockUploading ? 'Загрузка...' : 'Загрузить остатки из Excel' }}</span>
           </button>
+        </div>
+      </div>
+
+      <div class="rom-stock-order-mode">
+        <div class="rom-stock-mode-title">Списывать в колонку «Заказано»:</div>
+        <label class="rom-stock-mode-option">
+          <input type="radio" value="until" v-model="stockOrderMode" @change="loadStockData" />
+          Все дни до даты доставки
+        </label>
+        <label class="rom-stock-mode-option">
+          <input type="radio" value="selected" v-model="stockOrderMode" @change="syncStockSelectedDates(); loadStockData()" />
+          Только выбранные дни
+        </label>
+        <div v-if="stockOrderMode === 'selected'" class="rom-stock-date-picks">
+          <button type="button" class="rom-btn-sm" @click="selectAllStockOrderDates">Все</button>
+          <button type="button" class="rom-btn-sm" @click="selectOnlyDeliveryStockOrderDate">Только доставка</button>
+          <label v-for="d in stockOrderDateOptions" :key="d" class="rom-stock-date-chip">
+            <input type="checkbox" :value="d" v-model="stockSelectedOrderDates" @change="loadStockData" />
+            {{ formatDate(d) }}
+          </label>
+          <span v-if="!stockOrderDateOptions.length" class="rom-stock-mode-hint">Нет дней между датой остатков и доставкой</span>
         </div>
       </div>
 
@@ -1556,6 +1577,36 @@ const stockItems = ref([]);
 const stockFilter = ref('');
 const stockSupplierFilter = ref('');
 const stockShowDeficit = ref(false);
+const stockOrderMode = ref('until');
+const stockSelectedOrderDates = ref([]);
+
+function parseYmdDate(value) {
+  const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function toYmdDate(value) {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  const d = String(value.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+const stockOrderDateOptions = computed(() => {
+  const from = parseYmdDate(stockBalanceDate.value);
+  const to = parseYmdDate(stockDeliveryDate.value);
+  if (!from || !to || from >= to) return [];
+  const days = [];
+  const cur = new Date(from);
+  cur.setDate(cur.getDate() + 1);
+  while (cur <= to) {
+    days.push(toYmdDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+});
 
 const stockSuppliers = computed(() => {
   const set = new Set();
@@ -1598,7 +1649,10 @@ async function loadStockData() {
   if (!stockBalanceDate.value || !stockDeliveryDate.value) return;
   stockLoading.value = true;
   try {
-    const data = await store.adminGetStockBalances(stockBalanceDate.value, stockDeliveryDate.value, stockLegalEntity.value);
+    const data = await store.adminGetStockBalances(stockBalanceDate.value, stockDeliveryDate.value, stockLegalEntity.value, {
+      orderMode: stockOrderMode.value,
+      orderDates: stockOrderMode.value === 'selected' ? stockSelectedOrderDates.value : [],
+    });
     stockItems.value = data.items || [];
   } catch (e) {
     toast.error('Ошибка загрузки остатков');
@@ -1606,6 +1660,40 @@ async function loadStockData() {
     stockLoading.value = false;
   }
 }
+
+function syncStockSelectedDates(forceAll = false) {
+  const options = stockOrderDateOptions.value;
+  if (!options.length) {
+    stockSelectedOrderDates.value = [];
+    return;
+  }
+  if (forceAll || !stockSelectedOrderDates.value.length) {
+    stockSelectedOrderDates.value = [...options];
+    return;
+  }
+  const allowed = new Set(options);
+  const kept = stockSelectedOrderDates.value.filter(d => allowed.has(d));
+  stockSelectedOrderDates.value = kept.length ? kept : [...options];
+}
+
+function selectAllStockOrderDates() {
+  stockSelectedOrderDates.value = [...stockOrderDateOptions.value];
+  loadStockData();
+}
+
+function selectOnlyDeliveryStockOrderDate() {
+  stockSelectedOrderDates.value = stockDeliveryDate.value ? [stockDeliveryDate.value] : [];
+  loadStockData();
+}
+
+function handleStockDateChange() {
+  syncStockSelectedDates(true);
+  loadStockData();
+}
+
+watch([stockBalanceDate, stockDeliveryDate], () => {
+  syncStockSelectedDates(true);
+});
 
 function copyUnmatched() {
   if (!stockUnmatched.value.length) return;
@@ -3610,6 +3698,20 @@ async function doUnifiedExport() {
 .rom-stock-field label { display: block; font-size: 12px; font-weight: 600; color: #502314; margin-bottom: 4px; }
 .rom-stock-field select, .rom-stock-field input[type="date"] { min-width: 160px; }
 .rom-stock-upload { align-self: flex-end; }
+.rom-stock-order-mode {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 12px; background: #faf7f4;
+  border: 1px solid #ede8e3; border-radius: 8px;
+}
+.rom-stock-mode-title { font-size: 12px; font-weight: 700; color: #502314; }
+.rom-stock-mode-option { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: #502314; cursor: pointer; }
+.rom-stock-date-picks { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; padding-top: 4px; }
+.rom-stock-date-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px;
+  border: 1px solid #e5ded8; border-radius: 999px; background: #fff; font-size: 12px;
+  color: #502314; cursor: pointer; white-space: nowrap;
+}
+.rom-stock-mode-hint { color: #8b7355; font-size: 12px; }
 .rom-stock-filter-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .rom-stock-checkbox { font-size: 13px; color: #502314; white-space: nowrap; cursor: pointer; }
 .rom-stock-checkbox input { margin-right: 4px; }

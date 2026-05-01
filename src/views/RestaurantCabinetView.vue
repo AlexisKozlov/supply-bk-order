@@ -3950,7 +3950,7 @@ tr.del-err { background: #fef2f2; }
 .info-read-btn {
   border: 0; background: transparent; color: #C05621; font-weight: 800; padding: 0; cursor: pointer; font-size: 13px;
 }
-.image-preview-overlay { z-index: 4000; }
+.image-preview-overlay { z-index: 11000; }
 .important-image-modal {
   max-width: min(960px, 96vw); max-height: 92vh; background: white; border-radius: 12px; overflow: hidden;
   display: flex; flex-direction: column;

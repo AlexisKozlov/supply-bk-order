@@ -436,9 +436,17 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return data;
   }
 
-  async function adminGetStockBalances(balanceDate, deliveryDate, legalEntity = '') {
-    let url = `admin/stock-balances?date=${balanceDate}&delivery_date=${deliveryDate}`;
-    if (legalEntity) url += `&legal_entity=${encodeURIComponent(legalEntity)}`;
+  async function adminGetStockBalances(balanceDate, deliveryDate, legalEntity = '', options = {}) {
+    const params = new URLSearchParams({
+      date: balanceDate,
+      delivery_date: deliveryDate,
+    });
+    if (legalEntity) params.set('legal_entity', legalEntity);
+    if (options.orderMode) params.set('order_mode', options.orderMode);
+    if (Array.isArray(options.orderDates) && options.orderDates.length) {
+      params.set('order_dates', options.orderDates.join(','));
+    }
+    let url = `admin/stock-balances?${params.toString()}`;
     return await api(url);
   }
 

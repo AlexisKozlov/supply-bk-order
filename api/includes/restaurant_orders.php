@@ -1250,6 +1250,8 @@ function roCabinetSaveUploadedFiles($pdo, $postId) {
 
 function roCabinetTelegramChatIds($pdo, $targetMode, $targetGroup, $targets) {
     $verifiedSql = "(rs.verified_at IS NOT NULL OR (rs.must_reverify_by IS NOT NULL AND rs.must_reverify_by > NOW()))";
+    $subGroupSql = "CONVERT(COALESCE(NULLIF(rs.legal_entity_group, ''), CASE WHEN rs.restaurant_number >= 1000 THEN 'PS' ELSE 'BK_VM' END) USING utf8mb4) COLLATE utf8mb4_unicode_ci";
+    $groupParamSql = "CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci";
     $params = [];
     $where = [
         "rs.chat_id IS NOT NULL",
@@ -1258,13 +1260,13 @@ function roCabinetTelegramChatIds($pdo, $targetMode, $targetGroup, $targets) {
     ];
 
     if ($targetMode === 'group') {
-        $where[] = "rs.legal_entity_group = ?";
+        $where[] = "{$subGroupSql} = {$groupParamSql}";
         $params[] = roNormalizeLegalEntityGroup($targetGroup ?: 'BK_VM');
     } elseif ($targetMode === 'restaurants') {
         if (!$targets) return [];
         $parts = [];
         foreach ($targets as $target) {
-            $parts[] = "(rs.restaurant_number = ? AND rs.legal_entity_group = ?)";
+            $parts[] = "(rs.restaurant_number = ? AND {$subGroupSql} = {$groupParamSql})";
             $params[] = (int)$target['number'];
             $params[] = roNormalizeLegalEntityGroup($target['group'] ?? null, (int)$target['number']);
         }
@@ -1276,7 +1278,7 @@ function roCabinetTelegramChatIds($pdo, $targetMode, $targetGroup, $targets) {
         FROM ro_telegram_subs rs
         JOIN restaurants r
           ON r.number = rs.restaurant_number
-         AND r.legal_entity_group = rs.legal_entity_group
+         AND r.legal_entity_group COLLATE utf8mb4_unicode_ci = {$subGroupSql}
          AND r.active = 1
         WHERE " . implode(' AND ', $where) . "
     ";
@@ -1346,6 +1348,34 @@ function roCabinetTelegramSendFile($botToken, $chatId, $file, $caption = '', $ke
     return roCabinetTelegramRequest($botToken, $method, $payload, true);
 }
 
+function roCabinetTelegramSendImageGroup($botToken, $chatId, $files, $caption = '') {
+    $media = [];
+    $payload = ['chat_id' => $chatId];
+    $idx = 0;
+    foreach ($files as $file) {
+        $abs = roCabinetTelegramFileAbsPath($file);
+        if (!$abs) continue;
+        $mime = (string)($file['mime_type'] ?? '');
+        if (!str_starts_with($mime, 'image/')) continue;
+        $name = (string)($file['file_name'] ?? basename($abs));
+        $field = 'photo' . $idx;
+        $item = [
+            'type' => 'photo',
+            'media' => 'attach://' . $field,
+        ];
+        if ($idx === 0 && $caption !== '') {
+            $item['caption'] = $caption;
+            $item['parse_mode'] = 'HTML';
+        }
+        $media[] = $item;
+        $payload[$field] = new CURLFile($abs, $mime, $name);
+        $idx++;
+    }
+    if (count($media) < 2) return false;
+    $payload['media'] = json_encode($media, JSON_UNESCAPED_UNICODE);
+    return roCabinetTelegramRequest($botToken, 'sendMediaGroup', $payload, true);
+}
+
 function roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetGroup, $targets, $files = []) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? getenv('TELEGRAM_BOT_TOKEN') ?: '';
     if (!$botToken) return 0;
@@ -1378,10 +1408,43 @@ function roCabinetSendTelegramPost($pdo, $title, $message, $targetMode, $targetG
         return $sent;
     }
 
+    $imageFiles = array_values(array_filter($files, fn($file) => str_starts_with((string)($file['mime_type'] ?? ''), 'image/')));
+    $otherFiles = array_values(array_filter($files, fn($file) => !str_starts_with((string)($file['mime_type'] ?? ''), 'image/')));
+
+    if (count($imageFiles) > 1 && !$otherFiles) {
+        $captionTitle = htmlspecialchars(mb_substr($title ?: 'Важная информация', 0, 150), ENT_QUOTES, 'UTF-8');
+        $captionMessageRaw = mb_substr($message ?: '', 0, 800);
+        if (mb_strlen($message ?: '') > 800) $captionMessageRaw .= '...';
+        $captionMessage = htmlspecialchars($captionMessageRaw, ENT_QUOTES, 'UTF-8');
+        $fileCaption = "ℹ️ <b>{$captionTitle}</b>\n\n{$captionMessage}";
+        $sent = 0;
+        $chunks = array_chunk($imageFiles, 10);
+        foreach ($chatIds as $chatId) {
+            $chatOk = false;
+            foreach ($chunks as $chunkIndex => $chunk) {
+                if (count($chunk) === 1) {
+                    $ok = roCabinetTelegramSendFile($botToken, $chatId, $chunk[0], $chunkIndex === 0 ? $fileCaption : '');
+                } else {
+                    $ok = roCabinetTelegramSendImageGroup($botToken, $chatId, $chunk, $chunkIndex === 0 ? $fileCaption : '');
+                }
+                if ($ok) $chatOk = true;
+            }
+            if ($chatOk) $sent++;
+        }
+        return $sent;
+    }
+
     $sent = sendTelegramBulk($botToken, $chatIds, $text, 'HTML', $keyboard);
     if (count($files) > 1) {
         foreach ($chatIds as $chatId) {
-            foreach ($files as $file) {
+            foreach (array_chunk($imageFiles, 10) as $chunk) {
+                if (count($chunk) > 1) {
+                    roCabinetTelegramSendImageGroup($botToken, $chatId, $chunk);
+                } elseif (count($chunk) === 1) {
+                    roCabinetTelegramSendFile($botToken, $chatId, $chunk[0]);
+                }
+            }
+            foreach ($otherFiles as $file) {
                 roCabinetTelegramSendFile($botToken, $chatId, $file);
             }
         }
@@ -4633,6 +4696,8 @@ if (strpos($roAction, 'admin') === 0) {
         $balanceDate = $_GET['date'] ?? '';
         $deliveryDate = $_GET['delivery_date'] ?? '';
         $legalEntity = $_GET['legal_entity'] ?? '';
+        $orderMode = $_GET['order_mode'] ?? 'until';
+        $orderDatesRaw = trim((string)($_GET['order_dates'] ?? ''));
         if (!$balanceDate || !$deliveryDate) roRespond(['error' => 'Не указаны даты'], 400);
         if ($legalEntity) {
             roEnsureGroupAccess($sessionUser, getEntityGroup($legalEntity));
@@ -4738,13 +4803,33 @@ if (strpos($roAction, 'admin') === 0) {
             }
         }
 
-        // Суммарные заказы от даты остатков+1 до выбранной даты, с разбивкой по реальному юрлицу заказа.
-        $ordersWhere = [
-            'o.delivery_date > ?',
-            'o.delivery_date <= ?',
-            "o.status IN ('submitted','edited','locked')",
-        ];
-        $ordersParams = [$balanceDate, $deliveryDate];
+        // Суммарные заказы для колонки «Заказано».
+        // По умолчанию берём период от даты остатков+1 до выбранной доставки.
+        // В режиме selected считаем только явно отмеченные пользователем даты.
+        $ordersWhere = ["o.status IN ('submitted','edited','locked')"];
+        $ordersParams = [];
+        if ($orderMode === 'selected') {
+            $selectedDates = [];
+            foreach (array_filter(array_map('trim', explode(',', $orderDatesRaw))) as $d) {
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) continue;
+                if ($d <= $balanceDate || $d > $deliveryDate) continue;
+                $selectedDates[$d] = true;
+            }
+            $selectedDates = array_keys($selectedDates);
+            sort($selectedDates);
+            if (empty($selectedDates)) {
+                $ordersWhere[] = '1 = 0';
+            } else {
+                $ph = implode(',', array_fill(0, count($selectedDates), '?'));
+                $ordersWhere[] = "o.delivery_date IN ({$ph})";
+                foreach ($selectedDates as $d) $ordersParams[] = $d;
+            }
+        } else {
+            $ordersWhere[] = 'o.delivery_date > ?';
+            $ordersWhere[] = 'o.delivery_date <= ?';
+            $ordersParams[] = $balanceDate;
+            $ordersParams[] = $deliveryDate;
+        }
         if ($legalEntity) {
             $ordersWhere[] = 'o.legal_entity = ?';
             $ordersParams[] = $legalEntity;

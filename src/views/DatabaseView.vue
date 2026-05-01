@@ -315,7 +315,6 @@ import { useOrderStore } from '@/stores/orderStore.js';
 import { applyEntityGroupFilter } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
-import { exportProductsToExcel } from '@/lib/excelExport.js';
 import { useRestaurantStore } from '@/stores/restaurantStore.js';
 
 const EditCardModal = defineAsyncComponent(() => import('@/components/modals/EditCardModal.vue'));
@@ -743,7 +742,8 @@ async function deleteRestaurant(r) {
   }
 }
 
-function doExportProducts() {
+async function doExportProducts() {
+  const { exportProductsToExcel } = await import('@/lib/excelExport.js');
   exportProductsToExcel(products.value, orderStore.settings.legalEntity);
 }
 

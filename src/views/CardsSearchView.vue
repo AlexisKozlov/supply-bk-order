@@ -368,9 +368,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, defineAsyncComponent, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '../stores/userStore'
-import MaintenanceScreen from '@/components/MaintenanceScreen.vue'
+
+const MaintenanceScreen = defineAsyncComponent(() => import('@/components/MaintenanceScreen.vue'))
 
 const API_BASE = '/api'
 const userStore = useUserStore()

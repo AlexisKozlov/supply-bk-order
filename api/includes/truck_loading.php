@@ -143,24 +143,35 @@ function tlGetOrdersForDate($pdo, $date) {
 
     if (empty($orders)) return [];
 
+    $orderIds = array_map(function($order) {
+        return (int)$order['order_id'];
+    }, $orders);
+    $ph = implode(',', array_fill(0, count($orderIds), '?'));
+    $itemsStmt = $pdo->prepare("
+        SELECT oi.id as item_id, oi.order_id, oi.sku, oi.product_name, oi.category, oi.quantity,
+               COALESCE(p.weight_brutto, 0) as weight_brutto,
+               COALESCE(p.boxes_per_pallet, 0) as boxes_per_pallet,
+               COALESCE(p.multiplicity, 1) as multiplicity
+        FROM ro_order_items oi
+        JOIN ro_orders o ON o.id = oi.order_id
+        LEFT JOIN products p
+            ON p.sku = oi.sku
+            AND p.legal_entity = o.legal_entity
+            AND p.is_active = 1
+        WHERE oi.order_id IN ({$ph})
+        ORDER BY oi.order_id, oi.category, oi.product_name
+    ");
+    $itemsStmt->execute($orderIds);
+    $itemsByOrder = [];
+    foreach ($itemsStmt->fetchAll() as $item) {
+        $itemsByOrder[(int)$item['order_id']][] = $item;
+    }
+
     $result = [];
 
     foreach ($orders as $order) {
         $orderId = $order['order_id'];
-
-        // Позиции заказа с данными о товаре
-        $items = $pdo->prepare("
-            SELECT oi.id as item_id, oi.sku, oi.product_name, oi.category, oi.quantity,
-                   COALESCE(p.weight_brutto, 0) as weight_brutto,
-                   COALESCE(p.boxes_per_pallet, 0) as boxes_per_pallet,
-                   COALESCE(p.multiplicity, 1) as multiplicity
-            FROM ro_order_items oi
-            LEFT JOIN products p ON p.sku = oi.sku AND p.is_active = 1
-            WHERE oi.order_id = ?
-            ORDER BY oi.category, oi.product_name
-        ");
-        $items->execute([$orderId]);
-        $orderItems = $items->fetchAll();
+        $orderItems = $itemsByOrder[(int)$orderId] ?? [];
 
         $categories = [];
         $itemsList = [];
