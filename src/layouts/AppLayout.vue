@@ -438,6 +438,8 @@ const sidebarSections = [
     { module: 'planning', route: 'planning', icon: 'planning', label: 'Планирование' },
     { module: 'plan-fact', route: 'plan-fact', icon: 'delivery', label: 'Поставки' },
     { module: 'history', route: 'history', icon: 'history', label: 'История' },
+    { module: 'tasks', route: 'tasks', icon: 'clipboard', label: 'Задачи' },
+    { module: 'tasks', route: 'my-tasks', icon: 'user', label: 'Мои задачи' },
   ]},
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
@@ -892,6 +894,8 @@ function goToNotifEntity(n) {
   }
   if (n.entity_type === 'plan') {
     router.push({ path: '/planning', query: { planId: n.entity_id, mode: 'view' } });
+  } else if (n.entity_type === 'task') {
+    router.push({ name: 'tasks', query: { cardId: n.entity_id } });
   } else {
     router.push({ name: 'order', query: { orderId: n.entity_id, mode: 'view' } });
   }

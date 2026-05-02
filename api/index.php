@@ -109,6 +109,9 @@ require_once __DIR__ . '/includes/supplier_orders.php';
 // Загрузка машин
 require_once __DIR__ . '/includes/truck_loading.php';
 
+// Задачи (личные канбан-доски сотрудников)
+require_once __DIR__ . '/includes/tasks.php';
+
 // OCR (распознавание скриншотов)
 require_once __DIR__ . '/includes/ocr.php';
 
