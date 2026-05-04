@@ -91,9 +91,14 @@ function parseQlik(rows, skuToGroup) {
 
 // ═══ 1С УТ: сложная вложенная структура ═══
 function parse1cUT(rows) {
+  const header = find1cUTHeader(rows);
+  if (!header) return null;
+
   const items = [];
-  let cur = null, skip = true;
-  for (const row of rows) {
+  let cur = null;
+  for (let i = header.rowIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
     const v = row[0];
     if (v == null) continue;
     const s = String(v).trim();
@@ -101,18 +106,69 @@ function parse1cUT(rows) {
     if (s === 'Итого') break;
     const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
     if (m) {
-      if (cur && !skip) items.push({ sale_date: `${m[3]}-${m[2]}-${m[1]}`, analog_group: cur, quantity: Math.round((parseFloat(row[4])||0)*100)/100, restaurant_count: parseInt(row[5])||0 });
-    } else if (row[4] != null && !isNaN(parseFloat(row[4]))) {
-      if (skip) { skip = false; cur = null; continue; }
+      if (!cur) continue;
+      const qty = Math.round(parseNum(row[header.qtyCol]) * 100) / 100;
+      if (!qty) continue;
+      items.push({
+        sale_date: `${m[3]}-${m[2]}-${m[1]}`,
+        analog_group: cur,
+        quantity: qty,
+        restaurant_count: header.countCol >= 0 ? parseNum(row[header.countCol]) | 0 : 0,
+      });
+    } else if (row[header.qtyCol] != null && parseNum(row[header.qtyCol]) > 0) {
       cur = s.replace(/^[\s"]+|[\s"]+$/g, '');
+      if (!cur || cur === 'н.опр') cur = null;
     }
   }
-  return items.length ? { items, skuMapped: 0 } : null;
+  if (!items.length) return null;
+  return { items: aggregateSalesItems(items), skuMapped: 0 };
+}
+
+function find1cUTHeader(rows) {
+  for (let i = 0; i < Math.min(rows.length, 30); i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const first = String(row[0] || '').trim().toLowerCase();
+    let qtyCol = -1;
+    let countCol = -1;
+    for (let c = 0; c < row.length; c++) {
+      const h = String(row[c] || '').trim().toLowerCase();
+      if (h.includes('количество тмц') || h.includes('кол-во тмц') || h === 'количество') qtyCol = c;
+      if (h.includes('количество записей') || h.includes('кол-во записей')) countCol = c;
+    }
+    if ((first.includes('группа аналогов') || first.includes('группааналогов')) && qtyCol >= 0) {
+      return { rowIdx: i, qtyCol, countCol };
+    }
+  }
+  return null;
+}
+
+function aggregateSalesItems(items) {
+  const agg = new Map();
+  for (const it of items) {
+    const key = it.sale_date + '||' + it.analog_group;
+    if (agg.has(key)) {
+      const ex = agg.get(key);
+      ex.quantity = Math.round((ex.quantity + it.quantity) * 100) / 100;
+      if (it.restaurant_count > ex.restaurant_count) ex.restaurant_count = it.restaurant_count;
+    } else {
+      agg.set(key, { ...it });
+    }
+  }
+  return Array.from(agg.values());
 }
 
 function parseNum(v) {
   if (typeof v === 'number') return v;
-  return parseFloat(String(v || '0').replace(/,/g, '')) || 0;
+  let s = String(v || '0').trim().replace(/\s+/g, '');
+  if (s.includes(',') && s.includes('.')) {
+    s = s.replace(/,/g, '');
+  } else if (/^-?\d+,\d{3}$/.test(s)) {
+    s = s.replace(/,/g, '');
+  } else {
+    s = s.replace(',', '.');
+  }
+  return parseFloat(s) || 0;
 }
 
 function excelDateToStr(v) {

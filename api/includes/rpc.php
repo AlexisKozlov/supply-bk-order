@@ -947,6 +947,58 @@ if ($endpoint === 'rpc') {
         respond(['products' => $products, 'data' => $data, 'restaurants' => $restaurants]);
     }
 
+    if ($fn === 'sc_save_collection_cell') {
+        requireModuleAccess($authUser, 'stock-collection', 'edit', $ROLE_TEMPLATES, $ACCESS_LEVELS);
+        $collId = intval($body['collection_id'] ?? 0);
+        $productId = intval($body['product_id'] ?? 0);
+        $restaurantNumber = trim((string)($body['restaurant_number'] ?? ''));
+        $stock = $body['stock'] ?? null;
+        if (!$collId || !$productId || $restaurantNumber === '' || $stock === null) {
+            respond(['error' => 'Не все параметры указаны'], 400);
+        }
+        if (!is_numeric($stock)) respond(['error' => 'Некорректный остаток'], 400);
+        $stockVal = round(floatval($stock), 2);
+        if ($stockVal < 0 || $stockVal > 999999) respond(['error' => 'Некорректный остаток'], 400);
+
+        $collCheck = $pdo->prepare("SELECT id, legal_entity, status FROM stock_collections WHERE id = ?");
+        $collCheck->execute([$collId]);
+        $collRow = $collCheck->fetch();
+        if (!$collRow) respond(['error' => 'Сбор не найден'], 404);
+        if ($collRow['status'] !== 'active') respond(['error' => 'Сбор закрыт'], 400);
+        if (!checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+
+        $productCheck = $pdo->prepare("SELECT id FROM stock_collection_products WHERE id = ? AND collection_id = ?");
+        $productCheck->execute([$productId, $collId]);
+        if (!$productCheck->fetch()) respond(['error' => 'Товар не входит в этот сбор'], 400);
+
+        $group = getEntityGroup($collRow['legal_entity']);
+        $restaurantCheck = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
+        $restaurantCheck->execute([$restaurantNumber, $group]);
+        if (!$restaurantCheck->fetch()) respond(['error' => 'Ресторан не найден в выбранном юрлице'], 400);
+
+        try {
+            $stmt = $pdo->prepare("
+                INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at)
+                VALUES (?, ?, ?, ?, 'manual', NOW())
+                ON DUPLICATE KEY UPDATE stock = VALUES(stock), source = 'manual', submitted_at = NOW()
+            ");
+            $stmt->execute([$collId, $productId, $restaurantNumber, $stockVal]);
+            $idStmt = $pdo->prepare("SELECT id, product_id, restaurant_number, stock, source, submitted_at FROM stock_collection_data WHERE product_id = ? AND restaurant_number = ? LIMIT 1");
+            $idStmt->execute([$productId, $restaurantNumber]);
+            $item = $idStmt->fetch();
+            auditLog($pdo, 'stock_collection_cell_saved', 'stock_collection', $collId, $authUserName, [
+                'product_id' => $productId,
+                'restaurant_number' => $restaurantNumber,
+                'stock' => $stockVal,
+                'source' => 'manual',
+            ]);
+            respond(['success' => true, 'item' => $item]);
+        } catch (PDOException $e) {
+            error_log('sc_save_collection_cell error: ' . $e->getMessage());
+            respond(['error' => 'Ошибка сохранения'], 500);
+        }
+    }
+
     if ($fn === 'get_user_list') {
         $caller = getSessionUser($pdo);
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);

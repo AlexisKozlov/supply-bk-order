@@ -136,7 +136,7 @@
                       v-model="editStockValue"
                       type="text" inputmode="decimal"
                       class="sc-cell-input"
-                      @keydown.enter="saveCellEdit(row.cells[prod.id])"
+                      @keydown.enter="saveCellEdit(row, prod.id)"
                       @keydown.escape="editingCell = null"
                     />
                   </template>
@@ -147,7 +147,12 @@
                       :class="{ editable: activeCollection.status === 'active' }"
                       @dblclick="activeCollection.status === 'active' && startCellEdit(row, prod.id)"
                     >{{ row.cells[prod.id].stock }}</span>
-                    <span v-else class="sc-cell-empty">—</span>
+                    <span
+                      v-else
+                      class="sc-cell-empty"
+                      :class="{ editable: activeCollection.status === 'active' }"
+                      @dblclick="activeCollection.status === 'active' && startCellEdit(row, prod.id)"
+                    >—</span>
                   </template>
                 </td>
                 <td v-if="activeCollection.status === 'active'" class="col-del">
@@ -523,9 +528,14 @@ const uniqueRestaurants = computed(() => {
   return new Set(collectionData.value.data.map(d => d.restaurant_number)).size;
 });
 
+const answeredRestaurants = computed(() => {
+  if (!collectionData.value?.data) return new Set();
+  return new Set(collectionData.value.data.map(d => String(d.restaurant_number)));
+});
+
 const missingRestaurants = computed(() => {
   if (!collectionData.value?.data || !restaurantStore.restaurants.length) return [];
-  const answered = new Set(collectionData.value.data.map(d => String(d.restaurant_number)));
+  const answered = answeredRestaurants.value;
   return restaurantStore.restaurants
     .filter(r => !answered.has(String(r.number)))
     .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }));
@@ -837,16 +847,28 @@ function getRestaurantInfo(num) {
 }
 
 const mergedRows = computed(() => {
-  if (!collectionData.value?.data?.length) return [];
-  const allData = collectionData.value.data;
+  if (!collectionData.value) return [];
+  const allData = collectionData.value.data || [];
   const restMap = new Map();
+  for (const r of restaurantStore.restaurants) {
+    const key = String(r.number);
+    restMap.set(key, {
+      restaurant: key,
+      city: r.city || '',
+      address: r.address || '',
+      cells: {},
+      submittedAt: null,
+      hasData: answeredRestaurants.value.has(key),
+    });
+  }
   for (const d of allData) {
     const key = String(d.restaurant_number);
     if (!restMap.has(key)) {
       const info = getRestaurantInfo(key);
-      restMap.set(key, { restaurant: key, city: info.city, address: info.address, cells: {}, submittedAt: null });
+      restMap.set(key, { restaurant: key, city: info.city, address: info.address, cells: {}, submittedAt: null, hasData: true });
     }
     const row = restMap.get(key);
+    row.hasData = true;
     row.cells[d.product_id] = d;
     if (d.submitted_at && (!row.submittedAt || d.submitted_at > row.submittedAt)) {
       row.submittedAt = d.submitted_at;
@@ -901,23 +923,42 @@ const filteredRows = computed(() => {
 // Cell edit
 function startCellEdit(row, prodId) {
   const d = row.cells[prodId];
-  if (!d) return;
   editingCell.value = row.restaurant + '_' + prodId;
-  editStockValue.value = String(d.stock);
+  editStockValue.value = d ? String(d.stock) : '';
   nextTick(() => {
     const inp = document.querySelector('.sc-cell-input');
     if (inp) inp.focus();
   });
 }
 
-async function saveCellEdit(d) {
-  if (!d) return;
+async function saveCellEdit(row, prodId) {
+  const d = row.cells[prodId];
   const val = parseFloat(String(editStockValue.value).replace(',', '.'));
   if (isNaN(val)) { toastStore.error('Ошибка', 'Неверное значение'); return; }
   try {
-    const { error } = await db.from('stock_collection_data').update({ stock: val }).eq('id', d.id);
-    if (error) { toastStore.error('Ошибка', 'Не удалось сохранить'); return; }
-    d.stock = val;
+    if (d?.id) {
+      const { error } = await db.from('stock_collection_data').update({ stock: val }).eq('id', d.id);
+      if (error) { toastStore.error('Ошибка', 'Не удалось сохранить'); return; }
+      d.stock = val;
+    } else {
+      const { data, error } = await db.rpc('sc_save_collection_cell', {
+        collection_id: activeCollection.value.id,
+        product_id: prodId,
+        restaurant_number: row.restaurant,
+        stock: val,
+      });
+      if (error) { toastStore.error('Ошибка', error); return; }
+      row.cells[prodId] = data?.item || {
+        product_id: prodId,
+        restaurant_number: row.restaurant,
+        stock: val,
+        submitted_at: new Date().toISOString(),
+        source: 'manual',
+      };
+      if (collectionData.value?.data) collectionData.value.data.push(row.cells[prodId]);
+      row.hasData = true;
+      row.submittedAt = row.cells[prodId].submitted_at || row.submittedAt;
+    }
     editingCell.value = null;
     toastStore.success('Сохранено', '');
   } catch { toastStore.error('Ошибка', 'Не удалось сохранить'); }
@@ -1359,6 +1400,8 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-cell-val.editable { cursor: pointer; border-bottom: 1px dashed transparent; }
 .sc-cell-val.editable:hover { border-bottom-color: var(--orange); color: var(--orange); }
 .sc-cell-empty { color: #ddd; }
+.sc-cell-empty.editable { cursor: pointer; border-bottom: 1px dashed transparent; }
+.sc-cell-empty.editable:hover { color: var(--orange); border-bottom-color: var(--orange); }
 
 /* Cell edit */
 .sc-cell-input {

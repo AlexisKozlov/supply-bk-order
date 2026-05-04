@@ -309,6 +309,17 @@ function roShortCustomerName($legalEntity) {
 function roGetStockForSku($pdo, $sku, $legalEntity) {
     if (!$sku || !$legalEntity) return null;
 
+    $productInfo = null;
+    try {
+        $p = $pdo->prepare("SELECT external_code, name FROM products WHERE sku = ? AND legal_entity = ? AND is_active = 1 LIMIT 1");
+        $p->execute([$sku, $legalEntity]);
+        $productInfo = $p->fetch() ?: null;
+    } catch (Exception $e) {
+        $productInfo = null;
+    }
+    $externalCode = trim((string)($productInfo['external_code'] ?? ''));
+    $productName = trim((string)($productInfo['name'] ?? ''));
+
     // === stock_malling ===
     $shelfData = null;
     $customer = roShortCustomerName($legalEntity);
@@ -316,10 +327,28 @@ function roGetStockForSku($pdo, $sku, $legalEntity) {
         $s = $pdo->prepare("
             SELECT warehouse, production_date, expiry_date, expiry_status, quantity, uploaded_at
             FROM stock_malling
-            WHERE customer = ? AND product_name LIKE CONCAT(?, ' %')
+            WHERE customer = ?
+              AND (
+                product_name = ?
+                OR product_name LIKE CONCAT(?, ' %')
+                OR product_name LIKE CONCAT(?, ' - %')
+                OR product_name LIKE CONCAT('% - ', ?, ' %')
+                OR (? != '' AND product_name LIKE CONCAT(?, ' %'))
+                OR (? != '' AND product_name LIKE CONCAT(?, ' - %'))
+              )
             ORDER BY expiry_date IS NULL, expiry_date ASC
         ");
-        $s->execute([$customer, $sku]);
+        $s->execute([
+            $customer,
+            $productName,
+            $sku,
+            $sku,
+            $sku,
+            $externalCode,
+            $externalCode,
+            $externalCode,
+            $externalCode,
+        ]);
         $rows = $s->fetchAll();
         if (!empty($rows)) {
             $totalQty = 0;
@@ -365,8 +394,21 @@ function roGetStockForSku($pdo, $sku, $legalEntity) {
 
     // === Выбор по свежести ===
     if ($shelfData && $balData) {
-        // При равенстве дат — приоритет shelf_life (даёт ещё и сроки)
-        return ($balData['date'] > $shelfData['date']) ? $balData : $shelfData;
+        // Если данные со сроками не старее складских остатков, считаем остаток
+        // именно по stock_malling: там есть партии и сроки годности.
+        if (!$balData['date'] || ($shelfData['date'] && $shelfData['date'] >= $balData['date'])) {
+            return $shelfData;
+        }
+
+        // Только когда ro_stock_balances новее, берём оттуда количество,
+        // но сроки годности всё равно добавляем из stock_malling.
+        if ($balData['date'] > $shelfData['date']) {
+            $balData['nearest_expiry'] = $shelfData['nearest_expiry'];
+            $balData['expiry_status'] = $shelfData['expiry_status'];
+            $balData['batches'] = $shelfData['batches'];
+            $balData['expiry_source'] = 'shelf_life';
+            return $balData;
+        }
     }
     return $shelfData ?: $balData;
 }
