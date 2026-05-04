@@ -235,7 +235,27 @@
                   placeholder="Текст вопроса"
                 />
 
-                <div class="sv-options">
+                <div class="sv-question-type">
+                  <button
+                    v-for="type in questionTypes"
+                    :key="type.key"
+                    class="sv-type-btn"
+                    :class="{ active: question.type === type.key }"
+                    :disabled="!canEditDraft"
+                    @click="setQuestionType(qIndex, type.key)"
+                  >
+                    {{ type.label }}
+                  </button>
+                </div>
+
+                <div v-if="question.type === 'scale'" class="sv-type-note">
+                  Ресторан выберет оценку от 1 до 10.
+                </div>
+                <div v-else-if="question.type === 'text'" class="sv-type-note">
+                  Ресторан напишет ответ текстом.
+                </div>
+
+                <div v-if="question.type === 'choice'" class="sv-options">
                   <div
                     v-for="(option, oIndex) in question.options"
                     :key="oIndex"
@@ -258,7 +278,7 @@
                   </div>
                 </div>
 
-                <button class="sv-add-option" @click="addOption(qIndex)" :disabled="!canEditDraft">
+                <button v-if="question.type === 'choice'" class="sv-add-option" @click="addOption(qIndex)" :disabled="!canEditDraft">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   <span>Добавить вариант</span>
                 </button>
@@ -277,8 +297,14 @@
                   <div class="sv-analytics-q-text">{{ q.text }}</div>
                   <span class="sv-analytics-q-total">{{ q.responses_total }} отв.</span>
                 </div>
-                <div class="sv-analytics-options">
-                  <div v-for="opt in q.options" :key="opt.id" class="sv-analytics-option">
+                <div v-if="q.type === 'text'" class="sv-analytics-text-note">
+                  Текстовые ответы смотрите в блоке «Ответы по ресторанам».
+                </div>
+                <div v-else class="sv-analytics-options">
+                  <div v-if="q.type === 'scale'" class="sv-scale-summary">
+                    Средняя оценка: <b>{{ q.average_score || '—' }}</b>
+                  </div>
+                  <div v-for="opt in q.options" :key="opt.id || opt.text" class="sv-analytics-option">
                     <div class="sv-analytics-option-head">
                       <span class="sv-analytics-option-text">{{ opt.text }}</span>
                       <span class="sv-analytics-option-count">{{ opt.responses_count }} · {{ opt.responses_percent }}%</span>
@@ -335,7 +361,7 @@
                   <div v-if="isResponseOpen(resp.id)" class="sv-response-body">
                     <div v-for="a in resp.answers" :key="a.question_id" class="sv-response-answer">
                       <span class="sv-response-q">{{ a.question_text }}</span>
-                      <span class="sv-response-a">{{ a.option_text }}</span>
+                      <span class="sv-response-a">{{ surveyAnswerText(a) }}</span>
                     </div>
                     <div v-if="resp.comment" class="sv-response-comment">
                       <span class="sv-muted small">Комментарий:</span>
@@ -384,7 +410,7 @@ function makeEmptySurvey() {
     allow_comment: true,
     remind_after_hours: 24,
     questions: [
-      { text: '', options: [{ text: '' }, { text: '' }] },
+      { text: '', type: 'choice', options: [{ text: '' }, { text: '' }] },
     ],
   }
 }
@@ -400,6 +426,7 @@ function cloneSurveyToForm(survey) {
     remind_after_hours: Number(survey.remind_after_hours || 24),
     questions: (survey.questions || []).map(q => ({
       text: q.text || '',
+      type: q.type || 'choice',
       options: (q.options || []).map(o => ({ text: o.text || '' })),
     })),
   }
@@ -434,6 +461,11 @@ const filterTabs = [
   { key: 'draft', label: 'Черновики' },
   { key: 'active', label: 'Активные' },
   { key: 'closed', label: 'Закрытые' },
+]
+const questionTypes = [
+  { key: 'choice', label: 'Варианты' },
+  { key: 'scale', label: 'Шкала 1-10' },
+  { key: 'text', label: 'Текст' },
 ]
 
 const counts = computed(() => ({
@@ -541,7 +573,7 @@ function resetFormFromDetail() {
 
 // ══════ Вопросы / варианты ══════
 function addQuestion() {
-  form.value.questions.push({ text: '', options: [{ text: '' }, { text: '' }] })
+  form.value.questions.push({ text: '', type: 'choice', options: [{ text: '' }, { text: '' }] })
 }
 function removeQuestion(index) {
   if (form.value.questions.length <= 1) return
@@ -552,6 +584,14 @@ function removeOption(qi, oi) {
   const opts = form.value.questions[qi].options
   if (opts.length <= 2) return
   opts.splice(oi, 1)
+}
+function setQuestionType(qi, type) {
+  const q = form.value.questions[qi]
+  if (!q) return
+  q.type = ['choice', 'scale', 'text'].includes(type) ? type : 'choice'
+  if (q.type === 'choice' && (!Array.isArray(q.options) || q.options.length < 2)) {
+    q.options = [{ text: '' }, { text: '' }]
+  }
 }
 
 // Drag-and-drop вопросов
@@ -592,7 +632,8 @@ function buildPayload() {
     remind_after_hours: Math.max(1, Number(form.value.remind_after_hours || 24)),
     questions: form.value.questions.map(q => ({
       text: q.text.trim(),
-      options: q.options.map(o => ({ text: o.text.trim() })),
+      type: q.type || 'choice',
+      options: q.type === 'choice' ? q.options.map(o => ({ text: o.text.trim() })) : [],
     })),
   }
 }
@@ -688,6 +729,12 @@ function responsePct(s) {
 
 function toggleResponse(id) { openedResponses[id] = !openedResponses[id] }
 function isResponseOpen(id) { return !!openedResponses[id] || responsesExpanded.value }
+function surveyAnswerText(answer) {
+  if (!answer) return '—'
+  if (answer.type === 'scale') return answer.numeric_value ? String(answer.numeric_value) : '—'
+  if (answer.type === 'text') return answer.text_value || '—'
+  return answer.option_text || '—'
+}
 
 // Закрытие выпадающего меню
 function onGlobalClick() { menuOpen.value = false }
@@ -1361,6 +1408,40 @@ onUnmounted(() => {
 .sv-question-input {
   font-weight: 600;
 }
+.sv-question-type {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sv-type-btn {
+  border: 1px solid var(--sv-border-soft);
+  background: var(--sv-bg-soft);
+  color: var(--sv-text);
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 7px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sv-type-btn.active {
+  background: var(--sv-primary);
+  border-color: var(--sv-primary);
+  color: #fff;
+}
+.sv-type-btn:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+.sv-type-note {
+  color: var(--sv-muted);
+  background: var(--sv-bg-soft);
+  border: 1px solid var(--sv-border-soft);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 13px;
+}
 
 .sv-options {
   display: flex;
@@ -1402,6 +1483,17 @@ onUnmounted(() => {
   color: var(--sv-accent);
 }
 .sv-add-option:disabled { opacity: .5; cursor: not-allowed; }
+.sv-scale-summary, .sv-analytics-text-note {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sv-bg-soft);
+  color: var(--sv-text);
+  font-size: 13px;
+}
+.sv-scale-summary b {
+  color: var(--sv-primary);
+  font-size: 18px;
+}
 
 /* ══════ Результаты / Аналитика ══════ */
 .sv-block-title {

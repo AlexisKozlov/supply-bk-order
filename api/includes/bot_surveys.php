@@ -224,7 +224,7 @@ function surveyShowQuestion($chatId, $msgId, $surveyId, $questionId, $state) {
     global $pdo;
 
     $questionStmt = $pdo->prepare("
-        SELECT id, text, sort_order
+        SELECT id, text, type, sort_order
         FROM survey_questions
         WHERE id = ? AND survey_id = ?
     ");
@@ -232,14 +232,18 @@ function surveyShowQuestion($chatId, $msgId, $surveyId, $questionId, $state) {
     $question = $questionStmt->fetch();
     if (!$question) return;
 
-    $optionsStmt = $pdo->prepare("
-        SELECT id, text
-        FROM survey_options
-        WHERE question_id = ?
-        ORDER BY sort_order, id
-    ");
-    $optionsStmt->execute([$questionId]);
-    $options = $optionsStmt->fetchAll();
+    $type = $question['type'] ?: 'choice';
+    $options = [];
+    if ($type === 'choice') {
+        $optionsStmt = $pdo->prepare("
+            SELECT id, text
+            FROM survey_options
+            WHERE question_id = ?
+            ORDER BY sort_order, id
+        ");
+        $optionsStmt->execute([$questionId]);
+        $options = $optionsStmt->fetchAll();
+    }
 
     $totalStmt = $pdo->prepare("SELECT COUNT(*) FROM survey_questions WHERE survey_id = ?");
     $totalStmt->execute([$surveyId]);
@@ -268,39 +272,37 @@ function surveyShowQuestion($chatId, $msgId, $surveyId, $questionId, $state) {
     $text .= "<b>{$safeQuestion}</b>";
 
     $buttons = [];
-    foreach ($options as $option) {
-        $buttons[] = [[
-            'text' => $option['text'],
-            'callback_data' => "srv_ans_{$surveyId}_{$questionId}_{$option['id']}",
-        ]];
+    if ($type === 'scale') {
+        for ($i = 1; $i <= 10; $i += 5) {
+            $row = [];
+            for ($score = $i; $score < $i + 5; $score++) {
+                $row[] = [
+                    'text' => (string)$score,
+                    'callback_data' => "srv_ans_{$surveyId}_{$questionId}_{$score}",
+                ];
+            }
+            $buttons[] = $row;
+        }
+    } elseif ($type === 'text') {
+        $state['step'] = 'text_question';
+        $state['current_question_id'] = (int)$questionId;
+        $state['question_msg_id'] = $msgId;
+        surveySaveState($chatId, $state);
+        $text .= "\n\nНапишите ответ сообщением.";
+    } else {
+        foreach ($options as $option) {
+            $buttons[] = [[
+                'text' => $option['text'],
+                'callback_data' => "srv_ans_{$surveyId}_{$questionId}_{$option['id']}",
+            ]];
+        }
     }
 
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $buttons]);
 }
 
-function surveyProcessAnswer($chatId, $msgId, $surveyId, $questionId, $optionId) {
+function surveyNextQuestionId($surveyId, $questionId) {
     global $pdo;
-
-    $state = surveyLoadState($chatId);
-    if (!$state || (int)$state['survey_id'] !== (int)$surveyId) {
-        surveyStart($chatId, $msgId, $surveyId);
-        return;
-    }
-
-    $checkStmt = $pdo->prepare("
-        SELECT so.id
-        FROM survey_options so
-        JOIN survey_questions sq ON sq.id = so.question_id
-        WHERE so.id = ?
-          AND so.question_id = ?
-          AND sq.survey_id = ?
-    ");
-    $checkStmt->execute([$optionId, $questionId, $surveyId]);
-    if (!$checkStmt->fetch()) return;
-
-    $state['answers'][(string)$questionId] = (int)$optionId;
-    surveySaveState($chatId, $state);
-
     $nextStmt = $pdo->prepare("
         SELECT id
         FROM survey_questions
@@ -316,7 +318,11 @@ function surveyProcessAnswer($chatId, $msgId, $surveyId, $questionId, $optionId)
         LIMIT 1
     ");
     $nextStmt->execute([$surveyId, $questionId, $questionId, $questionId]);
-    $nextId = (int)$nextStmt->fetchColumn();
+    return (int)$nextStmt->fetchColumn();
+}
+
+function surveyContinueAfterAnswer($chatId, $msgId, $surveyId, $questionId, $state) {
+    $nextId = surveyNextQuestionId($surveyId, $questionId);
 
     if ($nextId) {
         surveyShowQuestion($chatId, $msgId, $surveyId, $nextId, $state);
@@ -328,6 +334,42 @@ function surveyProcessAnswer($chatId, $msgId, $surveyId, $questionId, $optionId)
     } else {
         surveyFinish($chatId, $msgId, $state, null);
     }
+}
+
+function surveyProcessAnswer($chatId, $msgId, $surveyId, $questionId, $optionId) {
+    global $pdo;
+
+    $state = surveyLoadState($chatId);
+    if (!$state || (int)$state['survey_id'] !== (int)$surveyId) {
+        surveyStart($chatId, $msgId, $surveyId);
+        return;
+    }
+
+    $questionStmt = $pdo->prepare("SELECT type FROM survey_questions WHERE id = ? AND survey_id = ?");
+    $questionStmt->execute([$questionId, $surveyId]);
+    $type = $questionStmt->fetchColumn();
+    if (!$type) return;
+
+    if ($type === 'scale') {
+        $score = (int)$optionId;
+        if ($score < 1 || $score > 10) return;
+        $state['answers'][(string)$questionId] = ['type' => 'scale', 'numeric_value' => $score];
+    } else {
+        $checkStmt = $pdo->prepare("
+            SELECT so.id
+            FROM survey_options so
+            JOIN survey_questions sq ON sq.id = so.question_id
+            WHERE so.id = ?
+              AND so.question_id = ?
+              AND sq.survey_id = ?
+        ");
+        $checkStmt->execute([$optionId, $questionId, $surveyId]);
+        if (!$checkStmt->fetch()) return;
+        $state['answers'][(string)$questionId] = ['type' => 'choice', 'option_id' => (int)$optionId];
+    }
+    surveySaveState($chatId, $state);
+
+    surveyContinueAfterAnswer($chatId, $msgId, $surveyId, $questionId, $state);
 }
 
 function surveyAskComment($chatId, $msgId, $state) {
@@ -379,11 +421,21 @@ function surveyFinish($chatId, $msgId, $state, $comment) {
         ")->execute([$surveyId, $restaurantNumber, $group, $chatId, $comment !== null && trim($comment) !== '' ? trim($comment) : null]);
         $responseId = (int)$pdo->lastInsertId();
 
-        foreach ($state['answers'] as $questionId => $optionId) {
+        foreach ($state['answers'] as $questionId => $answer) {
+            if (!is_array($answer)) {
+                $answer = ['type' => 'choice', 'option_id' => (int)$answer];
+            }
+            $type = $answer['type'] ?? 'choice';
             $pdo->prepare("
-                INSERT INTO survey_answers (response_id, question_id, option_id)
-                VALUES (?,?,?)
-            ")->execute([$responseId, (int)$questionId, (int)$optionId]);
+                INSERT INTO survey_answers (response_id, question_id, option_id, numeric_value, text_value)
+                VALUES (?,?,?,?,?)
+            ")->execute([
+                $responseId,
+                (int)$questionId,
+                $type === 'choice' ? (int)($answer['option_id'] ?? 0) : null,
+                $type === 'scale' ? (int)($answer['numeric_value'] ?? 0) : null,
+                $type === 'text' ? trim((string)($answer['text_value'] ?? '')) : null,
+            ]);
         }
 
         $pdo->commit();
@@ -426,7 +478,24 @@ function surveyFinish($chatId, $msgId, $state, $comment) {
 
 function surveyProcessComment($chatId, $text, $userMsgId) {
     $state = surveyLoadState($chatId);
-    if (!$state || ($state['step'] ?? '') !== 'comment') return false;
+    if (!$state) return false;
+
+    if (($state['step'] ?? '') === 'text_question') {
+        $answerText = trim($text);
+        if ($answerText === '') return true;
+        $questionId = (int)($state['current_question_id'] ?? 0);
+        $msgId = $state['question_msg_id'] ?? null;
+        if (!$questionId || !$msgId) return false;
+        if ($userMsgId) @deleteMessage($chatId, $userMsgId);
+        $state['answers'][(string)$questionId] = ['type' => 'text', 'text_value' => $answerText];
+        $state['step'] = 'question';
+        unset($state['current_question_id'], $state['question_msg_id']);
+        surveySaveState($chatId, $state);
+        surveyContinueAfterAnswer($chatId, $msgId, (int)$state['survey_id'], $questionId, $state);
+        return true;
+    }
+
+    if (($state['step'] ?? '') !== 'comment') return false;
 
     $msgId = $state['comment_msg_id'] ?? null;
     if ($userMsgId) @deleteMessage($chatId, $userMsgId);

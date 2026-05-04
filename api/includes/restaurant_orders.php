@@ -110,7 +110,7 @@ function roGetSurveyForRestaurant($pdo, $surveyId, $rest) {
     if (($survey['status'] ?? '') !== 'active') return null;
 
     $questionsStmt = $pdo->prepare("
-        SELECT id, text, sort_order
+        SELECT id, text, type, sort_order
         FROM survey_questions
         WHERE survey_id = ?
         ORDER BY sort_order, id
@@ -138,14 +138,21 @@ function roGetSurveyForRestaurant($pdo, $surveyId, $rest) {
 
     if (!empty($survey['response_id'])) {
         $answersStmt = $pdo->prepare("
-            SELECT question_id, option_id
-            FROM survey_answers
-            WHERE response_id = ?
+            SELECT sa.question_id, sq.type, sa.option_id, sa.numeric_value, sa.text_value
+            FROM survey_answers sa
+            JOIN survey_questions sq ON sq.id = sa.question_id
+            WHERE sa.response_id = ?
         ");
         $answersStmt->execute([(int)$survey['response_id']]);
         $answers = [];
         foreach ($answersStmt->fetchAll() as $answer) {
-            $answers[(int)$answer['question_id']] = (int)$answer['option_id'];
+            $questionId = (int)$answer['question_id'];
+            $answers[$questionId] = [
+                'option_id' => $answer['option_id'] !== null ? (int)$answer['option_id'] : null,
+                'numeric_value' => $answer['numeric_value'] !== null ? (int)$answer['numeric_value'] : null,
+                'text_value' => $answer['text_value'] ?? null,
+                'type' => $answer['type'] ?: 'choice',
+            ];
         }
         $survey['answers'] = $answers;
     } else {
@@ -288,6 +295,14 @@ function roGetCttPrefixByGroup($group) {
     return strtoupper((string)$group) === 'PS' ? 'DODO' : 'BK';
 }
 
+function roWarehouseStockLegalEntityForRestaurant($rest) {
+    $group = $rest['legal_entity_group'] ?? '';
+    $number = (string)($rest['restaurant_number'] ?? '');
+    if ($group === 'PS') return 'ООО "Пицца Стар"';
+    if ($number === '3') return 'ООО "Воглия Матта"';
+    return 'ООО "Бургер БК"';
+}
+
 // Полное название юрлица → короткое имя для stock_malling.customer
 // «ООО "Бургер БК"» → «Бургер БК», «ООО "Воглия Матта"» → «Воглия Матта», «ООО "Пицца Стар"» → «Пицца Стар»
 function roShortCustomerName($legalEntity) {
@@ -411,6 +426,36 @@ function roGetStockForSku($pdo, $sku, $legalEntity) {
         }
     }
     return $shelfData ?: $balData;
+}
+
+function roWarehouseStorageMode($warehouse) {
+    $w = mb_strtolower((string)$warehouse, 'UTF-8');
+    if (strpos($w, 'холод') !== false && strpos($w, 'мороз') !== false) return ['key' => 'mixed', 'label' => 'Холод/Мороз'];
+    if (strpos($w, 'мороз') !== false || strpos($w, 'заморож') !== false) return ['key' => 'frozen', 'label' => 'Мороз'];
+    if (strpos($w, 'холод') !== false || strpos($w, 'охлаж') !== false) return ['key' => 'cold', 'label' => 'Холод'];
+    if (strpos($w, 'сух') !== false || strpos($w, 'dry') !== false) return ['key' => 'dry', 'label' => 'Сухой сток'];
+    return ['key' => 'other', 'label' => $warehouse ?: 'Без режима'];
+}
+
+function roNormalizeLookupText($value) {
+    return mb_strtolower(trim(preg_replace('/\s+/u', ' ', (string)$value)), 'UTF-8');
+}
+
+function roFindProductForShelfRow($productName, $productsBySku, $productsByExternal, $productsByName) {
+    $name = trim((string)$productName);
+    $external = '';
+    $sku = '';
+    if (preg_match('/^\s*([^\s]+)\s+-\s+([^\s]+)\s+/u', $name, $m)) {
+        $external = trim($m[1]);
+        $sku = trim($m[2]);
+    } elseif (preg_match('/^\s*([^\s]+)/u', $name, $m)) {
+        $sku = trim($m[1]);
+    }
+    if ($sku !== '' && isset($productsBySku[$sku])) return $productsBySku[$sku];
+    if ($external !== '' && isset($productsByExternal[$external])) return $productsByExternal[$external];
+    $norm = roNormalizeLookupText($name);
+    if ($norm !== '' && isset($productsByName[$norm])) return $productsByName[$norm];
+    return null;
 }
 
 function roSessionsSupportGroups($pdo) {
@@ -612,7 +657,7 @@ function roAggregateOrderItems($items) {
     $aggregated = [];
     foreach ($items as $item) {
         $qty = floatval($item['quantity'] ?? 0);
-        if ($qty <= 0) continue;
+        if ($qty < 0) continue;
         $sku = trim((string)($item['sku'] ?? ''));
         if ($sku === '') continue;
         if (!isset($aggregated[$sku])) {
@@ -1848,6 +1893,124 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     roRespond(['success' => true, 'saved' => $saved]);
 }
 
+// --- Остатки склада для кабинета ресторана (из модуля «Сроки годности») ---
+if ($roAction === 'warehouse-stock' && $method === 'GET') {
+    $rest = roGetRestaurantSession($pdo);
+    if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
+
+    $legalEntity = roWarehouseStockLegalEntityForRestaurant($rest);
+    $customer = roShortCustomerName($legalEntity);
+    if (!$customer) roRespond(['error' => 'Не удалось определить юр. лицо ресторана'], 400);
+
+    $prodStmt = $pdo->prepare("
+        SELECT sku, external_code, gtin, name, analog_group, category
+        FROM products
+        WHERE legal_entity = ? AND is_active = 1
+    ");
+    $prodStmt->execute([$legalEntity]);
+    $productsBySku = [];
+    $productsByExternal = [];
+    $productsByName = [];
+    foreach ($prodStmt->fetchAll() as $p) {
+        $sku = trim((string)($p['sku'] ?? ''));
+        $ext = trim((string)($p['external_code'] ?? ''));
+        $name = roNormalizeLookupText($p['name'] ?? '');
+        if ($sku !== '') $productsBySku[$sku] = $p;
+        if ($ext !== '') $productsByExternal[$ext] = $p;
+        if ($name !== '') $productsByName[$name] = $p;
+    }
+
+    $s = $pdo->prepare("
+        SELECT customer, warehouse, product_name, production_date, expiry_date, expiry_status, quantity, uploaded_at
+        FROM stock_malling
+        WHERE customer = ?
+        ORDER BY product_name, expiry_date IS NULL, expiry_date ASC
+    ");
+    $s->execute([$customer]);
+
+    $groups = [];
+    $latestUpload = null;
+    $today = new DateTimeImmutable('today');
+    foreach ($s->fetchAll() as $row) {
+        $qty = round((float)($row['quantity'] ?? 0), 2);
+        if ($qty <= 0) continue;
+        $expiry = $row['expiry_date'] ?: null;
+        if ($expiry) {
+            $exp = DateTimeImmutable::createFromFormat('!Y-m-d', $expiry) ?: new DateTimeImmutable($expiry);
+            if ($exp < $today) continue;
+        }
+        $product = roFindProductForShelfRow($row['product_name'] ?? '', $productsBySku, $productsByExternal, $productsByName);
+        $sku = trim((string)($product['sku'] ?? ''));
+        $external = trim((string)($product['external_code'] ?? ''));
+        if (!$sku && preg_match('/^\s*([^\s]+)\s+-\s+([^\s]+)\s+/u', (string)$row['product_name'], $m)) $sku = trim($m[2]);
+        if (!$external && preg_match('/^\s*([^\s]+)\s+-\s+([^\s]+)\s+/u', (string)$row['product_name'], $m)) $external = trim($m[1]);
+
+        $key = $sku ? 'sku:' . $sku : 'name:' . roNormalizeLookupText($row['product_name']);
+        $storage = roWarehouseStorageMode($row['warehouse'] ?? '');
+        if (!isset($groups[$key])) {
+            $groups[$key] = [
+                'key' => $key,
+                'sku' => $sku,
+                'external_code' => $external,
+                'gtin' => $product['gtin'] ?? '',
+                'name' => $product['name'] ?? preg_replace('/^\s*[^\s]+\s+-\s*[^\s]+\s+/u', '', (string)$row['product_name']),
+                'raw_name' => $row['product_name'],
+                'analog_group' => $product['analog_group'] ?? '',
+                'category' => $product['category'] ?? '',
+                'storage_key' => $storage['key'],
+                'storage_label' => $storage['label'],
+                'quantity' => 0,
+                'nearest_expiry' => null,
+                'nearest_status' => null,
+                'days_left' => null,
+                'has_expired' => false,
+                'batches' => [],
+            ];
+        }
+        $g =& $groups[$key];
+        $g['quantity'] = round($g['quantity'] + $qty, 2);
+        if ($g['storage_key'] === 'other' && $storage['key'] !== 'other') {
+            $g['storage_key'] = $storage['key'];
+            $g['storage_label'] = $storage['label'];
+        }
+        if ($expiry && (!$g['nearest_expiry'] || $expiry < $g['nearest_expiry'])) {
+            $g['nearest_expiry'] = $expiry;
+            $g['nearest_status'] = $row['expiry_status'] ?: null;
+        }
+        $g['batches'][] = [
+            'warehouse' => $row['warehouse'],
+            'quantity' => $qty,
+            'production_date' => $row['production_date'] ?: null,
+            'expiry_date' => $expiry,
+            'expiry_status' => $row['expiry_status'] ?: null,
+        ];
+        unset($g);
+        if (!empty($row['uploaded_at']) && (!$latestUpload || $row['uploaded_at'] > $latestUpload)) {
+            $latestUpload = $row['uploaded_at'];
+        }
+    }
+
+    $items = array_values($groups);
+    foreach ($items as &$item) {
+        usort($item['batches'], function($a, $b) {
+            return ($a['expiry_date'] ?: '9999-12-31') <=> ($b['expiry_date'] ?: '9999-12-31');
+        });
+        if ($item['nearest_expiry']) {
+            $exp = DateTimeImmutable::createFromFormat('!Y-m-d', $item['nearest_expiry']) ?: new DateTimeImmutable($item['nearest_expiry']);
+            $item['days_left'] = (int)$today->diff($exp)->format('%r%a');
+        }
+    }
+    unset($item);
+    usort($items, fn($a, $b) => strcmp($a['storage_label'], $b['storage_label']) ?: strcmp($a['name'], $b['name']));
+
+    roRespond([
+        'legal_entity' => $legalEntity,
+        'customer' => $customer,
+        'uploaded_at' => $latestUpload,
+        'items' => $items,
+    ]);
+}
+
 // --- Привязка Telegram: генерация токена ---
 if ($roAction === 'telegram-link' && $method === 'POST') {
     $rest = roGetRestaurantSession($pdo);
@@ -2114,38 +2277,57 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
     foreach ($rawAnswers as $key => $value) {
         if (is_array($value)) {
             $questionId = (int)($value['question_id'] ?? 0);
-            $optionId = (int)($value['option_id'] ?? 0);
+            $answerMap[$questionId] = [
+                'option_id' => (int)($value['option_id'] ?? 0),
+                'numeric_value' => isset($value['numeric_value']) ? (int)$value['numeric_value'] : null,
+                'text_value' => isset($value['text_value']) ? trim((string)$value['text_value']) : null,
+            ];
+            continue;
         } else {
             $questionId = (int)$key;
-            $optionId = (int)$value;
-        }
-        if ($questionId > 0 && $optionId > 0) {
-            $answerMap[$questionId] = $optionId;
+            $answerMap[$questionId] = [
+                'option_id' => (int)$value,
+                'numeric_value' => null,
+                'text_value' => null,
+            ];
+            continue;
         }
     }
+    $answerMap = array_filter($answerMap, fn($answer, $questionId) => (int)$questionId > 0, ARRAY_FILTER_USE_BOTH);
 
     $qStmt = $pdo->prepare("
-        SELECT sq.id AS question_id, so.id AS option_id
+        SELECT sq.id AS question_id, sq.type, so.id AS option_id
         FROM survey_questions sq
-        JOIN survey_options so ON so.question_id = sq.id
+        LEFT JOIN survey_options so ON so.question_id = sq.id
         WHERE sq.survey_id = ?
         ORDER BY sq.sort_order, sq.id, so.sort_order, so.id
     ");
     $qStmt->execute([$surveyId]);
     $questionOptions = [];
+    $questionTypes = [];
     foreach ($qStmt->fetchAll() as $row) {
         $questionId = (int)$row['question_id'];
+        $questionTypes[$questionId] = $row['type'] ?: 'choice';
         $questionOptions[$questionId] ??= [];
-        $questionOptions[$questionId][] = (int)$row['option_id'];
+        if ($row['option_id'] !== null) $questionOptions[$questionId][] = (int)$row['option_id'];
     }
 
     if (!$questionOptions) roRespond(['error' => 'В опросе нет вопросов'], 400);
     if (count($answerMap) !== count($questionOptions)) roRespond(['error' => 'Ответьте на все вопросы'], 400);
 
     foreach ($questionOptions as $questionId => $optionIds) {
-        $selectedOptionId = (int)($answerMap[$questionId] ?? 0);
-        if (!$selectedOptionId || !in_array($selectedOptionId, $optionIds, true)) {
-            roRespond(['error' => 'Один из ответов выбран неверно'], 400);
+        $answer = $answerMap[$questionId] ?? null;
+        $type = $questionTypes[$questionId] ?? 'choice';
+        if ($type === 'scale') {
+            $score = (int)($answer['numeric_value'] ?? 0);
+            if ($score < 1 || $score > 10) roRespond(['error' => 'Одна из оценок указана неверно'], 400);
+        } elseif ($type === 'text') {
+            if (trim((string)($answer['text_value'] ?? '')) === '') roRespond(['error' => 'Ответьте на все вопросы'], 400);
+        } else {
+            $selectedOptionId = (int)($answer['option_id'] ?? 0);
+            if (!$selectedOptionId || !in_array($selectedOptionId, $optionIds, true)) {
+                roRespond(['error' => 'Один из ответов выбран неверно'], 400);
+            }
         }
     }
 
@@ -2170,11 +2352,18 @@ if ($roAction === 'submit-survey' && $method === 'POST') {
         $responseId = (int)$pdo->lastInsertId();
 
         $insertAnswer = $pdo->prepare("
-            INSERT INTO survey_answers (response_id, question_id, option_id)
-            VALUES (?, ?, ?)
+            INSERT INTO survey_answers (response_id, question_id, option_id, numeric_value, text_value)
+            VALUES (?, ?, ?, ?, ?)
         ");
-        foreach ($answerMap as $questionId => $optionId) {
-            $insertAnswer->execute([$responseId, (int)$questionId, (int)$optionId]);
+        foreach ($answerMap as $questionId => $answer) {
+            $type = $questionTypes[(int)$questionId] ?? 'choice';
+            $insertAnswer->execute([
+                $responseId,
+                (int)$questionId,
+                $type === 'choice' ? (int)($answer['option_id'] ?? 0) : null,
+                $type === 'scale' ? (int)($answer['numeric_value'] ?? 0) : null,
+                $type === 'text' ? trim((string)($answer['text_value'] ?? '')) : null,
+            ]);
         }
 
         $pdo->commit();

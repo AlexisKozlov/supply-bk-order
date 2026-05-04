@@ -101,7 +101,7 @@
     <div class="cab-main">
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'scanner' ? 'Сканер товаров' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров (BETA)">
@@ -775,7 +775,28 @@
               <!-- Вопрос -->
               <div v-if="wizardIsQuestion && currentQuestion" class="cab-sv-step-q">
                 <h3 class="cab-sv-step-title">{{ currentQuestion.text }}</h3>
-                <div class="cab-sv-bigopts">
+                <div v-if="surveyQuestionType(currentQuestion) === 'scale'" class="cab-sv-scale">
+                  <button
+                    v-for="score in 10"
+                    :key="score"
+                    class="cab-sv-scale-btn"
+                    :class="{ selected: Number(surveyAnswers[currentQuestion.id]) === score }"
+                    :disabled="surveySubmitting"
+                    @click="chooseOption(currentQuestion.id, score)"
+                  >
+                    {{ score }}
+                  </button>
+                </div>
+                <textarea
+                  v-else-if="surveyQuestionType(currentQuestion) === 'text'"
+                  v-model="surveyAnswers[currentQuestion.id]"
+                  class="cab-sv-textarea"
+                  rows="5"
+                  placeholder="Ваш ответ..."
+                  :disabled="surveySubmitting"
+                  @keydown.ctrl.enter="wizardCanNext && nextStep()"
+                />
+                <div v-else class="cab-sv-bigopts">
                   <button
                     v-for="option in currentQuestion.options || []"
                     :key="option.id"
@@ -870,7 +891,14 @@
                 <span class="cab-sv-ro-qtext">{{ q.text }}</span>
               </div>
               <div class="cab-sv-ro-opts">
+                <div v-if="surveyQuestionType(q) === 'scale'" class="cab-sv-ro-text-answer">
+                  Оценка: {{ surveyAnswers[q.id] || '—' }}
+                </div>
+                <div v-else-if="surveyQuestionType(q) === 'text'" class="cab-sv-ro-text-answer">
+                  {{ surveyAnswers[q.id] || '—' }}
+                </div>
                 <div
+                  v-else
                   v-for="opt in q.options || []"
                   :key="opt.id"
                   class="cab-sv-ro-opt"
@@ -958,6 +986,109 @@
             {{ stockLastSubmittedAt ? 'Сохранить изменения' : 'Сохранить' }}
           </button>
           <span v-if="stockSavedFlash" class="stock-saved-flash">Сохранено ✓</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════ TAB: Остатки склада ══════ -->
+    <section v-if="activeTab === 'warehouse-stock' && !globalLoading && !globalError" class="cab-section whs-section">
+      <div class="whs-panel">
+        <div class="whs-head">
+          <div>
+            <h2>Остатки склада</h2>
+            <p>{{ warehouseStockCustomer || 'Ваше юрлицо' }}<template v-if="warehouseStockUploadedAt"> · обновлено {{ fmtDateTime(warehouseStockUploadedAt) }}</template></p>
+          </div>
+          <button class="btn btn-outline" :disabled="warehouseStockLoading || !warehouseFilteredItems.length" @click="exportWarehouseStock">
+            Excel
+          </button>
+        </div>
+
+        <div class="whs-controls">
+          <div class="whs-search">
+            <span v-html="cabIconSvg.search"></span>
+            <input v-model="warehouseSearch" type="search" placeholder="Артикул, товар, GTIN или группа аналогов" />
+          </div>
+        </div>
+
+        <div class="whs-tabs" aria-label="Режимы хранения">
+          <button
+            v-for="tab in warehouseStorageTabs"
+            :key="tab.key"
+            class="whs-tab"
+            :class="{ active: warehouseStorageFilter === tab.key }"
+            @click="warehouseStorageFilter = tab.key"
+          >
+            {{ tab.label }}
+            <span>{{ tab.count }}</span>
+          </button>
+        </div>
+
+        <div v-if="warehouseStockLoading" class="cab-empty-card">
+          <BurgerSpinner text="Загрузка..." />
+        </div>
+        <div v-else-if="warehouseStockError" class="cab-empty-card">
+          <h2>Не удалось загрузить остатки</h2>
+          <p>{{ warehouseStockError }}</p>
+          <button class="btn btn-primary" @click="loadWarehouseStock">Повторить</button>
+        </div>
+        <div v-else-if="!warehouseStockItems.length" class="cab-empty-card">
+          <h2>Нет данных</h2>
+          <p>В модуле «Сроки годности» пока нет остатков для вашего юрлица.</p>
+        </div>
+        <div v-else-if="!warehouseFilteredItems.length" class="cab-empty-card">
+          <h2>Ничего не найдено</h2>
+          <p>Измените поиск или фильтр режима хранения.</p>
+        </div>
+
+        <div v-else class="whs-list">
+          <div class="whs-list-head">
+            <span>Номенклатура</span>
+            <span>Остаток</span>
+            <span>Срок годности</span>
+          </div>
+          <div v-for="item in warehouseFilteredItems" :key="item.key" class="whs-row" :class="{ soon: item.days_left >= 0 && item.days_left <= 7 }">
+            <div class="whs-row-main">
+              <div class="whs-name">
+                <button class="whs-copy whs-sku" type="button" title="Скопировать артикул и товар" @click="copyWarehouseTitle(item)">
+                  {{ item.sku || item.external_code || '—' }}
+                </button>
+                <button class="whs-copy whs-title" type="button" title="Скопировать артикул и товар" @click="copyWarehouseTitle(item)">
+                  {{ item.name }}
+                </button>
+              </div>
+              <div class="whs-meta">
+                <span>{{ item.storage_label }}</span>
+                <span v-if="item.analog_group">Группа: {{ item.analog_group }}</span>
+                <span v-if="item.gtin">GTIN: {{ item.gtin }}</span>
+                <span v-if="warehouseCopiedKey === item.key" class="whs-copied">Скопировано</span>
+              </div>
+            </div>
+            <div class="whs-qty">
+              <strong>{{ formatWarehouseQty(item.quantity) }}</strong>
+            </div>
+            <div class="whs-exp">
+              <span :class="warehouseExpiryClass(item)">{{ warehouseExpiryText(item) }}</span>
+              <button v-if="item.batches?.length > 1" class="whs-batches-btn" @click="toggleWarehouseItem(item.key)">
+                {{ warehouseOpenItems[item.key] ? 'Скрыть' : `Партии ${item.batches.length}` }}
+              </button>
+            </div>
+            <div v-if="warehouseOpenItems[item.key]" class="whs-batches">
+              <div class="whs-batch whs-batch-head">
+                <span>Номенклатура</span>
+                <span>Склад</span>
+                <span>Остаток</span>
+                <span>Срок годности</span>
+                <span>Статус</span>
+              </div>
+              <div v-for="(b, idx) in item.batches" :key="idx" class="whs-batch">
+                <span class="whs-batch-name">{{ warehouseNomenclature(item) }}</span>
+                <span>{{ b.warehouse || item.storage_label }}</span>
+                <b>{{ formatWarehouseQty(b.quantity) }}</b>
+                <span>{{ formatWarehouseDate(b.expiry_date) || '—' }}</span>
+                <span>{{ b.expiry_status || '—' }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1260,6 +1391,7 @@ const cabIconSvg = {
   info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5h.01"/></svg>',
   surveys: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M9 9h6"/><path d="M9 13h6"/><path d="M8.5 17l1.5 1.5 3-3"/></svg>',
   stock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>',
+  warehouse: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-5 9 5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/><path d="M8 12h8"/></svg>',
   scanner: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8"/><path d="M12 8v8"/><path d="M16 8v8"/></svg>',
   search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>',
   profile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>',
@@ -1294,6 +1426,7 @@ function supplierIcon(name) {
 }
 
 function tabIconSvg(tabId) {
+  if (tabId === 'warehouse-stock') return cabIconSvg.warehouse;
   return cabIconSvg[tabId] || cabIconSvg.profile;
 }
 
@@ -1329,6 +1462,15 @@ const stockLoading = ref(false);
 const stockSaving = ref(false);
 const stockError = ref('');
 const stockSavedFlash = ref(false);
+const warehouseStockItems = ref([]);
+const warehouseStockCustomer = ref('');
+const warehouseStockUploadedAt = ref('');
+const warehouseStockLoading = ref(false);
+const warehouseStockError = ref('');
+const warehouseSearch = ref('');
+const warehouseStorageFilter = ref('all');
+const warehouseOpenItems = reactive({});
+const warehouseCopiedKey = ref('');
 const restaurantBroadcasts = ref([]);
 let restaurantBroadcastTimer = null;
 const currentBroadcast = computed(() => restaurantBroadcasts.value[0] || null);
@@ -1348,6 +1490,43 @@ const stockDirty = computed(() => {
   return false;
 });
 const stockSavedSnapshot = reactive({}); // последние сохранённые значения
+
+const warehouseBaseItems = computed(() => {
+  return warehouseStockItems.value.filter(item => !(Number(item.days_left) < 0));
+});
+
+const warehouseStorageTabs = computed(() => {
+  const counts = new Map();
+  for (const item of warehouseBaseItems.value) {
+    const key = item.storage_key || 'other';
+    if (!counts.has(key)) counts.set(key, { key, label: item.storage_label || 'Без режима', count: 0 });
+    counts.get(key).count++;
+  }
+  const preferred = ['dry', 'cold', 'frozen', 'mixed', 'other'];
+  const tabs = [...counts.values()].sort((a, b) => {
+    const ia = preferred.indexOf(a.key);
+    const ib = preferred.indexOf(b.key);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.label.localeCompare(b.label, 'ru');
+  });
+  return [{ key: 'all', label: 'Все', count: warehouseBaseItems.value.length }, ...tabs];
+});
+
+const warehouseFilteredItems = computed(() => {
+  const q = warehouseSearch.value.trim().toLowerCase();
+  return warehouseBaseItems.value.filter(item => {
+    if (warehouseStorageFilter.value !== 'all' && item.storage_key !== warehouseStorageFilter.value) return false;
+    if (!q) return true;
+    return [
+      item.sku,
+      item.external_code,
+      item.gtin,
+      item.name,
+      item.raw_name,
+      item.analog_group,
+      item.category,
+    ].some(v => String(v || '').toLowerCase().includes(q));
+  });
+});
 
 // ═══ Telegram ═══
 const tgLinkCode = ref('');
@@ -1391,7 +1570,7 @@ const surveyTotalQuestions = computed(() => (surveyDetail.value?.questions || []
 const surveyAnsweredCount = computed(() => {
   const qs = surveyDetail.value?.questions || [];
   let n = 0;
-  for (const q of qs) { if (Number(surveyAnswers[q.id]) > 0) n++; }
+  for (const q of qs) { if (surveyQuestionAnswered(q)) n++; }
   return n;
 });
 const surveyProgressPct = computed(() => {
@@ -1430,7 +1609,7 @@ const currentQuestion = computed(() => {
 const wizardCanNext = computed(() => {
   if (wizardIsQuestion.value) {
     const q = currentQuestion.value;
-    return !!q && Number(surveyAnswers[q.id]) > 0;
+    return !!q && surveyQuestionAnswered(q);
   }
   return true;
 });
@@ -1438,7 +1617,7 @@ const wizardCanSubmit = computed(() => surveyAllAnswered.value);
 const wizardSegments = computed(() => {
   const qs = surveyDetail.value?.questions || [];
   const segs = qs.map((q, i) => ({
-    filled: Number(surveyAnswers[q.id]) > 0,
+    filled: surveyQuestionAnswered(q),
     reachable: true,
     label: `Вопрос ${i + 1}`,
   }));
@@ -1453,6 +1632,22 @@ const wizardStepLabel = computed(() => {
   if (wizardIsComment.value) return `Комментарий · шаг ${wizardStep.value + 1} из ${wizardTotalSteps.value}`;
   return `Вопрос ${wizardStep.value + 1} из ${surveyTotalQuestions.value}`;
 });
+
+function surveyQuestionType(question) {
+  return ['choice', 'scale', 'text'].includes(question?.type) ? question.type : 'choice';
+}
+
+function surveyQuestionAnswered(question) {
+  if (!question?.id) return false;
+  const value = surveyAnswers[question.id];
+  const type = surveyQuestionType(question);
+  if (type === 'text') return String(value || '').trim() !== '';
+  if (type === 'scale') {
+    const n = Number(value);
+    return n >= 1 && n <= 10;
+  }
+  return Number(value) > 0;
+}
 
 function openSurveyCard(survey) {
   if (!survey?.id) return;
@@ -1617,6 +1812,7 @@ const mainTabs = computed(() => {
       badge: '!', badgeType: 'alert',
     });
   }
+  tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
   tabs.push({ id: 'scanner', label: 'Сканер', beta: true });
   return tabs;
 });
@@ -2292,6 +2488,7 @@ async function switchTab(tab, subTab) {
     }
   }
   if (tab === 'stock' && stockCollection.active) loadStockInline();
+  if (tab === 'warehouse-stock' && !warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
 }
 // ═══ Синхронизация табов с роутом (URL) ═══
 function applyRouteToState() {
@@ -2327,6 +2524,9 @@ function applyRouteToState() {
     }
   } else if (name === 'restaurant-stock') {
     activeTab.value = 'stock';
+  } else if (name === 'restaurant-warehouse-stock') {
+    activeTab.value = 'warehouse-stock';
+    if (!warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
   } else if (name === 'restaurant-scanner') {
     activeTab.value = 'scanner';
   } else if (name === 'restaurant-profile') {
@@ -2344,6 +2544,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-surveys' };
   } else if (activeTab.value === 'stock') {
     target = { name: 'restaurant-stock' };
+  } else if (activeTab.value === 'warehouse-stock') {
+    target = { name: 'restaurant-warehouse-stock' };
   } else if (activeTab.value === 'scanner') {
     target = { name: 'restaurant-scanner' };
   } else if (activeTab.value === 'profile') {
@@ -2428,8 +2630,14 @@ function resetSurveyDraft(detail = surveyDetail.value) {
     return;
   }
   const answers = detail.answers || {};
-  for (const [questionId, optionId] of Object.entries(answers)) {
-    surveyAnswers[questionId] = Number(optionId);
+  for (const [questionId, answer] of Object.entries(answers)) {
+    if (answer && typeof answer === 'object') {
+      if (answer.type === 'text') surveyAnswers[questionId] = answer.text_value || '';
+      else if (answer.type === 'scale') surveyAnswers[questionId] = Number(answer.numeric_value || 0);
+      else surveyAnswers[questionId] = Number(answer.option_id || 0);
+    } else {
+      surveyAnswers[questionId] = Number(answer);
+    }
   }
   surveyComment.value = detail.comment || '';
 }
@@ -2483,12 +2691,18 @@ async function submitSurveyAnswer() {
 
   const payload = {};
   for (const question of (surveyDetail.value.questions || [])) {
-    const selected = Number(surveyAnswers[question.id] || 0);
-    if (!selected) {
+    if (!surveyQuestionAnswered(question)) {
       surveyError.value = 'Ответьте на все вопросы';
       return;
     }
-    payload[question.id] = selected;
+    const type = surveyQuestionType(question);
+    if (type === 'text') {
+      payload[question.id] = { question_id: Number(question.id), type, text_value: String(surveyAnswers[question.id] || '').trim() };
+    } else if (type === 'scale') {
+      payload[question.id] = { question_id: Number(question.id), type, numeric_value: Number(surveyAnswers[question.id]) };
+    } else {
+      payload[question.id] = Number(surveyAnswers[question.id]);
+    }
   }
 
   surveySubmitting.value = true;
@@ -2778,6 +2992,159 @@ async function submitStockInline() {
   } finally {
     stockSaving.value = false;
   }
+}
+
+async function loadWarehouseStock() {
+  warehouseStockLoading.value = true;
+  warehouseStockError.value = '';
+  try {
+    const data = await roStore.loadWarehouseStock();
+    warehouseStockItems.value = data.items || [];
+    warehouseStockCustomer.value = data.customer || data.legal_entity || '';
+    warehouseStockUploadedAt.value = data.uploaded_at || '';
+    if (!warehouseStorageTabs.value.some(t => t.key === warehouseStorageFilter.value)) {
+      warehouseStorageFilter.value = 'all';
+    }
+  } catch (e) {
+    warehouseStockError.value = e.message || 'Ошибка загрузки остатков';
+  } finally {
+    warehouseStockLoading.value = false;
+  }
+}
+
+function toggleWarehouseItem(key) {
+  warehouseOpenItems[key] = !warehouseOpenItems[key];
+}
+
+function formatWarehouseQty(value) {
+  const n = Number(value || 0);
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+
+function warehouseNomenclature(item) {
+  const code = item?.sku || item?.external_code || '';
+  return [code, item?.name || item?.raw_name || ''].filter(Boolean).join(' ');
+}
+
+async function copyWarehouseTitle(item) {
+  const text = warehouseNomenclature(item);
+  if (!text) return;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+    warehouseCopiedKey.value = item.key;
+    setTimeout(() => {
+      if (warehouseCopiedKey.value === item.key) warehouseCopiedKey.value = '';
+    }, 1400);
+  } catch {
+    warehouseCopiedKey.value = '';
+  }
+}
+
+function warehouseExpiryText(item) {
+  if (!item?.nearest_expiry) return 'Срок не указан';
+  const days = Number(item.days_left);
+  const date = formatWarehouseDate(item.nearest_expiry);
+  if (Number.isNaN(days)) return date;
+  if (days === 0) return `${date} · сегодня`;
+  return `${date} · ${days} дн.`;
+}
+
+function formatWarehouseDate(value) {
+  if (!value) return '';
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return value;
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+function warehouseExpiryClass(item) {
+  const days = Number(item?.days_left);
+  if (Number.isNaN(days)) return '';
+  if (days < 0) return 'bad';
+  if (days <= 7) return 'warn';
+  return 'ok';
+}
+
+async function exportWarehouseStock() {
+  const mod = await import('xlsx-js-style');
+  const XLSX = mod.default || mod;
+  const headers = ['Номенклатура', 'Склад', 'Остаток партии', 'Срок годности', 'Статус', 'Режим хранения', 'Группа аналогов', 'GTIN', 'Внешний код'];
+  const rows = [];
+  for (const item of warehouseFilteredItems.value) {
+    const batches = Array.isArray(item.batches) && item.batches.length ? item.batches : [{
+      warehouse: item.storage_label || '',
+      quantity: item.quantity || 0,
+      expiry_date: item.nearest_expiry || '',
+      expiry_status: item.nearest_status || '',
+    }];
+    for (const batch of batches) {
+      rows.push([
+        warehouseNomenclature(item),
+        batch.warehouse || item.storage_label || '',
+        Number(batch.quantity || 0),
+        batch.expiry_date ? formatWarehouseDate(batch.expiry_date) : '',
+        batch.expiry_status || '',
+        item.storage_label || '',
+        item.analog_group || '',
+        item.gtin || '',
+        item.external_code || '',
+      ]);
+    }
+  }
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [
+    { wch: 58 },
+    { wch: 24 },
+    { wch: 12 },
+    { wch: 16 },
+    { wch: 18 },
+    { wch: 18 },
+    { wch: 24 },
+    { wch: 18 },
+    { wch: 16 },
+  ];
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: headers.length - 1 } }) };
+  const border = {
+    top: { style: 'thin', color: { rgb: 'E7DED4' } },
+    bottom: { style: 'thin', color: { rgb: 'E7DED4' } },
+    left: { style: 'thin', color: { rgb: 'E7DED4' } },
+    right: { style: 'thin', color: { rgb: 'E7DED4' } },
+  };
+  for (let c = 0; c < headers.length; c++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
+    cell.s = {
+      font: { bold: true, color: { rgb: 'FFFFFF' } },
+      fill: { fgColor: { rgb: '502314' } },
+      alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+      border,
+    };
+  }
+  for (let r = 1; r <= rows.length; r++) {
+    for (let c = 0; c < headers.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) continue;
+      ws[addr].s = {
+        fill: { fgColor: { rgb: r % 2 ? 'FFF8EF' : 'FFFFFF' } },
+        alignment: { vertical: 'top', horizontal: c === 2 ? 'right' : 'left', wrapText: true },
+        border,
+      };
+      if (c === 2) ws[addr].z = '#,##0.00';
+    }
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Остатки склада');
+  XLSX.writeFile(wb, `Остатки склада ${warehouseStockCustomer.value || ''}.xlsx`);
 }
 
 function onBeforeUnload(e) {
@@ -3675,6 +4042,26 @@ tr.del-err { background: #fef2f2; }
   opacity: 1; transform: scale(1);
 }
 .cab-sv-bigopt.selected .cab-sv-bigopt-text { color: #4A2C18; font-weight: 700; }
+.cab-sv-scale {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(42px, 1fr));
+  gap: 8px;
+}
+.cab-sv-scale-btn {
+  min-height: 46px;
+  border: 2px solid #EDE8E3;
+  border-radius: 10px;
+  background: #fff;
+  color: #502314;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cab-sv-scale-btn.selected {
+  border-color: #D08B3A;
+  background: #FFF1D7;
+  color: #4A2C18;
+}
 
 /* Textarea */
 .cab-sv-textarea {
@@ -3802,6 +4189,15 @@ tr.del-err { background: #fef2f2; }
 .cab-sv-ro-opt.selected .cab-sv-ro-opt-mark {
   background: #D08B3A; border-color: #D08B3A;
 }
+.cab-sv-ro-text-answer {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #FBF6EE;
+  color: #4A2C18;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
 .cab-sv-ro-comment {
   margin-top: 14px; padding: 14px 16px;
   background: #FBF6EE; border-radius: 12px;
@@ -3866,6 +4262,54 @@ tr.del-err { background: #fef2f2; }
 .stock-row-unit { font-size: 12px; color: #8b7355; font-weight: 500; min-width: 28px; }
 .stock-inline-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #F2EDE8; }
 .stock-saved-flash { color: #16a34a; font-size: 13px; font-weight: 600; }
+
+.whs-section { max-width: 1180px; margin-left: auto; margin-right: auto; }
+.whs-panel { background: #fff; border: 1px solid #EDE8E3; border-radius: 18px; padding: 18px; }
+.whs-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+.whs-head h2 { margin: 0 0 4px; color: #502314; font-size: 20px; }
+.whs-head p { margin: 0; color: #8b7355; font-size: 13px; }
+.whs-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.whs-search { flex: 1; min-width: 260px; display: flex; align-items: center; gap: 8px; background: #FAFAF8; border: 1px solid #EDE8E3; border-radius: 10px; padding: 0 12px; min-height: 44px; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+.whs-search:focus-within { background: #fff; border-color: #502314; box-shadow: 0 0 0 3px rgba(80, 35, 20, .12); }
+.whs-search svg { width: 18px; height: 18px; stroke: #8b7355; }
+.whs-search input { appearance: none; -webkit-appearance: none; border: 0; outline: 0; box-shadow: none; border-radius: 0; background: transparent; width: 100%; font: inherit; color: #2b1a0e; min-height: 42px; }
+.whs-search input:focus { outline: 0; box-shadow: none; }
+.whs-check { min-height: 44px; display: flex; align-items: center; gap: 8px; color: #5f4b38; font-size: 13px; cursor: pointer; user-select: none; }
+.whs-check input { width: 16px; height: 16px; accent-color: #E76F51; }
+.whs-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 8px; -webkit-overflow-scrolling: touch; }
+.whs-tab { border: 1px solid #EDE8E3; background: #FAFAF8; color: #5f4b38; min-height: 40px; padding: 8px 12px; border-radius: 10px; font-weight: 700; font-size: 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.whs-tab span { color: #9b8064; font-weight: 700; }
+.whs-tab.active { background: #502314; border-color: #502314; color: #fff; }
+.whs-tab.active span { color: rgba(255,255,255,0.75); }
+.whs-list { display: flex; flex-direction: column; gap: 8px; }
+.whs-list-head { display: grid; grid-template-columns: minmax(0, 1fr) 120px 180px; gap: 12px; align-items: center; padding: 0 12px 2px; color: #8b7355; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.whs-list-head span:nth-child(2), .whs-list-head span:nth-child(3) { text-align: right; }
+.whs-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 180px; gap: 12px; align-items: center; border: 1px solid #F0E8DD; border-radius: 12px; padding: 12px; background: #fff; }
+.whs-row.soon { border-color: #F4A261; background: #FFF8EF; }
+.whs-row-main { min-width: 0; }
+.whs-name { display: flex; gap: 8px; align-items: baseline; color: #2b1a0e; font-weight: 700; line-height: 1.35; }
+.whs-copy { border: 0; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.whs-copy:hover { color: #E76F51; text-decoration: none; }
+.whs-copy:focus-visible { outline: 2px solid rgba(80, 35, 20, .35); outline-offset: 2px; border-radius: 4px; }
+.whs-sku { color: #E76F51; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.whs-title { min-width: 0; font-weight: 700; }
+.whs-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5px; color: #8b7355; font-size: 12px; }
+.whs-copied { color: #2e7d32; font-weight: 700; }
+.whs-qty { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; color: #2b1a0e; font-variant-numeric: tabular-nums; }
+.whs-qty strong { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.whs-exp { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; font-weight: 700; text-align: right; }
+.whs-exp .ok { color: #2e7d32; }
+.whs-exp .warn { color: #ef6c00; }
+.whs-exp .bad { color: #c0392b; }
+.whs-batches-btn { border: 0; background: transparent; color: #E76F51; padding: 2px 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.whs-batches { grid-column: 1 / -1; border-top: 1px solid #F0E8DD; padding-top: 10px; display: grid; gap: 0; }
+.whs-batch { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(150px, 220px) 92px 118px minmax(100px, 140px); gap: 12px; align-items: center; color: #5f4b38; font-size: 12px; padding: 7px 8px; border-bottom: 1px solid #F6EFE7; }
+.whs-batch:last-child { border-bottom: 0; }
+.whs-batch-head { color: #8b7355; font-weight: 800; background: #FAFAF8; border-radius: 8px; border-bottom: 0; margin-bottom: 2px; }
+.whs-batch-name { color: #2b1a0e; font-weight: 700; }
+.whs-batch-head span:nth-child(n+3) { text-align: right; }
+.whs-batch b { color: #2b1a0e; text-align: right; font-variant-numeric: tabular-nums; }
+.whs-batch span:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Profile */
 .profile-card { background: white; border-radius: 18px; padding: 20px; margin-bottom: 12px; display: flex; border: 1px solid #EDE8E3; }
@@ -4042,6 +4486,25 @@ tr.del-err { background: #fef2f2; }
   .profile-card { margin-top: 8px; }
   .input-field { font-size: 16px; padding: 12px 14px; }
   .pw-form .btn { width: 100%; justify-content: center; }
+
+  .whs-panel { padding: 14px; border-radius: 14px; }
+  .whs-head { align-items: stretch; flex-direction: column; }
+  .whs-controls { flex-direction: column; align-items: stretch; }
+  .whs-search { min-width: 0; }
+  .whs-list-head { display: none; }
+  .whs-row { grid-template-columns: 1fr; gap: 8px; }
+  .whs-qty, .whs-exp { text-align: left; align-items: flex-start; }
+  .whs-name { flex-wrap: wrap; }
+  .whs-title { flex-basis: 100%; }
+  .whs-batch { grid-template-columns: 1fr; gap: 5px; padding: 10px 0; }
+  .whs-batch-head { display: none; }
+  .whs-batch-name::before { content: 'Номенклатура: '; color: #9b8064; font-weight: 700; }
+  .whs-batch span:nth-child(2)::before { content: 'Склад: '; color: #9b8064; font-weight: 700; }
+  .whs-batch b::before { content: 'Остаток: '; color: #9b8064; font-weight: 700; }
+  .whs-batch span:nth-child(4)::before { content: 'Срок: '; color: #9b8064; font-weight: 700; }
+  .whs-batch span:nth-child(5)::before { content: 'Статус: '; color: #9b8064; font-weight: 700; }
+  .whs-batch span:nth-child(n), .whs-batch b { text-align: left; }
+  .cab-sv-scale { grid-template-columns: repeat(5, 1fr); }
 
   /* Surveys */
   .cab-sv { grid-template-columns: 1fr; }

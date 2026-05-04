@@ -95,6 +95,7 @@ const routes = [
       { path: 'info', name: 'restaurant-info', component: EmptySlot, meta: { title: 'Важная информация' } },
       { path: 'surveys', name: 'restaurant-surveys', component: EmptySlot, meta: { title: 'Опросы' } },
       { path: 'stock', name: 'restaurant-stock', component: EmptySlot, meta: { title: 'Сбор остатков' } },
+      { path: 'warehouse-stock', name: 'restaurant-warehouse-stock', component: EmptySlot, meta: { title: 'Остатки склада' } },
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
     ],

@@ -5352,7 +5352,7 @@ if ($endpoint === 'rpc') {
 
         // Вопросы + опции одним запросом
         $qRowsStmt = $pdo->prepare("
-            SELECT sq.id AS question_id, sq.text AS question_text, sq.sort_order AS question_sort,
+            SELECT sq.id AS question_id, sq.text AS question_text, sq.type AS question_type, sq.sort_order AS question_sort,
                    so.id AS option_id, so.text AS option_text, so.sort_order AS option_sort
             FROM survey_questions sq
             LEFT JOIN survey_options so ON so.question_id = sq.id
@@ -5367,6 +5367,7 @@ if ($endpoint === 'rpc') {
                 $questionsMap[$qid] = [
                     'id' => $qid,
                     'text' => $row['question_text'],
+                    'type' => $row['question_type'] ?: 'choice',
                     'sort_order' => (int)$row['question_sort'],
                     'options' => [],
                 ];
@@ -5397,12 +5398,12 @@ if ($endpoint === 'rpc') {
 
         // Детали ответов одним запросом
         $ansStmt = $pdo->prepare("
-            SELECT sa.response_id, sa.question_id, sq.text AS question_text,
-                   sa.option_id, so.text AS option_text, sq.sort_order AS q_sort
+            SELECT sa.response_id, sa.question_id, sq.text AS question_text, sq.type,
+                   sa.option_id, so.text AS option_text, sa.numeric_value, sa.text_value, sq.sort_order AS q_sort
             FROM survey_answers sa
             JOIN survey_responses sr ON sr.id = sa.response_id
             JOIN survey_questions sq ON sq.id = sa.question_id
-            JOIN survey_options so ON so.id = sa.option_id
+            LEFT JOIN survey_options so ON so.id = sa.option_id
             WHERE sr.survey_id = ?
             ORDER BY sq.sort_order, sq.id
         ");
@@ -5415,11 +5416,16 @@ if ($endpoint === 'rpc') {
             $ansByResp[$rid][] = [
                 'question_id' => (int)$row['question_id'],
                 'question_text' => $row['question_text'],
-                'option_id' => (int)$row['option_id'],
+                'type' => $row['type'] ?: 'choice',
+                'option_id' => $row['option_id'] !== null ? (int)$row['option_id'] : null,
                 'option_text' => $row['option_text'],
+                'numeric_value' => $row['numeric_value'] !== null ? (int)$row['numeric_value'] : null,
+                'text_value' => $row['text_value'],
             ];
-            $oid = (int)$row['option_id'];
-            $optionCounts[$oid] = ($optionCounts[$oid] ?? 0) + 1;
+            if (($row['type'] ?? 'choice') === 'choice' && $row['option_id'] !== null) {
+                $oid = (int)$row['option_id'];
+                $optionCounts[$oid] = ($optionCounts[$oid] ?? 0) + 1;
+            }
         }
         foreach ($respRows as &$r) {
             $r['answers'] = $ansByResp[(int)$r['id']] ?? [];
@@ -5427,20 +5433,59 @@ if ($endpoint === 'rpc') {
         unset($r);
         $s['responses'] = $respRows;
 
-        // Аналитика по вариантам (% и count)
+        // Аналитика по вариантам / шкале
         $totalResponses = count($respRows);
         foreach ($s['questions'] as &$q) {
-            $totalForQ = 0;
-            foreach ($q['options'] as $opt) {
-                $totalForQ += (int)($optionCounts[(int)$opt['id']] ?? 0);
+            if (($q['type'] ?? 'choice') === 'scale') {
+                $scaleCounts = array_fill(1, 10, 0);
+                $sum = 0;
+                $totalForQ = 0;
+                foreach ($ansByResp as $answers) {
+                    foreach ($answers as $answer) {
+                        if ((int)$answer['question_id'] !== (int)$q['id']) continue;
+                        $score = (int)($answer['numeric_value'] ?? 0);
+                        if ($score < 1 || $score > 10) continue;
+                        $scaleCounts[$score]++;
+                        $sum += $score;
+                        $totalForQ++;
+                    }
+                }
+                $q['options'] = [];
+                for ($score = 1; $score <= 10; $score++) {
+                    $cnt = (int)$scaleCounts[$score];
+                    $q['options'][] = [
+                        'id' => $score,
+                        'text' => (string)$score,
+                        'responses_count' => $cnt,
+                        'responses_percent' => $totalForQ > 0 ? round($cnt * 100 / $totalForQ) : 0,
+                    ];
+                }
+                $q['responses_total'] = $totalForQ;
+                $q['average_score'] = $totalForQ > 0 ? round($sum / $totalForQ, 1) : null;
+            } elseif (($q['type'] ?? 'choice') === 'text') {
+                $totalForQ = 0;
+                foreach ($ansByResp as $answers) {
+                    foreach ($answers as $answer) {
+                        if ((int)$answer['question_id'] === (int)$q['id'] && trim((string)($answer['text_value'] ?? '')) !== '') {
+                            $totalForQ++;
+                        }
+                    }
+                }
+                $q['options'] = [];
+                $q['responses_total'] = $totalForQ;
+            } else {
+                $totalForQ = 0;
+                foreach ($q['options'] as $opt) {
+                    $totalForQ += (int)($optionCounts[(int)$opt['id']] ?? 0);
+                }
+                foreach ($q['options'] as &$opt) {
+                    $cnt = (int)($optionCounts[(int)$opt['id']] ?? 0);
+                    $opt['responses_count'] = $cnt;
+                    $opt['responses_percent'] = $totalForQ > 0 ? round($cnt * 100 / $totalForQ) : 0;
+                }
+                unset($opt);
+                $q['responses_total'] = $totalForQ;
             }
-            foreach ($q['options'] as &$opt) {
-                $cnt = (int)($optionCounts[(int)$opt['id']] ?? 0);
-                $opt['responses_count'] = $cnt;
-                $opt['responses_percent'] = $totalForQ > 0 ? round($cnt * 100 / $totalForQ) : 0;
-            }
-            unset($opt);
-            $q['responses_total'] = $totalForQ;
         }
         unset($q);
 
@@ -5480,21 +5525,25 @@ if ($endpoint === 'rpc') {
         foreach ($questions as $q) {
             $qText = trim($q['text'] ?? '');
             if ($qText === '') continue;
+            $qType = in_array($q['type'] ?? 'choice', ['choice', 'scale', 'text'], true) ? $q['type'] : 'choice';
 
             $normalizedOptions = [];
-            foreach (($q['options'] ?? []) as $opt) {
-                $optText = trim($opt['text'] ?? '');
-                if ($optText !== '') {
-                    $normalizedOptions[] = $optText;
+            if ($qType === 'choice') {
+                foreach (($q['options'] ?? []) as $opt) {
+                    $optText = trim($opt['text'] ?? '');
+                    if ($optText !== '') {
+                        $normalizedOptions[] = $optText;
+                    }
                 }
-            }
 
-            if (count($normalizedOptions) < 2) {
-                respond(['error' => 'У каждого вопроса должно быть минимум 2 варианта ответа'], 400);
+                if (count($normalizedOptions) < 2) {
+                    respond(['error' => 'У вопроса с вариантами должно быть минимум 2 варианта ответа'], 400);
+                }
             }
 
             $normalizedQuestions[] = [
                 'text' => $qText,
+                'type' => $qType,
                 'options' => $normalizedOptions,
             ];
         }
@@ -5524,8 +5573,8 @@ if ($endpoint === 'rpc') {
             }
 
             foreach ($normalizedQuestions as $qi => $q) {
-                $pdo->prepare("INSERT INTO survey_questions (survey_id, text, sort_order) VALUES (?,?,?)")
-                    ->execute([$id, $q['text'], $qi]);
+                $pdo->prepare("INSERT INTO survey_questions (survey_id, text, type, sort_order) VALUES (?,?,?,?)")
+                    ->execute([$id, $q['text'], $q['type'], $qi]);
                 $qId = (int)$pdo->lastInsertId();
                 foreach ($q['options'] as $oi => $optText) {
                     $pdo->prepare("INSERT INTO survey_options (question_id, text, sort_order) VALUES (?,?,?)")

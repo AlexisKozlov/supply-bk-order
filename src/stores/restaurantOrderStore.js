@@ -624,6 +624,10 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     });
   }
 
+  async function loadWarehouseStock() {
+    return await api('warehouse-stock');
+  }
+
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
@@ -631,7 +635,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     loadBroadcasts, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,
     adminCreateCabinetPost, adminUpdateCabinetPost, adminDeleteCabinetPost, downloadCabinetFile, getCabinetFileObjectUrl,
     loadSurveys, loadSurvey, submitSurvey, markBroadcastRead,
-    getStockCollectionStatus, getStockCollectionData, submitStockCollection,
+    getStockCollectionStatus, getStockCollectionData, submitStockCollection, loadWarehouseStock,
     adminGetStatus, adminGetModuleSettings, adminSaveModuleSettings, adminGetOrder, adminUpdateOrder,
     adminCreateSession, adminAutoSession, adminCloseSession, adminDeleteOrder,
     adminToggleDate, adminGetOpenDates,
