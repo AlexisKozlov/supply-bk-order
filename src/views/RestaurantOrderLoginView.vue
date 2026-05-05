@@ -150,10 +150,6 @@
 
       <!-- Подсказки -->
       <div class="ro-hints">
-        <a class="ro-hint" href="https://t.me/alexiskozlov" target="_blank">
-          <span class="ro-hint-icon">&#128222;</span>
-          <span>Проблемы со входом? Напишите <strong>@alexiskozlov</strong></span>
-        </a>
         <router-link class="ro-hint" :to="{ name: 'ForgotPassword' }">
           <span class="ro-hint-icon">🔐</span>
           <span>Забыли пароль? <strong>Сбросить через Telegram</strong></span>
@@ -162,6 +158,8 @@
 
       <div class="ro-login-footer">
         {{ loginBrand.footer }}
+        <span class="ro-help-sep">·</span>
+        <a class="ro-help-link" href="https://t.me/alexiskozlov" target="_blank" rel="noopener">Нужна помощь?</a>
       </div>
     </div>
   </div>
@@ -415,10 +413,9 @@ async function forceLogin() {
   color: white;
 }
 .ro-logo-wrap {
-  background: rgba(255,255,255,0.15);
-  border-radius: 14px;
-  padding: 8px;
-  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .ro-brand-title {
   font-size: 22px;
@@ -659,6 +656,17 @@ a.ro-hint:hover { background: rgba(255,255,255,0.18); }
   color: rgba(255,255,255,0.4);
   font-size: 12px;
   text-align: center;
+}
+.ro-help-sep { margin: 0 6px; opacity: 0.6; }
+.ro-help-link {
+  color: rgba(255,255,255,0.55);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.ro-help-link:hover {
+  color: rgba(255,255,255,0.95);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* Конфликт сессий */
