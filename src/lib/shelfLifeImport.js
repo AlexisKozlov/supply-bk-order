@@ -118,21 +118,40 @@ function storageCategoryToType(category) {
   return null;
 }
 
-function extractSkuFromStockProduct(value) {
+function normalizeProductCode(value) {
+  let code = String(value || '').replace(/\s+/g, '').trim();
+  if (/^\d+\.0+$/.test(code)) code = code.replace(/\.0+$/, '');
+  return code;
+}
+
+function extractCodesFromStockProduct(value) {
   const s = String(value || '').trim();
-  const byDash = s.match(/^\s*\S+\s+-\s+([A-Za-zА-Яа-яЁё0-9_./-]+)/);
-  if (byDash) return byDash[1].trim();
+  const byDash = s.match(/^\s*(\S+)\s+-\s+([A-Za-zА-Яа-яЁё0-9_./-]+)/);
+  if (byDash) {
+    return {
+      externalCode: normalizeProductCode(byDash[1]),
+      sku: normalizeProductCode(byDash[2]),
+    };
+  }
   const firstToken = s.match(/^\s*([A-Za-zА-Яа-яЁё0-9_./-]+)/);
-  return firstToken ? firstToken[1].trim() : '';
+  const code = firstToken ? normalizeProductCode(firstToken[1]) : '';
+  return { externalCode: code, sku: code };
+}
+
+function extractSkuFromStockProduct(value) {
+  return extractCodesFromStockProduct(value).sku;
 }
 
 function resolveP1Warehouse(productName, options = {}) {
-  const sku = extractSkuFromStockProduct(productName);
-  const key = sku || String(productName || '').trim();
+  const { sku, externalCode } = extractCodesFromStockProduct(productName);
+  const key = externalCode || sku || String(productName || '').trim();
   const manual = options.manualStorageCategories || {};
   const productCategories = options.productCategories || {};
-  const category = normalizeStorageCategory(manual[key] || manual[sku] || productCategories[sku]);
-  if (category === 'Холод' || category === 'Мороз') return { warehouse: category, sku, key, needsChoice: false };
+  const category = normalizeStorageCategory(
+    manual[key] || manual[sku] || manual[externalCode] ||
+    productCategories[sku] || productCategories[externalCode]
+  );
+  if (category === 'Холод' || category === 'Мороз') return { warehouse: category, sku: sku || externalCode, key, needsChoice: false };
   return { warehouse: 'Холод/Мороз', sku, key, needsChoice: true };
 }
 

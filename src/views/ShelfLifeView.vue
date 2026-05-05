@@ -729,11 +729,20 @@ function saveStorageRules(rules) {
   localStorage.setItem(STORAGE_RULES_KEY, JSON.stringify(rules || {}));
 }
 
+function normalizeProductCode(value) {
+  let code = String(value || '').replace(/\s+/g, '').trim();
+  if (/^\d+\.0+$/.test(code)) code = code.replace(/\.0+$/, '');
+  return code;
+}
+
 async function loadProductCategories() {
   const map = {};
-  const { data } = await db.from('products').select('sku,category').eq('is_active', 1);
+  const { data } = await db.from('products').select('sku,external_code,category').eq('is_active', 1);
   for (const p of data || []) {
-    if (p.sku && p.category && !map[p.sku]) map[p.sku] = p.category;
+    const sku = normalizeProductCode(p.sku);
+    const externalCode = normalizeProductCode(p.external_code);
+    if (sku && p.category && !map[sku]) map[sku] = p.category;
+    if (externalCode && p.category && !map[externalCode]) map[externalCode] = p.category;
   }
   return map;
 }

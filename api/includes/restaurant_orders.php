@@ -570,6 +570,14 @@ function roNormalizeSku($sku) {
     return trim((string)$sku);
 }
 
+function roNormalizeStockProductCode($code) {
+    $code = roNormalizeSku($code);
+    if (preg_match('/^\d+\.0+$/', $code)) {
+        $code = preg_replace('/\.0+$/', '', $code);
+    }
+    return $code;
+}
+
 function roRestaurantHasDeliveryDate($pdo, $restaurantNumber, $legalEntityGroup, $deliveryDate) {
     if (!$deliveryDate) return false;
     $dow = (int)(new DateTime($deliveryDate))->format('N');
@@ -4792,11 +4800,11 @@ if (strpos($roAction, 'admin') === 0) {
         $productsBySku = [];
         $productsByExtCode = [];
         foreach ($productsStmt->fetchAll() as $p) {
-            $sku = trim($p['sku']);
+            $sku = roNormalizeStockProductCode($p['sku'] ?? '');
             if ($sku !== '' && !isset($productsBySku[$sku])) {
                 $productsBySku[$sku] = $p;
             }
-            $ext = trim($p['external_code'] ?? '');
+            $ext = roNormalizeStockProductCode($p['external_code'] ?? '');
             if ($ext !== '' && !isset($productsByExtCode[$ext])) {
                 $productsByExtCode[$ext] = $p;
             }
@@ -4858,11 +4866,23 @@ if (strpos($roAction, 'admin') === 0) {
                     continue;
                 }
 
-                // Парсим: "внешний_код - SKU Название"
-                if (!preg_match('/^(\S+)\s*-\s*(\S+)\s+(.+)$/', $productStr, $m)) continue;
-                $extCode = trim($m[1]);
-                $sku = trim($m[2]);
-                $excelName = trim($m[3]);
+                // Парсим обычный формат: "внешний_код - SKU Название".
+                // Если формат другой, берём первый код из строки и пробуем найти его как артикул или внешний код.
+                $extCode = '';
+                $sku = '';
+                $excelName = $productStr;
+                if (preg_match('/^(\S+)\s*-\s*(\S+)\s+(.+)$/', $productStr, $m)) {
+                    $extCode = roNormalizeStockProductCode($m[1]);
+                    $sku = roNormalizeStockProductCode($m[2]);
+                    $excelName = trim($m[3]);
+                } elseif (preg_match('/^\s*(\S+)\s+(.+)$/u', $productStr, $m)) {
+                    $sku = roNormalizeStockProductCode($m[1]);
+                    $extCode = $sku;
+                    $excelName = trim($m[2]);
+                } else {
+                    $sku = roNormalizeStockProductCode($productStr);
+                    $extCode = $sku;
+                }
 
                 // Сопоставляем: сначала по SKU, потом по внешнему коду
                 $foundProduct = $productsBySku[$sku] ?? $productsByExtCode[$extCode] ?? null;
