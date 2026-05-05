@@ -154,6 +154,10 @@
           <span class="ro-hint-icon">&#128222;</span>
           <span>Проблемы со входом? Напишите <strong>@alexiskozlov</strong></span>
         </a>
+        <router-link class="ro-hint" :to="{ name: 'ForgotPassword' }">
+          <span class="ro-hint-icon">🔐</span>
+          <span>Забыли пароль? <strong>Сбросить через Telegram</strong></span>
+        </router-link>
       </div>
 
       <div class="ro-login-footer">

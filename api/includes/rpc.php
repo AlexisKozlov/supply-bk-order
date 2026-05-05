@@ -3405,6 +3405,190 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
+    // ═══ Сброс пароля ресторана через Telegram ═══
+
+    if ($fn === 'request_password_reset') {
+        $restaurantNumber = trim((string)($body['restaurant_number'] ?? ''));
+        if (!$restaurantNumber) respond(['error' => 'Укажите номер ресторана'], 400);
+
+        // Нормализуем номер ресторана
+        $parsed = parseRestaurantInput($restaurantNumber);
+        if (!$parsed || !$parsed['number']) {
+            respond(['error' => 'Неверный номер ресторана'], 400);
+        }
+        $normalizedNumber = (string)$parsed['number'];
+
+        // Проверяем, существует ли ресторан
+        $restCheck = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+        $restCheck->execute([$normalizedNumber]);
+        if (!$restCheck->fetch()) {
+            // Не сообщаем, есть ли ресторан — для безопасности
+            respond(['success' => true]);
+        }
+
+        // Проверяем, есть ли подписчики в Telegram
+        $subCheck = $pdo->prepare("SELECT COUNT(*) FROM ro_telegram_subs WHERE restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+        $subCheck->execute([$normalizedNumber]);
+        $subCount = (int)$subCheck->fetchColumn();
+        if ($subCount === 0) {
+            // Нет подписчиков — не можем отправить код
+            respond(['success' => true]);
+        }
+
+        // Генерируем 6-значный код
+        $code = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+
+        // Сохраняем код в БД
+        $pdo->prepare("INSERT INTO password_reset_codes (restaurant_number, code, expires_at) VALUES (?, ?, ?)")
+            ->execute([$normalizedNumber, $code, $expiresAt]);
+
+        // Отправляем код через Telegram
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if ($botToken) {
+            $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+            $subs->execute([$normalizedNumber]);
+            $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
+
+            $msgText = "🔐 <b>Сброс пароля</b>\n\n";
+            $msgText .= "Ваш код для сброса пароля ресторана <b>{$normalizedNumber}</b>:\n\n";
+            $msgText .= "<b>{$code}</b>\n\n";
+            $msgText .= "Код действителен 10 минут.\n";
+            $msgText .= "Если вы не запрашивали сброс — проигнорируйте это сообщение.";
+
+            foreach ($chatIds as $cid) {
+                $payload = json_encode(['chat_id' => $cid, 'text' => $msgText, 'parse_mode' => 'HTML']);
+                $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $payload,
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_TIMEOUT => 5,
+                ]);
+                curl_exec($ch);
+                curl_close($ch);
+            }
+        }
+
+        // Логируем попытку
+        try {
+            $pdo->prepare("INSERT INTO password_reset_logs (restaurant_number, ip_address, created_at) VALUES (?, ?, NOW())")
+                ->execute([$normalizedNumber, $clientIp]);
+        } catch (Exception $e) {
+            // Таблица может не существовать
+        }
+
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'verify_reset_code') {
+        $restaurantNumber = trim((string)($body['restaurant_number'] ?? ''));
+        $code = trim((string)($body['code'] ?? ''));
+
+        if (!$restaurantNumber || !$code) {
+            respond(['error' => 'Укажите номер ресторана и код'], 400);
+        }
+
+        $parsed = parseRestaurantInput($restaurantNumber);
+        if (!$parsed || !$parsed['number']) {
+            respond(['error' => 'Неверный номер ресторана'], 400);
+        }
+        $normalizedNumber = (string)$parsed['number'];
+
+        // Ищем код
+        $stmt = $pdo->prepare("SELECT id, expires_at, used_at FROM password_reset_codes WHERE restaurant_number = ? AND code = ? ORDER BY created_at DESC LIMIT 1");
+        $stmt->execute([$normalizedNumber, $code]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            respond(['error' => 'Неверный код'], 400);
+        }
+
+        if ($row['used_at'] !== null) {
+            respond(['error' => 'Код уже использован'], 400);
+        }
+
+        if (strtotime($row['expires_at']) < time()) {
+            respond(['error' => 'Код истёк'], 400);
+        }
+
+        // Генерируем токен для сброса
+        $resetToken = bin2hex(random_bytes(32));
+        $pdo->prepare("UPDATE password_reset_codes SET reset_token = ?, used_at = NOW() WHERE id = ?")
+            ->execute([$resetToken, $row['id']]);
+
+        respond(['success' => true, 'reset_token' => $resetToken]);
+    }
+
+    if ($fn === 'reset_password') {
+        $resetToken = trim((string)($body['reset_token'] ?? ''));
+        $newPassword = $body['new_password'] ?? '';
+
+        if (!$resetToken || !$newPassword) {
+            respond(['error' => 'Укажите токен и новый пароль'], 400);
+        }
+
+        if (mb_strlen($newPassword) < 6) {
+            respond(['error' => 'Пароль должен быть не менее 6 символов'], 400);
+        }
+
+        // Ищем токен
+        $stmt = $pdo->prepare("SELECT id, restaurant_number, used_at FROM password_reset_codes WHERE reset_token = ? LIMIT 1");
+        $stmt->execute([$resetToken]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            respond(['error' => 'Неверный токен'], 400);
+        }
+
+        if ($row['used_at'] === null) {
+            respond(['error' => 'Токен не активирован'], 400);
+        }
+
+        $restaurantNumber = $row['restaurant_number'];
+
+        // Обновляем пароль в ro_users
+        $hash = password_hash($newPassword, PASSWORD_BCRYPT);
+        $updateStmt = $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ? AND is_active = 1");
+        $updateStmt->execute([$hash, $restaurantNumber]);
+
+        if ($updateStmt->rowCount() === 0) {
+            respond(['error' => 'Ресторан не найден'], 404);
+        }
+
+        // Удаляем использованные коды для этого ресторана
+        $pdo->prepare("DELETE FROM password_reset_codes WHERE restaurant_number = ?")->execute([$restaurantNumber]);
+
+        // Отправляем уведомление в Telegram
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if ($botToken) {
+            $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+            $subs->execute([$restaurantNumber]);
+            $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
+
+            $msgText = "✅ <b>Пароль успешно изменён</b>\n\n";
+            $msgText .= "Пароль для ресторана <b>{$restaurantNumber}</b> был успешно изменён.\n";
+            $msgText .= "Теперь вы можете войти с новым паролем.";
+
+            foreach ($chatIds as $cid) {
+                $payload = json_encode(['chat_id' => $cid, 'text' => $msgText, 'parse_mode' => 'HTML']);
+                $ch = curl_init("https://api.telegram.org/bot{$botToken}/sendMessage");
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $payload,
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_TIMEOUT => 5,
+                ]);
+                curl_exec($ch);
+                curl_close($ch);
+            }
+        }
+
+        respond(['success' => true]);
+    }
+
     // ═══ Баг-репорты: количество новых (для бейджа админа) ═══
     if ($fn === 'get_bug_reports_count') {
         $caller = getSessionUser($pdo);

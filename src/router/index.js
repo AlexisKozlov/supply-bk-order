@@ -81,6 +81,24 @@ const routes = [
     meta: { title: 'Заказы — Вход' },
   },
   {
+    path: '/forgot-password',
+    name: 'ForgotPassword',
+    component: () => import('@/views/ForgotPassword.vue'),
+    meta: { title: 'Сброс пароля' },
+  },
+  {
+    path: '/verify-reset-code',
+    name: 'VerifyResetCode',
+    component: () => import('@/views/VerifyResetCode.vue'),
+    meta: { title: 'Подтверждение кода' },
+  },
+  {
+    path: '/reset-password',
+    name: 'ResetPassword',
+    component: () => import('@/views/ResetPassword.vue'),
+    meta: { title: 'Новый пароль' },
+  },
+  {
     path: '/restaurant',
     component: () => import('@/views/RestaurantCabinetView.vue'),
     meta: { title: 'Личный кабинет' },
