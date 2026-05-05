@@ -7,28 +7,30 @@
     @dragend="onDragEnd"
     @click="onCardClick"
   >
-    <div v-if="cardLabels.length || canEditCard" class="task-card-labels">
+    <!-- Метки сверху (Trello-стиль: тонкие пиллы) -->
+    <div v-if="cardLabels.length" class="task-card-labels">
       <span v-for="l in cardLabels" :key="l.id" class="label-pill" :style="{ background: l.color }"
-            @click.stop="openLabelsPicker">{{ l.title }}</span>
-      <button v-if="canEditCard && !cardLabels.length" class="badge-add" @click.stop="openLabelsPicker"
-              title="Добавить метку">+ метка</button>
+            :title="l.title" @click.stop="openLabelsPicker">{{ l.title }}</span>
     </div>
 
-    <button v-if="canEditCard" class="card-menu-btn" @click.stop="cardMenuOpen = !cardMenuOpen" title="Меню">⋮</button>
+    <!-- Меню «⋮» в правом верхнем углу -->
+    <button v-if="canEditCard" class="card-menu-btn" @click.stop="cardMenuOpen = !cardMenuOpen" title="Меню">
+      <TaskIcon name="more" :size="14"/>
+    </button>
     <div v-if="cardMenuOpen" class="card-menu" v-click-outside-card="() => cardMenuOpen = false" @click.stop>
       <button class="card-menu-item" @click="startAddSubtask">
-        <span class="cm-icon">＋</span> Создать подзадачу
+        <TaskIcon name="plus" :size="14"/> Создать подзадачу
       </button>
       <button class="card-menu-item" @click="openCardFromMenu">
-        <span class="cm-icon">↗</span> Открыть задачу
+        <TaskIcon name="arrowUpRight" :size="14"/> Открыть задачу
       </button>
       <div class="card-menu-divider"></div>
       <button class="card-menu-item" @click="duplicateCard">
-        <span class="cm-icon">⧉</span> Дублировать
+        <TaskIcon name="copy" :size="14"/> Дублировать
       </button>
       <button class="card-menu-item submenu-trigger" @click.stop="moveSubmenuOpen = !moveSubmenuOpen">
-        <span class="cm-icon">→</span> Переместить в колонку
-        <span class="cm-arrow">▸</span>
+        <TaskIcon name="arrowRight" :size="14"/> Переместить в колонку
+        <TaskIcon name="chevronRight" :size="12" class="cm-arrow"/>
       </button>
       <div v-if="moveSubmenuOpen" class="card-submenu">
         <button v-for="col in store.columns" :key="col.id" class="card-menu-item"
@@ -41,40 +43,58 @@
       </div>
       <div class="card-menu-divider"></div>
       <button class="card-menu-item danger" @click="deleteCardFromMenu">
-        <span class="cm-icon">✕</span> Удалить карточку
+        <TaskIcon name="trash" :size="14"/> Удалить карточку
       </button>
     </div>
 
-    <div class="task-card-title">{{ card.title }}</div>
+    <!-- Заголовок + чекбокс «Готово → в архив» -->
+    <div class="task-card-title-row">
+      <input v-if="canEditCard" type="checkbox" class="task-card-done-chk"
+             :checked="!!card.is_done"
+             @click.stop
+             @change="completeAndArchive"
+             title="Завершить и убрать в архив" />
+      <div class="task-card-title">{{ card.title }}</div>
+    </div>
 
-    <!-- Бейджи внизу -->
-    <div class="task-card-badges">
-      <!-- Приоритет -->
-      <button class="badge prio-badge" :class="'prio-bg-' + (card.priority || 'medium')"
+    <!-- Метаданные снизу -->
+    <div class="task-card-meta">
+      <!-- Приоритет (всегда показываем, включая «Средний») -->
+      <button class="meta-pill prio-pill" :class="'prio-' + (card.priority || 'medium')"
               @click.stop="togglePopover('priority')"
               :title="'Приоритет: ' + priorityLabel">
-        <span class="prio-dot"></span>{{ priorityLabel }}
+        <span class="meta-dot"></span>{{ priorityLabel }}
       </button>
 
       <!-- Срок -->
-      <button v-if="card.due_date" class="badge due-badge" :class="{ overdue: isOverdue }"
+      <button v-if="card.due_date" class="meta-pill due-pill"
+              :class="{ overdue: isOverdue, fire: dueClass === 'due-fire', warn: dueClass === 'due-warn' }"
               @click.stop="togglePopover('due')" :title="'Срок: ' + (card.due_date || '')">
-        <BkIcon name="calendar" size="xs"/> {{ formatDue }}
+        <TaskIcon name="calendar" :size="12"/>
+        <span>{{ formatDue }}</span>
       </button>
-      <button v-else-if="canEditCard" class="badge-add" @click.stop="togglePopover('due')">+ срок</button>
+      <button v-else-if="canEditCard" class="meta-pill meta-pill-ghost"
+              @click.stop="togglePopover('due')" title="Установить срок">
+        <TaskIcon name="calendar" :size="12"/>
+        <span>Срок</span>
+      </button>
 
       <!-- Чек-лист -->
-      <span v-if="card.checklist?.total" class="badge meta-badge">
-        ✓ {{ card.checklist.done }}/{{ card.checklist.total }}
+      <span v-if="card.checklist?.total" class="meta-icon-stat"
+            :class="{ done: card.checklist.done === card.checklist.total }"
+            :title="'Чек-лист: ' + card.checklist.done + ' из ' + card.checklist.total">
+        <TaskIcon name="check" :size="12"/>
+        <span>{{ card.checklist.done }}/{{ card.checklist.total }}</span>
       </span>
 
       <!-- Чат -->
-      <span v-if="card.comments" class="badge meta-badge" @click.stop="openCardChat">
-        <BkIcon name="chat" size="xs"/> {{ card.comments }}
+      <span v-if="card.comments" class="meta-icon-stat" @click.stop="openCardChat" :title="'Комментариев: ' + card.comments">
+        <TaskIcon name="chat" :size="12"/>
+        <span>{{ card.comments }}</span>
       </span>
 
-      <!-- Соисполнители -->
-      <span v-if="card.assignees?.length" class="badge assignees-badge">
+      <!-- Соисполнители (справа) -->
+      <span v-if="card.assignees?.length" class="meta-assignees">
         <span v-for="(n, i) in card.assignees.slice(0,3)" :key="i" class="assignee-bubble" :title="n">{{ initials(n) }}</span>
         <span v-if="card.assignees.length > 3" class="assignee-more">+{{ card.assignees.length - 3 }}</span>
       </span>
@@ -82,7 +102,7 @@
 
     <!-- Раскрывалка подзадач (только если есть подзадачи) -->
     <div v-if="hasSubtasks" class="subtasks-toggle" @click.stop="toggleSubtasks">
-      <span class="subtasks-chevron">{{ subtasksOpen ? '▾' : '▸' }}</span>
+      <TaskIcon :name="subtasksOpen ? 'chevronDown' : 'chevronRight'" :size="12" class="subtasks-chevron"/>
       <span class="subtasks-label">Подзадачи</span>
       <span class="subtasks-counter">{{ card.subtasks_done || 0 }}/{{ card.subtasks_total || 0 }}</span>
     </div>
@@ -144,9 +164,12 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import BkIcon from '@/components/ui/BkIcon.vue';
+import TaskIcon from './TaskIcon.vue';
 import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
+import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
+const dlg = useTasksDialogs();
+const showError = (e) => dlg.info('Ошибка', e?.message || String(e), 'error');
 
 const props = defineProps({
   card: { type: Object, required: true },
@@ -221,10 +244,12 @@ function initials(n) {
 }
 
 function onCardClick(e) {
-  // Не открываем модалку, если кликали по бейджу/поповеру/подзадачам/меню
-  if (e.target.closest('.badge') || e.target.closest('.badge-add') || e.target.closest('.card-popover') ||
-      e.target.closest('.label-pill') || e.target.closest('.subtasks-toggle') || e.target.closest('.subtasks-list') ||
-      e.target.closest('.card-menu-btn') || e.target.closest('.card-menu') || e.target.closest('.subtask-add-form')) return;
+  // Не открываем модалку, если кликали по бейджу/поповеру/подзадачам/меню/чекбоксу
+  if (e.target.closest('.meta-pill') || e.target.closest('.meta-icon-stat') ||
+      e.target.closest('.card-popover') || e.target.closest('.label-pill') ||
+      e.target.closest('.subtasks-toggle') || e.target.closest('.subtasks-list') ||
+      e.target.closest('.card-menu-btn') || e.target.closest('.card-menu') ||
+      e.target.closest('.subtask-add-form') || e.target.closest('.task-card-done-chk')) return;
   emit('open', props.card);
 }
 
@@ -260,7 +285,7 @@ async function duplicateCard() {
       await tasksApi.setCardLabels(r.id, props.card.label_ids);
     }
     await store.reload();
-  } catch (e) { alert('Ошибка дублирования: ' + e.message); }
+  } catch (e) { showError(e); }
 }
 
 async function moveToColumn(columnId) {
@@ -269,16 +294,33 @@ async function moveToColumn(columnId) {
   if (columnId === props.card.column_id) return;
   try {
     await store.moveCard(props.card.id, columnId, 0);
-  } catch (e) { alert('Ошибка перемещения: ' + e.message); }
+  } catch (e) { showError(e); }
 }
 
 async function deleteCardFromMenu() {
   cardMenuOpen.value = false;
-  if (!confirm('Удалить карточку «' + props.card.title + '»?')) return;
+  const ok = await dlg.confirm('Удалить карточку', 'Удалить карточку «' + props.card.title + '»?',
+    { okText: 'Удалить', danger: true });
+  if (!ok) return;
   try {
     await tasksApi.deleteCard(props.card.id);
     await store.reload();
-  } catch (e) { alert('Ошибка удаления: ' + e.message); }
+  } catch (e) { showError(e); }
+}
+
+async function completeAndArchive() {
+  const archiveCol = store.columns.find(c => c.is_archive_column);
+  if (!archiveCol) { dlg.info('Нет архива', 'У доски нет колонки «Архив». Обратитесь к администратору.', 'warning'); return; }
+  const isInArchive = props.card.column_id === archiveCol.id;
+  let targetCol = archiveCol;
+  if (isInArchive) {
+    targetCol = store.columns.find(c => !c.is_archive_column && !c.is_done_column) || store.columns[0];
+  }
+  try {
+    await store.moveCard(props.card.id, targetCol.id, 0);
+  } catch (e) {
+    showError(e);
+  }
 }
 
 function toggleSubtasks() { subtasksOpen.value = !subtasksOpen.value; }
@@ -300,11 +342,10 @@ async function toggleSubtaskDone(st) {
   try {
     await tasksApi.updateCard(st.id, { is_done: newVal });
     st.is_done = newVal;
-    // Пересчитаем счётчик в родителе
     const subs = props.card.subtasks || [];
     props.card.subtasks_done = subs.filter(s => s.is_done).length;
     emit('subtasks-changed');
-  } catch (e) { alert(e.message); }
+  } catch (e) { showError(e); }
 }
 
 async function submitNewSubtask() {
@@ -318,7 +359,7 @@ async function submitNewSubtask() {
     newSubtaskTitle.value = '';
     addingSubtask.value = false;
     emit('subtasks-changed');
-  } catch (e) { alert(e.message); }
+  } catch (e) { showError(e); }
 }
 function cancelAddSubtask() { newSubtaskTitle.value = ''; addingSubtask.value = false; }
 
@@ -348,7 +389,7 @@ async function setPriority(p) {
   try {
     await tasksApi.updateCard(props.card.id, { priority: p });
     props.card.priority = p;
-  } catch (e) { alert(e.message); }
+  } catch (e) { showError(e); }
 }
 
 async function setDue(e) {
@@ -358,7 +399,7 @@ async function setDue(e) {
   try {
     await tasksApi.updateCard(props.card.id, { due_date: due });
     props.card.due_date = due;
-  } catch (er) { alert(er.message); }
+  } catch (er) { showError(er); }
 }
 
 async function toggleLabel(l) {
@@ -368,7 +409,7 @@ async function toggleLabel(l) {
   try {
     await tasksApi.setCardLabels(props.card.id, newIds);
     props.card.label_ids = newIds;
-  } catch (e) { alert(e.message); }
+  } catch (e) { showError(e); }
 }
 
 // Локальная директива «click-outside» для поповеров
@@ -387,288 +428,423 @@ const vClickOutsideCard = {
 
 <style scoped>
 .task-card {
-  background: #fff;
-  border: 1px solid var(--border-light, #e5e7eb);
-  border-radius: 8px;
-  padding: 8px 10px 10px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  background: var(--tk-bg-card, #fff);
+  border: 1px solid var(--tk-border-soft, #E1E4E8);
+  border-radius: var(--tk-r-md, 8px);
+  padding: var(--tk-s-2, 8px) var(--tk-s-3, 12px) var(--tk-s-3, 12px);
+  box-shadow: var(--tk-shadow-card, 0 1px 0 rgba(9,30,66,0.08), 0 1px 2px rgba(9,30,66,0.06));
   cursor: pointer;
   user-select: none;
-  transition: box-shadow .15s, transform .15s, border-color .15s;
-  border-left-width: 3px;
   position: relative;
+  transition: box-shadow var(--tk-transition, 120ms ease), transform var(--tk-transition, 120ms ease), border-color var(--tk-transition, 120ms ease);
 }
-.task-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateY(-1px); }
-.task-card.is-dragging { opacity: 0.4; }
-.task-card.is-done { opacity: 0.7; }
-.task-card.is-done .task-card-title { text-decoration: line-through; color: var(--text-muted); }
+.task-card:hover {
+  box-shadow: var(--tk-shadow-card-hover, 0 1px 1px rgba(9,30,66,0.10), 0 4px 8px rgba(9,30,66,0.10));
+  border-color: var(--tk-border, #DCDFE4);
+}
+.task-card.is-dragging { opacity: 0.45; transform: rotate(1deg); }
+.task-card.is-done { opacity: 0.6; }
+.task-card.is-done .task-card-title { text-decoration: line-through; color: var(--tk-text-muted); }
 
-.prio-low    { border-left-color: #B0BEC5; }
-.prio-medium { border-left-color: #4FC3F7; }
-.prio-high   { border-left-color: #FFB74D; }
-.prio-urgent { border-left-color: #EF5350; }
+/* Левая полоска по приоритету (тоньше и спокойнее, чем раньше) */
+.task-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: var(--tk-r-md, 8px) 0 0 var(--tk-r-md, 8px);
+  background: transparent;
+}
+.task-card.prio-low::before    { background: var(--tk-n-300); }
+.task-card.prio-medium::before { background: transparent; }
+.task-card.prio-high::before   { background: var(--tk-warning, #B65E03); }
+.task-card.prio-urgent::before { background: var(--tk-danger, #C9372C); }
 
-.task-card-labels { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; min-height: 18px; }
+/* ═══ Метки сверху ═══ */
+.task-card-labels {
+  display: flex; gap: var(--tk-s-1, 4px);
+  flex-wrap: wrap;
+  margin-bottom: var(--tk-s-2, 8px);
+}
 .label-pill {
-  font-size: 10px; font-weight: 700; color: #fff;
-  padding: 2px 7px; border-radius: 10px;
-  text-shadow: 0 1px 1px rgba(0,0,0,0.15);
+  font-size: 10px; font-weight: var(--tk-fw-bold, 700); color: #fff;
+  padding: 2px var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
   max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   cursor: pointer;
+  letter-spacing: .2px;
+  text-shadow: 0 1px 0 rgba(9,30,66,0.20);
 }
 .label-pill:hover { opacity: 0.85; }
 
+/* ═══ Заголовок ═══ */
+.task-card-title-row {
+  display: flex; align-items: flex-start; gap: var(--tk-s-2, 8px);
+  margin-bottom: var(--tk-s-2, 8px);
+  padding-right: 22px;
+}
 .task-card-title {
-  font-size: 13.5px; font-weight: 500; color: var(--text, #1f2937);
-  line-height: 1.35; word-break: break-word;
-  margin-bottom: 8px;
-  padding-right: 18px; /* место под кнопку «⋮» */
+  flex: 1;
+  font-size: var(--tk-fz-lg, 14px);
+  font-weight: var(--tk-fw-medium, 500);
+  color: var(--tk-text, #172B4D);
+  line-height: 1.4;
+  word-break: break-word;
+  min-width: 0;
+}
+.task-card.is-done .task-card-title { /* перебивает .is-done из ранее */ }
+
+/* Круглый чекбокс «Готово + в архив» */
+.task-card-done-chk {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px;
+  border: 2px solid var(--tk-n-300, #B3B9C4);
+  border-radius: 50%;
+  background: var(--tk-n-0, #fff);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin: 1px 0 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+  transition: all var(--tk-transition, 120ms ease);
+}
+.task-card-done-chk:hover {
+  border-color: var(--tk-success, #1F8F4E);
+  box-shadow: 0 0 0 4px var(--tk-success-soft, rgba(31,143,78,0.10));
+}
+.task-card-done-chk:checked {
+  background: var(--tk-success, #1F8F4E);
+  border-color: var(--tk-success, #1F8F4E);
+}
+.task-card-done-chk:checked::after {
+  content: ''; display: block;
+  width: 8px; height: 4px;
+  border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
 
 /* ═══ Меню «⋮» ═══ */
 .card-menu-btn {
   position: absolute;
-  top: 6px; right: 6px;
-  background: rgba(255,255,255,0.7);
+  top: var(--tk-s-1, 4px); right: var(--tk-s-1, 4px);
+  background: var(--tk-n-0, #fff);
   border: none; cursor: pointer;
-  font-size: 14px; color: var(--text-muted);
-  width: 22px; height: 22px; padding: 0;
-  border-radius: 4px;
-  line-height: 1;
+  color: var(--tk-text-muted, #758195);
+  width: 24px; height: 24px; padding: 0;
+  border-radius: var(--tk-r-sm, 4px);
+  display: flex; align-items: center; justify-content: center;
   opacity: 0;
-  transition: opacity .15s, background .15s, color .15s;
+  transition: opacity var(--tk-transition, 120ms ease), background var(--tk-transition, 120ms ease), color var(--tk-transition, 120ms ease);
   z-index: 5;
 }
-.task-card:hover .card-menu-btn { opacity: 0.85; }
+.task-card:hover .card-menu-btn { opacity: 1; }
 .card-menu-btn:hover {
-  background: rgba(0,0,0,0.08); color: var(--text);
-  opacity: 1 !important;
+  background: var(--tk-n-100, #F1F2F4);
+  color: var(--tk-text, #172B4D);
 }
 
 .card-menu {
-  position: absolute; top: 30px; right: 6px; z-index: 30;
-  background: #fff; border: 1px solid var(--border-light);
-  border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-  min-width: 200px; padding: 4px;
+  position: absolute; top: 32px; right: var(--tk-s-1, 4px); z-index: 30;
+  background: var(--tk-bg-popover, #fff);
+  border: 1px solid var(--tk-border, #DCDFE4);
+  border-radius: var(--tk-r-md, 8px);
+  box-shadow: var(--tk-shadow-popover, 0 8px 24px rgba(9,30,66,0.18));
+  min-width: 220px; padding: var(--tk-s-1, 4px);
 }
 .card-menu-item {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: var(--tk-s-2, 8px);
   width: 100%; text-align: left;
-  padding: 7px 10px; border: none; background: none; cursor: pointer;
-  font-size: 13px; color: var(--text); border-radius: 5px;
+  padding: var(--tk-s-2, 8px) var(--tk-s-3, 12px);
+  border: none; background: none; cursor: pointer;
+  font-size: var(--tk-fz-md, 13px);
+  color: var(--tk-text, #172B4D);
+  border-radius: var(--tk-r-sm, 4px);
   font-family: inherit;
   position: relative;
+  transition: background var(--tk-transition, 120ms ease);
 }
-.card-menu-item:hover { background: var(--bg-secondary, #f5f5f5); }
-.card-menu-item.danger { color: #E53935; }
-.card-menu-item.danger:hover { background: rgba(229,57,53,0.08); }
+.card-menu-item:hover { background: var(--tk-n-100, #F1F2F4); }
+.card-menu-item.danger { color: var(--tk-danger, #C9372C); }
+.card-menu-item.danger:hover { background: var(--tk-danger-soft, rgba(201,55,44,0.08)); }
 .card-menu-item.disabled { opacity: 0.4; cursor: default; }
 .card-menu-item.disabled:hover { background: none; }
 .card-menu-divider {
-  height: 1px; background: var(--border-light);
-  margin: 4px 0;
+  height: 1px; background: var(--tk-border-soft, #E1E4E8);
+  margin: var(--tk-s-1, 4px) 0;
 }
-.cm-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; font-size: 13px; color: var(--text-muted);
-  flex-shrink: 0;
-}
-.card-menu-item.danger .cm-icon { color: #E53935; }
-.cm-arrow { margin-left: auto; font-size: 10px; color: var(--text-muted); }
+.cm-arrow { margin-left: auto; color: var(--tk-text-muted, #758195); }
 .cm-col-dot {
   display: inline-block; width: 10px; height: 10px;
   border-radius: 50%; flex-shrink: 0;
 }
 .card-submenu {
-  margin-left: 14px; margin-top: 2px;
-  background: var(--bg-secondary, #f8f8fa);
-  border-radius: 6px; padding: 2px;
+  margin-left: var(--tk-s-3, 12px);
+  margin-top: 2px;
+  background: var(--tk-n-50, #F7F8F9);
+  border-radius: var(--tk-r-sm, 4px);
+  padding: 2px;
 }
 .card-submenu .card-menu-item {
-  font-size: 12.5px; padding: 5px 8px;
+  font-size: var(--tk-fz-sm, 12px);
+  padding: 5px var(--tk-s-2, 8px);
 }
 
-.task-card-badges {
-  display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
+/* ═══ Метаданные карточки ═══ */
+.task-card-meta {
+  display: flex; gap: var(--tk-s-1, 4px);
+  flex-wrap: wrap; align-items: center;
 }
 
-/* Бейджи */
-.badge {
-  display: inline-flex; align-items: center; gap: 3px;
-  font-size: 11px; font-weight: 600;
-  padding: 2px 7px; border-radius: 10px;
+/* Универсальная плашка метаданных */
+.meta-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--tk-fz-xs, 11px);
+  font-weight: var(--tk-fw-semibold, 600);
+  padding: 2px var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
   border: none; cursor: pointer;
-  background: var(--bg-secondary, #f0f1f3); color: var(--text, #1f2937);
+  background: var(--tk-n-100, #F1F2F4);
+  color: var(--tk-text-secondary, #44546F);
   font-family: inherit;
-  transition: filter .15s;
+  transition: background var(--tk-transition, 120ms ease);
 }
-.badge:hover { filter: brightness(0.95); }
-.badge.meta-badge { background: rgba(0,0,0,0.06); color: var(--text-muted); cursor: default; }
-.badge .bk-icon-wrap { line-height: 0; }
+.meta-pill:hover { background: var(--tk-n-200, #DCDFE4); }
+.meta-pill-ghost {
+  background: transparent;
+  color: var(--tk-text-muted, #758195);
+  border: 1px dashed var(--tk-border, #DCDFE4);
+  padding: 1px 7px;
+  opacity: 0;
+  transition: opacity var(--tk-transition, 120ms ease), border-color var(--tk-transition, 120ms ease), color var(--tk-transition, 120ms ease);
+}
+.task-card:hover .meta-pill-ghost { opacity: 0.95; }
+.meta-pill-ghost:hover { border-color: var(--tk-accent, #E87A1E); color: var(--tk-accent-text, #B85A0E); }
 
-.prio-badge { padding-left: 6px; }
-.prio-dot {
+.meta-dot {
   width: 8px; height: 8px; border-radius: 50%;
   display: inline-block;
-  background: #4FC3F7;
+  background: var(--tk-n-400);
 }
-.prio-bg-low    { background: #ECEFF1 !important; color: #455A64 !important; }
-.prio-bg-low .prio-dot { background: #B0BEC5; }
-.prio-bg-medium { background: #E1F5FE !important; color: #0277BD !important; }
-.prio-bg-medium .prio-dot { background: #4FC3F7; }
-.prio-bg-high   { background: #FFF3E0 !important; color: #E65100 !important; }
-.prio-bg-high .prio-dot { background: #FFB74D; }
-.prio-bg-urgent { background: #FFEBEE !important; color: #C62828 !important; }
-.prio-bg-urgent .prio-dot { background: #EF5350; }
+.meta-dot-medium { background: var(--tk-prio-medium-fg, #0747A6); }
 
-.due-badge { background: #E8F5E9; color: #2E7D32; }
-.due-badge.overdue { background: #FFEBEE; color: #C62828; font-weight: 700; }
+/* Приоритеты */
+.prio-pill.prio-low    { background: var(--tk-prio-low-bg);    color: var(--tk-prio-low-fg); }
+.prio-pill.prio-low .meta-dot    { background: var(--tk-prio-low-fg); }
+.prio-pill.prio-medium { background: var(--tk-prio-medium-bg); color: var(--tk-prio-medium-fg); }
+.prio-pill.prio-medium .meta-dot { background: var(--tk-prio-medium-fg); }
+.prio-pill.prio-high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
+.prio-pill.prio-high .meta-dot   { background: var(--tk-prio-high-fg); }
+.prio-pill.prio-urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+.prio-pill.prio-urgent .meta-dot { background: var(--tk-prio-urgent-fg); }
 
-/* ═══ «Срок горит» — выделение карточек ═══ */
-.task-card.due-fire {
-  background: linear-gradient(180deg, #FFF3E0 0%, #fff 50%);
-  box-shadow: 0 0 0 1px #FFB74D, 0 1px 4px rgba(255,152,0,0.2);
-}
-.task-card.due-fire .due-badge { background: #FFE0B2; color: #E65100; }
-.task-card.due-warn {
-  background: linear-gradient(180deg, #FFFDE7 0%, #fff 50%);
-}
-.task-card.due-warn .due-badge { background: #FFF59D; color: #F57F17; }
-.task-card.due-overdue, .is-overdue {
-  background: linear-gradient(180deg, #FFEBEE 0%, #fff 50%);
-  box-shadow: 0 0 0 1px #EF9A9A, 0 1px 4px rgba(244,67,54,0.2);
+/* Срок */
+.due-pill { background: var(--tk-success-soft, rgba(31,143,78,0.10)); color: var(--tk-success, #1F8F4E); }
+.due-pill.warn { background: var(--tk-prio-high-bg); color: var(--tk-prio-high-fg); }
+.due-pill.fire { background: var(--tk-warning-soft, rgba(182,94,3,0.10)); color: var(--tk-warning, #B65E03); }
+.due-pill.overdue {
+  background: var(--tk-prio-urgent-bg);
+  color: var(--tk-prio-urgent-fg);
+  font-weight: var(--tk-fw-bold, 700);
 }
 
-.badge-add {
-  font-size: 11px; font-weight: 600;
-  padding: 2px 7px; border-radius: 10px;
-  border: 1.5px dashed var(--border, #ccc); background: transparent;
-  color: var(--text-muted); cursor: pointer; font-family: inherit;
+/* Иконо-статистика без фона (чек-лист, чат) */
+.meta-icon-stat {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--tk-fz-xs, 11px);
+  font-weight: var(--tk-fw-semibold, 600);
+  padding: 2px var(--tk-s-1, 4px);
+  color: var(--tk-text-muted, #758195);
+  cursor: default;
+  border-radius: var(--tk-r-sm, 4px);
 }
-.badge-add:hover { border-color: var(--bk-orange, #E87A1E); color: var(--bk-orange, #E87A1E); }
+.meta-icon-stat.done { color: var(--tk-success, #1F8F4E); }
+.meta-icon-stat[role="button"], .meta-icon-stat:not(.done):hover { cursor: default; }
 
-.assignees-badge { gap: 0; padding: 1px 5px 1px 1px; background: transparent !important; }
+/* Срок горит — мягкая подсветка карточки */
+.task-card.due-fire { border-color: var(--tk-warning, #B65E03); }
+.task-card.due-fire::after {
+  content: '';
+  position: absolute; inset: -1px;
+  border-radius: var(--tk-r-md, 8px);
+  border: 1px solid var(--tk-warning, #B65E03);
+  pointer-events: none;
+}
+.task-card.due-overdue, .task-card.is-overdue { border-color: var(--tk-danger, #C9372C); }
+.task-card.due-overdue::after, .task-card.is-overdue::after {
+  content: '';
+  position: absolute; inset: -1px;
+  border-radius: var(--tk-r-md, 8px);
+  border: 1px solid var(--tk-danger, #C9372C);
+  pointer-events: none;
+}
+
+/* ═══ Соисполнители ═══ */
+.meta-assignees {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 0;
+}
 .assignee-bubble {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; border-radius: 50%;
-  background: linear-gradient(135deg, #E76F51, #F4A261);
-  color: #fff; font-size: 9px; font-weight: 700;
-  border: 1.5px solid #fff;
-  margin-left: -4px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--tk-accent, #E87A1E), #F4A261);
+  color: #fff; font-size: 9px; font-weight: var(--tk-fw-bold, 700);
+  border: 2px solid var(--tk-bg-card, #fff);
+  margin-left: -6px;
 }
 .assignee-bubble:first-child { margin-left: 0; }
 .assignee-more {
-  font-size: 11px; color: var(--text-muted);
-  margin-left: 2px;
+  font-size: var(--tk-fz-xs, 11px);
+  color: var(--tk-text-muted, #758195);
+  margin-left: 4px;
+  font-weight: var(--tk-fw-semibold, 600);
 }
 
-/* Поповер */
+/* ═══ Поповер ═══ */
 .card-popover {
   position: absolute; top: 100%; left: 0; right: 0;
-  margin-top: 4px; z-index: 50;
-  background: #fff; border: 1px solid var(--border-light);
-  border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,0.15);
-  padding: 8px;
+  margin-top: var(--tk-s-1, 4px); z-index: 50;
+  background: var(--tk-bg-popover, #fff);
+  border: 1px solid var(--tk-border, #DCDFE4);
+  border-radius: var(--tk-r-md, 8px);
+  box-shadow: var(--tk-shadow-popover, 0 8px 24px rgba(9,30,66,0.18));
+  padding: var(--tk-s-2, 8px);
   cursor: default;
 }
 .popover-title {
-  font-size: 11px; font-weight: 700; color: var(--text-muted);
+  font-size: var(--tk-fz-xs, 11px); font-weight: var(--tk-fw-bold, 700);
+  color: var(--tk-text-muted, #758195);
   text-transform: uppercase; letter-spacing: .5px;
-  margin-bottom: 6px;
+  margin-bottom: var(--tk-s-1, 4px);
+  padding: 0 var(--tk-s-2, 8px);
 }
 .popover-item {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 6px 8px; border-radius: 6px;
+  display: flex; align-items: center; gap: var(--tk-s-2, 8px);
+  width: 100%;
+  padding: var(--tk-s-2, 8px) var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
   background: none; border: none; cursor: pointer; text-align: left;
-  font-family: inherit; font-size: 13px; color: var(--text);
+  font-family: inherit;
+  font-size: var(--tk-fz-md, 13px);
+  color: var(--tk-text, #172B4D);
+  transition: background var(--tk-transition, 120ms ease);
 }
-.popover-item:hover { background: var(--bg-secondary, #f5f5f5); }
-.popover-item.active { background: rgba(232, 122, 30, 0.1); font-weight: 600; }
-.popover-item .prio-dot { flex-shrink: 0; }
+.popover-item:hover { background: var(--tk-n-100, #F1F2F4); }
+.popover-item.active { background: var(--tk-accent-soft, rgba(232,122,30,0.10)); font-weight: var(--tk-fw-semibold, 600); color: var(--tk-accent-text, #B85A0E); }
+.popover-item .prio-dot { flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.popover-item .prio-dot.prio-bg-low    { background: var(--tk-prio-low-fg); }
+.popover-item .prio-dot.prio-bg-medium { background: var(--tk-prio-medium-fg); }
+.popover-item .prio-dot.prio-bg-high   { background: var(--tk-prio-high-fg); }
+.popover-item .prio-dot.prio-bg-urgent { background: var(--tk-prio-urgent-fg); }
 
 .popover-input {
   width: 100%; box-sizing: border-box;
-  padding: 6px 8px; font-size: 13px;
-  border: 1px solid var(--border-light); border-radius: 6px;
-  background: #fff; color: var(--text); font-family: inherit;
+  padding: 6px var(--tk-s-2, 8px);
+  font-size: var(--tk-fz-md, 13px);
+  border: 1px solid var(--tk-border, #DCDFE4);
+  border-radius: var(--tk-r-sm, 4px);
+  background: var(--tk-n-0, #fff);
+  color: var(--tk-text, #172B4D);
+  font-family: inherit;
+  transition: border-color var(--tk-transition, 120ms ease), box-shadow var(--tk-transition, 120ms ease);
 }
-.popover-actions { margin-top: 6px; display: flex; justify-content: flex-end; }
+.popover-input:focus { outline: none; border-color: var(--tk-accent, #E87A1E); box-shadow: var(--tk-focus-ring, 0 0 0 2px rgba(232,122,30,0.35)); }
+.popover-actions { margin-top: var(--tk-s-2, 8px); display: flex; justify-content: flex-end; }
 .popover-clear {
   background: none; border: none; cursor: pointer;
-  color: #E53935; font-size: 12px; font-weight: 600; padding: 4px 8px;
+  color: var(--tk-danger, #C9372C);
+  font-size: var(--tk-fz-sm, 12px);
+  font-weight: var(--tk-fw-semibold, 600);
+  padding: var(--tk-s-1, 4px) var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
+  transition: background var(--tk-transition, 120ms ease);
 }
-.popover-clear:hover { background: rgba(229,57,53,0.1); border-radius: 4px; }
+.popover-clear:hover { background: var(--tk-danger-soft, rgba(201,55,44,0.08)); }
 
 .labels-popover .popover-labels {
-  display: flex; flex-wrap: wrap; gap: 4px; max-height: 180px; overflow-y: auto;
+  display: flex; flex-wrap: wrap; gap: var(--tk-s-1, 4px);
+  max-height: 180px; overflow-y: auto;
+  padding: 0 var(--tk-s-1, 4px);
 }
 .popover-label {
-  padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
-  cursor: pointer; border: 1.5px solid; background: transparent;
+  padding: 3px var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
+  font-size: var(--tk-fz-xs, 11px);
+  font-weight: var(--tk-fw-semibold, 600);
+  cursor: pointer;
+  border: 1.5px solid;
+  background: transparent;
   font-family: inherit;
 }
 .popover-empty {
-  font-size: 12px; color: var(--text-muted); font-style: italic; padding: 8px 4px;
+  font-size: var(--tk-fz-sm, 12px);
+  color: var(--tk-text-muted, #758195);
+  font-style: italic;
+  padding: var(--tk-s-2, 8px) var(--tk-s-1, 4px);
 }
 
 /* ═══ Раскрывалка подзадач ═══ */
 .subtasks-toggle {
-  display: flex; align-items: center; gap: 6px;
-  margin-top: 8px;
-  padding: 4px 6px;
-  background: rgba(0,0,0,0.03);
-  border-radius: 5px;
+  display: flex; align-items: center; gap: var(--tk-s-1, 4px);
+  margin-top: var(--tk-s-2, 8px);
+  padding: var(--tk-s-1, 4px) var(--tk-s-2, 8px);
+  background: rgba(9,30,66,0.05);
+  border-radius: var(--tk-r-sm, 4px);
   cursor: pointer;
-  font-size: 11.5px; color: var(--text-muted);
-  font-weight: 600;
+  font-size: var(--tk-fz-xs, 11px);
+  color: var(--tk-text-secondary, #44546F);
+  font-weight: var(--tk-fw-semibold, 600);
   user-select: none;
-  transition: background .12s;
+  transition: background var(--tk-transition, 120ms ease);
 }
-.subtasks-toggle:hover { background: rgba(0,0,0,0.06); color: var(--text); }
-.subtasks-chevron { font-size: 10px; line-height: 1; width: 10px; text-align: center; }
+.subtasks-toggle:hover { background: rgba(9,30,66,0.09); color: var(--tk-text, #172B4D); }
+.subtasks-chevron { color: var(--tk-text-muted); }
 .subtasks-counter {
   margin-left: auto;
-  font-weight: 700;
-  background: rgba(66,165,245,0.15);
-  color: #1565C0;
-  padding: 1px 7px; border-radius: 8px;
+  font-weight: var(--tk-fw-bold, 700);
+  background: var(--tk-prio-medium-bg);
+  color: var(--tk-prio-medium-fg);
+  padding: 1px var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
   font-size: 10.5px;
+  font-feature-settings: 'tnum';
 }
 
 .subtasks-list {
-  margin-top: 6px;
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 4px 0;
+  margin-top: var(--tk-s-1, 4px);
+  display: flex; flex-direction: column; gap: var(--tk-s-1, 4px);
+  padding: var(--tk-s-1, 4px) 0;
 }
 .subtask-mini {
-  display: flex; align-items: center; gap: 6px;
-  background: #fff;
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  transition: border-color .15s, background .15s;
+  display: flex; align-items: center; gap: var(--tk-s-2, 8px);
+  background: var(--tk-bg-card, #fff);
+  border: 1px solid var(--tk-border-soft, #E1E4E8);
+  border-radius: var(--tk-r-sm, 4px);
+  padding: 6px var(--tk-s-2, 8px);
+  font-size: var(--tk-fz-sm, 12px);
+  transition: border-color var(--tk-transition, 120ms ease), background var(--tk-transition, 120ms ease);
 }
-.subtask-mini:hover { border-color: #4FC3F7; background: #FAFEFF; }
-.subtask-mini.done { background: #F5F5F5; }
-.subtask-mini.done .subtask-mini-title { text-decoration: line-through; color: var(--text-muted); }
-.subtask-mini.overdue .subtask-mini-due { background: #FFEBEE; color: #C62828; }
+.subtask-mini:hover { border-color: var(--tk-border, #DCDFE4); background: var(--tk-n-50, #F7F8F9); }
+.subtask-mini.done { background: var(--tk-n-50, #F7F8F9); }
+.subtask-mini.done .subtask-mini-title { text-decoration: line-through; color: var(--tk-text-muted); }
+.subtask-mini.overdue .subtask-mini-due { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
 
-/* ═══ Круглый чекбокс ═══ */
+/* ═══ Круглый чекбокс подзадачи ═══ */
 .round-chk {
   appearance: none; -webkit-appearance: none;
   width: 18px; height: 18px;
-  border: 2px solid #B0BEC5; border-radius: 50%;
-  background: #fff;
+  border: 2px solid var(--tk-n-300, #B3B9C4);
+  border-radius: 50%;
+  background: var(--tk-n-0, #fff);
   cursor: pointer;
   flex-shrink: 0; margin: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: all .15s;
+  transition: all var(--tk-transition, 120ms ease);
   position: relative;
 }
-.round-chk:hover { border-color: #4FC3F7; }
+.round-chk:hover { border-color: var(--tk-success, #1F8F4E); }
 .round-chk:checked {
-  background: #66BB6A; border-color: #66BB6A;
+  background: var(--tk-success, #1F8F4E);
+  border-color: var(--tk-success, #1F8F4E);
 }
 .round-chk:checked::after {
   content: ''; display: block;
@@ -678,31 +854,41 @@ const vClickOutsideCard = {
 }
 .subtask-mini-title {
   flex: 1; min-width: 0; cursor: pointer;
-  color: var(--text); line-height: 1.3;
-  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  color: var(--tk-text, #172B4D);
+  line-height: 1.3;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--tk-s-2, 8px);
   word-break: break-word;
 }
-.subtask-mini-title:hover { color: #1976D2; }
+.subtask-mini-title:hover { color: var(--tk-accent-text, #B85A0E); }
 .subtask-mini-due {
   flex-shrink: 0;
-  font-size: 10.5px; font-weight: 600;
-  padding: 1px 6px; border-radius: 8px;
-  background: #E8F5E9; color: #2E7D32;
+  font-size: 10.5px;
+  font-weight: var(--tk-fw-semibold, 600);
+  padding: 1px var(--tk-s-2, 8px);
+  border-radius: var(--tk-r-sm, 4px);
+  background: var(--tk-success-soft);
+  color: var(--tk-success);
 }
 
 .subtask-add-form {
-  display: flex; flex-direction: column; gap: 4px;
-  margin-top: 8px;
-  padding: 6px;
-  background: rgba(232,122,30,0.06);
-  border-radius: 6px;
+  display: flex; flex-direction: column; gap: var(--tk-s-1, 4px);
+  margin-top: var(--tk-s-2, 8px);
+  padding: var(--tk-s-2, 8px);
+  background: var(--tk-accent-soft, rgba(232,122,30,0.10));
+  border-radius: var(--tk-r-sm, 4px);
 }
 .subtask-add-form input {
-  padding: 5px 8px; font-size: 12.5px;
-  border: 1px solid var(--bk-orange, #E87A1E); border-radius: 5px;
-  background: #fff; color: var(--text); font-family: inherit;
+  padding: 6px var(--tk-s-2, 8px);
+  font-size: var(--tk-fz-sm, 12px);
+  border: 1px solid var(--tk-accent, #E87A1E);
+  border-radius: var(--tk-r-sm, 4px);
+  background: var(--tk-n-0, #fff);
+  color: var(--tk-text, #172B4D);
+  font-family: inherit;
 }
-.subtask-add-actions { display: flex; gap: 4px; }
-.subtask-add-actions .btn { padding: 3px 10px; font-size: 12px; }
-.ts-btn-sm { padding: 3px 10px; font-size: 12px; }
+.subtask-add-form input:focus { outline: none; box-shadow: var(--tk-focus-ring, 0 0 0 2px rgba(232,122,30,0.35)); }
+.subtask-add-actions { display: flex; gap: var(--tk-s-1, 4px); }
+.subtask-add-actions .btn { padding: 4px var(--tk-s-3, 12px); font-size: var(--tk-fz-sm, 12px); }
+.ts-btn-sm { padding: 4px var(--tk-s-3, 12px); font-size: var(--tk-fz-sm, 12px); }
 </style>

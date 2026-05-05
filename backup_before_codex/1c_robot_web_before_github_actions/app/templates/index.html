@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <h1 class="h3 mb-3">Подготовка файла для загрузки в 1С</h1>
+    {% if error %}
+      <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+    <form action="/process" method="post" enctype="multipart/form-data" class="card p-4">
+      <div class="mb-3">
+        <label class="form-label">Справочник товаров Excel</label>
+        <input class="form-control" type="file" name="reference_file" accept=".xlsx,.xls" required>
+        <div class="form-text">Нужны колонки "Штрихкод" и "Артикул".</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Накладная СТТ или сводная таблица</label>
+        <input class="form-control" type="file" name="invoice_file" accept=".xlsx,.xls" required>
+      </div>
+      <div class="mb-4">
+        <label class="form-label">Режим обработки</label>
+        <select class="form-select" name="mode" required>
+          {% for key, title in modes.items() %}
+            <option value="{{ key }}">{{ title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit">Обработать Excel</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

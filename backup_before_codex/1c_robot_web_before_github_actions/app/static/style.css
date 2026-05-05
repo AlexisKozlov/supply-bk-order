@@ -1,0 +1,31 @@
+body {
+  background: #f6f7f9;
+}
+
+.card,
+.stat {
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.stat {
+  padding: 16px;
+  font-size: 14px;
+}
+
+.stat strong {
+  font-size: 28px;
+}
+
+.stat.ok {
+  border-color: #8fd19e;
+}
+
+.stat.warn {
+  border-color: #ffda6a;
+}
+
+.stat.danger {
+  border-color: #f1aeb5;
+}

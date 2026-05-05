@@ -16,26 +16,32 @@ export const useTasksStore = defineStore('tasks', () => {
   const users = ref([]);
 
   // ═══ ФИЛЬТРЫ И СОРТИРОВКА ═══
-  const filters = ref({
-    assignees: [],   // user names
-    labels: [],      // label ids
-    priorities: [],  // 'low','medium','high','urgent'
-    dueState: '',    // '' | 'overdue' | 'today' | 'week' | 'no-due'
-    text: '',        // быстрый текстовый поиск
-  });
+  // Фильтры по колонкам: { [columnId]: { assignees, labels, priorities, dueState, text } }
+  const filtersByColumn = ref({});
   const sortMode = ref('manual'); // manual | due | priority | created
 
-  const hasActiveFilters = computed(() => {
-    const f = filters.value;
-    return f.assignees.length || f.labels.length || f.priorities.length || f.dueState || f.text;
-  });
+  function emptyFilter() {
+    return { assignees: [], labels: [], priorities: [], dueState: '', text: '' };
+  }
 
-  function resetFilters() {
-    filters.value = { assignees: [], labels: [], priorities: [], dueState: '', text: '' };
+  function getColumnFilters(colId) {
+    if (!filtersByColumn.value[colId]) filtersByColumn.value[colId] = emptyFilter();
+    return filtersByColumn.value[colId];
+  }
+
+  function columnHasActiveFilters(colId) {
+    const f = filtersByColumn.value[colId];
+    if (!f) return false;
+    return !!(f.assignees.length || f.labels.length || f.priorities.length || f.dueState || f.text);
+  }
+
+  function resetColumnFilters(colId) {
+    filtersByColumn.value[colId] = emptyFilter();
   }
 
   function cardMatchesFilters(c) {
-    const f = filters.value;
+    const f = filtersByColumn.value[c.column_id];
+    if (!f) return true;
     if (f.text) {
       const t = f.text.toLowerCase();
       if (!(c.title || '').toLowerCase().includes(t) && !(c.description || '').toLowerCase().includes(t)) return false;
@@ -107,6 +113,8 @@ export const useTasksStore = defineStore('tasks', () => {
     error.value = '';
     try {
       const r = await tasksApi.loadBoard(id);
+      // При смене доски сбрасываем фильтры предыдущей
+      if (currentBoardId.value !== id) filtersByColumn.value = {};
       board.value = r.board;
       columns.value = r.columns || [];
       cards.value = r.cards || [];
@@ -180,9 +188,14 @@ export const useTasksStore = defineStore('tasks', () => {
 
   async function updateCard(id, payload) {
     await tasksApi.updateCard(id, payload);
-    // Обновим локально без перезагрузки доски
-    const c = cards.value.find(x => x.id === id);
-    if (c) Object.assign(c, payload);
+    // Обновим локально без перезагрузки доски — заменяем объект в массиве,
+    // чтобы computed cardsByColumn гарантированно перевычислился (в т.ч. для is_done).
+    const idx = cards.value.findIndex(x => x.id === id);
+    if (idx >= 0) {
+      const next = cards.value.slice();
+      next[idx] = { ...next[idx], ...payload };
+      cards.value = next;
+    }
   }
 
   async function deleteCard(id) {
@@ -191,27 +204,39 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   async function moveCard(cardId, toColumnId, toIndex) {
-    // Оптимистично переставляем локально
-    const card = cards.value.find(c => c.id === cardId);
-    if (!card) return;
-    const fromCol = card.column_id;
-    card.column_id = toColumnId;
-    // Пересортируем sort_order в обеих колонках
+    // Оптимистичный апдейт. Заменяем объект карточки в массиве (а не мутируем по полю),
+    // чтобы Vue гарантированно перерисовал классы is-done и состояние чекбокса.
+    const idx = cards.value.findIndex(c => c.id === cardId);
+    if (idx < 0) return;
+    const original = cards.value[idx];
+    const fromCol = original.column_id;
+    const targetCol = columns.value.find(c => c.id === toColumnId);
+    const toArchive = !!(targetCol && targetCol.is_archive_column);
+    const toDone    = !!(targetCol && targetCol.is_done_column);
+    const updated = {
+      ...original,
+      column_id: toColumnId,
+      is_done:     (toArchive || toDone) ? 1 : 0,
+      is_archived: toArchive ? 1 : 0,
+      completed_at: (toArchive || toDone) ? new Date().toISOString().slice(0,19).replace('T',' ') : null,
+    };
+    // Пересчёт sort_order в целевой колонке
     const inTarget = cards.value
       .filter(c => c.column_id === toColumnId && c.id !== cardId)
-      .sort((a, b) => a.sort_order - b.sort_order);
-    inTarget.splice(Math.max(0, Math.min(toIndex, inTarget.length)), 0, card);
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    inTarget.splice(Math.max(0, Math.min(toIndex, inTarget.length)), 0, updated);
     inTarget.forEach((c, i) => { c.sort_order = i; });
     if (fromCol !== toColumnId) {
       const inFrom = cards.value
-        .filter(c => c.column_id === fromCol)
-        .sort((a, b) => a.sort_order - b.sort_order);
+        .filter(c => c.column_id === fromCol && c.id !== cardId)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       inFrom.forEach((c, i) => { c.sort_order = i; });
-      // Если переехала в "Готово" — отметим визуально
-      const targetCol = columns.value.find(c => c.id === toColumnId);
-      if (targetCol?.is_done_column) card.is_done = 1;
-      else card.is_done = 0;
     }
+    // Заменяем массив целиком, чтобы computed гарантированно перевычислился
+    const next = cards.value.slice();
+    next[idx] = updated;
+    cards.value = next;
+
     try {
       await tasksApi.moveCard({ card_id: cardId, to_column_id: toColumnId, to_index: toIndex });
     } catch (e) {
@@ -242,7 +267,8 @@ export const useTasksStore = defineStore('tasks', () => {
   return {
     boards, currentBoardId, board, columns, cards, labels, users,
     canEditStructure, isOwner, loading, error, cardsByColumn,
-    filters, sortMode, hasActiveFilters, resetFilters,
+    filtersByColumn, sortMode,
+    getColumnFilters, columnHasActiveFilters, resetColumnFilters,
     fetchBoards, loadBoard, reload, createBoard, updateBoard, deleteBoard,
     createColumn, updateColumn, deleteColumn, reorderColumns,
     createCard, updateCard, deleteCard, moveCard,

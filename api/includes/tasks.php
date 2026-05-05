@@ -118,13 +118,14 @@ function tEnsureDefaultBoard($pdo, $userName, $displayName = '') {
     $title = trim($displayName) !== '' ? $displayName : $userName;
     $pdo->prepare("INSERT INTO tasks_boards (owner_name, title) VALUES (?, ?)")->execute([$userName, $title]);
     $boardId = (int)$pdo->lastInsertId();
+    // Без отдельной колонки «Готово» — карточки сразу едут в «Архив» через чекбокс/drag.
     $cols = [
-        ['Сделать',  '#90A4AE', 0, 0],
-        ['В работе', '#FFA726', 1, 0],
-        ['Готово',   '#66BB6A', 2, 1],
+        ['Сделать',  '#90A4AE',    0, 0, 0],
+        ['В работе', '#FFA726',    1, 0, 0],
+        ['Архив',    '#9E9E9E', 9999, 0, 1],
     ];
-    $ins = $pdo->prepare("INSERT INTO tasks_columns (board_id, title, color, sort_order, is_done_column) VALUES (?, ?, ?, ?, ?)");
-    foreach ($cols as $c) $ins->execute([$boardId, $c[0], $c[1], $c[2], $c[3]]);
+    $ins = $pdo->prepare("INSERT INTO tasks_columns (board_id, title, color, sort_order, is_done_column, is_archive_column) VALUES (?, ?, ?, ?, ?, ?)");
+    foreach ($cols as $c) $ins->execute([$boardId, $c[0], $c[1], $c[2], $c[3], $c[4]]);
     return $boardId;
 }
 
@@ -173,6 +174,7 @@ if ($method === 'GET' && $action === 'search') {
         JOIN tasks_boards b ON b.id = c.board_id
         LEFT JOIN tasks_columns col ON col.id = c.column_id
         WHERE (c.title LIKE ? OR c.description LIKE ?)
+          AND c.is_archived = 0
     ";
     $params = [$like, $like];
     if (!$isMgr) {
@@ -205,6 +207,7 @@ if ($method === 'GET' && $action === 'my-cards') {
         JOIN tasks_boards b ON b.id = c.board_id
         LEFT JOIN tasks_columns col ON col.id = c.column_id
         WHERE b.is_archived = 0
+          AND c.is_archived = 0
           AND (
             b.owner_name = ?
             OR c.created_by = ?
@@ -272,10 +275,14 @@ if ($action === 'boards' && !$id) {
         }
         $pdo->prepare("INSERT INTO tasks_boards (owner_name, title) VALUES (?, ?)")->execute([$owner, mb_substr($title, 0, 150)]);
         $boardId = (int)$pdo->lastInsertId();
-        // Дефолтные колонки
-        $cols = [['Сделать','#90A4AE',0,0],['В работе','#FFA726',1,0],['Готово','#66BB6A',2,1]];
-        $ins = $pdo->prepare("INSERT INTO tasks_columns (board_id, title, color, sort_order, is_done_column) VALUES (?, ?, ?, ?, ?)");
-        foreach ($cols as $c) $ins->execute([$boardId, $c[0], $c[1], $c[2], $c[3]]);
+        // Дефолтные колонки + системная «Архив». «Готово» намеренно не создаём — её роль выполняет «Архив».
+        $cols = [
+            ['Сделать','#90A4AE',0,0,0],
+            ['В работе','#FFA726',1,0,0],
+            ['Архив','#9E9E9E',9999,0,1],
+        ];
+        $ins = $pdo->prepare("INSERT INTO tasks_columns (board_id, title, color, sort_order, is_done_column, is_archive_column) VALUES (?, ?, ?, ?, ?, ?)");
+        foreach ($cols as $c) $ins->execute([$boardId, $c[0], $c[1], $c[2], $c[3], $c[4]]);
         tRespond(['id' => $boardId]);
     }
     tRespond(['error' => 'Method not allowed'], 405);
@@ -316,7 +323,7 @@ if ($action === 'board' && $id && $method === 'GET') {
     $s->execute([$boardId]);
     $columns = $s->fetchAll();
 
-    // На основной доске показываем только корневые карточки (без parent_card_id)
+    // Все корневые карточки (включая архивные — они отрисуются в архив-колонке)
     $s = $pdo->prepare("SELECT * FROM tasks_cards WHERE board_id = ? AND parent_card_id IS NULL ORDER BY column_id, sort_order, id");
     $s->execute([$boardId]);
     $cards = $s->fetchAll();
@@ -441,6 +448,7 @@ if ($action === 'columns' && $id && $id !== 'reorder') {
     if (!tCanEditBoard($tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
 
     if ($method === 'PATCH') {
+        if (!empty($col['is_archive_column'])) tRespond(['error' => 'Системная колонка «Архив» не редактируется'], 400);
         $sets = [];
         $params = [];
         if (isset($body['title']))          { $sets[] = 'title = ?';          $params[] = mb_substr(trim($body['title']), 0, 100); }
@@ -453,6 +461,7 @@ if ($action === 'columns' && $id && $id !== 'reorder') {
         tRespond(['success' => true]);
     }
     if ($method === 'DELETE') {
+        if (!empty($col['is_archive_column'])) tRespond(['error' => 'Системная колонка «Архив» не удаляется'], 400);
         // Проверяем, что колонка пустая
         $s = $pdo->prepare("SELECT COUNT(*) FROM tasks_cards WHERE column_id = ?");
         $s->execute([$colId]);
@@ -528,11 +537,14 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         $upd = $pdo->prepare("UPDATE tasks_cards SET sort_order = ? WHERE id = ?");
         foreach ($ids as $i => $iid) $upd->execute([$i, (int)$iid]);
 
-        // Обновляем column_id и is_done у самой карточки
-        $newIsDone = !empty($toCol['is_done_column']) ? 1 : 0;
+        // Обновляем column_id, is_done и is_archived у самой карточки.
+        // В колонку «Готово» = is_done. В колонку «Архив» = is_done + is_archived. В обычную = снимаем оба флага.
+        $isToArchive = !empty($toCol['is_archive_column']) ? 1 : 0;
+        $newIsDone   = ($isToArchive || !empty($toCol['is_done_column'])) ? 1 : 0;
+        $newArchived = $isToArchive;
         $completedAt = $newIsDone ? date('Y-m-d H:i:s') : null;
-        $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = ?, completed_at = ? WHERE id = ?")
-            ->execute([$toColumnId, $newIsDone, $completedAt, $cardId]);
+        $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = ?, is_archived = ?, completed_at = ? WHERE id = ?")
+            ->execute([$toColumnId, $newIsDone, $newArchived, $completedAt, $cardId]);
 
         // Если ушла из старой колонки — пересоберём sort_order там
         if ($fromCol !== $toColumnId) {
@@ -649,6 +661,11 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
             $newDone = $body['is_done'] ? 1 : 0;
             $sets[] = 'is_done = ?'; $params[] = $newDone;
             $sets[] = 'completed_at = ?'; $params[] = $newDone ? date('Y-m-d H:i:s') : null;
+        }
+        if (isset($body['is_archived'])) {
+            $newArchived = $body['is_archived'] ? 1 : 0;
+            $sets[] = 'is_archived = ?'; $params[] = $newArchived;
+            if ($newArchived) $changes['archived'] = true;
         }
         if (!$sets) tRespond(['error' => 'Нет полей для обновления'], 400);
         $params[] = $cardId;

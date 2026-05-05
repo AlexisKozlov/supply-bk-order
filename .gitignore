@@ -15,3 +15,4 @@ api/uploads/
 public/mockups/
 api/cron_telegram.lock
 api/health_state.json
+.aider*

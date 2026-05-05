@@ -369,7 +369,14 @@ function normalizeCategory(raw) {
   const value = String(raw || '').trim();
   if (!value) return '';
   const lower = value.toLowerCase();
-  if (lower.includes('мороз') || lower.includes('заморож')) return 'Мороз';
+  if (
+    lower.includes('мороз') ||
+    lower.includes('заморож') ||
+    lower.includes('фризер') ||
+    lower.includes('freezer') ||
+    lower.includes('freeze') ||
+    lower.includes('frozen')
+  ) return 'Мороз';
   if (lower.includes('холод') || lower.includes('охлажд')) return 'Холод';
   if (lower.includes('сух')) return 'Сухой';
   return value;

@@ -7,121 +7,117 @@
           <BkIcon name="clipboard" size="md"/>
           Задачи
         </h1>
-        <select v-if="store.boards.length" class="tasks-board-select" :value="store.currentBoardId" @change="changeBoard">
-          <optgroup v-for="(group, owner) in groupedBoards" :key="owner" :label="owner === currentUserName ? 'Мои' : owner">
-            <option v-for="b in group.active" :key="b.id" :value="b.id">{{ b.title }}</option>
-          </optgroup>
-          <optgroup v-if="archivedBoards.length" label="📦 Архивные">
-            <option v-for="b in archivedBoards" :key="b.id" :value="b.id">{{ b.title }} ({{ b.owner_name }})</option>
-          </optgroup>
-        </select>
+        <div class="tasks-header-divider"></div>
+        <div v-if="store.boards.length" class="tasks-board-picker">
+          <select class="tasks-board-select" :value="store.currentBoardId" @change="changeBoard">
+            <optgroup v-for="(group, owner) in groupedBoards" :key="owner" :label="owner === currentUserName ? 'Мои' : owner">
+              <option v-for="b in group.active" :key="b.id" :value="b.id">{{ b.title }}</option>
+            </optgroup>
+            <optgroup v-if="archivedBoards.length" label="Архивные">
+              <option v-for="b in archivedBoards" :key="b.id" :value="b.id">{{ b.title }} ({{ b.owner_name }})</option>
+            </optgroup>
+          </select>
+          <TaskIcon name="chevronDown" :size="14" class="tasks-board-select-chev"/>
+        </div>
       </div>
       <div class="tasks-header-right">
-        <button class="btn icon-btn" @click="openSearch" title="Поиск (Ctrl+K)">
-          <span style="font-size:14px;">🔍</span>
+        <button class="btn search-btn" @click="openSearch" title="Поиск по карточкам">
+          <TaskIcon name="search" :size="14"/>
+          <span class="search-btn-label">Поиск</span>
+          <kbd class="search-btn-kbd">{{ shortcutSymbol }}K</kbd>
         </button>
-        <button class="btn icon-btn" :class="{ 'btn-active': store.hasActiveFilters }"
-                @click="filtersOpen = !filtersOpen" title="Фильтры">
-          <span style="font-size:14px;">⚲</span>
-          <span v-if="store.hasActiveFilters" class="filter-dot"></span>
+        <div class="sort-wrap">
+          <select :value="store.sortMode" @change="store.sortMode = $event.target.value" class="sort-select" title="Сортировка карточек">
+            <option value="manual">Вручную</option>
+            <option value="due">По сроку</option>
+            <option value="priority">По приоритету</option>
+            <option value="created">По дате создания</option>
+          </select>
+          <TaskIcon name="chevronDown" :size="12" class="sort-select-chev"/>
+        </div>
+        <button v-if="store.board" class="btn icon-btn" @click="boardMenuOpen = !boardMenuOpen" title="Настройки доски">
+          <TaskIcon name="gear" :size="16"/>
         </button>
-        <select :value="store.sortMode" @change="store.sortMode = $event.target.value" class="sort-select" title="Сортировка карточек">
-          <option value="manual">Вручную</option>
-          <option value="due">По сроку</option>
-          <option value="priority">По приоритету</option>
-          <option value="created">По дате создания</option>
-        </select>
-        <button v-if="store.board" class="btn icon-btn" @click="boardMenuOpen = !boardMenuOpen" title="Настройки доски">⚙</button>
-        <button class="btn primary" @click="createBoardPrompt">+ Новая доска</button>
-      </div>
-
-      <!-- Панель фильтров -->
-      <div v-if="filtersOpen" class="filters-panel" v-click-outside-board="() => filtersOpen = false">
-        <div class="filters-row">
-          <label class="filters-label">Приоритет</label>
-          <div class="filters-chips">
-            <button v-for="p in PRIO_OPTS" :key="p.value" class="filter-chip"
-                    :class="{ active: store.filters.priorities.includes(p.value), ['prio-bg-' + p.value]: store.filters.priorities.includes(p.value) }"
-                    @click="togglePrio(p.value)">{{ p.label }}</button>
-          </div>
-        </div>
-        <div class="filters-row">
-          <label class="filters-label">Срок</label>
-          <div class="filters-chips">
-            <button v-for="d in DUE_OPTS" :key="d.value" class="filter-chip"
-                    :class="{ active: store.filters.dueState === d.value }"
-                    @click="store.filters.dueState = store.filters.dueState === d.value ? '' : d.value">
-              {{ d.label }}
-            </button>
-          </div>
-        </div>
-        <div v-if="store.labels.length" class="filters-row">
-          <label class="filters-label">Метки</label>
-          <div class="filters-chips">
-            <button v-for="l in store.labels" :key="l.id" class="filter-chip"
-                    :class="{ active: store.filters.labels.includes(l.id) }"
-                    :style="store.filters.labels.includes(l.id) ? { background: l.color, color: '#fff', borderColor: l.color } : { borderColor: l.color, color: l.color }"
-                    @click="toggleLabelFilter(l.id)">{{ l.title }}</button>
-          </div>
-        </div>
-        <div v-if="allAssignees.length" class="filters-row">
-          <label class="filters-label">Исполнители</label>
-          <div class="filters-chips">
-            <button v-for="n in allAssignees" :key="n" class="filter-chip"
-                    :class="{ active: store.filters.assignees.includes(n) }"
-                    @click="toggleAssigneeFilter(n)">
-              <span class="filter-bubble">{{ initials(n) }}</span>{{ n }}
-            </button>
-          </div>
-        </div>
-        <div class="filters-row">
-          <label class="filters-label">Текст</label>
-          <input v-model="store.filters.text" type="text" placeholder="Содержит…" class="filters-text" />
-        </div>
-        <div class="filters-actions">
-          <button v-if="store.hasActiveFilters" class="btn" @click="store.resetFilters()">Сбросить всё</button>
-        </div>
+        <div class="tasks-header-divider"></div>
+        <button class="btn primary tasks-new-board-btn" @click="createBoardPrompt">
+          <TaskIcon name="plus" :size="14"/>
+          <span>Новая доска</span>
+        </button>
       </div>
 
       <!-- Меню настроек доски -->
       <div v-if="boardMenuOpen && store.board" class="board-menu" v-click-outside-board="() => boardMenuOpen = false">
         <div class="board-menu-title">Настройки доски «{{ store.board.title }}»</div>
         <button v-if="store.canEditStructure" class="board-menu-item" @click="renameBoard">
-          <BkIcon name="edit" size="sm"/> Переименовать
+          <TaskIcon name="edit" :size="16"/> Переименовать
         </button>
         <button class="board-menu-item" @click="openLabelsManager">
-          <BkIcon name="document" size="sm"/> Метки доски ({{ store.labels.length }})
+          <TaskIcon name="tag" :size="16"/> Метки доски ({{ store.labels.length }})
         </button>
         <button v-if="store.canEditStructure" class="board-menu-item" @click="archiveBoard">
-          <BkIcon name="archive" size="sm"/> {{ store.board.is_archived ? 'Вернуть из архива' : 'Архивировать' }}
+          <TaskIcon name="archive" :size="16"/> {{ store.board.is_archived ? 'Вернуть из архива' : 'Архивировать' }}
         </button>
         <button v-if="store.canEditStructure" class="board-menu-item danger" @click="deleteBoard">
-          <BkIcon name="delete" size="sm"/> Удалить доску
+          <TaskIcon name="trash" :size="16"/> Удалить доску
         </button>
       </div>
     </header>
 
     <!-- Менеджер меток (модалка) -->
     <Teleport to="body" v-if="labelsManagerOpen">
-      <div class="modal" @click.self="labelsManagerOpen = false">
-        <div class="modal-box" style="max-width: 420px;">
+      <div class="modal" @click.self="closeLabelsManager">
+        <div class="modal-box labels-mgr-box">
           <div class="modal-header">
             <h3>Метки доски</h3>
-            <button class="modal-close" @click="labelsManagerOpen = false">✕</button>
+            <button class="modal-close" @click="closeLabelsManager">
+              <TaskIcon name="close" :size="16"/>
+            </button>
           </div>
-          <div class="labels-mgr">
-            <div v-for="l in store.labels" :key="l.id" class="labels-mgr-row">
-              <span class="labels-mgr-swatch" :style="{ background: l.color }"></span>
-              <input v-model="l.title" type="text" class="labels-mgr-input"
-                     @blur="updateLabel(l)" @keydown.enter="$event.target.blur()" />
-              <input v-model="l.color" type="color" class="labels-mgr-color" @change="updateLabel(l)" />
-              <button class="ts-icon-btn" @click="deleteLabel(l)" title="Удалить">✕</button>
+
+          <p class="labels-mgr-help">Метки помогают группировать карточки по теме или подразделению.</p>
+
+          <!-- Список существующих меток -->
+          <div class="labels-mgr-list">
+            <div v-for="l in store.labels" :key="l.id" class="labels-mgr-card"
+                 :class="{ open: editingLabelId === l.id }">
+              <div class="labels-mgr-card-row">
+                <span class="labels-mgr-swatch" :style="{ background: l.color }"></span>
+                <span class="labels-mgr-pill" :style="{ background: l.color }">{{ l.title || '—' }}</span>
+                <input v-model="l.title" type="text" class="labels-mgr-input"
+                       placeholder="Название метки"
+                       @blur="updateLabel(l)" @keydown.enter="$event.target.blur()" />
+                <button class="labels-mgr-edit-btn" :class="{ active: editingLabelId === l.id }"
+                        @click="toggleEdit(l)" title="Сменить цвет">
+                  <TaskIcon name="edit" :size="14"/>
+                </button>
+                <button class="ts-icon-btn danger" @click="deleteLabel(l)" title="Удалить">
+                  <TaskIcon name="trash" :size="14"/>
+                </button>
+              </div>
+              <div v-if="editingLabelId === l.id" class="labels-mgr-palette-wrap">
+                <ColorPalette :model-value="l.color" @update:modelValue="onLabelColorPick(l, $event)"/>
+              </div>
             </div>
-            <div v-if="!store.labels.length" class="labels-mgr-empty">Меток пока нет</div>
-            <div class="labels-mgr-add">
-              <input v-model="newLabel.title" type="text" placeholder="Название новой метки" />
-              <input v-model="newLabel.color" type="color" />
-              <button class="btn primary" @click="addLabel" :disabled="!newLabel.title.trim()">+</button>
+            <div v-if="!store.labels.length" class="labels-mgr-empty">Меток пока нет — добавьте первую ниже</div>
+          </div>
+
+          <!-- Форма добавления -->
+          <div class="labels-mgr-add">
+            <div class="labels-mgr-add-title">Добавить метку</div>
+            <div class="labels-mgr-add-row">
+              <span class="labels-mgr-pill" :style="{ background: newLabel.color }">
+                {{ newLabel.title.trim() || 'Превью' }}
+              </span>
+              <input v-model="newLabel.title" type="text" placeholder="Название новой метки"
+                     class="labels-mgr-input flex-grow"
+                     @keydown.enter="addLabel" />
+              <button class="btn primary" @click="addLabel" :disabled="!newLabel.title.trim()">
+                <TaskIcon name="plus" :size="14"/> Добавить
+              </button>
+            </div>
+            <div class="labels-mgr-add-palette">
+              <div class="labels-mgr-palette-label">Цвет:</div>
+              <ColorPalette v-model="newLabel.color"/>
             </div>
           </div>
         </div>
@@ -147,6 +143,7 @@
           <TaskColumn
             :column="col"
             :items="store.cardsByColumn[col.id] || []"
+            :all-items="cardsByColumnAll[col.id] || []"
             :labels="store.labels"
             :can-edit-structure="store.canEditStructure"
             :dragged-card="draggedCard"
@@ -177,45 +174,69 @@
                    @go-back="goBackInStack"
                    @deleted="onCardDeleted" />
 
+    <!-- Глобальные диалоги модуля (один раз на странице) -->
+    <ConfirmModal v-if="dlg.confirmModal.value.show"
+                  :title="dlg.confirmModal.value.title"
+                  :message="dlg.confirmModal.value.message"
+                  :ok-text="dlg.confirmModal.value.okText"
+                  :cancel-text="dlg.confirmModal.value.cancelText"
+                  :danger="dlg.confirmModal.value.danger"
+                  @confirm="dlg.onConfirm" @cancel="dlg.onCancel"/>
+    <InfoModal v-if="dlg.infoModal.value.show"
+               :title="dlg.infoModal.value.title"
+               :message="dlg.infoModal.value.message"
+               :type="dlg.infoModal.value.type"
+               @close="dlg.onInfoClose"/>
+    <PromptModal v-if="dlg.promptModal.value.show"
+                 :title="dlg.promptModal.value.title"
+                 :message="dlg.promptModal.value.message"
+                 :value="dlg.promptModal.value.value"
+                 :placeholder="dlg.promptModal.value.placeholder"
+                 :ok-text="dlg.promptModal.value.okText"
+                 :cancel-text="dlg.promptModal.value.cancelText"
+                 @ok="dlg.onPromptOk" @cancel="dlg.onPromptCancel"/>
+
     <!-- Поиск -->
-    <Teleport to="body" v-if="searchOpen">
-      <div class="search-modal" @click.self="searchOpen = false">
-        <div class="search-box">
-          <div class="search-input-wrap">
-            <span class="search-icon">🔍</span>
-            <input ref="searchInputRef" v-model="searchQuery" type="text" class="search-input"
-                   placeholder="Поиск по карточкам всех досок (название, описание)…"
-                   @keydown.esc="searchOpen = false"
-                   @keydown.down.prevent="searchHover = Math.min(searchHover + 1, searchResults.length - 1)"
-                   @keydown.up.prevent="searchHover = Math.max(searchHover - 1, 0)"
-                   @keydown.enter="goToSearchResult(searchResults[searchHover])" />
-            <span v-if="searchLoading" class="search-loading">…</span>
-          </div>
-          <div class="search-results" v-if="searchQuery.length >= 2">
-            <div v-if="!searchResults.length && !searchLoading" class="search-empty">Ничего не найдено</div>
-            <div v-for="(r, i) in searchResults" :key="r.id"
-                 class="search-result"
-                 :class="{ hover: i === searchHover, 'is-done': r.is_done }"
-                 @click="goToSearchResult(r)"
-                 @mouseenter="searchHover = i">
-              <div class="sr-main">
-                <div class="sr-title">
-                  {{ r.title }}
-                  <span v-if="r.is_done_column || r.is_done" class="sr-tag">✓ готово</span>
-                  <span v-if="r.priority === 'urgent'" class="sr-tag urgent">срочно</span>
-                  <span v-if="r.priority === 'high'" class="sr-tag high">высокий</span>
-                </div>
-                <div v-if="r.description" class="sr-desc">{{ r.description }}</div>
-                <div class="sr-meta">
-                  <span class="sr-board">{{ r.board_title }}</span>
-                  <span class="sr-col">· {{ r.column_title }}</span>
-                  <span v-if="r.due_date" class="sr-due">· до {{ formatShortDue(r.due_date) }}</span>
-                </div>
+    <Teleport to="body">
+      <div v-if="searchOpen" class="search-modal" @click.self="searchOpen = false">
+        <div class="search-box" @click.stop>
+        <div class="search-input-wrap">
+          <TaskIcon name="search" :size="20" class="search-icon-svg"/>
+          <input ref="searchInputRef" v-model="searchQuery" type="text" class="search-input"
+                 placeholder="Поиск по карточкам всех досок (название, описание)…"
+                 @keydown.esc="searchOpen = false"
+                 @keydown.down.prevent="searchHover = Math.min(searchHover + 1, searchResults.length - 1)"
+                 @keydown.up.prevent="searchHover = Math.max(searchHover - 1, 0)"
+                 @keydown.enter="goToSearchResult(searchResults[searchHover])" />
+          <span v-if="searchLoading" class="search-loading">…</span>
+          <span v-else-if="searchQuery.length >= 2" class="search-count">{{ searchResults.length }}</span>
+        </div>
+        <div v-if="searchError" class="search-empty" style="color: var(--tk-text-muted);">{{ searchError }}</div>
+        <div v-else-if="searchQuery.length < 2" class="search-hint">Введите минимум 2 символа</div>
+        <div v-else-if="!searchResults.length && !searchLoading" class="search-empty">Ничего не найдено</div>
+        <div v-else class="search-results">
+          <div v-for="(r, i) in searchResults" :key="r.id"
+               class="search-result"
+               :class="{ hover: i === searchHover, 'is-done': r.is_done }"
+               @click="goToSearchResult(r)"
+               @mouseenter="searchHover = i">
+            <div class="sr-main">
+              <div class="sr-title">
+                {{ r.title }}
+                <span v-if="r.is_done_column || r.is_done" class="sr-tag">✓ готово</span>
+                <span v-if="r.priority === 'urgent'" class="sr-tag urgent">срочно</span>
+                <span v-if="r.priority === 'high'" class="sr-tag high">высокий</span>
               </div>
-              <div class="sr-arrow">→</div>
+              <div v-if="r.description" class="sr-desc">{{ r.description }}</div>
+              <div class="sr-meta">
+                <span class="sr-board">{{ r.board_title }}</span>
+                <span class="sr-col">· {{ r.column_title }}</span>
+                <span v-if="r.due_date" class="sr-due">· до {{ formatShortDue(r.due_date) }}</span>
+              </div>
             </div>
+            <div class="sr-arrow"><TaskIcon name="arrowRight" :size="16"/></div>
           </div>
-          <div v-else class="search-hint">Введите минимум 2 символа</div>
+        </div>
         </div>
       </div>
     </Teleport>
@@ -223,14 +244,23 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue';
 import { useRoute } from 'vue-router';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { tasksApi } from '@/lib/tasksApi.js';
+import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import TaskColumn from '@/components/tasks/TaskColumn.vue';
 import TaskCardModal from '@/components/tasks/TaskCardModal.vue';
+import TaskIcon from '@/components/tasks/TaskIcon.vue';
+import ColorPalette from '@/components/tasks/ColorPalette.vue';
+
+const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/ConfirmModal.vue'));
+const InfoModal    = defineAsyncComponent(() => import('@/components/modals/InfoModal.vue'));
+const PromptModal  = defineAsyncComponent(() => import('@/components/modals/PromptModal.vue'));
+
+const dlg = useTasksDialogs();
 
 const store = useTasksStore();
 const userStore = useUserStore();
@@ -241,8 +271,8 @@ const openedCardId = computed(() => cardStack.value[cardStack.value.length - 1] 
 const draggedCard = ref(null);
 const boardMenuOpen = ref(false);
 const labelsManagerOpen = ref(false);
+const editingLabelId = ref(null);
 const newLabel = ref({ title: '', color: '#42A5F5' });
-const filtersOpen = ref(false);
 const searchOpen = ref(false);
 const searchQuery = ref('');
 const searchResults = ref([]);
@@ -250,24 +280,24 @@ const searchLoading = ref(false);
 const searchHover = ref(0);
 const searchInputRef = ref(null);
 
-const PRIO_OPTS = [
-  { value: 'urgent', label: 'Срочно' },
-  { value: 'high',   label: 'Высокий' },
-  { value: 'medium', label: 'Средний' },
-  { value: 'low',    label: 'Низкий' },
-];
-const DUE_OPTS = [
-  { value: 'overdue', label: '🔴 Просрочено' },
-  { value: 'today',   label: '🟠 Сегодня' },
-  { value: 'week',    label: '🟢 На неделе' },
-  { value: 'no-due',  label: 'Без срока' },
-];
-
 // Drag-and-drop колонок
 const colDragFrom = ref(null);
 const colDragOver = ref(null);
 
 const currentUserName = computed(() => userStore.currentUser?.name || '');
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const shortcutSymbol = isMac ? '⌘' : 'Ctrl ';
+
+// Все карточки по колонкам без применения фильтров — для счётчика и списка исполнителей в поповере фильтра
+const cardsByColumnAll = computed(() => {
+  const map = {};
+  for (const col of store.columns) map[col.id] = [];
+  for (const c of store.cards) {
+    if (!map[c.column_id]) map[c.column_id] = [];
+    map[c.column_id].push(c);
+  }
+  return map;
+});
 
 const groupedBoards = computed(() => {
   const g = {};
@@ -283,35 +313,6 @@ const groupedBoards = computed(() => {
 });
 
 const archivedBoards = computed(() => store.boards.filter(b => b.is_archived));
-
-// Список всех соисполнителей по карточкам — для фильтра
-const allAssignees = computed(() => {
-  const set = new Set();
-  for (const c of store.cards) {
-    if (store.board?.owner_name) set.add(store.board.owner_name);
-    for (const n of (c.assignees || [])) set.add(n);
-  }
-  return [...set].sort();
-});
-
-function togglePrio(p) {
-  const arr = store.filters.priorities;
-  const i = arr.indexOf(p);
-  if (i >= 0) arr.splice(i, 1); else arr.push(p);
-}
-function toggleLabelFilter(id) {
-  const arr = store.filters.labels;
-  const i = arr.indexOf(id);
-  if (i >= 0) arr.splice(i, 1); else arr.push(id);
-}
-function toggleAssigneeFilter(n) {
-  const arr = store.filters.assignees;
-  const i = arr.indexOf(n);
-  if (i >= 0) arr.splice(i, 1); else arr.push(n);
-}
-function initials(n) {
-  return (n || '').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-}
 
 onMounted(async () => {
   await store.fetchBoards();
@@ -340,10 +341,6 @@ function onHotkey(e) {
       addCardToFirstColumn();
     }
   }
-  if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    e.preventDefault();
-    filtersOpen.value = !filtersOpen.value;
-  }
 }
 
 function openSearch() {
@@ -354,9 +351,11 @@ function openSearch() {
   nextTick(() => searchInputRef.value?.focus?.());
 }
 
+const searchError = ref('');
 let searchTimer = null;
 watch(searchQuery, (v) => {
   clearTimeout(searchTimer);
+  searchError.value = '';
   if (!v || v.length < 2) { searchResults.value = []; return; }
   searchTimer = setTimeout(async () => {
     searchLoading.value = true;
@@ -364,7 +363,10 @@ watch(searchQuery, (v) => {
       const r = await tasksApi.search(v);
       searchResults.value = r.results || [];
       searchHover.value = 0;
-    } catch (e) { /* noop */ }
+    } catch (e) {
+      searchResults.value = [];
+      searchError.value = e?.message || 'Ошибка поиска';
+    }
     finally { searchLoading.value = false; }
   }, 200);
 });
@@ -385,11 +387,13 @@ function formatShortDue(s) {
 
 async function addCardToFirstColumn() {
   if (!store.columns.length) return;
-  const title = prompt('Новая задача:');
-  if (!title || !title.trim()) return;
-  try { await store.createCard({ board_id: store.currentBoardId, column_id: store.columns[0].id, title: title.trim() }); }
-  catch (e) { alert(e.message); }
+  const title = await dlg.prompt('Новая задача', { placeholder: 'Название задачи', okText: 'Создать' });
+  if (!title) return;
+  try { await store.createCard({ board_id: store.currentBoardId, column_id: store.columns[0].id, title }); }
+  catch (e) { dlg.info('Ошибка', e.message, 'error'); }
 }
+
+async function showError(title, e) { dlg.info(title, e?.message || String(e), 'error'); }
 
 // Открытие карточки при изменении query-параметра (например, при переходе из уведомления)
 watch(() => route.query.cardId, (v) => {
@@ -403,24 +407,37 @@ async function changeBoard(e) {
 }
 
 async function createBoardPrompt() {
-  const title = prompt('Название новой доски:');
-  if (!title || !title.trim()) return;
-  try { await store.createBoard({ title: title.trim() }); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  const title = await dlg.prompt('Новая доска', { placeholder: 'Название доски', okText: 'Создать' });
+  if (!title) return;
+  try { await store.createBoard({ title }); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 async function renameBoard() {
   boardMenuOpen.value = false;
   if (!store.board) return;
-  const t = prompt('Новое название доски:', store.board.title);
-  if (!t || t.trim() === store.board.title) return;
-  try { await store.updateBoard(store.board.id, { title: t.trim() }); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  const t = await dlg.prompt('Переименовать доску', { defaultValue: store.board.title, placeholder: 'Название доски' });
+  if (!t || t === store.board.title) return;
+  try { await store.updateBoard(store.board.id, { title: t }); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 function openLabelsManager() {
   boardMenuOpen.value = false;
   labelsManagerOpen.value = true;
+}
+function closeLabelsManager() {
+  labelsManagerOpen.value = false;
+  editingLabelId.value = null;
+}
+function toggleEdit(l) {
+  editingLabelId.value = (editingLabelId.value === l.id) ? null : l.id;
+}
+async function onLabelColorPick(l, color) {
+  l.color = color;
+  editingLabelId.value = null;
+  try { await store.updateLabel(l.id, { title: l.title, color }); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 async function addLabel() {
@@ -432,30 +449,34 @@ async function addLabel() {
       color: newLabel.value.color || '#42A5F5',
     });
     newLabel.value = { title: '', color: '#42A5F5' };
-  } catch (e) { alert(e.message); }
+  } catch (e) { showError('Ошибка', e); }
 }
 async function updateLabel(l) {
   try { await store.updateLabel(l.id, { title: l.title, color: l.color }); }
-  catch (e) { alert(e.message); }
+  catch (e) { showError('Ошибка', e); }
 }
 async function deleteLabel(l) {
-  if (!confirm('Удалить метку «' + l.title + '»?')) return;
+  const ok = await dlg.confirm('Удалить метку', 'Удалить метку «' + l.title + '»?', { okText: 'Удалить', danger: true });
+  if (!ok) return;
   try { await store.deleteLabel(l.id); }
-  catch (e) { alert(e.message); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 async function archiveBoard() {
   boardMenuOpen.value = false;
   const newState = !store.board.is_archived ? 1 : 0;
   try { await store.updateBoard(store.board.id, { is_archived: newState }); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 async function deleteBoard() {
   boardMenuOpen.value = false;
-  if (!confirm('Удалить доску «' + store.board.title + '» со всеми задачами? Действие нельзя отменить.')) return;
+  const ok = await dlg.confirm('Удалить доску',
+    'Удалить доску «' + store.board.title + '» со всеми задачами? Действие нельзя отменить.',
+    { okText: 'Удалить', danger: true });
+  if (!ok) return;
   try { await store.deleteBoard(store.board.id); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 // Локальная директива для закрытия меню по клику снаружи
@@ -468,10 +489,10 @@ const vClickOutsideBoard = {
 };
 
 async function addColumnPrompt() {
-  const title = prompt('Название колонки:');
-  if (!title || !title.trim()) return;
-  try { await store.createColumn({ board_id: store.currentBoardId, title: title.trim() }); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  const title = await dlg.prompt('Новая колонка', { placeholder: 'Название колонки', okText: 'Создать' });
+  if (!title) return;
+  try { await store.createColumn({ board_id: store.currentBoardId, title }); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 function openCard(card) { cardStack.value = [card.id]; }
@@ -492,7 +513,7 @@ function goBackInStack() {
 
 async function addCard(payload) {
   try { await store.createCard({ board_id: store.currentBoardId, ...payload }); }
-  catch (e) { alert('Ошибка: ' + e.message); }
+  catch (e) { showError('Ошибка', e); }
 }
 
 async function onMoveCard({ card, to_column_id, to_index }) {
@@ -505,9 +526,10 @@ function onCardDeleted(id) {
   store.cards = store.cards.filter(c => c.id !== id);
 }
 
-// Drag-and-drop колонок (только для редакторов структуры)
+// Drag-and-drop колонок (только для редакторов структуры; архив-колонку не двигаем)
 function onColDragStart(i, e) {
   if (!store.canEditStructure) { e.preventDefault(); return; }
+  if (store.columns[i]?.is_archive_column) { e.preventDefault(); return; }
   // Игнорируем перетаскивание, если оно начинается с карточки
   if (e.target.closest('.task-card')) { e.preventDefault(); return; }
   colDragFrom.value = i;
@@ -533,280 +555,467 @@ function onColDrop(i) {
 </script>
 
 <style scoped>
+/* ═══ Дизайн-токены модуля «Задачи» ═══
+   Бренд: оранжевый #E87A1E. Стиль: Trello/Jira — нейтральная серая база, цветной акцент только в активных состояниях.
+   Дочерние компоненты (TaskColumn, TaskCard, TaskCardModal) наследуют эти переменные. */
 .tasks-view {
+  /* Радиусы — только три значения */
+  --tk-r-sm: 4px;
+  --tk-r-md: 8px;
+  --tk-r-lg: 12px;
+
+  /* Отступы — ступени по 4 */
+  --tk-s-1: 4px;
+  --tk-s-2: 8px;
+  --tk-s-3: 12px;
+  --tk-s-4: 16px;
+  --tk-s-5: 20px;
+  --tk-s-6: 24px;
+
+  /* Тени */
+  --tk-shadow-card: 0 1px 0 rgba(9,30,66,0.08), 0 1px 2px rgba(9,30,66,0.06);
+  --tk-shadow-card-hover: 0 1px 1px rgba(9,30,66,0.10), 0 4px 8px rgba(9,30,66,0.10);
+  --tk-shadow-column: 0 1px 1px rgba(9,30,66,0.06), 0 0 1px rgba(9,30,66,0.10);
+  --tk-shadow-popover: 0 8px 24px rgba(9,30,66,0.18), 0 1px 2px rgba(9,30,66,0.10);
+
+  /* Типографика */
+  --tk-fz-xs: 11px;
+  --tk-fz-sm: 12px;
+  --tk-fz-md: 13px;
+  --tk-fz-lg: 14px;
+  --tk-fz-xl: 16px;
+  --tk-fz-h1: 18px;
+  --tk-fw-medium: 500;
+  --tk-fw-semibold: 600;
+  --tk-fw-bold: 700;
+
+  /* Палитра — нейтральная серая шкала (atlassian-inspired) */
+  --tk-n-0: #FFFFFF;
+  --tk-n-50: #F7F8F9;
+  --tk-n-100: #F1F2F4;
+  --tk-n-200: #DCDFE4;
+  --tk-n-300: #B3B9C4;
+  --tk-n-400: #8590A2;
+  --tk-n-500: #758195;
+  --tk-n-600: #626F86;
+  --tk-n-700: #44546F;
+  --tk-n-800: #2C3E5D;
+  --tk-n-900: #172B4D;
+
+  /* Поверхности */
+  --tk-bg-board: #F7F8F9;
+  --tk-bg-column: #EBECF0;
+  --tk-bg-card: #FFFFFF;
+  --tk-bg-popover: #FFFFFF;
+  --tk-border: #DCDFE4;
+  --tk-border-soft: #E1E4E8;
+
+  /* Акцент бренда (оранжевый) */
+  --tk-accent: #E87A1E;
+  --tk-accent-hover: #D26B12;
+  --tk-accent-soft: rgba(232,122,30,0.10);
+  --tk-accent-soft-strong: rgba(232,122,30,0.18);
+  --tk-accent-text: #B85A0E;
+
+  /* Приоритеты — пастельные плашки */
+  --tk-prio-urgent-bg: #FFEBE6;
+  --tk-prio-urgent-fg: #BF2600;
+  --tk-prio-high-bg: #FFF7D6;
+  --tk-prio-high-fg: #974F0C;
+  --tk-prio-medium-bg: #DEEBFF;
+  --tk-prio-medium-fg: #0747A6;
+  --tk-prio-low-bg: #EBECF0;
+  --tk-prio-low-fg: #44546F;
+
+  /* Семантика */
+  --tk-success: #1F8F4E;
+  --tk-success-soft: rgba(31,143,78,0.10);
+  --tk-warning: #B65E03;
+  --tk-warning-soft: rgba(182,94,3,0.10);
+  --tk-danger: #C9372C;
+  --tk-danger-soft: rgba(201,55,44,0.08);
+
+  /* Текст */
+  --tk-text: var(--tk-n-900);
+  --tk-text-secondary: var(--tk-n-700);
+  --tk-text-muted: var(--tk-n-500);
+
+  --tk-transition: 120ms ease;
+  --tk-focus-ring: 0 0 0 2px rgba(232,122,30,0.35);
+
+  /* ═══ собственно стили страницы ═══ */
   display: flex; flex-direction: column;
   height: 100%;
-  background: var(--bg, #fafbfc);
+  background: var(--tk-bg-board);
+  color: var(--tk-text);
 }
 .tasks-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px; gap: 16px;
-  background: #fff; border-bottom: 1px solid var(--border-light);
+  padding: var(--tk-s-2) var(--tk-s-4);
+  gap: var(--tk-s-3);
+  background: var(--tk-n-0);
+  border-bottom: 1px solid var(--tk-border);
   flex-wrap: wrap;
+  min-height: 56px;
 }
-.tasks-header-left { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
+.tasks-header-left { display: flex; align-items: center; gap: var(--tk-s-3); flex: 1; min-width: 0; }
 .tasks-title {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 18px; font-weight: 700; margin: 0;
-  color: var(--text, #1f2937);
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  font-size: var(--tk-fz-h1); font-weight: var(--tk-fw-bold); margin: 0;
+  color: var(--tk-text); letter-spacing: -0.2px;
+  white-space: nowrap;
 }
+
+/* Разделитель между группами в шапке */
+.tasks-header-divider {
+  width: 1px; height: 24px;
+  background: var(--tk-border);
+  flex-shrink: 0;
+}
+
+/* Селект досок — Trello-стиль (плоский, с chevron) */
+.tasks-board-picker { position: relative; display: inline-flex; align-items: center; min-width: 0; }
 .tasks-board-select {
-  padding: 6px 10px; font-size: 13.5px;
-  border: 1px solid var(--border-light); border-radius: 6px;
-  background: #fff; min-width: 220px; max-width: 320px;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding: 0 var(--tk-s-5) 0 var(--tk-s-3);
+  height: 36px;
+  font-size: var(--tk-fz-lg);
+  border: 1px solid transparent;
+  border-radius: var(--tk-r-md);
+  background: transparent;
+  color: var(--tk-text);
+  min-width: 180px; max-width: 320px;
+  font-weight: var(--tk-fw-semibold);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--tk-transition), border-color var(--tk-transition), box-shadow var(--tk-transition);
 }
-.tasks-header-right { display: flex; gap: 8px; }
-.tasks-header-right .btn { padding: 6px 14px; font-size: 13px; }
+.tasks-board-select:hover { background: var(--tk-n-100); }
+.tasks-board-select:focus { outline: none; background: var(--tk-n-100); border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.tasks-board-select-chev {
+  position: absolute; right: var(--tk-s-2); top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--tk-text-muted);
+}
+
+.tasks-header-right { display: flex; gap: var(--tk-s-2); align-items: center; flex-wrap: wrap; }
+.tasks-header-right .btn { padding: 0 var(--tk-s-3); height: 32px; font-size: var(--tk-fz-md); }
+.tasks-new-board-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: var(--tk-fw-semibold);
+}
+
+/* Кнопка поиска — широкая, как в Linear / Notion */
+.search-btn {
+  display: inline-flex; align-items: center; gap: var(--tk-s-2);
+  background: var(--tk-n-50);
+  border: 1px solid var(--tk-border);
+  color: var(--tk-text-muted);
+  font-family: inherit;
+  font-weight: var(--tk-fw-medium);
+  padding: 0 var(--tk-s-2) 0 var(--tk-s-3) !important;
+  cursor: pointer;
+  transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
+}
+.search-btn:hover { background: var(--tk-n-100); border-color: var(--tk-n-300); color: var(--tk-text-secondary); }
+.search-btn:focus-visible { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+.search-btn-label {
+  font-size: var(--tk-fz-md);
+  color: var(--tk-text-secondary);
+}
+.search-btn-kbd {
+  font-family: inherit;
+  font-size: var(--tk-fz-xs);
+  font-weight: var(--tk-fw-semibold);
+  padding: 1px 6px;
+  background: var(--tk-n-0);
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-sm);
+  color: var(--tk-text-muted);
+  white-space: nowrap;
+}
+
+/* Сортировка — компактнее, с chevron */
+.sort-wrap { position: relative; display: inline-flex; align-items: center; }
+.sort-select-chev {
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--tk-text-muted);
+}
 
 .tasks-loading, .tasks-error, .tasks-empty {
-  padding: 40px; text-align: center; color: var(--text-muted);
+  padding: 40px; text-align: center; color: var(--tk-text-muted);
+  font-size: var(--tk-fz-md);
 }
-.tasks-error { color: #E53935; }
+.tasks-error { color: var(--tk-danger); }
 
 .tasks-board-area {
   flex: 1; overflow: hidden;
-  padding: 16px 0 16px 16px;
+  padding: var(--tk-s-4) 0 var(--tk-s-4) var(--tk-s-4);
 }
 .tasks-columns {
-  display: flex; gap: 12px; align-items: flex-start;
-  height: 100%; overflow-x: auto; padding-bottom: 8px;
-  padding-right: 16px;
+  display: flex; gap: var(--tk-s-3); align-items: flex-start;
+  height: 100%; overflow-x: auto;
+  padding-bottom: var(--tk-s-2);
+  padding-right: var(--tk-s-4);
 }
 .tasks-column-wrap {
   height: 100%;
   display: flex;
   border: 2px solid transparent;
-  border-radius: 12px;
-  transition: border-color .15s;
+  border-radius: var(--tk-r-lg);
+  transition: border-color var(--tk-transition);
 }
-.tasks-column-wrap.col-drag-over { border-color: #FFA726; }
+.tasks-column-wrap.col-drag-over { border-color: var(--tk-accent); }
 
 .tasks-add-column {
   width: 280px; flex: 0 0 280px;
 }
 .tasks-add-column-btn {
-  width: 100%; padding: 10px;
-  background: rgba(0,0,0,0.04); border: 2px dashed var(--border-light);
-  border-radius: 10px; cursor: pointer; color: var(--text-muted);
-  font-size: 13px; font-weight: 500;
+  width: 100%; padding: var(--tk-s-3);
+  background: rgba(9,30,66,0.04);
+  border: 1px dashed var(--tk-border);
+  border-radius: var(--tk-r-md);
+  cursor: pointer; color: var(--tk-text-muted);
+  font-size: var(--tk-fz-md); font-weight: var(--tk-fw-medium);
+  font-family: inherit;
+  transition: background var(--tk-transition), color var(--tk-transition), border-color var(--tk-transition);
 }
-.tasks-add-column-btn:hover { background: rgba(0,0,0,0.07); color: var(--text); }
+.tasks-add-column-btn:hover {
+  background: rgba(9,30,66,0.07);
+  color: var(--tk-text);
+  border-color: var(--tk-n-300);
+}
 
 /* ═══ Меню настроек доски ═══ */
 .tasks-header { position: relative; }
 .icon-btn {
-  width: 36px; padding: 6px; display: flex; align-items: center; justify-content: center;
-  font-size: 16px;
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--tk-fz-lg);
+  background: var(--tk-n-0);
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-sm);
+  color: var(--tk-text-secondary);
+  cursor: pointer;
+  transition: background var(--tk-transition), border-color var(--tk-transition), color var(--tk-transition);
 }
+.icon-btn:hover { background: var(--tk-n-100); border-color: var(--tk-n-300); color: var(--tk-text); }
+.icon-btn:focus-visible { outline: none; box-shadow: var(--tk-focus-ring); border-color: var(--tk-accent); }
+
 .board-menu {
-  position: absolute; top: 56px; right: 22px; z-index: 100;
-  background: #fff; border: 1px solid var(--border-light);
-  border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.15);
-  min-width: 240px; padding: 6px;
+  position: absolute; top: 56px; right: var(--tk-s-5); z-index: 100;
+  background: var(--tk-bg-popover);
+  border: 1px solid var(--tk-border);
+  border-radius: var(--tk-r-md);
+  box-shadow: var(--tk-shadow-popover);
+  min-width: 240px; padding: var(--tk-s-1);
 }
 .board-menu-title {
-  padding: 8px 12px 6px; font-size: 11px; font-weight: 700;
-  color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
-  border-bottom: 1px solid var(--border-light); margin-bottom: 4px;
+  padding: var(--tk-s-2) var(--tk-s-3) var(--tk-s-1);
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-bold);
+  color: var(--tk-text-muted); text-transform: uppercase; letter-spacing: .5px;
+  border-bottom: 1px solid var(--tk-border-soft);
+  margin-bottom: var(--tk-s-1);
 }
 .board-menu-item {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 8px 12px; border: none; background: none; cursor: pointer;
-  font-size: 13.5px; color: var(--text); border-radius: 6px;
+  display: flex; align-items: center; gap: var(--tk-s-2); width: 100%;
+  padding: var(--tk-s-2) var(--tk-s-3);
+  border: none; background: none; cursor: pointer;
+  font-size: var(--tk-fz-md); color: var(--tk-text);
+  border-radius: var(--tk-r-sm);
   font-family: inherit; text-align: left;
+  transition: background var(--tk-transition);
 }
-.board-menu-item:hover { background: var(--bg-secondary, #f5f5f5); }
-.board-menu-item.danger { color: #E53935; }
-.board-menu-item.danger:hover { background: rgba(229,57,53,0.08); }
+.board-menu-item:hover { background: var(--tk-n-100); }
+.board-menu-item.danger { color: var(--tk-danger); }
+.board-menu-item.danger:hover { background: var(--tk-danger-soft); }
 
 /* ═══ Менеджер меток ═══ */
 :deep(.modal) {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+  position: fixed; inset: 0; background: rgba(9,30,66,0.50);
   display: flex; align-items: center; justify-content: center;
-  z-index: 1000; padding: 20px;
+  z-index: 1000; padding: var(--tk-s-5);
 }
 :deep(.modal-box) {
-  background: #fff; border-radius: 12px;
-  width: 100%; padding: 16px;
+  background: var(--tk-bg-popover);
+  border-radius: var(--tk-r-lg);
+  box-shadow: var(--tk-shadow-popover);
+  width: 100%; padding: var(--tk-s-4);
 }
 :deep(.modal-header) {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: var(--tk-s-3);
 }
-:deep(.modal-header h3) { margin: 0; font-size: 16px; }
+:deep(.modal-header h3) { margin: 0; font-size: var(--tk-fz-xl); font-weight: var(--tk-fw-semibold); color: var(--tk-text); }
 :deep(.modal-close) {
   background: none; border: none; cursor: pointer;
-  font-size: 18px; color: var(--text-muted); padding: 4px 8px;
+  font-size: var(--tk-fz-h1); color: var(--tk-text-muted);
+  padding: var(--tk-s-1) var(--tk-s-2); border-radius: var(--tk-r-sm);
+  transition: background var(--tk-transition), color var(--tk-transition);
 }
-.labels-mgr { display: flex; flex-direction: column; gap: 6px; }
+:deep(.modal-close):hover { background: var(--tk-n-100); color: var(--tk-text); }
+
+.labels-mgr { display: flex; flex-direction: column; gap: var(--tk-s-1); }
 .labels-mgr-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 6px; border-radius: 6px;
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  padding: var(--tk-s-1) var(--tk-s-2); border-radius: var(--tk-r-sm);
 }
-.labels-mgr-row:hover { background: var(--bg-secondary, #f5f5f5); }
+.labels-mgr-row:hover { background: var(--tk-n-100); }
 .labels-mgr-swatch {
-  width: 16px; height: 16px; border-radius: 50%;
-  flex-shrink: 0; border: 1px solid rgba(0,0,0,0.1);
+  width: 14px; height: 14px; border-radius: 50%;
+  flex-shrink: 0; border: 1px solid rgba(9,30,66,0.10);
 }
 .labels-mgr-input {
-  flex: 1; padding: 5px 8px; font-size: 13px;
-  border: 1px solid var(--border-light); border-radius: 4px;
-  background: #fff; color: var(--text); font-family: inherit;
+  flex: 1; padding: 6px var(--tk-s-2); font-size: var(--tk-fz-md);
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
+  background: var(--tk-n-0); color: var(--tk-text); font-family: inherit;
+  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
 }
+.labels-mgr-input:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 .labels-mgr-color {
-  width: 32px; height: 28px; padding: 0; cursor: pointer;
-  border: 1px solid var(--border-light); border-radius: 4px;
+  width: 30px; height: 28px; padding: 0; cursor: pointer;
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
+  background: var(--tk-n-0);
 }
 .labels-mgr-empty {
-  text-align: center; padding: 12px; color: var(--text-muted);
-  font-size: 13px; font-style: italic;
+  text-align: center; padding: var(--tk-s-3); color: var(--tk-text-muted);
+  font-size: var(--tk-fz-md); font-style: italic;
 }
 .labels-mgr-add {
-  display: flex; gap: 6px; align-items: center;
-  margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border-light);
+  display: flex; gap: var(--tk-s-2); align-items: center;
+  margin-top: var(--tk-s-2); padding-top: var(--tk-s-3);
+  border-top: 1px solid var(--tk-border-soft);
 }
 .labels-mgr-add input[type="text"] {
-  flex: 1; padding: 5px 8px; font-size: 13px;
-  border: 1px solid var(--border-light); border-radius: 4px;
-  background: #fff; color: var(--text); font-family: inherit;
+  flex: 1; padding: 6px var(--tk-s-2); font-size: var(--tk-fz-md);
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
+  background: var(--tk-n-0); color: var(--tk-text); font-family: inherit;
+  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
 }
+.labels-mgr-add input[type="text"]:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 .labels-mgr-add input[type="color"] {
-  width: 32px; height: 28px; padding: 0; cursor: pointer;
-  border: 1px solid var(--border-light); border-radius: 4px;
+  width: 30px; height: 28px; padding: 0; cursor: pointer;
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
 }
-.labels-mgr-add .btn { padding: 4px 12px; }
+.labels-mgr-add .btn { padding: 0 var(--tk-s-3); height: 28px; }
 .ts-icon-btn {
   background: none; border: none; cursor: pointer;
-  color: var(--text-muted); font-size: 12px; padding: 3px 7px; border-radius: 3px;
+  color: var(--tk-text-muted); font-size: var(--tk-fz-sm);
+  padding: var(--tk-s-1) 7px; border-radius: var(--tk-r-sm);
+  transition: background var(--tk-transition), color var(--tk-transition);
 }
-.ts-icon-btn:hover { color: #E53935; background: rgba(229,57,53,0.1); }
+.ts-icon-btn:hover { color: var(--tk-danger); background: var(--tk-danger-soft); }
 
-/* ═══ Кнопки в шапке + сортировка ═══ */
-.btn-active {
-  background: rgba(232,122,30,0.15) !important;
-  border-color: var(--bk-orange, #E87A1E) !important;
-  color: var(--bk-orange, #E87A1E) !important;
-  position: relative;
-}
-.filter-dot {
-  position: absolute; top: 4px; right: 4px;
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--bk-orange, #E87A1E);
-}
+/* ═══ Сортировка ═══ */
 .sort-select {
-  padding: 6px 10px; font-size: 12.5px;
-  border: 1px solid var(--border-light); border-radius: 6px;
-  background: #fff; color: var(--text); font-family: inherit;
-  height: 32px;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding: 0 24px 0 var(--tk-s-3); height: 32px;
+  font-size: var(--tk-fz-sm);
+  border: 1px solid var(--tk-border); border-radius: var(--tk-r-sm);
+  background: var(--tk-n-0); color: var(--tk-text);
+  font-family: inherit; font-weight: var(--tk-fw-medium);
+  cursor: pointer;
+  transition: border-color var(--tk-transition), box-shadow var(--tk-transition);
 }
+.sort-select:hover { border-color: var(--tk-n-300); }
+.sort-select:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
 
-/* ═══ Панель фильтров ═══ */
-.filters-panel {
-  position: absolute; top: 56px; right: 22px; z-index: 90;
-  background: #fff; border: 1px solid var(--border-light);
-  border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.15);
-  padding: 12px 14px;
-  min-width: 360px; max-width: 480px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-.filters-row {
-  display: flex; align-items: flex-start; gap: 10px;
-}
-.filters-label {
-  font-size: 11px; font-weight: 700; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: .4px;
-  min-width: 80px; padding-top: 5px; flex-shrink: 0;
-}
-.filters-chips {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  flex: 1;
-}
-.filter-chip {
-  padding: 3px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600;
-  cursor: pointer; border: 1.5px solid var(--border-light); background: #fff;
-  color: var(--text); font-family: inherit;
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.filter-chip:hover { border-color: var(--bk-orange, #E87A1E); }
-.filter-chip.active { background: rgba(232,122,30,0.1); border-color: var(--bk-orange); color: var(--bk-orange); }
-.filter-chip.prio-bg-low    { background: #ECEFF1 !important; border-color: #ECEFF1 !important; color: #455A64 !important; }
-.filter-chip.prio-bg-medium { background: #E1F5FE !important; border-color: #E1F5FE !important; color: #0277BD !important; }
-.filter-chip.prio-bg-high   { background: #FFF3E0 !important; border-color: #FFF3E0 !important; color: #E65100 !important; }
-.filter-chip.prio-bg-urgent { background: #FFEBEE !important; border-color: #FFEBEE !important; color: #C62828 !important; }
-.filter-bubble {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: linear-gradient(135deg, #E76F51, #F4A261);
-  color: #fff; font-size: 9px; font-weight: 700;
-}
-.filters-text {
-  flex: 1; padding: 6px 10px; font-size: 13px;
-  border: 1px solid var(--border-light); border-radius: 6px;
-  background: #fff; color: var(--text); font-family: inherit;
-}
-.filters-actions {
-  display: flex; justify-content: flex-end; padding-top: 4px; border-top: 1px solid var(--border-light);
-}
-
-/* ═══ Поиск ═══ */
+/* ═══ Поиск ═══
+   Teleport-ится в body — токены с .tasks-view не наследуются. Дублируем минимум локально. */
 .search-modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-  display: flex; align-items: flex-start; justify-content: center;
-  z-index: 1100; padding: 80px 20px 20px;
+  --tk-r-sm: 4px; --tk-r-md: 8px; --tk-r-lg: 12px;
+  --tk-s-1: 4px; --tk-s-2: 8px; --tk-s-3: 12px; --tk-s-4: 16px; --tk-s-5: 20px; --tk-s-6: 24px;
+  --tk-fz-xs: 11px; --tk-fz-sm: 12px; --tk-fz-md: 13px; --tk-fz-lg: 14px; --tk-fz-xl: 16px;
+  --tk-fw-medium: 500; --tk-fw-semibold: 600; --tk-fw-bold: 700;
+  --tk-n-0: #FFFFFF; --tk-n-50: #F7F8F9; --tk-n-100: #F1F2F4;
+  --tk-n-200: #DCDFE4; --tk-n-300: #B3B9C4; --tk-n-500: #758195;
+  --tk-n-700: #44546F; --tk-n-900: #172B4D;
+  --tk-bg-popover: #FFFFFF;
+  --tk-border: #DCDFE4; --tk-border-soft: #E1E4E8;
+  --tk-accent: #E87A1E; --tk-accent-text: #B85A0E;
+  --tk-prio-urgent-bg: #FFEBE6; --tk-prio-urgent-fg: #BF2600;
+  --tk-prio-high-bg: #FFF7D6;   --tk-prio-high-fg:   #974F0C;
+  --tk-success: #1F8F4E;
+  --tk-text: var(--tk-n-900); --tk-text-secondary: var(--tk-n-700); --tk-text-muted: var(--tk-n-500);
+  --tk-transition: 120ms ease;
+  --tk-shadow-popover: 0 8px 24px rgba(9,30,66,0.18), 0 1px 2px rgba(9,30,66,0.10);
+
+  position: fixed; inset: 0; background: rgba(9,30,66,0.50);
+  z-index: 1100;
 }
 .search-box {
-  background: #fff; border-radius: 12px;
-  width: 100%; max-width: 640px;
-  box-shadow: 0 12px 36px rgba(0,0,0,0.25);
-  overflow: hidden;
-  max-height: calc(100vh - 100px);
+  position: absolute;
+  top: 80px; left: 50%; transform: translateX(-50%);
+  background: var(--tk-bg-popover);
+  border-radius: var(--tk-r-lg);
+  width: calc(100% - 40px); max-width: 640px;
+  max-height: calc(100vh - 120px);
   display: flex; flex-direction: column;
+  box-shadow: var(--tk-shadow-popover);
+  overflow: hidden;
 }
 .search-input-wrap {
-  display: flex; align-items: center; gap: 8px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-light);
+  display: flex; align-items: center; gap: var(--tk-s-2);
+  padding: var(--tk-s-3) var(--tk-s-4);
+  border-bottom: 1px solid var(--tk-border-soft);
 }
-.search-icon { font-size: 18px; }
+.search-icon-svg { color: var(--tk-text-muted); }
 .search-input {
   flex: 1; border: none; outline: none;
-  font-size: 16px; background: none; color: var(--text);
+  font-size: var(--tk-fz-xl); background: none; color: var(--tk-text);
   font-family: inherit;
 }
-.search-loading { color: var(--text-muted); font-size: 14px; }
-.search-results { overflow-y: auto; }
+.search-input::placeholder { color: var(--tk-text-muted); }
+.search-loading { color: var(--tk-text-muted); font-size: var(--tk-fz-lg); }
+.search-count {
+  font-size: var(--tk-fz-sm); color: var(--tk-text-secondary);
+  background: var(--tk-n-100);
+  padding: 2px var(--tk-s-2); border-radius: 10px;
+  font-weight: var(--tk-fw-semibold);
+}
+.search-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 .search-empty, .search-hint {
-  padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;
+  padding: var(--tk-s-6); text-align: center;
+  color: var(--tk-text-muted); font-size: var(--tk-fz-md);
 }
 .search-result {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 16px;
+  display: flex; align-items: center; gap: var(--tk-s-3);
+  padding: var(--tk-s-3) var(--tk-s-4);
   cursor: pointer;
-  border-bottom: 1px solid var(--border-light);
-  transition: background .12s;
+  border-bottom: 1px solid var(--tk-border-soft);
+  transition: background var(--tk-transition);
 }
 .search-result:last-child { border-bottom: none; }
-.search-result.hover, .search-result:hover { background: var(--bg-secondary, #f5f5f5); }
-.search-result.is-done { opacity: 0.6; }
+.search-result.hover, .search-result:hover { background: var(--tk-n-100); }
+.search-result.is-done { opacity: 0.55; }
 .sr-main { flex: 1; min-width: 0; }
 .sr-title {
-  font-size: 14px; font-weight: 600; color: var(--text);
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: var(--tk-fz-lg); font-weight: var(--tk-fw-semibold); color: var(--tk-text);
+  display: flex; align-items: center; gap: var(--tk-s-1); flex-wrap: wrap;
 }
 .sr-tag {
-  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px;
-  background: rgba(0,0,0,0.06); color: var(--text-muted);
+  font-size: 10px; font-weight: var(--tk-fw-bold);
+  padding: 1px var(--tk-s-1); border-radius: var(--tk-r-sm);
+  background: var(--tk-n-100); color: var(--tk-text-muted);
+  text-transform: uppercase; letter-spacing: .3px;
 }
-.sr-tag.urgent { background: #FFEBEE; color: #C62828; }
-.sr-tag.high { background: #FFF3E0; color: #E65100; }
+.sr-tag.urgent { background: var(--tk-prio-urgent-bg); color: var(--tk-prio-urgent-fg); }
+.sr-tag.high   { background: var(--tk-prio-high-bg);   color: var(--tk-prio-high-fg); }
 .sr-desc {
-  font-size: 12.5px; color: var(--text-muted);
-  margin-top: 4px; line-height: 1.3;
+  font-size: var(--tk-fz-sm); color: var(--tk-text-muted);
+  margin-top: var(--tk-s-1); line-height: 1.4;
   overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.sr-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
-.sr-board { font-weight: 600; color: var(--bk-orange, #E87A1E); }
-.sr-due { font-weight: 600; color: #2E7D32; }
-.sr-arrow { color: var(--text-muted); font-size: 18px; }
+.sr-meta { font-size: var(--tk-fz-xs); color: var(--tk-text-muted); margin-top: var(--tk-s-1); }
+.sr-board { font-weight: var(--tk-fw-semibold); color: var(--tk-accent-text); }
+.sr-due { font-weight: var(--tk-fw-semibold); color: var(--tk-success); }
+.sr-arrow { color: var(--tk-text-muted); font-size: var(--tk-fz-h1); }
 </style>

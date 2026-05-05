@@ -439,7 +439,6 @@ const sidebarSections = [
     { module: 'plan-fact', route: 'plan-fact', icon: 'delivery', label: 'Поставки' },
     { module: 'history', route: 'history', icon: 'history', label: 'История' },
     { module: 'tasks', route: 'tasks', icon: 'clipboard', label: 'Задачи' },
-    { module: 'tasks', route: 'my-tasks', icon: 'user', label: 'Мои задачи' },
   ]},
   { title: 'Данные', items: [
     { module: 'database', route: 'database', icon: 'database', label: 'База данных' },
