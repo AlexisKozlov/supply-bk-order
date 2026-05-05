@@ -12,7 +12,7 @@ $allowed = [
     'chat_conversations', 'chat_messages', 'supplier_payments', 'hidden_analogs',
     'error_logs', 'changelog', 'product_adu', 'stock_malling',
     'deficit_sessions', 'deficit_results', 'deficit_tokens', 'deficit_restaurant_stock',
-    'stock_collections', 'stock_collection_products', 'stock_collection_data', 'stock_collection_tokens',
+    'stock_collections', 'stock_collection_products', 'stock_collection_data',
     'price_agreements', 'product_prices', 'price_history',
     'tenders', 'tender_items', 'tender_offers', 'tender_offer_prices', 'tender_files',
     'bug_reports', 'bug_report_replies', 'restaurant_sales', 'report_exclusions',
@@ -170,7 +170,6 @@ $filterWhitelist = [
     'stock_collections'       => ['id','legal_entity','status'],
     'stock_collection_products' => ['id','collection_id'],
     'stock_collection_data'   => ['id','collection_id','product_id','restaurant_number'],
-    'stock_collection_tokens' => ['id','collection_id'],
     'price_agreements' => ['id','number','supplier','legal_entity','status','valid_from','valid_to','created_by','approved_by','created_at'],
     'product_prices'   => ['id','sku','supplier','legal_entity','agreement_id','vat_rate','updated_by','updated_at'],
     'restaurant_sales' => ['id','analog_group','sale_date','legal_entity_group'],
@@ -216,7 +215,6 @@ $writeWhitelist = [
     'stock_collections'=> ['id','name'],
     'stock_collection_data' => ['id','stock'],
     'stock_collection_products' => ['id','collection_id','product_name','product_sku','unit','note','sort_order'],
-    'stock_collection_tokens' => ['id'],
     'hidden_analogs'        => ['id','analog_group','hidden_by'],
     'plt_products'          => ['id','entity_group','name','sku','storage_type','boxes_per_pallet','sort_order'],
     'plt_deliveries'        => ['id','legal_entity','delivery_date','supplier_name','total_cold','total_frozen','note','created_by'],
@@ -377,7 +375,7 @@ if ($method === 'POST') {
     }
     $recs = isset($body[0]) ? $body : [$body]; $ins = [];
     foreach ($recs as $rec) {
-        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','stock_collection_tokens','plt_products','plt_deliveries','plt_delivery_items','plt_daily_stock','plt_summary','hidden_analogs','order_corrections','chat_conversations','chat_messages','supplier_payments','order_file'])) $rec['id'] = uuid();
+        if (!isset($rec['id']) && !in_array($table, ['audit_log','search_logs','api_keys','settings','notifications','delivery_schedule','restaurants','error_logs','changelog','price_agreements','product_prices','report_exclusions','stock_collection_products','stock_collection_data','plt_products','plt_deliveries','plt_delivery_items','plt_daily_stock','plt_summary','hidden_analogs','order_corrections','chat_conversations','chat_messages','supplier_payments','order_file'])) $rec['id'] = uuid();
         foreach (['items','details','legal_entities','sku_order','analogs','data'] as $jc) { if (isset($rec[$jc]) && is_array($rec[$jc])) $rec[$jc] = json_encode($rec[$jc], JSON_UNESCAPED_UNICODE); }
         // Валидация имён колонок
         foreach (array_keys($rec) as $col) { if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $col)) respond(['error' => 'Недопустимое имя колонки: '.$col], 400); }

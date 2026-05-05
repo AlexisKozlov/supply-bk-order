@@ -69,12 +69,6 @@ const routes = [
     meta: { title: 'Остатки ресторана' },
   },
   {
-    path: '/stock-form/:token',
-    name: 'stock-form',
-    component: () => import('@/views/StockFormView.vue'),
-    meta: { title: 'Остатки ресторана' },
-  },
-  {
     path: '/restaurant/login',
     name: 'restaurant-order-login',
     component: () => import('@/views/RestaurantOrderLoginView.vue'),

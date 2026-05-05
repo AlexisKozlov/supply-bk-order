@@ -32,7 +32,7 @@ const router = useRouter();
 const route = useRoute();
 
 // Публичные страницы, которые работают даже при тех. работах
-const publicRoutes = ['search-cards', 'stock-form', 'deficit-form'];
+const publicRoutes = ['search-cards', 'deficit-form'];
 
 const showMaintenance = computed(() =>
   userStore.maintenanceMode && !userStore.isAdmin && !publicRoutes.includes(route.name)

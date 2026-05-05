@@ -1471,16 +1471,10 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     file_put_contents(sys_get_temp_dir() . "/sc_{$chatId}.txt", "sc_input");
     file_put_contents(sys_get_temp_dir() . "/sc_data_{$chatId}.json", $state);
 
-    // Кнопка Mini App если есть токен
-    $btns = [];
-    $token = $pdo->prepare("SELECT token FROM stock_collection_tokens WHERE collection_id = ? AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1");
-    $token->execute([$collectionId]);
-    $tok = $token->fetchColumn();
-    if ($tok) {
-        $url = ($GLOBALS['SITE_URL'] ?? 'https://supply-department.online') . "/stock-form/{$tok}";
-        $btns[] = [['text' => '🌐 Заполнить на сайте', 'web_app' => ['url' => $url]]];
-    }
-    $btns[] = [['text' => '◂ Назад', 'callback_data' => "sc_col_{$collectionId}"]];
+    // Публичная ссылка отключена — оставляем только кнопку «Назад»
+    $btns = [
+        [['text' => '◂ Назад', 'callback_data' => "sc_col_{$collectionId}"]],
+    ];
 
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
 }

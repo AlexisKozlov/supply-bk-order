@@ -312,23 +312,17 @@ function scNotifyRestaurants($pdo, $collectionId, $collectionName, $productsCoun
     $subs = $st->fetchAll();
     if (!$subs) return 0;
 
-    // Ищем активный токен для WebApp-кнопки
-    $tokenStmt = $pdo->prepare("SELECT token FROM stock_collection_tokens WHERE collection_id = ? AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1");
-    $tokenStmt->execute([$collectionId]);
-    $tok = $tokenStmt->fetchColumn();
-
     $text = "📋 <b>Новый сбор остатков</b>\n";
     $text .= "─────────────────────\n";
     $text .= "📝 {$collectionName}\n";
     $text .= "📦 Товаров: {$productsCount}\n\n";
     $text .= "Заполните остатки по вашему ресторану:";
 
-    $siteUrl = $_ENV['SITE_URL'] ?? 'https://supply-department.online';
-    $btns = [];
-    if ($tok) {
-        $btns[] = [['text' => '📋 Заполнить остатки', 'web_app' => ['url' => "{$siteUrl}/stock-form/{$tok}"]]];
-    }
-    $btns[] = [['text' => '📋 Заполнить в боте', 'callback_data' => 'rest_sc_start']];
+    // Только заполнение в боте — публичная ссылка отключена,
+    // через ЛК ресторан тоже может зайти, но кнопка ведёт в бот напрямую.
+    $btns = [
+        [['text' => '📋 Заполнить в боте', 'callback_data' => 'rest_sc_start']],
+    ];
     $keyboard = json_encode(['inline_keyboard' => $btns]);
 
     $chatIds = array_column($subs, 'chat_id');
@@ -353,7 +347,7 @@ $TABLE_TO_MODULE = [
     'notifications'=>'history',
     'settings'=>'database','item_order'=>'order',
     'deficit_sessions'=>'deficit','deficit_results'=>'deficit','deficit_tokens'=>'deficit','deficit_restaurant_stock'=>'deficit',
-    'stock_collections'=>'stock-collection','stock_collection_products'=>'stock-collection','stock_collection_data'=>'stock-collection','stock_collection_tokens'=>'stock-collection',
+    'stock_collections'=>'stock-collection','stock_collection_products'=>'stock-collection','stock_collection_data'=>'stock-collection',
     'price_agreements'=>'pricing','product_prices'=>'pricing','price_history'=>'pricing',
     'tenders'=>'tenders','tender_items'=>'tenders','tender_offers'=>'tenders','tender_offer_prices'=>'tenders','tender_files'=>'tenders',
     'dist_sessions'=>'distribution','dist_session_products'=>'distribution','dist_entries'=>'distribution','dist_notes'=>'distribution',

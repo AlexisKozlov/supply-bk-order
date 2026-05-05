@@ -62,15 +62,6 @@
         </div>
       </div>
 
-      <!-- Token (inline) -->
-      <div v-if="tokenLink" class="sc-token">
-        <div class="sc-token-label">Ссылка для ресторанов</div>
-        <div class="sc-token-row">
-          <input :value="tokenLink" readonly class="sc-token-input" @focus="$event.target.select()"/>
-          <button class="sc-btn sm fill" @click="copyToken">{{ copied ? '✓ Скопировано' : 'Копировать' }}</button>
-        </div>
-      </div>
-
       <!-- Products & data -->
       <div v-if="collectionData" class="sc-data">
         <!-- Summary bar -->
@@ -221,29 +212,6 @@
           <div class="sc-modal-foot">
             <button class="sc-btn outline" @click="showRename = false">Отмена</button>
             <button class="sc-btn fill" @click="saveRename" :disabled="!renameName.trim()">Сохранить</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Token modal -->
-      <div v-if="showTokenModal" class="modal">
-        <div class="modal-box" style="max-width: 500px;">
-          <div class="sc-modal-head">
-            <h3>Ссылка для ресторанов</h3>
-            <button class="sc-x" @click="showTokenModal = false">✕</button>
-          </div>
-          <p class="sc-confirm-text">Будет создана ссылка, действительная 48 часов. Отправьте её ресторанам для заполнения остатков.</p>
-          <div v-if="tokenLink" class="sc-token" style="margin-top: 12px;">
-            <div class="sc-token-row">
-              <input :value="tokenLink" readonly class="sc-token-input" @focus="$event.target.select()"/>
-              <button class="sc-btn sm fill" @click="copyToken">{{ copied ? '✓' : 'Копировать' }}</button>
-            </div>
-          </div>
-          <div class="sc-modal-foot">
-            <button v-if="!tokenLink" class="sc-btn fill" @click="doCreateToken" :disabled="creatingToken">
-              {{ creatingToken ? '...' : 'Создать ссылку' }}
-            </button>
-            <button v-else class="sc-btn outline" @click="showTokenModal = false">Готово</button>
           </div>
         </div>
       </div>
@@ -481,11 +449,6 @@ const newName = ref('');
 const newProducts = ref([makeProductRow()]);
 const canCreate = computed(() => newName.value.trim() && newProducts.value.some(p => p.name.trim() || p.fromDb));
 
-// Token
-const tokenLink = ref('');
-const copied = ref(false);
-const creatingToken = ref(false);
-const showTokenModal = ref(false);
 const notifying = ref(false);
 
 // Confirm modal
@@ -672,38 +635,15 @@ async function createCollection() {
       showCreate.value = false;
       await loadCollections();
       const coll = collections.value.find(c => c.id === data.id);
-      if (coll) {
-        await openCollection(coll);
-        // Токен создаётся автоматически — подхватываем из ответа
-        if (data.token) {
-          tokenLink.value = `${window.location.origin}/stock-form/${data.token}`;
-        }
-      }
+      if (coll) await openCollection(coll);
     }
   } catch { toastStore.error('Ошибка', 'Не удалось создать'); } finally { creating.value = false; }
 }
 
 async function openCollection(c) {
   activeCollection.value = c;
-  tokenLink.value = '';
   editingCell.value = null;
-  await Promise.all([refreshData(), loadActiveToken(c.id)]);
-}
-
-async function loadActiveToken(collectionId) {
-  try {
-    const { data } = await db.from('stock_collection_tokens')
-      .select('token,expires_at')
-      .eq('collection_id', collectionId)
-      .order('expires_at', { ascending: false })
-      .limit(1);
-    if (data?.length) {
-      const t = data[0];
-      if (new Date(t.expires_at) > new Date()) {
-        tokenLink.value = `${window.location.origin}/stock-form/${t.token}`;
-      }
-    }
-  } catch {}
+  await refreshData();
 }
 
 async function refreshData() {
@@ -712,25 +652,6 @@ async function refreshData() {
     const { data } = await db.rpc('sc_get_collection_data', { collection_id: activeCollection.value.id });
     collectionData.value = data;
   } catch { toastStore.error('Ошибка', 'Не удалось загрузить данные'); }
-}
-
-// Token modal
-function openTokenModal() {
-  tokenLink.value = '';
-  copied.value = false;
-  showTokenModal.value = true;
-}
-async function doCreateToken() {
-  creatingToken.value = true;
-  try {
-    const { data } = await db.rpc('sc_create_token', {
-      collection_id: activeCollection.value.id,
-      user_name: userStore.currentUser?.name || '',
-    });
-    if (data?.token) {
-      tokenLink.value = `${window.location.origin}/stock-form/${data.token}`;
-    }
-  } catch { toastStore.error('Ошибка', 'Не удалось создать ссылку'); } finally { creatingToken.value = false; }
 }
 
 async function notifyRestaurants() {
@@ -744,18 +665,11 @@ async function notifyRestaurants() {
   finally { notifying.value = false }
 }
 
-function copyToken() {
-  navigator.clipboard.writeText(tokenLink.value).then(() => {
-    copied.value = true;
-    setTimeout(() => copied.value = false, 2000);
-  }).catch(() => { toastStore.error('Ошибка', 'Не удалось скопировать'); });
-}
-
 // Close collection
 function askCloseCollection() {
   confirmModal.value = {
     show: true, title: 'Закрыть сбор', danger: true,
-    text: 'Рестораны больше не смогут отправить остатки по ссылке. Данные сохранятся.',
+    text: 'Рестораны больше не смогут отправить остатки. Данные сохранятся.',
     btnText: 'Закрыть сбор',
     action: doCloseCollection,
   };
@@ -764,7 +678,6 @@ async function doCloseCollection() {
   try {
     await db.rpc('sc_close_collection', { collection_id: activeCollection.value.id });
     activeCollection.value.status = 'closed';
-    tokenLink.value = '';
     toastStore.success('Закрыт', 'Сбор закрыт');
   } catch { toastStore.error('Ошибка', 'Не удалось закрыть'); }
 }
@@ -772,7 +685,7 @@ async function doCloseCollection() {
 function askReopenCollection() {
   confirmModal.value = {
     show: true, title: 'Переоткрыть сбор', danger: false,
-    text: 'Рестораны снова смогут открыть сбор и отправить остатки. Будет создана новая ссылка.',
+    text: 'Рестораны снова смогут открыть сбор и отправить остатки.',
     btnText: 'Переоткрыть',
     action: doReopenCollection,
   };
@@ -780,12 +693,9 @@ function askReopenCollection() {
 
 async function doReopenCollection() {
   try {
-    const { data, error } = await db.rpc('sc_reopen_collection', { collection_id: activeCollection.value.id });
+    const { error } = await db.rpc('sc_reopen_collection', { collection_id: activeCollection.value.id });
     if (error) throw new Error(error);
     activeCollection.value.status = 'active';
-    if (data?.token) {
-      tokenLink.value = `${window.location.origin}/stock-form/${data.token}`;
-    }
     toastStore.success('Открыт', 'Сбор снова доступен ресторанам');
   } catch (e) {
     toastStore.error('Ошибка', e.message || 'Не удалось переоткрыть');

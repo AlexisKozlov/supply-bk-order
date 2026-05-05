@@ -1795,10 +1795,6 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
     if (!$collection) {
         roRespond(['active' => false]);
     }
-    // Получаем токен для прямого доступа
-    $t = $pdo->prepare("SELECT token FROM stock_collection_tokens WHERE collection_id = ? AND expires_at > NOW() ORDER BY id DESC LIMIT 1");
-    $t->execute([$collection['id']]);
-    $tok = $t->fetch();
     roRespond([
         'active' => true,
         'collection' => [
@@ -1807,7 +1803,6 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
             'submitted' => ((int)$collection['total_products'] > 0) && ((int)$collection['submitted_count'] >= (int)$collection['total_products']),
             'submitted_count' => (int)$collection['submitted_count'],
             'total_products' => (int)$collection['total_products'],
-            'token' => $tok['token'] ?? null,
         ],
     ]);
 }

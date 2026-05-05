@@ -194,71 +194,12 @@ if ($endpoint === 'rpc') {
         respond(['success' => true]);
     }
 
-    // ═══ STOCK COLLECTION: публичные RPC (новая форма) ═══
-    if ($fn === 'sc_validate_token') {
-        $tokenVal = $body['token_value'] ?? '';
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
-        $s = $pdo->prepare("SELECT t.id as token_id, t.collection_id, t.expires_at, c.legal_entity, c.name as collection_name FROM stock_collection_tokens t JOIN stock_collections c ON c.id = t.collection_id WHERE t.token = ?");
-        $s->execute([$tokenVal]);
-        $row = $s->fetch();
-        if (!$row) respond(['error' => 'not_found', 'expired' => true]);
-        if (strtotime($row['expires_at']) < time()) respond(['error' => 'expired', 'expired' => true]);
-        // Товары
-        $s2 = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
-        $s2->execute([$row['collection_id']]);
-        $products = $s2->fetchAll();
-        // Рестораны, которые уже ответили
-        $s3 = $pdo->prepare("SELECT DISTINCT restaurant_number FROM stock_collection_data WHERE collection_id = ?");
-        $s3->execute([$row['collection_id']]);
-        $submitted = array_column($s3->fetchAll(), 'restaurant_number');
-        respond(['collection_id' => $row['collection_id'], 'legal_entity' => $row['legal_entity'], 'collection_name' => $row['collection_name'], 'products' => $products, 'submitted_restaurants' => $submitted]);
-    }
-    if ($fn === 'sc_get_restaurants') {
-        $tokenVal = $body['token_value'] ?? '';
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
-        $s = $pdo->prepare("SELECT c.legal_entity FROM stock_collection_tokens t JOIN stock_collections c ON c.id = t.collection_id WHERE t.token = ? AND t.expires_at > NOW()");
-        $s->execute([$tokenVal]);
-        $row = $s->fetch();
-        if (!$row) respond(['error' => 'expired']);
-        $le = $row['legal_entity'];
-        $group = getEntityGroup($le);
-        $s2 = $pdo->prepare("SELECT id, number, address, city FROM restaurants WHERE legal_entity_group = ? ORDER BY sort_order");
-        $s2->execute([$group]);
-        respond($s2->fetchAll());
-    }
-    if ($fn === 'sc_submit_stock') {
-        $tokenVal = $body['token_value'] ?? '';
-        $restNum = $body['restaurant_num'] ?? '';
-        $items = $body['items'] ?? []; // [{product_id, stock}]
-        if (!$tokenVal || !preg_match('/^[a-f0-9]{64}$/', $tokenVal)) respond(['error' => 'invalid_token']);
-        if (!$restNum || !preg_match('/^\d{1,5}$/', $restNum)) respond(['error' => 'invalid_restaurant']);
-        if (!checkRateLimit($pdo, $clientIp, 60, 5)) respond(['error' => 'too_many_attempts'], 429);
-        $s = $pdo->prepare("SELECT collection_id FROM stock_collection_tokens WHERE token = ? AND expires_at > NOW()");
-        $s->execute([$tokenVal]);
-        $tok = $s->fetch();
-        if (!$tok) respond(['error' => 'expired']);
-        $collId = $tok['collection_id'];
-        // Загружаем допустимые product_id для данной коллекции
-        $validPids = $pdo->prepare("SELECT id FROM stock_collection_products WHERE collection_id = ?");
-        $validPids->execute([$collId]);
-        $allowedPids = array_column($validPids->fetchAll(), 'id');
-        $allowedSet = array_flip($allowedPids);
-        $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW()) ON DUPLICATE KEY UPDATE stock = VALUES(stock), submitted_at = NOW()");
-        $pdo->beginTransaction();
-        try {
-            foreach ($items as $item) {
-                $pid = intval($item['product_id'] ?? 0);
-                $sv = floatval($item['stock'] ?? 0);
-                if ($sv < 0 || $sv > 999999) continue;
-                if ($pid > 0 && isset($allowedSet[$pid])) $ins->execute([$collId, $pid, $restNum, $sv]);
-            }
-            $pdo->commit();
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            error_log('sc_submit_stock error: ' . $e->getMessage());
-            respond(['error' => 'save_failed'], 500);
-        }
-        respond(['success' => true]);
+    // ═══ STOCK COLLECTION: публичная форма удалена.
+    // Сбор остатков идёт только через ЛК ресторана (X-RO-Token, см. restaurant_orders.php)
+    // и Telegram-бота (см. bot_rest.php). RPC sc_validate_token / sc_get_restaurants /
+    // sc_submit_stock / sc_create_token больше не существуют.
+    if (in_array($fn, ['sc_validate_token', 'sc_get_restaurants', 'sc_submit_stock', 'sc_create_token'], true)) {
+        respond(['error' => 'Публичная ссылка для сбора остатков отключена. Используйте ЛК ресторана или Telegram-бот.'], 410);
     }
 
     if (str_starts_with($fn, 'veg_')) {
@@ -821,17 +762,11 @@ if ($endpoint === 'rpc') {
             error_log('sc_create_collection error: ' . $e->getMessage());
             respond(['error' => 'Ошибка создания сбора'], 500);
         }
-        // Автоматически создаём токен (7 дней)
-        $token = bin2hex(random_bytes(32));
-        $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
-        $tokenStmt = $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)");
-        $tokenStmt->execute([$collId, $token, $uname, $expires]);
-
-        // Уведомляем рестораны о новом сборе
+        // Уведомляем рестораны о новом сборе (только Telegram-бот, без публичной ссылки)
         scNotifyRestaurants($pdo, $collId, $name, count($products));
 
         auditLog($pdo, 'collection_created', 'stock_collection', $collId, $uname, ['legal_entity' => $le, 'name' => $name, 'products_count' => count($products)]);
-        respond(['id' => $collId, 'token' => $token, 'expires_at' => $expires]);
+        respond(['id' => $collId]);
     }
 
     // Повторная отправка уведомлений ресторанам о сборе
@@ -850,22 +785,6 @@ if ($endpoint === 'rpc') {
         respond(['success' => true, 'sent' => $sent]);
     }
 
-    if ($fn === 'sc_create_token') {
-        $collId = intval($body['collection_id'] ?? 0);
-        $uname = $authUserName ?: ($body['user_name'] ?? '');
-        if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
-        // Проверяем доступ к юрлицу коллекции
-        $collCheck = $pdo->prepare("SELECT legal_entity FROM stock_collections WHERE id = ?");
-        $collCheck->execute([$collId]);
-        $collRow = $collCheck->fetch();
-        if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
-        if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
-        $token = bin2hex(random_bytes(32));
-        $expires = date('Y-m-d H:i:s', strtotime('+48 hours'));
-        $s = $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)");
-        $s->execute([$collId, $token, $uname, $expires]);
-        respond(['token' => $token, 'token_id' => $pdo->lastInsertId(), 'expires_at' => $expires]);
-    }
     if ($fn === 'sc_close_collection') {
         $collId = intval($body['collection_id'] ?? 0);
         if (!$collId) respond(['error' => 'Не все параметры указаны'], 400);
@@ -876,8 +795,6 @@ if ($endpoint === 'rpc') {
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
         if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         $pdo->prepare("UPDATE stock_collections SET status = 'closed', closed_at = NOW() WHERE id = ?")->execute([$collId]);
-        // Инвалидируем все токены этого сбора
-        $pdo->prepare("UPDATE stock_collection_tokens SET expires_at = NOW() WHERE collection_id = ? AND expires_at > NOW()")->execute([$collId]);
         auditLog($pdo, 'collection_closed', 'stock_collection', $collId, $authUserName, ['legal_entity' => $collRow['legal_entity']]);
         respond(['success' => true]);
     }
@@ -893,12 +810,8 @@ if ($endpoint === 'rpc') {
         if ($collRow['status'] === 'active') respond(['success' => true, 'already_active' => true]);
 
         $pdo->prepare("UPDATE stock_collections SET status = 'active', closed_at = NULL WHERE id = ?")->execute([$collId]);
-        $token = bin2hex(random_bytes(32));
-        $expires = date('Y-m-d H:i:s', strtotime('+7 days'));
-        $pdo->prepare("INSERT INTO stock_collection_tokens (collection_id, token, created_by, expires_at) VALUES (?, ?, ?, ?)")
-            ->execute([$collId, $token, $uname, $expires]);
         auditLog($pdo, 'collection_reopened', 'stock_collection', $collId, $uname, ['legal_entity' => $collRow['legal_entity']]);
-        respond(['success' => true, 'token' => $token, 'expires_at' => $expires]);
+        respond(['success' => true]);
     }
     if ($fn === 'sc_delete_collection') {
         $collId = intval($body['collection_id'] ?? 0);
@@ -911,7 +824,6 @@ if ($endpoint === 'rpc') {
         $pdo->beginTransaction();
         try {
             $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ?")->execute([$collId]);
-            $pdo->prepare("DELETE FROM stock_collection_tokens WHERE collection_id = ?")->execute([$collId]);
             $pdo->prepare("DELETE FROM stock_collection_products WHERE collection_id = ?")->execute([$collId]);
             $pdo->prepare("DELETE FROM stock_collections WHERE id = ?")->execute([$collId]);
             $pdo->commit();
