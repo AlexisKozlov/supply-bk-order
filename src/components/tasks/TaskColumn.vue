@@ -2,15 +2,16 @@
   <div
     class="task-column"
     :class="{ 'is-drop-target': dropActive, 'is-archive': column.is_archive_column }"
+    :style="{ '--col-color': column.color || '#9E9E9E' }"
     @dragover.prevent="onColumnDragOver"
     @dragleave="onColumnDragLeave"
     @drop="onColumnDrop"
   >
-    <div class="task-column-header" :style="{ '--col-dot': column.color || '#9E9E9E' }">
+    <div class="task-column-color-bar"></div>
+    <div class="task-column-header">
       <TaskIcon v-if="column.is_archive_column" name="archive" :size="14" class="archive-icon"/>
       <div class="task-column-title-wrap">
         <span v-if="!editingTitle || column.is_archive_column" class="task-column-title"
-              :class="{ 'no-dot': column.is_archive_column }"
               @dblclick="!column.is_archive_column && startEditTitle()">{{ column.title }}</span>
         <input v-else ref="titleInput" v-model="titleDraft" class="task-column-title-input"
                @blur="saveTitle" @keydown.enter="saveTitle" @keydown.esc="cancelEditTitle" />
@@ -326,8 +327,13 @@ defineExpose({});
   color: var(--tk-text-muted, #758195);
   margin-right: 2px;
 }
-.task-column-title.no-dot { padding-left: 0; }
-.task-column-title.no-dot::before { display: none; }
+.task-column { position: relative; }
+.task-column-color-bar {
+  height: 4px;
+  background: var(--col-color, #9E9E9E);
+  border-radius: var(--tk-r-lg, 12px) var(--tk-r-lg, 12px) 0 0;
+}
+.task-column.is-archive .task-column-color-bar { background: #9E9E9E; opacity: 0.6; }
 
 .task-column-header {
   padding: var(--tk-s-3, 12px) var(--tk-s-3, 12px) var(--tk-s-2, 8px);
@@ -342,15 +348,6 @@ defineExpose({});
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   cursor: text;
   text-transform: uppercase; letter-spacing: .4px;
-  position: relative;
-  padding-left: var(--tk-s-3, 12px);
-}
-.task-column-title::before {
-  content: '';
-  position: absolute; left: 0; top: 50%;
-  transform: translateY(-50%);
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--col-dot, #9E9E9E);
 }
 .task-column-title-input {
   font-weight: var(--tk-fw-semibold, 600);
@@ -499,7 +496,7 @@ defineExpose({});
 }
 
 .task-column-color-pop {
-  position: absolute; top: 38px; right: var(--tk-s-2, 8px); z-index: 30;
+  position: absolute; top: 42px; right: var(--tk-s-2, 8px); z-index: 30;
   background: var(--tk-bg-popover, #fff);
   border: 1px solid var(--tk-border, #DCDFE4);
   border-radius: var(--tk-r-md, 8px);
