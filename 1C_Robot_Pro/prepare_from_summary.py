@@ -4,6 +4,8 @@ import re
 import pandas as pd
 from pathlib import Path
 
+from excel_service import write_xlsx_with_text_columns
+
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
 SPRAV_FILE = BASE_DIR / "Карточки_ООО Бургер БК_15.04.2026.xlsx"
@@ -41,7 +43,7 @@ def main():
 
     print(f"Сводный файл: {input_file.name}")
 
-    sprav = pd.read_excel(SPRAV_FILE)
+    sprav = pd.read_excel(SPRAV_FILE, dtype=str).fillna("")
     for col in ["Штрихкод", "Артикул"]:
         if col not in sprav.columns:
             raise SystemExit(f"ОШИБКА: в справочнике нет колонки: {col}")
@@ -56,7 +58,7 @@ def main():
 
     for sheet in excel.sheet_names:
         print(f"Лист: {sheet}")
-        df = excel.parse(sheet)
+        df = excel.parse(sheet, dtype=str).fillna("")
         required = ["GTIN", "Количество", "Номер ЭТТН"]
         if not all(col in df.columns for col in required):
             print(f"Пропуск листа {sheet}: нет нужных колонок.")
@@ -88,9 +90,9 @@ def main():
     if df_all.empty:
         raise SystemExit("ОШИБКА: нет данных для обработки.")
 
-    df_all.to_excel(OUTPUT_DIR / "summary_all.xlsx", index=False)
+    write_xlsx_with_text_columns(df_all, OUTPUT_DIR / "summary_all.xlsx")
     if errors:
-        pd.DataFrame(errors).to_excel(OUTPUT_DIR / "summary_errors.xlsx", index=False)
+        write_xlsx_with_text_columns(pd.DataFrame(errors), OUTPUT_DIR / "summary_errors.xlsx")
         print(f"ВНИМАНИЕ: есть проблемные строки: {len(errors)}")
 
     df_ok = df_all[df_all["Статус"] == "OK"].copy()
@@ -100,7 +102,7 @@ def main():
     count_files = 0
     for ettn, part in df_ok.groupby("ЭТТН"):
         path = OUTPUT_DIR / f"{safe_filename(ettn)}_queue_ok.xlsx"
-        part[["Артикул", "Количество", "GTIN", "ЭТТН", "Лист"]].to_excel(path, index=False)
+        write_xlsx_with_text_columns(part[["Артикул", "Количество", "GTIN", "ЭТТН", "Лист"]], path)
         count_files += 1
         print(f"Создан файл: {path.name} | строк: {len(part)}")
 

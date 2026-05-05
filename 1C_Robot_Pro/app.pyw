@@ -1135,6 +1135,30 @@ class RobotApp:
             s = s[:-2]
         return s
 
+    def clean_article(self, value) -> str:
+        if pd.isna(value):
+            return ""
+        if isinstance(value, (int, float)):
+            try:
+                self.log(
+                    f"ВНИМАНИЕ: артикул пришёл как число ({value!r}). Возможна потеря ведущих нулей. "
+                    f"Проверьте, что Excel читается с dtype=str.",
+                    "warn",
+                )
+            except Exception:
+                pass
+            if isinstance(value, float):
+                if pd.isna(value):
+                    return ""
+                if value.is_integer():
+                    return str(int(value))
+                return str(value)
+            return str(value)
+        s = str(value).strip()
+        if s.lower() == "nan":
+            return ""
+        return s
+
     def press_enter(self, times: int):
         for _ in range(times):
             if self.stop_event.is_set() or self.wait_if_paused():
@@ -1189,13 +1213,16 @@ class RobotApp:
                 pass
 
         try:
-            df = pd.read_excel(self.selected_path)
+            df = pd.read_excel(self.selected_path, dtype=str).fillna("")
             required = ["Артикул", "Количество"]
             for col in required:
                 if col not in df.columns:
                     raise RuntimeError(f"В файле отсутствует колонка: {col}")
             if df.empty:
                 raise RuntimeError("Файл загрузки пустой")
+            df["Артикул"] = df["Артикул"].astype(str).str.strip()
+            df["Количество"] = df["Количество"].astype(str).str.strip()
+            leading_zero_count = int(df["Артикул"].str.match(r"^0\d").sum())
             total_rows = len(df)
             start_row = self.int_setting(self.start_row_var, 1, 1)
             if start_row > total_rows:
@@ -1209,6 +1236,7 @@ class RobotApp:
             write_both(f"Запуск робота. Режим: {self.settings.mode} / ввод Unicode-символами", "start")
             write_both(f"Файл загрузки: {self.selected_path}", "info")
             write_both(f"Всего строк: {total_rows}", "info")
+            write_both(f"Артикулов с ведущими нулями: {leading_zero_count}", "info")
             if start_row > 1:
                 write_both(f"Продолжение с строки: {start_row}", "warn")
             write_both("Перед стартом: нужная система открыта, курсор стоит в первой строке ввода, ENG, Caps Lock выкл.", "warn")
@@ -1236,7 +1264,7 @@ class RobotApp:
                     break
 
                 row_num = i + 1
-                article = self.cleanup_value(row["Артикул"])
+                article = self.clean_article(row["Артикул"])
                 qty = self.cleanup_value(row["Количество"])
 
                 try:

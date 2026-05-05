@@ -20,6 +20,31 @@ MERCURY_STOCK_SHEETS = {
 }
 
 
+TEXT_COLUMNS_DEFAULT = ("Артикул", "GTIN", "Штрихкод", "ЭТТН", "Номер ЭТТН", "№ ресторана")
+
+
+def write_xlsx_with_text_columns(df, path, text_columns=TEXT_COLUMNS_DEFAULT):
+    """Сохранить DataFrame в xlsx и пометить колонки с кодами как текст,
+    чтобы Excel не отбрасывал ведущие нули у артикулов/GTIN."""
+    path = Path(path)
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+        worksheet = writer.sheets[list(writer.sheets.keys())[0]]
+        column_indexes = {}
+        for idx, column_name in enumerate(df.columns, start=1):
+            if column_name in text_columns:
+                column_indexes[idx] = column_name
+        if not column_indexes:
+            return
+        for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+            for cell in row:
+                if cell.column in column_indexes:
+                    if cell.value is None:
+                        continue
+                    cell.value = str(cell.value)
+                    cell.number_format = "@"
+
+
 def normalize_gtin(value):
     if pd.isna(value):
         return ""
@@ -219,9 +244,9 @@ def clear_output_xlsx(output_dir: Path):
 
 
 def write_common_files(result_df, output_dir: Path):
-    result_df.to_excel(output_dir / "queue.xlsx", index=False)
-    result_df[result_df["Статус"] == "OK"].to_excel(output_dir / "queue_ok.xlsx", index=False)
-    result_df[result_df["Статус"] != "OK"].to_excel(output_dir / "queue_errors.xlsx", index=False)
+    write_xlsx_with_text_columns(result_df, output_dir / "queue.xlsx")
+    write_xlsx_with_text_columns(result_df[result_df["Статус"] == "OK"], output_dir / "queue_ok.xlsx")
+    write_xlsx_with_text_columns(result_df[result_df["Статус"] != "OK"], output_dir / "queue_errors.xlsx")
 
 
 def stats_for(result_df):
@@ -249,13 +274,13 @@ def process_mercury_to_output(invoice_path: Path, output_dir: Path, clear_output
     else:
         output_dir.mkdir(exist_ok=True)
 
-    result_df.to_excel(output_dir / "mercury_queue.xlsx", index=False)
+    write_xlsx_with_text_columns(result_df, output_dir / "mercury_queue.xlsx")
     created = ["mercury_queue.xlsx"]
 
     for (rest_number, rest_address, stock_name), group in result_df.groupby(["№ ресторана", "Адрес ресторана", "Склад"], sort=True):
         load_df = group[["Артикул", "Количество"]].copy()
         output_name = f"{safe_filename(rest_number)}_{safe_filename(rest_address)}_{stock_name}_mercury_queue_ok.xlsx"
-        load_df.to_excel(output_dir / output_name, index=False)
+        write_xlsx_with_text_columns(load_df, output_dir / output_name)
         created.append(output_name)
 
     return {
@@ -286,7 +311,7 @@ def process_to_output(reference_path: Path, invoice_path: Path, output_dir: Path
         ok_rows = result_df[result_df["Статус"] == "OK"]
         for ettn, group in ok_rows.groupby("Номер ЭТТН"):
             filename = f"{safe_filename(ettn)}_queue_ok.xlsx"
-            group.to_excel(output_dir / filename, index=False)
+            write_xlsx_with_text_columns(group, output_dir / filename)
             created.append(filename)
 
     return {

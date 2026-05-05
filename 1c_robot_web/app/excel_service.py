@@ -13,6 +13,31 @@ MODE_SINGLE = "single_stt"
 MODE_SUMMARY = "summary_ettn"
 
 
+TEXT_COLUMNS_DEFAULT = ("Артикул", "GTIN", "Штрихкод", "ЭТТН", "Номер ЭТТН", "№ ресторана")
+
+
+def write_xlsx_with_text_columns(df, path, text_columns=TEXT_COLUMNS_DEFAULT):
+    """Сохранить DataFrame в xlsx и пометить колонки с кодами как текст,
+    чтобы Excel не отбрасывал ведущие нули у артикулов/GTIN."""
+    path = Path(path)
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+        worksheet = writer.sheets[list(writer.sheets.keys())[0]]
+        column_indexes = {}
+        for idx, column_name in enumerate(df.columns, start=1):
+            if column_name in text_columns:
+                column_indexes[idx] = column_name
+        if not column_indexes:
+            return
+        for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+            for cell in row:
+                if cell.column in column_indexes:
+                    if cell.value is None:
+                        continue
+                    cell.value = str(cell.value)
+                    cell.number_format = "@"
+
+
 def normalize_gtin(value):
     if pd.isna(value):
         return ""
@@ -85,9 +110,9 @@ def write_common_files(result_df, output_dir):
     ok_path = output_dir / "queue_ok.xlsx"
     errors_path = output_dir / "queue_errors.xlsx"
 
-    result_df.to_excel(queue_path, index=False)
-    result_df[result_df["Статус"] == "OK"].to_excel(ok_path, index=False)
-    result_df[result_df["Статус"] != "OK"].to_excel(errors_path, index=False)
+    write_xlsx_with_text_columns(result_df, queue_path)
+    write_xlsx_with_text_columns(result_df[result_df["Статус"] == "OK"], ok_path)
+    write_xlsx_with_text_columns(result_df[result_df["Статус"] != "OK"], errors_path)
 
     return [
         {"name": "queue.xlsx", "path": queue_path.name},
@@ -195,7 +220,7 @@ def process_files(reference_path, invoice_path, mode):
     if mode == MODE_SUMMARY and "Номер ЭТТН" in result_df.columns:
         for ettn, group in result_df[result_df["Статус"] == "OK"].groupby("Номер ЭТТН"):
             filename = f"{safe_filename(ettn)}_queue_ok.xlsx"
-            group.to_excel(output_dir / filename, index=False)
+            write_xlsx_with_text_columns(group, output_dir / filename)
             files.append({"name": filename, "path": filename})
 
     return {
