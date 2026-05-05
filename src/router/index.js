@@ -60,7 +60,6 @@ const routes = [
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
       { path: 'tasks', name: 'tasks', component: () => import('@/views/TasksView.vue'), meta: { title: 'Задачи', module: 'tasks' } },
-      { path: 'my-tasks', name: 'my-tasks', component: () => import('@/views/MyTasksView.vue'), meta: { title: 'Мои задачи', module: 'tasks' } },
     ],
   },
   {
