@@ -52,6 +52,34 @@ npm run build
 - [Поддержка и безопасные изменения](/var/www/bk-calc/docs/maintenance.md)
 - [Диагностика проблем](/var/www/bk-calc/docs/troubleshooting.md)
 
+## Настройки скорости ввода (robot_1c.py)
+
+Скрипт `robot_1c.py` поддерживает три предустановленные скорости:
+
+- `--speed slow` — медленный ввод (пауза между нажатиями 0.3 с, между строками 0.5 с)
+- `--speed medium` — средний ввод (пауза между нажатиями 0.15 с, между строками 0.3 с) — **по умолчанию**
+- `--speed fast` — быстрый ввод (пауза между нажатиями 0.05 с, между строками 0.1 с)
+
+Также можно задать паузы вручную:
+
+- `--pause-between-keys 0.2` — пауза между нажатиями клавиш (секунды)
+- `--pause-between-rows 0.4` — пауза между строками (секунды)
+
+Если указан `--speed`, то ручные паузы игнорируются.
+
+Примеры:
+
+```bash
+# Быстрый ввод
+python robot_1c.py queue_ok.xlsx --speed fast
+
+# Медленный ввод
+python robot_1c.py queue_ok.xlsx --speed slow
+
+# Ручные паузы
+python robot_1c.py queue_ok.xlsx --pause-between-keys 0.25 --pause-between-rows 0.5
+```
+
 ## Точки входа
 
 - Фронтенд: [index.html](/var/www/bk-calc/index.html) -> [src/main.js](/var/www/bk-calc/src/main.js) -> [src/App.vue](/var/www/bk-calc/src/App.vue) -> [src/router/index.js](/var/www/bk-calc/src/router/index.js)
