@@ -154,6 +154,7 @@
             @move-card="onMoveCard"
             @rename="title => store.updateColumn(col.id, { title })"
             @set-color="color => store.updateColumn(col.id, { color })"
+            @set-wip-limit="limit => store.updateColumn(col.id, { wip_limit: limit })"
             @toggle-done="store.updateColumn(col.id, { is_done_column: col.is_done_column ? 0 : 1 })"
             @delete="store.deleteColumn(col.id)"
             @card-dragstart="card => draggedCard = card"

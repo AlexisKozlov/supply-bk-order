@@ -42,6 +42,10 @@
         </button>
       </div>
       <div class="card-menu-divider"></div>
+      <button class="card-menu-item" @click="archiveOrRestoreFromMenu">
+        <TaskIcon name="archive" :size="14"/>
+        {{ isInArchiveColumn ? 'Восстановить из архива' : 'Архивировать' }}
+      </button>
       <button class="card-menu-item danger" @click="deleteCardFromMenu">
         <TaskIcon name="trash" :size="14"/> Удалить карточку
       </button>
@@ -55,6 +59,13 @@
              @change="completeAndArchive"
              title="Завершить и убрать в архив" />
       <div class="task-card-title">{{ card.title }}</div>
+    </div>
+
+    <!-- Прогресс-бар чек-листа (виден, только если есть пункты) -->
+    <div v-if="card.checklist?.total" class="task-card-progress"
+         :title="'Чек-лист: ' + card.checklist.done + ' из ' + card.checklist.total"
+         :class="{ done: card.checklist.done === card.checklist.total }">
+      <div class="task-card-progress-fill" :style="{ width: checklistPct + '%' }"></div>
     </div>
 
     <!-- Метаданные снизу -->
@@ -206,6 +217,16 @@ const cardLabels = computed(() => {
 });
 const priorityClass = computed(() => 'prio-' + (props.card.priority || 'medium'));
 const priorityLabel = computed(() => (priorities.find(p => p.value === props.card.priority)?.label) || 'Средний');
+const checklistPct = computed(() => {
+  const total = props.card.checklist?.total || 0;
+  const done = props.card.checklist?.done || 0;
+  if (!total) return 0;
+  return Math.round(done / total * 100);
+});
+const isInArchiveColumn = computed(() => {
+  const col = store.columns.find(c => c.id === props.card.column_id);
+  return !!col?.is_archive_column;
+});
 const isOverdue = computed(() => {
   if (!props.card.due_date || props.card.is_done) return false;
   return new Date(props.card.due_date) < new Date();
@@ -321,6 +342,11 @@ async function completeAndArchive() {
   } catch (e) {
     showError(e);
   }
+}
+
+async function archiveOrRestoreFromMenu() {
+  cardMenuOpen.value = false;
+  await completeAndArchive();
 }
 
 function toggleSubtasks() { subtasksOpen.value = !subtasksOpen.value; }
@@ -493,6 +519,24 @@ const vClickOutsideCard = {
   min-width: 0;
 }
 .task-card.is-done .task-card-title { /* перебивает .is-done из ранее */ }
+
+/* Прогресс-бар чек-листа */
+.task-card-progress {
+  height: 4px;
+  background: var(--tk-n-100, #EBECF0);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: -2px 0 var(--tk-s-2, 8px);
+}
+.task-card-progress-fill {
+  height: 100%;
+  background: var(--tk-accent, #E87A1E);
+  border-radius: inherit;
+  transition: width 200ms ease, background 200ms ease;
+}
+.task-card-progress.done .task-card-progress-fill {
+  background: #36B37E;
+}
 
 /* Круглый чекбокс «Готово + в архив» */
 .task-card-done-chk {

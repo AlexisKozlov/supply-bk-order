@@ -63,10 +63,29 @@
 
           <!-- Описание -->
           <section class="ts-section">
-            <div class="ts-section-title">Описание</div>
-            <textarea v-model="full.card.description" class="ts-textarea" rows="3"
-                      placeholder="Добавить описание…"
-                      @blur="patch({ description: full.card.description || '' })"></textarea>
+            <div class="ts-section-title">
+              Описание
+              <button v-if="full.card.description && !descEditing" class="ts-section-action"
+                      @click="startDescEdit" title="Редактировать">
+                <TaskIcon name="edit" :size="12"/>
+                <span>Редактировать</span>
+              </button>
+            </div>
+            <div v-if="!descEditing && full.card.description" class="ts-md-view"
+                 @click="startDescEdit" v-html="descHtml"></div>
+            <div v-else class="ts-md-edit">
+              <textarea ref="descTextarea" v-model="full.card.description" class="ts-textarea" rows="4"
+                        placeholder="Добавить описание… Поддерживается **жирный** *курсив* `код` [ссылка](url), списки и заголовки."
+                        @blur="finishDescEdit"></textarea>
+              <div class="ts-md-hint">
+                <span><strong>**жирный**</strong></span>
+                <span><em>*курсив*</em></span>
+                <span><code>`код`</code></span>
+                <span>[текст](url)</span>
+                <span>- список</span>
+                <span># заголовок</span>
+              </div>
+            </div>
           </section>
 
           <!-- Метки -->
@@ -269,6 +288,7 @@ import { tasksApi } from '@/lib/tasksApi.js';
 import { useTasksStore } from '@/stores/tasksStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useTasksDialogs } from '@/composables/useTasksDialogs.js';
+import { renderMarkdown } from '@/lib/markdown.js';
 import TaskIcon from './TaskIcon.vue';
 const dlg = useTasksDialogs();
 const showError = (e, prefix = 'Ошибка') => dlg.info(prefix, e?.message || String(e), 'error');
@@ -292,6 +312,18 @@ const showRelationPicker = ref(false);
 const relationDraft = ref({ type: '', id: '', label: '' });
 const chatListRef = ref(null);
 const editingChecklistId = ref(null);
+const descEditing = ref(false);
+const descTextarea = ref(null);
+const descHtml = computed(() => renderMarkdown(full.value?.card?.description || ''));
+
+function startDescEdit() {
+  descEditing.value = true;
+  nextTick(() => descTextarea.value?.focus());
+}
+function finishDescEdit() {
+  descEditing.value = false;
+  patch({ description: full.value.card.description || '' });
+}
 const editingChecklistTitle = ref('');
 const editingInputRef = ref(null);
 
@@ -906,6 +938,66 @@ function historyText(h) {
 }
 .ts-textarea:hover { border-color: var(--tk-n-300); }
 .ts-textarea:focus { outline: none; border-color: var(--tk-accent); box-shadow: var(--tk-focus-ring); }
+
+/* Markdown — кнопка-действие в заголовке секции */
+.ts-section-action {
+  margin-left: auto;
+  background: none; border: none; cursor: pointer;
+  font-size: var(--tk-fz-xs); font-weight: var(--tk-fw-semibold);
+  color: var(--tk-text-muted);
+  text-transform: none; letter-spacing: 0;
+  padding: 2px 6px; border-radius: var(--tk-r-sm);
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: inherit;
+}
+.ts-section-action:hover { background: var(--tk-n-100); color: var(--tk-text); }
+
+/* Markdown — режим просмотра */
+.ts-md-view {
+  font-size: var(--tk-fz-md, 13px);
+  color: var(--tk-text);
+  line-height: 1.55;
+  cursor: text;
+  padding: 8px 10px;
+  border-radius: var(--tk-r-sm, 4px);
+  transition: background 120ms ease;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.ts-md-view:hover { background: var(--tk-n-50, #F7F8F9); }
+.ts-md-view p { margin: 0 0 6px; }
+.ts-md-view p:last-child { margin-bottom: 0; }
+.ts-md-view h3 { margin: 6px 0 4px; font-size: 15px; font-weight: 700; }
+.ts-md-view h4 { margin: 6px 0 4px; font-size: 14px; font-weight: 700; }
+.ts-md-view ul, .ts-md-view ol { margin: 0 0 6px; padding-left: 22px; }
+.ts-md-view li { margin: 1px 0; }
+.ts-md-view a { color: var(--tk-accent-text, #B85A0E); text-decoration: underline; }
+.ts-md-view a:hover { color: var(--tk-accent, #E87A1E); }
+.ts-md-view code {
+  background: var(--tk-n-100, #F1F2F4);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.ts-md-view strong { font-weight: 700; }
+.ts-md-view em { font-style: italic; }
+
+/* Markdown — режим редактирования: подсказка под textarea */
+.ts-md-hint {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  margin-top: 6px;
+  font-size: var(--tk-fz-xs, 11px);
+  color: var(--tk-text-muted);
+}
+.ts-md-hint strong { font-weight: 700; }
+.ts-md-hint em { font-style: italic; }
+.ts-md-hint code {
+  background: var(--tk-n-100, #F1F2F4);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 
 /* ═══ Чек-лист ═══ */
 .ts-progress {

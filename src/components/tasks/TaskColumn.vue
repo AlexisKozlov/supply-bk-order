@@ -1,7 +1,7 @@
 <template>
   <div
     class="task-column"
-    :class="{ 'is-drop-target': dropActive, 'is-archive': column.is_archive_column }"
+    :class="{ 'is-drop-target': dropActive, 'is-archive': column.is_archive_column, 'wip-exceeded': wipExceeded }"
     :style="{ '--col-color': column.color || '#9E9E9E' }"
     @dragover.prevent="onColumnDragOver"
     @dragleave="onColumnDragLeave"
@@ -15,7 +15,11 @@
               @dblclick="!column.is_archive_column && startEditTitle()">{{ column.title }}</span>
         <input v-else ref="titleInput" v-model="titleDraft" class="task-column-title-input"
                @blur="saveTitle" @keydown.enter="saveTitle" @keydown.esc="cancelEditTitle" />
-        <span class="task-column-count">{{ items.length }}{{ totalCount !== items.length ? '/' + totalCount : '' }}</span>
+        <span class="task-column-count" :class="{ 'wip-bad': wipExceeded }"
+              :title="column.wip_limit ? ('WIP-лимит: ' + totalCount + ' из ' + column.wip_limit) : ''">
+          {{ items.length }}{{ totalCount !== items.length ? '/' + totalCount : '' }}
+          <span v-if="column.wip_limit" class="wip-suffix">· {{ totalCount }}/{{ column.wip_limit }}</span>
+        </span>
       </div>
       <button class="task-column-filter-btn" :class="{ active: hasActiveFilters }"
               @click.stop="filterOpen = !filterOpen" title="Фильтр колонки">
@@ -33,6 +37,11 @@
           <span class="menu-color-dot" :style="{ background: column.color || '#9E9E9E' }"></span>
           Изменить цвет
         </button>
+        <button @click="openWipPicker">
+          <TaskIcon name="list" :size="14"/>
+          WIP-лимит
+          <span v-if="column.wip_limit" class="menu-meta">{{ column.wip_limit }}</span>
+        </button>
         <button class="danger" @click="askDelete">
           <TaskIcon name="trash" :size="14"/> Удалить колонку
         </button>
@@ -42,6 +51,17 @@
       <div v-if="colorPickerOpen" v-click-outside="() => colorPickerOpen = false" class="task-column-color-pop">
         <div class="tcc-title">Цвет колонки</div>
         <ColorPalette :model-value="column.color || '#9E9E9E'" @update:modelValue="onColorPick"/>
+      </div>
+
+      <!-- Поповер WIP-лимита -->
+      <div v-if="wipPickerOpen" v-click-outside="() => wipPickerOpen = false" class="task-column-wip-pop">
+        <div class="tcc-title">WIP-лимит колонки</div>
+        <div class="tcw-hint">Сколько карточек может быть одновременно. 0 — без лимита.</div>
+        <div class="tcw-row">
+          <input ref="wipInput" v-model.number="wipDraft" type="number" min="0" max="999"
+                 class="tcw-input" @keydown.enter="saveWip" @keydown.esc="wipPickerOpen = false"/>
+          <button class="btn primary ts-btn-sm" @click="saveWip">Применить</button>
+        </div>
       </div>
 
       <!-- Поповер фильтров для этой колонки -->
@@ -190,7 +210,7 @@ function resetFilters() { store.resetColumnFilters(props.column.id); }
 function closeFilter() { filterOpen.value = false; }
 const emit = defineEmits([
   'open-card', 'open-subtask', 'subtasks-changed', 'add-card', 'move-card',
-  'rename', 'set-color', 'toggle-done', 'delete',
+  'rename', 'set-color', 'set-wip-limit', 'toggle-done', 'delete',
   'card-dragstart', 'card-dragend',
 ]);
 
@@ -201,6 +221,14 @@ const titleDraft = ref('');
 const titleInput = ref(null);
 const menuOpen = ref(false);
 const colorPickerOpen = ref(false);
+const wipPickerOpen = ref(false);
+const wipDraft = ref(0);
+const wipInput = ref(null);
+const wipExceeded = computed(() => {
+  const limit = props.column.wip_limit || 0;
+  if (!limit) return false;
+  return totalCount.value > limit;
+});
 const dropIndex = ref(null);
 const dropActive = ref(false);
 
@@ -234,6 +262,17 @@ function openColorPicker() {
 function onColorPick(c) {
   colorPickerOpen.value = false;
   if (c) emit('set-color', c);
+}
+function openWipPicker() {
+  menuOpen.value = false;
+  wipDraft.value = props.column.wip_limit || 0;
+  wipPickerOpen.value = true;
+  nextTick(() => wipInput.value?.focus());
+}
+function saveWip() {
+  const v = Math.max(0, Math.min(999, parseInt(wipDraft.value, 10) || 0));
+  emit('set-wip-limit', v || null);
+  wipPickerOpen.value = false;
 }
 function toggleDone() { menuOpen.value = false; emit('toggle-done'); }
 async function askDelete() {
@@ -365,7 +404,14 @@ defineExpose({});
   font-size: var(--tk-fz-xs, 11px); font-weight: var(--tk-fw-semibold, 600);
   padding: 1px 7px; border-radius: 10px;
   font-feature-settings: 'tnum';
+  display: inline-flex; align-items: center; gap: 4px;
 }
+.task-column-count .wip-suffix { opacity: 0.75; font-weight: var(--tk-fw-medium, 500); }
+.task-column-count.wip-bad {
+  background: #FFE4E0;
+  color: #B81C0C;
+}
+.task-column-count.wip-bad .wip-suffix { opacity: 1; font-weight: var(--tk-fw-bold, 700); }
 .task-column-menu-btn,
 .task-column-filter-btn {
   background: none; border: none; cursor: pointer;
@@ -508,6 +554,52 @@ defineExpose({});
   color: var(--tk-text-muted, #758195);
   text-transform: uppercase; letter-spacing: .4px;
   margin-bottom: var(--tk-s-2, 8px);
+}
+
+/* Поповер WIP-лимита */
+.task-column-wip-pop {
+  position: absolute; top: 42px; right: var(--tk-s-2, 8px); z-index: 30;
+  background: var(--tk-bg-popover, #fff);
+  border: 1px solid var(--tk-border, #DCDFE4);
+  border-radius: var(--tk-r-md, 8px);
+  box-shadow: var(--tk-shadow-popover, 0 8px 24px rgba(9,30,66,0.18));
+  padding: var(--tk-s-3, 12px);
+  width: 240px;
+}
+.tcw-hint {
+  font-size: var(--tk-fz-sm, 12px);
+  color: var(--tk-text-muted, #758195);
+  margin-bottom: var(--tk-s-2, 8px);
+  line-height: 1.4;
+}
+.tcw-row { display: flex; gap: var(--tk-s-2, 8px); align-items: center; }
+.tcw-input {
+  flex: 1;
+  border: 1px solid var(--tk-border, #DCDFE4);
+  border-radius: var(--tk-r-sm, 4px);
+  padding: 6px 10px;
+  font-size: var(--tk-fz-md, 13px);
+  font-family: inherit;
+  background: var(--tk-n-0, #fff);
+  color: var(--tk-text, #172B4D);
+}
+.tcw-input:focus { outline: none; border-color: var(--tk-accent, #E87A1E); box-shadow: var(--tk-focus-ring, 0 0 0 2px rgba(232,122,30,0.35)); }
+.menu-meta {
+  margin-left: auto;
+  font-size: var(--tk-fz-xs, 11px);
+  font-weight: var(--tk-fw-semibold, 600);
+  color: var(--tk-text-muted, #758195);
+  background: var(--tk-n-100, #F1F2F4);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+/* Колонка с превышенным WIP-лимитом */
+.task-column.wip-exceeded {
+  box-shadow: 0 0 0 2px rgba(201,55,44,0.35) inset;
+}
+.task-column.wip-exceeded .task-column-color-bar {
+  background: #C9372C !important;
 }
 
 .task-column-body {
