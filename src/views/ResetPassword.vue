@@ -118,13 +118,18 @@ async function handleReset() {
   loading.value = true;
 
   try {
-    const result = await db.rpc('reset_password', {
+    const { data, error: rpcError } = await db.rpc('reset_password', {
       reset_token: resetToken.value,
       new_password: newPassword.value,
     });
 
-    if (result.error) {
-      error.value = result.error;
+    if (rpcError) {
+      error.value = rpcError;
+      return;
+    }
+
+    if (data?.error) {
+      error.value = data.error;
       return;
     }
 

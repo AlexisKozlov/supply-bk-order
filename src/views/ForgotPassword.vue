@@ -82,12 +82,17 @@ async function handleRequest() {
   loading.value = true;
 
   try {
-    const result = await db.rpc('request_password_reset', {
+    const { data, error: rpcError } = await db.rpc('request_password_reset', {
       restaurant_number: restaurantNumber.value,
     });
 
-    if (result.error) {
-      error.value = result.error;
+    if (rpcError) {
+      error.value = rpcError;
+      return;
+    }
+
+    if (data?.error) {
+      error.value = data.error;
       return;
     }
 

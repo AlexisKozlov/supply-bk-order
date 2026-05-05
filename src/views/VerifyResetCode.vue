@@ -76,24 +76,29 @@ async function handleVerify() {
   loading.value = true;
 
   try {
-    const result = await db.rpc('verify_reset_code', {
+    const { data, error: rpcError } = await db.rpc('verify_reset_code', {
       restaurant_number: restaurantNumber.value,
       code: code.value,
     });
 
-    if (result.error) {
-      error.value = result.error;
+    if (rpcError) {
+      error.value = rpcError;
       return;
     }
 
-    if (!result.reset_token) {
+    if (data?.error) {
+      error.value = data.error;
+      return;
+    }
+
+    if (!data?.reset_token) {
       error.value = 'Ошибка сервера: не получен токен';
       return;
     }
 
     router.push({
       name: 'ResetPassword',
-      query: { token: result.reset_token },
+      query: { token: data.reset_token },
     });
   } catch (e) {
     error.value = e.message || 'Ошибка соединения с сервером';
