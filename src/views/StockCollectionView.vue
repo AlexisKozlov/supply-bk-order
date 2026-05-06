@@ -697,6 +697,12 @@ async function refreshData() {
   if (!activeCollection.value) return;
   try {
     const { data } = await db.rpc('sc_get_collection_data', { collection_id: activeCollection.value.id });
+    if (data?.products) {
+      data.products = data.products.map(p => ({
+        ...p,
+        need_expiry: Number(p.need_expiry) === 1,
+      }));
+    }
     collectionData.value = data;
   } catch { toastStore.error('Ошибка', 'Не удалось загрузить данные'); }
 }

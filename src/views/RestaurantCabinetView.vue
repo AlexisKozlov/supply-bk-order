@@ -2992,7 +2992,7 @@ function stockBatchLabel(batch) {
 }
 
 function stockExpiryRequired(product) {
-  return !!product?.need_expiry;
+  return Number(product?.need_expiry) === 1;
 }
 
 function addStockBatch(productId) {
@@ -3074,7 +3074,10 @@ async function loadStockInline(collectionId = null) {
     stockCollection.active = true;
     stockCollection.selectedId = data.collection?.id || targetCollectionId;
     stockCollection.collection = { ...(stockCollection.collection || {}), ...data.collection };
-    stockProducts.value = data.products || [];
+    stockProducts.value = (data.products || []).map(p => ({
+      ...p,
+      need_expiry: Number(p.need_expiry) === 1,
+    }));
     // Заполняем партии ранее сохранёнными значениями
     for (const k of Object.keys(stockDrafts)) delete stockDrafts[k];
     for (const k of Object.keys(stockSavedSnapshot)) delete stockSavedSnapshot[k];
