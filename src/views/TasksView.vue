@@ -173,7 +173,8 @@
                    @close="closeCard"
                    @open-card="openSubcard"
                    @go-back="goBackInStack"
-                   @deleted="onCardDeleted" />
+                   @deleted="onCardDeleted"
+                   @refresh="store.loadBoard(store.currentBoardId)" />
 
     <!-- Глобальные диалоги модуля (один раз на странице) -->
     <ConfirmModal v-if="dlg.confirmModal.value.show"

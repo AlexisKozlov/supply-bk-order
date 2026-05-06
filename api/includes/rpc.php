@@ -5207,99 +5207,123 @@ if ($endpoint === 'rpc') {
     }
 
     function pdSyncDecisionToCard($pdo, $decId, $createdBy = 'system') {
-        $s = $pdo->prepare("SELECT id, text, responsible_person, deadline, status, tasks_card_id FROM protocol_decisions WHERE id = ?");
+        $s = $pdo->prepare("SELECT pd.id, pd.text, pd.responsible_person, pd.deadline, pd.status, pd.protocol_id, p.topic, p.meeting_date FROM protocol_decisions pd JOIN meeting_protocols p ON p.id = pd.protocol_id WHERE pd.id = ?");
         $s->execute([$decId]);
         $dec = $s->fetch();
         if (!$dec) return;
         $users = pdResponsibleToUsers($pdo, $dec['responsible_person']);
-        $cardId = (int)$dec['tasks_card_id'];
         $title = mb_substr((string)$dec['text'], 0, 255);
         $cardDue = $dec['deadline'] ? ($dec['deadline'] . ' 23:59:59') : null;
         $isDone = $dec['status'] === 'done' ? 1 : 0;
         $isArchived = $isDone ? 1 : 0;
-        $completedAt = $isDone ? (date('Y-m-d H:i:s')) : null;
+        $completedAt = $isDone ? date('Y-m-d H:i:s') : null;
+        $entityLabel = mb_substr('Протокол: ' . ($dec['topic'] ?? '') . ' от ' . ($dec['meeting_date'] ?? ''), 0, 255);
 
-        if (!$users && !$cardId) return;
-        if (!$users && $cardId) {
-            $pdo->prepare("UPDATE tasks_cards SET title=?, due_date=?, is_done=?, is_archived=?, completed_at=? WHERE id=?")
-                ->execute([$title, $cardDue, $isDone, $isArchived, $completedAt, $cardId]);
-            return;
+        $existingQ = $pdo->prepare("SELECT card_id, user_name FROM protocol_decision_cards WHERE decision_id = ?");
+        $existingQ->execute([$decId]);
+        $existing = [];
+        foreach ($existingQ->fetchAll() as $r) $existing[$r['user_name']] = (int)$r['card_id'];
+
+        $toCreate = array_diff($users, array_keys($existing));
+        $toRemove = array_diff(array_keys($existing), $users);
+
+        foreach ($toRemove as $userName) {
+            $cardId = $existing[$userName];
+            $bRes = $pdo->prepare("SELECT board_id FROM tasks_cards WHERE id = ?");
+            $bRes->execute([$cardId]);
+            $boardId = (int)$bRes->fetchColumn();
+            if ($boardId) {
+                $arc = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+                $arc->execute([$boardId]);
+                $arcId = (int)$arc->fetchColumn();
+                if ($arcId) {
+                    $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = 1, is_archived = 1, completed_at = COALESCE(completed_at, NOW()) WHERE id = ?")->execute([$arcId, $cardId]);
+                }
+            }
+            $pdo->prepare("DELETE FROM protocol_decision_cards WHERE decision_id = ? AND card_id = ?")->execute([$decId, $cardId]);
+            unset($existing[$userName]);
         }
-        $owner = $users[0];
-        if (!$cardId) {
-            $boardId = pdEnsureUserBoard($pdo, $owner);
-            if ($isDone) {
-                $c = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+
+        $firstCardId = null;
+        foreach ($users as $userName) {
+            if (isset($existing[$userName])) {
+                $cardId = $existing[$userName];
+                $cur = $pdo->prepare("SELECT board_id, column_id, is_done, (SELECT is_done_column FROM tasks_columns WHERE id = c.column_id) AS in_done, (SELECT is_archive_column FROM tasks_columns WHERE id = c.column_id) AS in_archive FROM tasks_cards c WHERE id = ?");
+                $cur->execute([$cardId]);
+                $card = $cur->fetch();
+                if (!$card) continue;
+                $newColumnId = (int)$card['column_id'];
+                if ($isDone && !(int)$card['in_archive']) {
+                    $c2 = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+                    $c2->execute([$card['board_id']]);
+                    $newColumnId = (int)$c2->fetchColumn() ?: $newColumnId;
+                } elseif (!$isDone && ((int)$card['in_done'] || (int)$card['in_archive'])) {
+                    $c2 = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1");
+                    $c2->execute([$card['board_id']]);
+                    $newColumnId = (int)$c2->fetchColumn() ?: $newColumnId;
+                }
+                $pdo->prepare("UPDATE tasks_cards SET title=?, due_date=?, is_done=?, is_archived=?, completed_at=?, column_id=? WHERE id=?")
+                    ->execute([$title, $cardDue, $isDone, $isArchived, $completedAt, $newColumnId, $cardId]);
             } else {
-                $c = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1");
+                $boardId = pdEnsureUserBoard($pdo, $userName);
+                $colSql = $isDone
+                    ? "SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1"
+                    : "SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1";
+                $c = $pdo->prepare($colSql);
+                $c->execute([$boardId]);
+                $columnId = (int)$c->fetchColumn();
+                if (!$columnId) continue;
+                $so = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id IS NULL");
+                $so->execute([$columnId]);
+                $sortOrder = (int)$so->fetchColumn();
+                $pdo->prepare("INSERT INTO tasks_cards (board_id, column_id, title, description, priority, due_date, sort_order, is_done, is_archived, created_by, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([$boardId, $columnId, $title, null, 'medium', $cardDue, $sortOrder, $isDone, $isArchived, $createdBy, $completedAt]);
+                $cardId = (int)$pdo->lastInsertId();
+                $pdo->prepare("INSERT INTO protocol_decision_cards (decision_id, card_id, user_name) VALUES (?, ?, ?)")
+                    ->execute([$decId, $cardId, $userName]);
+                $pdo->prepare("INSERT INTO tasks_relations (card_id, entity_type, entity_id, entity_label) VALUES (?, 'protocol', ?, ?)")
+                    ->execute([$cardId, (string)$dec['protocol_id'], $entityLabel]);
+                $existing[$userName] = $cardId;
             }
-            $c->execute([$boardId]);
-            $columnId = (int)$c->fetchColumn();
-            if (!$columnId) return;
-            $so = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id IS NULL");
-            $so->execute([$columnId]);
-            $sortOrder = (int)$so->fetchColumn();
-            $pdo->prepare("INSERT INTO tasks_cards (board_id, column_id, title, description, priority, due_date, sort_order, is_done, is_archived, created_by, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-                ->execute([$boardId, $columnId, $title, null, 'medium', $cardDue, $sortOrder, $isDone, $isArchived, $createdBy, $completedAt]);
-            $cardId = (int)$pdo->lastInsertId();
-            $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = ? WHERE id = ?")->execute([$cardId, $decId]);
-        } else {
-            $cur = $pdo->prepare("SELECT c.id, c.column_id, c.board_id, c.is_done, col.is_done_column, col.is_archive_column FROM tasks_cards c LEFT JOIN tasks_columns col ON col.id = c.column_id WHERE c.id = ?");
-            $cur->execute([$cardId]);
-            $card = $cur->fetch();
-            if (!$card) return;
-            $newColumnId = (int)$card['column_id'];
-            if ($isDone && !$card['is_archive_column']) {
-                $c2 = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
-                $c2->execute([$card['board_id']]);
-                $newColumnId = (int)$c2->fetchColumn() ?: $newColumnId;
-            } elseif (!$isDone && ($card['is_done_column'] || $card['is_archive_column'])) {
-                $c2 = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1");
-                $c2->execute([$card['board_id']]);
-                $newColumnId = (int)$c2->fetchColumn() ?: $newColumnId;
-            }
-            $pdo->prepare("UPDATE tasks_cards SET title=?, due_date=?, is_done=?, is_archived=?, completed_at=?, column_id=? WHERE id=?")
-                ->execute([$title, $cardDue, $isDone, $isArchived, $completedAt, $newColumnId, $cardId]);
-        }
-        if ($cardId && $users) {
+            if ($firstCardId === null) $firstCardId = $existing[$userName];
             $cur = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
-            $cur->execute([$cardId]);
-            $existing = array_column($cur->fetchAll(), 'user_name');
-            $toAdd = array_diff($users, $existing);
-            $toRemove = array_diff($existing, $users);
-            if ($toRemove) {
-                $ph = implode(',', array_fill(0, count($toRemove), '?'));
-                $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ? AND user_name IN ($ph)")->execute(array_merge([$cardId], array_values($toRemove)));
+            $cur->execute([$existing[$userName]]);
+            $cardAssignees = array_column($cur->fetchAll(), 'user_name');
+            $toAdd = array_diff($users, $cardAssignees);
+            $toRemove2 = array_diff($cardAssignees, $users);
+            if ($toRemove2) {
+                $ph = implode(',', array_fill(0, count($toRemove2), '?'));
+                $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ? AND user_name IN ($ph)")->execute(array_merge([$existing[$userName]], array_values($toRemove2)));
             }
             if ($toAdd) {
                 $ins = $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)");
-                foreach ($toAdd as $u) $ins->execute([$cardId, $u]);
+                foreach ($toAdd as $u) $ins->execute([$existing[$userName], $u]);
             }
         }
-        if ($cardId) {
-            if ($isDone) {
-                $pdo->prepare("UPDATE tasks_assignees SET is_done = 1, done_at = COALESCE(done_at, NOW()) WHERE card_id = ? AND is_done = 0")->execute([$cardId]);
-            } else {
-                $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ?")->execute([$cardId]);
-            }
+        if ($firstCardId) {
+            $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = ? WHERE id = ?")->execute([$firstCardId, $decId]);
+        } elseif (!$users) {
+            $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = NULL WHERE id = ?")->execute([$decId]);
         }
     }
 
     function pdArchiveCardForDecision($pdo, $decisionId) {
-        $s = $pdo->prepare("SELECT tasks_card_id FROM protocol_decisions WHERE id = ?");
-        $s->execute([$decisionId]);
-        $cardId = (int)$s->fetchColumn();
-        if (!$cardId) return;
-        $c = $pdo->prepare("SELECT board_id FROM tasks_cards WHERE id = ?");
-        $c->execute([$cardId]);
-        $boardId = (int)$c->fetchColumn();
-        if (!$boardId) return;
-        $col = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
-        $col->execute([$boardId]);
-        $archiveId = (int)$col->fetchColumn();
-        if (!$archiveId) return;
-        $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = 1, is_archived = 1, completed_at = COALESCE(completed_at, NOW()) WHERE id = ?")
-            ->execute([$archiveId, $cardId]);
+        $cards = $pdo->prepare("SELECT card_id FROM protocol_decision_cards WHERE decision_id = ?");
+        $cards->execute([$decisionId]);
+        foreach ($cards->fetchAll() as $r) {
+            $cardId = (int)$r['card_id'];
+            $b = $pdo->prepare("SELECT board_id FROM tasks_cards WHERE id = ?");
+            $b->execute([$cardId]);
+            $boardId = (int)$b->fetchColumn();
+            if (!$boardId) continue;
+            $col = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+            $col->execute([$boardId]);
+            $arcId = (int)$col->fetchColumn();
+            if (!$arcId) continue;
+            $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = 1, is_archived = 1, completed_at = COALESCE(completed_at, NOW()) WHERE id = ?")
+                ->execute([$arcId, $cardId]);
+        }
+        $pdo->prepare("DELETE FROM protocol_decision_cards WHERE decision_id = ?")->execute([$decisionId]);
         $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = NULL WHERE id = ?")->execute([$decisionId]);
     }
 

@@ -108,65 +108,42 @@ function tHistory($pdo, $cardId, $userName, $action, $details = null) {
     $s->execute([$cardId, $userName, $action, $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null]);
 }
 
-function tSyncCardToDecision($pdo, $cardId, $isDone) {
-    if ($isDone) {
-        $pdo->prepare("UPDATE tasks_assignees SET is_done = 1, done_at = COALESCE(done_at, NOW()) WHERE card_id = ? AND is_done = 0")->execute([$cardId]);
-    } else {
-        $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ?")->execute([$cardId]);
-    }
-    $s = $pdo->prepare("SELECT id FROM protocol_decisions WHERE tasks_card_id = ?");
+function tIsProtocolCard($pdo, $cardId) {
+    $s = $pdo->prepare("SELECT 1 FROM protocol_decision_cards WHERE card_id = ?");
     $s->execute([$cardId]);
-    $decId = (int)$s->fetchColumn();
-    if (!$decId) return;
-    if ($isDone) {
-        $pdo->prepare("UPDATE protocol_decisions SET status = 'done', completed_at = COALESCE(completed_at, NOW()) WHERE id = ?")->execute([$decId]);
-    } else {
-        $pdo->prepare("UPDATE protocol_decisions SET status = 'pending', completed_at = NULL WHERE id = ?")->execute([$decId]);
-    }
+    return (bool)$s->fetchColumn();
 }
 
+// Синхронизация статуса decision на основе всех связанных карточек:
+// если все is_done=1 → status='done', иначе 'pending'.
 function tCheckCardAutoState($pdo, $cardId, $tUserName) {
-    $s = $pdo->prepare("SELECT COUNT(*) FROM tasks_assignees WHERE card_id = ?");
+    $s = $pdo->prepare("SELECT decision_id FROM protocol_decision_cards WHERE card_id = ?");
     $s->execute([$cardId]);
-    $total = (int)$s->fetchColumn();
-    if ($total === 0) return ['all_done' => false];
+    $decId = (int)$s->fetchColumn();
+    if (!$decId) return ['all_done' => false, 'changed' => false];
 
-    $s = $pdo->prepare("SELECT COUNT(*) FROM tasks_assignees WHERE card_id = ? AND is_done = 0");
-    $s->execute([$cardId]);
-    $undone = (int)$s->fetchColumn();
+    $sums = $pdo->prepare("SELECT COUNT(*) AS total, SUM(c.is_done) AS done FROM protocol_decision_cards pdc JOIN tasks_cards c ON c.id = pdc.card_id WHERE pdc.decision_id = ?");
+    $sums->execute([$decId]);
+    $r = $sums->fetch();
+    $total = (int)$r['total'];
+    $done = (int)$r['done'];
+    $allDone = ($total > 0 && $done === $total);
 
-    $s = $pdo->prepare("SELECT c.id, c.is_done, c.board_id FROM tasks_cards c WHERE c.id = ?");
-    $s->execute([$cardId]);
-    $card = $s->fetch();
-    if (!$card) return ['all_done' => false];
-
-    if ($undone === 0 && !$card['is_done']) {
-        $c = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
-        $c->execute([$card['board_id']]);
-        $archColId = (int)$c->fetchColumn();
-        if ($archColId) {
-            $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = 1, is_archived = 1, completed_at = NOW() WHERE id = ?")
-                ->execute([$archColId, $cardId]);
-            tHistory($pdo, $cardId, $tUserName, 'auto_closed', ['reason' => 'all_assignees_done']);
-            tSyncCardToDecision($pdo, $cardId, 1);
-        }
-        return ['all_done' => true];
+    $cur = $pdo->prepare("SELECT status FROM protocol_decisions WHERE id = ?");
+    $cur->execute([$decId]);
+    $oldStatus = $cur->fetchColumn();
+    $newStatus = $allDone ? 'done' : 'pending';
+    if ($newStatus !== $oldStatus) {
+        $completedAt = $allDone ? date('Y-m-d H:i:s') : null;
+        $pdo->prepare("UPDATE protocol_decisions SET status = ?, completed_at = ? WHERE id = ?")->execute([$newStatus, $completedAt, $decId]);
+        return ['all_done' => $allDone, 'changed' => true];
     }
+    return ['all_done' => $allDone, 'changed' => false];
+}
 
-    if ($undone > 0 && $card['is_done']) {
-        $c = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1");
-        $c->execute([$card['board_id']]);
-        $workColId = (int)$c->fetchColumn();
-        if ($workColId) {
-            $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = 0, is_archived = 0, completed_at = NULL WHERE id = ?")
-                ->execute([$workColId, $cardId]);
-            tHistory($pdo, $cardId, $tUserName, 'auto_reopened', ['reason' => 'assignee_unchecked']);
-            tSyncCardToDecision($pdo, $cardId, 0);
-        }
-        return ['all_done' => false];
-    }
-
-    return ['all_done' => $undone === 0];
+// Совместимость: тонкая обёртка, чтобы старые вызовы не падали.
+function tSyncCardToDecision($pdo, $cardId, $isDone) {
+    tCheckCardAutoState($pdo, $cardId, '');
 }
 
 // Создание дефолтной доски с колонками для нового пользователя
@@ -587,8 +564,11 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
 
     $pdo->beginTransaction();
     try {
-        $fromCol = (int)$card['column_id'];
-        // Получаем все карточки в целевой колонке (без перемещаемой) в порядке sort_order
+        $fromCol     = (int)$card['column_id'];
+        $isToArchive = !empty($toCol['is_archive_column']) ? 1 : 0;
+        $newIsDone   = ($isToArchive || !empty($toCol['is_done_column'])) ? 1 : 0;
+        $isProto     = tIsProtocolCard($pdo, $cardId);
+
         $s = $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id = ? AND id <> ? ORDER BY sort_order, id");
         $s->execute([$toColumnId, $cardId]);
         $ids = array_column($s->fetchAll(), 'id');
@@ -598,24 +578,20 @@ if ($action === 'cards' && $id === 'move' && $method === 'POST') {
         $upd = $pdo->prepare("UPDATE tasks_cards SET sort_order = ? WHERE id = ?");
         foreach ($ids as $i => $iid) $upd->execute([$i, (int)$iid]);
 
-        // Обновляем column_id, is_done и is_archived у самой карточки.
-        // В колонку «Готово» = is_done. В колонку «Архив» = is_done + is_archived. В обычную = снимаем оба флага.
-        $isToArchive = !empty($toCol['is_archive_column']) ? 1 : 0;
-        $newIsDone   = ($isToArchive || !empty($toCol['is_done_column'])) ? 1 : 0;
-        $newArchived = $isToArchive;
         $completedAt = $newIsDone ? date('Y-m-d H:i:s') : null;
         $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = ?, is_archived = ?, completed_at = ? WHERE id = ?")
-            ->execute([$toColumnId, $newIsDone, $newArchived, $completedAt, $cardId]);
-        tSyncCardToDecision($pdo, $cardId, $newIsDone);
+            ->execute([$toColumnId, $newIsDone, $isToArchive, $completedAt, $cardId]);
+        tHistory($pdo, $cardId, $tUserName, 'moved', ['from_column' => $fromCol, 'to_column' => $toColumnId]);
 
-        // Если ушла из старой колонки — пересоберём sort_order там
         if ($fromCol !== $toColumnId) {
             $s = $pdo->prepare("SELECT id FROM tasks_cards WHERE column_id = ? ORDER BY sort_order, id");
             $s->execute([$fromCol]);
-            foreach (array_column($s->fetchAll(), 'id') as $i => $iid) $upd->execute([$i, (int)$iid]);
+            $upd2 = $pdo->prepare("UPDATE tasks_cards SET sort_order = ? WHERE id = ?");
+            foreach (array_column($s->fetchAll(), 'id') as $i => $iid) $upd2->execute([$i, (int)$iid]);
         }
 
-        tHistory($pdo, $cardId, $tUserName, 'moved', ['from_column' => $fromCol, 'to_column' => $toColumnId]);
+        if ($isProto) tCheckCardAutoState($pdo, $cardId, $tUserName);
+
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
@@ -653,11 +629,9 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         $s->execute([$cardId]);
         $labelIds = array_map('intval', array_column($s->fetchAll(), 'label_id'));
 
-        $s = $pdo->prepare("SELECT user_name, is_done, done_at FROM tasks_assignees WHERE card_id = ? ORDER BY added_at, user_name");
+        $s = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ? ORDER BY added_at, user_name");
         $s->execute([$cardId]);
-        $assignees = $s->fetchAll();
-        foreach ($assignees as &$a) { $a['is_done'] = (int)$a['is_done']; }
-        unset($a);
+        $assignees = array_column($s->fetchAll(), 'user_name');
 
         $s = $pdo->prepare("SELECT id, entity_type, entity_id, entity_label, created_at FROM tasks_relations WHERE card_id = ?");
         $s->execute([$cardId]);
@@ -734,10 +708,10 @@ if ($action === 'cards' && $id && $id !== 'move' && !$action2) {
         if (!$sets) tRespond(['error' => 'Нет полей для обновления'], 400);
         $params[] = $cardId;
         $pdo->prepare("UPDATE tasks_cards SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
-        if (isset($body['is_done'])) {
-            tSyncCardToDecision($pdo, $cardId, $body['is_done'] ? 1 : 0);
-        }
         if ($changes) tHistory($pdo, $cardId, $tUserName, 'updated', $changes);
+        if (isset($body['is_done']) && tIsProtocolCard($pdo, $cardId)) {
+            tCheckCardAutoState($pdo, $cardId, $tUserName);
+        }
         tRespond(['success' => true]);
     }
 
@@ -930,33 +904,6 @@ if ($action === 'cards' && $id && $action2 === 'history' && $method === 'GET') {
     tRespond(['items' => $rows]);
 }
 
-// ─── ASSIGNEES DONE (POST tasks/cards/:id/assignees/done) ───
-if ($action === 'cards' && $id && $action2 === 'assignees' && (isset($parts[4]) && $parts[4] === 'done') && $method === 'POST') {
-    $cardId = (int)$id;
-    $card = tGetCard($pdo, $cardId);
-    if (!$card) tRespond(['error' => 'Карточка не найдена'], 404);
-    $board = tGetBoard($pdo, $card['board_id']);
-    if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет доступа'], 403);
-
-    $targetName = trim($body['user_name'] ?? '');
-    $newIsDone  = !empty($body['is_done']) ? 1 : 0;
-    if (!$targetName) tRespond(['error' => 'user_name обязателен'], 400);
-
-    $canToggle = ($tUserName === $targetName) || tIsManager($tUser);
-    if (!$canToggle) tRespond(['error' => 'Нет прав: можно менять только свою галочку'], 403);
-
-    $s = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ? AND user_name = ?");
-    $s->execute([$cardId, $targetName]);
-    if (!$s->fetch()) tRespond(['error' => 'Пользователь не является соисполнителем'], 404);
-
-    $doneAt = $newIsDone ? date('Y-m-d H:i:s') : null;
-    $pdo->prepare("UPDATE tasks_assignees SET is_done = ?, done_at = ? WHERE card_id = ? AND user_name = ?")
-        ->execute([$newIsDone, $doneAt, $cardId, $targetName]);
-
-    $result = tCheckCardAutoState($pdo, $cardId, $tUserName);
-    tRespond(['success' => true, 'all_done' => $result['all_done']]);
-}
-
 // ─── ASSIGNEES (POST tasks/cards/:id/assignees) ───
 if ($action === 'cards' && $id && $action2 === 'assignees' && $method === 'POST') {
     $cardId = (int)$id;
@@ -998,7 +945,7 @@ if ($action === 'cards' && $id && $action2 === 'relations' && $method === 'POST'
     $board = tGetBoard($pdo, $card['board_id']);
     if (!tCanWorkWithBoard($pdo, $tUser, $board)) tRespond(['error' => 'Нет прав'], 403);
     $rels = $body['relations'] ?? [];
-    $allowedTypes = ['order','supplier','product','pricing','plan','so_order'];
+    $allowedTypes = ['order','supplier','product','pricing','plan','so_order','protocol'];
     $pdo->beginTransaction();
     try {
         $pdo->prepare("DELETE FROM tasks_relations WHERE card_id = ?")->execute([$cardId]);
