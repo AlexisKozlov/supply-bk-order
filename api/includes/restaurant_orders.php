@@ -1788,13 +1788,24 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
                  JOIN stock_collection_products scp ON scp.id = scd.product_id AND scp.collection_id = sc.id
                  WHERE scd.restaurant_number = ?) as submitted_count,
                 (SELECT COUNT(*) FROM stock_collection_products scp2 WHERE scp2.collection_id = sc.id) as total_products
-            FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY sc.id DESC LIMIT 1";
+            FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY sc.id DESC";
     $s = $pdo->prepare($sql);
     $s->execute(array_merge([$rest['restaurant_number']], $params));
-    $collection = $s->fetch();
-    if (!$collection) {
-        roRespond(['active' => false]);
+    $collections = $s->fetchAll();
+    if (!$collections) {
+        roRespond(['active' => false, 'collections' => []]);
     }
+    $collection = $collections[0];
+    $items = array_map(function($row) {
+        return [
+            'id' => (int)$row['id'],
+            'name' => $row['name'],
+            'created_at' => $row['created_at'],
+            'submitted' => ((int)$row['total_products'] > 0) && ((int)$row['submitted_count'] >= (int)$row['total_products']),
+            'submitted_count' => (int)$row['submitted_count'],
+            'total_products' => (int)$row['total_products'],
+        ];
+    }, $collections);
     roRespond([
         'active' => true,
         'collection' => [
@@ -1804,6 +1815,7 @@ if ($roAction === 'stock-collection-status' && $method === 'GET') {
             'submitted_count' => (int)$collection['submitted_count'],
             'total_products' => (int)$collection['total_products'],
         ],
+        'collections' => $items,
     ]);
 }
 
@@ -1813,10 +1825,18 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
     if (!$rest) roRespond(['error' => 'Не авторизован'], 401);
     $le = $rest['legal_entity'] ?: 'ООО "Бургер БК"';
     $group = getEntityGroup($le);
+    $collectionId = intval($_GET['collection_id'] ?? 0);
     $where = ["sc.status = 'active'"];
     $params = [];
     applyEntityTextFilter($group, $where, $params, 'sc.legal_entity');
-    $s = $pdo->prepare("SELECT id, name, created_at FROM stock_collections sc WHERE " . implode(' AND ', $where) . " ORDER BY id DESC LIMIT 1");
+    $sql = "SELECT id, name, created_at FROM stock_collections sc WHERE " . implode(' AND ', $where);
+    if ($collectionId > 0) {
+        $sql .= " AND sc.id = ?";
+        $params[] = $collectionId;
+    } else {
+        $sql .= " ORDER BY id DESC LIMIT 1";
+    }
+    $s = $pdo->prepare($sql);
     $s->execute($params);
     $coll = $s->fetch();
     if (!$coll) roRespond(['active' => false]);

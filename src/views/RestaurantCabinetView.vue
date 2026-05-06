@@ -945,6 +945,18 @@
         <p>Сейчас сбор остатков не проводится.</p>
       </div>
       <div v-else class="stock-inline">
+        <div v-if="stockCollection.collections.length > 1" class="stock-collection-switcher">
+          <button
+            v-for="c in stockCollection.collections"
+            :key="c.id"
+            class="stock-collection-chip"
+            :class="{ active: String(stockCollection.collection?.id) === String(c.id) }"
+            @click="selectStockCollection(c.id)"
+          >
+            <span>{{ c.name }}</span>
+            <small>{{ c.submitted_count }}/{{ c.total_products }}</small>
+          </button>
+        </div>
         <div class="stock-inline-head">
           <h2>{{ stockCollection.collection?.name }}</h2>
           <p v-if="stockLastSubmittedAt" class="stock-inline-sub">
@@ -1491,7 +1503,7 @@ const defaultOrderSubTab = computed(() => {
 });
 
 // ═══ Stock collection ═══
-const stockCollection = reactive({ active: false, collection: null });
+const stockCollection = reactive({ active: false, collection: null, collections: [], selectedId: null });
 const stockProducts = ref([]);
 const stockDrafts = reactive({}); // product_id -> [{expiry_date, stock}]
 const stockLastSubmittedAt = ref(null);
@@ -1851,9 +1863,20 @@ const mainTabs = computed(() => {
   }
   tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
   tabs.push({ id: 'scanner', label: 'Сканер', beta: true });
-  tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
+  if (kegReturnsEnabled.value) tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
   return tabs;
 });
+
+const kegReturnsEnabled = ref(false);
+async function loadKegReturnsAvailability() {
+  try {
+    const t = localStorage.getItem('ro_token') || '';
+    const res = await fetch('/api/keg-returns/restaurant-info', { headers: t ? { 'X-RO-Token': t } : {} });
+    if (!res.ok) { kegReturnsEnabled.value = false; return; }
+    const data = await res.json();
+    kegReturnsEnabled.value = !!parseInt(data.pickup_weekdays || 0);
+  } catch { kegReturnsEnabled.value = false; }
+}
 // ═══ Delivery (основная поставка) ═══
 const delSelectedDate = ref('');
 const delActiveCategory = ref('Сухой');
@@ -2525,7 +2548,7 @@ async function switchTab(tab, subTab) {
       loadImportantImagePreviews(importantPosts.value.length);
     }
   }
-  if (tab === 'stock' && stockCollection.active) loadStockInline();
+  if (tab === 'stock' && stockCollection.active) loadStockInline(stockCollection.selectedId);
   if (tab === 'warehouse-stock' && !warehouseStockItems.value.length && !warehouseStockLoading.value) loadWarehouseStock();
 }
 // ═══ Синхронизация табов с роутом (URL) ═══
@@ -2988,10 +3011,15 @@ async function checkStockCollection() {
   try {
     const data = await roStore.getStockCollectionStatus();
     stockCollection.active = data.active;
-    stockCollection.collection = data.collection || null;
+    stockCollection.collections = Array.isArray(data.collections) ? data.collections : (data.collection ? [data.collection] : []);
+    const selectedId = stockCollection.selectedId && stockCollection.collections.some(c => String(c.id) === String(stockCollection.selectedId))
+      ? stockCollection.selectedId
+      : (data.collection?.id || stockCollection.collections[0]?.id || null);
+    stockCollection.selectedId = selectedId;
+    stockCollection.collection = stockCollection.collections.find(c => String(c.id) === String(selectedId)) || data.collection || null;
     // Если пользователь уже на вкладке остатков — подгружаем форму
-    if (stockCollection.active && activeTab.value === 'stock' && !stockProducts.value.length) {
-      loadStockInline();
+    if (stockCollection.active && activeTab.value === 'stock') {
+      await loadStockInline(stockCollection.selectedId);
     }
   } catch (e) {
     if (activeTab.value === 'stock') {
@@ -3021,19 +3049,30 @@ async function loadPreviousDeliveryOrders() {
   }
 }
 
-async function loadStockInline() {
+async function selectStockCollection(collectionId) {
+  if (!collectionId || String(stockCollection.selectedId) === String(collectionId)) return;
+  stockCollection.selectedId = collectionId;
+  await loadStockInline(collectionId);
+}
+
+async function loadStockInline(collectionId = null) {
   stockLoading.value = true;
   stockError.value = '';
   try {
-    const data = await roStore.getStockCollectionData();
+    const targetCollectionId = collectionId || stockCollection.selectedId || stockCollection.collection?.id || null;
+    const data = await roStore.getStockCollectionData(targetCollectionId);
     if (!data.active) {
       stockCollection.active = false;
+      stockCollection.collections = [];
+      stockCollection.selectedId = null;
+      stockCollection.collection = null;
       stockProducts.value = [];
       for (const k of Object.keys(stockDrafts)) delete stockDrafts[k];
       for (const k of Object.keys(stockSavedSnapshot)) delete stockSavedSnapshot[k];
       return;
     }
     stockCollection.active = true;
+    stockCollection.selectedId = data.collection?.id || targetCollectionId;
     stockCollection.collection = { ...(stockCollection.collection || {}), ...data.collection };
     stockProducts.value = data.products || [];
     // Заполняем партии ранее сохранёнными значениями
@@ -3341,6 +3380,7 @@ onMounted(async () => {
   }
   try {
     await loadCabinetData();
+    loadKegReturnsAvailability();
     startRestaurantBroadcastPolling();
     supUpdateDeadlineTimers();
     supDeadlineTimerInterval = setInterval(supUpdateDeadlineTimers, 1000);
@@ -4356,6 +4396,18 @@ tr.del-err { background: #fef2f2; }
 .cab-sv-fade-enter-from, .cab-sv-fade-leave-to { opacity: 0; }
 
 .stock-inline { background: white; border-radius: 18px; padding: 20px; margin: 0 0 16px; border: 1px solid #EDE8E3; }
+.stock-collection-switcher { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.stock-collection-chip {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px; border-radius: 999px; border: 1px solid #EDE8E3;
+  background: #FAF7F4; color: #502314; cursor: pointer; font: inherit;
+  transition: all 0.15s ease;
+}
+.stock-collection-chip span { font-weight: 700; }
+.stock-collection-chip small { color: #8b7355; font-size: 11px; font-weight: 700; }
+.stock-collection-chip.active { background: #502314; border-color: #502314; color: #fff; }
+.stock-collection-chip.active small { color: rgba(255,255,255,0.8); }
+.stock-collection-chip:hover { border-color: #E76F51; }
 .stock-inline-head { padding-bottom: 12px; border-bottom: 1px solid #F2EDE8; margin-bottom: 12px; }
 .stock-inline-head h2 { color: #502314; margin: 0 0 4px; font-size: 18px; }
 .stock-inline-sub { color: #8b7355; font-size: 13px; margin: 0; }
