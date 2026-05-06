@@ -67,6 +67,11 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   const deliveryDays = ref([]);
   const restaurantOrdersEnabled = ref(true);
   const loading = ref(false);
+  // Дельта между серверным и клиентским временем (мс): server_time - client_time.
+  // Считается при каждом loadMyInfo. Применяется при расчёте обратного отсчёта
+  // дедлайна, чтобы сбитые часы устройства не показывали ложное «осталось N мин».
+  const serverTimeOffset = ref(0);
+  function nowFromServer() { return Date.now() + serverTimeOffset.value; }
 
   async function loginByTelegram(tgToken, acceptedDataRules = false) {
     const data = await api('tg-auth', {
@@ -112,6 +117,12 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   function logout() {
     api('logout', { method: 'POST' }).catch(() => {});
     logoutLocal();
+    // Жёсткая перезагрузка вместо SPA-редиректа: гарантированно сбрасывает
+    // все компоненты и таймеры, чтобы следующий пользователь не увидел данные
+    // предыдущего. SPA-навигация оставляет в памяти ref'ы, watchers, setInterval.
+    if (typeof window !== 'undefined') {
+      window.location.replace('/restaurant/login');
+    }
   }
 
   // Локальный выход: чистит только клиентское состояние, не обращаясь к серверу.
@@ -120,6 +131,16 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
   function logoutLocal() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REST_KEY);
+    // Чистим все локальные черновики формы заказа: они привязаны к ресторану,
+    // и оставлять их — это утечка данных предыдущего юзера.
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('bk_ro_draft_')) keys.push(k);
+      }
+      keys.forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* игнор */ }
     restaurant.value = null;
     sessionInfo.value = null;
     deliveryDays.value = [];
@@ -132,6 +153,9 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
       restaurantOrdersEnabled.value = data.restaurant_orders_enabled !== false;
       sessionInfo.value = data.session;
       deliveryDays.value = data.delivery_days || [];
+      if (typeof data.server_time === 'number' && Number.isFinite(data.server_time)) {
+        serverTimeOffset.value = data.server_time - Date.now();
+      }
     } finally {
       loading.value = false;
     }
@@ -631,6 +655,7 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
 
   return {
     restaurant, isAuthenticated, sessionInfo, deliveryDays, restaurantOrdersEnabled, loading,
+    serverTimeOffset, nowFromServer,
     login, loginByTelegram, validate, logout, logoutLocal, loadMyInfo, loadProducts, scanProduct, reportMissingGtin, loadMyOrder, loadMyOrders, submitOrder, repeatOrder,
     loadAllHistory, loadHistoryOrder, changePassword, getTelegramStatus, telegramLink, telegramUnlink, telegramLinks,
     loadBroadcasts, loadCabinetPosts, markCabinetPostsRead, adminGetCabinetPosts,

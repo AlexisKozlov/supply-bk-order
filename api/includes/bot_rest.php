@@ -222,8 +222,8 @@ function soBotGetWebLink($pdo, $chatId, $supplierId, $restNum) {
 
     $tgToken = bin2hex(random_bytes(32));
     $pdo->prepare("
-        INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
-        VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)
+        INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
+        VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)
     ")->execute([$tgToken, $chatId, $restNum, $restGroup]);
 
     $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
@@ -1520,8 +1520,8 @@ function restScBuildWebLink(PDO $pdo, $chatId, $restNum): ?string {
     if (!$check->fetch()) return null;
     $token = bin2hex(random_bytes(32));
     $pdo->prepare("
-        INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
-        VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), 0)
+        INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
+        VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), 0)
     ")->execute([$token, $chatId, $restNum, $restGroup]);
     $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
     return $siteUrl . '/restaurant/login?tg_token=' . $token . '&redirect=' . urlencode('/restaurant/stock');

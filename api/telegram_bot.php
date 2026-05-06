@@ -196,7 +196,7 @@ function botOpenRestaurantCabinet($chatId, $msgId, $restNum) {
     }
 
     $token = bin2hex(random_bytes(32));
-    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used) VALUES (?, 'auth', ?, ?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)")
         ->execute([$token, $chatId, $restNum, $restGroup]);
 
     $siteUrl = rtrim(getenv('SITE_URL') ?: 'https://supply-department.online', '/');
@@ -2506,7 +2506,10 @@ $text = trim($msg['text'] ?? '');
 // 6-значный код — привязка аккаунта ресторана к Telegram
 if (preg_match('/^\d{6}$/', $text)) {
     $code = $text;
-    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group, ro_user_id FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    // kind='bind' — это именно код привязки Telegram, выданный кабинетом.
+    // 64-байтные auth-токены сюда тоже теоретически могли бы прийти при удачном
+    // matched-формате, но защищаемся явно.
+    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group, ro_user_id FROM ro_tg_tokens WHERE token = ? AND kind = 'bind' AND expires_at > NOW() AND used = 0 LIMIT 1");
     $s->execute([$code]);
     $tok = $s->fetch();
     if ($tok && (int)($tok['telegram_chat_id'] ?? 0) === 0 && !empty($tok['restaurant_number'])) {

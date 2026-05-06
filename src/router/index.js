@@ -212,6 +212,20 @@ router.beforeEach((to) => {
   if (!userStore.currentUser) {
     userStore.restoreSession();
   }
+  // Защита кабинета ресторана: пути /restaurant/* (кроме /restaurant/login)
+  // требуют ro_token. Без него интерфейс не должен рендериться вообще.
+  // Серверная валидация токена остаётся в RestaurantCabinetView.onMounted.
+  if (to.path.startsWith('/restaurant/') && to.path !== '/restaurant/login' && to.path !== '/restaurant/reset-password') {
+    const roToken = localStorage.getItem('ro_token');
+    if (!roToken) {
+      return { path: '/restaurant/login', query: { redirect: to.fullPath } };
+    }
+  } else if (to.path === '/restaurant') {
+    const roToken = localStorage.getItem('ro_token');
+    if (!roToken) {
+      return { path: '/restaurant/login' };
+    }
+  }
   if (to.meta.requiresAuth && !userStore.isAuthenticated) {
     return { name: 'home', query: { showLogin: 'true', redirect: to.fullPath } };
   }

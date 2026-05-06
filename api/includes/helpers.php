@@ -432,8 +432,13 @@ function requireModuleAccess($sessionUser, $module, $minLevel, $roleTemplates, $
 
 function checkLegalEntityAccess($sessionUser, $legalEntity) {
     if (!$sessionUser) return true;
-    if (!$legalEntity) return true; // Запись без юрлица — доступна всем авторизованным
+    // Админ видит всё, в том числе записи без указанного юрлица.
     if (($sessionUser['role'] ?? '') === 'admin') return true;
+    // Запись без юрлица — раньше пропускали всех авторизованных, что давало
+    // обход разделения по юрлицам. Теперь — только админу. У обычных
+    // пользователей таких записей в проде сейчас нет, поэтому изменение
+    // безопасно; если когда-то появятся — админу нужно явно проставить юрлицо.
+    if (!$legalEntity) return false;
     $userEntities = $sessionUser['legal_entities'] ?? '';
     if (is_string($userEntities)) {
         $userEntities = json_decode($userEntities, true);
@@ -567,6 +572,16 @@ function checkRateLimit($pdo, $ip, $maxAttempts = 10, $windowMinutes = 10) {
     $pdo->prepare("DELETE FROM failed_login_attempts WHERE attempted_at < NOW() - INTERVAL ? MINUTE")->execute([$windowMinutes]);
     $s = $pdo->prepare("SELECT COUNT(*) as cnt FROM failed_login_attempts WHERE ip_address = ? AND attempted_at > NOW() - INTERVAL ? MINUTE");
     $s->execute([$ip, $windowMinutes]);
+    $count = $s->fetch()['cnt'] ?? 0;
+    return $count < $maxAttempts;
+}
+
+// Rate-limit по конкретной учётной записи (например, "rest_42" для ресторана №42).
+// Защищает от распределённого перебора пароля с разных IP против одного аккаунта.
+function checkAccountRateLimit($pdo, $userName, $maxAttempts = 5, $windowMinutes = 10) {
+    if (!$userName) return true;
+    $s = $pdo->prepare("SELECT COUNT(*) as cnt FROM failed_login_attempts WHERE user_name = ? AND attempted_at > NOW() - INTERVAL ? MINUTE");
+    $s->execute([$userName, $windowMinutes]);
     $count = $s->fetch()['cnt'] ?? 0;
     return $count < $maxAttempts;
 }

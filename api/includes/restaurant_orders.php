@@ -66,18 +66,31 @@ function roGetRestaurantSession($pdo) {
     $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
     if (!$token) return null;
     $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until
+        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,
+               ru.session_active_until, ru.last_login_at
         FROM ro_users ru
         WHERE ru.session_token = ? AND ru.is_active = 1
     ");
     $s->execute([$token]);
     $user = $s->fetch();
     if (!$user) return null;
-    // Проверяем активность сессии (3 часа неактивности)
+    // Проверяем активность сессии (3 часа неактивности).
     if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) {
         return null;
     }
-    // Продлеваем сессию при каждом запросе (сброс таймера неактивности)
+    // Абсолютный потолок: 24 часа от последнего логина. Без него сессия живёт
+    // бесконечно, пока кто-то стучит в API — утёкший токен валиден навсегда.
+    if (!empty($user['last_login_at'])) {
+        $loginTs = strtotime($user['last_login_at']);
+        if ($loginTs && (time() - $loginTs) > 24 * 3600) {
+            // Сессия истекла абсолютно — гасим токен, чтобы дальнейшие запросы
+            // (даже с этим токеном) уже ничего не возвращали.
+            $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
+                ->execute([$user['id']]);
+            return null;
+        }
+    }
+    // Продлеваем сессию при каждом запросе (сброс таймера неактивности).
     $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
         ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
     $rest = roGetRestaurantRow($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
@@ -631,20 +644,29 @@ function roLogAudit($pdo, $e) {
     }
 }
 
-function roNotifyRestaurant($pdo, $restaurantNumber, $message) {
+function roNotifyRestaurant($pdo, $restaurantNumber, $message, $legalEntityGroup = null) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;
 
     // Источник правды о подписках ресторана — ro_telegram_subs.
     // ro_users.telegram_chat_id больше не используется (см. миграцию verified_*).
+    // Фильтр по legal_entity_group обязателен: номера ресторанов BK_VM и PS
+    // могут совпадать, и без группы уведомление улетело бы чужой группе.
     $chatIds = [];
-    $s = $pdo->prepare("
+    $sql = "
         SELECT DISTINCT chat_id FROM ro_telegram_subs
         WHERE restaurant_number = ?
           AND notify_confirmations = 1
           AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
-    ");
-    $s->execute([(int)$restaurantNumber]);
+    ";
+    $params = [(int)$restaurantNumber];
+    if ($legalEntityGroup) {
+        $group = ($legalEntityGroup === 'PS') ? 'PS' : 'BK_VM';
+        $sql .= " AND legal_entity_group = ?";
+        $params[] = $group;
+    }
+    $s = $pdo->prepare($sql);
+    $s->execute($params);
     foreach ($s->fetchAll(PDO::FETCH_COLUMN) as $chatId) {
         $chatId = trim((string)$chatId);
         if ($chatId !== '') $chatIds[$chatId] = true;
@@ -855,7 +877,7 @@ function roBuildUtImportPreview($pdo, $filePath, $selectedDate, $sessionUser, $l
         SELECT restaurant_number, id
         FROM ro_orders
         WHERE delivery_date = ?
-          AND (CASE WHEN legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?
+          AND legal_entity_group = ?
     ");
     $existingStmt->execute([$selectedDate, $entityGroup]);
     $existingByRestaurant = [];
@@ -1097,12 +1119,12 @@ function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates, $o
             FROM ro_orders
             WHERE restaurant_number = ?
               AND delivery_date = ?
-              AND (CASE WHEN legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?
+              AND legal_entity_group = ?
             ORDER BY id DESC
             LIMIT 1
         ");
-        $orderInsert = $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?)");
-        $orderUpdate = $pdo->prepare("UPDATE ro_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), updated_by = ?, legal_entity = ?, comment = ? WHERE id = ?");
+        $orderInsert = $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, legal_entity_group, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?, ?)");
+        $orderUpdate = $pdo->prepare("UPDATE ro_orders SET status = 'submitted', submitted_at = NOW(), updated_at = NOW(), updated_by = ?, legal_entity = ?, legal_entity_group = ?, comment = ? WHERE id = ?");
         $itemsDelete = $pdo->prepare("DELETE FROM ro_order_items WHERE order_id = ?");
         $itemInsert = $pdo->prepare("INSERT INTO ro_order_items (order_id, sku, product_name, category, quantity, comment) VALUES (?, ?, ?, ?, ?, ?)");
 
@@ -1121,10 +1143,10 @@ function roCommitUtImport($pdo, $payload, $sessionUser, $addMissingTemplates, $o
                     continue;
                 }
                 $orderId = (int)$existingId;
-                $orderUpdate->execute([$actor, $le, 'Перезаписано импортом из 1С УТ', $orderId]);
+                $orderUpdate->execute([$actor, $le, $entityGroup, 'Перезаписано импортом из 1С УТ', $orderId]);
                 $itemsDelete->execute([$orderId]);
             } else {
-                $orderInsert->execute([$session['id'], $restNumber, $selectedDate, $actor, $le, 'Импорт из 1С УТ']);
+                $orderInsert->execute([$session['id'], $restNumber, $selectedDate, $actor, $le, $entityGroup, 'Импорт из 1С УТ']);
                 $orderId = (int)$pdo->lastInsertId();
             }
 
@@ -1571,6 +1593,7 @@ $roParam = $roParts[2] ?? null;
 if ($roAction === 'tg-auth' && $method === 'POST') {
     $tgToken = $body['tg_token'] ?? '';
     $acceptedDataRules = !empty($body['accepted_data_rules']);
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     if (!$tgToken) {
         roRespond(['success' => false, 'error' => 'Токен не указан'], 400);
     }
@@ -1578,11 +1601,18 @@ if ($roAction === 'tg-auth' && $method === 'POST') {
         roRespond(['success' => false, 'error' => 'Подтвердите согласие с правилами использования портала'], 400);
     }
 
-    // Ищем токен
-    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group FROM ro_tg_tokens WHERE token = ? AND expires_at > NOW() AND used = 0 LIMIT 1");
+    // Защита от перебора токенов: 10 попыток в минуту с одного IP.
+    if (!checkRateLimit($pdo, $clientIp, 10, 1)) {
+        roRespond(['success' => false, 'error' => 'Слишком много попыток. Подождите минуту'], 429);
+    }
+
+    // Ищем токен. kind='auth' — принимаем ТОЛЬКО длинные токены входа,
+    // 6-значные коды привязки (kind='bind') здесь не должны проходить.
+    $s = $pdo->prepare("SELECT id, telegram_chat_id, restaurant_number, legal_entity_group FROM ro_tg_tokens WHERE token = ? AND kind = 'auth' AND expires_at > NOW() AND used = 0 LIMIT 1");
     $s->execute([$tgToken]);
     $tgAuth = $s->fetch();
     if (!$tgAuth) {
+        recordFailedLogin($pdo, $clientIp, "tg_auth_invalid");
         roRespond(['success' => false, 'error' => 'Ссылка недействительна или истекла']);
     }
 
@@ -1659,6 +1689,10 @@ if ($roAction === 'login' && $method === 'POST') {
 
     if (!checkRateLimit($pdo, $clientIp, 15, 10)) {
         roRespond(['success' => false, 'error' => 'Слишком много попыток. Подождите 10 минут'], 429);
+    }
+    // Защита от распределённого подбора пароля одного ресторана с разных IP.
+    if (!checkAccountRateLimit($pdo, "rest_{$restNum}", 5, 10)) {
+        roRespond(['success' => false, 'error' => 'Слишком много неудачных попыток для этого ресторана. Подождите 10 минут'], 429);
     }
 
     $s = $pdo->prepare("SELECT id, restaurant_number, password_hash, legal_entity, legal_entity_group, session_token, session_active_until, last_login_at FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
@@ -1759,7 +1793,7 @@ if ($roAction === 'change-password' && $method === 'POST') {
     $oldPass = $body['old_password'] ?? '';
     $newPass = $body['new_password'] ?? '';
     if (!$oldPass || !$newPass) roRespond(['error' => 'Заполните оба поля'], 400);
-    if (mb_strlen($newPass) < 4) roRespond(['error' => 'Новый пароль слишком короткий (минимум 4 символа)'], 400);
+    if (mb_strlen($newPass) < 8) roRespond(['error' => 'Новый пароль слишком короткий (минимум 8 символов)'], 400);
     // Проверяем старый пароль
     $s = $pdo->prepare("SELECT id, password_hash FROM ro_users WHERE id = ? AND is_active = 1");
     $s->execute([$rest['id']]);
@@ -2025,7 +2059,7 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     } catch (Exception $e) {
         $pdo->rollBack();
         error_log('ro stock-collection-submit error: ' . $e->getMessage());
-        roRespond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
+        roRespond(['error' => 'Не удалось сохранить остатки. Попробуйте ещё раз или обратитесь в отдел закупок.'], 500);
     }
     if ($saved === 0) {
         roRespond(['error' => 'Ничего не сохранено. Проверьте, что введены количества (' . $skippedUnknown . ' позиций пропущено как неизвестные)'], 400);
@@ -2160,7 +2194,9 @@ if ($roAction === 'telegram-link' && $method === 'POST') {
     // правды о связях — ro_telegram_subs.
     $code = str_pad(random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
     // Привязываем код к конкретному ro_user, чтобы бот знал, чьё подтверждение получено.
-    $pdo->prepare("INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, ro_user_id, expires_at, used) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
+    // kind='bind' — этот код используется ТОЛЬКО для привязки Telegram через бота;
+    // эндпоинт /api/ro/tg-auth его не примет (см. фильтр kind='auth').
+    $pdo->prepare("INSERT INTO ro_tg_tokens (token, kind, telegram_chat_id, restaurant_number, legal_entity_group, ro_user_id, expires_at, used) VALUES (?, 'bind', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE), 0)")
         ->execute([$code, 0, (string)$rest['restaurant_number'], $rest['legal_entity_group'] ?? 'BK_VM', (int)$rest['id']]);
     roRespond(['success' => true, 'code' => $code, 'expires_in' => 600]);
 }
@@ -2579,7 +2615,7 @@ if ($roAction === 'my-info' && $method === 'GET') {
                 FROM ro_orders
                 WHERE restaurant_number = ?
                   AND delivery_date = ?
-                  AND (CASE WHEN legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?
+                  AND legal_entity_group = ?
                 ORDER BY id DESC
                 LIMIT 1
             ");
@@ -2619,6 +2655,7 @@ if ($roAction === 'my-info' && $method === 'GET') {
 
     roRespond([
         'restaurant_orders_enabled' => true,
+        'server_time' => time() * 1000, // мс UTC, фронт считает дельту против часов устройства
         'session' => [
             'id' => (int)$session['id'],
             'week_start' => $session['week_start'],
@@ -2958,7 +2995,7 @@ if ($roAction === 'my-order' && $method === 'GET' && $roParam) {
         FROM ro_orders
         WHERE restaurant_number = ?
           AND delivery_date = ?
-          AND (CASE WHEN legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?
+          AND legal_entity_group = ?
         ORDER BY id DESC
         LIMIT 1
     ");
@@ -3210,7 +3247,7 @@ if ($roAction === 'submit-order' && $method === 'POST') {
         FROM ro_orders
         WHERE restaurant_number = ?
           AND delivery_date = ?
-          AND (CASE WHEN legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?
+          AND legal_entity_group = ?
         ORDER BY id DESC
         LIMIT 1
     ");
@@ -3247,8 +3284,9 @@ if ($roAction === 'submit-order' && $method === 'POST') {
             // roGetLegalEntity — это единый источник истины (в т.ч. ресторан 3 = Воглия Матта).
             // Не опираемся на ro_users.legal_entity: там могут быть старые/некорректные значения.
             $le = roGetLegalEntity($pdo, $rest['restaurant_number'], $rest['legal_entity_group'] ?? null);
-            $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?)")
-                ->execute([$session['id'], $rest['restaurant_number'], $deliveryDate, "Ресторан {$rest['restaurant_number']}", $le, $comment]);
+            $grp = $rest['legal_entity_group'] ?? 'BK_VM';
+            $pdo->prepare("INSERT INTO ro_orders (session_id, restaurant_number, delivery_date, status, submitted_at, updated_by, legal_entity, legal_entity_group, comment) VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?, ?)")
+                ->execute([$session['id'], $rest['restaurant_number'], $deliveryDate, "Ресторан {$rest['restaurant_number']}", $le, $grp, $comment]);
             $orderId = $pdo->lastInsertId();
         }
 
@@ -3493,6 +3531,20 @@ if (strpos($roAction, 'admin') === 0) {
 
     $adminAction = $roParts[2] ?? '';
     $adminParam = $roParts[3] ?? null;
+
+    // --- Усиленный RBAC для чувствительных admin-операций ---
+    // Базовый гейт выше пропускает любого пользователя с restaurant-orders ≥ view/edit.
+    // Но управление учётками ресторанов (создание, сброс пароля) и публикация
+    // важных сообщений в кабинеты ресторанов требуют более строгой роли.
+    $userRoleForSensitive = $sessionUser['role'] ?? '';
+    $isSensitiveUsers = ($adminAction === 'users' && $method !== 'GET');
+    $isSensitiveCabinetPosts = ($adminAction === 'cabinet-posts' && in_array($method, ['POST', 'PATCH', 'DELETE'], true));
+    if ($isSensitiveUsers && $userRoleForSensitive !== 'admin') {
+        roRespond(['error' => 'Управление учётками ресторанов доступно только администраторам'], 403);
+    }
+    if ($isSensitiveCabinetPosts && !in_array($userRoleForSensitive, ['admin', 'manager'], true)) {
+        roRespond(['error' => 'Публикация сообщений в кабинеты ресторанов доступна только администраторам и менеджерам'], 403);
+    }
 
     // --- Настройки модуля для выбранной группы юрлиц ---
     if ($adminAction === 'module-settings' && $method === 'GET') {
@@ -3753,7 +3805,7 @@ if (strpos($roAction, 'admin') === 0) {
             LEFT JOIN ro_orders o
                 ON o.restaurant_number = r.number
                 AND o.delivery_date = ?
-                AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = r.legal_entity_group
+                AND o.legal_entity_group = r.legal_entity_group
             WHERE r.active = 1 AND r.legal_entity_group = ?
               AND (ds.restaurant_id IS NOT NULL OR o.id IS NOT NULL)
             ORDER BY r.region, r.number
@@ -3864,7 +3916,7 @@ if (strpos($roAction, 'admin') === 0) {
 
     // --- Детали заказа ---
     if ($adminAction === 'order' && $method === 'GET' && $adminParam) {
-        $s = $pdo->prepare("SELECT o.*, r.city, r.address, r.region FROM ro_orders o LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) WHERE o.id = ?");
+        $s = $pdo->prepare("SELECT o.*, r.city, r.address, r.region FROM ro_orders o LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = o.legal_entity_group WHERE o.id = ?");
         $s->execute([$adminParam]);
         $order = $s->fetch();
         if (!$order) roRespond(['error' => 'Заказ не найден'], 404);
@@ -4478,6 +4530,7 @@ if (strpos($roAction, 'admin') === 0) {
             $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
             $password = $body['password'] ?? '';
             if (!$restNum || !$password) roRespond(['error' => 'Не указан номер или пароль'], 400);
+            if (mb_strlen($password) < 8) roRespond(['error' => 'Пароль слишком короткий (минимум 8 символов)'], 400);
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
 
             $le = roGetLegalEntity($pdo, $restNum, $restGroup);
@@ -4496,6 +4549,7 @@ if (strpos($roAction, 'admin') === 0) {
             $password = $body['password'] ?? '';
             $mode = ($body['mode'] ?? 'missing') === 'all' ? 'all' : 'missing';
             if (!$password) roRespond(['error' => 'Не указан пароль'], 400);
+            if (mb_strlen($password) < 8) roRespond(['error' => 'Пароль слишком короткий (минимум 8 символов)'], 400);
 
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $restsWhere = ["active = 1"];
@@ -4534,6 +4588,7 @@ if (strpos($roAction, 'admin') === 0) {
             $restGroup = roNormalizeLegalEntityGroup($body['legal_entity_group'] ?? null, $restNum);
             $password = $body['password'] ?? '';
             if (!$restNum || !$password) roRespond(['error' => 'Не указан номер или пароль'], 400);
+            if (mb_strlen($password) < 8) roRespond(['error' => 'Пароль слишком короткий (минимум 8 символов)'], 400);
             roEnsureRestaurantAccess($pdo, $sessionUser, $restNum, $restGroup);
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ? AND legal_entity_group = ?")->execute([$hash, $restNum, $restGroup]);
@@ -4554,7 +4609,7 @@ if (strpos($roAction, 'admin') === 0) {
         $status = $_GET['status'] ?? '';
         $restaurants = $_GET['restaurants'] ?? ''; // comma-separated
 
-        $orderGroupExpr = "(CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END)";
+        $orderGroupExpr = "o.legal_entity_group";
         $where = ["o.delivery_date BETWEEN ? AND ?", "o.status != 'draft'", "{$orderGroupExpr} = ?"];
         $params = [$dateFrom, $dateTo, $entityGroup];
 
@@ -4657,14 +4712,14 @@ if (strpos($roAction, 'admin') === 0) {
             LEFT JOIN restaurants r ON r.number = o.restaurant_number AND r.active = 1 AND r.legal_entity_group = (CASE WHEN o.legal_entity LIKE '%Пицца%' THEN 'PS' ELSE 'BK_VM' END)
             LEFT JOIN delivery_schedule ds ON ds.restaurant_id = r.id AND ds.day_of_week = ?
             WHERE o.delivery_date = ? AND o.status != 'draft'
-              AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?
+              AND o.legal_entity_group = ?
         ";
         $ordersParams = [$dow, $date, $entityGroup];
         if ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
             $allowedGroups = roGetSessionUserGroups($sessionUser);
             if (empty($allowedGroups)) roRespond(['error' => 'Нет доступа к данным этого юрлица'], 403);
             $ph = implode(',', array_fill(0, count($allowedGroups), '?'));
-            $ordersSql .= " AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) IN ({$ph})";
+            $ordersSql .= " AND o.legal_entity_group IN ({$ph})";
             $ordersParams = array_merge($ordersParams, $allowedGroups);
         }
         $ordersSql .= " ORDER BY o.restaurant_number";
@@ -4829,7 +4884,7 @@ if (strpos($roAction, 'admin') === 0) {
         // Фильтр по группе юрлиц: событие относится либо к заказу этой группы,
         // либо к ресторану этой группы (для событий без order_id).
         if ($entityGroup) {
-            $where[] = "((o.legal_entity IS NOT NULL AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) = ?) OR (al.order_id IS NULL AND r.legal_entity_group = ?))";
+            $where[] = "((o.legal_entity IS NOT NULL AND o.legal_entity_group = ?) OR (al.order_id IS NULL AND r.legal_entity_group = ?))";
             $params[] = $entityGroup;
             $params[] = $entityGroup;
         } elseif ($sessionUser && ($sessionUser['role'] ?? '') !== 'admin') {
@@ -4839,7 +4894,7 @@ if (strpos($roAction, 'admin') === 0) {
             } else {
                 $ph = implode(',', array_fill(0, count($allowedGroups), '?'));
                 $where[] = "(
-                    (o.legal_entity IS NOT NULL AND (CASE WHEN o.legal_entity LIKE '%Пицца Стар%' THEN 'PS' ELSE 'BK_VM' END) IN ({$ph}))
+                    (o.legal_entity IS NOT NULL AND o.legal_entity_group IN ({$ph}))
                     OR
                     (al.order_id IS NULL AND r.legal_entity_group IN ({$ph}))
                 )";
@@ -5507,7 +5562,8 @@ if (strpos($roAction, 'admin') === 0) {
             $pdo->commit();
         } catch (Exception $e) {
             $pdo->rollBack();
-            roRespond(['error' => 'Не удалось сохранить: ' . $e->getMessage()], 500);
+            error_log('ro scan-unknown subscribers save error: ' . $e->getMessage());
+            roRespond(['error' => 'Не удалось сохранить подписчиков. Попробуйте ещё раз.'], 500);
         }
 
         $cur = $pdo->query("SELECT user_name FROM ro_scan_unknown_subscribers ORDER BY user_name");

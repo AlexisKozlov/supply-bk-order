@@ -8,16 +8,31 @@ function getEntityGroup($legalEntity) {
 }
 
 // Полное юрлицо ресторана по его номеру + группе.
-// Единый источник истины: PS → «Пицца Стар», BK_VM + номер 3 → «Воглия Матта», остальные BK_VM → «Бургер БК».
-// Если группа не задана — пытаемся определить по таблице restaurants.
+// Источник истины — колонка restaurants.legal_entity (миграция 20260506).
+// Хардкод оставлен как fallback на случай нового ресторана, для которого
+// колонка ещё не заполнена.
 function roGetLegalEntity($pdo, $restaurantNumber, $group = null) {
+    $num = (int)$restaurantNumber;
     if ($group === null) {
-        $s = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-        $s->execute([(int)$restaurantNumber]);
-        $group = $s->fetchColumn() ?: 'BK_VM';
+        $s = $pdo->prepare("SELECT legal_entity, legal_entity_group FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
+        $s->execute([$num]);
+        $row = $s->fetch();
+        if ($row) {
+            if (!empty($row['legal_entity'])) return $row['legal_entity'];
+            $group = $row['legal_entity_group'] ?: 'BK_VM';
+        } else {
+            $group = 'BK_VM';
+        }
+    } else {
+        // Группа известна — берём legal_entity по паре (number, group).
+        $s = $pdo->prepare("SELECT legal_entity FROM restaurants WHERE number = ? AND legal_entity_group = ? AND active = 1 LIMIT 1");
+        $s->execute([$num, $group]);
+        $le = $s->fetchColumn();
+        if (!empty($le)) return $le;
     }
+    // Fallback (для несуществующих/новых ресторанов).
     if ($group === 'PS') return 'ООО "Пицца Стар"';
-    if ((int)$restaurantNumber === 3) return 'ООО "Воглия Матта"';
+    if ($num === 3) return 'ООО "Воглия Матта"';
     return 'ООО "Бургер БК"';
 }
 

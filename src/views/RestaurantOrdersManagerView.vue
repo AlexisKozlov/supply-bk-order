@@ -1415,7 +1415,7 @@ async function loadAuditLog(append = false) {
     auditTotal.value = data.total || 0;
     auditLastRefresh.value = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   } catch (e) {
-    console.error('audit load failed', e);
+    if (import.meta.env.DEV) console.error('audit load failed', e);
   } finally {
     auditLoading.value = false;
   }
@@ -2421,6 +2421,10 @@ async function reloadUsers() {
 }
 
 async function handleBulkCreate() {
+  if ((bulkPassword.value || '').length < 8) {
+    toast.error('Слишком короткий пароль', 'Минимум 8 символов');
+    return;
+  }
   const warn = bulkMode.value === 'all'
     ? 'Назначить пароль ВСЕМ активным ресторанам? У существующих пароль будет заменён.'
     : 'Назначить пароль только тем ресторанам, у которых пароля ещё нет?';
@@ -2442,8 +2446,12 @@ async function handleBulkCreate() {
 async function handleSetPassword(u) {
   const verb = u.has_password ? 'Новый пароль' : 'Задайте пароль';
   const label = formatRestaurantNumber(u.restaurant_number, u.legal_entity_group);
-  const pass = prompt(`${verb} для ресторана ${label}:`);
+  const pass = prompt(`${verb} для ресторана ${label} (минимум 8 символов):`);
   if (!pass) return;
+  if (pass.length < 8) {
+    toast.error('Слишком короткий пароль', 'Минимум 8 символов');
+    return;
+  }
   usersBusy.value = true;
   try {
     // adminCreateUser делает INSERT … ON DUPLICATE KEY UPDATE — то же самое, что reset.

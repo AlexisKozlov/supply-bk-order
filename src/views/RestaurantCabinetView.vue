@@ -2028,6 +2028,10 @@ function delRefreshMultiplicityErrors() { for (const item of delOrderItems.value
 
 async function delSelectDay(date) {
   const requestId = ++delSelectRequestId;
+  // Гасим таймер «осталось до конца редактирования» от предыдущего дня —
+  // иначе старый интервал продолжает работать в фоне до размонтирования.
+  clearInterval(delEditTimerInterval);
+  delEditTimeLeft.value = '';
   delSelectedDate.value = date;
   delExistingOrder.value = null;
   delSubmitError.value = '';
@@ -2119,7 +2123,11 @@ let delDraftSaveTimer = null;
 
 function delDraftKey(date) {
   const rn = roStore.restaurant?.number || 'unknown';
-  return `bk_ro_draft_${rn}_${date}`;
+  // legal_entity_group в ключе обязателен: номера BK_VM и PS могут совпадать
+  // (например, BK_VM #5 и PS #5 в diapason 1000+), и без префикса группы
+  // черновик одного юрлица подцепится в кабинете другого на том же устройстве.
+  const grp = roStore.restaurant?.legal_entity_group || 'BK_VM';
+  return `bk_ro_draft_${grp}_${rn}_${date}`;
 }
 
 function delSaveDraft() {
@@ -2211,6 +2219,10 @@ async function delLoadFullTemplate() {
 }
 
 async function delHandleSubmit() {
+  // Защита от двойного клика: на iOS Safari два быстрых нажатия успевают пройти
+  // до того, как :disabled применится по reactivity. Без этой проверки уходит
+  // два запроса подряд, и второй упирается в уникальный ключ либо создаёт дубль.
+  if (delSubmitting.value) return;
   delSubmitting.value = true; delSubmitError.value = '';
   try {
     const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({
@@ -2221,6 +2233,9 @@ async function delHandleSubmit() {
       comment: i.comment || '',
     }));
     if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
+    // Принудительно сохраняем черновик ДО отправки. Если запрос упадёт (плохая
+    // связь, метро) и юзер закроет вкладку — введённое не пропадёт.
+    try { delSaveDraft(); } catch (e) { /* игнор */ }
     const result = await roStore.submitOrder(delSelectedDate.value, items, delOrderComment.value || null);
     if (result.success) {
       delClearDraft(delSelectedDate.value);
@@ -2252,7 +2267,8 @@ function delUpdateEditTimeLeft() {
   const orderDateStr = delDateToLocalYmd(orderDate);
   // Собираем дедлайн в минском времени (UTC+3)
   const dlMinsk = new Date(`${orderDateStr}T${editUntil}+03:00`);
-  const now = new Date();
+  // Серверное время через сохранённый offset — защита от сбитых часов устройства.
+  const now = new Date(roStore.nowFromServer ? roStore.nowFromServer() : Date.now());
   if (now >= dlMinsk) { delEditTimeLeft.value = ''; clearInterval(delEditTimerInterval); return; }
   const d = dlMinsk - now; const h = Math.floor(d/3600000); const m = Math.floor((d%3600000)/60000); const s = Math.floor((d%60000)/1000);
   delEditTimeLeft.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
@@ -2791,7 +2807,7 @@ async function submitSurveyAnswer() {
 async function changePassword() {
   pwError.value = ''; pwSuccess.value = false;
   if (pwNew.value !== pwConfirm.value) { pwError.value = 'Пароли не совпадают'; return; }
-  if (pwNew.value.length < 4) { pwError.value = 'Минимум 4 символа'; return; }
+  if (pwNew.value.length < 8) { pwError.value = 'Минимум 8 символов'; return; }
   pwLoading.value = true;
   try {
     const data = await roStore.changePassword(pwOld.value, pwNew.value);
@@ -2816,7 +2832,7 @@ async function loadTgLinks() {
   try {
     tgLinksList.value = await roStore.telegramLinks();
   } catch (e) {
-    console.warn('[restaurant cabinet] telegram-links:', e);
+    if (import.meta.env.DEV) console.warn('[restaurant cabinet] telegram-links:', e);
   }
 }
 
@@ -2835,7 +2851,7 @@ async function loadRestaurantBroadcasts() {
   try {
     restaurantBroadcasts.value = await roStore.loadBroadcasts();
   } catch (e) {
-    console.warn('[restaurant cabinet] broadcasts:', e);
+    if (import.meta.env.DEV) console.warn('[restaurant cabinet] broadcasts:', e);
   }
 }
 
@@ -2849,7 +2865,7 @@ async function loadImportantPostsWithOptions({ previewAll = false } = {}) {
     importantPosts.value = await roStore.loadCabinetPosts(50);
     await loadImportantImagePreviews(previewAll ? importantPosts.value.length : 1);
   } catch (e) {
-    console.warn('[restaurant cabinet] important-posts:', e);
+    if (import.meta.env.DEV) console.warn('[restaurant cabinet] important-posts:', e);
   } finally {
     importantLoading.value = false;
   }
@@ -2867,7 +2883,7 @@ async function loadImportantImagePreviews(maxPosts = 1) {
       try {
         importantPreviewUrls[file.id] = await roStore.getCabinetFileObjectUrl(file);
       } catch (e) {
-        console.warn('[restaurant cabinet] image-preview:', e);
+        if (import.meta.env.DEV) console.warn('[restaurant cabinet] image-preview:', e);
       }
     }
   }
@@ -2878,7 +2894,7 @@ async function markImportantRead(post) {
   try {
     await roStore.markCabinetPostsRead([post.id]);
   } catch (e) {
-    console.warn('[restaurant cabinet] important-read:', e);
+    if (import.meta.env.DEV) console.warn('[restaurant cabinet] important-read:', e);
   } finally {
     post.is_read = true;
   }
@@ -2930,7 +2946,7 @@ async function dismissCurrentBroadcast() {
   try {
     await roStore.markBroadcastRead([current.id]);
   } catch (e) {
-    console.warn('[restaurant cabinet] broadcast-read:', e);
+    if (import.meta.env.DEV) console.warn('[restaurant cabinet] broadcast-read:', e);
   } finally {
     restaurantBroadcasts.value = restaurantBroadcasts.value.filter(b => b.id !== current.id);
   }
@@ -3050,7 +3066,7 @@ async function loadPreviousDeliveryOrders() {
   try {
     delPreviousOrders.value = (await roStore.loadMyOrders(5)).filter(o => o.status === 'submitted' || o.status === 'edited');
   } catch (e) {
-    console.warn('[restaurant cabinet] previous-orders:', e);
+    if (import.meta.env.DEV) console.warn('[restaurant cabinet] previous-orders:', e);
   }
 }
 
@@ -3349,7 +3365,7 @@ function startCabinetBackgroundLoading() {
       if (runId !== cabinetBackgroundRunId) return;
       await task();
     } catch (e) {
-      console.warn(`[restaurant cabinet] ${label}:`, e);
+      if (import.meta.env.DEV) console.warn(`[restaurant cabinet] ${label}:`, e);
     }
   };
   setTimeout(() => {
