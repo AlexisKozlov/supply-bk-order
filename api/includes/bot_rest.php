@@ -1483,8 +1483,8 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     $text = "📋 <b>{$colName}</b>\n";
     $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n";
-    $text .= "Введите партии <b>по номерам товаров</b>.\n";
-    $text .= "Формат строки: <code>дд.мм.гггг: количество</code> или просто <code>количество</code>, если срок не нужен.\n";
+    $text .= "Введите остатки <b>по номерам товаров</b>.\n";
+    $text .= "Для товаров со сроком используйте строки вида <code>дд.мм.гггг: количество</code>.\n";
     $text .= "Если у товара несколько сроков, укажите несколько строк подряд.\n\n";
 
     if (!empty($existing)) {

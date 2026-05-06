@@ -967,10 +967,9 @@
                 Итого: <b>{{ stockProductTotal(p.id) || '0' }}</b> {{ stockUnitShort(p.unit) }}
               </div>
             </div>
-            <div class="stock-row-batches">
+            <div v-if="p.need_expiry" class="stock-row-batches">
               <div v-for="(batch, idx) in stockDrafts[p.id] || []" :key="idx" class="stock-batch-row">
                 <input
-                  v-if="p.need_expiry"
                   type="date"
                   v-model="batch.expiry_date"
                   class="stock-input stock-date-input"
@@ -990,6 +989,18 @@
                 <button v-if="(stockDrafts[p.id] || []).length > 1" class="stock-batch-del" @click="removeStockBatch(p.id, idx)" title="Удалить партию">✕</button>
               </div>
               <button class="stock-batch-add" @click="addStockBatch(p.id)">+ Добавить партию</button>
+            </div>
+            <div v-else class="stock-row-single">
+              <input
+                type="number"
+                inputmode="decimal"
+                min="0"
+                step="any"
+                v-model="stockDrafts[p.id][0].stock"
+                class="stock-input stock-qty-input"
+                placeholder="0"
+              />
+              <span class="stock-row-unit">{{ stockUnitShort(p.unit) }}</span>
             </div>
           </div>
         </div>
@@ -3033,7 +3044,11 @@ async function loadStockInline() {
         expiry_date: b.expiry_date ? String(b.expiry_date).slice(0, 10) : '',
         stock: b.stock != null ? String(b.stock) : '',
       }));
-      stockDrafts[p.id] = batches.length ? batches : [makeStockBatchRow()];
+      if (p.need_expiry) {
+        stockDrafts[p.id] = batches.length ? batches : [makeStockBatchRow()];
+      } else {
+        stockDrafts[p.id] = [makeStockBatchRow('', data.values?.[p.id] != null ? String(data.values[p.id]) : (batches[0]?.stock ?? ''))];
+      }
       stockSavedSnapshot[p.id] = JSON.stringify(normalizeStockDraft(p.id));
     }
     stockLastSubmittedAt.value = data.last_submitted_at || null;
@@ -3051,17 +3066,25 @@ async function submitStockInline() {
   try {
     const items = [];
     for (const p of stockProducts.value) {
-      const batches = normalizeStockDraft(p.id).map(batch => ({
-        expiry_date: batch.expiry_date,
-        stock: parseFloat(batch.stock),
-      }));
-      if (!batches.length) {
-        throw new Error(`У товара «${p.product_name}» нет ни одной партии`);
+      if (stockExpiryRequired(p)) {
+        const batches = normalizeStockDraft(p.id).map(batch => ({
+          expiry_date: batch.expiry_date,
+          stock: parseFloat(batch.stock),
+        }));
+        if (!batches.length) {
+          throw new Error(`У товара «${p.product_name}» нет ни одной партии`);
+        }
+        if (batches.some(batch => !batch.expiry_date)) {
+          throw new Error(`Для товара «${p.product_name}» нужно указать срок годности`);
+        }
+        items.push({ product_id: p.id, batches });
+      } else {
+        const stock = String(stockDrafts[p.id]?.[0]?.stock || '').trim();
+        if (stock === '' || Number.isNaN(Number(stock))) {
+          throw new Error(`У товара «${p.product_name}» не указано количество`);
+        }
+        items.push({ product_id: p.id, stock: parseFloat(stock) });
       }
-      if (stockExpiryRequired(p) && batches.some(batch => !batch.expiry_date)) {
-        throw new Error(`Для товара «${p.product_name}» нужно указать срок годности`);
-      }
-      items.push({ product_id: p.id, batches });
     }
     await roStore.submitStockCollection(stockCollection.collection.id, items);
     // Обновляем снапшот и время сохранения
@@ -4352,6 +4375,8 @@ tr.del-err { background: #fef2f2; }
 .stock-row-note { color: #8b7355; font-size: 11px; margin-top: 2px; }
 .stock-row-total { margin-top: 6px; font-size: 12px; color: #8b7355; }
 .stock-row-batches { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 280px; max-width: 420px; }
+.stock-row-single { display: flex; align-items: center; gap: 8px; flex: 0 0 220px; justify-content: flex-end; }
+.stock-row-single .stock-qty-input { width: 120px; }
 .stock-batch-row { display: flex; align-items: center; gap: 6px; }
 .stock-input { width: 80px; padding: 8px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 16px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
 .stock-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.08); }

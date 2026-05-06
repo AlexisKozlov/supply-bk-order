@@ -198,7 +198,7 @@
       <div v-if="cellEditor.show" class="modal">
         <div class="modal-box" style="max-width: 640px;">
           <div class="sc-modal-head">
-            <h3>Партии товара</h3>
+            <h3>{{ cellEditor.needExpiry ? 'Партии товара' : 'Количество товара' }}</h3>
             <button class="sc-x" @click="cellEditor.show = false">✕</button>
           </div>
           <div class="sc-cell-editor-head">
@@ -207,14 +207,17 @@
               Ресторан {{ formatRestaurantNumber(cellEditor.restaurantNumber) }}
             </div>
           </div>
-          <div class="sc-cell-editor-batches">
+          <div v-if="cellEditor.needExpiry" class="sc-cell-editor-batches">
             <div v-for="(batch, idx) in cellEditor.batches" :key="idx" class="sc-cell-editor-row">
-              <input v-if="cellEditor.needExpiry" v-model="batch.expiry_date" type="date" class="sc-input sc-cell-editor-date" />
+              <input v-model="batch.expiry_date" type="date" class="sc-input sc-cell-editor-date" />
               <input v-model="batch.stock" type="number" inputmode="decimal" min="0" step="any" class="sc-input sc-cell-editor-stock" placeholder="0" />
               <button class="sc-x sm" @click="removeCellBatch(idx)">✕</button>
             </div>
           </div>
-          <button class="sc-btn outline full" @click="addCellBatch" style="margin-top: 8px;">+ Добавить партию</button>
+          <div v-else class="sc-cell-editor-single">
+            <input v-model="cellEditor.stock" type="number" inputmode="decimal" min="0" step="any" class="sc-input sc-cell-editor-stock full" placeholder="0" />
+          </div>
+          <button v-if="cellEditor.needExpiry" class="sc-btn outline full" @click="addCellBatch" style="margin-top: 8px;">+ Добавить партию</button>
           <div class="sc-modal-foot">
             <button class="sc-btn outline" @click="cellEditor.show = false">Отмена</button>
             <button class="sc-btn fill" @click="saveCellEdit" :disabled="cellEditor.loading">
@@ -508,7 +511,7 @@ const sortKey = ref('restaurant');
 const sortDir = ref('asc');
 
 // Cell edit
-const cellEditor = ref({ show: false, loading: false, collectionId: null, restaurantNumber: '', productId: null, productName: '', unit: 'pieces', needExpiry: false, batches: [] });
+const cellEditor = ref({ show: false, loading: false, collectionId: null, restaurantNumber: '', productId: null, productName: '', unit: 'pieces', needExpiry: false, stock: '', batches: [] });
 
 // Missing restaurants
 const showMissing = ref(true);
@@ -918,6 +921,7 @@ function openCellEditor(row, prodId) {
     productName: prod ? `${prod.product_name}${prod.product_sku ? ` (${prod.product_sku})` : ''}` : `Товар ${prodId}`,
     unit: prod?.unit || 'pieces',
     needExpiry: !!prod?.need_expiry,
+    stock: cell?.total != null ? String(cell.total) : '',
     batches: (cell?.batches?.length ? cell.batches : [makeCellBatchRow()]).map(b => ({
       expiry_date: b.expiry_date ? String(b.expiry_date).slice(0, 10) : '',
       stock: b.stock != null ? String(b.stock) : '',
@@ -944,22 +948,32 @@ function normalizeCellEditorBatches() {
 }
 
 async function saveCellEdit() {
-  const batches = normalizeCellEditorBatches();
-  if (!batches.length) {
-    toastStore.error('Ошибка', 'Добавьте хотя бы одну партию');
-    return;
-  }
   cellEditor.value.loading = true;
   try {
-    const { error } = await db.rpc('sc_save_collection_cell', {
+    const payload = {
       collection_id: cellEditor.value.collectionId,
       product_id: cellEditor.value.productId,
       restaurant_number: cellEditor.value.restaurantNumber,
-      batches: batches.map(batch => ({
+    };
+    if (cellEditor.value.needExpiry) {
+      const batches = normalizeCellEditorBatches();
+      if (!batches.length) {
+        toastStore.error('Ошибка', 'Добавьте хотя бы одну партию');
+        return;
+      }
+      payload.batches = batches.map(batch => ({
         expiry_date: batch.expiry_date,
         stock: parseFloat(batch.stock),
-      })),
-    });
+      }));
+    } else {
+      const stock = String(cellEditor.value.stock || '').trim();
+      if (stock === '' || Number.isNaN(Number(stock))) {
+        toastStore.error('Ошибка', 'Укажите количество');
+        return;
+      }
+      payload.stock = parseFloat(stock);
+    }
+    const { error } = await db.rpc('sc_save_collection_cell', payload);
     if (error) { toastStore.error('Ошибка', error); return; }
     cellEditor.value.show = false;
     await refreshData();
@@ -1435,6 +1449,8 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-cell-editor-row { display: flex; align-items: center; gap: 8px; }
 .sc-cell-editor-date { width: 180px; }
 .sc-cell-editor-stock { width: 120px; text-align: center; }
+.sc-cell-editor-single { display: flex; justify-content: center; }
+.sc-cell-editor-single .sc-cell-editor-stock.full { width: 100%; max-width: 240px; }
 
 /* Buttons */
 .sc-btn {
