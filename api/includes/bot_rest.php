@@ -1478,78 +1478,53 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
         $existing[$pid][] = ['expiry_date' => $hasExpiryDate ? $r['expiry_date'] : null, 'stock' => $r['stock']];
     }
 
-    $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
+    $totalProducts = count($products);
+    $filledProducts = count(array_filter($products, fn($p) => !empty($existing[$p['id']])));
 
     $text = "📋 <b>{$colName}</b>\n";
     $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n";
-    $text .= "Введите остатки <b>по номерам товаров</b>.\n";
-    $text .= "Для товаров со сроком используйте строки вида <code>дд.мм.гггг: количество</code>.\n";
-    $text .= "Если у товара несколько сроков, укажите несколько строк подряд.\n\n";
-
-    if (!empty($existing)) {
-        $text .= "✅ <b>Уже заполнено:</b>\n";
-        foreach ($products as $idx => $p) {
-            if (empty($existing[$p['id']])) continue;
-            $u = $unitLabels[$p['unit']] ?? $p['unit'];
-            $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
-            $total = 0;
-            foreach ($existing[$p['id']] as $batch) $total += (float)$batch['stock'];
-            $text .= "  • " . ($idx + 1) . ". " . soEsc($label) . " — <b>" . rtrim(rtrim(number_format($total, 2, '.', ''), '0'), '.') . "</b> {$u}\n";
-            if (!empty($p['need_expiry'])) {
-                foreach ($existing[$p['id']] as $batch) {
-                    $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
-                    $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
-                    $text .= "      " . soEsc($date) . ": {$qty}\n";
-                }
-            }
-        }
-        $text .= "─────────────────────\n";
-        $text .= "Чтобы обновить, отправьте список заново.\n\n";
+    $text .= "Заполните остатки по {$totalProducts} позициям";
+    if ($filledProducts > 0) {
+        $text .= " (уже отмечено: <b>{$filledProducts}</b>)";
     }
+    $text .= ".\n\n";
+    $text .= "Удобнее всего заполнить через форму: понятные поля даты и количества, ничего вручную набирать не нужно.";
 
-    $text .= "<code>";
-    foreach ($products as $i => $p) {
-        $u = $unitLabels[$p['unit']] ?? $p['unit'];
-        $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
-        $needExpiry = !empty($p['need_expiry']);
-        $needMark = $needExpiry ? ' · срок обязателен' : '';
-        $text .= ($i + 1) . ". " . soEsc($label) . " ({$u}{$needMark})\n";
-        $current = $existing[$p['id']] ?? [];
-        if ($current) {
-            if ($needExpiry) {
-                foreach ($current as $batch) {
-                    $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
-                    $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
-                    $text .= soEsc($date) . ": {$qty}\n";
-                }
-            } else {
-                $qtyTotal = 0;
-                foreach ($current as $batch) $qtyTotal += (float)$batch['stock'];
-                $qtyTotal = rtrim(rtrim(number_format($qtyTotal, 2, '.', ''), '0'), '.');
-                $text .= "{$qtyTotal}\n";
-            }
-        } else {
-            $text .= $needExpiry ? "без срока: 0\n" : "0\n";
-        }
-        $text .= "\n";
+    // Генерируем токен авто-логина и формируем deep-link на форму сбора
+    $webLink = restScBuildWebLink($pdo, $chatId, $restNum);
+
+    $btns = [];
+    if ($webLink) {
+        $btns[] = [['text' => '🌐 Открыть форму', 'web_app' => ['url' => $webLink]]];
+        $btns[] = [['text' => '🔗 Открыть в браузере', 'url' => $webLink]];
     }
-    $text .= "</code>\n";
-    $text .= "<i>Скопируйте шаблон, замените даты и количества и отправьте.</i>";
+    // Если у пользователя один ресторан — sc_col_{id} автоматически возвращает сюда же (цикл).
+    // Поэтому возврат всегда на список сборов через rest_sc_start.
+    $subsForBack = botGetSubscribedRestaurants($pdo, $chatId);
+    $backCb = (count($subsForBack) > 1) ? "sc_col_{$collectionId}" : 'rest_sc_start';
+    $btns[] = [['text' => '◂ Назад', 'callback_data' => $backCb]];
 
-    if (mb_strlen($text) > 4000) $text = mb_substr($text, 0, 3990) . "\n…";
-
-    // Сохраняем контекст
-    $state = json_encode(['collection_id' => $collectionId, 'rest' => $restNum, 'products' => $products]);
-    file_put_contents(sys_get_temp_dir() . "/sc_{$chatId}.txt", "sc_input");
-    file_put_contents(sys_get_temp_dir() . "/sc_data_{$chatId}.json", $state);
-
-    // Публичная ссылка отключена — оставляем только кнопку «Назад»
-    $btns = [
-        [['text' => '◂ Назад', 'callback_data' => "sc_col_{$collectionId}"]],
-    ];
+    // Очищаем старый текстовый-режим, если был — больше через текст не вводим
+    @unlink(sys_get_temp_dir() . "/sc_{$chatId}.txt");
+    @unlink(sys_get_temp_dir() . "/sc_data_{$chatId}.json");
 
     editMessage($chatId, $msgId, $text, ['inline_keyboard' => $btns]);
+}
+
+// Генерирует одноразовый tg-токен авто-логина и возвращает deep-link на страницу сбора остатков.
+function restScBuildWebLink(PDO $pdo, $chatId, $restNum): ?string {
+    $restGroup = botGetRestaurantGroupByNumber($pdo, $restNum);
+    $check = $pdo->prepare("SELECT 1 FROM ro_users WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+    $check->execute([$restNum, $restGroup]);
+    if (!$check->fetch()) return null;
+    $token = bin2hex(random_bytes(32));
+    $pdo->prepare("
+        INSERT INTO ro_tg_tokens (token, telegram_chat_id, restaurant_number, legal_entity_group, expires_at, used)
+        VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE), 0)
+    ")->execute([$token, $chatId, $restNum, $restGroup]);
+    $siteUrl = rtrim($_ENV['SITE_URL'] ?? (getenv('SITE_URL') ?: 'https://supply-department.online'), '/');
+    return $siteUrl . '/restaurant/login?tg_token=' . $token . '&redirect=' . urlencode('/restaurant/stock');
 }
 
 function restScProcessInput($chatId, $text, $userMsgId) {
@@ -1616,13 +1591,15 @@ function restScProcessInput($chatId, $text, $userMsgId) {
         foreach ($products as $i => $p) {
             $productLines = $byProduct[$i] ?? [];
             $batches = botNormalizeStockCollectionBatches($productLines, $hasExpiryDate);
+            $name = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? '')) ?: ('товар ' . ($i + 1));
             if (!$batches) {
-                throw new RuntimeException('У товара ' . ($i + 1) . ' нет корректных партий');
+                throw new RuntimeException('У товара «' . $name . '» нет корректных партий. Укажите количество (или 0).');
             }
             if ($hasNeedExpiry && !empty($products[$i]['need_expiry'])) {
                 foreach ($batches as $batch) {
-                    if (empty($batch['expiry_date'])) {
-                        throw new RuntimeException('Для товара ' . ($i + 1) . ' нужен срок годности');
+                    // Срок обязателен только если остаток > 0
+                    if (empty($batch['expiry_date']) && (float)$batch['stock'] > 0) {
+                        throw new RuntimeException('Для товара «' . $name . '» нужно указать срок годности (или поставьте остаток 0)');
                     }
                 }
             }

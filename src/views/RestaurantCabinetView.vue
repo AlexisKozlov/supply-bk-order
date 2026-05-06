@@ -981,23 +981,28 @@
             </div>
             <div v-if="p.need_expiry" class="stock-row-batches">
               <div v-for="(batch, idx) in stockDrafts[p.id] || []" :key="idx" class="stock-batch-row">
-                <input
-                  type="date"
-                  v-model="batch.expiry_date"
-                  class="stock-input stock-date-input"
-                  :aria-label="`Срок годности для товара ${p.product_name}`"
-                  :title="'Срок обязателен'"
-                />
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  min="0"
-                  step="any"
-                  v-model="batch.stock"
-                  class="stock-input stock-qty-input"
-                  placeholder="0"
-                />
-                <span class="stock-row-unit">{{ stockUnitShort(p.unit) }}</span>
+                <div class="stock-batch-field">
+                  <label class="stock-batch-label">Срок годности</label>
+                  <input
+                    type="date"
+                    v-model="batch.expiry_date"
+                    class="stock-input stock-date-input"
+                    :class="{ 'stock-input-error': Number(batch.stock) > 0 && !batch.expiry_date }"
+                    :aria-label="`Срок годности для товара ${p.product_name}`"
+                  />
+                </div>
+                <div class="stock-batch-field">
+                  <label class="stock-batch-label">Кол-во, {{ stockUnitShort(p.unit) }}</label>
+                  <input
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    step="any"
+                    v-model="batch.stock"
+                    class="stock-input stock-qty-input"
+                    placeholder="0"
+                  />
+                </div>
                 <button v-if="(stockDrafts[p.id] || []).length > 1" class="stock-batch-del" @click="removeStockBatch(p.id, idx)" title="Удалить партию">✕</button>
               </div>
               <button class="stock-batch-add" @click="addStockBatch(p.id)">+ Добавить партию</button>
@@ -2974,8 +2979,8 @@ function makeStockBatchRow(expiry_date = '', stock = '') {
 function normalizeStockDraft(productId) {
   return (stockDrafts[productId] || [])
     .map(batch => ({
-      expiry_date: String(batch.expiry_date || '').trim(),
-      stock: String(batch.stock || '').trim(),
+      expiry_date: String(batch.expiry_date ?? '').trim(),
+      stock: String(batch.stock ?? '').trim().replace(',', '.'),
     }))
     .filter(batch => batch.stock !== '' && !Number.isNaN(Number(batch.stock)));
 }
@@ -3110,17 +3115,18 @@ async function submitStockInline() {
     for (const p of stockProducts.value) {
       if (stockExpiryRequired(p)) {
         const rawBatches = (stockDrafts[p.id] || []).map(batch => ({
-          expiry_date: String(batch.expiry_date || '').trim(),
-          stock: String(batch.stock ?? '').trim(),
+          expiry_date: String(batch.expiry_date ?? '').trim(),
+          stock: String(batch.stock ?? '').trim().replace(',', '.'),
         }));
         if (!rawBatches.some(batch => batch.stock !== '')) {
           throw new Error(`У товара «${p.product_name}» нет ни одной партии`);
         }
-        if (rawBatches.some(batch => batch.stock !== '' && batch.expiry_date === '')) {
-          throw new Error(`Для товара «${p.product_name}» нужно указать срок годности`);
-        }
         if (rawBatches.some(batch => batch.stock !== '' && Number.isNaN(Number(batch.stock)))) {
           throw new Error(`У товара «${p.product_name}» указано некорректное количество`);
+        }
+        // Срок обязателен только если остаток > 0
+        if (rawBatches.some(batch => batch.stock !== '' && Number(batch.stock) > 0 && batch.expiry_date === '')) {
+          throw new Error(`Для товара «${p.product_name}» нужно указать срок годности (или поставьте остаток 0)`);
         }
         const batches = rawBatches
           .filter(batch => batch.stock !== '')
@@ -3130,7 +3136,7 @@ async function submitStockInline() {
           }));
         items.push({ product_id: p.id, batches });
       } else {
-        const stock = String(stockDrafts[p.id]?.[0]?.stock ?? '').trim();
+        const stock = String(stockDrafts[p.id]?.[0]?.stock ?? '').trim().replace(',', '.');
         if (stock === '' || Number.isNaN(Number(stock))) {
           throw new Error(`У товара «${p.product_name}» не указано количество`);
         }
@@ -4441,7 +4447,10 @@ tr.del-err { background: #fef2f2; }
 .stock-row-batches { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 280px; max-width: 420px; }
 .stock-row-single { display: flex; align-items: center; gap: 8px; flex: 0 0 220px; justify-content: flex-end; }
 .stock-row-single .stock-qty-input { width: 120px; }
-.stock-batch-row { display: flex; align-items: center; gap: 6px; }
+.stock-batch-row { display: flex; align-items: flex-end; gap: 8px; }
+.stock-batch-field { display: flex; flex-direction: column; gap: 3px; }
+.stock-batch-label { font-size: 11px; color: #8b7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+.stock-input-error { border-color: #E76F51 !important; background: #FFF5F0 !important; }
 .stock-input { width: 80px; padding: 8px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 16px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
 .stock-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.08); }
 .stock-date-input { width: 150px; text-align: left; font-size: 14px; }
@@ -4618,6 +4627,16 @@ tr.del-err { background: #fef2f2; }
   .cab-sidebar { display: none; }
   .cab-main { margin-left: 0; }
   .cab-section { padding: 16px; }
+
+  /* Сбор остатков — на мобильнике партии разворачиваются под наименование */
+  .stock-row { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 4px; }
+  .stock-row-batches { min-width: 0; max-width: 100%; width: 100%; }
+  .stock-row-single { flex: 1 1 auto; justify-content: flex-start; }
+  .stock-batch-row { gap: 8px; flex-wrap: wrap; }
+  .stock-batch-field { flex: 1 1 auto; min-width: 130px; }
+  .stock-batch-field .stock-input { width: 100%; box-sizing: border-box; }
+  .stock-date-input { width: auto !important; }
+  .stock-qty-input { width: auto !important; }
 
   /* Dashboard */
   .dash-grid { grid-template-columns: repeat(2, 1fr); }

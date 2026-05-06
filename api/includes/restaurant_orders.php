@@ -1894,13 +1894,21 @@ function roNormalizeStockCollectionBatches($item, $allowExpiry = true) {
     $batches = [];
     if (!is_array($item)) return $batches;
 
+    // Принимаем число с запятой («5,5») и число с пробелами («5 000»).
+    $parseStock = function ($v) {
+        if ($v === null || $v === '') return null;
+        if (is_numeric($v)) return (float)$v;
+        $s = str_replace([',', ' ', "\xC2\xA0"], ['.', '', ''], (string)$v);
+        return is_numeric($s) ? (float)$s : null;
+    };
+
     if (isset($item['batches']) && is_array($item['batches'])) {
         foreach ($item['batches'] as $batch) {
             if (!is_array($batch)) continue;
             $expiry = trim((string)($batch['expiry_date'] ?? ''));
-            $stock = $batch['stock'] ?? null;
-            if ($stock === null || !is_numeric($stock)) continue;
-            $stockVal = round((float)$stock, 2);
+            $stock = $parseStock($batch['stock'] ?? null);
+            if ($stock === null) continue;
+            $stockVal = round($stock, 2);
             if ($stockVal < 0 || $stockVal > 999999) continue;
             if ($allowExpiry && $expiry !== '') {
                 $dt = DateTime::createFromFormat('Y-m-d', $expiry);
@@ -1913,10 +1921,10 @@ function roNormalizeStockCollectionBatches($item, $allowExpiry = true) {
         return $batches;
     }
 
-    $stock = $item['stock'] ?? null;
+    $stock = $parseStock($item['stock'] ?? null);
     $expiry = trim((string)($item['expiry_date'] ?? ''));
-    if ($stock !== null && is_numeric($stock)) {
-        $stockVal = round((float)$stock, 2);
+    if ($stock !== null) {
+        $stockVal = round($stock, 2);
         if ($stockVal >= 0 && $stockVal <= 999999) {
             if ($allowExpiry && $expiry !== '') {
                 $dt = DateTime::createFromFormat('Y-m-d', $expiry);
@@ -1969,37 +1977,58 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     } else {
         $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW())");
     }
+    // Загружаем имена товаров для информативных сообщений об ошибках.
+    $namesStmt = $pdo->prepare("SELECT id, product_name FROM stock_collection_products WHERE collection_id = ?");
+    $namesStmt->execute([$collId]);
+    $productNames = [];
+    foreach ($namesStmt->fetchAll() as $row) {
+        $productNames[(int)$row['id']] = $row['product_name'];
+    }
+
     $pdo->beginTransaction();
     try {
         $saved = 0;
+        $skippedUnknown = 0;
         foreach ($items as $item) {
             $pid = intval($item['product_id'] ?? 0);
-            if ($pid > 0 && array_key_exists($pid, $allowedSet)) {
-                $batches = roNormalizeStockCollectionBatches($item, $hasExpiryDate);
-                if (!$batches) continue;
-                if ($allowedSet[$pid]) {
-                    foreach ($batches as $batch) {
-                        if (empty($batch['expiry_date'])) {
-                            roRespond(['error' => 'Для этой позиции нужно указать срок годности'], 400);
-                        }
-                    }
-                }
-                $del->execute([$collId, $pid, $rest['restaurant_number']]);
+            if ($pid <= 0) continue;
+            if (!array_key_exists($pid, $allowedSet)) {
+                $skippedUnknown++;
+                continue;
+            }
+            $batches = roNormalizeStockCollectionBatches($item, $hasExpiryDate);
+            if (!$batches) {
+                $name = $productNames[$pid] ?? ('id=' . $pid);
+                roRespond(['error' => 'У товара «' . $name . '» не указано количество (или указано некорректно)'], 400);
+            }
+            if ($allowedSet[$pid]) {
                 foreach ($batches as $batch) {
-                    if ($hasExpiryDate) {
-                        $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['expiry_date'], $batch['stock']]);
-                    } else {
-                        $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['stock']]);
+                    // Срок обязателен только если остаток > 0
+                    if (empty($batch['expiry_date']) && (float)$batch['stock'] > 0) {
+                        $name = $productNames[$pid] ?? ('id=' . $pid);
+                        error_log('stock-collection-submit: empty expiry_date for pid=' . $pid . ', item=' . json_encode($item, JSON_UNESCAPED_UNICODE));
+                        roRespond(['error' => 'У товара «' . $name . '» нужно указать срок годности (или поставьте остаток 0)'], 400);
                     }
-                    $saved++;
                 }
+            }
+            $del->execute([$collId, $pid, $rest['restaurant_number']]);
+            foreach ($batches as $batch) {
+                if ($hasExpiryDate) {
+                    $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['expiry_date'], $batch['stock']]);
+                } else {
+                    $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['stock']]);
+                }
+                $saved++;
             }
         }
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
         error_log('ro stock-collection-submit error: ' . $e->getMessage());
-        roRespond(['error' => 'Ошибка сохранения'], 500);
+        roRespond(['error' => 'Ошибка сохранения: ' . $e->getMessage()], 500);
+    }
+    if ($saved === 0) {
+        roRespond(['error' => 'Ничего не сохранено. Проверьте, что введены количества (' . $skippedUnknown . ' позиций пропущено как неизвестные)'], 400);
     }
     roRespond(['success' => true, 'saved' => $saved]);
 }
