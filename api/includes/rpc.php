@@ -5179,6 +5179,130 @@ if ($endpoint === 'rpc') {
         respond($proto);
     }
 
+    function pdResponsibleToUsers($pdo, $responsiblePerson) {
+        $names = array_values(array_filter(array_map('trim', explode(',', (string)$responsiblePerson))));
+        if (!$names) return [];
+        $ph = implode(',', array_fill(0, count($names), '?'));
+        $s = $pdo->prepare("SELECT name FROM users WHERE name IN ($ph)");
+        $s->execute($names);
+        $exist = array_column($s->fetchAll(), 'name');
+        return array_values(array_filter($names, fn($n) => in_array($n, $exist, true)));
+    }
+
+    function pdEnsureUserBoard($pdo, $userName) {
+        $s = $pdo->prepare("SELECT id FROM tasks_boards WHERE owner_name = ? AND is_archived = 0 ORDER BY sort_order, id LIMIT 1");
+        $s->execute([$userName]);
+        $bid = (int)$s->fetchColumn();
+        if ($bid) return $bid;
+        $pdo->prepare("INSERT INTO tasks_boards (owner_name, title) VALUES (?, ?)")->execute([$userName, $userName]);
+        $bid = (int)$pdo->lastInsertId();
+        $cols = [
+            ['Сделать',  '#90A4AE',    0, 0, 0],
+            ['В работе', '#FFA726',    1, 0, 0],
+            ['Архив',    '#9E9E9E', 9999, 0, 1],
+        ];
+        $ins = $pdo->prepare("INSERT INTO tasks_columns (board_id, title, color, sort_order, is_done_column, is_archive_column) VALUES (?, ?, ?, ?, ?, ?)");
+        foreach ($cols as $c) $ins->execute([$bid, $c[0], $c[1], $c[2], $c[3], $c[4]]);
+        return $bid;
+    }
+
+    function pdSyncDecisionToCard($pdo, $decId, $createdBy = 'system') {
+        $s = $pdo->prepare("SELECT id, text, responsible_person, deadline, status, tasks_card_id FROM protocol_decisions WHERE id = ?");
+        $s->execute([$decId]);
+        $dec = $s->fetch();
+        if (!$dec) return;
+        $users = pdResponsibleToUsers($pdo, $dec['responsible_person']);
+        $cardId = (int)$dec['tasks_card_id'];
+        $title = mb_substr((string)$dec['text'], 0, 255);
+        $cardDue = $dec['deadline'] ? ($dec['deadline'] . ' 23:59:59') : null;
+        $isDone = $dec['status'] === 'done' ? 1 : 0;
+        $isArchived = $isDone ? 1 : 0;
+        $completedAt = $isDone ? (date('Y-m-d H:i:s')) : null;
+
+        if (!$users && !$cardId) return;
+        if (!$users && $cardId) {
+            $pdo->prepare("UPDATE tasks_cards SET title=?, due_date=?, is_done=?, is_archived=?, completed_at=? WHERE id=?")
+                ->execute([$title, $cardDue, $isDone, $isArchived, $completedAt, $cardId]);
+            return;
+        }
+        $owner = $users[0];
+        if (!$cardId) {
+            $boardId = pdEnsureUserBoard($pdo, $owner);
+            if ($isDone) {
+                $c = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+            } else {
+                $c = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1");
+            }
+            $c->execute([$boardId]);
+            $columnId = (int)$c->fetchColumn();
+            if (!$columnId) return;
+            $so = $pdo->prepare("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks_cards WHERE column_id = ? AND parent_card_id IS NULL");
+            $so->execute([$columnId]);
+            $sortOrder = (int)$so->fetchColumn();
+            $pdo->prepare("INSERT INTO tasks_cards (board_id, column_id, title, description, priority, due_date, sort_order, is_done, is_archived, created_by, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+                ->execute([$boardId, $columnId, $title, null, 'medium', $cardDue, $sortOrder, $isDone, $isArchived, $createdBy, $completedAt]);
+            $cardId = (int)$pdo->lastInsertId();
+            $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = ? WHERE id = ?")->execute([$cardId, $decId]);
+        } else {
+            $cur = $pdo->prepare("SELECT c.id, c.column_id, c.board_id, c.is_done, col.is_done_column, col.is_archive_column FROM tasks_cards c LEFT JOIN tasks_columns col ON col.id = c.column_id WHERE c.id = ?");
+            $cur->execute([$cardId]);
+            $card = $cur->fetch();
+            if (!$card) return;
+            $newColumnId = (int)$card['column_id'];
+            if ($isDone && !$card['is_archive_column']) {
+                $c2 = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+                $c2->execute([$card['board_id']]);
+                $newColumnId = (int)$c2->fetchColumn() ?: $newColumnId;
+            } elseif (!$isDone && ($card['is_done_column'] || $card['is_archive_column'])) {
+                $c2 = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_done_column = 0 AND is_archive_column = 0 ORDER BY sort_order, id LIMIT 1");
+                $c2->execute([$card['board_id']]);
+                $newColumnId = (int)$c2->fetchColumn() ?: $newColumnId;
+            }
+            $pdo->prepare("UPDATE tasks_cards SET title=?, due_date=?, is_done=?, is_archived=?, completed_at=?, column_id=? WHERE id=?")
+                ->execute([$title, $cardDue, $isDone, $isArchived, $completedAt, $newColumnId, $cardId]);
+        }
+        if ($cardId && $users) {
+            $cur = $pdo->prepare("SELECT user_name FROM tasks_assignees WHERE card_id = ?");
+            $cur->execute([$cardId]);
+            $existing = array_column($cur->fetchAll(), 'user_name');
+            $toAdd = array_diff($users, $existing);
+            $toRemove = array_diff($existing, $users);
+            if ($toRemove) {
+                $ph = implode(',', array_fill(0, count($toRemove), '?'));
+                $pdo->prepare("DELETE FROM tasks_assignees WHERE card_id = ? AND user_name IN ($ph)")->execute(array_merge([$cardId], array_values($toRemove)));
+            }
+            if ($toAdd) {
+                $ins = $pdo->prepare("INSERT IGNORE INTO tasks_assignees (card_id, user_name) VALUES (?, ?)");
+                foreach ($toAdd as $u) $ins->execute([$cardId, $u]);
+            }
+        }
+        if ($cardId) {
+            if ($isDone) {
+                $pdo->prepare("UPDATE tasks_assignees SET is_done = 1, done_at = COALESCE(done_at, NOW()) WHERE card_id = ? AND is_done = 0")->execute([$cardId]);
+            } else {
+                $pdo->prepare("UPDATE tasks_assignees SET is_done = 0, done_at = NULL WHERE card_id = ?")->execute([$cardId]);
+            }
+        }
+    }
+
+    function pdArchiveCardForDecision($pdo, $decisionId) {
+        $s = $pdo->prepare("SELECT tasks_card_id FROM protocol_decisions WHERE id = ?");
+        $s->execute([$decisionId]);
+        $cardId = (int)$s->fetchColumn();
+        if (!$cardId) return;
+        $c = $pdo->prepare("SELECT board_id FROM tasks_cards WHERE id = ?");
+        $c->execute([$cardId]);
+        $boardId = (int)$c->fetchColumn();
+        if (!$boardId) return;
+        $col = $pdo->prepare("SELECT id FROM tasks_columns WHERE board_id = ? AND is_archive_column = 1 ORDER BY sort_order LIMIT 1");
+        $col->execute([$boardId]);
+        $archiveId = (int)$col->fetchColumn();
+        if (!$archiveId) return;
+        $pdo->prepare("UPDATE tasks_cards SET column_id = ?, is_done = 1, is_archived = 1, completed_at = COALESCE(completed_at, NOW()) WHERE id = ?")
+            ->execute([$archiveId, $cardId]);
+        $pdo->prepare("UPDATE protocol_decisions SET tasks_card_id = NULL WHERE id = ?")->execute([$decisionId]);
+    }
+
     if ($fn === 'save_protocol') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
@@ -5226,6 +5350,7 @@ if ($endpoint === 'rpc') {
             }
             // Синхронизируем решения
             $existingIds = [];
+            $syncDecIds = [];
             foreach ($decisions as $dec) {
                 $decId = intval($dec['id'] ?? 0);
                 $decText = trim($dec['text'] ?? '');
@@ -5238,20 +5363,30 @@ if ($endpoint === 'rpc') {
                     $pdo->prepare("UPDATE protocol_decisions SET text=?, responsible_person=?, deadline=?, status=?, completed_at=? WHERE id=? AND protocol_id=?")
                         ->execute([$decText, $responsible, $deadline, $decStatus, $completedAt, $decId, $id]);
                     $existingIds[] = $decId;
+                    $syncDecIds[] = $decId;
                 } else {
                     $pdo->prepare("INSERT INTO protocol_decisions (protocol_id, text, responsible_person, deadline, status, completed_at) VALUES (?,?,?,?,?,?)")
                         ->execute([$id, $decText, $responsible, $deadline, $decStatus, $completedAt]);
-                    $existingIds[] = $pdo->lastInsertId();
+                    $newDecId = (int)$pdo->lastInsertId();
+                    $existingIds[] = $newDecId;
+                    $syncDecIds[] = $newDecId;
                 }
             }
             // Удаляем решения, которых больше нет
             if ($existingIds) {
                 $ph = implode(',', array_fill(0, count($existingIds), '?'));
+                $delQ = $pdo->prepare("SELECT id FROM protocol_decisions WHERE protocol_id = ? AND id NOT IN ($ph)");
+                $delQ->execute(array_merge([$id], $existingIds));
+                foreach ($delQ->fetchAll() as $rowDel) pdArchiveCardForDecision($pdo, (int)$rowDel['id']);
                 $pdo->prepare("DELETE FROM protocol_decisions WHERE protocol_id = ? AND id NOT IN ($ph)")->execute(array_merge([$id], $existingIds));
             } else {
+                $delQ = $pdo->prepare("SELECT id FROM protocol_decisions WHERE protocol_id = ?");
+                $delQ->execute([$id]);
+                foreach ($delQ->fetchAll() as $rowDel) pdArchiveCardForDecision($pdo, (int)$rowDel['id']);
                 $pdo->prepare("DELETE FROM protocol_decisions WHERE protocol_id = ?")->execute([$id]);
             }
             $pdo->commit();
+            foreach ($syncDecIds as $syncId) pdSyncDecisionToCard($pdo, $syncId, $caller['name']);
 
             // Telegram-уведомление участникам только при смене статуса на final
             $wasAlreadyFinal = isset($row) && ($row['old_status'] ?? '') === 'final';
@@ -5291,6 +5426,19 @@ if ($endpoint === 'rpc') {
         if (!$decId || !in_array($newStatus, ['pending', 'done', 'overdue'])) respond(['error' => 'Некорректные параметры'], 400);
         $completedAt = $newStatus === 'done' ? date('Y-m-d H:i:s') : null;
         $pdo->prepare("UPDATE protocol_decisions SET status = ?, completed_at = ? WHERE id = ?")->execute([$newStatus, $completedAt, $decId]);
+        pdSyncDecisionToCard($pdo, $decId, $caller['name']);
+        respond(['success' => true]);
+    }
+
+    if ($fn === 'update_decision_deadline') {
+        $caller = getSessionUser($pdo);
+        if (!$caller) respond(['error' => 'Требуется авторизация'], 401);
+        $decId = intval($body['id'] ?? 0);
+        $deadline = $body['deadline'] ?: null;
+        if (!$decId) respond(['error' => 'id required'], 400);
+        if ($deadline && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $deadline)) respond(['error' => 'Некорректная дата'], 400);
+        $pdo->prepare("UPDATE protocol_decisions SET deadline = ? WHERE id = ?")->execute([$deadline, $decId]);
+        pdSyncDecisionToCard($pdo, $decId, $caller['name']);
         respond(['success' => true]);
     }
 

@@ -61,6 +61,7 @@ export const tasksApi = {
 
   // Соисполнители
   setAssignees(cardId, names)        { return call('POST',  `/cards/${cardId}/assignees`, { user_names: names }); },
+  setAssigneeDone(cardId, userName, isDone) { return call('POST', `/cards/${cardId}/assignees/done`, { user_name: userName, is_done: isDone ? 1 : 0 }); },
 
   // Связи с сущностями
   setRelations(cardId, relations)    { return call('POST',  `/cards/${cardId}/relations`, { relations }); },

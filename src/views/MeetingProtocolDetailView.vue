@@ -90,7 +90,7 @@
               <td class="mpd-td-num">{{ i + 1 }}</td>
               <td class="mpd-td-text">{{ t.text }}</td>
               <td>{{ formatResponsible(t.responsible_person) }}</td>
-              <td>{{ fmtShortDate(t.deadline) }}</td>
+              <td><input type="date" v-model="t.deadline" @change="onCarryoverDeadlineChange(t)" class="mpd-date-input" /></td>
               <td><select v-model="t.status" class="mpd-cell-input mpd-cell-status" :class="'mpd-st-' + t.status" @change="onCarryoverStatusChange(t)">
                 <option value="pending">В работе</option>
                 <option value="done">Выполнено</option>
@@ -284,6 +284,11 @@ function onCarryoverStatusChange(t) {
     // Убираем из списка через секунду
     setTimeout(() => { carryoverTasks.value = carryoverTasks.value.filter(x => x.id !== t.id); }, 800);
   }
+}
+
+async function onCarryoverDeadlineChange(t) {
+  const { error } = await db.rpc('update_decision_deadline', { id: t.id, deadline: t.deadline || null });
+  if (error) toast.error('Ошибка', 'Не удалось обновить срок');
 }
 
 function isMyTask(dec) {
@@ -593,6 +598,15 @@ onBeforeUnmount(() => {
 .mpd-td-text { font-size: 13px; padding: 5px 8px; }
 .mpd-td-source { font-size: 11px; color: #999; white-space: nowrap; }
 .mpd-th-source { width: 90px; }
+.mpd-date-input {
+  padding: 3px 6px;
+  border: 1.5px solid var(--border, #ddd);
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--card, #fff);
+  color: var(--text, #333);
+  font-family: inherit;
+}
 
 /* Buttons */
 .mpd-btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; white-space: nowrap; }

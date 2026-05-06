@@ -173,12 +173,23 @@
 
           <!-- Соисполнители -->
           <section class="ts-section">
-            <div class="ts-section-title">Соисполнители</div>
+            <div class="ts-section-title">
+              Соисполнители
+              <span v-if="full.assignees.length" class="ts-section-progress">{{ assigneesDoneCount }}/{{ full.assignees.length }} готовы</span>
+            </div>
             <div class="ts-assignees">
-              <span v-for="n in full.assignees" :key="n" class="ts-chip">
-                <span class="ts-chip-bubble">{{ initials(n) }}</span>
-                <span class="ts-chip-name">{{ n }}</span>
-                <button v-if="canEditStructure" class="ts-icon-btn" @click="removeAssignee(n)">
+              <span v-for="a in full.assignees" :key="a.user_name" class="ts-chip" :class="{ 'ts-chip-done': a.is_done }">
+                <input
+                  type="checkbox"
+                  class="ts-chip-check"
+                  :checked="!!a.is_done"
+                  :disabled="!canToggleAssignee(a.user_name)"
+                  @change="toggleAssigneeDone(a)"
+                  :title="canToggleAssignee(a.user_name) ? 'Моя часть готова' : 'Только сам соисполнитель или менеджер может отметить'"
+                />
+                <span class="ts-chip-bubble">{{ initials(a.user_name) }}</span>
+                <span class="ts-chip-name">{{ a.user_name }}</span>
+                <button v-if="canEditStructure" class="ts-icon-btn" @click="removeAssignee(a.user_name)">
                   <TaskIcon name="close" :size="12"/>
                 </button>
               </span>
@@ -354,10 +365,14 @@ const dueDateLocal = computed(() => {
 });
 
 const availableUsers = computed(() => {
-  const taken = new Set(full.value?.assignees || []);
+  const taken = new Set((full.value?.assignees || []).map(a => typeof a === 'string' ? a : a.user_name));
   taken.add(store.board?.owner_name);
   return store.users.filter(u => !taken.has(u.name));
 });
+
+const assigneesDoneCount = computed(() =>
+  (full.value?.assignees || []).filter(a => a.is_done).length
+);
 
 const canDelete = computed(() => {
   if (!full.value) return false;
@@ -571,24 +586,50 @@ async function addNewLabel() {
 }
 
 // ─── Соисполнители ───
+function canToggleAssignee(name) {
+  const me = userStore.currentUser?.name;
+  if (!me) return false;
+  if (me === name) return true;
+  const role = userStore.currentUser?.role;
+  return role === 'admin' || role === 'manager';
+}
+
+async function toggleAssigneeDone(a) {
+  const newVal = !a.is_done;
+  try {
+    const res = await tasksApi.setAssigneeDone(full.value.card.id, a.user_name, newVal);
+    if (res?.error) { showError(new Error(res.error)); return; }
+    a.is_done = newVal ? 1 : 0;
+    a.done_at = newVal ? new Date().toISOString() : null;
+    const cardWasDone = !!full.value.card.is_done;
+    if (res?.all_done && !cardWasDone) {
+      full.value.card.is_done = 1;
+      emit('updated');
+    } else if (!res?.all_done && cardWasDone) {
+      full.value.card.is_done = 0;
+      emit('updated');
+    }
+  } catch (e) { showError(e); }
+}
+
 async function addAssignee() {
   if (!newAssignee.value) return;
-  const newList = [...full.value.assignees, newAssignee.value];
+  const newNames = [...full.value.assignees.map(a => a.user_name), newAssignee.value];
   try {
-    await tasksApi.setAssignees(props.cardId, newList);
-    full.value.assignees = newList;
+    await tasksApi.setAssignees(props.cardId, newNames);
+    full.value.assignees = [...full.value.assignees, { user_name: newAssignee.value, is_done: 0, done_at: null }];
     const inList = store.cards.find(c => c.id === props.cardId);
-    if (inList) inList.assignees = newList;
+    if (inList) inList.assignees = full.value.assignees.map(a => a.user_name);
     newAssignee.value = '';
   } catch (e) { showError(e); }
 }
 async function removeAssignee(name) {
-  const newList = full.value.assignees.filter(n => n !== name);
+  const newNames = full.value.assignees.filter(a => a.user_name !== name).map(a => a.user_name);
   try {
-    await tasksApi.setAssignees(props.cardId, newList);
-    full.value.assignees = newList;
+    await tasksApi.setAssignees(props.cardId, newNames);
+    full.value.assignees = full.value.assignees.filter(a => a.user_name !== name);
     const inList = store.cards.find(c => c.id === props.cardId);
-    if (inList) inList.assignees = newList;
+    if (inList) inList.assignees = newNames;
   } catch (e) { showError(e); }
 }
 
@@ -650,6 +691,8 @@ function historyText(h) {
     case 'labels_changed': return 'изменил(а) метки';
     case 'assignees_changed': return 'изменил(а) соисполнителей';
     case 'relations_changed': return 'изменил(а) связи';
+    case 'auto_closed':   return 'карточка закрыта (все соисполнители готовы)';
+    case 'auto_reopened': return 'карточка возвращена в работу';
     default: return h.action;
   }
 }
@@ -1403,5 +1446,29 @@ function historyText(h) {
 @media (max-width: 540px) {
   .task-sidebar { max-width: 100%; }
   .ts-props { grid-template-columns: 1fr; }
+}
+
+.ts-section-progress {
+  font-size: 11px;
+  color: var(--tk-text-muted);
+  font-weight: 500;
+  margin-left: 8px;
+}
+.ts-chip-check {
+  margin-right: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ts-chip-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.ts-chip-done {
+  background: var(--tk-success-soft);
+  opacity: 0.8;
+}
+.ts-chip-done .ts-chip-name {
+  text-decoration: line-through;
+  color: var(--tk-text-muted);
 }
 </style>
