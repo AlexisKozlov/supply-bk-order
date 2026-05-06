@@ -966,7 +966,7 @@ async function saveCellEdit() {
         stock: parseFloat(batch.stock),
       }));
     } else {
-      const stock = String(cellEditor.value.stock || '').trim();
+      const stock = String(cellEditor.value.stock ?? '').trim();
       if (stock === '' || Number.isNaN(Number(stock))) {
         toastStore.error('Ошибка', 'Укажите количество');
         return;

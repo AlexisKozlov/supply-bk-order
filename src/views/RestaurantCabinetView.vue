@@ -3079,7 +3079,7 @@ async function submitStockInline() {
         }
         items.push({ product_id: p.id, batches });
       } else {
-        const stock = String(stockDrafts[p.id]?.[0]?.stock || '').trim();
+        const stock = String(stockDrafts[p.id]?.[0]?.stock ?? '').trim();
         if (stock === '' || Number.isNaN(Number(stock))) {
           throw new Error(`У товара «${p.product_name}» не указано количество`);
         }
