@@ -4,12 +4,7 @@
     <div class="rsv-header">
       <h1 v-if="!embedded" class="page-title" style="margin-bottom:0">Реализация ресторанов</h1>
       <div class="rsv-controls">
-        <select v-model="period" class="rsv-select">
-          <option value="7">7 дней</option>
-          <option value="14">14 дней</option>
-          <option value="30">30 дней</option>
-          <option value="90">3 месяца</option>
-        </select>
+        <PeriodPicker v-model="periodSel" />
         <input v-model="searchQuery" class="rsv-search" placeholder="Поиск группы…" />
         <select v-model="supplierFilter" class="rsv-select">
           <option value="">Все поставщики</option>
@@ -208,6 +203,7 @@ import { useToastStore } from '@/stores/toastStore.js';
 import { getEntityGroupCode, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
+import PeriodPicker from '@/components/ui/PeriodPicker.vue';
 
 function normalizeAnalogGroup(s) {
   let t = String(s ?? '').trim();
@@ -234,7 +230,7 @@ const dbGroups = ref(new Set());
 const productsByGroup = ref({});
 const fileInput = ref(null);
 
-const period = ref('30');
+const periodSel = ref({ kind: 'preset', preset: '30', from: '', to: '' });
 const searchQuery = ref('');
 const sortKey = ref('total-desc');
 const hideZero = ref(true);
@@ -251,19 +247,26 @@ const dowOrder = [1, 2, 3, 4, 5, 6, 0]; // Пн-Вс
 async function loadData() {
   loading.value = true;
   try {
-    const pd = parseInt(period.value);
-    // Загружаем текущий + предыдущий период для тренда + запас
-    const daysNeeded = pd * 2 + 14;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - daysNeeded);
-    const cutStr = fmtISO(cutoff);
+    const pd = periodDays.value;
+    let cutStr;
+    let upperStr = null;
+    if (periodSel.value.kind === 'custom' && periodSel.value.from && periodSel.value.to) {
+      const f = new Date(periodSel.value.from + 'T12:00:00');
+      f.setDate(f.getDate() - pd - 14);
+      cutStr = fmtISO(f);
+      upperStr = periodSel.value.to;
+    } else {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - pd * 2 - 14);
+      cutStr = fmtISO(cutoff);
+    }
 
-    const { data, error } = await db.from('restaurant_sales')
+    let query = db.from('restaurant_sales')
       .select('sale_date, analog_group, quantity, restaurant_count')
-      .eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity))
-      .gte('sale_date', cutStr)
-      .order('sale_date', { ascending: true })
-      .limit(50000);
+      .eq('legal_entity_group', getEntityGroupCode(orderStore.settings.legalEntity));
+    if (upperStr) query = query.between('sale_date', cutStr, upperStr);
+    else query = query.gte('sale_date', cutStr);
+    const { data, error } = await query.order('sale_date', { ascending: true }).limit(50000);
     if (error) { toast.error('Ошибка', 'Не удалось загрузить данные'); return; }
     rawData.value = (data || []).map(r => ({ ...r, analog_group: normalizeAnalogGroup(r.analog_group) }));
   } catch (e) { toast.error('Ошибка', e.message); }
@@ -289,8 +292,17 @@ onMounted(() => { loadData(); loadProducts(); });
 
 // ═══ Period boundaries ═══
 
-const periodDays = computed(() => parseInt(period.value));
+const periodDays = computed(() => {
+  if (periodSel.value.kind === 'custom') {
+    if (!periodSel.value.from || !periodSel.value.to) return 30;
+    const f = new Date(periodSel.value.from + 'T12:00:00');
+    const t = new Date(periodSel.value.to + 'T12:00:00');
+    return Math.max(1, Math.round((t - f) / 86400000) + 1);
+  }
+  return parseInt(periodSel.value.preset) || 30;
+});
 const periodLabel = computed(() => {
+  if (periodSel.value.kind === 'custom') return periodDays.value + ' дней';
   const d = periodDays.value;
   if (d <= 30) return d + ' дней';
   if (d === 90) return '3 месяца';
@@ -313,8 +325,24 @@ function periodBounds(daysAgo, length) {
   return { from: fmtISO(from), to: fmtISO(to) };
 }
 
-const currentBounds = computed(() => periodBounds(0, periodDays.value));
-const prevBounds = computed(() => periodBounds(periodDays.value, periodDays.value));
+const currentBounds = computed(() => {
+  if (periodSel.value.kind === 'custom') {
+    return { from: periodSel.value.from || '', to: periodSel.value.to || '' };
+  }
+  return periodBounds(0, periodDays.value);
+});
+const prevBounds = computed(() => {
+  if (periodSel.value.kind === 'custom') {
+    if (!currentBounds.value.from) return { from: '', to: '' };
+    const len = periodDays.value;
+    const to = new Date(currentBounds.value.from + 'T12:00:00');
+    to.setDate(to.getDate() - 1);
+    const from = new Date(to);
+    from.setDate(from.getDate() - len + 1);
+    return { from: fmtISO(from), to: fmtISO(to) };
+  }
+  return periodBounds(periodDays.value, periodDays.value);
+});
 
 const currentPeriod = computed(() =>
   rawData.value.filter(r => r.sale_date >= currentBounds.value.from && r.sale_date <= currentBounds.value.to)
@@ -494,7 +522,12 @@ const paginatedGroups = computed(() =>
 
 function toggleExpand(name) { expanded.value = expanded.value === name ? null : name; }
 
-watch(period, () => { page.value = 1; expanded.value = null; loadData(); });
+watch(periodSel, () => {
+  page.value = 1;
+  expanded.value = null;
+  if (periodSel.value.kind === 'custom' && (!periodSel.value.from || !periodSel.value.to)) return;
+  loadData();
+}, { deep: true });
 watch(() => orderStore.settings.legalEntity, () => { page.value = 1; expanded.value = null; loadData(); });
 watch(searchQuery, () => { page.value = 1; });
 watch(sortKey, () => { page.value = 1; });

@@ -106,6 +106,7 @@ class QueryBuilder {
   gte(c, v)   { this._f[c] = `gte.${v}`;    return this; }
   lt(c, v)    { this._f[c] = `lt.${v}`;     return this; }
   lte(c, v)   { this._f[c] = `lte.${v}`;    return this; }
+  between(c, from, to) { this._f[c] = `between.${from}.${to}`; return this; }
   in(c, v)    { if (!Array.isArray(v) || !v.length) { this._emptyIn = true; return this; } this._f[c] = `in.(${v.map(x => String(x).replace(/,/g, '\\,')).join(',')})`; return this; }
   is(c, v)    { this._f[c] = v === null ? 'is.null' : `eq.${v}`; return this; }
   // Примечание: несколько фильтров на одну и ту же колонку не поддерживаются —

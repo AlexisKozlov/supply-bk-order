@@ -583,6 +583,11 @@ function parseFilter($key, $val, &$where, &$params, $pdo, $table) {
     elseif (strpos($val,'gt.')===0) { $where[]="`$key`>?"; $params[]=substr($val,3); }
     elseif (strpos($val,'lte.')===0) { $where[]="`$key`<=?"; $params[]=substr($val,4); }
     elseif (strpos($val,'lt.')===0) { $where[]="`$key`<?"; $params[]=substr($val,3); }
+    elseif (preg_match('/^between\.(.+?)\.(.+)$/', $val, $m)) {
+        $where[] = "`$key` BETWEEN ? AND ?";
+        $params[] = $m[1];
+        $params[] = $m[2];
+    }
     elseif (strpos($val,'in.')===0) {
         $inv = substr($val, 4, -1); // убираем "in.(" и ")"
         $arr = preg_split('/(?<!\\\\),/', $inv);
