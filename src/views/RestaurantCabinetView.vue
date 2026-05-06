@@ -3106,16 +3106,25 @@ async function submitStockInline() {
     const items = [];
     for (const p of stockProducts.value) {
       if (stockExpiryRequired(p)) {
-        const batches = normalizeStockDraft(p.id).map(batch => ({
-          expiry_date: batch.expiry_date,
-          stock: parseFloat(batch.stock),
+        const rawBatches = (stockDrafts[p.id] || []).map(batch => ({
+          expiry_date: String(batch.expiry_date || '').trim(),
+          stock: String(batch.stock ?? '').trim(),
         }));
-        if (!batches.length) {
+        if (!rawBatches.some(batch => batch.stock !== '')) {
           throw new Error(`У товара «${p.product_name}» нет ни одной партии`);
         }
-        if (batches.some(batch => !batch.expiry_date)) {
+        if (rawBatches.some(batch => batch.stock !== '' && batch.expiry_date === '')) {
           throw new Error(`Для товара «${p.product_name}» нужно указать срок годности`);
         }
+        if (rawBatches.some(batch => batch.stock !== '' && Number.isNaN(Number(batch.stock)))) {
+          throw new Error(`У товара «${p.product_name}» указано некорректное количество`);
+        }
+        const batches = rawBatches
+          .filter(batch => batch.stock !== '')
+          .map(batch => ({
+            expiry_date: batch.expiry_date,
+            stock: parseFloat(batch.stock),
+          }));
         items.push({ product_id: p.id, batches });
       } else {
         const stock = String(stockDrafts[p.id]?.[0]?.stock ?? '').trim();
