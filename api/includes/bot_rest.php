@@ -1496,10 +1496,12 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
             $total = 0;
             foreach ($existing[$p['id']] as $batch) $total += (float)$batch['stock'];
             $text .= "  • " . ($idx + 1) . ". " . soEsc($label) . " — <b>" . rtrim(rtrim(number_format($total, 2, '.', ''), '0'), '.') . "</b> {$u}\n";
-            foreach ($existing[$p['id']] as $batch) {
-                $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
-                $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
-                $text .= "      " . soEsc($date) . ": {$qty}\n";
+            if (!empty($p['need_expiry'])) {
+                foreach ($existing[$p['id']] as $batch) {
+                    $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
+                    $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
+                    $text .= "      " . soEsc($date) . ": {$qty}\n";
+                }
             }
         }
         $text .= "─────────────────────\n";
@@ -1515,13 +1517,20 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
         $text .= ($i + 1) . ". " . soEsc($label) . " ({$u}{$needMark})\n";
         $current = $existing[$p['id']] ?? [];
         if ($current) {
-            foreach ($current as $batch) {
-                $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
-                $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
-                $text .= soEsc($date) . ": {$qty}\n";
+            if ($needExpiry) {
+                foreach ($current as $batch) {
+                    $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
+                    $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
+                    $text .= soEsc($date) . ": {$qty}\n";
+                }
+            } else {
+                $qtyTotal = 0;
+                foreach ($current as $batch) $qtyTotal += (float)$batch['stock'];
+                $qtyTotal = rtrim(rtrim(number_format($qtyTotal, 2, '.', ''), '0'), '.');
+                $text .= "{$qtyTotal}\n";
             }
         } else {
-            $text .= "без срока: 0\n";
+            $text .= $needExpiry ? "без срока: 0\n" : "0\n";
         }
         $text .= "\n";
     }

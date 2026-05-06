@@ -131,7 +131,7 @@
                     <div class="sc-cell-total">
                       {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
                     </div>
-                    <div v-if="getCellBatches(row, prod.id).length" class="sc-cell-batches">
+                    <div v-if="prod.need_expiry && getCellBatches(row, prod.id).length" class="sc-cell-batches">
                       <div v-for="(b, idx) in getCellBatches(row, prod.id).slice(0, 2)" :key="idx" class="sc-cell-batch">
                         <span class="sc-cell-batch-date">{{ formatBatchDate(b.expiry_date) }}</span>
                         <span class="sc-cell-batch-stock">{{ formatBatchStock(b.stock) }}</span>
@@ -209,7 +209,7 @@
           </div>
           <div class="sc-cell-editor-batches">
             <div v-for="(batch, idx) in cellEditor.batches" :key="idx" class="sc-cell-editor-row">
-              <input v-model="batch.expiry_date" type="date" class="sc-input sc-cell-editor-date" />
+              <input v-if="cellEditor.needExpiry" v-model="batch.expiry_date" type="date" class="sc-input sc-cell-editor-date" />
               <input v-model="batch.stock" type="number" inputmode="decimal" min="0" step="any" class="sc-input sc-cell-editor-stock" placeholder="0" />
               <button class="sc-x sm" @click="removeCellBatch(idx)">✕</button>
             </div>
@@ -508,7 +508,7 @@ const sortKey = ref('restaurant');
 const sortDir = ref('asc');
 
 // Cell edit
-const cellEditor = ref({ show: false, loading: false, collectionId: null, restaurantNumber: '', productId: null, productName: '', unit: 'pieces', batches: [] });
+const cellEditor = ref({ show: false, loading: false, collectionId: null, restaurantNumber: '', productId: null, productName: '', unit: 'pieces', needExpiry: false, batches: [] });
 
 // Missing restaurants
 const showMissing = ref(true);
@@ -917,6 +917,7 @@ function openCellEditor(row, prodId) {
     productId: prodId,
     productName: prod ? `${prod.product_name}${prod.product_sku ? ` (${prod.product_sku})` : ''}` : `Товар ${prodId}`,
     unit: prod?.unit || 'pieces',
+    needExpiry: !!prod?.need_expiry,
     batches: (cell?.batches?.length ? cell.batches : [makeCellBatchRow()]).map(b => ({
       expiry_date: b.expiry_date ? String(b.expiry_date).slice(0, 10) : '',
       stock: b.stock != null ? String(b.stock) : '',

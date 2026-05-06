@@ -970,11 +970,12 @@
             <div class="stock-row-batches">
               <div v-for="(batch, idx) in stockDrafts[p.id] || []" :key="idx" class="stock-batch-row">
                 <input
+                  v-if="p.need_expiry"
                   type="date"
                   v-model="batch.expiry_date"
                   class="stock-input stock-date-input"
                   :aria-label="`Срок годности для товара ${p.product_name}`"
-                  :title="'Необязательно'"
+                  :title="'Срок обязателен'"
                 />
                 <input
                   type="number"
