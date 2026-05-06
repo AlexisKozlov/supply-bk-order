@@ -2,7 +2,10 @@
   <div class="kr-page">
     <div class="kr-page-header">
       <h1 class="page-title">Возврат кег</h1>
-      <button class="btn" @click="openImport">Импорт маршрутизации</button>
+      <div class="kr-page-actions">
+        <button class="btn" @click="exportExcel" :disabled="!filteredRows.length">📥 Экспорт в Excel</button>
+        <button class="btn primary" @click="openImport">Импорт маршрутизации</button>
+      </div>
     </div>
 
     <div class="kr-toolbar">
@@ -22,10 +25,12 @@
 
     <div v-if="loading" class="kr-loading">Загрузка...</div>
     <div v-else-if="error" class="kr-error">{{ error }}</div>
-    <table v-else class="kr-table">
+    <div v-else class="kr-table-wrap">
+    <table class="kr-table">
       <thead>
         <tr>
           <th>Ресторан</th>
+          <th>Адрес погрузки</th>
           <th>Дата возврата</th>
           <th>№ БСО</th>
           <th>Статус</th>
@@ -33,11 +38,13 @@
           <th>Водитель</th>
           <th>Машина</th>
           <th>Обновлено</th>
+          <th class="kr-th-actions">Действия</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in filteredRows" :key="row.id" @click="openEdit(row.id)" class="kr-row">
           <td>№{{ row.restaurant_number }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
+          <td>{{ row.pickup_address || '—' }}</td>
           <td>{{ fmtDate(row.return_date) }}</td>
           <td>{{ row.bso_series }} {{ row.bso_number }}</td>
           <td><span :class="'kr-badge kr-badge-' + row.status">{{ statusLabel(row.status) }}</span></td>
@@ -45,12 +52,17 @@
           <td>{{ row.driver || '—' }}</td>
           <td>{{ row.vehicle || '—' }}</td>
           <td>{{ fmtDateTime(row.updated_at || row.submitted_at || row.created_at) }}</td>
+          <td class="kr-td-actions" @click.stop>
+            <button class="kr-action-btn" @click="openEdit(row.id)" title="Открыть">✏️</button>
+            <button class="kr-action-btn kr-action-del" @click="deleteRow(row)" title="Удалить">🗑️</button>
+          </td>
         </tr>
         <tr v-if="!filteredRows.length">
-          <td colspan="8" class="kr-empty">Нет заявок</td>
+          <td colspan="10" class="kr-empty">Нет заявок</td>
         </tr>
       </tbody>
     </table>
+    </div>
 
     <KegReturnEditModal v-if="editId" :id="editId" @close="editId = null; loadList()" />
 
@@ -189,6 +201,35 @@ function openEdit(id) {
   editId.value = id;
 }
 
+async function deleteRow(row) {
+  if (!confirm(`Удалить заявку №${row.bso_series || ''} ${row.bso_number || row.id}?`)) return;
+  try {
+    const res = await fetch(`/api/keg-returns/${row.id}`, { method: 'DELETE', credentials: 'include', headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Ошибка');
+    await loadList();
+  } catch (e) { error.value = e.message; }
+}
+
+async function exportExcel() {
+  try {
+    const res = await fetch('/api/keg-returns/export', { credentials: 'include', headers: authHeaders() });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Ошибка экспорта');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const filename = m ? m[1] : 'keg-returns.xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) { error.value = e.message; }
+}
+
 function openImport() {
   importPreview.value = [];
   importError.value = '';
@@ -291,15 +332,23 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.kr-page { padding: 24px; max-width: 1200px; }
+.kr-page { padding: 24px; max-width: 100%; }
+.kr-table-wrap { overflow-x: auto; }
+.kr-table { min-width: 1200px; }
 .kr-page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .kr-page-header .page-title { margin-bottom: 0; flex: 1; }
 .page-title { font-size: 22px; font-weight: 700; }
 .kr-toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .kr-toolbar select,
 .kr-toolbar input { padding: 7px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; font-size: 14px; background: var(--input-bg, #fff); color: inherit; }
+.kr-page-actions { display: flex; gap: 8px; }
 .kr-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.kr-table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border-color, #e0e0e0); font-weight: 600; color: var(--text-secondary, #666); }
+.kr-table th { text-align: left; padding: 9px 12px; border-bottom: 2px solid var(--border, #d8d2c4); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text, #2b2b2b); background: var(--card, #fff); position: sticky; top: 0; z-index: 1; }
+.kr-th-actions { width: 110px; }
+.kr-td-actions { white-space: nowrap; }
+.kr-action-btn { padding: 4px 8px; margin: 0 2px; border: 1px solid var(--border, #ddd); border-radius: 6px; background: var(--card, #fff); cursor: pointer; font-size: 14px; }
+.kr-action-btn:hover { background: var(--hover-bg, #f5f5f5); }
+.kr-action-del:hover { background: #ffebee; border-color: #e53935; }
 .kr-row { cursor: pointer; }
 .kr-row:hover td { background: var(--hover-bg, #f5f5f5); }
 .kr-table td { padding: 9px 12px; border-bottom: 1px solid var(--border-color, #eee); }

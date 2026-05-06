@@ -315,6 +315,83 @@ $isRestaurant = (bool)$krRestSession;
 // Проверяем, что parts[1] не содержит нечислового субэндпоинта (import-routing и т.п.)
 $krSubSlug = (!$krId && isset($parts[1]) && $parts[1] !== '') ? $parts[1] : null;
 
+// ── GET /keg-returns/export ── xlsx-выгрузка списка для портала
+if ($method === 'GET' && $krSubSlug === 'export') {
+    if ($isRestaurant) krRespond(['error' => 'Только для портала'], 403);
+    $filterGroup = isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM';
+    if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
+    $rows = $pdo->prepare("
+        SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
+               kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at, kr.routed_at, kr.updated_at,
+               r.number AS restaurant_number, r.city AS restaurant_city,
+               r.address AS restaurant_address, r.pickup_address,
+               (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs
+        FROM keg_returns kr
+        JOIN restaurants r ON r.id = kr.restaurant_id
+        WHERE kr.legal_entity_group = ? AND kr.status != 'DRAFT'
+        ORDER BY kr.return_date DESC, kr.id DESC
+    ");
+    $rows->execute([$filterGroup]);
+    $list = $rows->fetchAll();
+
+    $statusLabels = ['DRAFT'=>'Черновик','SUBMITTED'=>'Отправлена','ROUTED'=>'Маршрутизирована','CANCELLED'=>'Отменена'];
+
+    $ss = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sh = $ss->getActiveSheet();
+    $sh->setTitle('Возврат кег');
+
+    $headers = ['Ресторан','Адрес погрузки','Дата возврата','Серия БСО','Номер БСО','Статус','Кег','Водитель','Машина','Сдал грузоотправитель','Создана','Маршрутизирована'];
+    foreach ($headers as $i => $h) {
+        $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1);
+        $sh->setCellValue($col . '1', $h);
+    }
+    $headerRange = 'A1:' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers)) . '1';
+    $sh->getStyle($headerRange)->getFont()->setBold(true)->setSize(11);
+    $sh->getStyle($headerRange)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB('F4A261');
+    $sh->getStyle($headerRange)->getFont()->getColor()->setRGB('FFFFFF');
+    $sh->getStyle($headerRange)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER)->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER)->setWrapText(true);
+    $sh->getRowDimension(1)->setRowHeight(30);
+
+    $r = 2;
+    foreach ($list as $row) {
+        $restName = '№' . (int)$row['restaurant_number'] . ' ' . trim(($row['restaurant_city'] ?? '') . ($row['restaurant_address'] ? ', ' . $row['restaurant_address'] : ''));
+        $sh->setCellValue('A' . $r, $restName);
+        $sh->setCellValue('B' . $r, $row['pickup_address'] ?? '');
+        $sh->setCellValue('C' . $r, $row['return_date'] ? date('d.m.Y', strtotime($row['return_date'])) : '');
+        $sh->setCellValue('D' . $r, $row['bso_series'] ?? '');
+        $sh->setCellValue('E' . $r, $row['bso_number'] ?? '');
+        $sh->setCellValue('F' . $r, $statusLabels[$row['status']] ?? $row['status']);
+        $sh->setCellValue('G' . $r, $row['total_kegs'] !== null ? (int)$row['total_kegs'] : '');
+        $sh->setCellValue('H' . $r, $row['driver'] ?? '');
+        $sh->setCellValue('I' . $r, $row['vehicle'] ?? '');
+        $sh->setCellValue('J' . $r, $row['sender_position_name'] ?? '');
+        $sh->setCellValue('K' . $r, $row['created_at'] ? date('d.m.Y H:i', strtotime($row['created_at'])) : '');
+        $sh->setCellValue('L' . $r, $row['routed_at'] ? date('d.m.Y H:i', strtotime($row['routed_at'])) : '');
+        // Заливка по статусу
+        $color = ['SUBMITTED' => 'FFF3E0', 'ROUTED' => 'E8F5E9', 'CANCELLED' => 'FCE4EC'][$row['status']] ?? 'FFFFFF';
+        $sh->getStyle('A' . $r . ':L' . $r)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB($color);
+        $r++;
+    }
+    // Автоширина колонок
+    foreach (range('A', 'L') as $col) {
+        $sh->getColumnDimension($col)->setAutoSize(true);
+    }
+    // Границы по всему диапазону
+    if ($r > 2) {
+        $sh->getStyle('A1:L' . ($r - 1))->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN)->getColor()->setRGB('CCCCCC');
+    }
+    $sh->freezePane('A2');
+
+    $fname = 'keg-returns_' . date('Ymd_Hi') . '.xlsx';
+    header_remove('Content-Type');
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $fname . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    $w = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($ss, 'Xlsx');
+    $w->save('php://output');
+    exit;
+}
+
 // ── GET /keg-returns/restaurant-info ──
 if ($method === 'GET' && $krSubSlug === 'restaurant-info') {
     if (!$isRestaurant) krRespond(['error' => 'Только для ресторана'], 403);
@@ -353,7 +430,7 @@ if ($method === 'GET' && $krId === null && $krAction === null && $krSubSlug === 
             SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
                    kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at,
                    r.number AS restaurant_number, r.city AS restaurant_city,
-                   r.address AS restaurant_address,
+                   r.address AS restaurant_address, r.pickup_address,
                    (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs
             FROM keg_returns kr
             JOIN restaurants r ON r.id = kr.restaurant_id

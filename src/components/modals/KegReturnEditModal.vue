@@ -57,8 +57,8 @@
               <input v-model="form.sender_position_name" type="text" :disabled="readonly" class="kr-em-input" />
             </div>
 
-            <div class="kr-em-kegs">
-              <div class="kr-em-label">Кеги</div>
+            <div class="kr-em-kegs-block">
+              <div class="kr-em-kegs-title">Кеги</div>
               <div v-if="catalogLoading" class="kr-em-sub">Загрузка каталога...</div>
               <div v-else class="kr-em-catalog">
                 <div v-for="keg in catalog" :key="keg.code" class="kr-em-keg-row">
@@ -290,13 +290,14 @@ onMounted(() => {
 .kr-em-input { flex: 1; padding: 6px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; font-size: 14px; background: var(--input-bg, #fff); color: inherit; }
 .kr-em-input:disabled { background: var(--input-disabled-bg, #f5f5f5); }
 .kr-em-input-sm { max-width: 100px; flex: none; }
-.kr-em-kegs { display: flex; flex-direction: column; gap: 8px; }
-.kr-em-catalog { display: flex; flex-direction: column; gap: 6px; padding-left: 202px; }
-.kr-em-keg-row { display: flex; align-items: center; gap: 10px; }
-.kr-em-keg-name { flex: 1; font-size: 14px; }
-.kr-em-qty { width: 70px; padding: 5px 8px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; font-size: 14px; text-align: center; background: var(--input-bg, #fff); color: inherit; }
+.kr-em-kegs-block { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.kr-em-kegs-title { font-size: 13px; font-weight: 600; color: var(--text-secondary, #666); }
+.kr-em-catalog { display: flex; flex-direction: column; gap: 8px; }
+.kr-em-keg-row { display: grid; grid-template-columns: 1fr 110px; gap: 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--border-color, #eee); border-radius: 8px; background: var(--card, #fff); }
+.kr-em-keg-name { font-size: 14px; line-height: 1.3; word-wrap: break-word; }
+.kr-em-qty { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center; background: var(--input-bg, #fff); color: inherit; }
 .kr-em-qty:disabled { background: var(--input-disabled-bg, #f5f5f5); }
-.kr-em-sub { font-size: 13px; color: var(--text-secondary, #999); padding-left: 202px; }
+.kr-em-sub { font-size: 13px; color: var(--text-secondary, #999); }
 .kr-em-loading, .kr-em-error { padding: 24px; text-align: center; }
 .kr-em-error { color: var(--danger, #e53935); }
 .kr-em-save-error { color: var(--danger, #e53935); font-size: 13px; padding: 0 16px 8px; }

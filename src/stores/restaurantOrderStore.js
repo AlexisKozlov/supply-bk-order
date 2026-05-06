@@ -613,8 +613,9 @@ export const useRestaurantOrderStore = defineStore('restaurantOrder', () => {
     return await api('stock-collection-status');
   }
 
-  async function getStockCollectionData() {
-    return await api('stock-collection-data');
+  async function getStockCollectionData(collectionId = null) {
+    const qs = collectionId ? `?collection_id=${encodeURIComponent(collectionId)}` : '';
+    return await api(`stock-collection-data${qs}`);
   }
 
   async function submitStockCollection(collectionId, items) {
