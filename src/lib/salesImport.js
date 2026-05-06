@@ -3,6 +3,17 @@
  * Используется и на странице «Реализация ресторанов», и на странице «Импорт данных».
  */
 
+function normalizeAnalogGroup(s) {
+  let t = String(s ?? '').trim();
+  if (!t) return t;
+  const lastOpen = t.lastIndexOf('«');
+  const lastClose = t.lastIndexOf('»');
+  if (lastOpen > lastClose) t += '»';
+  const dq = (t.match(/"/g) || []).length;
+  if (dq % 2 === 1) t += '"';
+  return t;
+}
+
 /**
  * Парсинг файла реализации из Excel.
  * @param {File} file — файл .xlsx/.xls
@@ -48,7 +59,7 @@ function parseQlik(rows, skuToGroup) {
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
-    let group = colGroup >= 0 ? String(row[colGroup] || '').trim() : '';
+    let group = colGroup >= 0 ? normalizeAnalogGroup(row[colGroup]) : '';
     // Если есть артикул и карта маппинга — подставляем группу аналогов по артикулу
     if (colSku >= 0 && skuToGroup) {
       const sku = String(row[colSku] || '').trim();
@@ -59,7 +70,7 @@ function parseQlik(rows, skuToGroup) {
           || (sku.startsWith('BK_') && skuToGroup[sku.slice(3)])
           || null;
         if (match) {
-          group = match;
+          group = normalizeAnalogGroup(match);
           skuMapped++;
         }
       }
@@ -116,7 +127,7 @@ function parse1cUT(rows) {
         restaurant_count: header.countCol >= 0 ? parseNum(row[header.countCol]) | 0 : 0,
       });
     } else if (row[header.qtyCol] != null && parseNum(row[header.qtyCol]) > 0) {
-      cur = s.replace(/^[\s"]+|[\s"]+$/g, '');
+      cur = normalizeAnalogGroup(s.replace(/^[\s"]+|[\s"]+$/g, ''));
       if (!cur || cur === 'н.опр') cur = null;
     }
   }

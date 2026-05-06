@@ -4,6 +4,20 @@
 require_once __DIR__ . '/../lib/SimpleXLSX.php';
 require_once __DIR__ . '/../lib/SimpleXLS.php';
 
+function normalizeAnalogGroup($s) {
+    $t = trim((string)$s);
+    if ($t === '') return $t;
+    $lastOpen = mb_strrpos($t, '«');
+    $lastClose = mb_strrpos($t, '»');
+    if ($lastOpen !== false && ($lastClose === false || $lastOpen > $lastClose)) {
+        $t .= '»';
+    }
+    if (substr_count($t, '"') % 2 === 1) {
+        $t .= '"';
+    }
+    return $t;
+}
+
 // Скачать файл из Telegram по file_id
 function botDownloadFile($fileId) {
     global $BOT_TOKEN;
@@ -62,7 +76,7 @@ function botParseSales($rows) {
     $items = [];
     for ($i = $headerIdx + 1; $i < count($rows); $i++) {
         $row = $rows[$i];
-        $group = trim(strval($row[$cols['group']] ?? ''));
+        $group = normalizeAnalogGroup($row[$cols['group']] ?? '');
         $dateRaw = trim(strval($row[$cols['date']] ?? ''));
         $qty = floatval($row[$cols['qty'] ?? -1] ?? 0);
         $restCount = isset($cols['rest_count']) ? intval($row[$cols['rest_count']] ?? 0) : 0;

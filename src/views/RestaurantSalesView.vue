@@ -209,6 +209,17 @@ import { getEntityGroupCode, ENTITY_SHORT_NAMES } from '@/lib/legalEntities.js';
 import BkIcon from '@/components/ui/BkIcon.vue';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 
+function normalizeAnalogGroup(s) {
+  let t = String(s ?? '').trim();
+  if (!t) return t;
+  const lastOpen = t.lastIndexOf('«');
+  const lastClose = t.lastIndexOf('»');
+  if (lastOpen > lastClose) t += '»';
+  const dq = (t.match(/"/g) || []).length;
+  if (dq % 2 === 1) t += '"';
+  return t;
+}
+
 const props = defineProps({ embedded: { type: Boolean, default: false } });
 
 const userStore = useUserStore();
@@ -254,7 +265,7 @@ async function loadData() {
       .order('sale_date', { ascending: true })
       .limit(50000);
     if (error) { toast.error('Ошибка', 'Не удалось загрузить данные'); return; }
-    rawData.value = data || [];
+    rawData.value = (data || []).map(r => ({ ...r, analog_group: normalizeAnalogGroup(r.analog_group) }));
   } catch (e) { toast.error('Ошибка', e.message); }
   finally { loading.value = false; }
 }
@@ -264,10 +275,11 @@ async function loadProducts() {
   if (!data) return;
   const gs = new Set(), bg = {};
   for (const p of data) {
-    if (!p.analog_group) continue;
-    gs.add(p.analog_group);
-    if (!bg[p.analog_group]) bg[p.analog_group] = [];
-    bg[p.analog_group].push(p);
+    const ag = normalizeAnalogGroup(p.analog_group);
+    if (!ag) continue;
+    gs.add(ag);
+    if (!bg[ag]) bg[ag] = [];
+    bg[ag].push(p);
   }
   dbGroups.value = gs;
   productsByGroup.value = bg;
