@@ -130,6 +130,27 @@ function sendTelegramDocument($botToken, $chatId, $filename, $content, $caption 
     return true;
 }
 
+function dbColumnExists($pdo, $table, $column) {
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $s = $pdo->prepare("
+            SELECT 1
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = ?
+            LIMIT 1
+        ");
+        $s->execute([$table, $column]);
+        $cache[$key] = (bool)$s->fetchColumn();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
 function notifyTelegramDataUpdate($pdo, $type, $userName, $legalEntity = '', $count = 0) {
     $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
     if (!$botToken) return;

@@ -73,7 +73,7 @@ function botFormatSubscribedRestaurant($restaurantNumber, $group) {
     return formatRestaurantNumber($restaurantNumber) . ' (' . botGetRestaurantGroupShort($group) . ')';
 }
 
-function botNormalizeStockCollectionBatches($lines) {
+function botNormalizeStockCollectionBatches($lines, $allowExpiry = true) {
     $out = [];
     if (!is_array($lines)) return $out;
     foreach ($lines as $line) {
@@ -81,7 +81,7 @@ function botNormalizeStockCollectionBatches($lines) {
         if ($line === '') continue;
         $datePart = null;
         $qtyPart = null;
-        if (preg_match('/^(\d{2}\.\d{2}\.\d{4})\s*[:=]\s*([\d.,]+)$/u', $line, $m)) {
+        if ($allowExpiry && preg_match('/^(\d{2}\.\d{2}\.\d{4})\s*[:=]\s*([\d.,]+)$/u', $line, $m)) {
             $dt = DateTime::createFromFormat('d.m.Y', $m[1]);
             if (!$dt || $dt->format('d.m.Y') !== $m[1]) continue;
             $datePart = $dt->format('Y-m-d');
@@ -1450,7 +1450,12 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     $colName = $colRow['name'];
 
     // Товары
-    $st = $pdo->prepare("SELECT id, product_name, product_sku, unit, need_expiry, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
+    $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
+    $hasNote = dbColumnExists($pdo, 'stock_collection_products', 'note');
+    $productCols = ['id', 'product_name', 'product_sku', 'unit'];
+    if ($hasNeedExpiry) $productCols[] = 'need_expiry';
+    if ($hasNote) $productCols[] = 'note';
+    $st = $pdo->prepare("SELECT " . implode(', ', $productCols) . " FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
     $st->execute([$collectionId]);
     $products = $st->fetchAll();
 
@@ -1461,12 +1466,16 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
 
     // Существующие данные
     $existing = [];
-    $ex = $pdo->prepare("SELECT product_id, expiry_date, stock FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ? ORDER BY product_id, expiry_date, id");
+    $hasExpiryDate = dbColumnExists($pdo, 'stock_collection_data', 'expiry_date');
+    $dataCols = ['product_id', 'stock'];
+    if ($hasExpiryDate) $dataCols[] = 'expiry_date';
+    $orderBy = $hasExpiryDate ? 'ORDER BY product_id, expiry_date, id' : 'ORDER BY product_id, id';
+    $ex = $pdo->prepare("SELECT " . implode(', ', $dataCols) . " FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ? {$orderBy}");
     $ex->execute([$collectionId, $restNum]);
     foreach ($ex->fetchAll() as $r) {
         $pid = (int)$r['product_id'];
         if (!isset($existing[$pid])) $existing[$pid] = [];
-        $existing[$pid][] = ['expiry_date' => $r['expiry_date'], 'stock' => $r['stock']];
+        $existing[$pid][] = ['expiry_date' => $hasExpiryDate ? $r['expiry_date'] : null, 'stock' => $r['stock']];
     }
 
     $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
@@ -1585,17 +1594,23 @@ function restScProcessInput($chatId, $text, $userMsgId) {
     }
 
     // Сохраняем
+    $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
+    $hasExpiryDate = dbColumnExists($pdo, 'stock_collection_data', 'expiry_date');
     $del = $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?");
-    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at) VALUES (?, ?, ?, ?, ?, 'form', NOW())");
+    if ($hasExpiryDate) {
+        $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at) VALUES (?, ?, ?, ?, ?, 'form', NOW())");
+    } else {
+        $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW())");
+    }
     $pdo->beginTransaction();
     try {
         foreach ($products as $i => $p) {
             $productLines = $byProduct[$i] ?? [];
-            $batches = botNormalizeStockCollectionBatches($productLines);
+            $batches = botNormalizeStockCollectionBatches($productLines, $hasExpiryDate);
             if (!$batches) {
                 throw new RuntimeException('У товара ' . ($i + 1) . ' нет корректных партий');
             }
-            if (!empty($products[$i]['need_expiry'])) {
+            if ($hasNeedExpiry && !empty($products[$i]['need_expiry'])) {
                 foreach ($batches as $batch) {
                     if (empty($batch['expiry_date'])) {
                         throw new RuntimeException('Для товара ' . ($i + 1) . ' нужен срок годности');
@@ -1604,7 +1619,11 @@ function restScProcessInput($chatId, $text, $userMsgId) {
             }
             $del->execute([$collectionId, $p['id'], $restNum]);
             foreach ($batches as $batch) {
-                $ins->execute([$collectionId, $p['id'], $restNum, $batch['expiry_date'], $batch['stock']]);
+                if ($hasExpiryDate) {
+                    $ins->execute([$collectionId, $p['id'], $restNum, $batch['expiry_date'], $batch['stock']]);
+                } else {
+                    $ins->execute([$collectionId, $p['id'], $restNum, $batch['stock']]);
+                }
             }
         }
         $pdo->commit();

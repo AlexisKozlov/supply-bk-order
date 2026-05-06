@@ -1822,12 +1822,23 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
     if (!$coll) roRespond(['active' => false]);
 
     // Товары сбора
-    $p = $pdo->prepare("SELECT id, product_name, product_sku, unit, need_expiry, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
+    $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
+    $hasNote = dbColumnExists($pdo, 'stock_collection_products', 'note');
+    $productCols = ['id', 'product_name', 'product_sku', 'unit'];
+    if ($hasNeedExpiry) $productCols[] = 'need_expiry';
+    $productCols[] = 'sort_order';
+    if ($hasNote) $productCols[] = 'note';
+    $p = $pdo->prepare("SELECT " . implode(', ', $productCols) . " FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
     $p->execute([$coll['id']]);
     $products = $p->fetchAll();
 
     // Ранее сохранённые значения этого ресторана
-    $d = $pdo->prepare("SELECT product_id, stock, expiry_date, submitted_at FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ? ORDER BY product_id, expiry_date, id");
+    $hasExpiryDate = dbColumnExists($pdo, 'stock_collection_data', 'expiry_date');
+    $dataCols = ['product_id', 'stock'];
+    if ($hasExpiryDate) $dataCols[] = 'expiry_date';
+    $dataCols[] = 'submitted_at';
+    $orderBy = $hasExpiryDate ? 'ORDER BY product_id, expiry_date, id' : 'ORDER BY product_id, id';
+    $d = $pdo->prepare("SELECT " . implode(', ', $dataCols) . " FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ? {$orderBy}");
     $d->execute([$coll['id'], $rest['restaurant_number']]);
     $values = [];
     $batches = [];
@@ -1838,7 +1849,7 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
         if (!isset($batches[$pid])) $batches[$pid] = [];
         $batches[$pid][] = [
             'stock' => (float)$row['stock'],
-            'expiry_date' => $row['expiry_date'],
+            'expiry_date' => $hasExpiryDate ? $row['expiry_date'] : null,
             'submitted_at' => $row['submitted_at'],
         ];
         if (!$lastSubmittedAt || $row['submitted_at'] > $lastSubmittedAt) {
@@ -1859,7 +1870,7 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
     ]);
 }
 
-function roNormalizeStockCollectionBatches($item) {
+function roNormalizeStockCollectionBatches($item, $allowExpiry = true) {
     $batches = [];
     if (!is_array($item)) return $batches;
 
@@ -1871,12 +1882,12 @@ function roNormalizeStockCollectionBatches($item) {
             if ($stock === null || !is_numeric($stock)) continue;
             $stockVal = round((float)$stock, 2);
             if ($stockVal < 0 || $stockVal > 999999) continue;
-            if ($expiry !== '') {
+            if ($allowExpiry && $expiry !== '') {
                 $dt = DateTime::createFromFormat('Y-m-d', $expiry);
                 if (!$dt || $dt->format('Y-m-d') !== $expiry) continue;
                 $batches[] = ['expiry_date' => $expiry, 'stock' => $stockVal];
             } else {
-        $batches[] = ['expiry_date' => null, 'stock' => $stockVal];
+                $batches[] = ['expiry_date' => null, 'stock' => $stockVal];
             }
         }
         return $batches;
@@ -1887,7 +1898,7 @@ function roNormalizeStockCollectionBatches($item) {
     if ($stock !== null && is_numeric($stock)) {
         $stockVal = round((float)$stock, 2);
         if ($stockVal >= 0 && $stockVal <= 999999) {
-            if ($expiry !== '') {
+            if ($allowExpiry && $expiry !== '') {
                 $dt = DateTime::createFromFormat('Y-m-d', $expiry);
                 if ($dt && $dt->format('Y-m-d') === $expiry) {
                     $batches[] = ['expiry_date' => $expiry, 'stock' => $stockVal];
@@ -1921,22 +1932,30 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     if ($collGroup !== $group) roRespond(['error' => 'Сбор не для вашего юрлица'], 403);
 
     // Загружаем допустимые product_id для этой коллекции
-    $validPids = $pdo->prepare("SELECT id, need_expiry FROM stock_collection_products WHERE collection_id = ?");
+    $hasNeedExpiry = dbColumnExists($pdo, 'stock_collection_products', 'need_expiry');
+    $hasExpiryDate = dbColumnExists($pdo, 'stock_collection_data', 'expiry_date');
+    $productCols = ['id'];
+    if ($hasNeedExpiry) $productCols[] = 'need_expiry';
+    $validPids = $pdo->prepare("SELECT " . implode(', ', $productCols) . " FROM stock_collection_products WHERE collection_id = ?");
     $validPids->execute([$collId]);
     $allowedSet = [];
     foreach ($validPids->fetchAll() as $row) {
-        $allowedSet[(int)$row['id']] = (int)$row['need_expiry'] === 1;
+        $allowedSet[(int)$row['id']] = $hasNeedExpiry ? ((int)$row['need_expiry'] === 1) : false;
     }
 
     $del = $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?");
-    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at) VALUES (?, ?, ?, ?, ?, 'form', NOW())");
+    if ($hasExpiryDate) {
+        $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at) VALUES (?, ?, ?, ?, ?, 'form', NOW())");
+    } else {
+        $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW())");
+    }
     $pdo->beginTransaction();
     try {
         $saved = 0;
         foreach ($items as $item) {
             $pid = intval($item['product_id'] ?? 0);
             if ($pid > 0 && array_key_exists($pid, $allowedSet)) {
-                $batches = roNormalizeStockCollectionBatches($item);
+                $batches = roNormalizeStockCollectionBatches($item, $hasExpiryDate);
                 if (!$batches) continue;
                 if ($allowedSet[$pid]) {
                     foreach ($batches as $batch) {
@@ -1947,7 +1966,11 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
                 }
                 $del->execute([$collId, $pid, $rest['restaurant_number']]);
                 foreach ($batches as $batch) {
-                    $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['expiry_date'], $batch['stock']]);
+                    if ($hasExpiryDate) {
+                        $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['expiry_date'], $batch['stock']]);
+                    } else {
+                        $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['stock']]);
+                    }
                     $saved++;
                 }
             }
