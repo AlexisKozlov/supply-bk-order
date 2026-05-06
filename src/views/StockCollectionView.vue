@@ -76,7 +76,7 @@
           </div>
           <div class="sc-summary-item">
             <div class="sc-summary-num">{{ collectionData.data?.length || 0 }}</div>
-            <div class="sc-summary-lbl">Ответов</div>
+            <div class="sc-summary-lbl">Партий</div>
           </div>
           <div style="margin-left: auto; display: flex; gap: 6px;">
             <button v-if="activeCollection.status === 'active'" class="sc-btn sm outline" @click="openEditProducts">Изменить товары</button>
@@ -110,6 +110,7 @@
                 <th v-for="prod in collectionData.products" :key="prod.id" class="col-prod sortable" @click="toggleSort('prod_' + prod.id)">
                   <div>{{ prod.product_name }} <span class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></div>
                   <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
+                  <div v-if="prod.need_expiry" class="th-flag">срок обязателен</div>
                   <div v-if="prod.note" class="th-note" :title="prod.note">{{ prod.note }}</div>
                 </th>
                 <th v-if="activeCollection.status === 'active'" class="col-del"></th>
@@ -122,29 +123,24 @@
                 <td class="col-addr muted">{{ row.address }}</td>
                 <td class="col-time muted">{{ fmtShort(row.submittedAt) }}</td>
                 <td v-for="prod in collectionData.products" :key="prod.id" class="col-prod">
-                  <template v-if="editingCell === row.restaurant + '_' + prod.id">
-                    <input
-                      v-model="editStockValue"
-                      type="text" inputmode="decimal"
-                      class="sc-cell-input"
-                      @keydown.enter="saveCellEdit(row, prod.id)"
-                      @keydown.escape="editingCell = null"
-                    />
-                  </template>
-                  <template v-else>
-                    <span
-                      v-if="row.cells[prod.id]"
-                      class="sc-cell-val"
-                      :class="{ editable: activeCollection.status === 'active' }"
-                      @dblclick="activeCollection.status === 'active' && startCellEdit(row, prod.id)"
-                    >{{ row.cells[prod.id].stock }}</span>
-                    <span
-                      v-else
-                      class="sc-cell-empty"
-                      :class="{ editable: activeCollection.status === 'active' }"
-                      @dblclick="activeCollection.status === 'active' && startCellEdit(row, prod.id)"
-                    >—</span>
-                  </template>
+                  <div
+                    class="sc-cell"
+                    :class="{ editable: activeCollection.status === 'active' }"
+                    @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                  >
+                    <div class="sc-cell-total">
+                      {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
+                    </div>
+                    <div v-if="getCellBatches(row, prod.id).length" class="sc-cell-batches">
+                      <div v-for="(b, idx) in getCellBatches(row, prod.id).slice(0, 2)" :key="idx" class="sc-cell-batch">
+                        <span class="sc-cell-batch-date">{{ formatBatchDate(b.expiry_date) }}</span>
+                        <span class="sc-cell-batch-stock">{{ formatBatchStock(b.stock) }}</span>
+                      </div>
+                      <div v-if="getCellBatches(row, prod.id).length > 2" class="sc-cell-more">
+                        +{{ getCellBatches(row, prod.id).length - 2 }} партии
+                      </div>
+                    </div>
+                  </div>
                 </td>
                 <td v-if="activeCollection.status === 'active'" class="col-del">
                   <button class="sc-row-del" @click="deleteRestaurantRow(row)" title="Удалить ресторан">✕</button>
@@ -193,6 +189,36 @@
             <button class="sc-btn outline" @click="confirmModal.show = false">Отмена</button>
             <button class="sc-btn fill" :class="{ 'btn-danger': confirmModal.danger }" @click="confirmModal.action(); confirmModal.show = false;">
               {{ confirmModal.btnText }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cell editor -->
+      <div v-if="cellEditor.show" class="modal">
+        <div class="modal-box" style="max-width: 640px;">
+          <div class="sc-modal-head">
+            <h3>Партии товара</h3>
+            <button class="sc-x" @click="cellEditor.show = false">✕</button>
+          </div>
+          <div class="sc-cell-editor-head">
+            <div class="sc-cell-editor-title">{{ cellEditor.productName }}</div>
+            <div class="sc-cell-editor-meta">
+              Ресторан {{ formatRestaurantNumber(cellEditor.restaurantNumber) }}
+            </div>
+          </div>
+          <div class="sc-cell-editor-batches">
+            <div v-for="(batch, idx) in cellEditor.batches" :key="idx" class="sc-cell-editor-row">
+              <input v-model="batch.expiry_date" type="date" class="sc-input sc-cell-editor-date" />
+              <input v-model="batch.stock" type="number" inputmode="decimal" min="0" step="any" class="sc-input sc-cell-editor-stock" placeholder="0" />
+              <button class="sc-x sm" @click="removeCellBatch(idx)">✕</button>
+            </div>
+          </div>
+          <button class="sc-btn outline full" @click="addCellBatch" style="margin-top: 8px;">+ Добавить партию</button>
+          <div class="sc-modal-foot">
+            <button class="sc-btn outline" @click="cellEditor.show = false">Отмена</button>
+            <button class="sc-btn fill" @click="saveCellEdit" :disabled="cellEditor.loading">
+              {{ cellEditor.loading ? '...' : 'Сохранить' }}
             </button>
           </div>
         </div>
@@ -285,20 +311,30 @@
                 </div>
               </div>
 
-              <!-- Unit selector -->
-              <div class="sc-product-unit-row">
-                <span class="sc-product-unit-label">Единица сбора:</span>
-                <template v-if="p.unitLocked">
-                  <span class="sc-unit-locked">{{ unitLabel(p.unit) }}</span>
-                </template>
-                <template v-else>
+              <div class="sc-product-flags">
+                <!-- Unit selector -->
+                <div class="sc-product-unit-row">
+                  <span class="sc-product-unit-label">Единица сбора:</span>
+                  <template v-if="p.unitLocked">
+                    <span class="sc-unit-locked">{{ unitLabel(p.unit) }}</span>
+                  </template>
+                  <template v-else>
+                    <div class="sc-switcher">
+                      <button :class="{ on: p.unit === 'boxes' }" @click="p.unit = 'boxes'">Коробки</button>
+                      <button :class="{ on: p.unit === 'pieces' }" @click="p.unit = 'pieces'">Штуки</button>
+                      <button :class="{ on: p.unit === 'kg' }" @click="p.unit = 'kg'">Кг</button>
+                      <button :class="{ on: p.unit === 'liters' }" @click="p.unit = 'liters'">Литры</button>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="sc-need-expiry">
+                  <span class="sc-product-unit-label">Нужен срок годности:</span>
                   <div class="sc-switcher">
-                    <button :class="{ on: p.unit === 'boxes' }" @click="p.unit = 'boxes'">Коробки</button>
-                    <button :class="{ on: p.unit === 'pieces' }" @click="p.unit = 'pieces'">Штуки</button>
-                    <button :class="{ on: p.unit === 'kg' }" @click="p.unit = 'kg'">Кг</button>
-                    <button :class="{ on: p.unit === 'liters' }" @click="p.unit = 'liters'">Литры</button>
+                    <button :class="{ on: !!p.need_expiry }" @click="p.need_expiry = true">Да</button>
+                    <button :class="{ on: !p.need_expiry }" @click="p.need_expiry = false">Нет</button>
                   </div>
-                </template>
+                </div>
               </div>
 
               <!-- Note -->
@@ -398,6 +434,14 @@
                 </div>
               </div>
 
+              <div class="sc-need-expiry">
+                <span class="sc-product-unit-label">Нужен срок годности:</span>
+                <div class="sc-switcher">
+                  <button :class="{ on: !!p.need_expiry }" @click="p.need_expiry = true">Да</button>
+                  <button :class="{ on: !p.need_expiry }" @click="p.need_expiry = false">Нет</button>
+                </div>
+              </div>
+
               <!-- Note -->
               <input v-model="p.note" type="text" placeholder="Примечание (видно сборщикам)" class="sc-input full sc-note-input" />
 
@@ -423,7 +467,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/lib/apiClient.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -464,8 +508,7 @@ const sortKey = ref('restaurant');
 const sortDir = ref('asc');
 
 // Cell edit
-const editingCell = ref(null);
-const editStockValue = ref('');
+const cellEditor = ref({ show: false, loading: false, collectionId: null, restaurantNumber: '', productId: null, productName: '', unit: 'pieces', batches: [] });
 
 // Missing restaurants
 const showMissing = ref(true);
@@ -505,14 +548,14 @@ const missingRestaurants = computed(() => {
 });
 
 function makeProductRow() {
-  return { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], showDrop: false, searchQuery: '', manual: false, supplier: '', searching: false, note: '' };
+  return { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], showDrop: false, searchQuery: '', manual: false, supplier: '', searching: false, note: '', need_expiry: false };
 }
 function addProductRow() {
   newProducts.value.push(makeProductRow());
 }
 function clearProductRow(i) {
   const p = newProducts.value[i];
-  Object.assign(p, { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], searchQuery: '', manual: false, supplier: '', searching: false });
+  Object.assign(p, { name: '', sku: '', unit: 'pieces', unitLocked: false, fromDb: false, results: [], searchQuery: '', manual: false, supplier: '', searching: false, need_expiry: false });
 }
 function setManual(i) {
   const p = newProducts.value[i];
@@ -594,6 +637,7 @@ function duplicateCollection() {
     sku: p.product_sku || '',
     unit: p.unit || 'pieces',
     note: p.note || '',
+    need_expiry: !!p.need_expiry,
     fromDb: true,
   }));
   activeCollection.value = null;
@@ -622,6 +666,7 @@ async function createCollection() {
       name: p.name.trim(),
       sku: p.sku.trim() || null,
       unit: p.unit,
+      need_expiry: !!p.need_expiry,
       note: p.note.trim() || null,
     }));
     const { data } = await db.rpc('sc_create_collection', {
@@ -642,7 +687,6 @@ async function createCollection() {
 
 async function openCollection(c) {
   activeCollection.value = c;
-  editingCell.value = null;
   await refreshData();
 }
 
@@ -750,6 +794,26 @@ function getProductTotal(productId) {
   return parseFloat(total.toFixed(2));
 }
 
+function formatBatchDate(dateStr) {
+  if (!dateStr) return 'без срока';
+  const d = new Date(String(dateStr).length === 10 ? `${dateStr}T00:00:00` : dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function formatBatchStock(stock) {
+  const n = parseFloat(stock) || 0;
+  return parseFloat(n.toFixed(2)).toString();
+}
+
+function getCellBatches(row, productId) {
+  return row.cells[productId]?.batches || [];
+}
+
+function getCellTotal(row, productId) {
+  return row.cells[productId]?.total || 0;
+}
+
 // Merged table: one row per restaurant, columns = products
 function getRestaurantInfo(num) {
   const r = restaurantStore.restaurants.find(r => String(r.number) === String(num));
@@ -779,9 +843,17 @@ const mergedRows = computed(() => {
     }
     const row = restMap.get(key);
     row.hasData = true;
-    row.cells[d.product_id] = d;
+    if (!row.cells[d.product_id]) {
+      row.cells[d.product_id] = { product_id: d.product_id, restaurant_number: d.restaurant_number, batches: [], total: 0, submittedAt: null };
+    }
+    const cell = row.cells[d.product_id];
+    cell.batches.push(d);
+    cell.total += parseFloat(d.stock) || 0;
     if (d.submitted_at && (!row.submittedAt || d.submitted_at > row.submittedAt)) {
       row.submittedAt = d.submitted_at;
+    }
+    if (d.submitted_at && (!cell.submittedAt || d.submitted_at > cell.submittedAt)) {
+      cell.submittedAt = d.submitted_at;
     }
   }
   return [...restMap.values()].sort((a, b) =>
@@ -822,56 +894,80 @@ const filteredRows = computed(() => {
     // Sort by product column
     if (key.startsWith('prod_')) {
       const prodId = parseInt(key.slice(5));
-      const va = parseFloat(a.cells[prodId]?.stock) || 0;
-      const vb = parseFloat(b.cells[prodId]?.stock) || 0;
+      const va = parseFloat(a.cells[prodId]?.total) || 0;
+      const vb = parseFloat(b.cells[prodId]?.total) || 0;
       return dir * (va - vb);
     }
     return 0;
   });
 });
 
-// Cell edit
-function startCellEdit(row, prodId) {
-  const d = row.cells[prodId];
-  editingCell.value = row.restaurant + '_' + prodId;
-  editStockValue.value = d ? String(d.stock) : '';
-  nextTick(() => {
-    const inp = document.querySelector('.sc-cell-input');
-    if (inp) inp.focus();
-  });
+function makeCellBatchRow(expiry_date = '', stock = '') {
+  return { expiry_date, stock };
 }
 
-async function saveCellEdit(row, prodId) {
-  const d = row.cells[prodId];
-  const val = parseFloat(String(editStockValue.value).replace(',', '.'));
-  if (isNaN(val)) { toastStore.error('Ошибка', 'Неверное значение'); return; }
+function openCellEditor(row, prodId) {
+  const prod = collectionData.value?.products?.find(p => p.id === prodId);
+  const cell = row.cells[prodId];
+  cellEditor.value = {
+    show: true,
+    loading: false,
+    collectionId: activeCollection.value.id,
+    restaurantNumber: row.restaurant,
+    productId: prodId,
+    productName: prod ? `${prod.product_name}${prod.product_sku ? ` (${prod.product_sku})` : ''}` : `Товар ${prodId}`,
+    unit: prod?.unit || 'pieces',
+    batches: (cell?.batches?.length ? cell.batches : [makeCellBatchRow()]).map(b => ({
+      expiry_date: b.expiry_date ? String(b.expiry_date).slice(0, 10) : '',
+      stock: b.stock != null ? String(b.stock) : '',
+    })),
+  };
+}
+
+function addCellBatch() {
+  cellEditor.value.batches.push(makeCellBatchRow());
+}
+
+function removeCellBatch(idx) {
+  cellEditor.value.batches.splice(idx, 1);
+  if (!cellEditor.value.batches.length) cellEditor.value.batches.push(makeCellBatchRow());
+}
+
+function normalizeCellEditorBatches() {
+  return cellEditor.value.batches
+    .map(batch => ({
+      expiry_date: String(batch.expiry_date || '').trim(),
+      stock: String(batch.stock || '').trim(),
+    }))
+    .filter(batch => batch.stock !== '' && !Number.isNaN(Number(batch.stock)));
+}
+
+async function saveCellEdit() {
+  const batches = normalizeCellEditorBatches();
+  if (!batches.length) {
+    toastStore.error('Ошибка', 'Добавьте хотя бы одну партию');
+    return;
+  }
+  cellEditor.value.loading = true;
   try {
-    if (d?.id) {
-      const { error } = await db.from('stock_collection_data').update({ stock: val }).eq('id', d.id);
-      if (error) { toastStore.error('Ошибка', 'Не удалось сохранить'); return; }
-      d.stock = val;
-    } else {
-      const { data, error } = await db.rpc('sc_save_collection_cell', {
-        collection_id: activeCollection.value.id,
-        product_id: prodId,
-        restaurant_number: row.restaurant,
-        stock: val,
-      });
-      if (error) { toastStore.error('Ошибка', error); return; }
-      row.cells[prodId] = data?.item || {
-        product_id: prodId,
-        restaurant_number: row.restaurant,
-        stock: val,
-        submitted_at: new Date().toISOString(),
-        source: 'manual',
-      };
-      if (collectionData.value?.data) collectionData.value.data.push(row.cells[prodId]);
-      row.hasData = true;
-      row.submittedAt = row.cells[prodId].submitted_at || row.submittedAt;
-    }
-    editingCell.value = null;
+    const { error } = await db.rpc('sc_save_collection_cell', {
+      collection_id: cellEditor.value.collectionId,
+      product_id: cellEditor.value.productId,
+      restaurant_number: cellEditor.value.restaurantNumber,
+      batches: batches.map(batch => ({
+        expiry_date: batch.expiry_date,
+        stock: parseFloat(batch.stock),
+      })),
+    });
+    if (error) { toastStore.error('Ошибка', error); return; }
+    cellEditor.value.show = false;
+    await refreshData();
     toastStore.success('Сохранено', '');
-  } catch { toastStore.error('Ошибка', 'Не удалось сохранить'); }
+  } catch {
+    toastStore.error('Ошибка', 'Не удалось сохранить');
+  } finally {
+    cellEditor.value.loading = false;
+  }
 }
 
 function deleteRestaurantRow(row) {
@@ -881,11 +977,11 @@ function deleteRestaurantRow(row) {
     btnText: 'Удалить',
     action: async () => {
       try {
-        const ids = Object.values(row.cells).map(d => d.id).filter(Boolean);
-        for (const id of ids) {
-          const { error } = await db.from('stock_collection_data').delete().eq('id', id);
-          if (error) { toastStore.error('Ошибка', 'Не удалось удалить'); return; }
-        }
+        const { error } = await db.from('stock_collection_data')
+          .delete()
+          .eq('collection_id', activeCollection.value.id)
+          .eq('restaurant_number', row.restaurant);
+        if (error) { toastStore.error('Ошибка', 'Не удалось удалить'); return; }
         await refreshData();
         toastStore.success('Удалено', '');
       } catch { toastStore.error('Ошибка', 'Не удалось удалить'); }
@@ -896,7 +992,7 @@ function deleteRestaurantRow(row) {
 function deleteEntry(d) {
   confirmModal.value = {
     show: true, title: 'Удалить запись', danger: true,
-    text: `Удалить остаток ресторана ${d.restaurant_number}?`,
+    text: `Удалить партию ресторана ${d.restaurant_number}?`,
     btnText: 'Удалить',
     action: async () => {
       try {
@@ -924,6 +1020,7 @@ function openEditProducts() {
   editProducts.value = collectionData.value.products.map(p => ({
     ...p,
     note: p.note || '',
+    need_expiry: !!p.need_expiry,
     _original: { ...p },
     _markedForDelete: false,
     _searchMode: false,
@@ -937,6 +1034,7 @@ function addEditProductRow() {
     product_name: '',
     product_sku: '',
     unit: 'pieces',
+    need_expiry: false,
     note: '',
     sort_order: editProducts.value.length,
     _searchMode: true,
@@ -1035,11 +1133,12 @@ async function saveEditProducts() {
     // 2. Update existing products
     for (const p of active.filter(p => p.id)) {
       const orig = p._original;
-      if (orig && (p.product_name !== orig.product_name || p.product_sku !== orig.product_sku || p.unit !== orig.unit || p.note !== orig.note)) {
+      if (orig && (p.product_name !== orig.product_name || p.product_sku !== orig.product_sku || p.unit !== orig.unit || p.need_expiry !== !!orig.need_expiry || p.note !== orig.note)) {
         await db.from('stock_collection_products').update({
           product_name: p.product_name.trim(),
           product_sku: (p.product_sku || '').trim() || null,
           unit: p.unit,
+          need_expiry: !!p.need_expiry,
           note: (p.note || '').trim() || null,
         }).eq('id', p.id);
       }
@@ -1054,6 +1153,7 @@ async function saveEditProducts() {
         product_name: p.product_name.trim(),
         product_sku: (p.product_sku || '').trim() || null,
         unit: p.unit,
+        need_expiry: !!p.need_expiry,
         sort_order: keepIds.length + i,
         note: (p.note || '').trim() || null,
       });
@@ -1117,7 +1217,7 @@ async function exportExcel() {
   const dataMap = new Map();
   for (const d of allData) {
     const key = `${d.restaurant_number}_${d.product_id}`;
-    dataMap.set(key, d.stock);
+    dataMap.set(key, (dataMap.get(key) || 0) + (parseFloat(d.stock) || 0));
   }
 
   restNums.forEach((num, ri) => {
@@ -1275,6 +1375,7 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 }
 .sc-tbl thead th.col-prod { white-space: normal; word-break: break-word; max-width: 80px; font-size: 10px; line-height: 1.3; }
 .sc-tbl thead th .th-unit { font-weight: 400; font-size: 9px; opacity: 0.7; margin-top: 1px; }
+.th-flag { font-weight: 700; font-size: 9px; color: #ffd8bf; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.02em; }
 .sc-tbl thead th .th-note { font-weight: 400; font-size: 9px; color: #c88; font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .sc-tbl tbody td {
   padding: 5px 5px; border-bottom: 1px solid #f0ece6; text-align: center;
@@ -1306,20 +1407,33 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .foot-val { font-weight: 700; color: #502314; }
 
 /* Cell values */
-.sc-cell-val { cursor: default; }
-.sc-cell-val.editable { cursor: pointer; border-bottom: 1px dashed transparent; }
-.sc-cell-val.editable:hover { border-bottom-color: var(--orange); color: var(--orange); }
-.sc-cell-empty { color: #ddd; }
-.sc-cell-empty.editable { cursor: pointer; border-bottom: 1px dashed transparent; }
-.sc-cell-empty.editable:hover { color: var(--orange); border-bottom-color: var(--orange); }
+.sc-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 38px;
+  justify-content: center;
+  align-items: center;
+  padding: 2px 0;
+}
+.sc-cell.editable { cursor: pointer; border-radius: 6px; }
+.sc-cell.editable:hover { background: rgba(244, 162, 97, 0.08); }
+.sc-cell-total { font-weight: 700; color: #502314; line-height: 1.15; }
+.sc-cell-batches { display: flex; flex-direction: column; gap: 1px; align-items: center; }
+.sc-cell-batch { display: flex; gap: 4px; align-items: center; justify-content: center; font-size: 10px; color: #8c7b6e; line-height: 1.1; }
+.sc-cell-batch-date { white-space: nowrap; }
+.sc-cell-batch-stock { font-weight: 600; color: #6b5344; white-space: nowrap; }
+.sc-cell-more { font-size: 10px; color: #c16b4d; line-height: 1.1; }
+.sc-cell-empty-mark { color: #ddd; }
 
 /* Cell edit */
-.sc-cell-input {
-  width: 70px; padding: 3px 6px; border: 1.5px solid var(--orange);
-  border-radius: 5px; font-size: 13px; font-family: inherit;
-  text-align: center; background: #FFFBF5;
-}
-.sc-cell-input:focus { outline: none; }
+.sc-cell-editor-head { margin-bottom: 12px; }
+.sc-cell-editor-title { font-size: 15px; font-weight: 700; color: #502314; }
+.sc-cell-editor-meta { font-size: 12px; color: #8c7b6e; margin-top: 2px; }
+.sc-cell-editor-batches { display: flex; flex-direction: column; gap: 8px; }
+.sc-cell-editor-row { display: flex; align-items: center; gap: 8px; }
+.sc-cell-editor-date { width: 180px; }
+.sc-cell-editor-stock { width: 120px; text-align: center; }
 
 /* Buttons */
 .sc-btn {
@@ -1394,8 +1508,26 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-product-unit-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .sc-product-unit-label { font-size: 12px; color: var(--muted); font-weight: 500; }
 .sc-unit-locked { font-size: 12px; font-weight: 700; color: #502314; padding: 5px 12px; background: #F0EBE4; border-radius: 6px; }
+.sc-product-flags {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
 .sc-note-input { margin-top: 8px; font-size: 12px; }
 .sc-note-input::placeholder { font-style: italic; }
+.sc-need-expiry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 0;
+  width: 100%;
+}
+.sc-need-expiry .sc-product-unit-label {
+  margin: 0;
+  white-space: nowrap;
+}
 
 /* Dropdown */
 .sc-drop {

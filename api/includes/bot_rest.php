@@ -73,6 +73,36 @@ function botFormatSubscribedRestaurant($restaurantNumber, $group) {
     return formatRestaurantNumber($restaurantNumber) . ' (' . botGetRestaurantGroupShort($group) . ')';
 }
 
+function botNormalizeStockCollectionBatches($lines) {
+    $out = [];
+    if (!is_array($lines)) return $out;
+    foreach ($lines as $line) {
+        $line = trim((string)$line);
+        if ($line === '') continue;
+        $datePart = null;
+        $qtyPart = null;
+        if (preg_match('/^(\d{2}\.\d{2}\.\d{4})\s*[:=]\s*([\d.,]+)$/u', $line, $m)) {
+            $dt = DateTime::createFromFormat('d.m.Y', $m[1]);
+            if (!$dt || $dt->format('d.m.Y') !== $m[1]) continue;
+            $datePart = $dt->format('Y-m-d');
+            $qtyPart = $m[2];
+        } elseif (preg_match('/^без\s*срока\s*[:=]\s*([\d.,]+)$/u', $line, $m)) {
+            $qtyPart = $m[1];
+        } elseif (preg_match('/^[\d.,]+$/u', $line)) {
+            $qtyPart = $line;
+        } else {
+            continue;
+        }
+        $stock = round((float)str_replace(',', '.', $qtyPart), 2);
+        if ($stock < 0 || $stock > 999999) continue;
+        $out[] = [
+            'expiry_date' => $datePart,
+            'stock' => $stock,
+        ];
+    }
+    return $out;
+}
+
 function botNormalizeRestaurantOrdersLegalEntity($legalEntity, $group = null) {
     $legalEntity = trim((string)$legalEntity);
     if ($legalEntity !== '') return $legalEntity;
@@ -1420,7 +1450,7 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
     $colName = $colRow['name'];
 
     // Товары
-    $st = $pdo->prepare("SELECT id, product_name, product_sku, unit, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
+    $st = $pdo->prepare("SELECT id, product_name, product_sku, unit, need_expiry, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
     $st->execute([$collectionId]);
     $products = $st->fetchAll();
 
@@ -1431,38 +1461,63 @@ function restScShowProducts($chatId, $msgId, $collectionId, $restNum) {
 
     // Существующие данные
     $existing = [];
-    $ex = $pdo->prepare("SELECT product_id, stock FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ?");
+    $ex = $pdo->prepare("SELECT product_id, expiry_date, stock FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ? ORDER BY product_id, expiry_date, id");
     $ex->execute([$collectionId, $restNum]);
-    foreach ($ex->fetchAll() as $r) $existing[$r['product_id']] = $r['stock'];
+    foreach ($ex->fetchAll() as $r) {
+        $pid = (int)$r['product_id'];
+        if (!isset($existing[$pid])) $existing[$pid] = [];
+        $existing[$pid][] = ['expiry_date' => $r['expiry_date'], 'stock' => $r['stock']];
+    }
 
     $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
 
     $text = "📋 <b>{$colName}</b>\n";
     $text .= "🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n";
     $text .= "─────────────────────\n";
+    $text .= "Введите партии <b>по номерам товаров</b>.\n";
+    $text .= "Формат строки: <code>дд.мм.гггг: количество</code> или просто <code>количество</code>, если срок не нужен.\n";
+    $text .= "Если у товара несколько сроков, укажите несколько строк подряд.\n\n";
 
     if (!empty($existing)) {
         $text .= "✅ <b>Уже заполнено:</b>\n";
-        foreach ($products as $p) {
-            if (isset($existing[$p['id']])) {
-                $u = $unitLabels[$p['unit']] ?? $p['unit'];
-                $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
-                $text .= "  • {$label} — <b>{$existing[$p['id']]}</b> {$u}\n";
+        foreach ($products as $idx => $p) {
+            if (empty($existing[$p['id']])) continue;
+            $u = $unitLabels[$p['unit']] ?? $p['unit'];
+            $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
+            $total = 0;
+            foreach ($existing[$p['id']] as $batch) $total += (float)$batch['stock'];
+            $text .= "  • " . ($idx + 1) . ". " . soEsc($label) . " — <b>" . rtrim(rtrim(number_format($total, 2, '.', ''), '0'), '.') . "</b> {$u}\n";
+            foreach ($existing[$p['id']] as $batch) {
+                $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
+                $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
+                $text .= "      " . soEsc($date) . ": {$qty}\n";
             }
         }
         $text .= "─────────────────────\n";
-        $text .= "Чтобы обновить — отправьте данные заново.\n\n";
+        $text .= "Чтобы обновить, отправьте список заново.\n\n";
     }
 
-    $text .= "Введите остатки, <b>по одной строке</b>:\n\n<code>";
-    foreach ($products as $p) {
+    $text .= "<code>";
+    foreach ($products as $i => $p) {
         $u = $unitLabels[$p['unit']] ?? $p['unit'];
-        $val = $existing[$p['id']] ?? 0;
         $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
-        $text .= "{$label} ({$u}): {$val}\n";
+        $needExpiry = !empty($p['need_expiry']);
+        $needMark = $needExpiry ? ' · срок обязателен' : '';
+        $text .= ($i + 1) . ". " . soEsc($label) . " ({$u}{$needMark})\n";
+        $current = $existing[$p['id']] ?? [];
+        if ($current) {
+            foreach ($current as $batch) {
+                $date = $batch['expiry_date'] ? date('d.m.Y', strtotime($batch['expiry_date'])) : 'без срока';
+                $qty = rtrim(rtrim(number_format((float)$batch['stock'], 2, '.', ''), '0'), '.');
+                $text .= soEsc($date) . ": {$qty}\n";
+            }
+        } else {
+            $text .= "без срока: 0\n";
+        }
+        $text .= "\n";
     }
     $text .= "</code>\n";
-    $text .= "<i>Скопируйте, измените числа и отправьте.</i>";
+    $text .= "<i>Скопируйте шаблон, замените даты и количества и отправьте.</i>";
 
     if (mb_strlen($text) > 4000) $text = mb_substr($text, 0, 3990) . "\n…";
 
@@ -1501,45 +1556,63 @@ function restScProcessInput($chatId, $text, $userMsgId) {
         return;
     }
 
-    // Парсим ввод: каждая строка = "название: количество" или просто числа по порядку
+    // Парсим ввод: блоки по номерам товаров, внутри каждого блока несколько строк партий.
     $lines = preg_split('/[\n\r]+/', trim($text));
-    $values = [];
-
-    if (count($lines) === count($products)) {
-        // Пробуем как список значений по порядку
-        $allNumeric = true;
-        foreach ($lines as $line) {
-            $parts = preg_split('/[:=]\s*/', trim($line));
-            $val = str_replace(',', '.', trim(end($parts)));
-            if (!is_numeric($val)) { $allNumeric = false; break; }
-            $values[] = floatval($val);
-        }
-        if (!$allNumeric) $values = [];
-    }
-
-    if (empty($values)) {
-        // Пробуем парсить "название: число"
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if (!$line) continue;
-            if (preg_match('/[:=]\s*([\d.,]+)\s*$/', $line, $m)) {
-                $values[] = floatval(str_replace(',', '.', $m[1]));
-            } elseif (is_numeric(str_replace(',', '.', $line))) {
-                $values[] = floatval(str_replace(',', '.', $line));
+    $byProduct = [];
+    $currentIdx = null;
+    foreach ($lines as $rawLine) {
+        $line = trim($rawLine);
+        if ($line === '') continue;
+        if (preg_match('/^(\d+)\.\s*/', $line, $m)) {
+            $idx = (int)$m[1] - 1;
+            if (isset($products[$idx])) {
+                $currentIdx = $idx;
+                $tail = trim(substr($line, strlen($m[0])));
+                if ($tail !== '' && preg_match('/^(\d{2}\.\d{2}\.\d{4})\s*[:=]\s*([\d.,]+)$/u', $tail)) {
+                    $byProduct[$currentIdx][] = $tail;
+                }
+                continue;
             }
         }
+        if ($currentIdx === null) continue;
+        $byProduct[$currentIdx][] = $line;
     }
 
-    if (count($values) !== count($products)) {
+    if (count($byProduct) !== count($products)) {
         $state2 = ['msg_id' => null];
-        corrReplace($chatId, $userMsgId, $state2, "⚠️ Количество значений (" . count($values) . ") не совпадает с количеством товаров (" . count($products) . ").\n\nВведите по одному числу на строку, в том же порядке.");
+        corrReplace($chatId, $userMsgId, $state2, "⚠️ Не заполнены все товары.\n\nНужно указать блок для каждого товара и внутри блока строки вида <code>дд.мм.гггг: количество</code> или просто <code>количество</code>.");
         return;
     }
 
     // Сохраняем
-    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW()) ON DUPLICATE KEY UPDATE stock = VALUES(stock), submitted_at = NOW()");
-    foreach ($products as $i => $p) {
-        $ins->execute([$collectionId, $p['id'], $restNum, $values[$i]]);
+    $del = $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?");
+    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at) VALUES (?, ?, ?, ?, ?, 'form', NOW())");
+    $pdo->beginTransaction();
+    try {
+        foreach ($products as $i => $p) {
+            $productLines = $byProduct[$i] ?? [];
+            $batches = botNormalizeStockCollectionBatches($productLines);
+            if (!$batches) {
+                throw new RuntimeException('У товара ' . ($i + 1) . ' нет корректных партий');
+            }
+            if (!empty($products[$i]['need_expiry'])) {
+                foreach ($batches as $batch) {
+                    if (empty($batch['expiry_date'])) {
+                        throw new RuntimeException('Для товара ' . ($i + 1) . ' нужен срок годности');
+                    }
+                }
+            }
+            $del->execute([$collectionId, $p['id'], $restNum]);
+            foreach ($batches as $batch) {
+                $ins->execute([$collectionId, $p['id'], $restNum, $batch['expiry_date'], $batch['stock']]);
+            }
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        $state2 = ['msg_id' => null];
+        corrReplace($chatId, $userMsgId, $state2, "⚠️ Не удалось сохранить сбор. Проверьте формат дат и количеств.");
+        return;
     }
 
     // Чистим
@@ -1548,12 +1621,19 @@ function restScProcessInput($chatId, $text, $userMsgId) {
 
     $unitLabels = ['boxes' => 'кор', 'pieces' => 'шт', 'kg' => 'кг', 'liters' => 'л'];
     $confirmText = "✅ <b>Остатки сохранены!</b>\n🏪 Ресторан <b>" . formatRestaurantNumber($restNum) . "</b>\n─────────────────────\n";
-    foreach ($products as $i => $p) {
-        $u = $unitLabels[$p['unit']] ?? $p['unit'];
-        $v = rtrim(rtrim(number_format($values[$i], 2, '.', ''), '0'), '.');
-        $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
-        $confirmText .= "  • {$label} — <b>{$v}</b> {$u}\n";
-    }
+        foreach ($products as $i => $p) {
+            $u = $unitLabels[$p['unit']] ?? $p['unit'];
+            $label = trim(($p['product_sku'] ?? '') . ' ' . ($p['product_name'] ?? ''));
+            $total = 0;
+            foreach (($byProduct[$i] ?? []) as $line) {
+                if (preg_match('/^(\d{2}\.\d{2}\.\d{4})\s*[:=]\s*([\d.,]+)$/u', $line, $m)) {
+                    $total += (float)str_replace(',', '.', $m[2]);
+                } elseif (preg_match('/^[\d.,]+$/u', $line)) {
+                    $total += (float)str_replace(',', '.', $line);
+                }
+            }
+            $confirmText .= "  • " . ($i + 1) . ". " . soEsc($label) . " — <b>" . rtrim(rtrim(number_format($total, 2, '.', ''), '0'), '.') . "</b> {$u}\n";
+        }
 
     // Антиспам — удаляем сообщение пользователя, обновляем бота
     $state2 = ['msg_id' => null];

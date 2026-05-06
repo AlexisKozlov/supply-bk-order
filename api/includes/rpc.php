@@ -3,6 +3,28 @@
  * RPC-эндпоинты (публичные и приватные).
  * Подключается из index.php.
  */
+
+function rpcNormalizeStockCollectionBatches($batches) {
+    $out = [];
+    if (!is_array($batches)) return $out;
+    foreach ($batches as $batch) {
+        if (!is_array($batch)) continue;
+        $expiry = trim((string)($batch['expiry_date'] ?? ''));
+        $stock = $batch['stock'] ?? null;
+        if (!is_numeric($stock)) continue;
+        $stockVal = round(floatval($stock), 2);
+        if ($stockVal < 0 || $stockVal > 999999) continue;
+        if ($expiry !== '') {
+            $dt = DateTime::createFromFormat('Y-m-d', $expiry);
+            if (!$dt || $dt->format('Y-m-d') !== $expiry) continue;
+            $out[] = ['expiry_date' => $expiry, 'stock' => $stockVal];
+        } else {
+            $out[] = ['expiry_date' => null, 'stock' => $stockVal];
+        }
+    }
+    return $out;
+}
+
 // ═══ RPC (публичные — без API-ключа) ═══
 if ($endpoint === 'rpc') {
     $fn = $subpoint ?? '';
@@ -980,13 +1002,14 @@ if ($endpoint === 'rpc') {
             $s = $pdo->prepare("INSERT INTO stock_collections (legal_entity, name, created_by) VALUES (?, ?, ?)");
             $s->execute([$le, $name, $uname]);
             $collId = $pdo->lastInsertId();
-            $ins = $pdo->prepare("INSERT INTO stock_collection_products (collection_id, product_name, product_sku, unit, sort_order, note) VALUES (?, ?, ?, ?, ?, ?)");
+            $ins = $pdo->prepare("INSERT INTO stock_collection_products (collection_id, product_name, product_sku, unit, need_expiry, sort_order, note) VALUES (?, ?, ?, ?, ?, ?, ?)");
             foreach ($products as $i => $p) {
                 $pname = mb_substr($p['name'] ?? '', 0, 255);
                 $psku = mb_substr($p['sku'] ?? '', 0, 50) ?: null;
                 $punit = in_array($p['unit'] ?? '', ['boxes', 'pieces', 'kg', 'liters']) ? $p['unit'] : 'pieces';
+                $pneedExpiry = !empty($p['need_expiry']) ? 1 : 0;
                 $pnote = mb_substr($p['note'] ?? '', 0, 500) ?: null;
-                $ins->execute([$collId, $pname, $psku, $punit, $i, $pnote]);
+                $ins->execute([$collId, $pname, $psku, $punit, $pneedExpiry, $i, $pnote]);
             }
             $pdo->commit();
         } catch (Exception $e) {
@@ -1077,11 +1100,11 @@ if ($endpoint === 'rpc') {
         if (!$collRow) respond(['error' => 'Коллекция не найдена'], 404);
         if ($authUser && !checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         // Товары
-        $s = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
+        $s = $pdo->prepare("SELECT id, product_name, product_sku, unit, need_expiry, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order");
         $s->execute([$collId]);
         $products = $s->fetchAll();
         // Данные
-        $s2 = $pdo->prepare("SELECT id, product_id, restaurant_number, stock, source, submitted_at FROM stock_collection_data WHERE collection_id = ? ORDER BY restaurant_number");
+        $s2 = $pdo->prepare("SELECT id, product_id, restaurant_number, expiry_date, stock, source, submitted_at FROM stock_collection_data WHERE collection_id = ? ORDER BY restaurant_number, product_id, expiry_date, id");
         $s2->execute([$collId]);
         $data = $s2->fetchAll();
         // Ответы по ресторанам
@@ -1096,13 +1119,13 @@ if ($endpoint === 'rpc') {
         $collId = intval($body['collection_id'] ?? 0);
         $productId = intval($body['product_id'] ?? 0);
         $restaurantNumber = trim((string)($body['restaurant_number'] ?? ''));
-        $stock = $body['stock'] ?? null;
-        if (!$collId || !$productId || $restaurantNumber === '' || $stock === null) {
+        $batches = $body['batches'] ?? null;
+        if ($batches === null && isset($body['stock'], $body['expiry_date'])) {
+            $batches = [['stock' => $body['stock'], 'expiry_date' => $body['expiry_date']]];
+        }
+        if (!$collId || !$productId || $restaurantNumber === '' || $batches === null) {
             respond(['error' => 'Не все параметры указаны'], 400);
         }
-        if (!is_numeric($stock)) respond(['error' => 'Некорректный остаток'], 400);
-        $stockVal = round(floatval($stock), 2);
-        if ($stockVal < 0 || $stockVal > 999999) respond(['error' => 'Некорректный остаток'], 400);
 
         $collCheck = $pdo->prepare("SELECT id, legal_entity, status FROM stock_collections WHERE id = ?");
         $collCheck->execute([$collId]);
@@ -1111,9 +1134,10 @@ if ($endpoint === 'rpc') {
         if ($collRow['status'] !== 'active') respond(['error' => 'Сбор закрыт'], 400);
         if (!checkLegalEntityAccess($authUser, $collRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
 
-        $productCheck = $pdo->prepare("SELECT id FROM stock_collection_products WHERE id = ? AND collection_id = ?");
+        $productCheck = $pdo->prepare("SELECT id, need_expiry FROM stock_collection_products WHERE id = ? AND collection_id = ?");
         $productCheck->execute([$productId, $collId]);
-        if (!$productCheck->fetch()) respond(['error' => 'Товар не входит в этот сбор'], 400);
+        $productRow = $productCheck->fetch();
+        if (!$productRow) respond(['error' => 'Товар не входит в этот сбор'], 400);
 
         $group = getEntityGroup($collRow['legal_entity']);
         $restaurantCheck = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? LIMIT 1");
@@ -1121,23 +1145,39 @@ if ($endpoint === 'rpc') {
         if (!$restaurantCheck->fetch()) respond(['error' => 'Ресторан не найден в выбранном юрлице'], 400);
 
         try {
+            $normalized = rpcNormalizeStockCollectionBatches($batches);
+            if (!$normalized) respond(['error' => 'Добавьте хотя бы одну партию'], 400);
+            if (!empty($productRow['need_expiry'])) {
+                foreach ($normalized as $batch) {
+                    if (empty($batch['expiry_date'])) {
+                        respond(['error' => 'Для этой позиции нужно указать срок годности'], 400);
+                    }
+                }
+            }
+            $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?")->execute([$collId, $productId, $restaurantNumber]);
             $stmt = $pdo->prepare("
-                INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at)
-                VALUES (?, ?, ?, ?, 'manual', NOW())
-                ON DUPLICATE KEY UPDATE stock = VALUES(stock), source = 'manual', submitted_at = NOW()
+                INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at)
+                VALUES (?, ?, ?, ?, ?, 'manual', NOW())
             ");
-            $stmt->execute([$collId, $productId, $restaurantNumber, $stockVal]);
-            $idStmt = $pdo->prepare("SELECT id, product_id, restaurant_number, stock, source, submitted_at FROM stock_collection_data WHERE product_id = ? AND restaurant_number = ? LIMIT 1");
-            $idStmt->execute([$productId, $restaurantNumber]);
-            $item = $idStmt->fetch();
+            $savedIds = [];
+            foreach ($normalized as $batch) {
+                $stmt->execute([$collId, $productId, $restaurantNumber, $batch['expiry_date'], $batch['stock']]);
+                $savedIds[] = (int)$pdo->lastInsertId();
+            }
+            $pdo->commit();
+            $idStmt = $pdo->prepare("SELECT id, product_id, restaurant_number, expiry_date, stock, source, submitted_at FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ? ORDER BY expiry_date, id");
+            $idStmt->execute([$collId, $productId, $restaurantNumber]);
+            $item = $idStmt->fetchAll();
             auditLog($pdo, 'stock_collection_cell_saved', 'stock_collection', $collId, $authUserName, [
                 'product_id' => $productId,
                 'restaurant_number' => $restaurantNumber,
-                'stock' => $stockVal,
+                'batches' => $normalized,
                 'source' => 'manual',
             ]);
-            respond(['success' => true, 'item' => $item]);
+            respond(['success' => true, 'items' => $item]);
         } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
             error_log('sc_save_collection_cell error: ' . $e->getMessage());
             respond(['error' => 'Ошибка сохранения'], 500);
         }

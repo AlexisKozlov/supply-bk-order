@@ -101,7 +101,7 @@
     <div class="cab-main">
       <div class="cab-topbar">
         <div>
-          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : 'Профиль' }}</div>
+          <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
           <div class="cab-topbar-sub">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }} · {{ restaurantAddress }}</div>
         </div>
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров (BETA)">
@@ -958,20 +958,37 @@
         <div v-else class="stock-inline-list">
           <div v-for="p in stockProducts" :key="p.id" class="stock-row">
             <div class="stock-row-main">
-              <div class="stock-row-name">{{ p.product_sku ? `${p.product_sku} ${p.product_name}` : p.product_name }}</div>
+              <div class="stock-row-name">
+                {{ p.product_sku ? `${p.product_sku} ${p.product_name}` : p.product_name }}
+                <span v-if="p.need_expiry" class="stock-row-flag">срок обязателен</span>
+              </div>
               <div v-if="p.note" class="stock-row-note">{{ p.note }}</div>
+              <div class="stock-row-total">
+                Итого: <b>{{ stockProductTotal(p.id) || '0' }}</b> {{ stockUnitShort(p.unit) }}
+              </div>
             </div>
-            <div class="stock-row-input">
-              <input
-                type="number"
-                inputmode="decimal"
-                min="0"
-                step="any"
-                v-model="stockValues[p.id]"
-                class="stock-input"
-                placeholder="0"
-              />
-              <span class="stock-row-unit">{{ stockUnitShort(p.unit) }}</span>
+            <div class="stock-row-batches">
+              <div v-for="(batch, idx) in stockDrafts[p.id] || []" :key="idx" class="stock-batch-row">
+                <input
+                  type="date"
+                  v-model="batch.expiry_date"
+                  class="stock-input stock-date-input"
+                  :aria-label="`Срок годности для товара ${p.product_name}`"
+                  :title="'Необязательно'"
+                />
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  v-model="batch.stock"
+                  class="stock-input stock-qty-input"
+                  placeholder="0"
+                />
+                <span class="stock-row-unit">{{ stockUnitShort(p.unit) }}</span>
+                <button v-if="(stockDrafts[p.id] || []).length > 1" class="stock-batch-del" @click="removeStockBatch(p.id, idx)" title="Удалить партию">✕</button>
+              </div>
+              <button class="stock-batch-add" @click="addStockBatch(p.id)">+ Добавить партию</button>
             </div>
           </div>
         </div>
@@ -1096,6 +1113,11 @@
     <!-- ══════ TAB: Сканер товаров (BETA) ══════ -->
     <section v-if="activeTab === 'scanner' && !globalLoading && !globalError" class="cab-section">
       <ScannerView />
+    </section>
+
+    <!-- ══════ TAB: Возврат кег ══════ -->
+    <section v-if="activeTab === 'keg-returns' && !globalLoading && !globalError" class="cab-section">
+      <RestaurantKegReturnsTab />
     </section>
 
     <!-- ══════ TAB: Профиль ══════ -->
@@ -1356,6 +1378,7 @@ import { formatRestaurantNumber } from '@/lib/legalEntities.js';
 import SupplierPreviousOrder from '@/components/SupplierPreviousOrder.vue';
 
 const ScannerView = defineAsyncComponent(() => import('@/views/restaurant/ScannerView.vue'));
+const RestaurantKegReturnsTab = defineAsyncComponent(() => import('@/components/restaurant/RestaurantKegReturnsTab.vue'));
 
 const router = useRouter();
 const route = useRoute();
@@ -1402,6 +1425,7 @@ const cabIconSvg = {
   x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10"/><path d="M17 7 7 17"/></svg>',
   skip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M7 17 17 7"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.5 4 4-.5L18.5 9 15 5.5 4 16.5Z"/><path d="m13.5 7 3.5 3.5"/></svg>',
+  truck: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
 };
 const supplierIconSvg = {
   drinks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h4"/><path d="M9 3v3l-2 2v11a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V8l-2-2V3"/><path d="M7 12h6"/><path d="M16 7h2l1 3v9a2 2 0 0 1-2 2h-1"/><path d="M16 11h3"/></svg>',
@@ -1427,6 +1451,7 @@ function supplierIcon(name) {
 
 function tabIconSvg(tabId) {
   if (tabId === 'warehouse-stock') return cabIconSvg.warehouse;
+  if (tabId === 'keg-returns') return cabIconSvg.truck;
   return cabIconSvg[tabId] || cabIconSvg.profile;
 }
 
@@ -1456,7 +1481,7 @@ const defaultOrderSubTab = computed(() => {
 // ═══ Stock collection ═══
 const stockCollection = reactive({ active: false, collection: null });
 const stockProducts = ref([]);
-const stockValues = reactive({}); // product_id -> string/number
+const stockDrafts = reactive({}); // product_id -> [{expiry_date, stock}]
 const stockLastSubmittedAt = ref(null);
 const stockLoading = ref(false);
 const stockSaving = ref(false);
@@ -1483,9 +1508,9 @@ const currentImportantPost = computed(() => importantPosts.value.find(p => !p.is
 let cabinetBackgroundRunId = 0;
 const stockDirty = computed(() => {
   for (const p of stockProducts.value) {
-    const saved = stockSavedSnapshot[p.id];
-    const current = stockValues[p.id];
-    if ((saved ?? '') !== (current ?? '')) return true;
+    const saved = stockSavedSnapshot[p.id] || '[]';
+    const current = JSON.stringify(normalizeStockDraft(p.id));
+    if (saved !== current) return true;
   }
   return false;
 });
@@ -1814,6 +1839,7 @@ const mainTabs = computed(() => {
   }
   tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
   tabs.push({ id: 'scanner', label: 'Сканер', beta: true });
+  tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
   return tabs;
 });
 // ═══ Delivery (основная поставка) ═══
@@ -2531,6 +2557,8 @@ function applyRouteToState() {
     activeTab.value = 'scanner';
   } else if (name === 'restaurant-profile') {
     activeTab.value = 'profile';
+  } else if (name === 'restaurant-keg-returns') {
+    activeTab.value = 'keg-returns';
   }
 }
 
@@ -2550,6 +2578,8 @@ function syncStateToRoute() {
     target = { name: 'restaurant-scanner' };
   } else if (activeTab.value === 'profile') {
     target = { name: 'restaurant-profile' };
+  } else if (activeTab.value === 'keg-returns') {
+    target = { name: 'restaurant-keg-returns' };
   } else if (activeTab.value === 'orders') {
     const sub = orderSubTab.value;
     if (sub === 'delivery' && roStore.restaurantOrdersEnabled) target = { name: 'restaurant-orders-delivery' };
@@ -2902,6 +2932,45 @@ function stockUnitShort(u) {
   return { boxes: 'кор.', kg: 'кг', liters: 'л' }[u] || 'шт.';
 }
 
+function makeStockBatchRow(expiry_date = '', stock = '') {
+  return { expiry_date, stock };
+}
+
+function normalizeStockDraft(productId) {
+  return (stockDrafts[productId] || [])
+    .map(batch => ({
+      expiry_date: String(batch.expiry_date || '').trim(),
+      stock: String(batch.stock || '').trim(),
+    }))
+    .filter(batch => batch.stock !== '' && !Number.isNaN(Number(batch.stock)));
+}
+
+function stockProductTotal(productId) {
+  return normalizeStockDraft(productId)
+    .reduce((sum, batch) => sum + (parseFloat(batch.stock) || 0), 0)
+    .toFixed(2)
+    .replace(/\.00$/, '');
+}
+
+function stockBatchLabel(batch) {
+  return batch.expiry_date ? formatWarehouseDate(batch.expiry_date) : 'без срока';
+}
+
+function stockExpiryRequired(product) {
+  return !!product?.need_expiry;
+}
+
+function addStockBatch(productId) {
+  if (!stockDrafts[productId]) stockDrafts[productId] = [];
+  stockDrafts[productId].push(makeStockBatchRow());
+}
+
+function removeStockBatch(productId, idx) {
+  if (!stockDrafts[productId]) return;
+  stockDrafts[productId].splice(idx, 1);
+  if (!stockDrafts[productId].length) stockDrafts[productId].push(makeStockBatchRow());
+}
+
 // Stock collection check
 async function checkStockCollection() {
   try {
@@ -2948,18 +3017,23 @@ async function loadStockInline() {
     if (!data.active) {
       stockCollection.active = false;
       stockProducts.value = [];
+      for (const k of Object.keys(stockDrafts)) delete stockDrafts[k];
+      for (const k of Object.keys(stockSavedSnapshot)) delete stockSavedSnapshot[k];
       return;
     }
     stockCollection.active = true;
     stockCollection.collection = { ...(stockCollection.collection || {}), ...data.collection };
     stockProducts.value = data.products || [];
-    // Заполняем поля ранее сохранёнными значениями
-    for (const k of Object.keys(stockValues)) delete stockValues[k];
+    // Заполняем партии ранее сохранёнными значениями
+    for (const k of Object.keys(stockDrafts)) delete stockDrafts[k];
     for (const k of Object.keys(stockSavedSnapshot)) delete stockSavedSnapshot[k];
     for (const p of stockProducts.value) {
-      const v = data.values?.[p.id];
-      stockValues[p.id] = v != null ? String(v) : '';
-      stockSavedSnapshot[p.id] = stockValues[p.id];
+      const batches = (data.batches?.[p.id] || []).map(b => ({
+        expiry_date: b.expiry_date ? String(b.expiry_date).slice(0, 10) : '',
+        stock: b.stock != null ? String(b.stock) : '',
+      }));
+      stockDrafts[p.id] = batches.length ? batches : [makeStockBatchRow()];
+      stockSavedSnapshot[p.id] = JSON.stringify(normalizeStockDraft(p.id));
     }
     stockLastSubmittedAt.value = data.last_submitted_at || null;
   } catch (e) {
@@ -2974,13 +3048,24 @@ async function submitStockInline() {
   stockError.value = '';
   stockSaving.value = true;
   try {
-    const items = stockProducts.value
-      .map(p => ({ product_id: p.id, stock: parseFloat(stockValues[p.id] || 0) || 0 }))
-      .filter(it => !isNaN(it.stock));
+    const items = [];
+    for (const p of stockProducts.value) {
+      const batches = normalizeStockDraft(p.id).map(batch => ({
+        expiry_date: batch.expiry_date,
+        stock: parseFloat(batch.stock),
+      }));
+      if (!batches.length) {
+        throw new Error(`У товара «${p.product_name}» нет ни одной партии`);
+      }
+      if (stockExpiryRequired(p) && batches.some(batch => !batch.expiry_date)) {
+        throw new Error(`Для товара «${p.product_name}» нужно указать срок годности`);
+      }
+      items.push({ product_id: p.id, batches });
+    }
     await roStore.submitStockCollection(stockCollection.collection.id, items);
     // Обновляем снапшот и время сохранения
     for (const p of stockProducts.value) {
-      stockSavedSnapshot[p.id] = stockValues[p.id];
+      stockSavedSnapshot[p.id] = JSON.stringify(normalizeStockDraft(p.id));
     }
     stockLastSubmittedAt.value = new Date().toISOString().slice(0, 19).replace('T', ' ');
     stockSavedFlash.value = true;
@@ -4251,15 +4336,37 @@ tr.del-err { background: #fef2f2; }
 .stock-inline-head h2 { color: #502314; margin: 0 0 4px; font-size: 18px; }
 .stock-inline-sub { color: #8b7355; font-size: 13px; margin: 0; }
 .stock-inline-list { display: flex; flex-direction: column; gap: 0; }
-.stock-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid #F7F2EC; }
+.stock-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 4px; border-bottom: 1px solid #F7F2EC; }
 .stock-row:last-child { border-bottom: none; }
 .stock-row-main { flex: 1; min-width: 0; }
 .stock-row-name { color: #502314; font-size: 14px; font-weight: 600; line-height: 1.25; }
+.stock-row-flag {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #D67B3A;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 .stock-row-note { color: #8b7355; font-size: 11px; margin-top: 2px; }
-.stock-row-input { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.stock-row-total { margin-top: 6px; font-size: 12px; color: #8b7355; }
+.stock-row-batches { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 280px; max-width: 420px; }
+.stock-batch-row { display: flex; align-items: center; gap: 6px; }
 .stock-input { width: 80px; padding: 8px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 16px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
 .stock-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.08); }
+.stock-date-input { width: 150px; text-align: left; font-size: 14px; }
+.stock-qty-input { width: 92px; }
 .stock-row-unit { font-size: 12px; color: #8b7355; font-weight: 500; min-width: 28px; }
+.stock-batch-del {
+  border: none; background: transparent; color: #c16b4d; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+}
+.stock-batch-del:hover { background: #FFF1EC; }
+.stock-batch-add {
+  align-self: flex-start; border: none; background: transparent; color: #E76F51;
+  font-size: 12px; font-weight: 600; cursor: pointer; padding: 0;
+}
+.stock-batch-add:hover { text-decoration: underline; }
 .stock-inline-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #F2EDE8; }
 .stock-saved-flash { color: #16a34a; font-size: 13px; font-weight: 600; }
 

@@ -1822,17 +1822,25 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
     if (!$coll) roRespond(['active' => false]);
 
     // Товары сбора
-    $p = $pdo->prepare("SELECT id, product_name, product_sku, unit, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
+    $p = $pdo->prepare("SELECT id, product_name, product_sku, unit, need_expiry, sort_order, note FROM stock_collection_products WHERE collection_id = ? ORDER BY sort_order, id");
     $p->execute([$coll['id']]);
     $products = $p->fetchAll();
 
     // Ранее сохранённые значения этого ресторана
-    $d = $pdo->prepare("SELECT product_id, stock, submitted_at FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ?");
+    $d = $pdo->prepare("SELECT product_id, stock, expiry_date, submitted_at FROM stock_collection_data WHERE collection_id = ? AND restaurant_number = ? ORDER BY product_id, expiry_date, id");
     $d->execute([$coll['id'], $rest['restaurant_number']]);
     $values = [];
+    $batches = [];
     $lastSubmittedAt = null;
     foreach ($d->fetchAll() as $row) {
-        $values[(int)$row['product_id']] = (float)$row['stock'];
+        $pid = (int)$row['product_id'];
+        $values[$pid] = ($values[$pid] ?? 0) + (float)$row['stock'];
+        if (!isset($batches[$pid])) $batches[$pid] = [];
+        $batches[$pid][] = [
+            'stock' => (float)$row['stock'],
+            'expiry_date' => $row['expiry_date'],
+            'submitted_at' => $row['submitted_at'],
+        ];
         if (!$lastSubmittedAt || $row['submitted_at'] > $lastSubmittedAt) {
             $lastSubmittedAt = $row['submitted_at'];
         }
@@ -1846,8 +1854,51 @@ if ($roAction === 'stock-collection-data' && $method === 'GET') {
         ],
         'products' => $products,
         'values' => $values,
+        'batches' => $batches,
         'last_submitted_at' => $lastSubmittedAt,
     ]);
+}
+
+function roNormalizeStockCollectionBatches($item) {
+    $batches = [];
+    if (!is_array($item)) return $batches;
+
+    if (isset($item['batches']) && is_array($item['batches'])) {
+        foreach ($item['batches'] as $batch) {
+            if (!is_array($batch)) continue;
+            $expiry = trim((string)($batch['expiry_date'] ?? ''));
+            $stock = $batch['stock'] ?? null;
+            if ($stock === null || !is_numeric($stock)) continue;
+            $stockVal = round((float)$stock, 2);
+            if ($stockVal < 0 || $stockVal > 999999) continue;
+            if ($expiry !== '') {
+                $dt = DateTime::createFromFormat('Y-m-d', $expiry);
+                if (!$dt || $dt->format('Y-m-d') !== $expiry) continue;
+                $batches[] = ['expiry_date' => $expiry, 'stock' => $stockVal];
+            } else {
+        $batches[] = ['expiry_date' => null, 'stock' => $stockVal];
+            }
+        }
+        return $batches;
+    }
+
+    $stock = $item['stock'] ?? null;
+    $expiry = trim((string)($item['expiry_date'] ?? ''));
+    if ($stock !== null && is_numeric($stock)) {
+        $stockVal = round((float)$stock, 2);
+        if ($stockVal >= 0 && $stockVal <= 999999) {
+            if ($expiry !== '') {
+                $dt = DateTime::createFromFormat('Y-m-d', $expiry);
+                if ($dt && $dt->format('Y-m-d') === $expiry) {
+                    $batches[] = ['expiry_date' => $expiry, 'stock' => $stockVal];
+                }
+            } else {
+                $batches[] = ['expiry_date' => null, 'stock' => $stockVal];
+            }
+        }
+    }
+
+    return $batches;
 }
 
 // --- Сохранение остатков ресторана (из личного кабинета) ---
@@ -1870,21 +1921,35 @@ if ($roAction === 'stock-collection-submit' && $method === 'POST') {
     if ($collGroup !== $group) roRespond(['error' => 'Сбор не для вашего юрлица'], 403);
 
     // Загружаем допустимые product_id для этой коллекции
-    $validPids = $pdo->prepare("SELECT id FROM stock_collection_products WHERE collection_id = ?");
+    $validPids = $pdo->prepare("SELECT id, need_expiry FROM stock_collection_products WHERE collection_id = ?");
     $validPids->execute([$collId]);
-    $allowedSet = array_flip(array_column($validPids->fetchAll(), 'id'));
+    $allowedSet = [];
+    foreach ($validPids->fetchAll() as $row) {
+        $allowedSet[(int)$row['id']] = (int)$row['need_expiry'] === 1;
+    }
 
-    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, stock, source, submitted_at) VALUES (?, ?, ?, ?, 'form', NOW()) ON DUPLICATE KEY UPDATE stock = VALUES(stock), submitted_at = NOW()");
+    $del = $pdo->prepare("DELETE FROM stock_collection_data WHERE collection_id = ? AND product_id = ? AND restaurant_number = ?");
+    $ins = $pdo->prepare("INSERT INTO stock_collection_data (collection_id, product_id, restaurant_number, expiry_date, stock, source, submitted_at) VALUES (?, ?, ?, ?, ?, 'form', NOW())");
     $pdo->beginTransaction();
     try {
         $saved = 0;
         foreach ($items as $item) {
             $pid = intval($item['product_id'] ?? 0);
-            $sv = floatval($item['stock'] ?? 0);
-            if ($sv < 0 || $sv > 999999) continue;
-            if ($pid > 0 && isset($allowedSet[$pid])) {
-                $ins->execute([$collId, $pid, $rest['restaurant_number'], $sv]);
-                $saved++;
+            if ($pid > 0 && array_key_exists($pid, $allowedSet)) {
+                $batches = roNormalizeStockCollectionBatches($item);
+                if (!$batches) continue;
+                if ($allowedSet[$pid]) {
+                    foreach ($batches as $batch) {
+                        if (empty($batch['expiry_date'])) {
+                            roRespond(['error' => 'Для этой позиции нужно указать срок годности'], 400);
+                        }
+                    }
+                }
+                $del->execute([$collId, $pid, $rest['restaurant_number']]);
+                foreach ($batches as $batch) {
+                    $ins->execute([$collId, $pid, $rest['restaurant_number'], $batch['expiry_date'], $batch['stock']]);
+                    $saved++;
+                }
             }
         }
         $pdo->commit();

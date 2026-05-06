@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS `stock_collection_products` (
   `product_name` VARCHAR(255) NOT NULL,
   `product_sku` VARCHAR(50) DEFAULT NULL,
   `unit` ENUM('boxes','pieces') NOT NULL DEFAULT 'pieces' COMMENT 'В чём собираем остатки',
+  `need_expiry` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Нужен срок годности для позиции',
   `sort_order` INT NOT NULL DEFAULT 0,
   INDEX `idx_collection` (`collection_id`),
   FOREIGN KEY (`collection_id`) REFERENCES `stock_collections`(`id`) ON DELETE CASCADE
@@ -31,14 +32,15 @@ CREATE TABLE IF NOT EXISTS `stock_collection_data` (
   `collection_id` INT NOT NULL,
   `product_id` INT NOT NULL COMMENT 'stock_collection_products.id',
   `restaurant_number` VARCHAR(20) NOT NULL,
+  `expiry_date` DATE DEFAULT NULL COMMENT 'Срок годности партии',
   `stock` DECIMAL(12,2) NOT NULL DEFAULT 0,
   `source` ENUM('form','file','manual') NOT NULL DEFAULT 'form',
   `submitted_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_collection` (`collection_id`),
   INDEX `idx_product` (`product_id`),
+  INDEX `idx_collection_product_rest_expiry` (`collection_id`, `product_id`, `restaurant_number`, `expiry_date`),
   FOREIGN KEY (`collection_id`) REFERENCES `stock_collections`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`product_id`) REFERENCES `stock_collection_products`(`id`) ON DELETE CASCADE,
-  UNIQUE KEY `uniq_prod_rest` (`product_id`, `restaurant_number`)
+  FOREIGN KEY (`product_id`) REFERENCES `stock_collection_products`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Токены для публичной формы (привязаны к сессии сбора)
