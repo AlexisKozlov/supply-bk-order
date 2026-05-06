@@ -1,0 +1,1160 @@
+<?php
+/**
+ * API возврата кег.
+ * Подключается из index.php. Переменные ($pdo, $endpoint, $subpoint, $method, $body, $parts) через global.
+ *
+ * Маршруты:
+ *   GET    keg-catalog              — список кег
+ *   GET    keg-returns              — список заявок
+ *   POST   keg-returns              — создать DRAFT
+ *   GET    keg-returns/{id}         — детально
+ *   PATCH  keg-returns/{id}         — обновить
+ *   POST   keg-returns/{id}/submit  — DRAFT → SUBMITTED
+ *   POST   keg-returns/{id}/cancel  — → CANCELLED
+ *   GET    keg-returns/{id}/excel   — скачать Excel ТТН
+ */
+
+if ($endpoint !== 'keg-returns' && $endpoint !== 'keg-catalog') return;
+
+// Разрешаем токены через ?token= / ?ro_token= для прямых ссылок (скачивание Excel, печать).
+if (!empty($_GET['token']) && empty($_SERVER['HTTP_X_SESSION_TOKEN'])) {
+    $_SERVER['HTTP_X_SESSION_TOKEN'] = $_GET['token'];
+}
+if (!empty($_GET['ro_token']) && empty($_SERVER['HTTP_X_RO_TOKEN'])) {
+    $_SERVER['HTTP_X_RO_TOKEN'] = $_GET['ro_token'];
+}
+
+require_once __DIR__ . '/../../vendor/autoload.php';
+
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Xlsx as XlsxReader;
+use PhpOffice\PhpSpreadsheet\Reader\Xls as XlsReader;
+
+// ═══ Хелперы ═══
+
+function krRespond($data, $code = 200) {
+    http_response_code($code);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+    exit;
+}
+
+/**
+ * Возвращает DateTime (10:00 Europe/Minsk) последнего рабочего дня перед return_date.
+ */
+function kegCalcDeadline(string $returnDate): DateTime {
+    $tz = new DateTimeZone('Europe/Minsk');
+    $d = new DateTime($returnDate, $tz);
+    $d->setTime(10, 0, 0);
+    do {
+        $d->modify('-1 day');
+    } while (in_array((int)$d->format('N'), [6, 7]));
+    return $d;
+}
+
+/**
+ * Сессия ресторана через X-RO-Token (аналогично restaurant_orders.php).
+ */
+function krGetRestaurantSession($pdo) {
+    $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
+    if (!$token) return null;
+    $s = $pdo->prepare("
+        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until
+        FROM ro_users ru
+        WHERE ru.session_token = ? AND ru.is_active = 1
+    ");
+    $s->execute([$token]);
+    $user = $s->fetch();
+    if (!$user) return null;
+    if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return null;
+    $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
+        ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
+    $rest = krGetRestaurantByNumber($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
+    $user['restaurant_id'] = isset($rest['id']) ? (int)$rest['id'] : null;
+    $user['pickup_address'] = $rest['pickup_address'] ?? null;
+    if (empty($user['legal_entity_group']) && !empty($rest['legal_entity_group'])) {
+        $user['legal_entity_group'] = $rest['legal_entity_group'];
+    }
+    return $user;
+}
+
+function krGetRestaurantByNumber($pdo, $restaurantNumber, $group = null) {
+    $g = ($group && in_array(strtoupper($group), ['BK_VM', 'PS'])) ? strtoupper($group) : 'BK_VM';
+    $s = $pdo->prepare("
+        SELECT id, number, region, city, address, pickup_address, pickup_weekdays, legal_entity_group
+        FROM restaurants
+        WHERE number = ? AND active = 1 AND legal_entity_group = ?
+        LIMIT 1
+    ");
+    $s->execute([(int)$restaurantNumber, $g]);
+    return $s->fetch() ?: null;
+}
+
+function krGetReturnWithItems($pdo, $id) {
+    $s = $pdo->prepare("
+        SELECT kr.*,
+               r.number AS restaurant_number, r.city AS restaurant_city,
+               r.address AS restaurant_address, r.pickup_address,
+               r.legal_entity_group AS restaurant_leg,
+               r.pickup_weekdays AS restaurant_pickup_weekdays
+        FROM keg_returns kr
+        JOIN restaurants r ON r.id = kr.restaurant_id
+        WHERE kr.id = ?
+    ");
+    $s->execute([(int)$id]);
+    $row = $s->fetch();
+    if (!$row) return null;
+
+    $items = $pdo->prepare("
+        SELECT kri.id, kri.keg_code, kri.quantity, kc.name AS keg_name
+        FROM keg_return_items kri
+        JOIN keg_catalog kc ON kc.code = kri.keg_code
+        WHERE kri.request_id = ?
+        ORDER BY kc.sort_order, kri.keg_code
+    ");
+    $items->execute([(int)$id]);
+    $row['items'] = $items->fetchAll();
+
+    // Реквизиты юрлица-отправителя.
+    // BK_VM: ресторан №3 → ВМ, остальные → БК (см. api/includes/legal_entities.php).
+    $row['legal_entity_code'] = krLegalCodeForRestaurant((int)$row['restaurant_number'], $row['restaurant_leg'] ?? 'BK_VM');
+    $led = $pdo->prepare("SELECT * FROM legal_entity_details WHERE legal_entity_code = ?");
+    $led->execute([$row['legal_entity_code']]);
+    $row['legal_entity_details'] = $led->fetch() ?: null;
+
+    krAddDeadline($row);
+
+    return $row;
+}
+
+function krLegalCodeForRestaurant(int $restaurantNumber, string $group): string {
+    if ($group === 'PS') return 'PS';
+    return $restaurantNumber === 3 ? 'VM' : 'BK';
+}
+
+/**
+ * Отправляет TG-уведомление всем подписчикам ресторана.
+ */
+/**
+ * Отправляет ресторану полное уведомление о маршрутизации:
+ * текстовое сообщение + PDF-файл ТТН.
+ */
+function krNotifyRouted(PDO $pdo, array $row): void {
+    $bsoStr  = trim(($row['bso_series'] ?? '') . ' ' . ($row['bso_number'] ?? ''));
+    $bsoDate = !empty($row['return_date']) ? date('d.m.Y', strtotime($row['return_date'])) : '';
+    $link    = 'https://supply-department.online/restaurant/keg-returns?id=' . (int)$row['id'];
+    $tgMsg   = '✅ ТТН №' . $bsoStr . ' от ' . $bsoDate . ' готова к печати.' . "\n"
+             . 'Открыть заявку: ' . $link . "\n"
+             . 'Распечатайте и не забудьте взять подпись водителя.';
+    try {
+        krNotifyRestaurant($pdo, (int)$row['restaurant_id'], $tgMsg);
+    } catch (Throwable $e) {
+        error_log('krNotifyRouted text failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
+    }
+    // PDF best-effort
+    try {
+        $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+        if (!$botToken) return;
+        $rNum = $pdo->prepare("SELECT number FROM restaurants WHERE id = ?");
+        $rNum->execute([(int)$row['restaurant_id']]);
+        $rNumber = (int)$rNum->fetchColumn();
+        if (!$rNumber) return;
+        $subStmt = $pdo->prepare("
+            SELECT DISTINCT chat_id FROM ro_telegram_subs
+            WHERE restaurant_number = ?
+              AND chat_id IS NOT NULL AND chat_id != ''
+              AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+        ");
+        $subStmt->execute([$rNumber]);
+        $chatIds = array_column($subStmt->fetchAll(), 'chat_id');
+        if (!$chatIds) return;
+        $pdfContent = krGeneratePdf($row);
+        if ($pdfContent === false) return;
+        $pdfName = 'TTN_' . ($row['bso_series'] ?: 'X') . '_' . ($row['bso_number'] ?: '0') . '.pdf';
+        foreach ($chatIds as $chatId) {
+            sendTelegramDocument($botToken, $chatId, $pdfName, $pdfContent, 'ТТН №' . $bsoStr);
+        }
+    } catch (Throwable $e) {
+        error_log('krNotifyRouted PDF failed for #' . (int)$row['id'] . ': ' . $e->getMessage());
+    }
+}
+
+function krNotifyRestaurant(PDO $pdo, int $restaurantId, string $text) {
+    $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
+    if (!$botToken) return;
+    $r = $pdo->prepare("SELECT number FROM restaurants WHERE id = ?");
+    $r->execute([$restaurantId]);
+    $number = (int)$r->fetchColumn();
+    if (!$number) return;
+    $s = $pdo->prepare("
+        SELECT DISTINCT chat_id FROM ro_telegram_subs
+        WHERE restaurant_number = ?
+          AND chat_id IS NOT NULL AND chat_id != ''
+          AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))
+    ");
+    $s->execute([$number]);
+    $chatIds = array_column($s->fetchAll(), 'chat_id');
+    if (!$chatIds) {
+        error_log("krNotifyRestaurant: no chat_ids for restaurant #$number");
+        return;
+    }
+    foreach ($chatIds as $chatId) {
+        sendTelegramMessage($botToken, $chatId, $text);
+    }
+}
+
+/**
+ * Валидация серии и номера БСО.
+ * Серия: ровно 2 заглавные кириллические буквы.
+ * Номер: ровно 7 цифр.
+ */
+function krValidateBso(?string $series, ?string $number): ?string {
+    $s = trim((string)$series);
+    $n = trim((string)$number);
+    if ($s === '' && $n === '') return null; // допустимо в DRAFT
+    if (!preg_match('/^[А-ЯЁ]{2}$/u', $s)) return 'Серия БСО — две заглавные кириллические буквы';
+    if (!preg_match('/^\d{7}$/', $n)) return 'Номер БСО — ровно 7 цифр';
+    return null;
+}
+
+/**
+ * Валидация дня недели: return_date должна попадать в pickup_weekdays маски.
+ * Маска: бит 0 = Пн, бит 6 = Вс.
+ */
+function krValidateReturnDate(?string $date, int $weekdaysMask): ?string {
+    if (!$date) return 'Укажите дату возврата';
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return 'Неверный формат даты';
+    if ($weekdaysMask === 0) return null; // не задано — не блокируем
+    $tz = new DateTimeZone('Europe/Minsk');
+    $d = new DateTime($date, $tz);
+    $weekday = (int)$d->format('N') - 1; // 0=Пн, 6=Вс
+    if (!($weekdaysMask & (1 << $weekday))) {
+        $names = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+        $allowed = [];
+        for ($i = 0; $i < 7; $i++) if ($weekdaysMask & (1 << $i)) $allowed[] = $names[$i];
+        return 'Дата возврата должна быть: ' . implode(', ', $allowed);
+    }
+    return null;
+}
+
+/**
+ * Возвращает pickup_weekdays ресторана по restaurant_id.
+ */
+function krGetPickupWeekdays(PDO $pdo, int $restaurantId): int {
+    $s = $pdo->prepare("SELECT pickup_weekdays FROM restaurants WHERE id = ?");
+    $s->execute([$restaurantId]);
+    return (int)($s->fetchColumn() ?: 0);
+}
+
+/**
+ * Добавляет поле deadline_iso к строке заявки.
+ */
+function krAddDeadline(array &$row): void {
+    if (!empty($row['return_date'])) {
+        $deadline = kegCalcDeadline($row['return_date']);
+        $row['deadline_iso'] = $deadline->format(DateTime::ATOM);
+    } else {
+        $row['deadline_iso'] = null;
+    }
+}
+
+/**
+ * Нормализует адрес для матчинга.
+ */
+function krNormalizeAddress(string $addr): string {
+    $addr = mb_strtolower(trim($addr));
+    $addr = preg_replace('/\s+/', ' ', $addr);
+    $addr = rtrim($addr, '.');
+    return $addr;
+}
+
+function krInsertItems($pdo, $requestId, array $items) {
+    $stmt = $pdo->prepare("
+        INSERT INTO keg_return_items (request_id, keg_code, quantity)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)
+    ");
+    foreach ($items as $item) {
+        $stmt->execute([(int)$requestId, trim($item['keg_code']), (int)$item['quantity']]);
+    }
+}
+
+function krValidateItems(array $items): ?string {
+    if (empty($items)) return 'Укажите хотя бы одну позицию кег';
+    foreach ($items as $i => $item) {
+        if (empty($item['keg_code'])) return "Позиция #" . ($i + 1) . ": не указан код кеги";
+        if (!isset($item['quantity']) || (int)$item['quantity'] <= 0) return "Позиция #" . ($i + 1) . ": quantity должен быть > 0";
+    }
+    return null;
+}
+
+// ═══ Роутинг keg-catalog ═══
+
+if ($endpoint === 'keg-catalog') {
+    if ($method !== 'GET') krRespond(['error' => 'Method Not Allowed'], 405);
+    $rows = $pdo->query("SELECT code, name, photo_url, sort_order FROM keg_catalog WHERE active = 1 ORDER BY sort_order, code")->fetchAll();
+    krRespond($rows);
+}
+
+// ═══ Роутинг keg-returns ═══
+
+// parts: [0]=keg-returns, [1]=id или null, [2]=action или null
+$krId = isset($parts[1]) && is_numeric($parts[1]) ? (int)$parts[1] : null;
+$krAction = $parts[2] ?? null;
+
+// Определяем режим: ресторан или портал
+$krRestSession = krGetRestaurantSession($pdo);
+$krPortalUser = getSessionUser($pdo);
+
+// Хотя бы одна авторизация обязательна
+if (!$krRestSession && !$krPortalUser) {
+    krRespond(['error' => 'Unauthorized'], 401);
+}
+
+$isRestaurant = (bool)$krRestSession;
+
+// Проверяем, что parts[1] не содержит нечислового субэндпоинта (import-routing и т.п.)
+$krSubSlug = (!$krId && isset($parts[1]) && $parts[1] !== '') ? $parts[1] : null;
+
+// ── GET /keg-returns/restaurant-info ──
+if ($method === 'GET' && $krSubSlug === 'restaurant-info') {
+    if (!$isRestaurant) krRespond(['error' => 'Только для ресторана'], 403);
+    $r = krGetRestaurantByNumber($pdo, $krRestSession['restaurant_number'], $krRestSession['legal_entity_group'] ?? null);
+    if (!$r) krRespond(['error' => 'Ресторан не найден'], 404);
+    $infoStmt = $pdo->prepare("SELECT default_vehicle, default_driver FROM restaurants WHERE id = ?");
+    $infoStmt->execute([$r['id']]);
+    $extra = $infoStmt->fetch() ?: [];
+    krRespond([
+        'restaurant_id'    => (int)$r['id'],
+        'restaurant_number'=> (int)$r['number'],
+        'pickup_address'   => $r['pickup_address'] ?? '',
+        'pickup_weekdays'  => (int)($r['pickup_weekdays'] ?? 0),
+        'default_vehicle'  => $extra['default_vehicle'] ?? '',
+        'default_driver'   => $extra['default_driver'] ?? '',
+    ]);
+}
+
+// ── GET /keg-returns ──
+if ($method === 'GET' && $krId === null && $krAction === null && $krSubSlug === null) {
+    if ($isRestaurant) {
+        $restId = (int)$krRestSession['restaurant_id'];
+        $rows = $pdo->prepare("
+            SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
+                   kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at
+            FROM keg_returns kr
+            WHERE kr.restaurant_id = ?
+            ORDER BY kr.return_date DESC, kr.id DESC
+        ");
+        $rows->execute([$restId]);
+    } else {
+        // Portal: только BK_VM, фильтр по статусу (не DRAFT)
+        $filterGroup = isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM';
+        if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
+        $rows = $pdo->prepare("
+            SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
+                   kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at,
+                   r.number AS restaurant_number, r.city AS restaurant_city,
+                   r.address AS restaurant_address,
+                   (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs
+            FROM keg_returns kr
+            JOIN restaurants r ON r.id = kr.restaurant_id
+            WHERE kr.legal_entity_group = ? AND kr.status != 'DRAFT'
+            ORDER BY kr.return_date DESC, kr.id DESC
+        ");
+        $rows->execute([$filterGroup]);
+        $list = $rows->fetchAll();
+        foreach ($list as &$item) {
+            krAddDeadline($item);
+        }
+        unset($item);
+        krRespond($list);
+    }
+    // Ресторан: просто список без deadline_iso
+    krRespond($rows->fetchAll());
+}
+
+// ── POST /keg-returns ── создать DRAFT
+if ($method === 'POST' && $krId === null && $krAction === null && $krSubSlug === null) {
+    $returnDate = trim($body['return_date'] ?? '');
+    if (!$returnDate || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $returnDate)) {
+        krRespond(['error' => 'return_date обязательна (YYYY-MM-DD)'], 400);
+    }
+
+    $items = $body['items'] ?? [];
+    $itemsError = krValidateItems($items);
+    if ($itemsError) krRespond(['error' => $itemsError], 400);
+
+    if ($isRestaurant) {
+        $restaurantId = (int)$krRestSession['restaurant_id'];
+        $legalEntityGroup = $krRestSession['legal_entity_group'] ?? 'BK_VM';
+        $createdByChatId = null; // не храним chat_id в этой таблице, только restaurant_id
+        $createdByUser = null;
+    } else {
+        $restaurantId = isset($body['restaurant_id']) ? (int)$body['restaurant_id'] : 0;
+        if (!$restaurantId) krRespond(['error' => 'restaurant_id обязателен'], 400);
+        $legalEntityGroup = 'BK_VM';
+        $createdByChatId = null;
+        $createdByUser = $krPortalUser['name'] ?? null;
+    }
+
+    if ($legalEntityGroup !== 'BK_VM') krRespond(['error' => 'Только BK_VM в MVP'], 400);
+
+    $bsoSeries = trim($body['bso_series'] ?? '') ?: null;
+    $bsoNumber = trim($body['bso_number'] ?? '') ?: null;
+    $senderPositionName = trim($body['sender_position_name'] ?? '');
+
+    // Валидация формата БСО
+    $bsoErr = krValidateBso($bsoSeries, $bsoNumber);
+    if ($bsoErr) krRespond(['error' => $bsoErr], 422);
+
+    // Валидация дня недели (только для ресторана с заданной маской)
+    if ($isRestaurant) {
+        $wdMask = krGetPickupWeekdays($pdo, $restaurantId);
+        $wdErr = krValidateReturnDate($returnDate, $wdMask);
+        if ($wdErr) krRespond(['error' => $wdErr], 422);
+    }
+
+    // Проверка уникальности BSO (только если оба заполнены; NULL != NULL в MySQL — дубль невозможен)
+    if ($bsoSeries !== null && $bsoNumber !== null) {
+        $chk = $pdo->prepare("SELECT id FROM keg_returns WHERE restaurant_id = ? AND bso_series = ? AND bso_number = ?");
+        $chk->execute([$restaurantId, $bsoSeries, $bsoNumber]);
+        if ($chk->fetch()) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
+    }
+
+    // Подхватываем дефолтные водителя/машину ресторана, если они есть
+    $defQ = $pdo->prepare("SELECT default_vehicle, default_driver FROM restaurants WHERE id = ?");
+    $defQ->execute([$restaurantId]);
+    $def = $defQ->fetch() ?: [];
+    $defaultVehicle = !empty($def['default_vehicle']) ? $def['default_vehicle'] : null;
+    $defaultDriver  = !empty($def['default_driver'])  ? $def['default_driver']  : null;
+
+    try {
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("
+            INSERT INTO keg_returns (restaurant_id, legal_entity_group, return_date, bso_series, bso_number,
+                                     vehicle, driver, sender_position_name, status, created_by_chat_id, created_by_user)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?)
+        ");
+        $stmt->execute([$restaurantId, $legalEntityGroup, $returnDate, $bsoSeries, $bsoNumber,
+                        $defaultVehicle, $defaultDriver, $senderPositionName, $createdByChatId, $createdByUser]);
+        $newId = (int)$pdo->lastInsertId();
+        krInsertItems($pdo, $newId, $items);
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        if ($e->getCode() == 23000) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
+        error_log('keg_returns INSERT: ' . $e->getMessage());
+        krRespond(['error' => 'Ошибка создания заявки'], 500);
+    }
+
+    $row = krGetReturnWithItems($pdo, $newId);
+    krRespond($row, 201);
+}
+
+// ── GET /keg-returns/{id} ──
+if ($method === 'GET' && $krId && $krAction === null) {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+        krRespond(['error' => 'Нет доступа'], 403);
+    }
+    krRespond($row);
+}
+
+// ── PATCH /keg-returns/{id} ──
+if ($method === 'PATCH' && $krId && $krAction === null) {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+        if (!in_array($row['status'], ['DRAFT', 'SUBMITTED'])) {
+            krRespond(['error' => 'Нельзя редактировать в статусе ' . $row['status']], 422);
+        }
+        // Проверка дедлайна
+        $deadline = kegCalcDeadline($row['return_date']);
+        $now = new DateTime('now', new DateTimeZone('Europe/Minsk'));
+        if ($now > $deadline) {
+            krRespond(['error' => 'Дедлайн истёк, редактирование недоступно'], 422);
+        }
+    } else {
+        if ($row['status'] === 'CANCELLED') {
+            krRespond(['error' => 'Нельзя редактировать отменённую заявку'], 422);
+        }
+    }
+
+    // Валидация BSO при PATCH если переданы
+    if (array_key_exists('bso_series', $body) || array_key_exists('bso_number', $body)) {
+        $newSeries4check = array_key_exists('bso_series', $body) ? (trim($body['bso_series']) ?: null) : $row['bso_series'];
+        $newNumber4check = array_key_exists('bso_number', $body) ? (trim($body['bso_number']) ?: null) : $row['bso_number'];
+        $bsoErr2 = krValidateBso($newSeries4check, $newNumber4check);
+        if ($bsoErr2) krRespond(['error' => $bsoErr2], 422);
+    }
+
+    // Валидация дня недели при изменении return_date
+    if (array_key_exists('return_date', $body)) {
+        $newDate4check = trim($body['return_date']);
+        $wdMask2 = krGetPickupWeekdays($pdo, (int)$row['restaurant_id']);
+        $wdErr2 = krValidateReturnDate($newDate4check, $wdMask2);
+        if ($wdErr2) krRespond(['error' => $wdErr2], 422);
+    }
+
+    // Собираем обновляемые поля
+    $allowed = ['return_date', 'vehicle', 'driver', 'sender_position_name', 'bso_series', 'bso_number'];
+    $sets = [];
+    $vals = [];
+    $bsoFields = ['bso_series', 'bso_number'];
+    foreach ($allowed as $f) {
+        if (array_key_exists($f, $body)) {
+            $sets[] = "$f = ?";
+            $v = is_string($body[$f]) ? trim($body[$f]) : $body[$f];
+            $vals[] = (in_array($f, $bsoFields) && $v === '') ? null : $v;
+        }
+    }
+
+    // Автоматически SUBMITTED → ROUTED если vehicle И driver заполнены
+    if (!$isRestaurant && $row['status'] === 'SUBMITTED') {
+        $newVehicle = isset($body['vehicle']) ? trim($body['vehicle']) : ($row['vehicle'] ?? '');
+        $newDriver  = isset($body['driver'])  ? trim($body['driver'])  : ($row['driver'] ?? '');
+        if ($newVehicle !== '' && $newDriver !== '') {
+            $sets[] = "status = ?";
+            $vals[] = 'ROUTED';
+            $sets[] = "routed_at = NOW()";
+        }
+    }
+
+    // BSO уникальность при смене
+    if (isset($body['bso_series']) || isset($body['bso_number'])) {
+        $newSeries = isset($body['bso_series']) ? (trim($body['bso_series']) ?: null) : $row['bso_series'];
+        $newNumber = isset($body['bso_number']) ? (trim($body['bso_number']) ?: null) : $row['bso_number'];
+        if ($newSeries !== null && $newNumber !== null) {
+            $chk = $pdo->prepare("SELECT id FROM keg_returns WHERE restaurant_id = ? AND bso_series = ? AND bso_number = ? AND id != ?");
+            $chk->execute([(int)$row['restaurant_id'], $newSeries, $newNumber, $krId]);
+            if ($chk->fetch()) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
+        }
+    }
+
+    if (!empty($sets)) {
+        $vals[] = $krId;
+        try {
+            $pdo->prepare("UPDATE keg_returns SET " . implode(', ', $sets) . " WHERE id = ?")->execute($vals);
+        } catch (PDOException $e) {
+            if ($e->getCode() == 23000) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
+            error_log('keg_returns PATCH: ' . $e->getMessage());
+            krRespond(['error' => 'Ошибка обновления'], 500);
+        }
+    }
+
+    // Обновляем items если переданы
+    if (isset($body['items'])) {
+        $itemsError = krValidateItems($body['items']);
+        if ($itemsError) krRespond(['error' => $itemsError], 400);
+        // Удаляем старые, вставляем новые
+        $pdo->prepare("DELETE FROM keg_return_items WHERE request_id = ?")->execute([$krId]);
+        krInsertItems($pdo, $krId, $body['items']);
+    }
+
+    $rowAfter = krGetReturnWithItems($pdo, $krId);
+    // Если статус переключился на ROUTED — шлём ресторану полное уведомление с PDF.
+    if ($rowAfter && $row['status'] !== 'ROUTED' && $rowAfter['status'] === 'ROUTED') {
+        krNotifyRouted($pdo, $rowAfter);
+    }
+    krRespond($rowAfter);
+}
+
+// ── POST /keg-returns/{id}/submit ──
+if ($method === 'POST' && $krId && $krAction === 'submit') {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+        krRespond(['error' => 'Нет доступа'], 403);
+    }
+    if ($row['status'] !== 'DRAFT') {
+        krRespond(['error' => 'Только DRAFT можно отправить'], 422);
+    }
+
+    // Проверка дедлайна
+    $submitDeadline = kegCalcDeadline($row['return_date']);
+    $submitNow = new DateTime('now', new DateTimeZone('Europe/Minsk'));
+    if ($submitNow >= $submitDeadline) {
+        krRespond(['error' => 'Дедлайн прошёл, отправка недоступна'], 422);
+    }
+
+    // Валидация обязательных полей при submit
+    if (trim($row['sender_position_name']) === '') {
+        krRespond(['error' => 'Укажите поле "Сдал грузоотправитель"'], 422);
+    }
+    if (empty($row['bso_series']) || empty($row['bso_number'])) {
+        krRespond(['error' => 'Укажите серию и номер БСО'], 422);
+    }
+    // Валидация формата БСО при submit
+    $bsoErrSubmit = krValidateBso($row['bso_series'], $row['bso_number']);
+    if ($bsoErrSubmit) krRespond(['error' => $bsoErrSubmit], 422);
+
+    if (empty($row['items'])) {
+        krRespond(['error' => 'Добавьте хотя бы одну позицию кег'], 422);
+    }
+
+    $pdo->prepare("UPDATE keg_returns SET status = 'SUBMITTED', submitted_at = NOW() WHERE id = ?")->execute([$krId]);
+    $row = krGetReturnWithItems($pdo, $krId);
+
+    // TG-уведомление ресторану
+    $bsoStr = trim(($row['bso_series'] ?? '') . ' ' . ($row['bso_number'] ?? ''));
+    $submitDate = date('d.m.Y', strtotime($row['return_date']));
+    $tgSubmit = '🍺 Возвратная ТТН №' . $bsoStr . ' от ' . $submitDate . ' сформирована. Ожидайте маршрутизацию.';
+    krNotifyRestaurant($pdo, (int)$row['restaurant_id'], $tgSubmit);
+
+    krRespond($row);
+}
+
+// ── DELETE /keg-returns/{id} ── (закупщик — любую, ресторан — только свой DRAFT)
+if ($method === 'DELETE' && $krId && $krAction === null) {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+        if ($row['status'] !== 'DRAFT') {
+            krRespond(['error' => 'Ресторан может удалять только черновик'], 422);
+        }
+    }
+    $pdo->prepare("DELETE FROM keg_returns WHERE id = ?")->execute([$krId]);
+    krRespond(['success' => true]);
+}
+
+// ── POST /keg-returns/{id}/cancel ──
+if ($method === 'POST' && $krId && $krAction === 'cancel') {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+        if ($row['status'] !== 'DRAFT') {
+            krRespond(['error' => 'Ресторан может отменить только DRAFT'], 422);
+        }
+    }
+
+    $pdo->prepare("UPDATE keg_returns SET status = 'CANCELLED', cancelled_at = NOW() WHERE id = ?")->execute([$krId]);
+    $row = krGetReturnWithItems($pdo, $krId);
+    krRespond($row);
+}
+
+// ═══ Числа прописью ═══
+
+function numberToWordsRu(int $n): string {
+    if ($n === 0) return 'Ноль';
+    if ($n < 0) return 'Минус ' . numberToWordsRu(-$n);
+    $units  = ['', 'Один', 'Два', 'Три', 'Четыре', 'Пять', 'Шесть', 'Семь', 'Восемь', 'Девять'];
+    $unitsF = ['', 'Одна', 'Две', 'Три', 'Четыре', 'Пять', 'Шесть', 'Семь', 'Восемь', 'Девять'];
+    $teens  = ['Десять', 'Одиннадцать', 'Двенадцать', 'Тринадцать', 'Четырнадцать', 'Пятнадцать',
+               'Шестнадцать', 'Семнадцать', 'Восемнадцать', 'Девятнадцать'];
+    $tens     = ['', '', 'Двадцать', 'Тридцать', 'Сорок', 'Пятьдесят', 'Шестьдесят', 'Семьдесят', 'Восемьдесят', 'Девяносто'];
+    $hundreds = ['', 'Сто', 'Двести', 'Триста', 'Четыреста', 'Пятьсот', 'Шестьсот', 'Семьсот', 'Восемьсот', 'Девятьсот'];
+    $result = [];
+    if ($n >= 1000000) {
+        $m = (int)($n / 1000000);
+        $lm = $m % 10; $ltm = $m % 100;
+        $word = ($ltm >= 10 && $ltm < 20) ? 'миллионов' : (($lm === 1) ? 'миллион' : (($lm >= 2 && $lm <= 4) ? 'миллиона' : 'миллионов'));
+        $result[] = numberToWordsRu($m) . ' ' . $word;
+        $n %= 1000000;
+    }
+    if ($n >= 1000) {
+        $t = (int)($n / 1000);
+        $tStr = '';
+        $h = (int)($t / 100); if ($h) $tStr .= $hundreds[$h] . ' ';
+        $tt = $t % 100;
+        if ($tt >= 10 && $tt < 20) { $tStr .= $teens[$tt - 10]; }
+        else {
+            $td = (int)($tt / 10); $u = $tt % 10;
+            if ($td) $tStr .= $tens[$td] . ($u ? ' ' : '');
+            if ($u) $tStr .= $unitsF[$u];
+        }
+        $tStr = trim($tStr);
+        $ld = $t % 10; $ltd = $t % 100;
+        $word = ($ltd >= 10 && $ltd < 20) ? 'тысяч' : (($ld === 1) ? 'тысяча' : (($ld >= 2 && $ld <= 4) ? 'тысячи' : 'тысяч'));
+        $result[] = $tStr . ' ' . $word;
+        $n %= 1000;
+    }
+    if ($n > 0) {
+        $h = (int)($n / 100); if ($h) $result[] = $hundreds[$h];
+        $tt = $n % 100;
+        if ($tt >= 10 && $tt < 20) { $result[] = $teens[$tt - 10]; }
+        else {
+            $td = (int)($tt / 10); $u = $tt % 10;
+            if ($td) $result[] = $tens[$td];
+            if ($u)  $result[] = $units[$u];
+        }
+    }
+    $raw = trim(implode(' ', $result));
+    // Первая буква большая, остальное — строчные (через mb_strtolower для кириллицы)
+    return mb_strtoupper(mb_substr($raw, 0, 1, 'UTF-8'), 'UTF-8') . mb_strtolower(mb_substr($raw, 1, null, 'UTF-8'), 'UTF-8');
+}
+
+function rublesToWordsRu(int $rub, int $kop): string {
+    return numberToWordsRu($rub) . ' руб. ' . sprintf('%02d', $kop) . ' коп.';
+}
+
+// ═══ Общий хелпер заполнения шаблона ТТН ═══
+
+/**
+ * Загружает шаблон ТТН и заполняет его данными заявки.
+ * Возвращает готовый Spreadsheet для дальнейшего сохранения (Xlsx или PDF).
+ *
+ * Координаты по дампу строк 36-64:
+ *   A = Наименование, O = Ед.изм, R = Кол-во, U = Цена, Y = Стоимость без НДС,
+ *   AD = Ставка НДС, AG = Сумма НДС, AL = Стоимость с НДС,
+ *   AQ = Кол-во грузовых мест, AT = Масса груза.
+ *   Итого прописью: H45, H47, H49, AN49. Цифры: AW46, AW48.
+ *   Товар к перевозке принял (водитель): AN51.
+ */
+function krFillTemplate(array $row): \PhpOffice\PhpSpreadsheet\Spreadsheet {
+    $led = $row['legal_entity_details'] ?? null;
+    $returnDate = $row['return_date'];
+    $items = $row['items'] ?? [];
+    $restaurantNumber = (int)($row['restaurant_number'] ?? 0);
+
+    // Дата
+    $months = ['01'=>'января','02'=>'февраля','03'=>'марта','04'=>'апреля','05'=>'мая',
+               '06'=>'июня','07'=>'июля','08'=>'августа','09'=>'сентября','10'=>'октября',
+               '11'=>'ноября','12'=>'декабря'];
+    [$y, $m, $d] = explode('-', $returnDate);
+    $dateFormatted = (int)$d . ' ' . ($months[$m] ?? $m) . ' ' . $y . ' г.';
+    $dateShort = sprintf('%02d.%02d.%04d', (int)$d, (int)$m, (int)$y);
+
+    // Реквизиты юрлица
+    $shortName = $led ? ($led['full_name'] ?? '') : '';
+    $base = $led ? ($led['full_name'] . ', ' . $led['address']) : '';
+    $senderName   = $base ? ($base . ' (Ресторан №' . $restaurantNumber . ')') : '';
+    $receiverName = $base ? ($base . ' (хранение)') : '';
+    $unp = $led ? ($led['unp'] ?? '') : '';
+
+    $pickupAddress  = !empty($row['pickup_address']) ? $row['pickup_address'] : ($row['restaurant_city'] . ', ' . $row['restaurant_address']);
+    $dropoffAddress = 'Минский район, Луговослободский с/с, М4 18 км, Склад №6 ТЛК "Прилесье"';
+
+    $vehicle = $row['vehicle'] ?? '';
+    $driver  = $row['driver'] ?? '';
+    $senderPositionName = $row['sender_position_name'] ?? '';
+
+    $templatePath = (($row['legal_entity_code'] ?? '') === 'VM')
+        ? __DIR__ . '/../../ТТН1 ВМ.xls'
+        : __DIR__ . '/../../ТТН1.xls';
+    $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
+    $reader->setReadDataOnly(false);
+    $spreadsheet = $reader->load($templatePath);
+    $sheet = $spreadsheet->getActiveSheet();
+
+    // Дата — D18
+    $sheet->getCell('D18')->setValue($dateFormatted);
+
+    // УНП грузоотправителя — T4, грузополучателя — AB4
+    if ($unp) {
+        $sheet->getCell('T4')->setValue($unp);
+        $sheet->getCell('AB4')->setValue($unp);
+    }
+
+    // Грузоотправитель — H26, грузополучатель — H28
+    if ($senderName)   $sheet->getCell('H26')->setValue($senderName);
+    if ($receiverName) $sheet->getCell('H28')->setValue($receiverName);
+
+    // Пункт погрузки — AC30, разгрузки — AV30
+    $sheet->getCell('AC30')->setValue($pickupAddress);
+    $sheet->getCell('AV30')->setValue($dropoffAddress);
+
+    // Автомобиль — E20 (рядом с label), водитель — E22 (рядом с label)
+    // E21 и E23 — подсказки «(марка, регистрационный знак)» и «(фамилия и инициалы)», не трогаем
+    if ($vehicle) $sheet->getCell('E20')->setValue($vehicle);
+    if ($driver)  $sheet->getCell('E22')->setValue($driver);
+    $sheet->getStyle('E20')->getFont()->setSize(12);
+    $sheet->getStyle('E22')->getFont()->setSize(12);
+
+    // К путевому листу №: всегда «б/н» (label в AO20, значение справа от него)
+    $sheet->getCell('BB20')->setValue('б/н');
+    $sheet->getStyle('BB20')->getFont()->setSize(12);
+
+    // Исполнитель погрузки/разгрузки — E63, E64 (только юрлицо, без адреса)
+    if ($shortName) {
+        $sheet->getCell('E63')->setValue($shortName);
+        $sheet->getCell('E64')->setValue($shortName);
+    }
+
+    // Дата операций погрузки/разгрузки
+    $sheet->getCell('U63')->setValue($dateShort);
+    $sheet->getCell('Y63')->setValue($dateShort);
+    $sheet->getCell('U64')->setValue($dateShort);
+    $sheet->getCell('Y64')->setValue($dateShort);
+
+    // Товар к перевозке принял (водитель) — AN51; AN52 — подпись «водитель»
+    if ($driver) {
+        $sheet->getCell('AN51')->setValue('водитель ' . $driver);
+        $sheet->getStyle('AN51')->getFont()->setSize(12);
+        $sheet->getCell('AN52')->setValue('(водитель)');
+    }
+
+    // ── Товарный раздел ──
+    // Только непустые позиции
+    $nonEmpty = array_values(array_filter($items, fn($it) => (int)$it['quantity'] > 0));
+    $price = 300;         // руб за кегу
+    $weightPerKegT = 0.0093; // тонн за кегу
+    $itemRows = [40, 41];
+    $totalQty    = 0;
+    $totalSum    = 0;
+    $totalWeight = 0.0;
+
+    for ($i = 0; $i < count($itemRows); $i++) {
+        $r = $itemRows[$i];
+        if (isset($nonEmpty[$i])) {
+            $it  = $nonEmpty[$i];
+            $qty = (int)$it['quantity'];
+            $name = $it['keg_code'] . ' ' . $it['keg_name'];
+            $sum = $qty * $price;
+            $weightT  = round($qty * 0.0093, 3); // в тоннах для табличной колонки
+            $weightKg = $qty * 9.3;              // в кг для прописи итога
+            $sheet->getCell('A'  . $r)->setValue($name);
+            $sheet->getCell('O'  . $r)->setValue('шт');
+            $sheet->getCell('R'  . $r)->setValue($qty);
+            $sheet->getCell('U'  . $r)->setValue(number_format($price, 2, ',', ' '));
+            $sheet->getCell('Y'  . $r)->setValue(number_format($sum,   2, ',', ' '));
+            $sheet->getCell('AD' . $r)->setValue('-');
+            $sheet->getCell('AG' . $r)->setValue('-');
+            $sheet->getCell('AL' . $r)->setValue(number_format($sum,   2, ',', ' '));
+            $sheet->getCell('AQ' . $r)->setValue($qty);
+            $sheet->getCell('AT' . $r)->setValue(number_format($weightT, 3, ',', ' '));
+            $totalQty       += $qty;
+            $totalSum       += $sum;
+            $totalWeight    += $weightT;
+            $totalWeightKg  = isset($totalWeightKg) ? $totalWeightKg + $weightKg : $weightKg;
+        } else {
+            foreach (['A','O','R','U','Y','AD','AG','AL','AQ','AT'] as $col) {
+                $sheet->getCell($col . $r)->setValue('');
+            }
+        }
+    }
+
+    // Высота строк товарного раздела — auto, перенос текста
+    $sheet->getRowDimension(40)->setRowHeight(28);
+    $sheet->getRowDimension(41)->setRowHeight(28);
+    $sheet->getStyle('A40:A41')->getAlignment()->setWrapText(true);
+
+    // Центрирование числовых колонок товарного раздела (строки 40, 41, 42)
+    $numericCols = ['R', 'U', 'Y', 'AD', 'AG', 'AL', 'AQ', 'AT'];
+    foreach ([40, 41, 42] as $nr) {
+        foreach ($numericCols as $nc) {
+            $sheet->getStyle($nc . $nr)->getAlignment()
+                ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER)
+                ->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER)
+                ->setIndent(1);
+        }
+    }
+
+    // Если только одна позиция — скрываем строку 41
+    if (count($nonEmpty) === 1) {
+        $sheet->getRowDimension(41)->setVisible(false);
+    }
+
+    // ИТОГО — строка 42 (масса в тоннах с 4 знаками)
+    $sheet->getCell('Y42') ->setValue(number_format($totalSum,    2, ',', ' '));
+    $sheet->getCell('AL42')->setValue(number_format($totalSum,    2, ',', ' '));
+    $sheet->getCell('AQ42')->setValue($totalQty);
+    $sheet->getCell('AT42')->setValue(number_format($totalWeight, 3, ',', ' '));
+
+    // Сводные значения прописью и цифрами (строки 45-50)
+    $totalSumInt = (int)floor($totalSum);
+    $totalSumKop = (int)round(($totalSum - $totalSumInt) * 100);
+    $totalWeightKgInt = (int)round($totalWeightKg ?? 0);
+
+    $sheet->getCell('H45')->setValue('Ноль руб. 00 коп.');
+    $sheet->getCell('AW46')->setValue('0,00');
+    $sheet->getCell('H47')->setValue(rublesToWordsRu($totalSumInt, $totalSumKop));
+    $sheet->getCell('AW48')->setValue(number_format($totalSum, 2, ',', ' '));
+    $sheet->getCell('H49')->setValue(numberToWordsRu($totalWeightKgInt) . ' кг.');
+    $sheet->getCell('AN49')->setValue(numberToWordsRu($totalQty));
+
+    // Сдал грузоотправитель — H51, H53
+    if ($senderPositionName) {
+        $sheet->getCell('H51')->setValue($senderPositionName);
+        $sheet->getCell('H53')->setValue($senderPositionName);
+    }
+
+    // Page setup: A4, книжная, fit-to-width, узкие поля
+    $ps = $sheet->getPageSetup();
+    $ps->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_PORTRAIT);
+    $ps->setPaperSize(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::PAPERSIZE_A4);
+    $ps->setFitToPage(true);
+    $ps->setFitToWidth(1);
+    $ps->setFitToHeight(0);
+    $ps->setPrintArea('A3:BO81');
+    $ps->setHorizontalCentered(false);
+    $ps->setVerticalCentered(false);
+    // Поля: верх 1.5 см, низ 1 см, лево 2 см (сдвиг вправо +1 см), право 1 см.
+    $sheet->getPageMargins()
+        ->setTop(0.59)->setRight(0.3937)->setLeft(0.787)->setBottom(0.3937)
+        ->setHeader(0)->setFooter(0);
+
+    // Отступ после строки УНП (строка 4): высота строки 5 = ~3.5 см (≈99 pt).
+    $sheet->getRowDimension(5)->setRowHeight(99);
+
+    return $spreadsheet;
+}
+
+/**
+ * Генерирует PDF из заявки через LibreOffice.
+ * Возвращает содержимое PDF-файла в виде строки, или false при ошибке.
+ */
+function krGeneratePdf(array $row) {
+    $spreadsheet = krFillTemplate($row);
+    $tmpDir  = sys_get_temp_dir() . '/kegprint_' . uniqid();
+    @mkdir($tmpDir);
+    $xlsxPath = $tmpDir . '/ttn.xlsx';
+    $writer   = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
+    $writer->save($xlsxPath);
+
+    $cmd = 'export HOME=' . escapeshellarg($tmpDir)
+        . ' && libreoffice --headless --convert-to pdf --outdir '
+        . escapeshellarg($tmpDir) . ' ' . escapeshellarg($xlsxPath) . ' 2>&1';
+    $out     = shell_exec($cmd);
+    $pdfPath = $tmpDir . '/ttn.pdf';
+
+    if (!file_exists($pdfPath)) {
+        error_log('krGeneratePdf failed: ' . $out);
+        @unlink($xlsxPath); @rmdir($tmpDir);
+        return false;
+    }
+    $content = file_get_contents($pdfPath);
+    @unlink($pdfPath); @unlink($xlsxPath); @rmdir($tmpDir);
+    return $content;
+}
+
+// ── GET /keg-returns/{id}/excel ──
+if ($method === 'GET' && $krId && $krAction === 'excel') {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+        krRespond(['error' => 'Нет доступа'], 403);
+    }
+
+    $bsoSeries = $row['bso_series'] ?? '';
+    $bsoNumber = $row['bso_number'] ?? '';
+    $safeDate  = str_replace('-', '', $row['return_date']);
+    $filename  = 'TTN_' . ($bsoSeries ?: 'X') . '_' . ($bsoNumber ?: '0') . '_' . $safeDate . '.xlsx';
+
+    $spreadsheet = krFillTemplate($row);
+
+    header_remove('Content-Type');
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+    $writer->save('php://output');
+    exit;
+}
+
+// ── GET /keg-returns/{id}/print ── PDF для печати через LibreOffice
+if ($method === 'GET' && $krId && $krAction === 'print') {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+        krRespond(['error' => 'Нет доступа'], 403);
+    }
+
+    $bsoSeries = $row['bso_series'] ?? '';
+    $bsoNumber = $row['bso_number'] ?? '';
+    $safeDate  = str_replace('-', '', $row['return_date']);
+    $filename  = 'TTN_' . ($bsoSeries ?: 'X') . '_' . ($bsoNumber ?: '0') . '_' . $safeDate . '.pdf';
+
+    $pdfContent = krGeneratePdf($row);
+    if ($pdfContent === false) {
+        krRespond(['error' => 'Не удалось сгенерировать PDF'], 500);
+    }
+
+    header_remove('Content-Type');
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: inline; filename="' . $filename . '"');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    echo $pdfContent;
+    exit;
+}
+
+// ── POST /keg-returns/import-routing ──
+if ($method === 'POST' && $krSubSlug === 'import-routing') {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+
+    // При multipart/form-data данные приходят в $_POST, не в $body
+    $returnDate = trim($_POST['return_date'] ?? $body['return_date'] ?? '');
+    if (!$returnDate || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $returnDate)) {
+        krRespond(['error' => 'return_date обязательна (YYYY-MM-DD)'], 400);
+    }
+
+    if (empty($_FILES['file'])) {
+        krRespond(['error' => 'Файл не загружен (поле file)'], 400);
+    }
+
+    $tmpPath = $_FILES['file']['tmp_name'];
+    $origName = $_FILES['file']['name'] ?? '';
+    $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+
+    try {
+        if ($ext === 'xlsx') {
+            $reader = new XlsxReader();
+        } elseif ($ext === 'xls') {
+            $reader = new XlsReader();
+        } else {
+            krRespond(['error' => 'Поддерживаются только .xlsx и .xls'], 400);
+        }
+        $reader->setReadDataOnly(true);
+        $spreadsheet = $reader->load($tmpPath);
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheetData = $sheet->toArray(null, true, true, false);
+    } catch (Exception $e) {
+        error_log('keg import-routing read: ' . $e->getMessage());
+        krRespond(['error' => 'Не удалось прочитать файл: ' . $e->getMessage()], 422);
+    }
+
+    // Ищем строку заголовков (содержит «Водитель» или «Адрес точки»)
+    $headerIdx = -1;
+    foreach ($sheetData as $idx => $row2) {
+        foreach ($row2 as $cell) {
+            $c = mb_strtolower(trim((string)$cell));
+            if ($c === 'водитель' || strpos($c, 'адрес точки') !== false) {
+                $headerIdx = $idx;
+                break 2;
+            }
+        }
+    }
+    if ($headerIdx < 0) {
+        krRespond(['error' => 'Не найдена строка заголовков (нет колонки «Водитель»)'], 422);
+    }
+
+    // Парсим строки данных с поддержкой объединённых ячеек (значение только в первой строке группы)
+    $currentDriver   = null;
+    $currentCustomer = null;
+    $currentVehicle  = null;
+    $parsed = [];
+
+    foreach ($sheetData as $idx => $row2) {
+        if ($idx <= $headerIdx) continue;
+        $driver   = trim((string)($row2[0] ?? ''));
+        $customer = trim((string)($row2[1] ?? ''));
+        $address  = trim((string)($row2[2] ?? ''));
+        $vehicle  = trim((string)($row2[4] ?? ''));
+
+        if ($driver !== '')   $currentDriver   = $driver;
+        if ($customer !== '') $currentCustomer = $customer;
+        if ($vehicle !== '')  $currentVehicle  = $vehicle;
+        if ($address === '') continue; // продолжение мержа — без адреса
+
+        $parsed[] = [
+            'driver'   => $currentDriver,
+            'customer' => $currentCustomer,
+            'address'  => $address,
+            'vehicle'  => $currentVehicle,
+        ];
+    }
+
+    // Дедупликация по (address, customer) — оставляем первый
+    $seen = [];
+    $unique = [];
+    foreach ($parsed as $p) {
+        $key = $p['address'] . '||' . $p['customer'];
+        if (!isset($seen[$key])) {
+            $seen[$key] = true;
+            $unique[] = $p;
+        }
+    }
+
+    // Загружаем все SUBMITTED заявки за return_date (BK_VM)
+    $reqStmt = $pdo->prepare("
+        SELECT kr.id, kr.status, kr.vehicle, kr.driver, kr.bso_series, kr.bso_number, kr.restaurant_id,
+               r.address AS restaurant_address, r.number AS restaurant_number, r.city AS restaurant_city
+        FROM keg_returns kr
+        JOIN restaurants r ON r.id = kr.restaurant_id
+        WHERE kr.return_date = ? AND kr.legal_entity_group = 'BK_VM' AND kr.status = 'SUBMITTED'
+    ");
+    $reqStmt->execute([$returnDate]);
+    $requests = $reqStmt->fetchAll();
+
+    $preview = [];
+    $commitActions = [];
+
+    foreach ($unique as $fileRow) {
+        $normAddr = krNormalizeAddress($fileRow['address']);
+        // Матчинг по адресу (LIKE с обеих сторон)
+        $candidates = [];
+        foreach ($requests as $req) {
+            $normReqAddr = krNormalizeAddress($req['restaurant_address']);
+            if (strpos($normReqAddr, $normAddr) !== false || strpos($normAddr, $normReqAddr) !== false) {
+                $candidates[] = $req;
+            }
+        }
+        // Уточняем по customer если несколько кандидатов
+        if (count($candidates) > 1) {
+            $custLower = mb_strtolower($fileRow['customer'] ?? '');
+            if (strpos($custLower, 'воглия') !== false) {
+                $filtered = array_filter($candidates, fn($c) => (int)$c['restaurant_number'] === 3);
+            } elseif (strpos($custLower, 'бургер') !== false || strpos($custLower, 'бк') !== false) {
+                $filtered = array_filter($candidates, fn($c) => (int)$c['restaurant_number'] !== 3);
+            } else {
+                $filtered = $candidates;
+            }
+            if (count($filtered) > 0) $candidates = array_values($filtered);
+        }
+
+        if (empty($candidates)) {
+            $preview[] = ['row' => $fileRow, 'match' => null, 'warning' => 'не найден'];
+            continue;
+        }
+
+        $match = $candidates[0];
+        $warning = null;
+        if (count($candidates) > 1) $warning = 'несколько кандидатов';
+
+        $preview[] = [
+            'row' => $fileRow,
+            'match' => [
+                'request_id'         => (int)$match['id'],
+                'restaurant_number'  => (int)$match['restaurant_number'],
+                'restaurant_address' => $match['restaurant_address'],
+                'status'             => $match['status'],
+                'current_driver'     => $match['driver'],
+                'current_vehicle'    => $match['vehicle'],
+            ],
+            'warning' => $warning,
+        ];
+        $commitActions[] = ['req' => $match, 'file' => $fileRow, 'warning' => $warning];
+    }
+
+    $commitVal = $_POST['commit'] ?? $body['commit'] ?? null;
+    $isCommit = ($commitVal === 'true' || $commitVal === true || $commitVal === 1 || $commitVal === '1');
+
+    if ($isCommit) {
+        foreach ($commitActions as $action) {
+            $req  = $action['req'];
+            $file = $action['file'];
+            if ($action['warning'] === 'не найден') continue;
+            $pdo->prepare("
+                UPDATE keg_returns SET vehicle = ?, driver = ?, status = 'ROUTED', routed_at = NOW()
+                WHERE id = ? AND status = 'SUBMITTED'
+            ")->execute([
+                $file['vehicle'] ?? '',
+                $file['driver']  ?? '',
+                (int)$req['id'],
+            ]);
+            $routedRow = krGetReturnWithItems($pdo, (int)$req['id']);
+            if ($routedRow) krNotifyRouted($pdo, $routedRow);
+        }
+        krRespond(['preview' => $preview, 'committed' => count($commitActions)]);
+    }
+
+    krRespond(['preview' => $preview]);
+}
+
+// Если ни один маршрут не сработал
+krRespond(['error' => 'Not Found'], 404);

@@ -60,6 +60,7 @@ const routes = [
       { path: 'protocols', name: 'protocols', component: () => import('@/views/MeetingProtocolsView.vue'), meta: { title: 'Протоколы совещаний', module: 'protocols' } },
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
       { path: 'tasks', name: 'tasks', component: () => import('@/views/TasksView.vue'), meta: { title: 'Задачи', module: 'tasks' } },
+      { path: 'keg-returns', name: 'keg-returns', component: () => import('@/views/KegReturnsView.vue'), meta: { title: 'Возврат кег', module: 'restaurant-orders' } },
     ],
   },
   {
@@ -109,6 +110,7 @@ const routes = [
       { path: 'warehouse-stock', name: 'restaurant-warehouse-stock', component: EmptySlot, meta: { title: 'Остатки склада' } },
       { path: 'scanner', name: 'restaurant-scanner', component: EmptySlot, meta: { title: 'Сканер товаров' } },
       { path: 'profile', name: 'restaurant-profile', component: EmptySlot, meta: { title: 'Профиль' } },
+      { path: 'keg-returns', name: 'restaurant-keg-returns', component: EmptySlot, meta: { title: 'Возврат кег' } },
     ],
   },
   {

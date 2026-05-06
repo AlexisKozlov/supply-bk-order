@@ -279,6 +279,23 @@
               <span class="db-rest-label-text">Комментарий</span>
               <input v-model="restModal.data.notes" type="text" />
             </label>
+            <label class="db-rest-label">
+              <span class="db-rest-label-text">Адрес погрузки (для ТТН возврата кег)</span>
+              <input v-model="restModal.data.pickup_address" type="text" placeholder="г. Минск, ул. Притыцкого, 154" />
+            </label>
+            <label class="db-rest-label">
+              <span class="db-rest-label-text">Дни возврата кег</span>
+              <div class="db-rest-weekdays">
+                <label v-for="(day, idx) in weekdayNames" :key="idx" class="db-rest-weekday">
+                  <input
+                    type="checkbox"
+                    :checked="!!((restModal.data.pickup_weekdays || 0) & (1 << idx))"
+                    @change="toggleWeekday(idx, $event.target.checked)"
+                  />
+                  {{ day }}
+                </label>
+              </div>
+            </label>
           </div>
           <div class="db-rest-modal-footer">
             <button v-if="restModal.data.id && isAdmin" class="btn db-rest-btn-delete" @click="deleteRestaurant(restModal.data); restModal.show = false">
@@ -384,6 +401,12 @@ const expandedGroups = reactive(new Set());
 const renameModal = ref({ show: false, oldName: '', newName: '' });
 let _renameInitial = '';
 const restModal = ref({ show: false, data: {}, saving: false });
+const weekdayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+function toggleWeekday(idx, checked) {
+  const cur = restModal.value.data.pickup_weekdays || 0;
+  if (checked) restModal.value.data.pickup_weekdays = cur | (1 << idx);
+  else restModal.value.data.pickup_weekdays = cur & ~(1 << idx);
+}
 let _restModalSnapshot = '';
 const recipes = ref([]);
 let _recLoadId = 0;
@@ -942,4 +965,7 @@ async function onImportSaved() { showImportModal.value = false; await loadProduc
   .analog-item { padding: 6px 10px 6px 20px; flex-wrap: wrap; gap: 4px; }
   .analog-group-header { padding: 8px 10px; }
 }
+.db-rest-weekdays { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
+.db-rest-weekday { display: flex; align-items: center; gap: 4px; font-size: 13px; cursor: pointer; }
+.db-rest-weekday input { cursor: pointer; }
 </style>

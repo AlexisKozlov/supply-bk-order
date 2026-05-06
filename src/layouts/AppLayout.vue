@@ -474,6 +474,7 @@ const toolsGroups = [
     { module: 'restaurant-orders', route: 'restaurant-cabinet-manager', icon: 'building', label: 'Кабинеты ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Неизвестные штрихкоды', badgeKey: 'scan-unknown' },
+    { module: 'restaurant-orders', route: 'keg-returns', icon: 'truck', label: 'Возврат кег' },
     { module: 'surveys', route: 'surveys', icon: 'document', label: 'Опросы' },
     { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
     { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
