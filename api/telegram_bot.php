@@ -121,6 +121,7 @@ function sendDocument($chatId, $filename, $content, $caption = '') {
 }
 
 require_once __DIR__ . '/includes/legal_entities.php';
+require_once __DIR__ . '/includes/helpers.php';
 require_once __DIR__ . '/includes/bot_ai.php';
 require_once __DIR__ . '/includes/bot_lookup.php';
 require_once __DIR__ . '/includes/bot_helpers.php';
