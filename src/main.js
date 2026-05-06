@@ -61,6 +61,25 @@ window.onerror = (message, source, lineno, colno, error) => {
   logErrorToServer('error', msg, error?.stack || null);
 };
 
+// Жёсткая перезагрузка после деплоя: чистим кэши Service Worker'а и его самого,
+// иначе reload снова отдаст старый закэшированный index.html со ссылками на
+// удалённые чанки.
+async function hardReloadAfterChunkError() {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) { /* игнор */ }
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (e) { /* игнор */ }
+  window.location.reload();
+}
+
 // Перехват необработанных промисов
 window.onunhandledrejection = (event) => {
   const reason = event.reason;
@@ -77,7 +96,7 @@ window.onunhandledrejection = (event) => {
     const count = parseInt(sessionStorage.getItem(key) || '0');
     if (count < 2) {
       sessionStorage.setItem(key, String(count + 1));
-      window.location.reload();
+      hardReloadAfterChunkError();
     } else {
       sessionStorage.removeItem(key);
     }
@@ -89,12 +108,41 @@ window.onunhandledrejection = (event) => {
 
 // Перехват ошибок Vue-компонентов
 app.config.errorHandler = (err, instance, info) => {
+  const errMsg = err?.message || String(err || '');
+  // Ошибки загрузки модулей/CSS после деплоя — то же поведение, что и в onunhandledrejection
+  if (
+    errMsg.includes('Failed to fetch dynamically imported module') ||
+    errMsg.includes('Unable to preload CSS') ||
+    errMsg.includes('Importing a module script failed') ||
+    errMsg.includes('error loading dynamically imported module')
+  ) {
+    const key = 'bk_reload_count';
+    const count = parseInt(sessionStorage.getItem(key) || '0');
+    if (count < 2) {
+      sessionStorage.setItem(key, String(count + 1));
+      hardReloadAfterChunkError();
+    } else {
+      sessionStorage.removeItem(key);
+      try {
+        const toast = useToastStore();
+        toast.error(
+          'Не удалось загрузить часть приложения',
+          'Закройте все вкладки портала и откройте заново — это подгрузит новую версию.'
+        );
+      } catch (e) { /* store not ready */ }
+    }
+    return;
+  }
   console.error(`[Vue error] ${info}:`, err);
-  logErrorToServer('error', `[Vue ${info}] ${err?.message || err}`, err?.stack || null);
+  logErrorToServer('error', `[Vue ${info}] ${errMsg}`, err?.stack || null);
   try {
     const toast = useToastStore();
-    toast.error('Произошла ошибка', err?.message || 'Неизвестная ошибка');
+    toast.error('Произошла ошибка', errMsg || 'Неизвестная ошибка');
   } catch (e) { /* store not ready */ }
 };
 
 app.mount('#app');
+
+// Приложение успешно стартовало — сбрасываем счётчик попыток автоперезагрузки
+// после ошибки загрузки чанка, чтобы при следующем сбое снова было 2 попытки.
+try { sessionStorage.removeItem('bk_reload_count'); } catch (e) { /* игнор */ }

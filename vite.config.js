@@ -29,7 +29,7 @@ export default defineConfig({
     vue(),
     cleanupCopiedLegacyPublicAssets(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       manifest: {
         name: 'Supply Department — Отдел закупок',
         short_name: 'Закупки',
@@ -45,6 +45,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,otf,woff,woff2}'],
         globIgnores: [
           '**/xlsx-*.js',
@@ -68,6 +71,7 @@ export default defineConfig({
           'presentation.html',
           'sidebar-variants.html',
           'faq-for-management.html',
+          'maintenance.html',
           'mockups/**',
           'edi-autofill.user.js',
         ],

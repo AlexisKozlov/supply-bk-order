@@ -5,7 +5,7 @@
         <div class="upd-icon">🔄</div>
         <div class="upd-text">
           <div class="upd-title">Доступна новая версия портала</div>
-          <div class="upd-sub">Чтобы увидеть последние изменения, обновите приложение.</div>
+          <div class="upd-sub">Нажмите «Обновить», чтобы загрузить свежие изменения.</div>
         </div>
         <div class="upd-actions">
           <button class="upd-btn upd-btn-later" @click="later">Позже</button>
@@ -26,14 +26,31 @@ import { useRegisterSW } from 'virtual:pwa-register/vue';
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 
 const updating = ref(false);
+const needRefresh = ref(false);
 
-const { needRefresh, updateServiceWorker } = useRegisterSW({
+// В режиме autoUpdate новый SW сразу активируется и берёт контроль над вкладкой.
+// Тост показываем по событию controllerchange — это значит, что в текущей вкладке
+// уже работает свежая версия SW и пользователю стоит обновить страницу,
+// чтобы загрузить актуальный index.html и ассеты.
+if ('serviceWorker' in navigator) {
+  let initialController = navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Первый controllerchange после первичной регистрации SW (когда controller был null)
+    // — это не апдейт, а просто появление контроллера. Пропускаем.
+    if (!initialController) {
+      initialController = navigator.serviceWorker.controller;
+      return;
+    }
+    needRefresh.value = true;
+  });
+}
+
+useRegisterSW({
   immediate: true,
   onRegisteredSW(swUrl, registration) {
     if (!registration) return;
-    setInterval(async () => {
+    async function checkForUpdate() {
       try {
-        // Сам регистр обновит worker, если есть новая версия
         if (registration.installing || !navigator) return;
         if (('connection' in navigator) && !navigator.onLine) return;
         const resp = await fetch(swUrl, {
@@ -44,7 +61,17 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
           await registration.update();
         }
       } catch (e) { /* offline — ок */ }
-    }, UPDATE_CHECK_INTERVAL);
+    }
+    // Сразу при загрузке проверяем, нет ли свежей версии — иначе пользователь
+    // увидит закэшированный SW'ом старый index.html и будет ждать 5 минут до
+    // первой плановой проверки.
+    checkForUpdate();
+    setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL);
+    // Также проверяем при возвращении во вкладку — если пользователь
+    // долго не работал, ждать 5 минут не нужно.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') checkForUpdate();
+    });
   },
   onRegisterError(error) {
     console.warn('[SW register error]', error);
@@ -54,20 +81,14 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
 async function doUpdate() {
   updating.value = true;
   try {
-    // Принудительно чистим runtime-кэш, чтобы API-ответы тоже обновились
     if ('caches' in window) {
       try {
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
       } catch (e) { /* игнор */ }
     }
-    await updateServiceWorker(true);
-    // На некоторых браузерах updateServiceWorker не всегда перезагружает
-    setTimeout(() => window.location.reload(), 500);
-  } catch (e) {
-    updating.value = false;
-    window.location.reload();
-  }
+  } catch (e) { /* игнор */ }
+  window.location.reload();
 }
 
 function later() {
@@ -79,7 +100,7 @@ function later() {
 .upd-banner {
   position: fixed;
   left: 50%;
-  bottom: 20px;
+  bottom: max(20px, env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 10000;
   max-width: min(540px, calc(100vw - 24px));
