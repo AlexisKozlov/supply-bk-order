@@ -416,7 +416,8 @@ if ($method === 'GET' && $krId === null && $krAction === null && $krSubSlug === 
         $restId = (int)$krRestSession['restaurant_id'];
         $rows = $pdo->prepare("
             SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
-                   kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at
+                   kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at,
+                   (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs
             FROM keg_returns kr
             WHERE kr.restaurant_id = ?
             ORDER BY kr.return_date DESC, kr.id DESC

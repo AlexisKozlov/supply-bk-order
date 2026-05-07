@@ -11,18 +11,34 @@
       <div v-else-if="listError" class="krt-error">{{ listError }}</div>
       <template v-else>
         <div v-if="!rows.length" class="krt-empty">Нет заявок на возврат кег</div>
-        <div v-else class="krt-list">
-          <div v-for="row in rows" :key="row.id" class="krt-row" @click="openEdit(row)">
-            <div class="krt-row-main">
-              <span class="krt-row-date">{{ fmtDate(row.return_date) }}</span>
-              <span :class="'krt-badge krt-badge-' + row.status">{{ statusLabel(row.status) }}</span>
-            </div>
-            <div class="krt-row-sub">
-              <span v-if="row.bso_series || row.bso_number">БСО: {{ row.bso_series }} {{ row.bso_number }}</span>
-              <span v-if="row.driver"> · {{ row.driver }}</span>
+        <template v-else>
+          <div class="krt-filter-chips">
+            <button
+              v-for="f in statusFilters"
+              :key="f.key"
+              class="krt-chip"
+              :class="{ active: statusFilter === f.key }"
+              @click="statusFilter = f.key"
+            >
+              {{ f.label }}
+              <span v-if="f.count" class="krt-chip-count">{{ f.count }}</span>
+            </button>
+          </div>
+          <div v-if="!filteredRows.length" class="krt-empty">В этой категории заявок нет</div>
+          <div v-else class="krt-list">
+            <div v-for="row in filteredRows" :key="row.id" class="krt-row" @click="openEdit(row)">
+              <div class="krt-row-main">
+                <span class="krt-row-date">{{ fmtDate(row.return_date) }}</span>
+                <span :class="'krt-badge krt-badge-' + row.status">{{ statusLabel(row.status) }}</span>
+                <span v-if="row.total_kegs" class="krt-row-kegs">{{ row.total_kegs }} кег</span>
+              </div>
+              <div v-if="row.bso_series || row.bso_number || row.driver" class="krt-row-sub">
+                <span v-if="row.bso_series || row.bso_number">БСО: {{ row.bso_series }} {{ row.bso_number }}</span>
+                <span v-if="row.driver"> · {{ row.driver }}</span>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
       </template>
     </template>
 
@@ -106,11 +122,16 @@
               <input
                 type="number"
                 min="0"
+                inputmode="numeric"
                 :value="kegQty(keg.code)"
                 @change="setKegQty(keg.code, $event.target.value)"
                 :disabled="formReadonly"
                 class="krt-qty"
               />
+            </div>
+            <div class="krt-kegs-total" :class="{ empty: totalKegsCount === 0 }">
+              <span v-if="totalKegsCount === 0">Кеги не указаны</span>
+              <span v-else>Всего: <strong>{{ totalKegsCount }} кег</strong> в {{ totalKegsTypes }} {{ pluralTypes(totalKegsTypes) }}</span>
             </div>
           </div>
         </div>
@@ -122,7 +143,12 @@
             <button class="btn" @click="saveDraft" :disabled="saving">
               {{ saving ? 'Сохранение...' : 'Сохранить черновик' }}
             </button>
-            <button class="btn primary" @click="submit" :disabled="saving">
+            <button
+              class="btn primary"
+              @click="submit"
+              :disabled="saving || totalKegsCount === 0"
+              :title="totalKegsCount === 0 ? 'Укажите количество кег' : ''"
+            >
               Сформировать ТТН
             </button>
             <button v-if="editingId && form.status === 'SUBMITTED'" class="btn btn-danger" @click="cancelReturn" :disabled="saving">
@@ -160,6 +186,23 @@ function buildHeaders(json = false) {
 }
 
 const rows = ref([]);
+const statusFilter = ref('all');
+const STATUS_FILTER_DEFS = [
+  { key: 'all', label: 'Все', match: () => true },
+  { key: 'DRAFT', label: 'Черновики', match: r => r.status === 'DRAFT' },
+  { key: 'SUBMITTED', label: 'Отправлены', match: r => r.status === 'SUBMITTED' },
+  { key: 'ROUTED', label: 'Маршрутизированы', match: r => r.status === 'ROUTED' },
+  { key: 'CANCELLED', label: 'Отменены', match: r => r.status === 'CANCELLED' },
+];
+const statusFilters = computed(() => STATUS_FILTER_DEFS.map(f => ({
+  key: f.key,
+  label: f.label,
+  count: f.key === 'all' ? rows.value.length : rows.value.filter(f.match).length,
+})));
+const filteredRows = computed(() => {
+  const def = STATUS_FILTER_DEFS.find(f => f.key === statusFilter.value) || STATUS_FILTER_DEFS[0];
+  return rows.value.filter(def.match);
+});
 const catalog = ref([]);
 const listLoading = ref(false);
 const listError = ref('');
@@ -374,6 +417,20 @@ function kegQty(code) {
   return kegQties.value[code] || 0;
 }
 
+const totalKegsCount = computed(() => {
+  let s = 0;
+  for (const v of Object.values(kegQties.value)) s += parseInt(v, 10) || 0;
+  return s;
+});
+const totalKegsTypes = computed(() =>
+  Object.values(kegQties.value).filter(v => (parseInt(v, 10) || 0) > 0).length
+);
+function pluralTypes(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'типе';
+  return 'типах';
+}
+
 function setKegQty(code, val) {
   const n = parseInt(val, 10);
   if (n > 0) kegQties.value[code] = n;
@@ -430,6 +487,14 @@ async function submit() {
   validateBso();
   validateWeekday();
   if (bsoError.value || weekdayError.value) return;
+  if (totalKegsCount.value === 0) {
+    saveError.value = 'Укажите количество кег хотя бы в одной строке';
+    return;
+  }
+  const dateStr = form.value.return_date ? fmtDate(form.value.return_date) : '—';
+  if (!confirm(`Отправить заявку на возврат ${totalKegsCount.value} кег от ${dateStr}?\n\nИзменить состав можно только до дедлайна.`)) {
+    return;
+  }
   saving.value = true;
   saveError.value = '';
   try {
@@ -606,4 +671,61 @@ onMounted(async () => {
 .krt-deadline-wrap { padding: 8px 12px; border-radius: 8px; background: #fff8e1; border: 1px solid #ffe082; font-size: 13px; }
 .krt-deadline-countdown { color: #e65100; }
 .krt-deadline-passed { color: var(--danger, #e53935); font-weight: 600; }
+
+/* Чипы фильтра по статусу */
+.krt-filter-chips { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+.krt-filter-chips::-webkit-scrollbar { height: 4px; }
+.krt-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border: 1.5px solid var(--border-color, #E8DCC8);
+  background: var(--card-bg, #FFFBF6); color: inherit;
+  border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600;
+  white-space: nowrap; transition: all .15s; flex-shrink: 0;
+}
+.krt-chip:hover { border-color: #E76F51; }
+.krt-chip.active { background: #E76F51; color: white; border-color: #E76F51; }
+.krt-chip-count {
+  display: inline-block; min-width: 18px; padding: 1px 7px;
+  border-radius: 10px; background: rgba(0,0,0,.08); font-size: 11px; font-weight: 700;
+}
+.krt-chip.active .krt-chip-count { background: rgba(255,255,255,.25); }
+
+/* Счётчик кег в карточке списка */
+.krt-row-kegs {
+  margin-left: auto; padding: 2px 10px; border-radius: 10px;
+  background: #EFF6FF; color: #1d4ed8; font-size: 12px; font-weight: 700;
+}
+
+/* Итог под каталогом кег */
+.krt-kegs-total {
+  margin-top: 10px; padding: 10px 14px; border-radius: 8px;
+  background: #F4FBF4; border: 1px solid #C8E6C9; color: #2e7d32; font-size: 14px;
+}
+.krt-kegs-total.empty { background: var(--input-disabled-bg, #f5f5f5); border-color: var(--border-color, #ddd); color: var(--text-secondary, #888); }
+.krt-kegs-total strong { font-weight: 700; }
+
+/* Мобильный вид */
+@media (max-width: 640px) {
+  .krt-wrap { padding: 14px; }
+  .krt-title { font-size: 18px; }
+  .krt-row { padding: 12px 14px; }
+  .krt-row-main { flex-wrap: wrap; }
+
+  .krt-field { flex-direction: column; align-items: stretch; gap: 6px; }
+  .krt-label { width: auto; padding-top: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .krt-input { width: 100%; padding: 11px 12px; font-size: 16px; }
+  .krt-input-sm { max-width: 90px; }
+  .krt-row-inputs { gap: 10px; }
+
+  .krt-catalog { padding-left: 0; gap: 10px; }
+  .krt-keg-row { padding: 8px 0; border-bottom: 1px solid #F0EAE0; }
+  .krt-keg-row:last-child { border-bottom: none; }
+  .krt-keg-name { font-size: 15px; }
+  .krt-qty { width: 80px; padding: 10px; font-size: 16px; }
+
+  .krt-actions { flex-direction: column; }
+  .krt-actions .btn { width: 100%; padding: 12px; font-size: 15px; }
+  /* Опасные кнопки внизу */
+  .krt-actions .btn-danger { order: 99; }
+}
 </style>
