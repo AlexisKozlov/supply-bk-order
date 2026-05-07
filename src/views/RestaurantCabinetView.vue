@@ -333,6 +333,10 @@
               <div class="cab-success-timer-lbl">Можно изменить до {{ delEditDeadlineTime }}</div>
               <div class="cab-success-time">{{ delEditTimeLeft }}</div>
             </div>
+            <div v-else-if="delEditTimerExpired" class="cab-success-timer expired">
+              <div class="cab-success-timer-lbl">Время редактирования истекло</div>
+              <div class="cab-success-timer-sub">Заказ зафиксирован. Изменения возможны только через отдел закупок.</div>
+            </div>
 
             <div class="cab-success-btns">
               <button v-if="delEditTimeLeft" class="btn btn-outline" @click="delShowSuccess = false">Изменить</button>
@@ -431,7 +435,7 @@
                         class="del-qty" :class="{ 'del-qty-err': item._multError }"
                         :disabled="!delCanSubmit && !delCanEdit" placeholder="0"
                         @input="delCheckMultiplicity(item)" @focus="$event.target.select()" />
-                      <div v-if="item._multError" class="del-mult-hint">Кратность {{ item.multiplicity }}</div>
+                      <div v-if="item._multError" class="del-mult-hint">Кратно {{ item.multiplicity }}: {{ delMultSuggest(item) }}</div>
                     </td>
                     <td class="del-td-act">
                       <button v-if="item._added" class="btn-icon-danger" @click="delRemoveItem(item)">&times;</button>
@@ -456,7 +460,7 @@
             </div>
 
             <div class="submit-area">
-              <div v-if="delHasMultErrors" class="error-msg">Исправьте количество — некоторые товары заказаны не кратно</div>
+              <div v-if="delMultErrorsCount" class="error-msg">{{ delMultErrorsCount }} {{ pluralPositions(delMultErrorsCount) }} с неверной кратностью — исправьте, чтобы отправить</div>
               <div v-if="delCanSubmit || delCanEdit" class="order-comment-row">
                 <input v-model="delOrderComment" type="text" class="order-comment-input" placeholder="Комментарий к заказу (необязательно)" :disabled="!delCanSubmit && !delCanEdit" />
               </div>
@@ -1915,6 +1919,7 @@ const delShowSuccess = ref(false);
 const delOrderComment = ref('');
 const delWasEdited = ref(false);
 const delEditTimeLeft = ref('');
+const delEditTimerExpired = ref(false);
 let delEditTimerInterval = null;
 let delSelectRequestId = 0;
 const delShowAddModal = ref(false);
@@ -2019,6 +2024,7 @@ const delSearchInOtherCategories = computed(() => {
 const delTotalItems = computed(() => delOrderItems.value.filter(i => i.quantity > 0).length);
 const delTotalQty = computed(() => delOrderItems.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
 const delHasMultErrors = computed(() => delOrderItems.value.some(i => i._multError && i.quantity > 0));
+const delMultErrorsCount = computed(() => delOrderItems.value.filter(i => i._multError && i.quantity > 0).length);
 function delSerializeState() {
   return JSON.stringify({
     items: delOrderItems.value.map(i => ({
@@ -2066,6 +2072,25 @@ function delCheckMultiplicity(item) {
   item.multiplicity = m;
   item._multError = m > 1 && q > 0 && Math.abs(q / m - Math.round(q / m)) > 0.0001;
 }
+// Подсказка с двумя ближайшими кратными значениями: меньше и больше введённого.
+// Помогает пользователю не считать в уме при редкой кратности (например, 6 или 12).
+function delMultSuggest(item) {
+  const m = parseFloat(item.multiplicity) || 1;
+  const q = parseFloat(item.quantity) || 0;
+  if (m <= 1 || q <= 0) return '';
+  const lower = Math.floor(q / m) * m;
+  const upper = Math.ceil(q / m) * m;
+  if (lower > 0 && upper !== lower) return `${lower} или ${upper}`;
+  return String(upper || m);
+}
+function pluralRu(n, forms) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return forms[0];
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return forms[1];
+  return forms[2];
+}
+function pluralPositions(n) { return pluralRu(n, ['позиция', 'позиции', 'позиций']); }
+function pluralBoxes(n) { return pluralRu(n, ['коробка', 'коробки', 'коробок']); }
 function delRefreshMultiplicityErrors() { for (const item of delOrderItems.value) delCheckMultiplicity(item); }
 
 async function delSelectDay(date) {
@@ -2074,6 +2099,7 @@ async function delSelectDay(date) {
   // иначе старый интервал продолжает работать в фоне до размонтирования.
   clearInterval(delEditTimerInterval);
   delEditTimeLeft.value = '';
+  delEditTimerExpired.value = false;
   delSelectedDate.value = date;
   delExistingOrder.value = null;
   delSubmitError.value = '';
@@ -2266,16 +2292,28 @@ async function delHandleSubmit() {
   // до того, как :disabled применится по reactivity. Без этой проверки уходит
   // два запроса подряд, и второй упирается в уникальный ключ либо создаёт дубль.
   if (delSubmitting.value) return;
+  const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({
+    sku: i.sku,
+    product_name: i.product_name,
+    category: i.category,
+    quantity: i.quantity,
+    comment: i.comment || '',
+  }));
+  if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
+  // Подтверждение с конкретными цифрами — заказ уходит на склад,
+  // отменить нельзя, можно только отредактировать до edit_until.
+  const isUpdate = !!delExistingOrder.value;
+  const totalQty = items.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0);
+  const confirmMsg = `${items.length} ${pluralPositions(items.length)}, ${totalQty} ${pluralBoxes(totalQty)}. ` +
+    `Доставка ${fmtDate(delSelectedDate.value)}. Изменить можно до ${delEditDeadlineTime.value}.`;
+  const ok = await showConfirm(
+    isUpdate ? 'Обновить заказ?' : 'Отправить заказ?',
+    confirmMsg,
+    { okText: isUpdate ? 'Обновить' : 'Отправить' }
+  );
+  if (!ok) return;
   delSubmitting.value = true; delSubmitError.value = '';
   try {
-    const items = delOrderItems.value.filter(i => i.quantity > 0).map(i => ({
-      sku: i.sku,
-      product_name: i.product_name,
-      category: i.category,
-      quantity: i.quantity,
-      comment: i.comment || '',
-    }));
-    if (!items.length) { delSubmitError.value = 'Добавьте хотя бы одну позицию'; return; }
     // Принудительно сохраняем черновик ДО отправки. Если запрос упадёт (плохая
     // связь, метро) и юзер закроет вкладку — введённое не пропадёт.
     try { delSaveDraft(); } catch (e) { /* игнор */ }
@@ -2297,7 +2335,7 @@ async function delHandleSubmit() {
   finally { delSubmitting.value = false; }
 }
 
-function delStartEditTimer() { clearInterval(delEditTimerInterval); delUpdateEditTimeLeft(); delEditTimerInterval = setInterval(delUpdateEditTimeLeft, 1000); }
+function delStartEditTimer() { clearInterval(delEditTimerInterval); delEditTimerExpired.value = false; delUpdateEditTimeLeft(); delEditTimerInterval = setInterval(delUpdateEditTimeLeft, 1000); }
 function delUpdateEditTimeLeft() {
   const deadlines = delCurrentDeadlines.value;
   const editUntil = deadlines?.edit_until || deadlines?.hard || '13:00:00';
@@ -2312,7 +2350,7 @@ function delUpdateEditTimeLeft() {
   const dlMinsk = new Date(`${orderDateStr}T${editUntil}+03:00`);
   // Серверное время через сохранённый offset — защита от сбитых часов устройства.
   const now = new Date(roStore.nowFromServer ? roStore.nowFromServer() : Date.now());
-  if (now >= dlMinsk) { delEditTimeLeft.value = ''; clearInterval(delEditTimerInterval); return; }
+  if (now >= dlMinsk) { delEditTimeLeft.value = ''; delEditTimerExpired.value = true; clearInterval(delEditTimerInterval); return; }
   const d = dlMinsk - now; const h = Math.floor(d/3600000); const m = Math.floor((d%3600000)/60000); const s = Math.floor((d%60000)/1000);
   delEditTimeLeft.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
@@ -4008,6 +4046,12 @@ tr.del-err { background: #fef2f2; }
 }
 .cab-success-timer-lbl { font-size: 11px; color: #15803d; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
 .cab-success-time { font-size: 28px; font-weight: 800; color: #16a34a; font-variant-numeric: tabular-nums; letter-spacing: 2px; line-height: 1; }
+.cab-success-timer.expired {
+  background: linear-gradient(135deg, #fff7ed, #fef2f2);
+  border-color: #fecaca;
+}
+.cab-success-timer.expired .cab-success-timer-lbl { color: #b45309; }
+.cab-success-timer-sub { font-size: 13px; color: #78350f; margin-top: 4px; line-height: 1.4; }
 
 .cab-success-btns { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
 .cab-success-btns .btn { flex: 1; min-width: 0; max-width: 200px; padding: 12px 18px; font-size: 14px; }
