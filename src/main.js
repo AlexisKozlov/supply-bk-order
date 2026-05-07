@@ -5,6 +5,7 @@ import { router } from './router/index.js';
 import { setAuthErrorHandler } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
+import { notifyAppUpdateRequired } from '@/lib/appUpdateNotify.js';
 import { db } from '@/lib/apiClient.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import './assets/style.css';
@@ -61,26 +62,6 @@ window.onerror = (message, source, lineno, colno, error) => {
   logErrorToServer('error', msg, error?.stack || null);
 };
 
-// Сигнал о том, что приложению требуется обновление (новый деплой и старая
-// версия не может догрузить чанки). Показываем тост и просим пользователя
-// нажать «Обновить» в баннере. Никакой автоматической перезагрузки —
-// иначе пользователь теряет несохранённые данные.
-function notifyAppUpdateRequired() {
-  // Один раз за сессию — показываем тост и поднимаем баннер UpdatePrompt.
-  if (window.__bkUpdateNotified) return;
-  window.__bkUpdateNotified = true;
-  try {
-    window.dispatchEvent(new Event('bk:needs-update'));
-  } catch (e) { /* игнор */ }
-  try {
-    const toast = useToastStore();
-    toast.warning(
-      'Доступна новая версия портала',
-      'Сохраните введённые данные и нажмите «Обновить» в баннере внизу — старые ссылки не работают.',
-      0 // не скрывать автоматически
-    );
-  } catch (e) { /* store not ready */ }
-}
 
 // Перехват необработанных промисов
 window.onunhandledrejection = (event) => {

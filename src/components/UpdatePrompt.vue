@@ -86,15 +86,28 @@ useRegisterSW({
 
 async function doUpdate() {
   updating.value = true;
-  try {
-    if ('caches' in window) {
-      try {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
-      } catch (e) { /* игнор */ }
-    }
-  } catch (e) { /* игнор */ }
-  window.location.reload();
+  // 1. Разрегистрируем SW — на следующей навигации запросы пойдут напрямую
+  // к серверу, минуя любой кэш Service Worker'а. Если идёт сборка — nginx
+  // отдаст maintenance.html, иначе свежий index.html.
+  if ('serviceWorker' in navigator) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    } catch (e) { /* игнор */ }
+  }
+  // 2. Чистим всё, что мог сохранить SW в Cache Storage.
+  if ('caches' in window) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    } catch (e) { /* игнор */ }
+  }
+  // 3. Жёсткая перезагрузка с cache-bust параметром, чтобы и HTTP-кэш браузера
+  // отдал свежий index.html. Используем pathname без сохранения query (на случай
+  // старых query-параметров от прежнего билда).
+  const u = new URL(window.location.href);
+  u.searchParams.set('_v', Date.now().toString(36));
+  window.location.replace(u.toString());
 }
 
 function later() {

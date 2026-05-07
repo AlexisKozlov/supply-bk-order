@@ -61,6 +61,7 @@ const routes = [
       { path: 'protocols/:id', name: 'protocol-detail', component: () => import('@/views/MeetingProtocolDetailView.vue'), meta: { title: 'Протокол', module: 'protocols' } },
       { path: 'tasks', name: 'tasks', component: () => import('@/views/TasksView.vue'), meta: { title: 'Задачи', module: 'tasks' } },
       { path: 'keg-returns', name: 'keg-returns', component: () => import('@/views/KegReturnsView.vue'), meta: { title: 'Возврат кег', module: 'restaurant-orders' } },
+      { path: 'keg-returns/schedule', name: 'keg-returns-schedule', component: () => import('@/views/KegReturnsScheduleView.vue'), meta: { title: 'График возврата кег', module: 'restaurant-orders' } },
     ],
   },
   {
@@ -186,8 +187,10 @@ export const router = createRouter({
   routes,
 });
 
-// Перезагрузка страницы при ошибке загрузки модулей (после деплоя новой версии)
-router.onError((error, to) => {
+// При ошибке загрузки модулей после деплоя НЕ перезагружаем автоматически —
+// это сбрасывает несохранённые данные пользователя. Показываем тост и баннер
+// «Обновить», пользователь сам решит, когда перезагрузить.
+router.onError((error) => {
   const msg = error?.message || '';
   if (
     msg.includes('Failed to fetch dynamically imported module') ||
@@ -195,8 +198,8 @@ router.onError((error, to) => {
     msg.includes('Importing a module script failed') ||
     msg.includes('error loading dynamically imported module')
   ) {
-    // Перезагружаем на целевую страницу, чтобы получить свежие файлы
-    window.location.href = to?.fullPath || window.location.href;
+    // Импортируем динамически, чтобы не тащить toastStore в граф router'а
+    import('@/lib/appUpdateNotify.js').then(m => m.notifyAppUpdateRequired()).catch(() => {});
   }
 });
 

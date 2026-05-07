@@ -25,34 +25,51 @@ function buildAuthHeaders() {
   return h;
 }
 
+// Обработка 401: чистим токен и сигналим UI. БЕЗ автоматического редиректа —
+// иначе во время кратковременного 401 при деплое пользователь теряет
+// несохранённые данные. Кабинет показывает баннер «Войти заново», пользователь
+// сам решает, когда уйти на логин.
+let session401Notified = false;
+function handle401() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REST_KEY);
+  if (typeof window !== 'undefined' && !session401Notified) {
+    session401Notified = true;
+    try { window.dispatchEvent(new Event('bk:ro-session-expired')); } catch (e) {}
+  }
+}
+
 async function api(path, opts = {}) {
   const url = `${API_BASE}/${path}`;
-  const res = await fetch(url, { headers: buildHeaders(), ...opts });
+  let res;
+  try {
+    res = await fetch(url, { headers: buildHeaders(), ...opts });
+  } catch (e) {
+    throw new Error('Сервер недоступен');
+  }
+  // 401 на одной попытке мог быть разовым (рестарт бэкенда при деплое).
+  // Делаем одну тихую повторную попытку через 1.5 сек, прежде чем считать
+  // сессию завершённой.
+  if (res.status === 401 && !path.startsWith('admin')) {
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      res = await fetch(url, { headers: buildHeaders(), ...opts });
+    } catch (e) {
+      throw new Error('Сервер недоступен');
+    }
+    if (res.status === 401) {
+      handle401();
+      throw new Error('Сессия завершена');
+    }
+  }
   const text = await res.text();
   let data = {};
   if (text) {
     try {
       data = JSON.parse(text);
     } catch {
-      if (res.status === 401 && !path.startsWith('admin')) {
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(REST_KEY);
-        if (window.location.pathname.startsWith('/ro') || window.location.pathname.startsWith('/restaurant')) {
-          window.location.href = '/restaurant/login';
-        }
-        throw new Error('Сессия завершена');
-      }
       throw new Error(`Ошибка сервера (${res.status})`);
     }
-  }
-  // При 401 — сессия невалидна, выкидываем на логин
-  if (res.status === 401 && !path.startsWith('admin')) {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REST_KEY);
-    if (window.location.pathname.startsWith('/ro') || window.location.pathname.startsWith('/restaurant')) {
-      window.location.href = '/restaurant/login';
-    }
-    throw new Error('Сессия завершена');
   }
   if (!res.ok) throw new Error(data.error || `Ошибка сервера (${res.status})`);
   return data;
