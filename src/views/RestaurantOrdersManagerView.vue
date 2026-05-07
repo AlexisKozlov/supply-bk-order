@@ -1032,6 +1032,10 @@
                     <div class="rom-exp-grouping-name">По категориям хранения</div>
                     <div class="rom-exp-grouping-hint">Сухой / Холод / Мороз — каждый лист отдельно</div>
                   </button>
+                  <button class="rom-exp-grouping-opt" :class="{ active: exportGrouping === 'byEntity' }" @click="exportGrouping = 'byEntity'">
+                    <div class="rom-exp-grouping-name">По юр. лицам</div>
+                    <div class="rom-exp-grouping-hint">Отдельный лист на «Бургер БК», «Воглия Матта», «Пицца Стар»</div>
+                  </button>
                 </div>
               </div>
 
@@ -1853,6 +1857,7 @@ const EXPORT_COLUMNS_DEF = [
   { key: 'date', label: 'Дата доставки', width: 14, value: ctx => ctx.date },
   { key: 'order_num', label: '№ заказа', width: 12, value: ctx => ctx.ordNum },
   { key: 'rest_num', label: '№ ресторана', width: 10, value: ctx => formatRestaurantNumber(ctx.order.restaurant_number, ctx.order.legal_entity_group) },
+  { key: 'legal_entity', label: 'Юр. лицо', width: 16, value: ctx => shortLegalEntity(ctx.order.legal_entity || '') },
   { key: 'rest_addr', label: 'Адрес ресторана', width: 40, value: ctx => ctx.ri.address || ctx.ri.city || '' },
   { key: 'rest_city', label: 'Город', width: 16, value: ctx => ctx.ri.city || '' },
   { key: 'rest_region', label: 'Регион', width: 12, value: ctx => ctx.ri.region || '' },
@@ -1928,6 +1933,7 @@ const EXPORT_COLUMN_PRESETS = {
   warehouse: { label: 'Для склада', cols: ['rest_num', 'rest_addr', 'delivery_time', 'category', 'product', 'quantity', 'item_pallets', 'rest_weight', 'rest_pallets'] },
   traceable: { label: 'С прослеживаемостью', cols: ['rest_num', 'rest_addr', 'category', 'external_code', 'gtin', 'product', 'quantity'] },
   deposit: { label: 'С залоговыми ценами', cols: ['date', 'rest_num', 'rest_addr', 'category', 'external_code', 'gtin', 'product', 'quantity', 'deposit_price', 'rest_deposit_sum'] },
+  accounting: { label: 'Для бухгалтерии', cols: ['date', 'rest_num', 'legal_entity', 'rest_addr', 'category', 'external_code', 'product', 'quantity', 'deposit_price', 'rest_deposit_sum'] },
 };
 let exportData = null;
 
@@ -2921,6 +2927,40 @@ async function doUnifiedExport() {
         const catRestNums = new Set(catItems.map(i => i.restaurant_number));
         const catOrders = filteredOrders.filter(o => catRestNums.has(o.restaurant_number));
         writeSheet(catOrders, catByRest, cat);
+      }
+    } else if (exportGrouping.value === 'byEntity') {
+      // Группировка по юрлицу: один лист на каждое юрлицо, где есть заказы.
+      // Полезно бухгалтерии, чтобы Бургер БК и Воглия Матта (одна группа BK_VM) не сливались.
+      const entityOf = num => {
+        const o = filteredOrders.find(x => x.restaurant_number === num);
+        return shortLegalEntity(o?.legal_entity || '') || '—';
+      };
+      const groups = {};
+      for (const order of filteredOrders) {
+        const ent = shortLegalEntity(order.legal_entity || '') || '—';
+        if (!groups[ent]) groups[ent] = { orders: [], byRest: {} };
+        groups[ent].orders.push(order);
+      }
+      for (const item of items) {
+        const ent = entityOf(item.restaurant_number);
+        if (!groups[ent]) continue;
+        if (!groups[ent].byRest[item.restaurant_number]) groups[ent].byRest[item.restaurant_number] = [];
+        groups[ent].byRest[item.restaurant_number].push(item);
+      }
+      // Стабильный порядок: БК → ВМ → ПС → остальные
+      const order = ['Бургер БК', 'Воглия Матта', 'Пицца Стар'];
+      const sortedNames = Object.keys(groups).sort((a, b) => {
+        const ia = order.indexOf(a), ib = order.indexOf(b);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.localeCompare(b, 'ru');
+      });
+      for (const name of sortedNames) {
+        const g = groups[name];
+        if (!g.orders.length) continue;
+        const sorted = [...g.orders].sort((a, b) => a.restaurant_number - b.restaurant_number);
+        writeSheet(sorted, g.byRest, name);
       }
     }
 

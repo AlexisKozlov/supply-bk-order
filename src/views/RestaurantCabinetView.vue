@@ -383,7 +383,7 @@
             </div>
 
             <div class="cat-tabs">
-              <button v-for="cat in delCategories" :key="cat" class="cat-tab" :class="{ active: delActiveCategory === cat }" @click="delActiveCategory = cat">
+              <button v-for="cat in delCategories" :key="cat" class="cat-tab" :class="{ active: !delOnlyFilled && delActiveCategory === cat }" @click="delOnlyFilled = false; delActiveCategory = cat">
                 {{ cat }}
                 <span v-if="delGetCategoryItemCount(cat)" class="cat-count">{{ delGetCategoryItemCount(cat) }}</span>
               </button>
@@ -392,6 +392,16 @@
             <div class="search-row">
               <input v-model="delSearchQuery" type="text" placeholder="Поиск по названию или артикулу..." class="input-search" />
               <button v-if="delSearchQuery" class="search-clear" @click="delSearchQuery = ''">&times;</button>
+              <button
+                class="btn btn-sm"
+                :class="delOnlyFilled ? 'btn-primary' : 'btn-outline'"
+                :disabled="delTotalItems === 0"
+                :title="delTotalItems === 0 ? 'Сначала заполните хотя бы одну позицию' : 'Показать только товары с количеством'"
+                @click="delOnlyFilled = !delOnlyFilled"
+              >
+                Только заполненные
+                <span v-if="delTotalItems > 0" class="del-only-filled-count">{{ delTotalItems }}</span>
+              </button>
               <button class="btn btn-sm btn-outline" @click="delShowAddModal = true">+ Добавить</button>
               <button class="btn btn-sm btn-outline" :disabled="delLoadingTemplate" @click="delLoadFullTemplate" title="Дозагрузить все товары из шаблона">
                 <span v-if="delLoadingTemplate" class="cab-spin cab-spin-sm"></span>
@@ -405,7 +415,6 @@
                 <thead>
                   <tr>
                     <th class="del-th-name">Товар</th>
-                    <th class="del-th-mult">Кратность</th>
                     <th class="del-th-qty">Кол-во</th>
                     <th class="del-th-act"></th>
                   </tr>
@@ -414,9 +423,7 @@
                   <tr v-for="item in delFilteredItems" :key="item.sku" :class="{ 'del-filled': item.quantity > 0, 'del-err': item._multError }">
                     <td class="del-td-name">
                       <span class="del-sku">{{ item.sku }}</span> {{ item.product_name }}
-                    </td>
-                    <td class="del-td-mult">
-                      <span v-if="item.multiplicity > 1" class="del-mult">x{{ item.multiplicity }}</span>
+                      <span v-if="item.multiplicity > 1" class="del-mult-inline" title="Заказывать только кратно этому числу коробок">×{{ item.multiplicity }}</span>
                     </td>
                     <td class="del-td-qty">
                       <input v-model.number="item.quantity" type="number" inputmode="decimal" min="0"
@@ -432,7 +439,18 @@
                   </tr>
                 </tbody>
               </table>
-              <div v-else-if="delSearchQuery && !delProductsLoading" class="empty-msg">Ничего не найдено</div>
+              <div v-else-if="delSearchQuery && !delProductsLoading" class="empty-msg">
+                <div>Ничего не найдено в категории «{{ delActiveCategory }}»</div>
+                <div v-if="delSearchInOtherCategories.length" class="del-search-other">
+                  <span class="del-search-other-lbl">Найдено в других категориях:</span>
+                  <button
+                    v-for="o in delSearchInOtherCategories"
+                    :key="o.category"
+                    class="del-search-other-chip"
+                    @click="delActiveCategory = o.category"
+                  >{{ o.category }} <span class="del-search-other-count">{{ o.count }}</span></button>
+                </div>
+              </div>
               <div v-else-if="!delProductsLoading" class="empty-msg">Нет товаров в категории «{{ delActiveCategory }}»</div>
               <div v-if="delProductsLoading" class="mini-loader"><div class="cab-spin"></div></div>
             </div>
@@ -1966,13 +1984,37 @@ const delEditDeadlineTime = computed(() => {
   const t = deadlines?.edit_until || deadlines?.hard || '13:00:00';
   return t.slice(0, 5);
 });
+const delOnlyFilled = ref(false);
+// Если все позиции стёрли — выключаем фильтр, иначе таблица будет пустой
+// без понятного объяснения.
+watch(() => delOrderItems.value.some(i => (parseFloat(i.quantity) || 0) > 0), hasFilled => {
+  if (!hasFilled) delOnlyFilled.value = false;
+});
 const delFilteredItems = computed(() => {
-  let items = delOrderItems.value.filter(i => i.category === delActiveCategory.value);
+  // В режиме «Только заполненные» показываем все заполненные позиции
+  // из всех категорий — это режим проверки заказа перед отправкой.
+  let items = delOnlyFilled.value
+    ? delOrderItems.value.filter(i => (parseFloat(i.quantity) || 0) > 0)
+    : delOrderItems.value.filter(i => i.category === delActiveCategory.value);
   if (delSearchQuery.value) {
     const q = delSearchQuery.value.toLowerCase();
     items = items.filter(i => i.product_name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q));
   }
   return items;
+});
+
+// Если поиск не дал результатов в текущей категории, показываем,
+// в каких других категориях товар нашёлся, и предлагаем туда перейти.
+const delSearchInOtherCategories = computed(() => {
+  const q = (delSearchQuery.value || '').toLowerCase();
+  if (!q || delFilteredItems.value.length) return [];
+  const counts = {};
+  for (const i of delOrderItems.value) {
+    if (i.category === delActiveCategory.value) continue;
+    if (!(i.product_name || '').toLowerCase().includes(q) && !(i.sku || '').toLowerCase().includes(q)) continue;
+    counts[i.category] = (counts[i.category] || 0) + 1;
+  }
+  return delCategories.filter(c => counts[c]).map(c => ({ category: c, count: counts[c] }));
 });
 const delTotalItems = computed(() => delOrderItems.value.filter(i => i.quantity > 0).length);
 const delTotalQty = computed(() => delOrderItems.value.reduce((s, i) => s + (parseFloat(i.quantity) || 0), 0));
@@ -2037,6 +2079,7 @@ async function delSelectDay(date) {
   delSubmitError.value = '';
   delSearchQuery.value = '';
   delActiveCategory.value = 'Сухой';
+  delOnlyFilled.value = false;
   delOrderComment.value = '';
   delDraftRestoreNotice.value = '';
   try {
@@ -3826,13 +3869,22 @@ onUnmounted(() => {
 .del-table tbody tr { transition: background 0.1s; }
 .del-table tbody tr:hover { background: #FEFCFA; }
 .del-th-name { text-align: left; }
-.del-th-mult { width: 80px; text-align: center; }
 .del-th-qty { width: 90px; text-align: center; }
 .del-th-act { width: 30px; }
 .del-td-name { font-weight: 500; text-align: left; }
-.del-td-mult { text-align: center; }
 .del-sku { font-size: 10px; color: #B0A090; font-family: 'SF Mono', 'JetBrains Mono', monospace; margin-right: 4px; }
-.del-mult { font-size: 10px; color: #2563eb; background: #EFF6FF; padding: 2px 7px; border-radius: 5px; font-weight: 700; margin-left: 6px; }
+.del-mult-inline {
+  display: inline-block;
+  font-size: 10px;
+  color: #2563eb;
+  background: #EFF6FF;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-weight: 700;
+  margin-left: 6px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
 .del-td-qty { text-align: center; }
 .del-qty { width: 64px; height: 30px; padding: 0; border: 1.5px solid #EDE8E3; border-radius: 8px; font-size: 13px; text-align: center; font-family: inherit; font-weight: 700; background: #FAFAF8; color: #502314; transition: all 0.15s; -moz-appearance: textfield; }
 .del-qty::-webkit-inner-spin-button { -webkit-appearance: none; }
@@ -3847,6 +3899,25 @@ tr.del-err { background: #fef2f2; }
 
 .btn-icon-danger { background: none; border: none; cursor: pointer; color: #dc2626; font-size: 18px; padding: 2px 4px; flex-shrink: 0; }
 .empty-msg { padding: 32px; text-align: center; color: #8b7355; font-size: 13px; }
+.del-search-other { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.del-search-other-lbl { font-size: 12px; color: #8b7355; }
+.del-search-other-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #FFFBF6; border: 1.5px solid #E8DCC8; color: #502314;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all 0.15s;
+}
+.del-search-other-chip:hover { background: #FCEFE0; border-color: #E76F51; }
+.del-search-other-count {
+  display: inline-block; background: #E76F51; color: white;
+  font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; min-width: 18px; text-align: center;
+}
+.del-only-filled-count {
+  display: inline-block; margin-left: 6px;
+  background: rgba(255,255,255,0.25);
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align: center;
+}
+.btn-outline .del-only-filled-count { background: #FCEFE0; color: #E76F51; }
 
 /* Delivery item-list extras */
 .item-input-stack { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
@@ -4693,7 +4764,6 @@ tr.del-err { background: #fef2f2; }
   .del-table tr { display: flex; align-items: center; padding: 10px 12px; gap: 10px; border-bottom: 1px solid #F5F2EE; flex-wrap: nowrap; }
   .del-table td { padding: 0; border: none; height: auto; }
   .del-td-name { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .del-td-mult { display: none; }
   .del-td-qty { flex-shrink: 0; }
   .del-td-act { flex-shrink: 0; }
   .del-qty { width: 68px; height: 42px; font-size: 16px; }
