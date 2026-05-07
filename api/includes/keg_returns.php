@@ -9,9 +9,10 @@
  *   POST   keg-returns              — создать DRAFT
  *   GET    keg-returns/{id}         — детально
  *   PATCH  keg-returns/{id}         — обновить
- *   POST   keg-returns/{id}/submit  — DRAFT → SUBMITTED
- *   POST   keg-returns/{id}/cancel  — → CANCELLED
- *   GET    keg-returns/{id}/excel   — скачать Excel ТТН
+ *   POST   keg-returns/{id}/submit       — DRAFT → SUBMITTED
+ *   POST   keg-returns/{id}/cancel       — → CANCELLED
+ *   POST   keg-returns/{id}/replace-bso  — заменить БСО (10:00–16:00, со списком в историю)
+ *   GET    keg-returns/{id}/excel        — скачать Excel ТТН
  */
 
 if ($endpoint !== 'keg-returns' && $endpoint !== 'keg-catalog') return;
@@ -39,6 +40,33 @@ function krRespond($data, $code = 200) {
 }
 
 /**
+ * Проверка прав портала на модуль «Заказы ресторанов» (вкл. возврат кег).
+ * minLevel: view | edit | full.
+ */
+function krRequirePortalAccess(?array $portalUser, string $minLevel = 'view'): void {
+    global $ROLE_TEMPLATES, $ACCESS_LEVELS;
+    if (!$portalUser) krRespond(['error' => 'Требуется авторизация портала'], 401);
+    $perms = resolvePermissions($portalUser['role'] ?? 'user', $portalUser['permissions'] ?? null, $ROLE_TEMPLATES);
+    $actual = $ACCESS_LEVELS[$perms['restaurant-orders'] ?? 'none'] ?? 0;
+    $required = $ACCESS_LEVELS[$minLevel] ?? 0;
+    if ($actual < $required) krRespond(['error' => 'Недостаточно прав'], 403);
+}
+
+/**
+ * Проверка доступа к группе юрлиц (BK_VM / PS) для пользователя портала.
+ * Админ — всегда ок. Остальным — только если их legal_entities содержат
+ * хотя бы одно юрлицо этой группы.
+ */
+function krRequireGroupAccess(?array $portalUser, ?string $group): void {
+    if (!$portalUser) krRespond(['error' => 'Требуется авторизация'], 401);
+    if (($portalUser['role'] ?? '') === 'admin') return;
+    $allowed = roGetSessionUserGroups($portalUser);
+    if (!$group || !in_array($group, $allowed, true)) {
+        krRespond(['error' => 'Нет доступа к данным этого юрлица'], 403);
+    }
+}
+
+/**
  * Возвращает DateTime (10:00 Europe/Minsk) последнего рабочего дня перед return_date.
  */
 function kegCalcDeadline(string $returnDate): DateTime {
@@ -48,6 +76,17 @@ function kegCalcDeadline(string $returnDate): DateTime {
     do {
         $d->modify('-1 day');
     } while (in_array((int)$d->format('N'), [6, 7]));
+    return $d;
+}
+
+/**
+ * Cutoff (16:00 того же рабочего дня, что и dedaline 10:00) — последний момент,
+ * когда ресторан ещё может заменить испорченный БСО через спец-эндпоинт.
+ * После cutoff менять БСО нельзя (заявки уходят лог-провайдеру финально).
+ */
+function kegCalcCutoff(string $returnDate): DateTime {
+    $d = kegCalcDeadline($returnDate);
+    $d->setTime(16, 0, 0);
     return $d;
 }
 
@@ -113,6 +152,23 @@ function krGetReturnWithItems($pdo, $id) {
     ");
     $items->execute([(int)$id]);
     $row['items'] = $items->fetchAll();
+
+    // История замен БСО (старые номера → текущий). Используется в карточке
+    // заявки на ресторане и в модалке закупок.
+    try {
+        $hStmt = $pdo->prepare("
+            SELECT id, old_series, old_number, new_series, new_number,
+                   reason, changed_by_chat_id, changed_by_user, changed_at
+            FROM keg_return_bso_history
+            WHERE request_id = ?
+            ORDER BY changed_at, id
+        ");
+        $hStmt->execute([(int)$id]);
+        $row['bso_history'] = $hStmt->fetchAll();
+    } catch (Throwable $e) {
+        // если миграция ещё не применена — пустой массив
+        $row['bso_history'] = [];
+    }
 
     // Реквизиты юрлица-отправителя.
     // BK_VM: ресторан №3 → ВМ, остальные → БК (см. api/includes/legal_entities.php).
@@ -289,14 +345,24 @@ function krGetPickupWeekdays(PDO $pdo, int $restaurantId): int {
 }
 
 /**
- * Добавляет поле deadline_iso к строке заявки.
+ * Добавляет к строке заявки поля deadline_iso, cutoff_iso и can_replace_bso.
+ * can_replace_bso = true, если сейчас интервал [deadline 10:00, cutoff 16:00)
+ * и статус ∈ {SUBMITTED, ROUTED}. До deadline ресторан правит БСО обычным
+ * редактированием (PATCH), после cutoff — нельзя совсем.
  */
 function krAddDeadline(array &$row): void {
     if (!empty($row['return_date'])) {
         $deadline = kegCalcDeadline($row['return_date']);
+        $cutoff   = kegCalcCutoff($row['return_date']);
         $row['deadline_iso'] = $deadline->format(DateTime::ATOM);
+        $row['cutoff_iso']   = $cutoff->format(DateTime::ATOM);
+        $now = new DateTime('now', new DateTimeZone('Europe/Minsk'));
+        $statusOk = in_array($row['status'] ?? '', ['SUBMITTED', 'ROUTED'], true);
+        $row['can_replace_bso'] = $statusOk && $now >= $deadline && $now < $cutoff;
     } else {
         $row['deadline_iso'] = null;
+        $row['cutoff_iso']   = null;
+        $row['can_replace_bso'] = false;
     }
 }
 
@@ -330,6 +396,18 @@ function krValidateItems(array $items): ?string {
     return null;
 }
 
+// ═══ Авторизация (общая для keg-catalog и keg-returns) ═══
+
+// Определяем режим: ресторан или портал.
+// Хотя бы одна авторизация обязательна для всех keg-* эндпоинтов,
+// включая справочник кег (раньше был открыт анонимно).
+$krRestSession = krGetRestaurantSession($pdo);
+$krPortalUser  = getSessionUser($pdo);
+if (!$krRestSession && !$krPortalUser) {
+    krRespond(['error' => 'Нет авторизации'], 401);
+}
+$isRestaurant = (bool)$krRestSession;
+
 // ═══ Роутинг keg-catalog ═══
 
 if ($endpoint === 'keg-catalog') {
@@ -344,25 +422,16 @@ if ($endpoint === 'keg-catalog') {
 $krId = isset($parts[1]) && is_numeric($parts[1]) ? (int)$parts[1] : null;
 $krAction = $parts[2] ?? null;
 
-// Определяем режим: ресторан или портал
-$krRestSession = krGetRestaurantSession($pdo);
-$krPortalUser = getSessionUser($pdo);
-
-// Хотя бы одна авторизация обязательна
-if (!$krRestSession && !$krPortalUser) {
-    krRespond(['error' => 'Нет авторизации'], 401);
-}
-
-$isRestaurant = (bool)$krRestSession;
-
 // Проверяем, что parts[1] не содержит нечислового субэндпоинта (import-routing и т.п.)
 $krSubSlug = (!$krId && isset($parts[1]) && $parts[1] !== '') ? $parts[1] : null;
 
 // ── GET /keg-returns/export ── xlsx-выгрузка списка для портала
 if ($method === 'GET' && $krSubSlug === 'export') {
     if ($isRestaurant) krRespond(['error' => 'Только для портала'], 403);
+    krRequirePortalAccess($krPortalUser, 'view');
     $filterGroup = isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM';
     if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
+    krRequireGroupAccess($krPortalUser, $filterGroup);
     $rows = $pdo->prepare("
         SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
                kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at, kr.routed_at, kr.updated_at,
@@ -470,15 +539,18 @@ if ($method === 'GET' && $krId === null && $krAction === null && $krSubSlug === 
         ");
         $rows->execute([$restId]);
     } else {
-        // Portal: только BK_VM, фильтр по статусу (не DRAFT)
+        // Portal: фильтр по статусу (не DRAFT) в рамках группы юрлиц пользователя
+        krRequirePortalAccess($krPortalUser, 'view');
         $filterGroup = isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM';
         if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
+        krRequireGroupAccess($krPortalUser, $filterGroup);
         $rows = $pdo->prepare("
             SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
                    kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at,
                    r.number AS restaurant_number, r.city AS restaurant_city,
                    r.address AS restaurant_address, r.pickup_address,
-                   (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs
+                   (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs,
+                   (SELECT COUNT(*) FROM keg_return_bso_history WHERE request_id = kr.id) AS bso_replaced_count
             FROM keg_returns kr
             JOIN restaurants r ON r.id = kr.restaurant_id
             WHERE kr.legal_entity_group = ? AND kr.status != 'DRAFT'
@@ -513,9 +585,16 @@ if ($method === 'POST' && $krId === null && $krAction === null && $krSubSlug ===
         $createdByChatId = null; // не храним chat_id в этой таблице, только restaurant_id
         $createdByUser = null;
     } else {
+        krRequirePortalAccess($krPortalUser, 'edit');
         $restaurantId = isset($body['restaurant_id']) ? (int)$body['restaurant_id'] : 0;
         if (!$restaurantId) krRespond(['error' => 'Не указан ресторан'], 400);
-        $legalEntityGroup = 'BK_VM';
+        // Группа берётся из самого ресторана, чтобы пользователь не мог
+        // создать заявку для чужого юрлица передачей произвольного id.
+        $rGroupStmt = $pdo->prepare("SELECT legal_entity_group FROM restaurants WHERE id = ? AND active = 1");
+        $rGroupStmt->execute([$restaurantId]);
+        $legalEntityGroup = $rGroupStmt->fetchColumn();
+        if (!$legalEntityGroup) krRespond(['error' => 'Ресторан не найден'], 404);
+        krRequireGroupAccess($krPortalUser, $legalEntityGroup);
         $createdByChatId = null;
         $createdByUser = $krPortalUser['name'] ?? null;
     }
@@ -584,8 +663,13 @@ if ($method === 'POST' && $krId === null && $krAction === null && $krSubSlug ===
 if ($method === 'GET' && $krId && $krAction === null) {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
-    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
-        krRespond(['error' => 'Нет доступа'], 403);
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+    } else {
+        krRequirePortalAccess($krPortalUser, 'view');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
     }
     krRespond($row);
 }
@@ -609,6 +693,8 @@ if ($method === 'PATCH' && $krId && $krAction === null) {
             krRespond(['error' => 'Дедлайн истёк, редактирование недоступно'], 422);
         }
     } else {
+        krRequirePortalAccess($krPortalUser, 'edit');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
         if ($row['status'] === 'CANCELLED') {
             krRespond(['error' => 'Нельзя редактировать отменённую заявку'], 422);
         }
@@ -698,8 +784,13 @@ if ($method === 'POST' && $krId && $krAction === 'submit') {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
 
-    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
-        krRespond(['error' => 'Нет доступа'], 403);
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+    } else {
+        krRequirePortalAccess($krPortalUser, 'edit');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
     }
     if ($row['status'] !== 'DRAFT') {
         krRespond(['error' => 'Отправить можно только черновик'], 422);
@@ -739,7 +830,7 @@ if ($method === 'POST' && $krId && $krAction === 'submit') {
     krRespond($row);
 }
 
-// ── DELETE /keg-returns/{id} ── (закупщик — любую, ресторан — только свой DRAFT)
+// ── DELETE /keg-returns/{id} ── (закупщик — любую в своей группе, ресторан — только свой DRAFT)
 if ($method === 'DELETE' && $krId && $krAction === null) {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
@@ -750,6 +841,9 @@ if ($method === 'DELETE' && $krId && $krAction === null) {
         if ($row['status'] !== 'DRAFT') {
             krRespond(['error' => 'Ресторан может удалять только черновик'], 422);
         }
+    } else {
+        krRequirePortalAccess($krPortalUser, 'full');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
     }
     $pdo->prepare("DELETE FROM keg_returns WHERE id = ?")->execute([$krId]);
     krRespond(['success' => true]);
@@ -759,6 +853,11 @@ if ($method === 'DELETE' && $krId && $krAction === null) {
 if ($method === 'POST' && $krId && $krAction === 'cancel') {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if (!$isRestaurant) {
+        krRequirePortalAccess($krPortalUser, 'edit');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
+    }
 
     if ($isRestaurant) {
         if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
@@ -783,6 +882,94 @@ if ($method === 'POST' && $krId && $krAction === 'cancel') {
     $pdo->prepare("UPDATE keg_returns SET status = 'CANCELLED', cancelled_at = NOW() WHERE id = ?")->execute([$krId]);
     $row = krGetReturnWithItems($pdo, $krId);
     krRespond($row);
+}
+
+// ── POST /keg-returns/{id}/replace-bso ──
+// Замена номера БСО, если ресторан испортил бланк. Доступно только в окне
+// [deadline 10:00, cutoff 16:00) и только в статусе SUBMITTED/ROUTED.
+// До 10:00 — ресторан правит БСО обычным PATCH. После 16:00 — никаких изменений.
+if ($method === 'POST' && $krId && $krAction === 'replace-bso') {
+    $row = krGetReturnWithItems($pdo, $krId);
+    if (!$row) krRespond(['error' => 'Не найдено'], 404);
+
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+    } else {
+        krRequirePortalAccess($krPortalUser, 'edit');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
+    }
+
+    if (!in_array($row['status'], ['SUBMITTED', 'ROUTED'], true)) {
+        krRespond(['error' => 'Замена БСО доступна только для отправленных и маршрутизированных заявок'], 422);
+    }
+    if (empty($row['return_date'])) {
+        krRespond(['error' => 'У заявки не указана дата возврата'], 422);
+    }
+
+    $deadline = kegCalcDeadline($row['return_date']);
+    $cutoff   = kegCalcCutoff($row['return_date']);
+    $now      = new DateTime('now', new DateTimeZone('Europe/Minsk'));
+    if ($now < $deadline) {
+        krRespond(['error' => 'До дедлайна 10:00 правьте БСО обычным редактированием'], 422);
+    }
+    if ($now >= $cutoff) {
+        krRespond(['error' => 'Окно замены БСО закрыто (после 16:00). Свяжитесь с отделом закупок'], 422);
+    }
+
+    $newSeries = trim((string)($body['new_series'] ?? ''));
+    $newNumber = trim((string)($body['new_number'] ?? ''));
+    $reason    = trim((string)($body['reason'] ?? ''));
+
+    if ($newSeries === '' || $newNumber === '') {
+        krRespond(['error' => 'Укажите серию и номер нового БСО'], 422);
+    }
+    $bsoErr = krValidateBso($newSeries, $newNumber);
+    if ($bsoErr) krRespond(['error' => $bsoErr], 422);
+    if ($reason === '') krRespond(['error' => 'Укажите причину замены'], 422);
+    if (mb_strlen($reason) > 255) krRespond(['error' => 'Причина: не более 255 символов'], 422);
+
+    if ($newSeries === ($row['bso_series'] ?? '') && $newNumber === ($row['bso_number'] ?? '')) {
+        krRespond(['error' => 'Новый БСО совпадает с текущим'], 422);
+    }
+
+    // Уникальность БСО среди заявок этого же ресторана
+    $chk = $pdo->prepare("SELECT id FROM keg_returns WHERE restaurant_id = ? AND bso_series = ? AND bso_number = ? AND id != ?");
+    $chk->execute([(int)$row['restaurant_id'], $newSeries, $newNumber, $krId]);
+    if ($chk->fetch()) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
+
+    $changedByChat = $isRestaurant ? (int)($krRestSession['id'] ?? 0) : null;
+    $changedByUser = !$isRestaurant ? ($krPortalUser['name'] ?? null) : null;
+
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare("
+            INSERT INTO keg_return_bso_history
+                (request_id, old_series, old_number, new_series, new_number, reason, changed_by_chat_id, changed_by_user)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ")->execute([
+            $krId,
+            $row['bso_series'] ?: null,
+            $row['bso_number'] ?: null,
+            $newSeries,
+            $newNumber,
+            $reason,
+            $changedByChat,
+            $changedByUser,
+        ]);
+        $pdo->prepare("UPDATE keg_returns SET bso_series = ?, bso_number = ? WHERE id = ?")
+            ->execute([$newSeries, $newNumber, $krId]);
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        if ($e->getCode() == 23000) krRespond(['error' => 'Заявка с таким БСО уже существует'], 422);
+        error_log('keg_returns replace-bso: ' . $e->getMessage());
+        krRespond(['error' => 'Ошибка замены БСО'], 500);
+    }
+
+    $rowAfter = krGetReturnWithItems($pdo, $krId);
+    krRespond($rowAfter);
 }
 
 // ═══ Числа прописью ═══
@@ -1076,8 +1263,13 @@ if ($method === 'GET' && $krId && $krAction === 'excel') {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
 
-    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
-        krRespond(['error' => 'Нет доступа'], 403);
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+    } else {
+        krRequirePortalAccess($krPortalUser, 'view');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
     }
 
     $bsoSeries = $row['bso_series'] ?? '';
@@ -1103,8 +1295,13 @@ if ($method === 'GET' && $krId && $krAction === 'excel') {
 if ($method === 'GET' && $krId && $krAction === 'print') {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
-    if ($isRestaurant && (int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
-        krRespond(['error' => 'Нет доступа'], 403);
+    if ($isRestaurant) {
+        if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
+            krRespond(['error' => 'Нет доступа'], 403);
+        }
+    } else {
+        krRequirePortalAccess($krPortalUser, 'view');
+        krRequireGroupAccess($krPortalUser, $row['legal_entity_group'] ?? null);
     }
 
     $bsoSeries = $row['bso_series'] ?? '';
@@ -1128,6 +1325,7 @@ if ($method === 'GET' && $krId && $krAction === 'print') {
 // ── GET /keg-returns/import-template.xlsx ── шаблон для логистов
 if ($method === 'GET' && ($krSubSlug === 'import-template.xlsx' || $krSubSlug === 'import-template')) {
     if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    krRequirePortalAccess($krPortalUser, 'full');
 
     $ss = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
 
@@ -1229,6 +1427,10 @@ if ($method === 'GET' && ($krSubSlug === 'import-template.xlsx' || $krSubSlug ==
 // ── POST /keg-returns/import-routing ──
 if ($method === 'POST' && $krSubSlug === 'import-routing') {
     if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+    // Массовая операция по всем ресторанам группы BK_VM — требуется full-доступ
+    // и наличие BK_VM в legal_entities пользователя.
+    krRequirePortalAccess($krPortalUser, 'full');
+    krRequireGroupAccess($krPortalUser, 'BK_VM');
 
     // При multipart/form-data данные приходят в $_POST, не в $body
     $returnDate = trim($_POST['return_date'] ?? $body['return_date'] ?? '');

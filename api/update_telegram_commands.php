@@ -6,6 +6,8 @@
  *   php /var/www/bk-calc/api/update_telegram_commands.php
  */
 
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
+
 $envFile = __DIR__ . '/.env';
 if (!file_exists($envFile)) {
     fwrite(STDERR, "No .env\n");

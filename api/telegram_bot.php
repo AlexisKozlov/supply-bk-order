@@ -1748,11 +1748,21 @@ if (isset($input['callback_query'])) {
                 break;
             case 'sales': cmdSales($chatId, $user, $msgId); break;
             // cards обрабатывается выше в отдельном блоке (доступен без аккаунта)
-            case 'rest_subs_stats': cmdRestSubsStats($chatId, $msgId); break;
-            case 'corrections': cmdCorrections($chatId, $msgId); break;
+            case 'rest_subs_stats':
+                if (!botRequireAdmin($user, $chatId, $msgId)) break;
+                cmdRestSubsStats($chatId, $msgId);
+                break;
+            case 'corrections':
+                if (!botRequireAdmin($user, $chatId, $msgId)) break;
+                cmdCorrections($chatId, $msgId);
+                break;
             case 'ro_status': cmdRoStatus($chatId, $user, $msgId); break;
-            case 'ro_send_logins': restRoSendLogins($chatId, $msgId); break;
+            case 'ro_send_logins':
+                if (!botRequireAdmin($user, $chatId, $msgId)) break;
+                restRoSendLogins($chatId, $msgId);
+                break;
             case 'upload_order_file':
+                if (!botRequireAdmin($user, $chatId, $msgId)) break;
                 file_put_contents(sys_get_temp_dir() . "/import_{$chatId}.txt", 'order_file');
                 editMessage($chatId, $msgId, "📄 <b>Файл заказа</b>\n─────────────────────\nОтправьте файл Excel для ресторанов.\nОн будет доступен всем ресторанам через бот.", ['inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]]]);
                 break;
@@ -2456,7 +2466,11 @@ if (file_exists($importModeFile) && isset($msg['document'])) {
     $importType = trim(@file_get_contents($importModeFile));
     @unlink($importModeFile);
     $user = getUser($chatId);
-    if ($user && $importType === 'order_file') {
+    // Дополнительная страховка: даже если флаг как-то остался в /tmp, файл
+    // обработается только если у юзера роль admin/manager.
+    $userRole = $user['role'] ?? '';
+    $isAdminUploader = in_array($userRole, ['admin', 'manager'], true);
+    if ($user && $isAdminUploader && $importType === 'order_file') {
         $fileId = $msg['document']['file_id'] ?? null;
         $fileName = $msg['document']['file_name'] ?? 'file';
         if ($fileId) {

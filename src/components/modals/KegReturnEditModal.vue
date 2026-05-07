@@ -37,6 +37,22 @@
               </div>
             </div>
 
+            <div v-if="(form.bso_history || []).length" class="kr-em-bso-history">
+              <div class="kr-em-bso-history-head">
+                <span class="kr-em-bso-history-tag">БСО заменён {{ form.bso_history.length }}×</span>
+              </div>
+              <ul class="kr-em-bso-history-list">
+                <li v-for="h in form.bso_history" :key="h.id">
+                  <span class="kr-em-bso-old">{{ h.old_series || '—' }} {{ h.old_number || '' }}</span>
+                  <span class="kr-em-bso-arrow">→</span>
+                  <span class="kr-em-bso-new">{{ h.new_series }} {{ h.new_number }}</span>
+                  <span class="kr-em-bso-time">{{ fmtDateTime(h.changed_at) }}</span>
+                  <span class="kr-em-bso-by">{{ h.changed_by_user || (h.changed_by_chat_id ? 'ресторан' : '') }}</span>
+                  <div class="kr-em-bso-reason">{{ h.reason }}</div>
+                </li>
+              </ul>
+            </div>
+
             <div class="kr-em-field">
               <span class="kr-em-label">Статус</span>
               <span :class="'kr-badge kr-badge-' + form.status">{{ statusLabel(form.status) }}</span>
@@ -275,6 +291,15 @@ function statusLabel(s) {
   return map[s] || s;
 }
 
+function fmtDateTime(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return s;
+  const date = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return `${date} ${time}`;
+}
+
 onMounted(() => {
   loadData();
   loadCatalog();
@@ -310,4 +335,35 @@ onMounted(() => {
 .kr-badge-CANCELLED { background: #fce4ec; color: #c62828; }
 .btn-danger { background: #fce4ec; color: #c62828; }
 .btn-danger:hover { background: #f8bbd0; }
+
+/* История замен БСО */
+.kr-em-bso-history {
+  background: #FFF8F0; border-left: 3px solid #F4A261; border-radius: 6px;
+  padding: 10px 12px; margin: -2px 0 4px;
+}
+.kr-em-bso-history-head { margin-bottom: 6px; }
+.kr-em-bso-history-tag {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  background: #FFE0B2; color: #C16B4D;
+  font-size: 11px; font-weight: 700;
+}
+.kr-em-bso-history-list { list-style: none; padding: 0; margin: 0; }
+.kr-em-bso-history-list li {
+  padding: 6px 0; border-bottom: 1px dashed #E8DCC8;
+  font-size: 13px;
+  display: grid;
+  grid-template-columns: auto auto auto 1fr auto;
+  gap: 6px 8px;
+  align-items: baseline;
+}
+.kr-em-bso-history-list li:last-child { border-bottom: none; }
+.kr-em-bso-old { color: #8B7355; text-decoration: line-through; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kr-em-bso-arrow { color: #C16B4D; }
+.kr-em-bso-new { font-weight: 700; color: #2C1A12; font-variant-numeric: tabular-nums; }
+.kr-em-bso-time { font-size: 12px; color: #8B7355; white-space: nowrap; }
+.kr-em-bso-by { font-size: 12px; color: #8B7355; }
+.kr-em-bso-reason {
+  grid-column: 1 / -1;
+  font-size: 12.5px; color: #6B5344;
+}
 </style>

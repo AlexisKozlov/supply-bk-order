@@ -208,6 +208,59 @@
             </template>
           </section>
 
+          <!-- Секция: Замена БСО (после дедлайна 10:00 и до cutoff 16:00) -->
+          <section
+            v-if="bsoSectionVisible"
+            class="krt-section krt-bso-section"
+          >
+            <div class="krt-section-head">
+              <h3>
+                Бланк БСО
+                <span v-if="(form.bso_history || []).length" class="krt-bso-replaced-tag">
+                  заменён {{ form.bso_history.length }}×
+                </span>
+              </h3>
+            </div>
+
+            <!-- Активный CTA замены: окно 10:00–16:00 -->
+            <div v-if="form.can_replace_bso" class="krt-bso-replace-cta">
+              <div class="krt-bso-replace-text">
+                <div class="krt-bso-replace-title">Испортили БСО при печати?</div>
+                <div class="krt-bso-replace-sub">
+                  Окно замены до <b>{{ cutoffFormatted }}</b>. Потом изменить нельзя — заявки уйдут лог-провайдеру финально.
+                </div>
+              </div>
+              <button class="krt-btn primary" @click="openBsoReplace" :disabled="saving">
+                Заменить БСО
+              </button>
+            </div>
+
+            <!-- Окно закрылось -->
+            <div v-else-if="cutoffPassed && (form.status === 'SUBMITTED' || form.status === 'ROUTED')" class="krt-bso-cutoff-msg">
+              Окно замены БСО закрыто (после 16:00). Если бланк испорчен — свяжитесь с отделом закупок.
+            </div>
+
+            <!-- История замен -->
+            <div v-if="(form.bso_history || []).length" class="krt-bso-history">
+              <div class="krt-bso-history-title">История замен</div>
+              <ul class="krt-bso-history-list">
+                <li v-for="h in form.bso_history" :key="h.id" class="krt-bso-history-item">
+                  <div class="krt-bso-history-row">
+                    <span class="krt-bso-history-old">
+                      {{ h.old_series || '—' }} {{ h.old_number || '' }}
+                    </span>
+                    <span class="krt-bso-history-arrow">→</span>
+                    <span class="krt-bso-history-new">
+                      {{ h.new_series }} {{ h.new_number }}
+                    </span>
+                    <span class="krt-bso-history-time">{{ fmtDateTime(h.changed_at) }}</span>
+                  </div>
+                  <div class="krt-bso-history-reason">{{ h.reason }}</div>
+                </li>
+              </ul>
+            </div>
+          </section>
+
           <!-- Секция: Кеги -->
           <section class="krt-section">
             <div class="krt-section-head">
@@ -354,6 +407,73 @@
             :class="confirmModal.danger ? 'danger' : 'primary'"
             @click="confirmOk"
           >{{ confirmModal.okText || 'OK' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Модал «Заменить БСО» -->
+    <div v-if="bsoModal.show" class="krt-confirm-overlay" @click.self="closeBsoReplace">
+      <div class="krt-confirm krt-bso-modal">
+        <h3>Заменить БСО</h3>
+        <p class="krt-bso-modal-current">
+          Текущий: <b>{{ form.bso_series }} {{ form.bso_number }}</b>
+        </p>
+
+        <div class="krt-bso-modal-row">
+          <div class="krt-fld krt-fld-bso-series">
+            <label class="krt-fld-label">Новая серия</label>
+            <input
+              :value="bsoModal.newSeries"
+              @input="onModalSeriesInput"
+              type="text"
+              maxlength="2"
+              placeholder="АА"
+              class="krt-input krt-input-mono"
+              autocomplete="off"
+            />
+          </div>
+          <div class="krt-fld krt-fld-bso-number">
+            <label class="krt-fld-label">Новый номер</label>
+            <input
+              :value="bsoModal.newNumber"
+              @input="onModalNumberInput"
+              type="text"
+              inputmode="numeric"
+              maxlength="7"
+              placeholder="0000000"
+              class="krt-input krt-input-mono"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+
+        <div class="krt-fld">
+          <label class="krt-fld-label">Причина замены</label>
+          <select v-model="bsoModal.reasonKey" class="krt-input">
+            <option v-for="r in BSO_REASONS" :key="r.key" :value="r.key">{{ r.label }}</option>
+          </select>
+        </div>
+
+        <div v-if="bsoModal.reasonKey === 'OTHER'" class="krt-fld">
+          <label class="krt-fld-label">Уточните причину</label>
+          <input
+            v-model="bsoModal.reasonOther"
+            type="text"
+            maxlength="200"
+            placeholder="Например: попал в воду"
+            class="krt-input"
+          />
+        </div>
+
+        <p class="krt-bso-modal-warn">
+          Старый номер сохранится в истории заявки. Окно замены до <b>{{ cutoffFormatted }}</b>.
+        </p>
+
+        <div class="krt-confirm-actions">
+          <button class="krt-btn ghost" @click="closeBsoReplace" :disabled="bsoModal.saving">Отмена</button>
+          <button class="krt-btn primary" @click="replaceBsoSubmit" :disabled="bsoModal.saving">
+            {{ bsoModal.saving ? 'Сохраняем...' : 'Заменить' }}
+          </button>
         </div>
       </div>
     </div>
@@ -509,33 +629,141 @@ function confirmCancel() {
 
 // Дедлайн
 const deadlineIso = ref(null);
+const cutoffIso = ref(null);
 const deadlinePassed = ref(false);
+const cutoffPassed = ref(false);
 let deadlineTimer = null;
 
-const deadlineFormatted = computed(() => {
-  if (!deadlineIso.value) return '';
-  const d = new Date(deadlineIso.value);
+function fmtIsoLocal(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const date = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   return `${date} в ${time}`;
-});
+}
+
+const deadlineFormatted = computed(() => fmtIsoLocal(deadlineIso.value));
+const cutoffFormatted   = computed(() => fmtIsoLocal(cutoffIso.value));
 
 function startDeadlineWatch() {
   stopDeadlineWatch();
-  if (!deadlineIso.value) return;
+  if (!deadlineIso.value && !cutoffIso.value) return;
   const check = () => {
-    const dl = new Date(deadlineIso.value).getTime();
-    deadlinePassed.value = Date.now() >= dl;
+    if (deadlineIso.value) {
+      deadlinePassed.value = Date.now() >= new Date(deadlineIso.value).getTime();
+    }
+    if (cutoffIso.value) {
+      cutoffPassed.value = Date.now() >= new Date(cutoffIso.value).getTime();
+    }
   };
   check();
-  // Раз в минуту обновляем флаг — этого достаточно: в формулировке точность секунд не нужна.
+  // Раз в минуту обновляем флаги — этого достаточно: точность секунд не нужна.
   deadlineTimer = setInterval(check, 60000);
 }
 function stopDeadlineWatch() {
   if (deadlineTimer) { clearInterval(deadlineTimer); deadlineTimer = null; }
 }
 onUnmounted(stopDeadlineWatch);
+
+// Секция БСО показывается, если есть, что показать: либо доступна замена,
+// либо есть история, либо окно замены уже закрылось (чтобы пояснить ресторану).
+const bsoSectionVisible = computed(() => {
+  if (!form.value || !form.value.status) return false;
+  if (form.value.status === 'DRAFT' || form.value.status === 'CANCELLED') return false;
+  if (form.value.can_replace_bso) return true;
+  if ((form.value.bso_history || []).length) return true;
+  if (cutoffPassed.value) return true;
+  // SUBMITTED/ROUTED, но дедлайн ещё не наступил — обычное редактирование, секция не нужна
+  return false;
+});
+
+// Причины замены
+const BSO_REASONS = [
+  { key: 'PRINT_DAMAGED', label: 'Испорчен при печати' },
+  { key: 'WRONG_FORM',    label: 'Не тот бланк / не та сторона' },
+  { key: 'LOST',          label: 'Утерян' },
+  { key: 'OTHER',         label: 'Другое (указать)' },
+];
+
+// Модалка замены
+const bsoModal = reactive({
+  show: false,
+  newSeries: '',
+  newNumber: '',
+  reasonKey: 'PRINT_DAMAGED',
+  reasonOther: '',
+  saving: false,
+});
+
+function openBsoReplace() {
+  bsoModal.show = true;
+  bsoModal.newSeries = form.value.bso_series || '';
+  bsoModal.newNumber = '';
+  bsoModal.reasonKey = 'PRINT_DAMAGED';
+  bsoModal.reasonOther = '';
+  bsoModal.saving = false;
+}
+function closeBsoReplace() {
+  if (bsoModal.saving) return;
+  bsoModal.show = false;
+}
+function onModalSeriesInput(e) {
+  const raw = String(e.target.value || '');
+  const filtered = raw.replace(/[^А-Яа-яЁё]/g, '').toUpperCase().slice(0, 2);
+  bsoModal.newSeries = filtered;
+  if (e.target.value !== filtered) e.target.value = filtered;
+}
+function onModalNumberInput(e) {
+  const raw = String(e.target.value || '');
+  const filtered = raw.replace(/\D/g, '').slice(0, 7);
+  bsoModal.newNumber = filtered;
+  if (e.target.value !== filtered) e.target.value = filtered;
+}
+
+async function replaceBsoSubmit() {
+  const s = (bsoModal.newSeries || '').trim();
+  const n = (bsoModal.newNumber || '').trim();
+  if (!/^[А-ЯЁ]{2}$/u.test(s)) { toast.error('Серия БСО', 'Две заглавные кириллические буквы.'); return; }
+  if (!/^\d{7}$/.test(n))      { toast.error('Номер БСО', 'Ровно 7 цифр.'); return; }
+  if (s === form.value.bso_series && n === form.value.bso_number) {
+    toast.error('Тот же БСО', 'Новый номер совпадает с текущим.');
+    return;
+  }
+  const reasonDef = BSO_REASONS.find(r => r.key === bsoModal.reasonKey);
+  let reason = reasonDef?.label || '';
+  if (bsoModal.reasonKey === 'OTHER') {
+    const custom = (bsoModal.reasonOther || '').trim();
+    if (!custom) { toast.error('Причина', 'Уточните причину замены.'); return; }
+    reason = 'Другое: ' + custom;
+  }
+  bsoModal.saving = true;
+  try {
+    const res = await fetch(`/api/keg-returns/${editingId.value}/replace-bso`, {
+      method: 'POST',
+      headers: buildHeaders(true),
+      body: JSON.stringify({ new_series: s, new_number: n, reason }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Не удалось заменить БСО');
+    bsoModal.show = false;
+    await loadFormData(editingId.value);
+    toast.success('БСО заменён', `Новый номер: ${s} ${n}`);
+  } catch (e) {
+    toast.error('Не удалось заменить БСО', e.message || '');
+  } finally {
+    bsoModal.saving = false;
+  }
+}
+
+function fmtDateTime(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return s;
+  const date = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return `${date} ${time}`;
+}
 
 const WEEKDAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
@@ -701,9 +929,16 @@ async function loadFormData(id) {
       kegQties.value[item.keg_code] = item.quantity;
     }
     deadlineIso.value = data.deadline_iso || null;
+    cutoffIso.value = data.cutoff_iso || null;
+    deadlinePassed.value = false;
+    cutoffPassed.value = false;
     fieldErr.return_date = false;
     fieldErr.bso = false;
-    if (deadlineIso.value && (data.status === 'DRAFT' || data.status === 'SUBMITTED')) {
+    // Тикаем таймер, пока заявка ещё подвижная (DRAFT/SUBMITTED для дедлайна
+    // или SUBMITTED/ROUTED для cutoff — чтобы во время сессии вовремя
+    // переключилась видимость секции замены БСО).
+    const movable = ['DRAFT', 'SUBMITTED', 'ROUTED'].includes(data.status);
+    if (movable && (deadlineIso.value || cutoffIso.value)) {
       startDeadlineWatch();
     } else {
       stopDeadlineWatch();
@@ -1374,6 +1609,71 @@ onMounted(async () => {
 .krt-confirm h3 { margin: 0 0 8px; font-size: 17px; color: #2C1A12; }
 .krt-confirm p { margin: 0 0 18px; color: #6B5344; font-size: 14px; line-height: 1.5; }
 .krt-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ═══ Секция «Бланк БСО» (замена + история) ═══ */
+.krt-bso-section { background: #fff; }
+.krt-bso-replaced-tag {
+  display: inline-block; margin-left: 8px;
+  padding: 2px 9px; border-radius: 999px;
+  background: #FFE0B2; color: #C16B4D;
+  font-size: 11px; font-weight: 700; vertical-align: 2px;
+}
+.krt-bso-replace-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  padding: 14px 16px; border-radius: 12px;
+  background: linear-gradient(135deg, #FFF8F0, #FFFBF6);
+  border: 1.5px solid #FFD9B6; margin-bottom: 12px;
+}
+.krt-bso-replace-text { flex: 1; min-width: 200px; }
+.krt-bso-replace-title { font-weight: 700; font-size: 15px; color: #2C1A12; margin-bottom: 2px; }
+.krt-bso-replace-sub { font-size: 12.5px; color: #6B5344; line-height: 1.4; }
+.krt-bso-cutoff-msg {
+  padding: 12px 14px; border-radius: 10px;
+  background: #F7F2EB; color: #6B5344;
+  font-size: 13px; line-height: 1.5; margin-bottom: 12px;
+}
+.krt-bso-history-title {
+  font-size: 12px; font-weight: 700; color: #8B7355;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  margin: 4px 0 6px;
+}
+.krt-bso-history-list { list-style: none; padding: 0; margin: 0; }
+.krt-bso-history-item {
+  padding: 10px 12px; border-radius: 8px;
+  background: #FAF6EF; margin-bottom: 6px;
+  border-left: 3px solid #F4A261;
+}
+.krt-bso-history-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: 13.5px; color: #2C1A12;
+  font-variant-numeric: tabular-nums;
+}
+.krt-bso-history-old { color: #8B7355; text-decoration: line-through; font-weight: 600; }
+.krt-bso-history-arrow { color: #C16B4D; }
+.krt-bso-history-new { font-weight: 700; }
+.krt-bso-history-time { margin-left: auto; font-size: 12px; color: #8B7355; }
+.krt-bso-history-reason { margin-top: 2px; font-size: 12.5px; color: #6B5344; }
+
+/* ═══ Модалка «Заменить БСО» ═══ */
+.krt-bso-modal { max-width: 460px; }
+.krt-bso-modal-current {
+  margin: -2px 0 14px; padding: 8px 12px;
+  background: #FAF6EF; border-radius: 8px;
+  font-size: 13px; color: #6B5344;
+}
+.krt-bso-modal-current b { color: #2C1A12; font-variant-numeric: tabular-nums; }
+.krt-bso-modal-row {
+  display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; margin-bottom: 10px;
+}
+.krt-bso-modal-warn {
+  margin: 12px 0 16px; font-size: 12px; color: #8B7355;
+  padding: 8px 10px; background: #FFF1E0; border-radius: 8px; line-height: 1.45;
+}
+.krt-bso-modal-warn b { color: #C16B4D; }
+@media (max-width: 480px) {
+  .krt-bso-modal-row { grid-template-columns: 1fr 1fr; }
+}
 
 /* ═══ Модал «Что дальше» после формирования ТТН ═══ */
 .krt-submitted-overlay {

@@ -47,7 +47,12 @@
           <td>№{{ row.restaurant_number }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
           <td>{{ pickupAddressFor(row) }}</td>
           <td>{{ fmtDate(row.return_date) }}</td>
-          <td>{{ row.bso_series }} {{ row.bso_number }}</td>
+          <td>
+            {{ row.bso_series }} {{ row.bso_number }}
+            <span v-if="Number(row.bso_replaced_count) > 0" class="kr-bso-replaced" :title="'БСО заменён ' + row.bso_replaced_count + ' раз'">
+              ↻{{ row.bso_replaced_count }}
+            </span>
+          </td>
           <td><span :class="'kr-badge kr-badge-' + row.status">{{ statusLabel(row.status) }}</span></td>
           <td>{{ row.total_kegs != null ? row.total_kegs : '—' }}</td>
           <td>{{ row.driver || '—' }}</td>
@@ -396,6 +401,13 @@ onMounted(() => {
 .kr-badge-SUBMITTED { background: #fff3e0; color: #e65100; }
 .kr-badge-ROUTED { background: #e8f5e9; color: #2e7d32; }
 .kr-badge-CANCELLED { background: #fce4ec; color: #c62828; }
+.kr-bso-replaced {
+  display: inline-block; margin-left: 6px;
+  padding: 1px 7px; border-radius: 999px;
+  background: #FFE0B2; color: #C16B4D;
+  font-size: 11px; font-weight: 700; line-height: 1.6;
+  vertical-align: 1px;
+}
 .kr-import-modal { max-width: 820px; width: 100%; }
 .kr-import-body { padding: 12px 0; }
 .kr-em-field { display: flex; align-items: center; gap: 12px; }

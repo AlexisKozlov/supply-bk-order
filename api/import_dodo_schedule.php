@@ -25,6 +25,8 @@
  *   php /var/www/bk-calc/api/import_dodo_schedule.php
  */
 
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
+
 require_once __DIR__ . '/lib/SimpleXLSX.php';
 
 // .env для доступа к БД

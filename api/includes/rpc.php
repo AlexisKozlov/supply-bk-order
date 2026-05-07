@@ -694,6 +694,8 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Неверный номер ресторана'], 400);
         }
         $normalizedNumber = (string)$parsed['number'];
+        // Группа юрлиц обязательна для разделения BK_VM ↔ PS при пересечениях номеров.
+        $normalizedGroup  = $parsed['group'];
 
         // Тихий троттлинг: не сообщаем о превышении, чтобы не дать перебирать
         // номера и не сигналить об их существовании. Лимиты:
@@ -719,9 +721,9 @@ if ($endpoint === 'rpc') {
             // Если таблицы нет/проблема с БД — не блокируем поток сброса.
         }
 
-        // Существует ли ресторан
-        $restCheck = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND active = 1 LIMIT 1");
-        $restCheck->execute([$normalizedNumber]);
+        // Существует ли ресторан в этой группе
+        $restCheck = $pdo->prepare("SELECT id FROM restaurants WHERE number = ? AND legal_entity_group = ? AND active = 1 LIMIT 1");
+        $restCheck->execute([$normalizedNumber, $normalizedGroup]);
         if (!$restCheck->fetch()) {
             // Не сообщаем о факте существования — для безопасности.
             try {
@@ -731,9 +733,9 @@ if ($endpoint === 'rpc') {
             respond(['success' => true]);
         }
 
-        // Есть ли подписчики в Telegram
-        $subCheck = $pdo->prepare("SELECT COUNT(*) FROM ro_telegram_subs WHERE restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
-        $subCheck->execute([$normalizedNumber]);
+        // Есть ли подписчики в Telegram (в этой группе)
+        $subCheck = $pdo->prepare("SELECT COUNT(*) FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+        $subCheck->execute([$normalizedNumber, $normalizedGroup]);
         $subCount = (int)$subCheck->fetchColumn();
         if ($subCount === 0) {
             try {
@@ -747,13 +749,13 @@ if ($endpoint === 'rpc') {
 
         // expires_at считаем в SQL, чтобы быть в одной таймзоне с created_at и
         // проверками верификации (PHP может быть в UTC, MySQL — в локальной).
-        $pdo->prepare("INSERT INTO password_reset_codes (restaurant_number, code, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))")
-            ->execute([$normalizedNumber, $code]);
+        $pdo->prepare("INSERT INTO password_reset_codes (restaurant_number, legal_entity_group, code, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))")
+            ->execute([$normalizedNumber, $normalizedGroup, $code]);
 
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if ($botToken) {
-            $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
-            $subs->execute([$normalizedNumber]);
+            $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+            $subs->execute([$normalizedNumber, $normalizedGroup]);
             $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
 
             $displayNumber = formatRestaurantNumber($normalizedNumber);
@@ -799,6 +801,7 @@ if ($endpoint === 'rpc') {
             respond(['error' => 'Неверный номер ресторана'], 400);
         }
         $normalizedNumber = (string)$parsed['number'];
+        $normalizedGroup  = $parsed['group'];
 
         // Лимит на перебор кода: 5 неудач в течение 10 минут — отказ.
         try {
@@ -810,8 +813,10 @@ if ($endpoint === 'rpc') {
         } catch (Exception $e) {}
 
         // Проверки срока действия делаем в SQL, чтобы не зависеть от таймзоны PHP.
-        $stmt = $pdo->prepare("SELECT id, used_at, (expires_at < NOW()) AS is_expired FROM password_reset_codes WHERE restaurant_number = ? AND code = ? ORDER BY created_at DESC LIMIT 1");
-        $stmt->execute([$normalizedNumber, $code]);
+        // Поиск кода — строго в рамках пары (номер + группа), чтобы не подменить
+        // другую группу при пересечении номеров.
+        $stmt = $pdo->prepare("SELECT id, used_at, (expires_at < NOW()) AS is_expired FROM password_reset_codes WHERE restaurant_number = ? AND legal_entity_group = ? AND code = ? ORDER BY created_at DESC LIMIT 1");
+        $stmt->execute([$normalizedNumber, $normalizedGroup, $code]);
         $row = $stmt->fetch();
 
         if (!$row) {
@@ -851,7 +856,7 @@ if ($endpoint === 'rpc') {
 
         // Токен должен быть валидным и не старше 30 минут с момента активации.
         // Сравнение времени делаем в SQL, чтобы не зависеть от таймзоны PHP.
-        $stmt = $pdo->prepare("SELECT id, restaurant_number, used_at, (used_at < (NOW() - INTERVAL 30 MINUTE)) AS is_expired FROM password_reset_codes WHERE reset_token = ? LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, restaurant_number, legal_entity_group, used_at, (used_at < (NOW() - INTERVAL 30 MINUTE)) AS is_expired FROM password_reset_codes WHERE reset_token = ? LIMIT 1");
         $stmt->execute([$resetToken]);
         $row = $stmt->fetch();
 
@@ -868,28 +873,33 @@ if ($endpoint === 'rpc') {
         }
 
         $restaurantNumber = $row['restaurant_number'];
+        // Группа фиксирована тем, в какой группе создавался код. UPDATE,
+        // DELETE и уведомления выполняются строго по паре, чтобы не задеть
+        // одноимённый номер в другой группе.
+        $resetGroup = $row['legal_entity_group'];
 
         $hash = password_hash($newPassword, PASSWORD_BCRYPT);
-        $updateStmt = $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ? AND is_active = 1");
-        $updateStmt->execute([$hash, $restaurantNumber]);
+        $updateStmt = $pdo->prepare("UPDATE ro_users SET password_hash = ? WHERE restaurant_number = ? AND legal_entity_group = ? AND is_active = 1");
+        $updateStmt->execute([$hash, $restaurantNumber, $resetGroup]);
 
         if ($updateStmt->rowCount() === 0) {
             respond(['error' => 'Ресторан не найден'], 404);
         }
 
-        // Сбрасываем все коды по этому ресторану.
-        $pdo->prepare("DELETE FROM password_reset_codes WHERE restaurant_number = ?")->execute([$restaurantNumber]);
+        // Сбрасываем все коды по этому ресторану в этой группе.
+        $pdo->prepare("DELETE FROM password_reset_codes WHERE restaurant_number = ? AND legal_entity_group = ?")
+            ->execute([$restaurantNumber, $resetGroup]);
 
         // Сбрасываем активные сессии в кабинете, чтобы старая вкладка не работала.
         try {
-            $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE restaurant_number = ?")
-                ->execute([$restaurantNumber]);
+            $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE restaurant_number = ? AND legal_entity_group = ?")
+                ->execute([$restaurantNumber, $resetGroup]);
         } catch (Exception $e) {}
 
         $botToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? '';
         if ($botToken) {
-            $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
-            $subs->execute([$restaurantNumber]);
+            $subs = $pdo->prepare("SELECT DISTINCT chat_id FROM ro_telegram_subs WHERE restaurant_number = ? AND legal_entity_group = ? AND (verified_at IS NOT NULL OR (must_reverify_by IS NOT NULL AND must_reverify_by > NOW()))");
+            $subs->execute([$restaurantNumber, $resetGroup]);
             $chatIds = $subs->fetchAll(PDO::FETCH_COLUMN);
 
             $displayNumber = formatRestaurantNumber($restaurantNumber);

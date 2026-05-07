@@ -184,7 +184,7 @@ function getToolDefinitions() {
         ],
         [
             'name' => 'run_sql',
-            'description' => 'Выполнить произвольный SELECT-запрос к базе данных. Используй только когда другие инструменты не подходят. Доступные таблицы: products, analysis_data, orders, order_items, suppliers, plans, price_agreements, product_prices, price_history, stock_malling, restaurants, delivery_schedule, restaurant_sales, cards, tenders, tender_items, tender_offers. ТОЛЬКО SELECT, лимит 50 строк.',
+            'description' => 'Выполнить произвольный SELECT-запрос к базе данных. Используй только когда другие инструменты не подходят. Доступные таблицы: products, analysis_data, orders, order_items, suppliers, plans, price_agreements, product_prices, price_history, stock_malling, restaurants, delivery_schedule, restaurant_sales, cards, tenders, tender_items, tender_offers. ТОЛЬКО SELECT, лимит 50 строк. ЗАПРЕЩЕНО: users, ro_users, user_sessions, ro_telegram_subs, password_reset_codes, ro_tg_tokens, api_keys, audit_log, bug_reports, information_schema, mysql.*; колонки password, password_hash, session_token, token, reset_token, api_key; UNION. На такие запросы сервер вернёт ошибку.',
             'input_schema' => [
                 'type' => 'object',
                 'properties' => [
@@ -600,6 +600,44 @@ function toolRunSql($sql, $params, $entity) {
     if (preg_match('/INTO\s+(OUTFILE|DUMPFILE)\b|LOAD_FILE\s*\(/i', $sqlClean)) return "Запрещённая операция.";
     // Защита от функций, которые могут повесить сервер
     if (preg_match('/\b(SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK|WAIT_FOR_EXECUTED_GTID_SET)\s*\(/i', $sqlClean)) return "Запрещённая функция.";
+
+    // UNION может «приклеить» к легальному запросу секрет (SELECT 1, password FROM users).
+    if (preg_match('/\bUNION\b/i', $sqlClean)) return "UNION в запросах запрещён.";
+
+    // Системные таблицы — выгружают структуру и сами хеши через INFORMATION_SCHEMA / mysql.user.
+    if (preg_match('/\b(information_schema|mysql|performance_schema|sys)\s*\./i', $sqlClean)) {
+        return "Запрос к системным таблицам запрещён.";
+    }
+
+    // Blacklist таблиц с конфиденциальными данными (хеши паролей, активные
+    // токены сессий/binding-кодов, аудит). Через бот доступ к ним не нужен.
+    $forbiddenTables = [
+        'users', 'ro_users', 'user_sessions', 'ro_telegram_subs',
+        'password_reset_codes', 'password_reset_logs', 'ro_tg_tokens',
+        'api_keys', 'audit_log', 'bug_reports',
+    ];
+    foreach ($forbiddenTables as $t) {
+        if (preg_match('/\b' . preg_quote($t, '/') . '\b/i', $sqlClean)) {
+            error_log("toolRunSql blocked: table '$t' in SQL: " . $sqlClean);
+            return "Запрос обращается к закрытой таблице. Эти данные нельзя получать через бот.";
+        }
+    }
+
+    // Blacklist опасных колонок (дополнительная страховка на случай, если
+    // когда-то добавят таблицу с такими полями и забудут обновить список выше).
+    $forbiddenColumns = ['password', 'password_hash', 'session_token', 'reset_token', 'api_key', 'must_reverify_by'];
+    foreach ($forbiddenColumns as $c) {
+        if (preg_match('/\b' . preg_quote($c, '/') . '\b/i', $sqlClean)) {
+            error_log("toolRunSql blocked: column '$c' in SQL: " . $sqlClean);
+            return "Запрос обращается к закрытой колонке.";
+        }
+    }
+    // 'token' проверяем отдельно с границами без буквенно-цифровых символов,
+    // чтобы не задеть невинные поля (next_token, tokenizer и т.п.).
+    if (preg_match('/(^|[^a-zA-Z_])token($|[^a-zA-Z_])/i', $sqlClean)) {
+        error_log("toolRunSql blocked: column 'token' in SQL: " . $sqlClean);
+        return "Запрос обращается к закрытой колонке (token).";
+    }
 
     // Добавляем LIMIT если нет
     if (!preg_match('/\bLIMIT\b/i', $sqlClean)) $sqlClean .= ' LIMIT 50';

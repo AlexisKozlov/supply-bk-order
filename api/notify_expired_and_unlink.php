@@ -17,6 +17,8 @@
  * Запуск (вручную): php /var/www/bk-calc/api/notify_expired_and_unlink.php
  */
 
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
+
 $envFile = __DIR__ . '/.env';
 if (!file_exists($envFile)) { fwrite(STDERR, "No .env\n"); exit(1); }
 foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {

@@ -294,3 +294,18 @@ function buildDirectAnswer($context) {
 
     return $text;
 }
+
+/**
+ * Проверка, что у пользователя бота достаточно прав для админских операций
+ * (массовая рассылка, заливка файла-заказа, статистика подписок и т.п.).
+ * При отказе сам редактирует сообщение и возвращает false — вызывающий
+ * делает `break` без обработки команды.
+ */
+function botRequireAdmin(?array $user, int $chatId, int $msgId): bool {
+    $role = $user['role'] ?? '';
+    if (in_array($role, ['admin', 'manager'], true)) return true;
+    editMessage($chatId, $msgId, '⛔ Недостаточно прав. Эта команда доступна только администраторам.', [
+        'inline_keyboard' => [[['text' => '◂ Меню', 'callback_data' => 'cmd_menu']]],
+    ]);
+    return false;
+}

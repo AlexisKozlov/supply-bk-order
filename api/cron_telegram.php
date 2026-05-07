@@ -4,6 +4,8 @@
  * Запуск каждые 5 минут: php /var/www/bk-calc/api/cron_telegram.php
  */
 
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
+
 // Защита от параллельного запуска (flock)
 $lockFile = __DIR__ . '/cron_telegram.lock';
 $lockFp = fopen($lockFile, 'w');
