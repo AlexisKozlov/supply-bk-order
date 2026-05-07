@@ -1676,13 +1676,15 @@ const cabIconSvg = {
   skip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M7 17 17 7"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.5 4 4-.5L18.5 9 15 5.5 4 16.5Z"/><path d="m13.5 7 3.5 3.5"/></svg>',
   truck: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+  // Возврат кег: кега + дугообразная стрелка возврата сверху (стиль сайдбара)
+  kegReturn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
 };
 
 // Иконки для крупных плиток дашборда — более «жирные» и выразительные.
 const tileIconSvg = {
   scanner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5"/><line x1="7" y1="9" x2="7" y2="15"/><line x1="10.5" y1="9" x2="10.5" y2="15"/><line x1="13.5" y1="9" x2="13.5" y2="15"/><line x1="17" y1="9" x2="17" y2="15"/><line x1="3" y1="12" x2="21" y2="12" stroke-width="2.4" stroke-linecap="round" opacity="0.55"/></svg>',
   warehouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11V8.5L12 4l9 4.5V11"/><path d="M4 11h16v9.5H4z"/><path d="M9 14.5h6"/><path d="M9 17.5h6"/><circle cx="17.5" cy="6.5" r="3" fill="currentColor" opacity="0.18" stroke="none"/><path d="M17.5 5v1.5l1 .8" stroke-width="1.6"/></svg>',
-  keg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="4.4" rx="6" ry="1.7"/><path d="M6 4.4v15.2c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7V4.4"/><path d="M6 9c0 .9 2.7 1.7 6 1.7S18 9.9 18 9"/><path d="M6 14.4c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7"/></svg>',
+  keg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="13" height="16" rx="2.5"/><path d="M6.5 8h7"/><path d="M6.5 12h5"/><circle cx="17" cy="15.5" r="3.8" fill="currentColor" fill-opacity="0.1"/><path d="M19.7 18.2 22 20.5"/></svg>',
 };
 const supplierIconSvg = {
@@ -1709,7 +1711,7 @@ function supplierIcon(name) {
 
 function tabIconSvg(tabId) {
   if (tabId === 'warehouse-stock') return cabIconSvg.warehouse;
-  if (tabId === 'keg-returns') return cabIconSvg.truck;
+  if (tabId === 'keg-returns') return cabIconSvg.kegReturn;
   return cabIconSvg[tabId] || cabIconSvg.profile;
 }
 
@@ -5544,6 +5546,12 @@ tr.del-err { background: #fef2f2; }
 .dash-tile--scanner .dash-tile-icon { background: #E5F3E5; color: #2E7D32; }
 .dash-tile--warehouse .dash-tile-icon { background: #EFE9FF; color: #6B46C1; }
 .dash-tile--keg .dash-tile-icon { background: #FFF1E0; color: #C16B4D; }
+.dash-tile-icon-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
 .dash-tile--cards .dash-tile-icon { background: #E0F2FE; color: #1D4ED8; }
 
 @media (max-width: 640px) {

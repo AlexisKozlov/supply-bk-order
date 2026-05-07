@@ -3,9 +3,12 @@
     <!-- ═══ Список заявок ═══ -->
     <template v-if="!formMode">
       <div class="krt-header">
-        <div>
-          <h2 class="krt-title">Возврат кег</h2>
-          <p class="krt-sub">Оформление ТТН на возврат пустых кег.</p>
+        <div class="krt-header-title">
+          <span class="krt-header-icon" v-html="iconKegReturn"></span>
+          <div>
+            <h2 class="krt-title">Возврат кег</h2>
+            <p class="krt-sub">Оформление ТТН на возврат пустых кег.</p>
+          </div>
         </div>
         <button class="krt-btn primary lg" @click="openNew">
           <span class="krt-btn-plus">+</span>
@@ -422,6 +425,9 @@ function buildHeaders(json = false) {
 }
 
 const iconKeg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="4.5" rx="6" ry="1.7"/><path d="M6 4.5v15c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7v-15"/><path d="M6 9c0 .9 2.7 1.7 6 1.7S18 9.9 18 9"/><path d="M6 14.5c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7"/></svg>';
+// Иконка «Возврат кег» — кега + дугообразная стрелка возврата сверху.
+// В стиле сайдбара (тонкие линии, currentColor → задаётся через CSS).
+const iconKegReturn = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8 Q 4 3 12 3 Q 20 3 20 8"/><polyline points="6.5 6 4 8 6.5 10.5"/><ellipse cx="12" cy="10.5" rx="5" ry="1.5"/><path d="M7 10.5V20c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5v-9.5"/><path d="M7 14c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/><path d="M7 17.5c0 .8 2.2 1.5 5 1.5s5-.7 5-1.5"/></svg>';
 
 const rows = ref([]);
 const statusFilter = ref('all');
@@ -1021,6 +1027,20 @@ onMounted(async () => {
   gap: 16px; margin-bottom: 20px; flex-wrap: wrap;
 }
 .krt-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; color: #2C1A12; }
+.krt-header-title { display: flex; align-items: center; gap: 12px; }
+.krt-header-icon {
+  width: 44px; height: 44px;
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 10px;
+  background: #FFF1E0;
+  color: #E76F51;
+}
+.krt-header-icon :deep(svg) { width: 26px; height: 26px; }
+@media (max-width: 640px) {
+  .krt-header-icon { width: 38px; height: 38px; }
+  .krt-header-icon :deep(svg) { width: 22px; height: 22px; }
+}
 .krt-sub { margin: 0; font-size: 13px; color: #8C7B6E; }
 
 /* ═══ Кнопки ═══ */
