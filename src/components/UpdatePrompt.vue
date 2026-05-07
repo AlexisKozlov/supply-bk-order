@@ -45,6 +45,12 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Сигнал из main.js при ошибке загрузки чанков после деплоя — поднимаем
+// тот же баннер, чтобы пользователь обновил страницу когда удобно.
+window.addEventListener('bk:needs-update', () => {
+  needRefresh.value = true;
+});
+
 useRegisterSW({
   immediate: true,
   onRegisteredSW(swUrl, registration) {

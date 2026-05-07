@@ -61,23 +61,25 @@ window.onerror = (message, source, lineno, colno, error) => {
   logErrorToServer('error', msg, error?.stack || null);
 };
 
-// Жёсткая перезагрузка после деплоя: чистим кэши Service Worker'а и его самого,
-// иначе reload снова отдаст старый закэшированный index.html со ссылками на
-// удалённые чанки.
-async function hardReloadAfterChunkError() {
+// Сигнал о том, что приложению требуется обновление (новый деплой и старая
+// версия не может догрузить чанки). Показываем тост и просим пользователя
+// нажать «Обновить» в баннере. Никакой автоматической перезагрузки —
+// иначе пользователь теряет несохранённые данные.
+function notifyAppUpdateRequired() {
+  // Один раз за сессию — показываем тост и поднимаем баннер UpdatePrompt.
+  if (window.__bkUpdateNotified) return;
+  window.__bkUpdateNotified = true;
   try {
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
+    window.dispatchEvent(new Event('bk:needs-update'));
   } catch (e) { /* игнор */ }
   try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-  } catch (e) { /* игнор */ }
-  window.location.reload();
+    const toast = useToastStore();
+    toast.warning(
+      'Доступна новая версия портала',
+      'Сохраните введённые данные и нажмите «Обновить» в баннере внизу — старые ссылки не работают.',
+      0 // не скрывать автоматически
+    );
+  } catch (e) { /* store not ready */ }
 }
 
 // Перехват необработанных промисов
@@ -92,14 +94,7 @@ window.onunhandledrejection = (event) => {
     msg.includes('Importing a module script failed') ||
     msg.includes('error loading dynamically imported module')
   ) {
-    const key = 'bk_reload_count';
-    const count = parseInt(sessionStorage.getItem(key) || '0');
-    if (count < 2) {
-      sessionStorage.setItem(key, String(count + 1));
-      hardReloadAfterChunkError();
-    } else {
-      sessionStorage.removeItem(key);
-    }
+    notifyAppUpdateRequired();
     return;
   }
   if (shouldIgnoreError(msg, stack)) return;
@@ -116,21 +111,7 @@ app.config.errorHandler = (err, instance, info) => {
     errMsg.includes('Importing a module script failed') ||
     errMsg.includes('error loading dynamically imported module')
   ) {
-    const key = 'bk_reload_count';
-    const count = parseInt(sessionStorage.getItem(key) || '0');
-    if (count < 2) {
-      sessionStorage.setItem(key, String(count + 1));
-      hardReloadAfterChunkError();
-    } else {
-      sessionStorage.removeItem(key);
-      try {
-        const toast = useToastStore();
-        toast.error(
-          'Не удалось загрузить часть приложения',
-          'Закройте все вкладки портала и откройте заново — это подгрузит новую версию.'
-        );
-      } catch (e) { /* store not ready */ }
-    }
+    notifyAppUpdateRequired();
     return;
   }
   console.error(`[Vue error] ${info}:`, err);
@@ -142,7 +123,3 @@ app.config.errorHandler = (err, instance, info) => {
 };
 
 app.mount('#app');
-
-// Приложение успешно стартовало — сбрасываем счётчик попыток автоперезагрузки
-// после ошибки загрузки чанка, чтобы при следующем сбое снова было 2 попытки.
-try { sessionStorage.removeItem('bk_reload_count'); } catch (e) { /* игнор */ }
