@@ -44,7 +44,7 @@
       <tbody>
         <tr v-for="row in filteredRows" :key="row.id" @click="openEdit(row.id)" class="kr-row">
           <td>№{{ row.restaurant_number }} {{ row.restaurant_city }}<span v-if="row.restaurant_address">, {{ row.restaurant_address }}</span></td>
-          <td>{{ row.pickup_address || '—' }}</td>
+          <td>{{ pickupAddressFor(row) }}</td>
           <td>{{ fmtDate(row.return_date) }}</td>
           <td>{{ row.bso_series }} {{ row.bso_number }}</td>
           <td><span :class="'kr-badge kr-badge-' + row.status">{{ statusLabel(row.status) }}</span></td>
@@ -304,6 +304,15 @@ async function commitImport() {
   } finally {
     importLoading.value = false;
   }
+}
+
+function pickupAddressFor(row) {
+  // Адрес погрузки: явный pickup_address; если пуст — собираем из города и адреса ресторана.
+  if (row.pickup_address) return row.pickup_address;
+  const city = row.restaurant_city || '';
+  const addr = row.restaurant_address || '';
+  if (city && addr) return city + ', ' + addr;
+  return city || addr || '—';
 }
 
 function fmtDate(d) {

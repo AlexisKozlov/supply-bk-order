@@ -207,6 +207,15 @@ function krNotifyRestaurant(PDO $pdo, int $restaurantId, string $text) {
  * Серия: ровно 2 заглавные кириллические буквы.
  * Номер: ровно 7 цифр.
  */
+function krStatusLabel(?string $status): string {
+    return [
+        'DRAFT'     => 'Черновик',
+        'SUBMITTED' => 'Отправлена',
+        'ROUTED'    => 'Маршрутизирована',
+        'CANCELLED' => 'Отменена',
+    ][(string)$status] ?? 'неизвестно';
+}
+
 function krValidateBso(?string $series, ?string $number): ?string {
     $s = trim((string)$series);
     $n = trim((string)$number);
@@ -290,7 +299,7 @@ function krValidateItems(array $items): ?string {
 // ═══ Роутинг keg-catalog ═══
 
 if ($endpoint === 'keg-catalog') {
-    if ($method !== 'GET') krRespond(['error' => 'Method Not Allowed'], 405);
+    if ($method !== 'GET') krRespond(['error' => 'Метод не поддерживается'], 405);
     $rows = $pdo->query("SELECT code, name, photo_url, sort_order FROM keg_catalog WHERE active = 1 ORDER BY sort_order, code")->fetchAll();
     krRespond($rows);
 }
@@ -307,7 +316,7 @@ $krPortalUser = getSessionUser($pdo);
 
 // Хотя бы одна авторизация обязательна
 if (!$krRestSession && !$krPortalUser) {
-    krRespond(['error' => 'Unauthorized'], 401);
+    krRespond(['error' => 'Нет авторизации'], 401);
 }
 
 $isRestaurant = (bool)$krRestSession;
@@ -454,7 +463,7 @@ if ($method === 'GET' && $krId === null && $krAction === null && $krSubSlug === 
 if ($method === 'POST' && $krId === null && $krAction === null && $krSubSlug === null) {
     $returnDate = trim($body['return_date'] ?? '');
     if (!$returnDate || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $returnDate)) {
-        krRespond(['error' => 'return_date обязательна (YYYY-MM-DD)'], 400);
+        krRespond(['error' => 'Укажите дату возврата'], 400);
     }
 
     $items = $body['items'] ?? [];
@@ -468,13 +477,13 @@ if ($method === 'POST' && $krId === null && $krAction === null && $krSubSlug ===
         $createdByUser = null;
     } else {
         $restaurantId = isset($body['restaurant_id']) ? (int)$body['restaurant_id'] : 0;
-        if (!$restaurantId) krRespond(['error' => 'restaurant_id обязателен'], 400);
+        if (!$restaurantId) krRespond(['error' => 'Не указан ресторан'], 400);
         $legalEntityGroup = 'BK_VM';
         $createdByChatId = null;
         $createdByUser = $krPortalUser['name'] ?? null;
     }
 
-    if ($legalEntityGroup !== 'BK_VM') krRespond(['error' => 'Только BK_VM в MVP'], 400);
+    if ($legalEntityGroup !== 'BK_VM') krRespond(['error' => 'Возврат пока доступен только для Бургер БК и Воглия Матта'], 400);
 
     $bsoSeries = trim($body['bso_series'] ?? '') ?: null;
     $bsoNumber = trim($body['bso_number'] ?? '') ?: null;
@@ -548,7 +557,7 @@ if ($method === 'PATCH' && $krId && $krAction === null) {
             krRespond(['error' => 'Нет доступа'], 403);
         }
         if (!in_array($row['status'], ['DRAFT', 'SUBMITTED'])) {
-            krRespond(['error' => 'Нельзя редактировать в статусе ' . $row['status']], 422);
+            krRespond(['error' => 'Нельзя редактировать в статусе «' . krStatusLabel($row['status']) . '»'], 422);
         }
         // Проверка дедлайна
         $deadline = kegCalcDeadline($row['return_date']);
@@ -650,7 +659,7 @@ if ($method === 'POST' && $krId && $krAction === 'submit') {
         krRespond(['error' => 'Нет доступа'], 403);
     }
     if ($row['status'] !== 'DRAFT') {
-        krRespond(['error' => 'Только DRAFT можно отправить'], 422);
+        krRespond(['error' => 'Отправить можно только черновик'], 422);
     }
 
     // Проверка дедлайна
@@ -712,8 +721,19 @@ if ($method === 'POST' && $krId && $krAction === 'cancel') {
         if ((int)$row['restaurant_id'] !== (int)$krRestSession['restaurant_id']) {
             krRespond(['error' => 'Нет доступа'], 403);
         }
-        if ($row['status'] !== 'DRAFT') {
-            krRespond(['error' => 'Ресторан может отменить только DRAFT'], 422);
+        if ($row['status'] === 'CANCELLED') {
+            krRespond(['error' => 'Заявка уже отменена'], 422);
+        }
+        if ($row['status'] === 'ROUTED') {
+            krRespond(['error' => 'Маршрутизированную заявку отменить нельзя — обратитесь в отдел закупок'], 422);
+        }
+        // DRAFT — отменяется всегда; SUBMITTED — только до дедлайна.
+        if ($row['status'] === 'SUBMITTED' && !empty($row['return_date'])) {
+            $deadline = kegCalcDeadline($row['return_date']);
+            $now = new DateTime('now', new DateTimeZone('Europe/Minsk'));
+            if ($now > $deadline) {
+                krRespond(['error' => 'Дедлайн прошёл — отмена недоступна'], 422);
+            }
         }
     }
 
@@ -818,9 +838,9 @@ function krFillTemplate(array $row): \PhpOffice\PhpSpreadsheet\Spreadsheet {
     $driver  = $row['driver'] ?? '';
     $senderPositionName = $row['sender_position_name'] ?? '';
 
-    $templatePath = (($row['legal_entity_code'] ?? '') === 'VM')
-        ? __DIR__ . '/../../ТТН1 ВМ.xls'
-        : __DIR__ . '/../../ТТН1.xls';
+    // Используем единый шаблон БК и подставляем данные юрлица (Воглия Матта / Бургер БК)
+    // динамически из legal_entity_details: full_name, address, unp.
+    $templatePath = __DIR__ . '/../../ТТН1.xls';
     $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
     $reader->setReadDataOnly(false);
     $spreadsheet = $reader->load($templatePath);
@@ -943,7 +963,9 @@ function krFillTemplate(array $row): \PhpOffice\PhpSpreadsheet\Spreadsheet {
     // Сводные значения прописью и цифрами (строки 45-50)
     $totalSumInt = (int)floor($totalSum);
     $totalSumKop = (int)round(($totalSum - $totalSumInt) * 100);
-    $totalWeightKgInt = (int)round($totalWeightKg ?? 0);
+    // Берём кг из показанного значения тонн (round до 3 знаков * 1000),
+    // чтобы прописью совпадало с цифрой массы в таблице.
+    $totalWeightKgInt = (int)round($totalWeight * 1000);
 
     $sheet->getCell('H45')->setValue('Ноль руб. 00 коп.');
     $sheet->getCell('AW46')->setValue('0,00');
@@ -952,11 +974,10 @@ function krFillTemplate(array $row): \PhpOffice\PhpSpreadsheet\Spreadsheet {
     $sheet->getCell('H49')->setValue(numberToWordsRu($totalWeightKgInt) . ' кг.');
     $sheet->getCell('AN49')->setValue(numberToWordsRu($totalQty));
 
-    // Сдал грузоотправитель — H51, H53
-    if ($senderPositionName) {
-        $sheet->getCell('H51')->setValue($senderPositionName);
-        $sheet->getCell('H53')->setValue($senderPositionName);
-    }
+    // Сдал грузоотправитель — H51, H53. Всегда перезаписываем, чтобы убрать
+    // дефолтный текст из шаблона при пустом значении.
+    $sheet->getCell('H51')->setValue($senderPositionName ?: '');
+    $sheet->getCell('H53')->setValue($senderPositionName ?: '');
 
     // Page setup: A4, книжная, fit-to-width, узкие поля
     $ps = $sheet->getPageSetup();
@@ -1068,11 +1089,11 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     // При multipart/form-data данные приходят в $_POST, не в $body
     $returnDate = trim($_POST['return_date'] ?? $body['return_date'] ?? '');
     if (!$returnDate || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $returnDate)) {
-        krRespond(['error' => 'return_date обязательна (YYYY-MM-DD)'], 400);
+        krRespond(['error' => 'Укажите дату возврата'], 400);
     }
 
     if (empty($_FILES['file'])) {
-        krRespond(['error' => 'Файл не загружен (поле file)'], 400);
+        krRespond(['error' => 'Файл не выбран'], 400);
     }
 
     $tmpPath = $_FILES['file']['tmp_name'];
@@ -1085,7 +1106,7 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
         } elseif ($ext === 'xls') {
             $reader = new XlsReader();
         } else {
-            krRespond(['error' => 'Поддерживаются только .xlsx и .xls'], 400);
+            krRespond(['error' => 'Поддерживаются только Excel-файлы (.xlsx или .xls)'], 400);
         }
         $reader->setReadDataOnly(true);
         $spreadsheet = $reader->load($tmpPath);
@@ -1093,7 +1114,8 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
         $sheetData = $sheet->toArray(null, true, true, false);
     } catch (Exception $e) {
         error_log('keg import-routing read: ' . $e->getMessage());
-        krRespond(['error' => 'Не удалось прочитать файл: ' . $e->getMessage()], 422);
+        error_log('keg-returns import-routing read failed: ' . $e->getMessage());
+        krRespond(['error' => 'Не удалось прочитать файл — проверьте формат'], 422);
     }
 
     // Ищем строку заголовков (содержит «Водитель» или «Адрес точки»)
@@ -1235,4 +1257,4 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
 }
 
 // Если ни один маршрут не сработал
-krRespond(['error' => 'Not Found'], 404);
+krRespond(['error' => 'Не найдено'], 404);
