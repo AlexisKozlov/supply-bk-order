@@ -99,6 +99,7 @@
 
     <!-- ══════ Main ══════ -->
     <div class="cab-main">
+      <!-- Десктоп-топбар -->
       <div class="cab-topbar">
         <div>
           <div class="cab-topbar-title">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
@@ -107,6 +108,24 @@
         <button v-if="activeTab !== 'scanner'" class="cab-topbar-scan" @click="switchTab('scanner')" title="Сканер товаров (BETA)">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
           <span class="cab-topbar-scan-beta">BETA</span>
+        </button>
+      </div>
+
+      <!-- Мобильный топбар: компактный, sticky -->
+      <div class="mob-topbar">
+        <div class="mob-topbar-rest">
+          <span class="mob-topbar-num">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</span>
+          <span class="mob-topbar-label">Ресторан</span>
+        </div>
+        <div class="mob-topbar-screen">{{ activeTab === 'dashboard' ? 'Главная' : activeTab === 'orders' ? 'Заказы' : activeTab === 'info' ? 'Важная информация' : activeTab === 'surveys' ? 'Опросы' : activeTab === 'stock' ? 'Сбор остатков' : activeTab === 'warehouse-stock' ? 'Остатки склада' : activeTab === 'scanner' ? 'Сканер товаров' : activeTab === 'keg-returns' ? 'Возврат кег' : 'Профиль' }}</div>
+        <button
+          v-if="activeTab !== 'scanner'"
+          class="mob-topbar-scan"
+          @click="switchTab('scanner')"
+          title="Сканер товаров"
+          aria-label="Открыть сканер"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 012-2h2"/><path d="M17 3h2a2 2 0 012 2v2"/><path d="M21 17v2a2 2 0 01-2 2h-2"/><path d="M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="11" y1="8" x2="11" y2="16"/><line x1="15" y1="8" x2="15" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
         </button>
       </div>
 
@@ -155,26 +174,42 @@
             </div>
           </div>
 
-          <!-- Быстрые действия -->
-          <div class="dash-actions">
-            <h3 class="dash-section-title">Быстрые действия</h3>
-            <div class="dash-action-grid">
-              <button class="dash-action" @click="switchTab('orders')">
-                <span class="dash-action-icon" v-html="cabIconSvg.orders"></span>
-                <span>Заказы</span>
+          <!-- Сервисы — крупные плитки -->
+          <div class="dash-services">
+            <h3 class="dash-section-title">Сервисы</h3>
+            <div class="dash-tiles">
+              <button class="dash-tile dash-tile--scanner" @click="switchTab('scanner')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.scanner"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Сканер товаров <span class="dash-tile-beta">BETA</span></div>
+                  <div class="dash-tile-sub">Сканировать штрих-код для поиска</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
               </button>
-              <a v-if="canUseCardSearch" class="dash-action" href="/search-cards" target="_blank">
-                <span class="dash-action-icon" v-html="cabIconSvg.search"></span>
-                <span>Карточки</span>
+              <button class="dash-tile dash-tile--warehouse" @click="switchTab('warehouse-stock')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.warehouse"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Остатки склада</div>
+                  <div class="dash-tile-sub">Сроки годности по товарам</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
+              <button v-if="kegReturnsEnabled" class="dash-tile dash-tile--keg" @click="switchTab('keg-returns')">
+                <span class="dash-tile-icon" v-html="tileIconSvg.keg"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Возврат кег</div>
+                  <div class="dash-tile-sub">Оформление ТТН на пустые кеги</div>
+                </div>
+                <span class="dash-tile-arrow">›</span>
+              </button>
+              <a v-if="canUseCardSearch" class="dash-tile dash-tile--cards" href="/search-cards" target="_blank">
+                <span class="dash-tile-icon" v-html="tileIconSvg.search"></span>
+                <div class="dash-tile-text">
+                  <div class="dash-tile-title">Поиск карточек</div>
+                  <div class="dash-tile-sub">Найти товар и его описание</div>
+                </div>
+                <span class="dash-tile-arrow">↗</span>
               </a>
-              <button class="dash-action" @click="switchTab('profile')">
-                <span class="dash-action-icon" v-html="cabIconSvg.profile"></span>
-                <span>Профиль</span>
-              </button>
-              <button v-if="stockCollection.active" class="dash-action dash-action--alert" @click="switchTab('stock')">
-                <span class="dash-action-icon" v-html="cabIconSvg.stock"></span>
-                <span>Сбор остатков</span>
-              </button>
             </div>
           </div>
 
@@ -227,44 +262,80 @@
     </section>
 
     <!-- ══════ TAB: Важная информация ══════ -->
-    <section v-if="activeTab === 'info' && !globalLoading && !globalError" class="cab-section">
-      <div class="info-toolbar">
-        <button class="btn btn-outline btn-sm" @click="loadImportantPosts" :disabled="importantLoading">
-          {{ importantLoading ? 'Загрузка...' : 'Обновить' }}
-        </button>
+    <section v-if="activeTab === 'info' && !globalLoading && !globalError" class="cab-section info-section">
+      <div v-if="importantLoading && !importantPosts.length" class="cab-empty-card">
+        <BurgerSpinner text="Загрузка..." />
       </div>
-      <div v-if="importantLoading" class="cab-empty-card">Загрузка...</div>
-      <div v-else-if="!importantPosts.length" class="cab-empty-card">
-        <h2>Сообщений пока нет</h2>
-        <p>Когда отдел закупок опубликует информацию, она появится здесь.</p>
+      <div v-else-if="!importantPosts.length" class="info-empty">
+        <span class="info-empty-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.5V14a2 2 0 0 1-2 2h-7l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12"/><circle cx="20" cy="5" r="3"/></svg>
+        </span>
+        <h3>Пока всё спокойно</h3>
+        <p>Когда отдел закупок опубликует важную информацию, она появится здесь.</p>
       </div>
-      <div v-else class="info-posts">
-        <article v-for="post in importantPosts" :key="post.id" class="info-post" :class="{ unread: !post.is_read }">
-          <div class="info-post-head">
-            <div>
-              <h3>{{ post.title || 'Важная информация' }}</h3>
-              <div class="info-post-meta">{{ post.created_by || 'Отдел закупок' }} · {{ fmtDateTime(post.published_at || post.created_at) }}</div>
+      <template v-else>
+        <!-- Чипы-фильтры (только если постов > 4) -->
+        <div v-if="importantPosts.length > 4" class="info-filter-chips">
+          <button class="info-fchip" :class="{ active: infoFilter === 'all' }" @click="infoFilter = 'all'">
+            Все <span class="info-fchip-count">{{ importantPosts.length }}</span>
+          </button>
+          <button class="info-fchip" :class="{ active: infoFilter === 'unread' }" @click="infoFilter = 'unread'">
+            Непрочитанные <span class="info-fchip-count">{{ importantPostsUnreadCount }}</span>
+          </button>
+        </div>
+
+        <div v-if="!importantPostsFiltered.length" class="info-empty">
+          <span class="info-empty-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <h3>Всё прочитано</h3>
+          <p>В этой категории больше нет сообщений.</p>
+        </div>
+
+        <div v-else class="info-list">
+          <article
+            v-for="post in importantPostsFiltered"
+            :key="post.id"
+            class="info-card"
+            :class="{ unread: !post.is_read }"
+          >
+            <header class="info-card-head">
+              <div class="info-card-author">
+                <span class="info-card-avatar">{{ infoAvatar(post.created_by) }}</span>
+                <div class="info-card-author-info">
+                  <div class="info-card-author-name">{{ post.created_by || 'Отдел закупок' }}</div>
+                  <time class="info-card-time">{{ fmtDateTime(post.published_at || post.created_at) }}</time>
+                </div>
+              </div>
+              <span v-if="!post.is_read" class="info-card-dot" aria-label="Новое"></span>
+            </header>
+            <h3 v-if="post.title" class="info-card-title">{{ post.title }}</h3>
+            <p class="info-card-message">{{ post.message }}</p>
+
+            <div v-if="post.files?.length" class="info-card-files">
+              <button
+                v-for="file in post.files"
+                :key="file.id"
+                class="info-file"
+                :class="{ image: isImportantImage(file) }"
+                @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
+              >
+                <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" class="info-file-img" />
+                <span v-else class="info-file-ico" v-html="cabIconSvg.file"></span>
+                <span class="info-file-meta">
+                  <span class="info-file-name">{{ file.file_name }}</span>
+                  <span class="info-file-size">{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</span>
+                </span>
+              </button>
             </div>
-            <span v-if="!post.is_read" class="info-unread">Новое</span>
-          </div>
-          <p>{{ post.message }}</p>
-          <div v-if="post.files?.length" class="info-attachments">
-            <button
-              v-for="file in post.files"
-              :key="file.id"
-              class="info-attachment"
-              :class="{ image: isImportantImage(file) }"
-              @click="isImportantImage(file) ? previewImportantFile(file) : downloadImportantFile(file)"
-            >
-              <img v-if="isImportantImage(file) && importantPreviewUrls[file.id]" :src="importantPreviewUrls[file.id]" :alt="file.file_name" />
-              <span v-else class="info-file-icon" v-html="cabIconSvg.file"></span>
-              <span>{{ file.file_name }}</span>
-              <small>{{ isImportantImage(file) ? 'Открыть' : formatImportantFileSize(file.file_size) }}</small>
-            </button>
-          </div>
-          <button v-if="!post.is_read" class="info-read-btn" @click="markImportantRead(post)">Отметить прочитанным</button>
-        </article>
-      </div>
+
+            <footer v-if="!post.is_read" class="info-card-foot">
+              <button class="info-read" @click="markImportantRead(post)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Отметить прочитанным
+              </button>
+            </footer>
+          </article>
+        </div>
+      </template>
     </section>
 
     <!-- ══════ TAB: Заказы ══════ -->
@@ -958,7 +1029,7 @@
     </section>
 
     <!-- ══════ TAB: Сбор остатков ══════ -->
-    <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section">
+    <section v-if="activeTab === 'stock' && !globalLoading && !globalError" class="cab-section sc-section">
       <div v-if="stockLoading" class="cab-empty-card">
         <BurgerSpinner text="Загрузка..." />
       </div>
@@ -966,12 +1037,13 @@
         <h2>Нет активного сбора</h2>
         <p>Сейчас сбор остатков не проводится.</p>
       </div>
-      <div v-else class="stock-inline">
-        <div v-if="stockCollection.collections.length > 1" class="stock-collection-switcher">
+      <div v-else class="sc-wrap">
+        <!-- Переключатель коллекций -->
+        <div v-if="stockCollection.collections.length > 1" class="sc-coll-switcher">
           <button
             v-for="c in stockCollection.collections"
             :key="c.id"
-            class="stock-collection-chip"
+            class="sc-coll-chip"
             :class="{ active: String(stockCollection.collection?.id) === String(c.id) }"
             @click="selectStockCollection(c.id)"
           >
@@ -979,81 +1051,176 @@
             <small>{{ c.submitted_count }}/{{ c.total_products }}</small>
           </button>
         </div>
-        <div class="stock-inline-head">
-          <h2>{{ stockCollection.collection?.name }}</h2>
-          <p v-if="stockLastSubmittedAt" class="stock-inline-sub">
-            Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}
+
+        <!-- Шапка коллекции -->
+        <div class="sc-head">
+          <h2 class="sc-head-title">{{ stockCollection.collection?.name }}</h2>
+          <p class="sc-head-sub">
+            <span v-if="stockLastSubmittedAt">Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}</span>
+            <span v-else>Если товара нет — оставьте поле пустым или поставьте 0.</span>
           </p>
-          <p v-else class="stock-inline-sub">Заполните остатки по позициям и нажмите «Сохранить». Если товара нет — оставьте поле пустым или поставьте 0.</p>
         </div>
+
         <div v-if="!stockProducts.length" class="cab-empty-card">
           <p>В сборе пока нет товаров.</p>
         </div>
-        <div v-else class="stock-inline-list">
-          <div v-for="p in stockProducts" :key="p.id" class="stock-row">
-            <div class="stock-row-main">
-              <div class="stock-row-name">
-                {{ p.product_sku ? `${p.product_sku} ${p.product_name}` : p.product_name }}
-                <span v-if="p.need_expiry" class="stock-row-flag">срок обязателен</span>
-              </div>
-              <div v-if="p.note" class="stock-row-note">{{ p.note }}</div>
-              <div class="stock-row-total">
-                Итого: <b>{{ stockProductTotal(p.id) || '0' }}</b> {{ stockUnitShort(p.unit) }}
-              </div>
+
+        <template v-else>
+          <!-- Поиск + фильтры (только при > 8 товарах) -->
+          <div v-if="stockShowSearch" class="sc-toolbar">
+            <input
+              v-model="stockSearch"
+              type="search"
+              class="sc-search-input"
+              placeholder="Поиск по артикулу или названию..."
+            />
+            <div class="sc-filter-chips">
+              <button class="sc-fchip" :class="{ active: stockFilter === 'all' }" @click="stockFilter = 'all'">
+                Все <span class="sc-fchip-count">{{ stockTotalCount }}</span>
+              </button>
+              <button class="sc-fchip" :class="{ active: stockFilter === 'unfilled' }" @click="stockFilter = 'unfilled'">
+                Не заполнено <span class="sc-fchip-count">{{ stockTotalCount - stockFilledCount }}</span>
+              </button>
+              <button class="sc-fchip" :class="{ active: stockFilter === 'filled' }" @click="stockFilter = 'filled'">
+                Заполнено <span class="sc-fchip-count">{{ stockFilledCount }}</span>
+              </button>
             </div>
-            <div v-if="p.need_expiry" class="stock-row-batches">
-              <div v-for="(batch, idx) in stockDrafts[p.id] || []" :key="idx" class="stock-batch-row">
-                <div class="stock-batch-field">
-                  <label class="stock-batch-label">Срок годности</label>
-                  <input
-                    type="date"
-                    v-model="batch.expiry_date"
-                    class="stock-input stock-date-input"
-                    :class="{ 'stock-input-error': Number(batch.stock) > 0 && !batch.expiry_date }"
-                    :aria-label="`Срок годности для товара ${p.product_name}`"
-                  />
+          </div>
+
+          <!-- Группа: со сроком годности -->
+          <div v-if="stockFilteredGrouped.withExpiry.length" class="sc-group">
+            <div class="sc-group-head">
+              <h3>Со сроком годности</h3>
+              <span class="sc-group-count">{{ stockFilteredGrouped.withExpiry.length }}</span>
+            </div>
+            <div class="sc-list">
+              <article
+                v-for="p in stockFilteredGrouped.withExpiry"
+                :key="p.id"
+                class="sc-card"
+                :class="{
+                  'sc-card-filled': stockProductFilled(p.id),
+                  'sc-card-invalid': stockProductInvalid(p),
+                }"
+              >
+                <header class="sc-card-head">
+                  <div class="sc-card-title">
+                    <span v-if="p.product_sku" class="sc-card-sku">{{ p.product_sku }}</span>
+                    <span class="sc-card-name">{{ p.product_name }}</span>
+                  </div>
+                  <div class="sc-card-total">
+                    <span class="sc-card-total-num">{{ stockProductTotal(p.id) || '0' }}</span>
+                    <span class="sc-card-total-unit">{{ stockUnitShort(p.unit) }}</span>
+                  </div>
+                </header>
+                <div v-if="p.note" class="sc-card-note">{{ p.note }}</div>
+
+                <div class="sc-batches">
+                  <div v-for="(batch, idx) in stockDrafts[p.id] || []" :key="idx" class="sc-batch-row">
+                    <div class="sc-batch-fld">
+                      <label class="sc-batch-lbl">Срок годности</label>
+                      <input
+                        type="date"
+                        v-model="batch.expiry_date"
+                        class="sc-input"
+                        :class="{ 'sc-input-err': Number(batch.stock) > 0 && !batch.expiry_date }"
+                      />
+                    </div>
+                    <div class="sc-batch-fld">
+                      <label class="sc-batch-lbl">Количество, {{ stockUnitShort(p.unit) }}</label>
+                      <input
+                        type="number"
+                        inputmode="decimal"
+                        min="0"
+                        step="any"
+                        v-model="batch.stock"
+                        class="sc-input sc-input-num"
+                        placeholder="0"
+                      />
+                    </div>
+                    <button
+                      v-if="(stockDrafts[p.id] || []).length > 1"
+                      class="sc-batch-del"
+                      @click="removeStockBatch(p.id, idx)"
+                      title="Удалить партию"
+                      aria-label="Удалить партию"
+                    >✕</button>
+                  </div>
+                  <button class="sc-batch-add" @click="addStockBatch(p.id)" type="button">+ Добавить партию</button>
                 </div>
-                <div class="stock-batch-field">
-                  <label class="stock-batch-label">Кол-во, {{ stockUnitShort(p.unit) }}</label>
+              </article>
+            </div>
+          </div>
+
+          <!-- Группа: без срока -->
+          <div v-if="stockFilteredGrouped.withoutExpiry.length" class="sc-group">
+            <div class="sc-group-head">
+              <h3>Без срока годности</h3>
+              <span class="sc-group-count">{{ stockFilteredGrouped.withoutExpiry.length }}</span>
+            </div>
+            <div class="sc-list">
+              <article
+                v-for="p in stockFilteredGrouped.withoutExpiry"
+                :key="p.id"
+                class="sc-card sc-card-simple"
+                :class="{ 'sc-card-filled': stockProductFilled(p.id) }"
+              >
+                <header class="sc-card-head">
+                  <div class="sc-card-title">
+                    <span v-if="p.product_sku" class="sc-card-sku">{{ p.product_sku }}</span>
+                    <span class="sc-card-name">{{ p.product_name }}</span>
+                  </div>
+                  <div class="sc-card-total">
+                    <span class="sc-card-total-num">{{ stockProductTotal(p.id) || '0' }}</span>
+                    <span class="sc-card-total-unit">{{ stockUnitShort(p.unit) }}</span>
+                  </div>
+                </header>
+                <div v-if="p.note" class="sc-card-note">{{ p.note }}</div>
+                <div class="sc-card-input-row">
                   <input
                     type="number"
                     inputmode="decimal"
                     min="0"
                     step="any"
-                    v-model="batch.stock"
-                    class="stock-input stock-qty-input"
+                    v-model="stockDrafts[p.id][0].stock"
+                    class="sc-input sc-input-num sc-card-input"
                     placeholder="0"
                   />
+                  <span class="sc-card-input-unit">{{ stockUnitShort(p.unit) }}</span>
                 </div>
-                <button v-if="(stockDrafts[p.id] || []).length > 1" class="stock-batch-del" @click="removeStockBatch(p.id, idx)" title="Удалить партию">✕</button>
-              </div>
-              <button class="stock-batch-add" @click="addStockBatch(p.id)">+ Добавить партию</button>
-            </div>
-            <div v-else class="stock-row-single">
-              <input
-                type="number"
-                inputmode="decimal"
-                min="0"
-                step="any"
-                v-model="stockDrafts[p.id][0].stock"
-                class="stock-input stock-qty-input"
-                placeholder="0"
-              />
-              <span class="stock-row-unit">{{ stockUnitShort(p.unit) }}</span>
+              </article>
             </div>
           </div>
-        </div>
-        <div v-if="stockError" class="error-msg">{{ stockError }}</div>
-        <div class="stock-inline-actions">
-          <button
-            class="btn btn-primary btn-lg"
-            :disabled="stockSaving || !stockProducts.length || (!!stockLastSubmittedAt && !stockDirty)"
-            @click="submitStockInline"
+
+          <!-- Пустой результат фильтра -->
+          <div
+            v-if="!stockFilteredGrouped.withExpiry.length && !stockFilteredGrouped.withoutExpiry.length"
+            class="cab-empty-card"
           >
-            <span v-if="stockSaving" class="cab-spin cab-spin-sm"></span>
-            {{ stockLastSubmittedAt ? 'Сохранить изменения' : 'Сохранить' }}
-          </button>
-          <span v-if="stockSavedFlash" class="stock-saved-flash">Сохранено ✓</span>
+            <p>Под текущий поиск/фильтр товаров не найдено.</p>
+          </div>
+        </template>
+
+        <!-- Sticky-полоса сохранения -->
+        <div v-if="stockProducts.length" class="sc-savebar">
+          <div class="sc-savebar-inner">
+            <div class="sc-savebar-progress">
+              <div class="sc-savebar-progress-text">
+                Заполнено <b>{{ stockFilledCount }}</b> из {{ stockTotalCount }}
+              </div>
+              <div class="sc-savebar-progress-bar">
+                <div class="sc-savebar-progress-fill" :style="{ width: stockProgress + '%' }"></div>
+              </div>
+            </div>
+            <button
+              class="btn btn-primary btn-lg sc-savebar-btn"
+              :disabled="stockSaving || (!!stockLastSubmittedAt && !stockDirty)"
+              @click="submitStockInline"
+            >
+              <span v-if="stockSaving" class="cab-spin cab-spin-sm"></span>
+              {{ stockLastSubmittedAt ? 'Сохранить изменения' : 'Сохранить' }}
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -1172,68 +1339,78 @@
     </section>
 
     <!-- ══════ TAB: Профиль ══════ -->
-    <section v-if="activeTab === 'profile' && !globalLoading && !globalError" class="cab-section">
-      <div class="profile-card">
-        <div class="profile-header">
-          <div class="profile-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
-          <div>
-            <h2>Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</h2>
-            <p>{{ restaurantAddress }}</p>
-            <p class="profile-le">{{ roStore.restaurant?.legal_entity }}</p>
-          </div>
+    <section v-if="activeTab === 'profile' && !globalLoading && !globalError" class="cab-section pf-section">
+      <!-- Шапка ресторана -->
+      <div class="pf-hero">
+        <div class="pf-hero-avatar">{{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</div>
+        <div class="pf-hero-info">
+          <h2 class="pf-hero-title">Ресторан {{ formatRestaurantNumber(roStore.restaurant?.number, roStore.restaurant?.legal_entity_group) }}</h2>
+          <p class="pf-hero-addr">{{ restaurantAddress }}</p>
+          <p class="pf-hero-le">{{ roStore.restaurant?.legal_entity }}</p>
         </div>
       </div>
 
       <!-- Telegram -->
-      <div class="profile-block">
-        <h3>Telegram</h3>
-
-        <div class="profile-tg-unlinked">
-          <p>Каждый сотрудник может привязать свой Telegram к этому ресторану. Получите код и отправьте его боту с телефона сотрудника.</p>
-          <div v-if="tgError" class="error-msg">{{ tgError }}</div>
-          <div v-if="tgLinkCode" class="tg-code-box">
-            <p>Отправьте этот код боту <a href="https://t.me/supplyportal_bot" target="_blank">@supplyportal_bot</a>:</p>
-            <div class="tg-code">{{ tgLinkCode }}</div>
-            <p class="tg-code-hint">Код действует 10 минут</p>
+      <div class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-tg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 1.5 11l7 2.5L11 21l3-6 7-12z"/><path d="M11 13.5 21 3"/></svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Telegram</h3>
+            <p>Уведомления и быстрые действия в боте</p>
           </div>
-          <button v-else class="btn btn-primary" @click="tgGetCode" :disabled="tgLinkLoading">
-            <span v-if="tgLinkLoading" class="cab-spin cab-spin-sm"></span>
-            Получить код привязки
-          </button>
         </div>
 
-        <!-- Все привязки ресторана -->
-        <div v-if="tgLinksList.length" class="profile-tg-links">
-          <div class="profile-tg-links-title">Все привязки этого ресторана ({{ tgLinksList.length }})</div>
-          <ul class="tg-links">
-            <li v-for="link in tgLinksList" :key="link.chat_id" class="tg-link-row">
-              <div class="tg-link-info">
-                <div class="tg-link-name">
+        <div v-if="tgLinkCode" class="pf-tg-code">
+          <p class="pf-tg-code-hint">Отправьте этот код боту <a href="https://t.me/supplyportal_bot" target="_blank">@supplyportal_bot</a></p>
+          <div class="pf-tg-code-box">{{ tgLinkCode }}</div>
+          <p class="pf-tg-code-meta">Код действует 10 минут</p>
+        </div>
+        <button v-else class="pf-btn primary block" @click="tgGetCode" :disabled="tgLinkLoading">
+          <span v-if="tgLinkLoading" class="cab-spin cab-spin-sm"></span>
+          Получить код привязки
+        </button>
+
+        <div v-if="tgLinksList.length" class="pf-tg-links">
+          <div class="pf-tg-links-title">Привязанные сотрудники ({{ tgLinksList.length }})</div>
+          <ul class="pf-tg-list">
+            <li v-for="link in tgLinksList" :key="link.chat_id" class="pf-tg-item">
+              <div class="pf-tg-item-info">
+                <div class="pf-tg-item-name">
                   {{ link.first_name || 'Без имени' }}
-                  <span v-if="link.username" class="tg-link-username">@{{ link.username }}</span>
+                  <span v-if="link.username" class="pf-tg-item-username">@{{ link.username }}</span>
                 </div>
-                <div class="tg-link-meta">
-                  <span v-if="link.verified">✓ привязан {{ formatTgDate(link.verified_at) }}</span>
-                  <span v-else-if="link.must_reverify_by" class="tg-link-warn">⚠ нужно перепривязать до {{ formatTgDate(link.must_reverify_by) }}</span>
-                  <span v-else class="tg-link-warn">⚠ не подтверждён</span>
+                <div class="pf-tg-item-meta">
+                  <span v-if="link.verified" class="pf-tg-item-ok">Привязан {{ formatTgDate(link.verified_at) }}</span>
+                  <span v-else-if="link.must_reverify_by" class="pf-tg-item-warn">Нужно перепривязать до {{ formatTgDate(link.must_reverify_by) }}</span>
+                  <span v-else class="pf-tg-item-warn">Не подтверждён</span>
                 </div>
               </div>
-              <button class="btn btn-sm btn-danger-outline" @click="tgUnlink(link.chat_id)">Отвязать</button>
+              <button class="pf-btn ghost sm danger" @click="tgUnlink(link.chat_id)">Отвязать</button>
             </li>
           </ul>
         </div>
       </div>
 
       <!-- Смена пароля -->
-      <div class="profile-block">
-        <h3>Смена пароля</h3>
-        <form @submit.prevent="changePassword" class="pw-form">
-          <input v-model="pwOld" type="password" placeholder="Текущий пароль" class="input-field" autocomplete="current-password" />
-          <input v-model="pwNew" type="password" placeholder="Новый пароль" class="input-field" autocomplete="new-password" />
-          <input v-model="pwConfirm" type="password" placeholder="Повтор нового пароля" class="input-field" autocomplete="new-password" />
-          <div v-if="pwError" class="error-msg">{{ pwError }}</div>
-          <div v-if="pwSuccess" class="success-msg">Пароль изменён</div>
-          <button type="submit" class="btn btn-primary" :disabled="pwLoading || !pwOld || !pwNew">
+      <div class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-lock">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Смена пароля</h3>
+            <p>Безопасность входа в кабинет</p>
+          </div>
+        </div>
+        <form @submit.prevent="changePassword" class="pf-form">
+          <input v-model="pwOld" type="password" placeholder="Текущий пароль" class="pf-input" autocomplete="current-password" />
+          <input v-model="pwNew" type="password" placeholder="Новый пароль" class="pf-input" autocomplete="new-password" />
+          <input v-model="pwConfirm" type="password" placeholder="Повтор нового пароля" class="pf-input" autocomplete="new-password" />
+          <div v-if="pwError" class="pf-msg pf-msg-err">{{ pwError }}</div>
+          <div v-if="pwSuccess" class="pf-msg pf-msg-ok">Пароль изменён</div>
+          <button type="submit" class="pf-btn primary block" :disabled="pwLoading || !pwOld || !pwNew">
             <span v-if="pwLoading" class="cab-spin cab-spin-sm"></span>
             Сменить пароль
           </button>
@@ -1241,15 +1418,31 @@
       </div>
 
       <!-- Контакты -->
-      <div class="profile-block">
-        <h3>Контакты отдела закупок</h3>
-        <a href="https://t.me/supplyportal_bot" target="_blank" class="contact-link">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 3L1 11l8 2m12-10l-8 18-4-8m12-10l-12 10"/></svg>
-          @supplyportal_bot
+      <div class="pf-card">
+        <div class="pf-card-head">
+          <span class="pf-card-icon pf-icon-contact">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+          </span>
+          <div class="pf-card-title">
+            <h3>Отдел закупок</h3>
+            <p>Связь с командой через бота</p>
+          </div>
+        </div>
+        <a href="https://t.me/supplyportal_bot" target="_blank" class="pf-contact-link">
+          <span class="pf-contact-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 1.5 11l7 2.5L11 21l3-6 7-12z"/><path d="M11 13.5 21 3"/></svg>
+          </span>
+          <span class="pf-contact-text">
+            <span class="pf-contact-username">@supplyportal_bot</span>
+            <span class="pf-contact-sub">Открыть в Telegram</span>
+          </span>
+          <span class="pf-contact-arrow">›</span>
         </a>
       </div>
 
-      <button class="btn btn-danger-outline btn-lg logout-full" @click="handleLogout">Выйти из аккаунта</button>
+      <div class="pf-logout-row">
+        <button class="pf-btn danger lg pf-logout" @click="handleLogout">Выйти из аккаунта</button>
+      </div>
     </section>
 
     <div v-if="currentImportantPost" class="modal-overlay" @click.self="dismissCurrentImportantPost">
@@ -1400,10 +1593,10 @@
 
     <!-- ══════ Mobile tab bar ══════ -->
     <div class="mob-tabbar">
-      <button v-for="tab in mainTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id }" @click="switchTab(tab.id)">
+      <button v-for="tab in mobileTabs" :key="tab.id" class="mob-tab" :class="{ active: activeTab === tab.id, alert: tab.badgeType === 'alert' }" @click="switchTab(tab.id)">
         <span class="mob-tab-icon" v-html="tabIconSvg(tab.id)"></span>
         <span class="mob-tab-label">{{ tab.label }}</span>
-        <span v-if="tab.badge" class="mob-tab-badge">{{ tab.badge }}</span>
+        <span v-if="tab.badge" class="mob-tab-badge" :class="tab.badgeType">{{ tab.badge }}</span>
       </button>
       <button class="mob-tab" :class="{ active: activeTab === 'profile' }" @click="switchTab('profile')">
         <span class="mob-tab-icon" v-html="cabIconSvg.profile"></span>
@@ -1423,6 +1616,7 @@ import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, 
 import { useRouter, useRoute } from 'vue-router';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
+import { useToastStore } from '@/stores/toastStore.js';
 import { deadlineTimeLeftString } from '@/composables/useDeadlineCountdown.js';
 import { formatDate as fmtDate, formatDateShort as fmtDateShort, formatDateTime as fmtDateTime, statusLabel } from '@/lib/roUtils.js';
 import { formatRestaurantNumber } from '@/lib/legalEntities.js';
@@ -1435,6 +1629,7 @@ const router = useRouter();
 const route = useRoute();
 const roStore = useRestaurantOrderStore();
 const soStore = useSupplierOrderStore();
+const toast = useToastStore();
 
 const globalLoading = ref(true);
 const globalError = ref('');
@@ -1477,6 +1672,14 @@ const cabIconSvg = {
   skip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M7 17 17 7"/></svg>',
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.5 4 4-.5L18.5 9 15 5.5 4 16.5Z"/><path d="m13.5 7 3.5 3.5"/></svg>',
   truck: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+};
+
+// Иконки для крупных плиток дашборда — более «жирные» и выразительные.
+const tileIconSvg = {
+  scanner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5"/><line x1="7" y1="9" x2="7" y2="15"/><line x1="10.5" y1="9" x2="10.5" y2="15"/><line x1="13.5" y1="9" x2="13.5" y2="15"/><line x1="17" y1="9" x2="17" y2="15"/><line x1="3" y1="12" x2="21" y2="12" stroke-width="2.4" stroke-linecap="round" opacity="0.55"/></svg>',
+  warehouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11V8.5L12 4l9 4.5V11"/><path d="M4 11h16v9.5H4z"/><path d="M9 14.5h6"/><path d="M9 17.5h6"/><circle cx="17.5" cy="6.5" r="3" fill="currentColor" opacity="0.18" stroke="none"/><path d="M17.5 5v1.5l1 .8" stroke-width="1.6"/></svg>',
+  keg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="4.4" rx="6" ry="1.7"/><path d="M6 4.4v15.2c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7V4.4"/><path d="M6 9c0 .9 2.7 1.7 6 1.7S18 9.9 18 9"/><path d="M6 14.4c0 .9 2.7 1.7 6 1.7s6-.8 6-1.7"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="13" height="16" rx="2.5"/><path d="M6.5 8h7"/><path d="M6.5 12h5"/><circle cx="17" cy="15.5" r="3.8" fill="currentColor" fill-opacity="0.1"/><path d="M19.7 18.2 22 20.5"/></svg>',
 };
 const supplierIconSvg = {
   drinks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h4"/><path d="M9 3v3l-2 2v11a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V8l-2-2V3"/><path d="M7 12h6"/><path d="M16 7h2l1 3v9a2 2 0 0 1-2 2h-1"/><path d="M16 11h3"/></svg>',
@@ -1536,8 +1739,9 @@ const stockDrafts = reactive({}); // product_id -> [{expiry_date, stock}]
 const stockLastSubmittedAt = ref(null);
 const stockLoading = ref(false);
 const stockSaving = ref(false);
-const stockError = ref('');
 const stockSavedFlash = ref(false);
+const stockSearch = ref('');
+const stockFilter = ref('all'); // all | unfilled | filled
 const warehouseStockItems = ref([]);
 const warehouseStockCustomer = ref('');
 const warehouseStockUploadedAt = ref('');
@@ -1556,6 +1760,17 @@ const importantPreviewUrls = reactive({});
 const importantImagePreview = reactive({ show: false, url: '', name: '' });
 const latestImportantPost = computed(() => importantPosts.value[0] || null);
 const currentImportantPost = computed(() => importantPosts.value.find(p => !p.is_read && Number(p.show_popup || 0) === 1) || null);
+const infoFilter = ref('all'); // all | unread
+const importantPostsUnreadCount = computed(() => importantPosts.value.filter(p => !p.is_read).length);
+const importantPostsFiltered = computed(() => {
+  if (infoFilter.value === 'unread') return importantPosts.value.filter(p => !p.is_read);
+  return importantPosts.value;
+});
+function infoAvatar(authorName) {
+  const name = (authorName || 'Отдел закупок').trim();
+  const ch = name.charAt(0).toUpperCase();
+  return ch || 'З';
+}
 let cabinetBackgroundRunId = 0;
 const stockDirty = computed(() => {
   for (const p of stockProducts.value) {
@@ -1566,6 +1781,60 @@ const stockDirty = computed(() => {
   return false;
 });
 const stockSavedSnapshot = reactive({}); // последние сохранённые значения
+
+// Видим ли поиск/фильтры (показываем только если товаров много)
+const stockShowSearch = computed(() => stockProducts.value.length > 8);
+
+// Заполнен ли товар: есть валидная введённая цифра (включая 0).
+function stockProductFilled(productId) {
+  return normalizeStockDraft(productId).length > 0;
+}
+// Есть ли в карточке ошибка: партия с остатком > 0 без срока.
+function stockProductInvalid(p) {
+  if (!stockExpiryRequired(p)) return false;
+  const batches = stockDrafts[p.id] || [];
+  return batches.some(b => Number(b.stock) > 0 && !b.expiry_date);
+}
+
+const stockFilledCount = computed(() => stockProducts.value.filter(p => stockProductFilled(p.id)).length);
+const stockTotalCount = computed(() => stockProducts.value.length);
+const stockProgress = computed(() => {
+  const tot = stockTotalCount.value;
+  return tot ? Math.round((stockFilledCount.value / tot) * 100) : 0;
+});
+
+// Список товаров после поиска и фильтра, разбитый на две группы и
+// отсортированный «не заполнено → заполнено».
+const stockFilteredGrouped = computed(() => {
+  const q = stockSearch.value.trim().toLowerCase();
+  const filter = stockFilter.value;
+  const matches = (p) => {
+    if (q) {
+      const hay = [p.product_sku, p.product_name].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    const filled = stockProductFilled(p.id);
+    if (filter === 'unfilled' && filled) return false;
+    if (filter === 'filled' && !filled) return false;
+    return true;
+  };
+  // Сортировка: незаполненные первыми, среди равных — по исходному порядку.
+  const sortFn = (a, b) => {
+    const fa = stockProductFilled(a.id) ? 1 : 0;
+    const fb = stockProductFilled(b.id) ? 1 : 0;
+    return fa - fb;
+  };
+  const withExpiry = [];
+  const withoutExpiry = [];
+  for (const p of stockProducts.value) {
+    if (!matches(p)) continue;
+    if (stockExpiryRequired(p)) withExpiry.push(p);
+    else withoutExpiry.push(p);
+  }
+  withExpiry.sort(sortFn);
+  withoutExpiry.sort(sortFn);
+  return { withExpiry, withoutExpiry };
+});
 
 const warehouseBaseItems = computed(() => {
   return warehouseStockItems.value.filter(item => !(Number(item.days_left) < 0));
@@ -1872,6 +2141,8 @@ const urgentItems = computed(() => {
 });
 
 // ═══ Tabs ═══
+// Полный список табов — используется на десктопе (вторичная навигация под топбаром)
+// и для определения, какие экраны вообще доступны.
 const mainTabs = computed(() => {
   const tabs = [
     { id: 'dashboard', label: 'Главная' },
@@ -1892,6 +2163,54 @@ const mainTabs = computed(() => {
   tabs.push({ id: 'scanner', label: 'Сканер', beta: true });
   if (kegReturnsEnabled.value) tabs.push({ id: 'keg-returns', label: 'Возврат кег' });
   return tabs;
+});
+
+// Нижний таббар на мобилке — компактный набор: только 4 фиксированные кнопки
+// плюс «Сбор остатков» и «Опросы», когда они активны. Остальное (Сканер,
+// Возврат кег, Остатки склада) — крупными плитками на дашборде.
+const mobileTabs = computed(() => {
+  const tabs = [
+    { id: 'dashboard', label: 'Главная' },
+    { id: 'orders', label: 'Заказы', badge: dashOrdersPending.value || null, badgeType: dashOrdersPending.value ? 'warn' : '' },
+    { id: 'info', label: 'Информация', badge: importantPosts.value.filter(p => !p.is_read).length || null, badgeType: 'warn' },
+  ];
+  if (stockCollection.active) {
+    // Счётчик незаполненных позиций. Если всё заполнено — бейджа нет.
+    const unfilled = stockCollectionUnfilledCount.value;
+    tabs.push({
+      id: 'stock',
+      label: 'Остатки',
+      badge: unfilled > 0 ? unfilled : null,
+      badgeType: unfilled > 0 ? 'alert' : '',
+    });
+  }
+  if (surveyItems.value.length) {
+    tabs.push({ id: 'surveys', label: 'Опросы', badge: surveyPendingCount.value || null, badgeType: surveyPendingCount.value ? 'warn' : '' });
+  }
+  return tabs;
+});
+
+// Сколько товаров в активном сборе остатков ещё не заполнены.
+// Используется для бейджа в нижнем таббаре. 0 = бейджа нет.
+// Источник: если уже загружен список stockProducts — считаем по нему;
+// иначе (ещё не открывали вкладку) — берём submitted_count/total_products из статуса.
+const stockCollectionUnfilledCount = computed(() => {
+  if (!stockCollection.active) return 0;
+  const products = stockProducts.value || [];
+  if (products.length) {
+    let n = 0;
+    for (const p of products) {
+      if (!stockProductFilled(p.id)) n++;
+    }
+    return n;
+  }
+  const c = stockCollection.collection;
+  if (c && c.total_products != null) {
+    const total = Number(c.total_products) || 0;
+    const sub = Number(c.submitted_count) || 0;
+    return Math.max(0, total - sub);
+  }
+  return 0;
 });
 
 const kegReturnsEnabled = ref(false);
@@ -3125,7 +3444,7 @@ async function checkStockCollection() {
     }
   } catch (e) {
     if (activeTab.value === 'stock') {
-      stockError.value = e.message || 'Не удалось проверить сбор остатков';
+      toast.error('Не удалось проверить сбор остатков', e.message || '');
     }
   }
 }
@@ -3159,7 +3478,6 @@ async function selectStockCollection(collectionId) {
 
 async function loadStockInline(collectionId = null) {
   stockLoading.value = true;
-  stockError.value = '';
   try {
     const targetCollectionId = collectionId || stockCollection.selectedId || stockCollection.collection?.id || null;
     const data = await roStore.getStockCollectionData(targetCollectionId);
@@ -3197,7 +3515,7 @@ async function loadStockInline(collectionId = null) {
     }
     stockLastSubmittedAt.value = data.last_submitted_at || null;
   } catch (e) {
-    stockError.value = e.message || 'Ошибка загрузки';
+    toast.error('Ошибка загрузки', e.message || '');
   } finally {
     stockLoading.value = false;
   }
@@ -3205,7 +3523,6 @@ async function loadStockInline(collectionId = null) {
 
 async function submitStockInline() {
   if (!stockCollection.collection?.id) return;
-  stockError.value = '';
   stockSaving.value = true;
   try {
     const items = [];
@@ -3251,10 +3568,11 @@ async function submitStockInline() {
     stockLastSubmittedAt.value = new Date().toISOString().slice(0, 19).replace('T', ' ');
     stockSavedFlash.value = true;
     setTimeout(() => { stockSavedFlash.value = false; }, 2000);
+    toast.success('Сохранено', 'Остатки записаны');
     // Обновляем счётчик в дашборд-карточке
     checkStockCollection();
   } catch (e) {
-    stockError.value = e.message || 'Не удалось сохранить';
+    toast.error('Не удалось сохранить', e.message || '');
   } finally {
     stockSaving.value = false;
   }
@@ -4547,61 +4865,170 @@ tr.del-err { background: #fef2f2; }
 .cab-sv-fade-enter-active, .cab-sv-fade-leave-active { transition: opacity .25s ease; }
 .cab-sv-fade-enter-from, .cab-sv-fade-leave-to { opacity: 0; }
 
-.stock-inline { background: white; border-radius: 18px; padding: 20px; margin: 0 0 16px; border: 1px solid #EDE8E3; }
-.stock-collection-switcher { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-.stock-collection-chip {
+/* ═══ Сбор остатков (редизайн) ═══ */
+.sc-section { padding-bottom: 120px; }
+.sc-wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+/* Переключатель коллекций (если несколько) */
+.sc-coll-switcher { display: flex; flex-wrap: wrap; gap: 8px; }
+.sc-coll-chip {
   display: inline-flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 10px 14px; border-radius: 999px; border: 1px solid #EDE8E3;
-  background: #FAF7F4; color: #502314; cursor: pointer; font: inherit;
-  transition: all 0.15s ease;
+  padding: 9px 14px; border-radius: 999px; border: 1.5px solid #EDE8E3;
+  background: #FFFBF6; color: #502314; cursor: pointer; font: inherit;
+  transition: all .15s ease;
 }
-.stock-collection-chip span { font-weight: 700; }
-.stock-collection-chip small { color: #8b7355; font-size: 11px; font-weight: 700; }
-.stock-collection-chip.active { background: #502314; border-color: #502314; color: #fff; }
-.stock-collection-chip.active small { color: rgba(255,255,255,0.8); }
-.stock-collection-chip:hover { border-color: #E76F51; }
-.stock-inline-head { padding-bottom: 12px; border-bottom: 1px solid #F2EDE8; margin-bottom: 12px; }
-.stock-inline-head h2 { color: #502314; margin: 0 0 4px; font-size: 18px; }
-.stock-inline-sub { color: #8b7355; font-size: 13px; margin: 0; }
-.stock-inline-list { display: flex; flex-direction: column; gap: 0; }
-.stock-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 4px; border-bottom: 1px solid #F7F2EC; }
-.stock-row:last-child { border-bottom: none; }
-.stock-row-main { flex: 1; min-width: 0; }
-.stock-row-name { color: #502314; font-size: 14px; font-weight: 600; line-height: 1.25; }
-.stock-row-flag {
-  margin-left: 8px;
-  font-size: 10px;
-  font-weight: 800;
-  color: #D67B3A;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+.sc-coll-chip span { font-weight: 700; font-size: 13px; }
+.sc-coll-chip small { color: #8b7355; font-size: 11px; font-weight: 700; }
+.sc-coll-chip.active { background: #502314; border-color: #502314; color: #fff; }
+.sc-coll-chip.active small { color: rgba(255,255,255,.85); }
+.sc-coll-chip:hover:not(.active) { border-color: #E76F51; }
+
+/* Шапка коллекции */
+.sc-head { background: #fff; border: 1px solid #EDE8E3; border-radius: 14px; padding: 16px 18px; }
+.sc-head-title { margin: 0 0 4px; color: #2C1A12; font-size: 18px; font-weight: 700; }
+.sc-head-sub { margin: 0; color: #8b7355; font-size: 13px; }
+
+/* Тулбар: поиск + фильтры */
+.sc-toolbar { display: flex; flex-direction: column; gap: 10px; }
+.sc-search-input {
+  width: 100%; padding: 11px 14px; border-radius: 10px;
+  border: 1.5px solid #E8DCC8; background: #fff; color: #2C1A12;
+  font-size: 14px; font-family: inherit; transition: border-color .15s, box-shadow .15s;
 }
-.stock-row-note { color: #8b7355; font-size: 11px; margin-top: 2px; }
-.stock-row-total { margin-top: 6px; font-size: 12px; color: #8b7355; }
-.stock-row-batches { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 280px; max-width: 420px; }
-.stock-row-single { display: flex; align-items: center; gap: 8px; flex: 0 0 220px; justify-content: flex-end; }
-.stock-row-single .stock-qty-input { width: 120px; }
-.stock-batch-row { display: flex; align-items: flex-end; gap: 8px; }
-.stock-batch-field { display: flex; flex-direction: column; gap: 3px; }
-.stock-batch-label { font-size: 11px; color: #8b7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
-.stock-input-error { border-color: #E76F51 !important; background: #FFF5F0 !important; }
-.stock-input { width: 80px; padding: 8px 4px; border: 1.5px solid #e0dbd5; border-radius: 8px; font-size: 16px; text-align: center; font-family: inherit; background: white; transition: border-color 0.15s; }
-.stock-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 2px rgba(231,111,81,0.08); }
-.stock-date-input { width: 150px; text-align: left; font-size: 14px; }
-.stock-qty-input { width: 92px; }
-.stock-row-unit { font-size: 12px; color: #8b7355; font-weight: 500; min-width: 28px; }
-.stock-batch-del {
+.sc-search-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 3px rgba(231,111,81,.15); }
+.sc-filter-chips { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+.sc-fchip {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 12px; border: 1.5px solid #E8DCC8; background: #FFFBF6;
+  color: #6B5344; border-radius: 999px; cursor: pointer; font: inherit;
+  font-size: 13px; font-weight: 600; transition: all .15s;
+}
+.sc-fchip:hover:not(.active) { border-color: #E76F51; }
+.sc-fchip.active { background: #E76F51; color: #fff; border-color: #E76F51; }
+.sc-fchip-count {
+  display: inline-block; min-width: 18px; padding: 1px 7px;
+  border-radius: 10px; background: rgba(0,0,0,.08); font-size: 11px; font-weight: 700;
+}
+.sc-fchip.active .sc-fchip-count { background: rgba(255,255,255,.25); }
+
+/* Группа товаров */
+.sc-group { display: flex; flex-direction: column; gap: 10px; }
+.sc-group-head {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 0 4px;
+}
+.sc-group-head h3 {
+  margin: 0; font-size: 12.5px; font-weight: 700;
+  color: #8b7355; text-transform: uppercase; letter-spacing: .04em;
+}
+.sc-group-count {
+  display: inline-block; min-width: 22px; padding: 1px 8px;
+  border-radius: 999px; background: #F0E5D6; color: #6B5344;
+  font-size: 11.5px; font-weight: 700;
+}
+.sc-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* Карточка товара */
+.sc-card {
+  background: #fff; border: 1.5px solid #ECE3D6; border-radius: 12px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+  transition: border-color .15s, background .15s;
+}
+.sc-card-filled { border-color: #C8E6C9; background: #FAFDF9; }
+.sc-card-invalid { border-color: #E76F51; background: #FFF5F0; }
+.sc-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.sc-card-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; flex: 1; }
+.sc-card-sku {
+  display: inline-block;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px; font-weight: 600; color: #8C7B6E;
+  background: #FFF8F0; border: 1px solid #ECE3D6; border-radius: 5px;
+  padding: 1px 6px; letter-spacing: .02em;
+  vertical-align: 1px;
+}
+.sc-card-name { color: #2C1A12; font-size: 14.5px; font-weight: 600; line-height: 1.3; }
+.sc-card-total {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  white-space: nowrap; padding: 4px 10px; border-radius: 8px;
+  background: #FFF1E0; color: #C16B4D; font-weight: 700;
+  flex-shrink: 0;
+}
+.sc-card-filled .sc-card-total { background: #E8F5E9; color: #2E7D32; }
+.sc-card-total-num { font-size: 16px; }
+.sc-card-total-unit { font-size: 12px; opacity: .8; }
+.sc-card-note { color: #8b7355; font-size: 12px; margin: -4px 0 0; }
+
+/* Партии (товар со сроком) */
+.sc-batches { display: flex; flex-direction: column; gap: 8px; }
+.sc-batch-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 32px;
+  gap: 10px; align-items: end;
+}
+.sc-batch-fld { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sc-batch-lbl {
+  font-size: 11px; font-weight: 600; color: #8b7355;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.sc-input {
+  width: 100%; padding: 9px 11px; border-radius: 8px;
+  border: 1.5px solid #E8DCC8; background: #fff; color: #2C1A12;
+  font-size: 15px; font-family: inherit;
+  transition: border-color .15s, box-shadow .15s;
+  min-height: 40px; box-sizing: border-box;
+}
+.sc-input:focus { outline: none; border-color: #E76F51; box-shadow: 0 0 0 3px rgba(231,111,81,.15); }
+.sc-input-num { text-align: right; }
+.sc-input-err { border-color: #E76F51; background: #FFF5F0; }
+.sc-batch-del {
   border: none; background: transparent; color: #c16b4d; cursor: pointer;
-  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  width: 32px; height: 40px; border-radius: 8px; flex-shrink: 0;
+  font-size: 14px; align-self: end;
 }
-.stock-batch-del:hover { background: #FFF1EC; }
-.stock-batch-add {
-  align-self: flex-start; border: none; background: transparent; color: #E76F51;
-  font-size: 12px; font-weight: 600; cursor: pointer; padding: 0;
+.sc-batch-del:hover { background: #FFF1EC; }
+.sc-batch-add {
+  align-self: flex-start; border: 1.5px dashed #E8DCC8;
+  background: transparent; color: #C16B4D;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 7px 12px; border-radius: 8px; font-family: inherit;
+  transition: all .15s;
 }
-.stock-batch-add:hover { text-decoration: underline; }
-.stock-inline-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #F2EDE8; }
-.stock-saved-flash { color: #16a34a; font-size: 13px; font-weight: 600; }
+.sc-batch-add:hover { border-color: #E76F51; background: #FFF8F0; color: #E76F51; }
+
+/* Карточка без срока — поле в одну строку */
+.sc-card-input-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  align-items: center;
+}
+.sc-card-input { max-width: 180px; justify-self: end; }
+.sc-card-input-unit { font-size: 13px; color: #8b7355; font-weight: 600; min-width: 28px; }
+
+/* Sticky-полоса сохранения */
+.sc-savebar {
+  position: sticky; bottom: 0;
+  margin: 14px -4px 0;
+  padding: 12px 4px 0;
+  background: linear-gradient(to top, #FAF6EF 70%, rgba(250,246,239,0));
+  z-index: 10;
+}
+.sc-savebar-inner {
+  display: flex; align-items: center; gap: 14px;
+  background: #fff; border: 1px solid #ECE3D6; border-radius: 14px;
+  padding: 12px 16px;
+  box-shadow: 0 -2px 8px rgba(80,35,20,.06);
+}
+.sc-savebar-progress { flex: 1; min-width: 0; }
+.sc-savebar-progress-text { font-size: 13px; color: #6B5344; margin-bottom: 4px; }
+.sc-savebar-progress-text b { color: #2C1A12; font-weight: 700; }
+.sc-savebar-progress-bar {
+  height: 6px; border-radius: 999px; background: #F0E5D6; overflow: hidden;
+}
+.sc-savebar-progress-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #F4A261, #E76F51);
+  transition: width .25s ease;
+}
+.sc-savebar-btn { flex-shrink: 0; min-width: 180px; }
 
 .whs-section { max-width: 1180px; margin-left: auto; margin-right: auto; }
 .whs-panel { background: #fff; border: 1px solid #EDE8E3; border-radius: 18px; padding: 18px; }
@@ -4704,35 +5131,139 @@ tr.del-err { background: #fef2f2; }
 .cab-info-text.cab-info-error { color: #b91c1c; }
 .cab-info-text-broadcast { white-space: pre-line; }
 
-.info-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
-.info-posts { display: flex; flex-direction: column; gap: 12px; }
-.info-post {
-  background: white; border: 1px solid #EDE8E3; border-radius: 12px; padding: 16px;
-}
-.info-post.unread { border-color: #E76F51; box-shadow: 0 8px 24px rgba(231,111,81,.08); }
-.info-post-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.info-post h3 { margin: 0 0 4px; color: #502314; font-size: 17px; }
-.info-post-meta { color: #8b7355; font-size: 12px; }
-.info-post p { margin: 12px 0; color: #4b3527; line-height: 1.45; white-space: pre-line; }
-.info-unread {
-  flex-shrink: 0; padding: 4px 8px; border-radius: 999px; background: #FFF3E0; color: #B45309;
-  font-size: 11px; font-weight: 800;
-}
+/* Старые .info-toolbar/.info-posts/.info-post оставлены пустыми — стили
+   полностью заменены на .info-section/.info-card ниже. */
 .info-files { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; }
 .info-files-modal { margin-bottom: 12px; }
-.info-attachments { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; margin-top: 12px; }
-.info-attachment {
-  min-width: 0; border: 1px solid #EDE8E3; border-radius: 10px; padding: 8px; background: #FAF7F4;
-  color: #502314; font: inherit; font-size: 13px; text-align: left; cursor: pointer; overflow: hidden;
+
+/* Информация — редизайн */
+.info-section { max-width: 760px; margin: 0 auto; padding-bottom: 100px; }
+.info-empty {
+  background: #fff; border: 1px solid #ECE3D6; border-radius: 16px;
+  padding: 36px 24px; text-align: center;
 }
-.info-attachment.image { padding: 0; background: white; }
-.info-attachment img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #F4ECE4; }
-.info-file-icon { display: flex; width: 38px; height: 38px; align-items: center; justify-content: center; padding: 8px 8px 2px; color: #8b7355; }
-.info-attachment span:not(.info-file-icon) { display: block; padding: 7px 8px 2px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.info-attachment small { display: block; padding: 0 8px 8px; color: #8b7355; white-space: nowrap; font-size: 12px; }
-.info-attachment:hover { border-color: #E76F51; background: #F4ECE4; }
-.info-read-btn {
-  border: 0; background: transparent; color: #C05621; font-weight: 800; padding: 0; cursor: pointer; font-size: 13px;
+.info-empty-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 60px; height: 60px; border-radius: 16px;
+  background: #FFF1E0; color: #C16B4D;
+  margin: 0 auto 14px;
+}
+.info-empty h3 { margin: 0 0 6px; font-size: 17px; color: #2C1A12; }
+.info-empty p { margin: 0; color: #8B7355; font-size: 13.5px; line-height: 1.5; max-width: 320px; margin: 0 auto; }
+
+.info-filter-chips {
+  display: flex; gap: 8px; margin-bottom: 14px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px;
+}
+.info-fchip {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 12px; border: 1.5px solid #E8DCC8; background: #FFFBF6;
+  color: #6B5344; border-radius: 999px; cursor: pointer; font: inherit;
+  font-size: 13px; font-weight: 600; transition: all .15s;
+}
+.info-fchip:hover:not(.active) { border-color: #E76F51; }
+.info-fchip.active { background: #E76F51; color: #fff; border-color: #E76F51; }
+.info-fchip-count {
+  display: inline-block; min-width: 18px; padding: 1px 7px;
+  border-radius: 10px; background: rgba(0,0,0,.08);
+  font-size: 11px; font-weight: 700;
+}
+.info-fchip.active .info-fchip-count { background: rgba(255,255,255,.25); }
+
+.info-list { display: flex; flex-direction: column; gap: 12px; }
+.info-card {
+  background: #fff; border: 1.5px solid #ECE3D6; border-radius: 14px;
+  padding: 16px 18px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.info-card.unread {
+  border-color: #F4A261;
+  box-shadow: 0 4px 14px rgba(244,162,97,.15);
+  background: linear-gradient(to bottom right, #FFF8F0, #FFFFFF 60%);
+}
+.info-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.info-card-author { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.info-card-avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: linear-gradient(135deg, #502314, #6B321F);
+  color: #fff; font-size: 15px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.info-card.unread .info-card-avatar {
+  background: linear-gradient(135deg, #E76F51, #F4A261);
+}
+.info-card-author-info { min-width: 0; }
+.info-card-author-name { font-size: 13.5px; font-weight: 700; color: #2C1A12; line-height: 1.2; }
+.info-card-time { font-size: 11.5px; color: #8B7355; line-height: 1.3; display: block; margin-top: 2px; }
+.info-card-dot {
+  flex-shrink: 0;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #E76F51;
+  box-shadow: 0 0 0 4px rgba(231,111,81,.2);
+}
+.info-card-title {
+  margin: 0 0 8px; font-size: 16px; font-weight: 700; color: #2C1A12;
+  line-height: 1.35;
+}
+.info-card-message {
+  margin: 0; color: #4B3527; font-size: 14.5px; line-height: 1.55;
+  white-space: pre-line;
+}
+
+.info-card-files {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px; margin-top: 14px;
+}
+.info-file {
+  display: flex; align-items: center; gap: 10px;
+  background: #FAFAF8; border: 1px solid #EDE8E3; border-radius: 10px;
+  padding: 8px 10px; cursor: pointer; font: inherit; color: #2C1A12;
+  text-align: left; min-width: 0;
+  transition: border-color .15s, background .15s;
+}
+.info-file:hover { border-color: #E76F51; background: #FFF8F0; }
+.info-file.image {
+  flex-direction: column; align-items: stretch; gap: 0; padding: 0;
+  overflow: hidden;
+}
+.info-file-img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block;
+  background: #F4ECE4;
+}
+.info-file.image .info-file-meta { padding: 8px 10px; }
+.info-file-ico {
+  width: 36px; height: 36px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: #FFF1E0; color: #C16B4D;
+}
+.info-file-ico svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.info-file-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.info-file-name {
+  font-size: 13px; font-weight: 600; color: #2C1A12;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.info-file-size { font-size: 11.5px; color: #8B7355; }
+
+.info-card-foot {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid #F2EDE8;
+}
+.info-read {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border: 1.5px solid #E8DCC8; border-radius: 999px;
+  background: #FFFBF6; color: #C16B4D; font: inherit;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.info-read:hover { background: #E76F51; color: #fff; border-color: #E76F51; }
+
+@media (max-width: 640px) {
+  .info-card { padding: 14px; border-radius: 12px; }
+  .info-card-files { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .info-empty { padding: 28px 16px; }
 }
 .image-preview-overlay { z-index: 11000; }
 .important-image-modal {
@@ -4763,12 +5294,26 @@ tr.del-err { background: #fef2f2; }
   .cab-section { padding: 16px; }
 
   /* Сбор остатков — на мобильнике партии разворачиваются под наименование */
-  .stock-row { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 4px; }
-  .stock-row-batches { min-width: 0; max-width: 100%; width: 100%; }
-  .stock-row-single { flex: 1 1 auto; justify-content: flex-start; }
-  .stock-batch-row { gap: 8px; flex-wrap: wrap; }
-  .stock-batch-field { flex: 1 1 auto; min-width: 130px; }
-  .stock-batch-field .stock-input { width: 100%; box-sizing: border-box; }
+  /* Сбор остатков на мобилке */
+  .sc-section { padding-bottom: 140px; }
+  .sc-card { padding: 12px; border-radius: 12px; }
+  .sc-card-head { flex-wrap: wrap; gap: 8px; }
+  .sc-card-name { font-size: 14px; }
+  .sc-card-total-num { font-size: 15px; }
+  .sc-batch-row { grid-template-columns: 1fr 1fr; }
+  .sc-batch-del {
+    grid-column: 1 / -1;
+    width: auto; height: auto;
+    padding: 8px;
+    background: #FFF1EC; color: #c16b4d;
+    border-radius: 8px; font-size: 12px; font-weight: 600;
+  }
+  .sc-batch-del:hover { background: #FFE0D5; }
+  .sc-card-input-row { grid-template-columns: 1fr auto; }
+  .sc-card-input { max-width: none; width: 100%; }
+  .sc-savebar { margin-left: -14px; margin-right: -14px; padding: 12px 14px 0; }
+  .sc-savebar-inner { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; }
+  .sc-savebar-btn { width: 100%; min-width: 0; padding: 12px; font-size: 15px; }
   .stock-date-input { width: auto !important; }
   .stock-qty-input { width: auto !important; }
 
@@ -4909,10 +5454,238 @@ tr.del-err { background: #fef2f2; }
 .mob-tab-icon { height: 20px; display: flex; align-items: center; justify-content: center; }
 .mob-tab-label { font-size: 9px; font-weight: 700; }
 .mob-tab-badge {
-  position: absolute; top: 2px; right: calc(50% - 16px);
-  min-width: 16px; height: 16px; border-radius: 8px;
+  position: absolute; top: 2px; right: calc(50% - 18px);
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
   background: #E76F51; color: white; font-size: 9px; font-weight: 800;
   display: flex; align-items: center; justify-content: center;
+}
+.mob-tab-badge.warn { background: #F4A261; }
+.mob-tab-badge.alert { background: #E53935; }
+.mob-tab.alert { color: #E53935; }
+
+/* ═══ Mobile topbar (compact) ═══ */
+.mob-topbar { display: none; }
+@media (max-width: 768px) {
+  .mob-topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: #fff; border-bottom: 1px solid #EDE8E3;
+    position: sticky; top: 0; z-index: 50;
+  }
+  .mob-topbar-rest {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 44px;
+    background: linear-gradient(135deg, #502314, #6B321F);
+    color: #fff; border-radius: 10px;
+    padding: 4px 10px;
+    line-height: 1;
+  }
+  .mob-topbar-num { font-size: 16px; font-weight: 800; letter-spacing: 0.02em; }
+  .mob-topbar-label { font-size: 8px; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 1px; }
+  .mob-topbar-screen {
+    flex: 1; min-width: 0;
+    font-size: 15px; font-weight: 700; color: #2C1A12;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mob-topbar-scan {
+    flex-shrink: 0; width: 40px; height: 40px;
+    border: none; border-radius: 10px;
+    background: #FFF1E0; color: #C16B4D; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+  }
+  .mob-topbar-scan:hover, .mob-topbar-scan:active { background: #E76F51; color: #fff; }
+}
+
+/* ═══ Dashboard tiles (Сервисы) ═══ */
+.dash-services { margin-top: 18px; }
+.dash-tiles {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.dash-tile {
+  display: grid; grid-template-columns: 44px 1fr 16px;
+  align-items: center; gap: 12px;
+  padding: 14px 14px; border-radius: 14px; cursor: pointer;
+  border: 1.5px solid transparent;
+  background: #fff;
+  font-family: inherit; text-align: left; text-decoration: none;
+  color: #2C1A12;
+  transition: transform .08s, box-shadow .15s, border-color .15s;
+  box-shadow: 0 1px 0 rgba(80,35,20,.04);
+}
+.dash-tile:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(80,35,20,.08); }
+.dash-tile-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #FFF1E0; color: #E76F51;
+  flex-shrink: 0;
+}
+.dash-tile-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dash-tile-text { min-width: 0; }
+.dash-tile-title {
+  font-size: 14px; font-weight: 700; color: #2C1A12;
+  display: flex; align-items: center; gap: 6px;
+  line-height: 1.25;
+}
+.dash-tile-beta {
+  display: inline-block; padding: 1px 5px; border-radius: 4px;
+  background: #FFE8C9; color: #B45309;
+  font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+}
+.dash-tile-sub { font-size: 12px; color: #8B7355; margin-top: 2px; line-height: 1.3; }
+.dash-tile-arrow { color: #C7B9A7; font-size: 18px; font-weight: 300; line-height: 1; }
+/* Цветовые акценты */
+.dash-tile--scanner .dash-tile-icon { background: #E5F3E5; color: #2E7D32; }
+.dash-tile--warehouse .dash-tile-icon { background: #EFE9FF; color: #6B46C1; }
+.dash-tile--keg .dash-tile-icon { background: #FFF1E0; color: #C16B4D; }
+.dash-tile--cards .dash-tile-icon { background: #E0F2FE; color: #1D4ED8; }
+
+@media (max-width: 640px) {
+  .dash-tiles { grid-template-columns: 1fr; gap: 8px; }
+  .dash-tile { padding: 12px; }
+}
+
+/* ═══ Profile (редизайн) ═══ */
+.pf-section { padding-bottom: 100px; max-width: 720px; margin: 0 auto; }
+.pf-hero {
+  display: flex; gap: 14px; align-items: center;
+  background: linear-gradient(135deg, #FFF8F0, #FFFBF6);
+  border: 1px solid #ECE3D6; border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 14px;
+}
+.pf-hero-avatar {
+  width: 64px; height: 64px; border-radius: 16px;
+  background: linear-gradient(135deg, #E76F51, #F4A261);
+  color: #fff; font-size: 22px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(231,111,81,.25);
+}
+.pf-hero-info { min-width: 0; flex: 1; }
+.pf-hero-title { margin: 0 0 4px; font-size: 18px; font-weight: 700; color: #2C1A12; }
+.pf-hero-addr { margin: 0; font-size: 13px; color: #6B5344; line-height: 1.4; }
+.pf-hero-le { margin: 4px 0 0; font-size: 12px; color: #8B7355; }
+
+.pf-card {
+  background: #fff; border: 1px solid #ECE3D6; border-radius: 14px;
+  padding: 16px; margin-bottom: 12px;
+}
+.pf-card-head {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+}
+.pf-card-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.pf-icon-tg { background: #E1F5FE; color: #0277BD; }
+.pf-icon-lock { background: #F3E5F5; color: #6B46C1; }
+.pf-icon-contact { background: #FFF1E0; color: #C16B4D; }
+.pf-card-title { min-width: 0; flex: 1; }
+.pf-card-title h3 { margin: 0; font-size: 15px; font-weight: 700; color: #2C1A12; }
+.pf-card-title p { margin: 2px 0 0; font-size: 12px; color: #8B7355; }
+
+/* Кнопки профиля */
+.pf-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 16px; border: 1.5px solid transparent; border-radius: 10px;
+  font: inherit; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background .15s, border-color .15s, transform .08s;
+}
+.pf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.pf-btn.block { width: 100%; }
+.pf-btn.lg { padding: 13px 18px; font-size: 15px; }
+.pf-btn.sm { padding: 7px 12px; font-size: 13px; }
+.pf-btn.primary { background: #E76F51; color: #fff; border-color: #E76F51; }
+.pf-btn.primary:hover:not(:disabled) { background: #D9603F; border-color: #D9603F; }
+.pf-btn.danger { background: #fff; color: #E53935; border-color: #FFCDD2; }
+.pf-btn.danger:hover:not(:disabled) { background: #FFEBEE; border-color: #E53935; }
+.pf-btn.ghost { background: transparent; color: #6B5344; border-color: #EDE7DF; }
+.pf-btn.ghost.danger { color: #E53935; border-color: #FFCDD2; }
+.pf-btn.ghost.danger:hover:not(:disabled) { background: #FFEBEE; }
+
+/* Telegram-код */
+.pf-tg-code {
+  background: #F4FBF4; border: 1px solid #C8E6C9; border-radius: 10px;
+  padding: 14px; text-align: center;
+}
+.pf-tg-code-hint { margin: 0 0 10px; font-size: 13px; color: #2E7D32; }
+.pf-tg-code-hint a { color: #2E7D32; font-weight: 700; }
+.pf-tg-code-box {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 22px; font-weight: 800; letter-spacing: 0.18em;
+  color: #2C1A12; padding: 12px; background: #fff;
+  border-radius: 8px; border: 1.5px dashed #C8E6C9;
+}
+.pf-tg-code-meta { margin: 8px 0 0; font-size: 11px; color: #8B7355; }
+
+/* Список привязок */
+.pf-tg-links { margin-top: 14px; padding-top: 14px; border-top: 1px solid #F2EDE8; }
+.pf-tg-links-title { font-size: 12px; color: #8B7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+.pf-tg-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.pf-tg-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: #FAFAF8; border: 1px solid #EDE8E3; border-radius: 10px;
+  padding: 10px 12px;
+}
+.pf-tg-item-info { min-width: 0; flex: 1; }
+.pf-tg-item-name { font-size: 14px; font-weight: 700; color: #2C1A12; }
+.pf-tg-item-username { font-weight: 400; color: #8B7355; margin-left: 6px; }
+.pf-tg-item-meta { font-size: 12px; margin-top: 2px; }
+.pf-tg-item-ok { color: #2E7D32; }
+.pf-tg-item-warn { color: #C16B4D; }
+
+/* Форма пароля */
+.pf-form { display: flex; flex-direction: column; gap: 10px; }
+.pf-input {
+  padding: 11px 14px; border-radius: 10px;
+  border: 1.5px solid #EDE8E3; background: #FAFAF8; color: #2C1A12;
+  font: inherit; font-size: 15px;
+  transition: border-color .15s, background .15s;
+}
+.pf-input:focus { outline: none; border-color: #E76F51; background: #fff; box-shadow: 0 0 0 3px rgba(231,111,81,.12); }
+.pf-msg { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+.pf-msg-err { background: #FFEBEE; color: #C62828; }
+.pf-msg-ok { background: #E8F5E9; color: #2E7D32; }
+
+/* Контакты */
+.pf-contact-link {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px; border-radius: 10px; background: #FAFAF8;
+  border: 1px solid #EDE8E3; text-decoration: none; color: #2C1A12;
+  transition: background .15s, border-color .15s;
+}
+.pf-contact-link:hover { background: #FFF8F0; border-color: #D6C5AB; }
+.pf-contact-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: #E1F5FE; color: #0277BD;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.pf-contact-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.pf-contact-username { font-size: 14.5px; font-weight: 700; color: #2C1A12; }
+.pf-contact-sub { font-size: 12px; color: #8B7355; }
+.pf-contact-arrow { color: #C7B9A7; font-size: 18px; font-weight: 300; }
+
+.pf-logout-row { display: flex; justify-content: flex-start; margin-top: 14px; }
+.pf-logout { min-width: 220px; }
+@media (max-width: 640px) {
+  .pf-logout-row { justify-content: stretch; }
+  .pf-logout { width: 100%; min-width: 0; }
+}
+
+@media (max-width: 640px) {
+  .pf-hero { padding: 14px; gap: 12px; }
+  .pf-hero-avatar { width: 56px; height: 56px; font-size: 19px; border-radius: 14px; }
+  .pf-hero-title { font-size: 16px; }
+  .pf-card { padding: 14px; }
+  .pf-card-icon { width: 36px; height: 36px; }
+  .pf-card-icon svg { width: 18px; height: 18px; }
+  .pf-card-title h3 { font-size: 14px; }
+  .pf-input { padding: 12px 14px; font-size: 16px; /* Чтобы iOS не зумил */ }
+  .pf-tg-item { flex-direction: column; align-items: stretch; gap: 8px; }
+  .pf-tg-code-box { font-size: 19px; letter-spacing: 0.14em; }
 }
 
 /* ═══ Order comment ═══ */
