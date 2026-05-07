@@ -23,9 +23,6 @@
         </div>
       </div>
       <div class="rom-header-right">
-        <button class="rom-btn rom-btn-primary" @click="handleAutoSession">
-          {{ session ? 'Сессия активна' : 'Создать сессию' }}
-        </button>
         <div class="rom-menu-wrap" v-click-outside="() => moreMenuOpen = false">
           <button class="rom-btn rom-btn-icon" @click="moreMenuOpen = !moreMenuOpen" title="Ещё">⋯</button>
           <div v-if="moreMenuOpen" class="rom-menu">
@@ -46,7 +43,7 @@
         </div>
         <div class="rom-command-deadline" :class="'dl-' + (deadlineStatus?.status || 'none')">
           <div class="rom-cmd-label">Статус приёма</div>
-          <div class="rom-cmd-deadline-text">{{ deadlineLabel || (session ? 'Приём не открыт' : 'Нет сессии') }}</div>
+          <div class="rom-cmd-deadline-text">{{ deadlineLabel || 'Приём не открыт' }}</div>
           <div v-if="deadlineStatus?.soft_deadline || deadlineStatus?.hard_deadline" class="rom-cmd-deadline-times">
             <span v-if="deadlineStatus.soft_deadline">мягкий: <strong>{{ deadlineStatus.soft_deadline.slice(0,5) }}</strong></span>
             <span v-if="deadlineStatus.hard_deadline">жёсткий: <strong>{{ deadlineStatus.hard_deadline.slice(0,5) }}</strong></span>
@@ -98,11 +95,6 @@
 
       <!-- Loading -->
       <div v-if="loading" class="rom-loading"><BurgerSpinner text="Загрузка..." /></div>
-
-      <!-- No session -->
-      <div v-else-if="!session" class="rom-empty">
-        Нет активной сессии. Нажмите «Создать сессию» для открытия приёма заявок.
-      </div>
 
       <template v-else>
         <!-- Карточки-сводка -->
@@ -2011,7 +2003,18 @@ function setTomorrow() {
 async function loadStatus() {
   loading.value = true;
   try {
-    const data = await store.adminGetStatus(selectedDate.value, orderStore.settings.legalEntity);
+    let data = await store.adminGetStatus(selectedDate.value, orderStore.settings.legalEntity);
+    // Сессия в этом модуле всегда одна на юрлицо: если её ещё нет —
+    // автоматически создаём и перечитываем статус. Пользователь не должен
+    // вручную нажимать «Создать сессию».
+    if (!data.session) {
+      try {
+        await store.adminAutoSession(orderStore.settings.legalEntity || undefined);
+        data = await store.adminGetStatus(selectedDate.value, orderStore.settings.legalEntity);
+      } catch (e) {
+        // не ломаем UI — просто покажем то, что вернёт сервер
+      }
+    }
     session.value = data.session;
     restaurants.value = data.restaurants || [];
     stats.value = data.stats || { total: 0, submitted: 0, pending: 0 };
