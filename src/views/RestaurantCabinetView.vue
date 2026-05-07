@@ -168,9 +168,13 @@
               <div class="dash-stat-num">{{ dashOrdersPending }}</div>
               <div class="dash-stat-label">Ожидают заявку</div>
             </div>
-            <div class="dash-stat" v-if="stockCollection.active" @click="switchTab('stock')">
-              <div class="dash-stat-num dash-stat-alert">!</div>
-              <div class="dash-stat-label">Сбор остатков</div>
+            <div
+              v-if="stockCollection.active && stockCollectionUnfilledCount > 0"
+              class="dash-stat"
+              @click="switchTab('stock')"
+            >
+              <div class="dash-stat-num dash-stat-alert">{{ stockCollectionUnfilledCount }}</div>
+              <div class="dash-stat-label">Не заполнено остатков</div>
             </div>
           </div>
 
@@ -2153,10 +2157,12 @@ const mainTabs = computed(() => {
     tabs.push({ id: 'surveys', label: 'Опросы', badge: surveyPendingCount.value || null, badgeType: surveyPendingCount.value ? 'warn' : '' });
   }
   if (stockCollection.active) {
+    const unfilled = stockCollectionUnfilledCount.value;
     tabs.push({
-      id: 'stock', label: 'Сбор остатков',
-      blink: !stockCollection.collection?.submitted,
-      badge: '!', badgeType: 'alert',
+      id: 'stock',
+      label: 'Сбор остатков',
+      badge: unfilled > 0 ? unfilled : null,
+      badgeType: unfilled > 0 ? 'alert' : '',
     });
   }
   tabs.push({ id: 'warehouse-stock', label: 'Остатки склада' });
