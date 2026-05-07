@@ -5,7 +5,11 @@
       <div>
         <router-link :to="{ name: 'shelf-life' }" class="sla-back">← К срокам годности</router-link>
         <h1 class="sla-title">Аналитика ячеек</h1>
-        <p class="sla-sub">Сводка для презентации руководителю — графики, KPI и экспорт.</p>
+        <p class="sla-sub">
+          <span v-if="filterEntity">Юрлицо: <b>{{ filterEntity }}</b> · </span>
+          <span v-else-if="availableEntities.length > 1">Все юрлица · </span>
+          Сводка для презентации руководителю — графики, KPI и экспорт.
+        </p>
       </div>
       <div class="sla-header-actions">
         <!-- Скачать график (PNG/SVG, светлый/тёмный) -->
@@ -20,13 +24,13 @@
             <button class="sla-export-item" @click="chartExportMenu = false; downloadChartSvg(true)">SVG · тёмный</button>
           </div>
         </div>
-        <button class="sla-btn outline" :disabled="!rawRows.length || exportBusy" @click="runExport(downloadExcel, 'excel')">
+        <button class="sla-btn outline" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadExcel, 'excel')">
           {{ exportBusy === 'excel' ? '...' : 'Excel' }}
         </button>
-        <button class="sla-btn outline" :disabled="!rawRows.length || exportBusy" @click="runExport(downloadPdf, 'pdf')">
+        <button class="sla-btn outline" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPdf, 'pdf')">
           {{ exportBusy === 'pdf' ? '...' : 'PDF' }}
         </button>
-        <button class="sla-btn primary" :disabled="!rawRows.length || exportBusy" @click="runExport(downloadPptx, 'pptx')">
+        <button class="sla-btn primary" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPptx, 'pptx')">
           {{ exportBusy === 'pptx' ? '...' : 'PowerPoint' }}
         </button>
       </div>
@@ -34,6 +38,22 @@
 
     <!-- ═══ Контролы периода и группировки ═══ -->
     <div class="sla-toolbar">
+      <div class="sla-toolbar-row" v-if="availableEntities.length > 1">
+        <span class="sla-toolbar-label">Юрлицо:</span>
+        <button
+          class="sla-chip"
+          :class="{ active: !filterEntity }"
+          @click="filterEntity = ''; syncToUrl()"
+        >Все ({{ availableEntities.length }})</button>
+        <button
+          v-for="e in availableEntities"
+          :key="e"
+          class="sla-chip"
+          :class="{ active: filterEntity === e }"
+          @click="filterEntity = e; syncToUrl()"
+        >{{ shortEntityName(e) }}</button>
+      </div>
+
       <div class="sla-toolbar-row">
         <span class="sla-toolbar-label">Период:</span>
         <button
@@ -121,6 +141,32 @@
         <div class="sla-insight-icon">💡</div>
         <p>{{ autoInsight }}</p>
       </div>
+
+      <!-- ═══ Экспорт (видная секция в основном потоке) ═══ -->
+      <section class="sla-export-section">
+        <div class="sla-export-section-text">
+          <h3>Готово к презентации?</h3>
+          <p>Скачайте сводку в нужном формате — все KPI, графики и таблицы вшиты внутрь.</p>
+        </div>
+        <div class="sla-export-section-buttons">
+          <button class="sla-export-btn" @click="openChartExportMenu">
+            <span class="sla-export-btn-ico">🖼</span>
+            <span>График PNG / SVG</span>
+          </button>
+          <button class="sla-export-btn" :disabled="exportBusy" @click="runExport(downloadExcel, 'excel')">
+            <span class="sla-export-btn-ico">📊</span>
+            <span>{{ exportBusy === 'excel' ? 'Готовится...' : 'Excel' }}</span>
+          </button>
+          <button class="sla-export-btn" :disabled="exportBusy" @click="runExport(downloadPdf, 'pdf')">
+            <span class="sla-export-btn-ico">📄</span>
+            <span>{{ exportBusy === 'pdf' ? 'Готовится...' : 'PDF' }}</span>
+          </button>
+          <button class="sla-export-btn primary" :disabled="exportBusy" @click="runExport(downloadPptx, 'pptx')">
+            <span class="sla-export-btn-ico">📽</span>
+            <span>{{ exportBusy === 'pptx' ? 'Готовится...' : 'PowerPoint' }}</span>
+          </button>
+        </div>
+      </section>
 
       <!-- ═══ Главный график ═══ -->
       <section class="sla-chart-card">
@@ -210,6 +256,45 @@
         <p class="sla-chart-hint" v-if="granularity === 'day'">
           Подсказка: <b>Shift+клик</b> по точке — добавить или изменить метку события на графике.
         </p>
+      </section>
+
+      <!-- ═══ Среднемесячные значения по типам хранения ═══ -->
+      <section v-if="monthlyAverages" class="sla-table-card">
+        <header class="sla-chart-head">
+          <h3>Среднемесячные значения по складам</h3>
+          <span class="sla-table-hint">Среднее по дням внутри месяца, по каждому типу хранения</span>
+        </header>
+        <div v-for="g in monthlyAverages.groups" :key="g.entity" class="sla-table-wrap">
+          <div v-if="!filterEntity" class="sla-table-entity-name">{{ g.entity }}</div>
+          <div class="sla-table-scroll">
+            <table class="sla-table">
+              <thead>
+                <tr>
+                  <th class="sla-table-th-month">Месяц</th>
+                  <th v-for="t in monthlyAverages.types" :key="t">{{ STOCK_TYPE_LABELS[t] || t }}</th>
+                  <th class="sla-table-th-total">Итого</th>
+                  <th class="sla-table-th-days">Дней</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in g.months" :key="m.key">
+                  <td class="sla-table-month">{{ m.label }}</td>
+                  <td v-for="t in monthlyAverages.types" :key="t" class="sla-table-num">{{ m.byType[t] || '—' }}</td>
+                  <td class="sla-table-num sla-table-total">{{ m.total || '—' }}</td>
+                  <td class="sla-table-days">{{ m.daysCount }}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td class="sla-table-month">Среднее за период</td>
+                  <td v-for="t in monthlyAverages.types" :key="t" class="sla-table-num">{{ g.avgByType[t] || '—' }}</td>
+                  <td class="sla-table-num sla-table-total">{{ g.avgTotal || '—' }}</td>
+                  <td class="sla-table-days">—</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- ═══ Heatmap-календарь ═══ -->
@@ -306,10 +391,29 @@ import { useRouter, useRoute } from 'vue-router';
 import { db } from '@/lib/apiClient.js';
 import BurgerSpinner from '@/components/ui/BurgerSpinner.vue';
 import { useToastStore } from '@/stores/toastStore.js';
+import { useOrderStore } from '@/stores/orderStore.js';
 
 const router = useRouter();
 const route = useRoute();
 const toast = useToastStore();
+const orderStore = useOrderStore();
+
+// Шорт-нейм юрлица (та же логика, что в ShelfLifeView)
+function shortEntityName(name) {
+  if (!name) return '';
+  if (/Бургер БК/i.test(name)) return 'БК';
+  if (/Воглия Матта/i.test(name)) return 'ВМ';
+  if (/Пицца Стар/i.test(name)) return 'ПС';
+  return name;
+}
+function entityToWarehouseName(legalEntity) {
+  // В warehouse_cells.legal_entity хранятся короткие имена («Бургер БК» и т.п.)
+  if (!legalEntity) return '';
+  if (/Бургер БК/i.test(legalEntity)) return 'Бургер БК';
+  if (/Воглия Матта/i.test(legalEntity)) return 'Воглия Матта';
+  if (/Пицца Стар/i.test(legalEntity)) return 'Пицца Стар';
+  return legalEntity;
+}
 
 // ─── Константы ───
 const PRESETS = [
@@ -342,10 +446,25 @@ const customEnd = ref('');
 const granularity = ref('month');
 const groupBy = ref('entity');
 const comparePrev = ref(false);
+// Фильтр по юрлицу. Пустая строка = все юрлица.
+// По умолчанию подставляем активное юрлицо пользователя — чтобы данные
+// разных юрлиц не смешивались автоматически.
+const filterEntity = ref(entityToWarehouseName(orderStore.settings?.legalEntity || ''));
 
 const loading = ref(false);
 const error = ref('');
 const rawRows = ref([]);
+
+// Список доступных юрлиц (на основе пришедших данных)
+const availableEntities = computed(() => {
+  return [...new Set(rawRows.value.map(r => r.legal_entity))].sort();
+});
+
+// Данные с применённым фильтром по юрлицу
+const filteredRows = computed(() => {
+  if (!filterEntity.value) return rawRows.value;
+  return rawRows.value.filter(r => r.legal_entity === filterEntity.value);
+});
 
 // ─── URL share ───
 function syncFromUrl() {
@@ -356,6 +475,7 @@ function syncFromUrl() {
   if (q.gran && GRANULARITY.some(g => g.key === q.gran)) granularity.value = q.gran;
   if (q.group && GROUPING.some(g => g.key === q.group)) groupBy.value = q.group;
   if (q.compare === '1') comparePrev.value = true;
+  if (q.entity !== undefined) filterEntity.value = String(q.entity);
 }
 
 function syncToUrl() {
@@ -369,6 +489,7 @@ function syncToUrl() {
     q.end = customEnd.value;
   }
   if (comparePrev.value) q.compare = '1';
+  if (filterEntity.value) q.entity = filterEntity.value;
   router.replace({ query: q }).catch(() => {});
 }
 
@@ -461,7 +582,7 @@ async function loadData() {
 const dailyTotals = computed(() => {
   // Map<date, { total, byEntity: {entity:n}, byType: {type:n} }>
   const byDate = new Map();
-  for (const r of rawRows.value) {
+  for (const r of filteredRows.value) {
     if (!byDate.has(r.report_date)) {
       byDate.set(r.report_date, { date: r.report_date, total: 0, byEntity: {}, byType: {} });
     }
@@ -717,7 +838,7 @@ const chartSeries = computed(() => {
     }];
   }
   if (groupBy.value === 'entity') {
-    const entities = [...new Set(rawRows.value.map(r => r.legal_entity))].sort();
+    const entities = [...new Set(filteredRows.value.map(r => r.legal_entity))].sort();
     return entities.map(e => {
       const buckets = aggregateBuckets(cur, gran, d => d.byEntity[e] || 0);
       return {
@@ -729,7 +850,7 @@ const chartSeries = computed(() => {
     });
   }
   // type
-  const types = [...new Set(rawRows.value.map(r => r.stock_type))].sort();
+  const types = [...new Set(filteredRows.value.map(r => r.stock_type))].sort();
   return types.map(t => {
     const buckets = aggregateBuckets(cur, gran, d => d.byType[t] || 0);
     return {
@@ -1125,6 +1246,13 @@ function handleDocClick(e) {
     chartExportMenu.value = false;
   }
 }
+function openChartExportMenu() {
+  // Прокрутим к шапке и откроем меню
+  if (exportWrapEl.value) {
+    exportWrapEl.value.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  setTimeout(() => { chartExportMenu.value = true; }, 200);
+}
 onMounted(() => document.addEventListener('click', handleDocClick));
 onUnmounted(() => document.removeEventListener('click', handleDocClick));
 
@@ -1173,11 +1301,11 @@ async function downloadExcel() {
   days.push([
     { v: 'Дата', t: 's', s: sH },
     { v: 'Всего', t: 's', s: sH },
-    ...[...new Set(rawRows.value.map(r => r.legal_entity))].sort().map(e => ({ v: e, t: 's', s: sH })),
-    ...[...new Set(rawRows.value.map(r => r.stock_type))].sort().map(t => ({ v: STOCK_TYPE_LABELS[t] || t, t: 's', s: sH })),
+    ...[...new Set(filteredRows.value.map(r => r.legal_entity))].sort().map(e => ({ v: e, t: 's', s: sH })),
+    ...[...new Set(filteredRows.value.map(r => r.stock_type))].sort().map(t => ({ v: STOCK_TYPE_LABELS[t] || t, t: 's', s: sH })),
   ]);
-  const entities = [...new Set(rawRows.value.map(r => r.legal_entity))].sort();
-  const types = [...new Set(rawRows.value.map(r => r.stock_type))].sort();
+  const entities = [...new Set(filteredRows.value.map(r => r.legal_entity))].sort();
+  const types = [...new Set(filteredRows.value.map(r => r.stock_type))].sort();
   for (const d of currentDays.value) {
     days.push([
       { v: d.date, t: 's', s: sC },
@@ -1189,6 +1317,47 @@ async function downloadExcel() {
   const ws2 = XLSX.utils.aoa_to_sheet(days);
   ws2['!cols'] = [{ wch: 12 }, { wch: 10 }, ...entities.map(() => ({ wch: 14 })), ...types.map(() => ({ wch: 12 }))];
   XLSX.utils.book_append_sheet(wb, ws2, 'Дни');
+
+  // Лист 3: «Среднемесячные значения» по типам хранения (по юрлицам)
+  if (monthlyAverages.value && monthlyAverages.value.groups.length) {
+    const ma = monthlyAverages.value;
+    const aoa = [];
+    const headerRow = [
+      { v: 'Юрлицо', t: 's', s: sH },
+      { v: 'Месяц', t: 's', s: sH },
+      ...ma.types.map(t => ({ v: STOCK_TYPE_LABELS[t] || t, t: 's', s: sH })),
+      { v: 'Итого', t: 's', s: sH },
+      { v: 'Дней в месяце', t: 's', s: sH },
+    ];
+    aoa.push(headerRow);
+    for (const g of ma.groups) {
+      for (const m of g.months) {
+        aoa.push([
+          { v: g.entity, t: 's', s: sC },
+          { v: m.label, t: 's', s: sB },
+          ...ma.types.map(t => ({ v: m.byType[t] || 0, t: 'n', s: sN })),
+          { v: m.total || 0, t: 'n', s: { ...sN, font: { ...sN.font, bold: true } } },
+          { v: m.daysCount, t: 'n', s: sN },
+        ]);
+      }
+      // Среднее по юрлицу
+      aoa.push([
+        { v: g.entity, t: 's', s: { ...sC, fill: { fgColor: { rgb: 'FFF1E0' } } } },
+        { v: 'Среднее за период', t: 's', s: { ...sB, fill: { fgColor: { rgb: 'FFF1E0' } } } },
+        ...ma.types.map(t => ({ v: g.avgByType[t] || 0, t: 'n', s: { ...sN, font: { ...sN.font, bold: true }, fill: { fgColor: { rgb: 'FFF1E0' } } } })),
+        { v: g.avgTotal || 0, t: 'n', s: { ...sN, font: { ...sN.font, bold: true, color: { rgb: 'C16B4D' } }, fill: { fgColor: { rgb: 'FFF1E0' } } } },
+        { v: '', t: 's', s: { ...sN, fill: { fgColor: { rgb: 'FFF1E0' } } } },
+      ]);
+      aoa.push([]); // пустая строка между юрлицами
+    }
+    const ws3 = XLSX.utils.aoa_to_sheet(aoa);
+    ws3['!cols'] = [
+      { wch: 16 }, { wch: 14 },
+      ...ma.types.map(() => ({ wch: 12 })),
+      { wch: 12 }, { wch: 12 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Среднемесячные');
+  }
 
   XLSX.writeFile(wb, 'cell-analytics-' + dateRange.value.start + '_' + dateRange.value.end + '.xlsx');
 }
@@ -1314,6 +1483,82 @@ async function downloadPptx() {
 
   await pptx.writeFile({ fileName: 'cell-analytics-' + dateRange.value.start + '_' + dateRange.value.end + '.pptx' });
 }
+
+// ─── Среднемесячные значения по типу хранения (и по юрлицу, если выбрано «Все») ───
+const monthlyAverages = computed(() => {
+  // Возвращает структуру:
+  // - groupsByEntity: Map<entity, { months: [{ key, label, byType: {dry, cold, frozen, shabany}, total }], avgByType, total }>
+  //   Если фильтр выбран — только одно юрлицо в map.
+  // - types: упорядоченный массив типов хранения, встречающихся в данных
+  if (!filteredRows.value.length) return null;
+
+  // Соберём по (entity, month) → массив дневных rawRows для усреднения
+  const acc = new Map(); // key: entity::month, value: { entity, monthKey, days: Map<date, {byType:{}}> }
+  for (const r of filteredRows.value) {
+    const dt = new Date(r.report_date);
+    const monthKey = dt.getFullYear() + '-' + pad(dt.getMonth() + 1);
+    const k = r.legal_entity + '::' + monthKey;
+    if (!acc.has(k)) acc.set(k, { entity: r.legal_entity, monthKey, days: new Map() });
+    const slot = acc.get(k);
+    if (!slot.days.has(r.report_date)) slot.days.set(r.report_date, { byType: {} });
+    const day = slot.days.get(r.report_date);
+    day.byType[r.stock_type] = (day.byType[r.stock_type] || 0) + (parseInt(r.cell_count, 10) || 0);
+  }
+
+  // Превратим acc в группы по юрлицам
+  const byEntity = new Map();
+  for (const slot of acc.values()) {
+    const days = [...slot.days.values()];
+    const monthAvg = { byType: {}, total: 0, daysCount: days.length };
+    const typeKeys = new Set();
+    for (const d of days) {
+      for (const [t, v] of Object.entries(d.byType)) {
+        typeKeys.add(t);
+        monthAvg.byType[t] = (monthAvg.byType[t] || 0) + v;
+      }
+    }
+    for (const t of typeKeys) {
+      monthAvg.byType[t] = Math.round(monthAvg.byType[t] / days.length);
+      monthAvg.total += monthAvg.byType[t];
+    }
+
+    if (!byEntity.has(slot.entity)) byEntity.set(slot.entity, []);
+    byEntity.get(slot.entity).push({
+      key: slot.monthKey,
+      label: bucketLabel(slot.monthKey, 'month'),
+      byType: monthAvg.byType,
+      total: monthAvg.total,
+      daysCount: monthAvg.daysCount,
+    });
+  }
+
+  // Сортировка месяцев
+  for (const arr of byEntity.values()) arr.sort((a, b) => a.key.localeCompare(b.key));
+
+  // Подсчёт средних/итого по юрлицу
+  const result = [];
+  const allTypes = new Set();
+  for (const r of filteredRows.value) allTypes.add(r.stock_type);
+  const types = [...allTypes].sort((a, b) => {
+    const order = { dry: 1, cold: 2, frozen: 3, shabany: 4 };
+    return (order[a] || 99) - (order[b] || 99);
+  });
+
+  // Список юрлиц для отображения (если фильтр — только оно)
+  const entities = filterEntity.value ? [filterEntity.value] : [...byEntity.keys()].sort();
+  for (const e of entities) {
+    const months = byEntity.get(e) || [];
+    const avgByType = {};
+    let avgTotal = 0;
+    for (const t of types) {
+      const arr = months.map(m => m.byType[t] || 0);
+      avgByType[t] = arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+    }
+    avgTotal = types.reduce((s, t) => s + (avgByType[t] || 0), 0);
+    result.push({ entity: e, months, avgByType, avgTotal });
+  }
+  return { groups: result, types };
+});
 
 // Возвращает координаты Y-области для рендера вертикальной линии аннотации
 const chartAnnotations = computed(() => {
@@ -1502,6 +1747,83 @@ onMounted(() => {
 .sla-chart-tooltip-title { color: #FFD54F; font-weight: 700; margin-bottom: 2px; }
 .sla-tooltip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
 .sla-chart-hint { font-size: 11.5px; color: #8B7355; margin: 8px 0 0; text-align: center; }
+
+/* Заметная секция экспорта в основном потоке */
+.sla-export-section {
+  background: linear-gradient(135deg, #FFF8F0, #FFFBF6);
+  border: 1.5px solid #FFD9B6; border-radius: 14px;
+  padding: 18px 22px; margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap;
+}
+.sla-export-section-text h3 {
+  margin: 0 0 4px; font-size: 17px; color: #2C1A12; font-weight: 700;
+}
+.sla-export-section-text p {
+  margin: 0; font-size: 13px; color: #6B5344;
+}
+.sla-export-section-buttons {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.sla-export-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 10px;
+  border: 1.5px solid #FFD9B6; background: #fff;
+  color: #2C1A12; font: inherit; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.sla-export-btn:hover:not(:disabled) {
+  border-color: #E76F51; transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(231,111,81,.18);
+}
+.sla-export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sla-export-btn.primary {
+  background: #E76F51; color: #fff; border-color: #E76F51;
+}
+.sla-export-btn.primary:hover:not(:disabled) {
+  background: #D9603F; border-color: #D9603F;
+}
+.sla-export-btn-ico { font-size: 18px; }
+@media (max-width: 640px) {
+  .sla-export-section-buttons { width: 100%; }
+  .sla-export-btn { flex: 1; justify-content: center; }
+}
+
+/* Сводная таблица среднемесячных */
+.sla-table-card {
+  background: #fff; border: 1px solid #ECE3D6; border-radius: 14px;
+  padding: 16px 18px; margin-bottom: 12px;
+}
+.sla-table-hint { font-size: 11.5px; color: #8B7355; }
+.sla-table-wrap { margin-top: 10px; }
+.sla-table-entity-name {
+  font-size: 13px; font-weight: 700; color: #2C1A12;
+  padding: 8px 4px 6px; border-bottom: 2px solid #E76F51; margin-bottom: 6px;
+  display: inline-block;
+}
+.sla-table-scroll { overflow-x: auto; }
+.sla-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  min-width: 540px;
+}
+.sla-table thead th {
+  background: #FFF8F0; color: #6B5344; font-weight: 700;
+  text-align: right; padding: 8px 10px; font-size: 12px;
+  border-bottom: 1.5px solid #E8DCC8;
+}
+.sla-table-th-month { text-align: left !important; }
+.sla-table-th-total { background: #FFF1E0 !important; color: #C16B4D !important; }
+.sla-table-th-days { width: 60px; text-align: center !important; }
+.sla-table tbody td { padding: 8px 10px; border-bottom: 1px solid #F2EDE8; }
+.sla-table tbody tr:hover { background: #FAFAF8; }
+.sla-table-month { color: #2C1A12; font-weight: 600; }
+.sla-table-num { text-align: right; font-variant-numeric: tabular-nums; color: #2C1A12; }
+.sla-table-total { background: rgba(231,111,81,0.06); color: #C16B4D; font-weight: 700; }
+.sla-table-days { text-align: center; color: #8B7355; font-size: 11.5px; }
+.sla-table tfoot td {
+  padding: 10px; background: #FFF8F0; font-weight: 700;
+  border-top: 1.5px solid #E8DCC8; border-bottom: none;
+}
 
 /* Heatmap */
 .sla-heat-legend { display: inline-flex; align-items: center; gap: 4px; }
