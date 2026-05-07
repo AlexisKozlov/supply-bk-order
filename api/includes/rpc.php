@@ -1319,6 +1319,62 @@ if ($endpoint === 'rpc') {
         respond(['success' => true, 'enabled' => (bool)$enabled]);
     }
 
+    // ═══ Пользовательские UI-настройки (preferences) ═══
+    // Хранятся как JSON в users.preferences. Используются для синхронизации
+    // избранного в сайдбаре и других UI-предпочтений между устройствами.
+
+    if ($fn === 'get_user_preferences') {
+        if (!$authUserName) respond(['error' => 'Нет авторизации'], 401);
+        try {
+            $s = $pdo->prepare("SELECT preferences FROM users WHERE name = ? LIMIT 1");
+            $s->execute([$authUserName]);
+            $raw = $s->fetchColumn();
+        } catch (Throwable $e) {
+            // Если колонки ещё нет — миграция не применена.
+            respond(['preferences' => new \stdClass()]);
+        }
+        $prefs = null;
+        if ($raw) {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) $prefs = $decoded;
+        }
+        if (!$prefs) $prefs = new \stdClass();
+        respond(['preferences' => $prefs]);
+    }
+
+    if ($fn === 'set_user_preference') {
+        if (!$authUserName) respond(['error' => 'Нет авторизации'], 401);
+        $key = trim((string)($body['key'] ?? ''));
+        if ($key === '') respond(['error' => 'Не указан ключ настройки'], 400);
+        if (!preg_match('/^[a-zA-Z0-9_]{1,50}$/', $key)) {
+            respond(['error' => 'Некорректный ключ настройки'], 400);
+        }
+        $value = $body['value'] ?? null;
+        try {
+            $s = $pdo->prepare("SELECT preferences FROM users WHERE name = ? LIMIT 1");
+            $s->execute([$authUserName]);
+            $raw = $s->fetchColumn();
+            $prefs = $raw ? json_decode($raw, true) : null;
+            if (!is_array($prefs)) $prefs = [];
+            if ($value === null) {
+                unset($prefs[$key]);
+            } else {
+                $prefs[$key] = $value;
+            }
+            $json = json_encode($prefs, JSON_UNESCAPED_UNICODE);
+            // Жёсткое ограничение на размер JSON (16 КБ — с большим запасом).
+            if (strlen($json) > 16 * 1024) {
+                respond(['error' => 'Слишком большой объём настроек'], 413);
+            }
+            $pdo->prepare("UPDATE users SET preferences = ? WHERE name = ?")
+                ->execute([$json, $authUserName]);
+        } catch (Throwable $e) {
+            error_log('set_user_preference error: ' . $e->getMessage());
+            respond(['error' => 'Не удалось сохранить настройки'], 500);
+        }
+        respond(['success' => true]);
+    }
+
     if ($fn === 'get_user_list') {
         $caller = getSessionUser($pdo);
         if (!$caller || $caller['role'] !== 'admin') respond(['success' => false, 'error' => 'Нет прав доступа'], 403);

@@ -453,29 +453,29 @@ const toolsGroups = [
     { module: 'analytics', route: 'analytics', icon: 'analytics', label: 'Аналитика' },
     { module: 'analysis', route: 'analysis', icon: 'ruler', label: 'Анализ запасов' },
     { module: 'marketing', route: 'marketing', icon: 'marketing', label: 'Маркетинг' },
+    { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
   ]},
   { title: 'Склад и логистика', items: [
-    { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
     { module: 'shelf-life', route: 'shelf-life', icon: 'shelfLife', label: 'Сроки годности' },
     { module: 'delivery-schedule', route: 'delivery-schedule', icon: 'schedule', label: 'График доставки' },
     { module: 'deficit', route: 'deficit', icon: 'deficit', label: 'Распределение дефицита' },
-    { module: 'distribution', route: 'distribution', icon: 'package', label: 'Распределение' },
-    { module: 'truck-loading', route: 'truck-loading', icon: 'truck', label: 'Загрузка машин' },
+    { module: 'distribution', route: 'distribution', icon: 'distribute', label: 'Распределение' },
+    { module: 'truck-loading', route: 'truck-loading', icon: 'truckLoad', label: 'Загрузка машин' },
     { module: 'pallet-calc', route: 'pallet-calc', icon: 'pallet', label: 'Калькулятор паллет' },
     { module: 'pallet-storage', route: 'pallet-storage', icon: 'warehouse', label: 'Паллетовка склада' },
   ]},
   { title: 'Поставщики', items: [
     { module: 'tenders', route: 'tenders', icon: 'tender', label: 'Тендеры' },
-    { module: 'protocols', route: 'protocols', icon: 'document', label: 'Протоколы' },
     { module: 'supplier-orders', route: 'supplier-orders', icon: 'factory', label: 'Заявки поставщикам' },
-    { module: 'plan-fact', route: 'payments', icon: 'pricing', label: 'Оплаты поставщиков' },
+    { module: 'plan-fact', route: 'payments', icon: 'payments', label: 'Оплаты поставщиков' },
   ]},
   { title: 'Управление ресторанами', items: [
     { module: 'restaurant-orders', route: 'restaurant-cabinet-manager', icon: 'building', label: 'Кабинеты ресторанов' },
-    { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'delivery', label: 'Заказы ресторанов' },
+    { module: 'restaurant-orders', route: 'restaurant-orders', icon: 'restaurantOrders', label: 'Заказы ресторанов' },
     { module: 'restaurant-orders', route: 'restaurant-unknown-barcodes', icon: 'warning', label: 'Неизвестные штрихкоды', badgeKey: 'scan-unknown' },
-    { module: 'restaurant-orders', route: 'keg-returns', icon: 'truck', label: 'Возврат кег' },
-    { module: 'surveys', route: 'surveys', icon: 'document', label: 'Опросы' },
+    { module: 'restaurant-orders', route: 'keg-returns', icon: 'kegReturn', label: 'Возврат кег' },
+    { module: 'stock-collection', route: 'stock-collection', icon: 'stockCollection', label: 'Сбор остатков' },
+    { module: 'surveys', route: 'surveys', icon: 'survey', label: 'Опросы' },
     { module: 'chat', route: 'chat', icon: 'chat', label: 'Чат с ресторанами' },
     { module: 'corrections', route: 'corrections', icon: 'edit', label: 'Корректировки' },
   ]},
@@ -568,13 +568,47 @@ watch(() => route.name, (newRoute) => {
 }, { immediate: true });
 
 // ═══ Избранные модули ═══
+// Избранное в сайдбаре. localStorage используется как мгновенный кеш — чтобы
+// панель не «прыгала» при загрузке. Источник истины — сервер (users.preferences),
+// благодаря чему список синхронизируется между устройствами и не пропадает
+// при чистке кеша браузера.
 const pinnedModules = ref(JSON.parse(localStorage.getItem('bk_pinned_modules') || '[]'));
+let savePinsTimer = null;
+async function loadPinsFromServer() {
+  try {
+    const { data, error } = await db.rpc('get_user_preferences', {});
+    if (error || !data) return;
+    const serverPins = data.preferences && Array.isArray(data.preferences.sidebar_pins)
+      ? data.preferences.sidebar_pins
+      : null;
+    if (serverPins !== null) {
+      pinnedModules.value = serverPins;
+      localStorage.setItem('bk_pinned_modules', JSON.stringify(serverPins));
+    } else if (pinnedModules.value.length) {
+      // На сервере ничего нет, в localStorage есть — переносим на сервер.
+      schedulePinsSave(0);
+    }
+  } catch (e) { /* офлайн / нет доступа — оставляем localStorage */ }
+}
+function schedulePinsSave(delay = 400) {
+  if (savePinsTimer) clearTimeout(savePinsTimer);
+  savePinsTimer = setTimeout(async () => {
+    savePinsTimer = null;
+    try {
+      await db.rpc('set_user_preference', {
+        key: 'sidebar_pins',
+        value: pinnedModules.value,
+      });
+    } catch (e) { /* не блокируем UI */ }
+  }, delay);
+}
 
 function togglePin(routeName) {
   const idx = pinnedModules.value.indexOf(routeName);
   if (idx >= 0) pinnedModules.value.splice(idx, 1);
   else pinnedModules.value.push(routeName);
   localStorage.setItem('bk_pinned_modules', JSON.stringify(pinnedModules.value));
+  schedulePinsSave();
 }
 
 function isPinned(routeName) { return pinnedModules.value.includes(routeName); }
@@ -808,6 +842,9 @@ onMounted(() => {
   if (allowed && allowed.length > 0 && !allowed.includes(orderStore.settings.legalEntity)) {
     orderStore.settings.legalEntity = allowed[0];
   }
+
+  // Подтягиваем избранное в сайдбаре с сервера — синхронно с другими устройствами
+  loadPinsFromServer();
 
   loadBadges()
   badgeTimer = setInterval(loadBadges, 30000)
