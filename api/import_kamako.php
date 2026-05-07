@@ -6,7 +6,7 @@
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
 // Загрузка .env
-$envFile = __DIR__ . '/.env';
+$envFile = '/var/www/bk-calc-secrets/.env';
 if (file_exists($envFile)) {
     foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim($line);

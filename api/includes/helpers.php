@@ -540,7 +540,18 @@ function getSessionUser($pdo) {
     }
     if (!$token) { $_sessionUserCache['result'] = null; return null; }
     // Очистка сессий перенесена в cron_telegram.php
-    $s = $pdo->prepare("SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions, u.created_at, u.telegram_chat_id, u.hidden_modules FROM user_sessions s JOIN users u ON u.name = s.user_name WHERE s.token = ? AND s.expires_at > NOW()");
+    // Абсолютный потолок жизни сессии — 30 дней от created_at, для admin — 7.
+    // После этого «скользящее» продление expires_at не помогает: токен умирает.
+    $s = $pdo->prepare("
+        SELECT u.name, u.role, u.display_role, u.legal_entities, u.permissions,
+               u.created_at, u.telegram_chat_id, u.hidden_modules,
+               s.created_at AS session_created_at
+        FROM user_sessions s
+        JOIN users u ON u.name = s.user_name
+        WHERE s.token = ?
+          AND s.expires_at > NOW()
+          AND s.created_at > (NOW() - INTERVAL CASE WHEN u.role = 'admin' THEN 7 ELSE 30 END DAY)
+    ");
     $s->execute([$token]);
     $row = $s->fetch();
     if (!$row) { $_sessionUserCache['result'] = null; return null; }
@@ -550,7 +561,17 @@ function getSessionUser($pdo) {
         $s2->execute([$token]);
         $exp = $s2->fetchColumn();
         if ($exp && strtotime($exp) - time() < 6 * 86400) {
-            $pdo->prepare("UPDATE user_sessions SET expires_at = ? WHERE token = ?")->execute([date('Y-m-d H:i:s', strtotime('+7 days')), $token]);
+            // Продление expires_at не должно перепрыгнуть абсолютный потолок:
+            // CASE по роли подбирается на стороне MySQL.
+            $pdo->prepare("
+                UPDATE user_sessions s
+                JOIN users u ON u.name = s.user_name
+                SET s.expires_at = LEAST(
+                    DATE_ADD(NOW(), INTERVAL 7 DAY),
+                    DATE_ADD(s.created_at, INTERVAL CASE WHEN u.role = 'admin' THEN 7 ELSE 30 END DAY)
+                )
+                WHERE s.token = ?
+            ")->execute([$token]);
         }
         $sessionUpdated = true;
     }

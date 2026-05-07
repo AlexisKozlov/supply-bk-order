@@ -19,7 +19,7 @@
 
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit('CLI only'); }
 
-$envFile = __DIR__ . '/.env';
+$envFile = '/var/www/bk-calc-secrets/.env';
 if (!file_exists($envFile)) { fwrite(STDERR, "No .env\n"); exit(1); }
 foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
     if (str_starts_with(trim($line), '#')) continue;

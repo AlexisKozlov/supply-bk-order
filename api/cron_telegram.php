@@ -16,7 +16,7 @@ if (!flock($lockFp, LOCK_EX | LOCK_NB)) {
 // Ограничение времени выполнения — 4 минуты (крон каждые 5 мин)
 set_time_limit(240);
 
-$envFile = __DIR__ . '/.env';
+$envFile = '/var/www/bk-calc-secrets/.env';
 if (!file_exists($envFile)) exit;
 foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
     if (str_starts_with(trim($line), '#')) continue;

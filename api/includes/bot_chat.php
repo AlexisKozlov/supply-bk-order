@@ -1,6 +1,15 @@
 <?php
 // ═══ Чат ресторанов с отделом закупок ═══
 
+/**
+ * HTML-эскейп для подстановки user-controlled значений в parse_mode=HTML.
+ * Без него first_name из Telegram (или текст сообщения) могут содержать
+ * валидные теги <a href>, <b> и т.п. — Telegram их пропустит.
+ */
+function chatEsc(?string $v): string {
+    return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
+
 // Шаг 1: выбор ресторана
 function chatStart($chatId, $msgId) {
     global $pdo;
@@ -126,12 +135,13 @@ function chatShowHistory($chatId, $msgId, $restNum) {
     } else {
         foreach ($msgs as $m) {
             $time = date('d.m H:i', strtotime($m['created_at']));
+            $name = chatEsc($m['sender_name']);
             if ($m['direction'] === 'from_restaurant') {
-                $text .= "📤 <b>{$m['sender_name']}</b> <i>{$time}</i>\n";
+                $text .= "📤 <b>{$name}</b> <i>{$time}</i>\n";
             } else {
-                $text .= "📨 <b>{$m['sender_name']}</b> <i>{$time}</i>\n";
+                $text .= "📨 <b>{$name}</b> <i>{$time}</i>\n";
             }
-            if ($m['message_text']) $text .= "{$m['message_text']}\n";
+            if ($m['message_text']) $text .= chatEsc($m['message_text']) . "\n";
             if ($m['photo_file_id']) $text .= "📷 Фото\n";
             $text .= "\n";
         }
@@ -152,7 +162,7 @@ function chatNotifyPurchasers($pdo, $restNum, $senderName, $preview) {
     if (!$recipients) return;
 
     $preview = mb_substr($preview, 0, 200);
-    $text = "💬 Сообщение от ресторана <b>{$restNum}</b> ({$senderName}):\n{$preview}";
+    $text = "💬 Сообщение от ресторана <b>" . chatEsc((string)$restNum) . "</b> (" . chatEsc($senderName) . "):\n" . chatEsc($preview);
 
     foreach ($recipients as $r) {
         $payload = json_encode(['chat_id' => $r['telegram_chat_id'], 'text' => $text, 'parse_mode' => 'HTML']);

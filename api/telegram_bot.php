@@ -2,7 +2,7 @@
 // Telegram Bot для Supply Department
 // Webhook: https://supply-department.online/api/telegram_bot.php
 
-$envFile = __DIR__ . '/.env';
+$envFile = '/var/www/bk-calc-secrets/.env';
 if (!file_exists($envFile)) exit;
 foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
     if (str_starts_with(trim($line), '#')) continue;
@@ -2520,6 +2520,22 @@ $text = trim($msg['text'] ?? '');
 // 6-значный код — привязка аккаунта ресторана к Telegram
 if (preg_match('/^\d{6}$/', $text)) {
     $code = $text;
+
+    // Rate-limit: 10 неудачных попыток за 1 час с одного chat_id → блок.
+    // Без этого 1 млн вариантов угадываются за пару часов через бота.
+    $rateKey = 'tg_bind_' . $chatId;
+    try {
+        // Чистим старые записи и считаем неудачные попытки за окно.
+        $pdo->prepare("DELETE FROM failed_login_attempts WHERE user_name = ? AND attempted_at < (NOW() - INTERVAL 1 HOUR)")
+            ->execute([$rateKey]);
+        $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM failed_login_attempts WHERE user_name = ? AND attempted_at > (NOW() - INTERVAL 1 HOUR)");
+        $cntStmt->execute([$rateKey]);
+        if ((int)$cntStmt->fetchColumn() >= 10) {
+            sendMessage($chatId, "❌ Слишком много неудачных попыток. Подождите час и попробуйте ещё раз. Если кода у вас нет — получите новый в личном кабинете.");
+            exit;
+        }
+    } catch (Throwable $e) { /* если таблицы нет — продолжаем без rate-limit */ }
+
     // kind='bind' — это именно код привязки Telegram, выданный кабинетом.
     // 64-байтные auth-токены сюда тоже теоретически могли бы прийти при удачном
     // matched-формате, но защищаемся явно.
@@ -2544,6 +2560,11 @@ if (preg_match('/^\d{6}$/', $text)) {
             sendMessage($chatId, "✅ <b>Telegram привязан!</b>\n\nРесторан {$prettyRest} успешно привязан к вашему Telegram и добавлен в ваши рестораны.\n\nТеперь вы будете получать уведомления о дедлайнах и сможете входить в личный кабинет через бота.");
         }
     } else {
+        // Логируем неудачу для rate-limit.
+        try {
+            $pdo->prepare("INSERT INTO failed_login_attempts (ip_address, user_name) VALUES (?, ?)")
+                ->execute(['0.0.0.0', $rateKey]);
+        } catch (Throwable $e) {}
         sendMessage($chatId, "❌ Код недействителен или истёк.\n\nПолучите новый код в личном кабинете (Профиль → Telegram → Получить код).");
     }
     exit;

@@ -38,7 +38,7 @@ header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 // Load .env
-$envFile = __DIR__ . '/.env';
+$envFile = '/var/www/bk-calc-secrets/.env';
 if (file_exists($envFile)) {
     foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         if (strpos(trim($line), '#') === 0) continue;

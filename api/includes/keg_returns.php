@@ -17,12 +17,29 @@
 
 if ($endpoint !== 'keg-returns' && $endpoint !== 'keg-catalog') return;
 
-// Разрешаем токены через ?token= / ?ro_token= для прямых ссылок (скачивание Excel, печать).
-if (!empty($_GET['token']) && empty($_SERVER['HTTP_X_SESSION_TOKEN'])) {
-    $_SERVER['HTTP_X_SESSION_TOKEN'] = $_GET['token'];
+// Принимаем токен из query-параметра только для эндпоинтов скачивания
+// (Excel/печать/шаблон) — там окно открывается через window.open() и
+// заголовки слать нельзя. На остальных маршрутах query-token игнорируется,
+// потому что попадает в access-логи nginx и Referer.
+$krQueryTokenAllowed = false;
+if (!empty($parts[2]) && in_array($parts[2], ['excel', 'print'], true)) {
+    $krQueryTokenAllowed = true;
+} elseif (!empty($parts[1]) && in_array($parts[1], ['import-template', 'import-template.xlsx'], true)) {
+    $krQueryTokenAllowed = true;
 }
-if (!empty($_GET['ro_token']) && empty($_SERVER['HTTP_X_RO_TOKEN'])) {
-    $_SERVER['HTTP_X_RO_TOKEN'] = $_GET['ro_token'];
+
+if ($krQueryTokenAllowed) {
+    if (!empty($_GET['token']) && empty($_SERVER['HTTP_X_SESSION_TOKEN'])) {
+        $_SERVER['HTTP_X_SESSION_TOKEN'] = $_GET['token'];
+    }
+    if (!empty($_GET['ro_token']) && empty($_SERVER['HTTP_X_RO_TOKEN'])) {
+        $_SERVER['HTTP_X_RO_TOKEN'] = $_GET['ro_token'];
+    }
+    // Снижаем ущерб от попадания токена в логи: убираем из суперглобала и
+    // запрещаем кеш/реферер на этот ответ.
+    unset($_GET['token'], $_GET['ro_token']);
+    header('Cache-Control: no-store, no-cache, must-revalidate, private');
+    header('Referrer-Policy: no-referrer');
 }
 
 require_once __DIR__ . '/../../vendor/autoload.php';
@@ -92,12 +109,15 @@ function kegCalcCutoff(string $returnDate): DateTime {
 
 /**
  * Сессия ресторана через X-RO-Token (аналогично restaurant_orders.php).
+ * Включает абсолютный потолок 24 часа от last_login_at — иначе утёкший
+ * токен живёт неограниченно, пока кто-то стучит в API.
  */
 function krGetRestaurantSession($pdo) {
     $token = $_SERVER['HTTP_X_RO_TOKEN'] ?? '';
     if (!$token) return null;
     $s = $pdo->prepare("
-        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group, ru.session_active_until
+        SELECT ru.id, ru.restaurant_number, ru.legal_entity, ru.legal_entity_group,
+               ru.session_active_until, ru.last_login_at
         FROM ro_users ru
         WHERE ru.session_token = ? AND ru.is_active = 1
     ");
@@ -105,6 +125,16 @@ function krGetRestaurantSession($pdo) {
     $user = $s->fetch();
     if (!$user) return null;
     if ($user['session_active_until'] && strtotime($user['session_active_until']) < time()) return null;
+    // Абсолютный потолок 24 часа от логина. Без него таймер «3 часа неактивности»
+    // продлевает сессию бесконечно, пока есть запросы.
+    if (!empty($user['last_login_at'])) {
+        $loginTs = strtotime($user['last_login_at']);
+        if ($loginTs && (time() - $loginTs) > 24 * 3600) {
+            $pdo->prepare("UPDATE ro_users SET session_token = NULL, session_active_until = NULL WHERE id = ?")
+                ->execute([$user['id']]);
+            return null;
+        }
+    }
     $pdo->prepare("UPDATE ro_users SET session_active_until = ? WHERE id = ?")
         ->execute([date('Y-m-d H:i:s', strtotime('+3 hours')), $user['id']]);
     $rest = krGetRestaurantByNumber($pdo, $user['restaurant_number'], $user['legal_entity_group'] ?? null);
@@ -1446,6 +1476,24 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
     $origName = $_FILES['file']['name'] ?? '';
     $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
 
+    // Защита от zip-bomb / подмены MIME: сверяем по реальному содержимому,
+    // а не по расширению (10 МБ xlsx-«бомба» может развернуться в гигабайты).
+    $fileSize = (int)($_FILES['file']['size'] ?? 0);
+    if ($fileSize <= 0 || $fileSize > 10 * 1024 * 1024) {
+        krRespond(['error' => 'Файл должен быть не больше 10 МБ'], 400);
+    }
+    $finfo = @finfo_open(FILEINFO_MIME_TYPE);
+    $realMime = $finfo ? @finfo_file($finfo, $tmpPath) : '';
+    if ($finfo) finfo_close($finfo);
+    $allowedXlsxMimes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip', 'application/octet-stream'];
+    $allowedXlsMimes  = ['application/vnd.ms-excel', 'application/excel', 'application/octet-stream', 'application/x-ole-storage'];
+    if ($ext === 'xlsx' && !in_array($realMime, $allowedXlsxMimes, true)) {
+        krRespond(['error' => 'Файл не похож на .xlsx (' . htmlspecialchars($realMime) . ')'], 400);
+    }
+    if ($ext === 'xls' && !in_array($realMime, $allowedXlsMimes, true)) {
+        krRespond(['error' => 'Файл не похож на .xls (' . htmlspecialchars($realMime) . ')'], 400);
+    }
+
     try {
         if ($ext === 'xlsx') {
             $reader = new XlsxReader();
@@ -1457,6 +1505,12 @@ if ($method === 'POST' && $krSubSlug === 'import-routing') {
         $reader->setReadDataOnly(true);
         $spreadsheet = $reader->load($tmpPath);
         $sheet = $spreadsheet->getActiveSheet();
+        // Жёсткий лимит на число строк/колонок — защита от zip-bomb с миллионами ячеек.
+        $highestRow = (int)$sheet->getHighestDataRow();
+        $highestCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($sheet->getHighestDataColumn());
+        if ($highestRow > 50000 || $highestCol > 100) {
+            krRespond(['error' => 'В файле слишком много строк/колонок. Ожидается до 50000 строк и 100 колонок.'], 400);
+        }
         $sheetData = $sheet->toArray(null, true, true, false);
     } catch (Exception $e) {
         error_log('keg import-routing read: ' . $e->getMessage());
