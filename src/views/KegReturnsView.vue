@@ -3,6 +3,7 @@
     <div class="kr-page-header">
       <h1 class="page-title">Возврат кег</h1>
       <div class="kr-page-actions">
+        <router-link :to="{ name: 'keg-returns-schedule' }" class="btn">График</router-link>
         <button class="btn" @click="exportExcel" :disabled="!filteredRows.length">📥 Экспорт в Excel</button>
         <button class="btn primary" @click="openImport">Импорт маршрутизации</button>
       </div>
@@ -83,6 +84,10 @@
             <div class="kr-em-field" style="margin-top:10px">
               <label class="kr-em-label">Файл (.xlsx / .xls)</label>
               <input ref="importFileInput" type="file" accept=".xlsx,.xls" @change="onImportFile" :disabled="importLoading" />
+            </div>
+            <div style="margin-top:8px; font-size:12px; color:#8B7355">
+              Нет файла под рукой?
+              <a href="#" @click.prevent="downloadImportTemplate" class="kr-tmpl-link">Скачать шаблон с актуальными адресами</a> и отправить логистам.
             </div>
 
             <div v-if="importError" class="kr-em-save-error" style="margin-top:10px">{{ importError }}</div>
@@ -242,6 +247,28 @@ function closeImport() {
   importPreview.value = [];
   importError.value = '';
   importFile.value = null;
+}
+
+async function downloadImportTemplate() {
+  try {
+    const t = localStorage.getItem('bk_session_token') || '';
+    const res = await fetch('/api/keg-returns/import-template.xlsx', { headers: t ? { 'X-Session-Token': t } : {} });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Не удалось получить шаблон');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const filename = m ? m[1] : 'keg_routing_template.xlsx';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    importError.value = e.message;
+  }
 }
 
 async function onImportFile(e) {

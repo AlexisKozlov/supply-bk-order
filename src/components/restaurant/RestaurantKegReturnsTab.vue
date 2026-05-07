@@ -354,6 +354,53 @@
         </div>
       </div>
     </div>
+
+    <!-- Модал «Что дальше» после формирования ТТН -->
+    <div v-if="submittedModal.show" class="krt-submitted-overlay" @click.self="submittedModal.show = false">
+      <div class="krt-submitted">
+        <div class="krt-submitted-icon" aria-hidden="true">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h3 class="krt-submitted-title">ТТН отправлена</h3>
+        <p v-if="submittedModal.bsoStr" class="krt-submitted-bso">№ {{ submittedModal.bsoStr }}</p>
+
+        <ol class="krt-submitted-steps">
+          <li>
+            <span class="krt-step-num">1</span>
+            <div>
+              <div class="krt-step-title">Заявка создана</div>
+              <div class="krt-step-sub">
+                Отдел закупок увидит её в общем списке.
+                <template v-if="deadlineFormatted">
+                  Скорректировать состав можно <b>до {{ deadlineFormatted }}</b>.
+                </template>
+              </div>
+            </div>
+          </li>
+          <li>
+            <span class="krt-step-num">2</span>
+            <div>
+              <div class="krt-step-title">Дождитесь маршрутизации</div>
+              <div class="krt-step-sub">Когда заявка попадёт в маршрут, мы пришлём уведомление в Telegram-бот <b>@supplyportal_bot</b>.</div>
+            </div>
+          </li>
+          <li>
+            <span class="krt-step-num">3</span>
+            <div>
+              <div class="krt-step-title">Распечатайте ТТН на БСО</div>
+              <div class="krt-step-sub">
+                После уведомления откройте заявку, скачайте Excel или нажмите «Печать», распечатайте на БСО и передайте водителю вместе с кегами.
+                <b class="krt-step-warn">Не забудьте взять подпись водителя на возвратной ТТН.</b>
+              </div>
+            </div>
+          </li>
+        </ol>
+
+        <div class="krt-submitted-actions">
+          <button class="krt-btn primary" @click="submittedModal.show = false">Понятно</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -412,6 +459,8 @@ const fieldErr = reactive({ return_date: false, bso: false });
 
 // Просмотр фото
 const photoModal = reactive({ show: false, url: '', name: '' });
+// Модал «Что дальше» — показывается после успешного формирования ТТН.
+const submittedModal = reactive({ show: false, bsoStr: '' });
 function openPhoto(keg) {
   if (!keg?.photo_url) return;
   photoModal.url = keg.photo_url;
@@ -827,7 +876,8 @@ async function submit() {
     const data2 = await res2.json();
     if (!res2.ok) throw new Error(data2.error || 'Ошибка отправки');
     await loadFormData(editingId.value);
-    toast.success('ТТН сформирована', 'Заявка отправлена в отдел закупок');
+    submittedModal.show = true;
+    submittedModal.bsoStr = ((form.value.bso_series || '') + ' ' + (form.value.bso_number || '')).trim();
   } catch (e) {
     toast.error('Ошибка отправки', e.message || '');
   } finally {
@@ -1304,6 +1354,71 @@ onMounted(async () => {
 .krt-confirm h3 { margin: 0 0 8px; font-size: 17px; color: #2C1A12; }
 .krt-confirm p { margin: 0 0 18px; color: #6B5344; font-size: 14px; line-height: 1.5; }
 .krt-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ═══ Модал «Что дальше» после формирования ТТН ═══ */
+.krt-submitted-overlay {
+  position: fixed; inset: 0; z-index: 1150;
+  background: rgba(20,10,5,.55);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  backdrop-filter: blur(2px);
+}
+.krt-submitted {
+  background: #fff; border-radius: 18px;
+  padding: 28px 26px 24px; max-width: 460px; width: 100%;
+  box-shadow: 0 18px 50px rgba(0,0,0,.22);
+}
+.krt-submitted-icon {
+  width: 64px; height: 64px; margin: 0 auto 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #43A047, #66BB6A);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 24px rgba(67,160,71,.3);
+}
+.krt-submitted-title {
+  margin: 0 0 4px; text-align: center;
+  font-size: 22px; font-weight: 700; color: #2C1A12;
+}
+.krt-submitted-bso {
+  margin: 0 0 18px; text-align: center;
+  font-size: 14px; font-weight: 600; color: #8B7355;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+.krt-submitted-steps {
+  list-style: none; padding: 0; margin: 0 0 22px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.krt-submitted-steps li {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: #FAFAF8; border: 1px solid #ECE3D6; border-radius: 12px;
+  padding: 12px 14px;
+}
+.krt-step-num {
+  flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #E76F51; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px;
+}
+.krt-step-title { font-size: 14.5px; font-weight: 700; color: #2C1A12; line-height: 1.25; }
+.krt-step-sub { font-size: 13px; color: #6B5344; line-height: 1.45; margin-top: 3px; }
+.krt-step-sub b { color: #2C1A12; }
+.krt-step-warn {
+  display: block; margin-top: 6px;
+  color: #C16B4D; font-weight: 700; font-size: 12.5px;
+}
+.krt-submitted-actions {
+  display: flex; justify-content: flex-end;
+}
+
+@media (max-width: 480px) {
+  .krt-submitted { padding: 22px 18px 20px; border-radius: 16px; }
+  .krt-submitted-icon { width: 56px; height: 56px; }
+  .krt-submitted-title { font-size: 19px; }
+  .krt-submitted-steps li { padding: 10px 12px; gap: 10px; }
+  .krt-step-num { width: 26px; height: 26px; font-size: 13px; }
+}
 
 /* ═══ Прочее ═══ */
 .krt-empty { text-align: center; color: #8C7B6E; padding: 32px 0; }

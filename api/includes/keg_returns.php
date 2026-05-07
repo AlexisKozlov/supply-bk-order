@@ -207,6 +207,40 @@ function krNotifyRestaurant(PDO $pdo, int $restaurantId, string $text) {
  * Серия: ровно 2 заглавные кириллические буквы.
  * Номер: ровно 7 цифр.
  */
+/**
+ * Проверяет, включён ли модуль возврата кег для конкретного ресторана.
+ * Возвращает массив [enabled, reason]: enabled=true, если оба флага активны
+ * (на ресторане и на юрлице).
+ */
+function krGetReturnsEnabledStatus(PDO $pdo, int $restaurantId, string $legalEntityGroup): array {
+    // Глобальный флаг (по юрлицу). Используем legal_entity_group через
+    // соответствующее юрлицо: для BK_VM берём «ООО "Бургер БК"».
+    $globalEnabled = true;
+    try {
+        $legalEntity = ($legalEntityGroup === 'PS') ? 'ООО "Пицца Стар"' : 'ООО "Бургер БК"';
+        $s = $pdo->prepare("SELECT keg_returns_enabled FROM ro_module_settings WHERE legal_entity = ? LIMIT 1");
+        $s->execute([$legalEntity]);
+        $row = $s->fetch();
+        if ($row && (int)$row['keg_returns_enabled'] !== 1) $globalEnabled = false;
+    } catch (Throwable $e) {
+        // если миграция ещё не применена — считаем включённым
+    }
+    if (!$globalEnabled) {
+        return ['enabled' => false, 'reason' => 'Возврат кег временно отключён отделом закупок'];
+    }
+    $restEnabled = true;
+    try {
+        $s = $pdo->prepare("SELECT keg_returns_enabled FROM restaurants WHERE id = ?");
+        $s->execute([$restaurantId]);
+        $val = $s->fetchColumn();
+        if ($val !== false && (int)$val !== 1) $restEnabled = false;
+    } catch (Throwable $e) { /* колонка ещё не добавлена */ }
+    if (!$restEnabled) {
+        return ['enabled' => false, 'reason' => 'Возврат кег для этого ресторана отключён'];
+    }
+    return ['enabled' => true, 'reason' => null];
+}
+
 function krStatusLabel(?string $status): string {
     return [
         'DRAFT'     => 'Черновик',
@@ -409,6 +443,7 @@ if ($method === 'GET' && $krSubSlug === 'restaurant-info') {
     $infoStmt = $pdo->prepare("SELECT default_vehicle, default_driver FROM restaurants WHERE id = ?");
     $infoStmt->execute([$r['id']]);
     $extra = $infoStmt->fetch() ?: [];
+    $status = krGetReturnsEnabledStatus($pdo, (int)$r['id'], $r['legal_entity_group'] ?? 'BK_VM');
     krRespond([
         'restaurant_id'    => (int)$r['id'],
         'restaurant_number'=> (int)$r['number'],
@@ -416,6 +451,8 @@ if ($method === 'GET' && $krSubSlug === 'restaurant-info') {
         'pickup_weekdays'  => (int)($r['pickup_weekdays'] ?? 0),
         'default_vehicle'  => $extra['default_vehicle'] ?? '',
         'default_driver'   => $extra['default_driver'] ?? '',
+        'keg_returns_enabled' => $status['enabled'],
+        'keg_returns_disabled_reason' => $status['enabled'] ? null : $status['reason'],
     ]);
 }
 
@@ -484,6 +521,12 @@ if ($method === 'POST' && $krId === null && $krAction === null && $krSubSlug ===
     }
 
     if ($legalEntityGroup !== 'BK_VM') krRespond(['error' => 'Возврат пока доступен только для Бургер БК и Воглия Матта'], 400);
+
+    // Проверяем, что возврат кег включён для этого ресторана и юрлица
+    if ($isRestaurant) {
+        $kStatus = krGetReturnsEnabledStatus($pdo, $restaurantId, $legalEntityGroup);
+        if (!$kStatus['enabled']) krRespond(['error' => $kStatus['reason']], 403);
+    }
 
     $bsoSeries = trim($body['bso_series'] ?? '') ?: null;
     $bsoNumber = trim($body['bso_number'] ?? '') ?: null;
@@ -1079,6 +1122,107 @@ if ($method === 'GET' && $krId && $krAction === 'print') {
     header('Content-Disposition: inline; filename="' . $filename . '"');
     header('Cache-Control: no-cache, no-store, must-revalidate');
     echo $pdfContent;
+    exit;
+}
+
+// ── GET /keg-returns/import-template.xlsx ── шаблон для логистов
+if ($method === 'GET' && ($krSubSlug === 'import-template.xlsx' || $krSubSlug === 'import-template')) {
+    if ($isRestaurant) krRespond(['error' => 'Нет доступа'], 403);
+
+    $ss = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+
+    // Лист 1: «Маршрутизация» — пустой шаблон с заголовками, как ждёт парсер.
+    $sh = $ss->getActiveSheet();
+    $sh->setTitle('Маршрутизация');
+    $headers = ['Водитель', 'Заказчик', 'Адрес точки', '№ ТТН', 'Машина'];
+    foreach ($headers as $i => $h) {
+        $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1) . '1';
+        $sh->setCellValue($cell, $h);
+        $sh->getStyle($cell)->getFont()->setBold(true)->setSize(11);
+        $sh->getStyle($cell)->getFill()
+            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->getStartColor()->setRGB('502314');
+        $sh->getStyle($cell)->getFont()->getColor()->setRGB('FFFFFF');
+        $sh->getStyle($cell)->getAlignment()
+            ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+    }
+    // Пара примеров для понимания формата
+    $sh->setCellValue('A2', 'Иванов И.И.');
+    $sh->setCellValue('B2', 'Бургер БК');
+    $sh->setCellValue('C2', 'г. Минск, ул. Притыцкого, 154');
+    $sh->setCellValue('D2', 'без №');
+    $sh->setCellValue('E2', 'AA1234-5');
+    $sh->setCellValue('A3', 'Петров П.П.');
+    $sh->setCellValue('B3', 'Воглия Матта');
+    $sh->setCellValue('C3', 'г. Минск, пр. Победителей, 65');
+    $sh->setCellValue('D3', 'без №');
+    $sh->setCellValue('E3', 'BB7654-9');
+    $sh->getColumnDimension('A')->setWidth(22);
+    $sh->getColumnDimension('B')->setWidth(20);
+    $sh->getColumnDimension('C')->setWidth(45);
+    $sh->getColumnDimension('D')->setWidth(12);
+    $sh->getColumnDimension('E')->setWidth(16);
+
+    // Лист 2: «Адреса ресторанов» — актуальный справочник для копирования.
+    $sh2 = $ss->createSheet();
+    $sh2->setTitle('Адреса ресторанов');
+    $hdr2 = ['№ ресторана', 'Юрлицо', 'Город', 'Адрес', 'Адрес погрузки', 'Дни возврата'];
+    foreach ($hdr2 as $i => $h) {
+        $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1) . '1';
+        $sh2->setCellValue($cell, $h);
+        $sh2->getStyle($cell)->getFont()->setBold(true)->setSize(11);
+        $sh2->getStyle($cell)->getFill()
+            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->getStartColor()->setRGB('6B321F');
+        $sh2->getStyle($cell)->getFont()->getColor()->setRGB('FFFFFF');
+    }
+    $rows = $pdo->query("
+        SELECT r.number, r.legal_entity_group, r.city, r.address, r.pickup_address, r.pickup_weekdays
+        FROM restaurants r
+        WHERE r.active = 1 AND r.legal_entity_group = 'BK_VM'
+          AND COALESCE(r.keg_returns_enabled, 1) = 1
+        ORDER BY r.number
+    ")->fetchAll();
+    $weekdayNames = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+    $r = 2;
+    foreach ($rows as $row) {
+        $isVm = ((int)$row['number'] === 3); // см. krLegalCodeForRestaurant
+        $legalName = $isVm ? 'Воглия Матта' : 'Бургер БК';
+        $mask = (int)($row['pickup_weekdays'] ?? 0);
+        $days = [];
+        for ($i = 0; $i < 7; $i++) if ($mask & (1 << $i)) $days[] = $weekdayNames[$i];
+        // Если pickup_address не задан — собираем из города и адреса ресторана
+        // (так же делается в самой ТТН и в таблице портала).
+        $pickup = trim((string)($row['pickup_address'] ?? ''));
+        if ($pickup === '') {
+            $city = trim((string)($row['city'] ?? ''));
+            $addr = trim((string)($row['address'] ?? ''));
+            $pickup = ($city !== '' && $addr !== '') ? ($city . ', ' . $addr) : ($city !== '' ? $city : $addr);
+        }
+        $sh2->setCellValue('A' . $r, (int)$row['number']);
+        $sh2->setCellValue('B' . $r, $legalName);
+        $sh2->setCellValue('C' . $r, $row['city'] ?? '');
+        $sh2->setCellValue('D' . $r, $row['address'] ?? '');
+        $sh2->setCellValue('E' . $r, $pickup);
+        $sh2->setCellValue('F' . $r, $days ? implode(', ', $days) : '—');
+        $r++;
+    }
+    $sh2->getColumnDimension('A')->setWidth(12);
+    $sh2->getColumnDimension('B')->setWidth(18);
+    $sh2->getColumnDimension('C')->setWidth(16);
+    $sh2->getColumnDimension('D')->setWidth(40);
+    $sh2->getColumnDimension('E')->setWidth(40);
+    $sh2->getColumnDimension('F')->setWidth(28);
+    $sh2->freezePane('A2');
+
+    $ss->setActiveSheetIndex(0);
+
+    $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($ss, 'Xlsx');
+    $filename = 'keg_routing_template.xlsx';
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: no-cache');
+    $writer->save('php://output');
     exit;
 }
 
