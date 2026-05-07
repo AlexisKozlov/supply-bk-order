@@ -8,6 +8,9 @@
         <div class="sl-mode-tabs">
           <button class="sl-mode-tab" :class="{ active: slTab === 'shelf' }" @click="slTab = 'shelf'">Сроки</button>
           <button class="sl-mode-tab" :class="{ active: slTab === 'cells' }" @click="slTab = 'cells'; loadCellStats()">Ячейки</button>
+          <router-link :to="{ name: 'shelf-life-analytics' }" class="sl-mode-tab sl-mode-tab-link">
+            Аналитика
+          </router-link>
         </div>
       </div>
       <div class="sl-header-right">
@@ -1076,6 +1079,7 @@ watch(() => orderStore.settings.legalEntity, (v) => {
 .sl-mode-tab { padding: 5px 14px; font-size: 12px; font-weight: 600; background: none; border: none; cursor: pointer; color: var(--text-muted); transition: all .15s; }
 .sl-mode-tab.active { background: var(--bk-brown); color: #fff; }
 .sl-mode-tab:hover:not(.active) { background: rgba(139,115,85,.08); }
+.sl-mode-tab-link { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* Cells table */
 .sl-cells-section { flex: 1; overflow: auto; padding: 0 2px; }

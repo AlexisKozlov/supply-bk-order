@@ -1957,6 +1957,88 @@ if ($endpoint === 'rpc') {
         respond($st->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    // ═══ Аналитика ячеек склада (страница /shelf-life/analytics) ═══
+    // Возвращает дневные данные за выбранный период, фронт сам агрегирует
+    // по неделям/месяцам в зависимости от выбранной гранулярности.
+    if ($fn === 'cell_analytics_get') {
+        $start = trim((string)($body['start'] ?? ''));
+        $end   = trim((string)($body['end'] ?? ''));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) {
+            respond(['error' => 'Укажите корректный диапазон дат'], 400);
+        }
+        // Защита от слишком длинных запросов: максимум 12 месяцев + 30 дней
+        // (нужно немного запасу для «сравнения с предыдущим периодом» на фронте).
+        $maxDays = 366 + 30;
+        $diff = (strtotime($end) - strtotime($start)) / 86400;
+        if ($diff < 0) respond(['error' => 'Конец периода раньше начала'], 400);
+        if ($diff > $maxDays) respond(['error' => 'Слишком большой период (максимум 12 месяцев)'], 400);
+
+        $st = $pdo->prepare("
+            SELECT report_date, legal_entity, stock_type, cell_count, is_manual
+            FROM warehouse_cells
+            WHERE report_date >= ? AND report_date <= ?
+            ORDER BY report_date, legal_entity, stock_type
+        ");
+        $st->execute([$start, $end]);
+        $rows = $st->fetchAll();
+        respond(['rows' => $rows, 'start' => $start, 'end' => $end]);
+    }
+
+    // ─── Аннотации событий на графике аналитики ячеек ───
+    if ($fn === 'cell_annotations_list') {
+        $start = trim((string)($body['start'] ?? ''));
+        $end   = trim((string)($body['end'] ?? ''));
+        $sql = "SELECT id, event_date, label, color, created_by, created_at FROM cell_chart_annotations";
+        $args = [];
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) {
+            $sql .= " WHERE event_date >= ? AND event_date <= ?";
+            $args = [$start, $end];
+        }
+        $sql .= " ORDER BY event_date";
+        $st = $pdo->prepare($sql);
+        $st->execute($args);
+        respond(['rows' => $st->fetchAll()]);
+    }
+
+    if ($fn === 'cell_annotation_save') {
+        if (!$authUserName) respond(['error' => 'Нет авторизации'], 401);
+        $id = (int)($body['id'] ?? 0);
+        $date = trim((string)($body['event_date'] ?? ''));
+        $label = trim((string)($body['label'] ?? ''));
+        $color = trim((string)($body['color'] ?? '#E76F51'));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) respond(['error' => 'Дата некорректна'], 400);
+        if ($label === '') respond(['error' => 'Пустая метка'], 400);
+        if (mb_strlen($label) > 255) respond(['error' => 'Метка слишком длинная'], 400);
+        if (!preg_match('/^#[0-9A-Fa-f]{3,8}$/', $color)) $color = '#E76F51';
+        try {
+            if ($id > 0) {
+                $pdo->prepare("UPDATE cell_chart_annotations SET event_date = ?, label = ?, color = ? WHERE id = ?")
+                    ->execute([$date, $label, $color, $id]);
+            } else {
+                $pdo->prepare("INSERT INTO cell_chart_annotations (event_date, label, color, created_by) VALUES (?, ?, ?, ?)")
+                    ->execute([$date, $label, $color, $authUserName]);
+                $id = (int)$pdo->lastInsertId();
+            }
+        } catch (Throwable $e) {
+            error_log('cell_annotation_save: ' . $e->getMessage());
+            respond(['error' => 'Не удалось сохранить'], 500);
+        }
+        respond(['success' => true, 'id' => $id]);
+    }
+
+    if ($fn === 'cell_annotation_delete') {
+        if (!$authUserName) respond(['error' => 'Нет авторизации'], 401);
+        $id = (int)($body['id'] ?? 0);
+        if ($id <= 0) respond(['error' => 'id обязателен'], 400);
+        try {
+            $pdo->prepare("DELETE FROM cell_chart_annotations WHERE id = ?")->execute([$id]);
+        } catch (Throwable $e) {
+            error_log('cell_annotation_delete: ' . $e->getMessage());
+            respond(['error' => 'Не удалось удалить'], 500);
+        }
+        respond(['success' => true]);
+    }
+
     if ($fn === 'get_warehouse_cells') {
         $days = intval($body['days'] ?? 90);
         if ($days > 365) $days = 365;
