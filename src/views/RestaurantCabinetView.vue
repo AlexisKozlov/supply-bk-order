@@ -984,7 +984,7 @@
           <p v-if="stockLastSubmittedAt" class="stock-inline-sub">
             Последнее сохранение: {{ fmtDateTime(stockLastSubmittedAt) }}
           </p>
-          <p v-else class="stock-inline-sub">Заполните остатки по всем позициям и нажмите «Сохранить».</p>
+          <p v-else class="stock-inline-sub">Заполните остатки по позициям и нажмите «Сохранить». Если товара нет — оставьте поле пустым или поставьте 0.</p>
         </div>
         <div v-if="!stockProducts.length" class="cab-empty-card">
           <p>В сборе пока нет товаров.</p>
@@ -1047,7 +1047,7 @@
         <div class="stock-inline-actions">
           <button
             class="btn btn-primary btn-lg"
-            :disabled="stockSaving || !stockProducts.length || !stockDirty"
+            :disabled="stockSaving || !stockProducts.length || (!!stockLastSubmittedAt && !stockDirty)"
             @click="submitStockInline"
           >
             <span v-if="stockSaving" class="cab-spin cab-spin-sm"></span>
@@ -3215,9 +3215,6 @@ async function submitStockInline() {
           expiry_date: String(batch.expiry_date ?? '').trim(),
           stock: String(batch.stock ?? '').trim().replace(',', '.'),
         }));
-        if (!rawBatches.some(batch => batch.stock !== '')) {
-          throw new Error(`У товара «${p.product_name}» нет ни одной партии`);
-        }
         if (rawBatches.some(batch => batch.stock !== '' && Number.isNaN(Number(batch.stock)))) {
           throw new Error(`У товара «${p.product_name}» указано некорректное количество`);
         }
@@ -3225,19 +3222,25 @@ async function submitStockInline() {
         if (rawBatches.some(batch => batch.stock !== '' && Number(batch.stock) > 0 && batch.expiry_date === '')) {
           throw new Error(`Для товара «${p.product_name}» нужно указать срок годности (или поставьте остаток 0)`);
         }
-        const batches = rawBatches
+        let batches = rawBatches
           .filter(batch => batch.stock !== '')
           .map(batch => ({
             expiry_date: batch.expiry_date,
             stock: parseFloat(batch.stock),
           }));
+        // Если все партии пустые — считаем, что остатков нет (0 без срока)
+        if (!batches.length) {
+          batches = [{ expiry_date: '', stock: 0 }];
+        }
         items.push({ product_id: p.id, batches });
       } else {
-        const stock = String(stockDrafts[p.id]?.[0]?.stock ?? '').trim().replace(',', '.');
-        if (stock === '' || Number.isNaN(Number(stock))) {
-          throw new Error(`У товара «${p.product_name}» не указано количество`);
+        const raw = String(stockDrafts[p.id]?.[0]?.stock ?? '').trim().replace(',', '.');
+        if (raw !== '' && Number.isNaN(Number(raw))) {
+          throw new Error(`У товара «${p.product_name}» указано некорректное количество`);
         }
-        items.push({ product_id: p.id, stock: parseFloat(stock) });
+        // Пустое поле = 0 (нет остатков по товару)
+        const stock = raw === '' ? 0 : parseFloat(raw);
+        items.push({ product_id: p.id, stock });
       }
     }
     await roStore.submitStockCollection(stockCollection.collection.id, items);

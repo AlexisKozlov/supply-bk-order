@@ -1158,8 +1158,8 @@ if ($endpoint === 'rpc') {
         $productId = intval($body['product_id'] ?? 0);
         $restaurantNumber = trim((string)($body['restaurant_number'] ?? ''));
         $batches = $body['batches'] ?? null;
-        if ($batches === null && isset($body['stock'], $body['expiry_date'])) {
-            $batches = [['stock' => $body['stock'], 'expiry_date' => $body['expiry_date']]];
+        if ($batches === null && array_key_exists('stock', $body)) {
+            $batches = [['stock' => $body['stock'], 'expiry_date' => $body['expiry_date'] ?? null]];
         }
         if (!$collId || !$productId || $restaurantNumber === '' || $batches === null) {
             respond(['error' => 'Не все параметры указаны'], 400);
@@ -1185,11 +1185,15 @@ if ($endpoint === 'rpc') {
         try {
             $hasExpiryDate = dbColumnExists($pdo, 'stock_collection_data', 'expiry_date');
             $normalized = rpcNormalizeStockCollectionBatches($batches, $hasExpiryDate);
-            if (!$normalized) respond(['error' => 'Добавьте хотя бы одну партию'], 400);
+            // Если ничего не введено — считаем, что остатков нет (0 без срока)
+            if (!$normalized) {
+                $normalized = [['expiry_date' => null, 'stock' => 0.0]];
+            }
             if (!empty($productRow['need_expiry'])) {
                 foreach ($normalized as $batch) {
-                    if (empty($batch['expiry_date'])) {
-                        respond(['error' => 'Для этой позиции нужно указать срок годности'], 400);
+                    // Срок обязателен только если остаток > 0
+                    if (empty($batch['expiry_date']) && (float)$batch['stock'] > 0) {
+                        respond(['error' => 'Для этой позиции нужно указать срок годности (или поставьте остаток 0)'], 400);
                     }
                 }
             }

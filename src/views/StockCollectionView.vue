@@ -103,17 +103,43 @@
           <table class="sc-tbl">
             <thead>
               <tr>
-                <th class="col-num sortable" @click="toggleSort('restaurant')">Ресторан <span class="sort-arrow">{{ sortKey === 'restaurant' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
-                <th class="col-city sortable" @click="toggleSort('city')">Город <span class="sort-arrow">{{ sortKey === 'city' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
-                <th class="col-addr sortable" @click="toggleSort('address')">Адрес <span class="sort-arrow">{{ sortKey === 'address' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
-                <th class="col-time sortable" @click="toggleSort('time')">Заполнено <span class="sort-arrow">{{ sortKey === 'time' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
-                <th v-for="prod in collectionData.products" :key="prod.id" class="col-prod sortable" @click="toggleSort('prod_' + prod.id)">
-                  <div>{{ prod.product_name }} <span class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></div>
+                <th class="col-num sortable" :rowspan="anyExpanded ? 2 : 1" @click="toggleSort('restaurant')">Ресторан <span class="sort-arrow">{{ sortKey === 'restaurant' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th class="col-city sortable" :rowspan="anyExpanded ? 2 : 1" @click="toggleSort('city')">Город <span class="sort-arrow">{{ sortKey === 'city' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th class="col-addr sortable" :rowspan="anyExpanded ? 2 : 1" @click="toggleSort('address')">Адрес <span class="sort-arrow">{{ sortKey === 'address' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th class="col-time sortable" :rowspan="anyExpanded ? 2 : 1" @click="toggleSort('time')">Заполнено <span class="sort-arrow">{{ sortKey === 'time' ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span></th>
+                <th
+                  v-for="prod in collectionData.products"
+                  :key="prod.id"
+                  class="col-prod prod-group-head"
+                  :class="{ expandable: prod.need_expiry, expanded: isExpanded(prod) }"
+                  :colspan="isExpanded(prod) ? expiryDatesFor(prod.id).length + 1 : 1"
+                  :rowspan="!isExpanded(prod) && anyExpanded ? 2 : 1"
+                  @click="prod.need_expiry ? toggleExpand(prod) : toggleSort('prod_' + prod.id)"
+                >
+                  <div>
+                    {{ prod.product_name }}
+                    <span v-if="prod.need_expiry" class="prod-toggle-icon">{{ isExpanded(prod) ? '▾' : '▸' }}</span>
+                    <span v-else class="sort-arrow">{{ sortKey === 'prod_' + prod.id ? (sortDir === 'asc' ? '▲' : '▼') : '⇅' }}</span>
+                  </div>
                   <div class="th-unit">{{ unitLabel(prod.unit) }}</div>
-                  <div v-if="prod.need_expiry" class="th-flag">срок обязателен</div>
+                  <div v-if="prod.need_expiry && !isExpanded(prod)" class="th-flag">срок · нажмите для разбивки</div>
                   <div v-if="prod.note" class="th-note" :title="prod.note">{{ prod.note }}</div>
                 </th>
-                <th v-if="activeCollection.status === 'active'" class="col-del"></th>
+                <th v-if="activeCollection.status === 'active'" class="col-del" :rowspan="anyExpanded ? 2 : 1"></th>
+              </tr>
+              <tr v-if="anyExpanded">
+                <template v-for="prod in collectionData.products" :key="'sub_' + prod.id">
+                  <template v-if="isExpanded(prod)">
+                    <th
+                      v-for="date in expiryDatesFor(prod.id)"
+                      :key="prod.id + '_' + date"
+                      class="col-prod-date"
+                    >
+                      <div class="prod-date-label">до {{ formatBatchDate(date) }}</div>
+                    </th>
+                    <th class="col-prod-total">Итого</th>
+                  </template>
+                </template>
               </tr>
             </thead>
             <tbody>
@@ -122,26 +148,50 @@
                 <td class="col-city muted">{{ row.city }}</td>
                 <td class="col-addr muted">{{ row.address }}</td>
                 <td class="col-time muted">{{ fmtShort(row.submittedAt) }}</td>
-                <td v-for="prod in collectionData.products" :key="prod.id" class="col-prod">
-                  <div
-                    class="sc-cell"
-                    :class="{ editable: activeCollection.status === 'active' }"
-                    @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
-                  >
-                    <div class="sc-cell-total">
-                      {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
-                    </div>
-                    <div v-if="prod.need_expiry && getCellBatches(row, prod.id).length" class="sc-cell-batches">
-                      <div v-for="(b, idx) in getCellBatches(row, prod.id).slice(0, 2)" :key="idx" class="sc-cell-batch">
-                        <span class="sc-cell-batch-date">{{ formatBatchDate(b.expiry_date) }}</span>
-                        <span class="sc-cell-batch-stock">{{ formatBatchStock(b.stock) }}</span>
+                <template v-for="prod in collectionData.products" :key="prod.id">
+                  <template v-if="isExpanded(prod)">
+                    <td
+                      v-for="date in expiryDatesFor(prod.id)"
+                      :key="prod.id + '_' + date"
+                      class="col-prod col-prod-date-cell"
+                      :class="{ editable: activeCollection.status === 'active' }"
+                      @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                    >
+                      <div class="sc-cell-date-val">
+                        {{ getCellByDate(row, prod.id, date) || '' }}
                       </div>
-                      <div v-if="getCellBatches(row, prod.id).length > 2" class="sc-cell-more">
-                        +{{ getCellBatches(row, prod.id).length - 2 }} партии
+                    </td>
+                    <td
+                      class="col-prod col-prod-total-cell"
+                      :class="{ editable: activeCollection.status === 'active' }"
+                      @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                    >
+                      <div class="sc-cell-total">
+                        {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
+                      </div>
+                    </td>
+                  </template>
+                  <td v-else class="col-prod">
+                    <div
+                      class="sc-cell"
+                      :class="{ editable: activeCollection.status === 'active' }"
+                      @dblclick="activeCollection.status === 'active' && openCellEditor(row, prod.id)"
+                    >
+                      <div class="sc-cell-total">
+                        {{ getCellBatches(row, prod.id).length ? getCellTotal(row, prod.id) : '—' }}
+                      </div>
+                      <div v-if="prod.need_expiry && getCellBatches(row, prod.id).length" class="sc-cell-batches">
+                        <div v-for="(b, idx) in getCellBatches(row, prod.id).slice(0, 2)" :key="idx" class="sc-cell-batch">
+                          <span class="sc-cell-batch-date">{{ formatBatchDate(b.expiry_date) }}</span>
+                          <span class="sc-cell-batch-stock">{{ formatBatchStock(b.stock) }}</span>
+                        </div>
+                        <div v-if="getCellBatches(row, prod.id).length > 2" class="sc-cell-more">
+                          +{{ getCellBatches(row, prod.id).length - 2 }} партии
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </td>
+                  </td>
+                </template>
                 <td v-if="activeCollection.status === 'active'" class="col-del">
                   <button class="sc-row-del" @click="deleteRestaurantRow(row)" title="Удалить ресторан">✕</button>
                 </td>
@@ -150,9 +200,21 @@
             <tfoot>
               <tr>
                 <td colspan="4" class="foot-label">Итого</td>
-                <td v-for="prod in collectionData.products" :key="prod.id" class="col-prod foot-val">
-                  {{ getProductTotal(prod.id) }}
-                </td>
+                <template v-for="prod in collectionData.products" :key="prod.id">
+                  <template v-if="isExpanded(prod)">
+                    <td
+                      v-for="date in expiryDatesFor(prod.id)"
+                      :key="prod.id + '_' + date"
+                      class="col-prod foot-val"
+                    >
+                      {{ getProductDateTotal(prod.id, date) || '' }}
+                    </td>
+                    <td class="col-prod foot-val foot-val-strong">{{ getProductTotal(prod.id) }}</td>
+                  </template>
+                  <td v-else class="col-prod foot-val">
+                    {{ getProductTotal(prod.id) }}
+                  </td>
+                </template>
                 <td v-if="activeCollection.status === 'active'"></td>
               </tr>
             </tfoot>
@@ -515,6 +577,64 @@ const cellEditor = ref({ show: false, loading: false, collectionId: null, restau
 
 // Missing restaurants
 const showMissing = ref(true);
+
+// Expanded product columns (раскрытые группы по датам)
+const expandedProducts = ref(new Set());
+function toggleExpand(prod) {
+  if (!prod?.need_expiry) return;
+  const s = new Set(expandedProducts.value);
+  if (s.has(prod.id)) s.delete(prod.id);
+  else s.add(prod.id);
+  expandedProducts.value = s;
+}
+function isExpanded(prod) {
+  return prod?.need_expiry && expandedProducts.value.has(prod.id);
+}
+const anyExpanded = computed(() => {
+  for (const p of (collectionData.value?.products || [])) {
+    if (isExpanded(p)) return true;
+  }
+  return false;
+});
+
+// Уникальные даты партий по товару — отсортированы по возрастанию
+// Возвращает массив строк YYYY-MM-DD (без пустых/null)
+const productExpiryDates = computed(() => {
+  const map = new Map();
+  for (const p of (collectionData.value?.products || [])) {
+    if (!p.need_expiry) continue;
+    const dates = new Set();
+    for (const d of (collectionData.value?.data || [])) {
+      if (d.product_id !== p.id) continue;
+      const ed = d.expiry_date ? String(d.expiry_date).slice(0, 10) : '';
+      if (ed) dates.add(ed);
+    }
+    map.set(p.id, [...dates].sort());
+  }
+  return map;
+});
+function expiryDatesFor(productId) {
+  return productExpiryDates.value.get(productId) || [];
+}
+function getCellByDate(row, productId, date) {
+  const cell = row.cells[productId];
+  if (!cell) return 0;
+  let s = 0;
+  for (const b of cell.batches) {
+    const ed = b.expiry_date ? String(b.expiry_date).slice(0, 10) : '';
+    if (ed === date) s += parseFloat(b.stock) || 0;
+  }
+  return parseFloat(s.toFixed(2));
+}
+function getProductDateTotal(productId, date) {
+  let s = 0;
+  for (const d of (collectionData.value?.data || [])) {
+    if (d.product_id !== productId) continue;
+    const ed = d.expiry_date ? String(d.expiry_date).slice(0, 10) : '';
+    if (ed === date) s += parseFloat(d.stock) || 0;
+  }
+  return parseFloat(s.toFixed(2));
+}
 
 const todayStr = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 
@@ -963,21 +1083,27 @@ async function saveCellEdit() {
     };
     if (cellEditor.value.needExpiry) {
       const batches = normalizeCellEditorBatches();
-      if (!batches.length) {
-        toastStore.error('Ошибка', 'Добавьте хотя бы одну партию');
+      // Срок нужен только если остаток > 0
+      const missingExpiry = batches.find(b => parseFloat(b.stock) > 0 && !b.expiry_date);
+      if (missingExpiry) {
+        toastStore.error('Ошибка', 'Укажите срок годности (или поставьте остаток 0)');
         return;
       }
-      payload.batches = batches.map(batch => ({
-        expiry_date: batch.expiry_date,
-        stock: parseFloat(batch.stock),
-      }));
+      // Если ничего не введено — считаем, что остатков нет (0 без срока)
+      payload.batches = batches.length
+        ? batches.map(batch => ({
+            expiry_date: batch.expiry_date,
+            stock: parseFloat(batch.stock),
+          }))
+        : [{ expiry_date: '', stock: 0 }];
     } else {
-      const stock = String(cellEditor.value.stock ?? '').trim();
-      if (stock === '' || Number.isNaN(Number(stock))) {
-        toastStore.error('Ошибка', 'Укажите количество');
+      const raw = String(cellEditor.value.stock ?? '').trim().replace(',', '.');
+      if (raw !== '' && Number.isNaN(Number(raw))) {
+        toastStore.error('Ошибка', 'Указано некорректное количество');
         return;
       }
-      payload.stock = parseFloat(stock);
+      // Пустое поле = 0 (нет остатков)
+      payload.stock = raw === '' ? 0 : parseFloat(raw);
     }
     const { error } = await db.rpc('sc_save_collection_cell', payload);
     if (error) { toastStore.error('Ошибка', error); return; }
@@ -1203,72 +1329,212 @@ async function exportExcel() {
   const products = collectionData.value.products || [];
   const allData = collectionData.value.data || [];
 
-  // Collect all unique restaurants
+  // Все уникальные рестораны
   const restSet = new Set(allData.map(d => d.restaurant_number));
   const restNums = [...restSet].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
 
+  // Уникальные даты по каждому товару (только need_expiry)
+  const datesByProd = new Map();
+  for (const p of products) {
+    if (!p.need_expiry) continue;
+    const set = new Set();
+    for (const d of allData) {
+      if (d.product_id !== p.id) continue;
+      const ed = d.expiry_date ? String(d.expiry_date).slice(0, 10) : '';
+      if (ed) set.add(ed);
+    }
+    datesByProd.set(p.id, [...set].sort());
+  }
+
   const brown = '502314';
+  const accent = '6B321F';
+  const subBg = 'FFF3E0';
+  const totalBg = 'F5EBE0';
   const bdr = { style: 'thin', color: { rgb: 'E0D6CC' } };
   const borders = { top: bdr, bottom: bdr, left: bdr, right: bdr };
-  const sH = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' }, fill: { fgColor: { rgb: brown } }, alignment: { horizontal: 'center', vertical: 'center' }, border: borders };
+  const sH = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' }, name: 'Calibri' }, fill: { fgColor: { rgb: brown } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borders };
+  const sH2 = { font: { bold: true, sz: 10, color: { rgb: 'FFFFFF' }, name: 'Calibri' }, fill: { fgColor: { rgb: accent } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: borders };
   const sC = (stripe) => ({ font: { sz: 11, name: 'Calibri' }, fill: stripe ? { fgColor: { rgb: 'FFF8F0' } } : undefined, alignment: { vertical: 'center' }, border: borders });
   const sB = (stripe) => ({ font: { bold: true, sz: 11, name: 'Calibri' }, fill: stripe ? { fgColor: { rgb: 'FFF8F0' } } : undefined, alignment: { vertical: 'center' }, border: borders });
+  const sCDate = (stripe) => ({ font: { sz: 11, name: 'Calibri', color: { rgb: '6B5344' } }, fill: { fgColor: { rgb: stripe ? 'FFF1E0' : subBg } }, alignment: { vertical: 'center', horizontal: 'center' }, border: borders });
+  const sCTotal = (stripe) => ({ font: { sz: 11, bold: true, name: 'Calibri', color: { rgb: brown } }, fill: { fgColor: { rgb: stripe ? 'F0E2D0' : totalBg } }, alignment: { vertical: 'center', horizontal: 'center' }, border: borders });
 
   const ws = {};
+  const merges = [];
   let r = 0;
 
   // Title
   ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: activeCollection.value.name, t: 's', s: { font: { bold: true, sz: 14, color: { rgb: brown }, name: 'Calibri' } } };
   r += 2;
 
-  // Headers: Ресторан | Город | Адрес | Product1 (unit) | Product2 (unit) | ...
-  const cols = [{ wch: 12 }, { wch: 14 }, { wch: 24 }];
+  // Шапка занимает 2 строки. Сначала разметим столбцы и подсчитаем смещения по товарам
+  // Базовые столбцы: Ресторан | Город | Адрес
   ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: 'Ресторан', t: 's', s: sH };
   ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: 'Город', t: 's', s: sH };
   ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: 'Адрес', t: 's', s: sH };
-  const prodOffset = 3;
-  products.forEach((p, i) => {
-    const ul = unitLabel(p.unit);
-    ws[XLSX.utils.encode_cell({ r, c: i + prodOffset })] = { v: `${p.product_name} (${ul})`, t: 's', s: sH };
-    cols.push({ wch: Math.max(16, p.product_name.length + 8) });
-  });
-  r++;
+  // Базовые столбцы перекрывают обе строки шапки
+  merges.push({ s: { r, c: 0 }, e: { r: r + 1, c: 0 } });
+  merges.push({ s: { r, c: 1 }, e: { r: r + 1, c: 1 } });
+  merges.push({ s: { r, c: 2 }, e: { r: r + 1, c: 2 } });
 
-  // Data rows
-  const dataMap = new Map();
+  const cols = [{ wch: 12 }, { wch: 14 }, { wch: 24 }];
+  const prodOffset = 3;
+  // prodCol[productId] = { start, end, dates: [...] }
+  const prodCol = new Map();
+  let curC = prodOffset;
+  for (const p of products) {
+    const ul = unitLabel(p.unit);
+    if (p.need_expiry) {
+      const dates = datesByProd.get(p.id) || [];
+      const span = dates.length + 1; // даты + Итого
+      // Верхняя строка — название товара, объединить span колонок
+      ws[XLSX.utils.encode_cell({ r, c: curC })] = { v: `${p.product_name} (${ul})`, t: 's', s: sH };
+      if (span > 1) {
+        merges.push({ s: { r, c: curC }, e: { r, c: curC + span - 1 } });
+      }
+      // Нижняя строка — даты + «Итого»
+      dates.forEach((dt, i) => {
+        ws[XLSX.utils.encode_cell({ r: r + 1, c: curC + i })] = { v: 'до ' + formatBatchDate(dt), t: 's', s: sH2 };
+        cols.push({ wch: 11 });
+      });
+      ws[XLSX.utils.encode_cell({ r: r + 1, c: curC + dates.length })] = { v: 'Итого', t: 's', s: sH2 };
+      cols.push({ wch: Math.max(10, p.product_name.length + 4) });
+      prodCol.set(p.id, { start: curC, end: curC + span - 1, dates, hasExpiry: true });
+      curC += span;
+    } else {
+      // Одна колонка с rowspan=2
+      ws[XLSX.utils.encode_cell({ r, c: curC })] = { v: `${p.product_name} (${ul})`, t: 's', s: sH };
+      merges.push({ s: { r, c: curC }, e: { r: r + 1, c: curC } });
+      cols.push({ wch: Math.max(16, p.product_name.length + 8) });
+      prodCol.set(p.id, { start: curC, end: curC, dates: [], hasExpiry: false });
+      curC += 1;
+    }
+  }
+  const lastC = curC - 1;
+  r += 2;
+
+  // Карта значений: (rest, product, date) → сумма; (rest, product) → общий итог
+  const cellByDate = new Map();
+  const cellTotal = new Map();
   for (const d of allData) {
-    const key = `${d.restaurant_number}_${d.product_id}`;
-    dataMap.set(key, (dataMap.get(key) || 0) + (parseFloat(d.stock) || 0));
+    const totKey = `${d.restaurant_number}__${d.product_id}`;
+    cellTotal.set(totKey, (cellTotal.get(totKey) || 0) + (parseFloat(d.stock) || 0));
+    const ed = d.expiry_date ? String(d.expiry_date).slice(0, 10) : '';
+    if (ed) {
+      const dKey = `${d.restaurant_number}__${d.product_id}__${ed}`;
+      cellByDate.set(dKey, (cellByDate.get(dKey) || 0) + (parseFloat(d.stock) || 0));
+    }
   }
 
+  // Строки данных
   restNums.forEach((num, ri) => {
     const stripe = ri % 2 === 1;
     const info = getRestaurantInfo(num);
     ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: `Ресторан ${num}`, t: 's', s: sB(stripe) };
     ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: info.city, t: 's', s: sC(stripe) };
     ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: info.address, t: 's', s: sC(stripe) };
-    products.forEach((p, pi) => {
-      const val = dataMap.get(`${num}_${p.id}`) ?? '';
-      ws[XLSX.utils.encode_cell({ r, c: pi + prodOffset })] = { v: val === '' ? '' : Number(val), t: val === '' ? 's' : 'n', s: sC(stripe) };
-    });
+    for (const p of products) {
+      const cfg = prodCol.get(p.id);
+      if (cfg.hasExpiry) {
+        cfg.dates.forEach((dt, i) => {
+          const v = cellByDate.get(`${num}__${p.id}__${dt}`);
+          const cell = v == null ? { v: '', t: 's' } : { v: parseFloat(v.toFixed(2)), t: 'n' };
+          ws[XLSX.utils.encode_cell({ r, c: cfg.start + i })] = { ...cell, s: sCDate(stripe) };
+        });
+        const tot = cellTotal.get(`${num}__${p.id}`);
+        ws[XLSX.utils.encode_cell({ r, c: cfg.start + cfg.dates.length })] =
+          tot == null ? { v: '', t: 's', s: sCTotal(stripe) } : { v: parseFloat(tot.toFixed(2)), t: 'n', s: sCTotal(stripe) };
+      } else {
+        const tot = cellTotal.get(`${num}__${p.id}`);
+        ws[XLSX.utils.encode_cell({ r, c: cfg.start })] =
+          tot == null ? { v: '', t: 's', s: sC(stripe) } : { v: parseFloat(tot.toFixed(2)), t: 'n', s: sC(stripe) };
+      }
+    }
     r++;
   });
 
-  // Totals
+  // Итого
   const sBold = { font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' }, border: borders };
+  const sBoldAcc = { font: { bold: true, sz: 11, color: { rgb: brown }, name: 'Calibri' }, fill: { fgColor: { rgb: totalBg } }, border: borders };
   ws[XLSX.utils.encode_cell({ r, c: 0 })] = { v: 'Итого', t: 's', s: sBold };
   ws[XLSX.utils.encode_cell({ r, c: 1 })] = { v: '', t: 's', s: sBold };
   ws[XLSX.utils.encode_cell({ r, c: 2 })] = { v: '', t: 's', s: sBold };
-  products.forEach((p, pi) => {
-    const total = allData.filter(d => d.product_id === p.id).reduce((s, d) => s + (parseFloat(d.stock) || 0), 0);
-    ws[XLSX.utils.encode_cell({ r, c: pi + prodOffset })] = { v: parseFloat(total.toFixed(2)), t: 'n', s: sBold };
+  for (const p of products) {
+    const cfg = prodCol.get(p.id);
+    if (cfg.hasExpiry) {
+      cfg.dates.forEach((dt, i) => {
+        let s = 0;
+        for (const num of restNums) {
+          s += cellByDate.get(`${num}__${p.id}__${dt}`) || 0;
+        }
+        ws[XLSX.utils.encode_cell({ r, c: cfg.start + i })] = { v: parseFloat(s.toFixed(2)), t: 'n', s: sBold };
+      });
+      let tot = 0;
+      for (const num of restNums) tot += cellTotal.get(`${num}__${p.id}`) || 0;
+      ws[XLSX.utils.encode_cell({ r, c: cfg.start + cfg.dates.length })] = { v: parseFloat(tot.toFixed(2)), t: 'n', s: sBoldAcc };
+    } else {
+      let tot = 0;
+      for (const num of restNums) tot += cellTotal.get(`${num}__${p.id}`) || 0;
+      ws[XLSX.utils.encode_cell({ r, c: cfg.start })] = { v: parseFloat(tot.toFixed(2)), t: 'n', s: sBold };
+    }
+  }
+
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: lastC } });
+  ws['!cols'] = cols;
+  ws['!merges'] = merges;
+
+  // ───── Лист «Партии» ─────
+  const ws2 = {};
+  const cols2 = [{ wch: 12 }, { wch: 14 }, { wch: 26 }, { wch: 12 }, { wch: 28 }, { wch: 12 }, { wch: 9 }, { wch: 8 }, { wch: 12 }, { wch: 16 }];
+  const head2 = ['Ресторан', 'Город', 'Адрес', 'Артикул', 'Товар', 'Срок', 'Объём', 'Ед.', 'Источник', 'Дата ввода'];
+  head2.forEach((h, i) => {
+    ws2[XLSX.utils.encode_cell({ r: 0, c: i })] = { v: h, t: 's', s: sH };
   });
 
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: products.length + prodOffset - 1 } });
-  ws['!cols'] = cols;
+  const productById = new Map(products.map(p => [p.id, p]));
+  // Сортировка: ресторан → товар (по имени) → срок
+  const sortedData = [...allData].sort((a, b) => {
+    const ra = String(a.restaurant_number || '');
+    const rb = String(b.restaurant_number || '');
+    const cmpR = ra.localeCompare(rb, undefined, { numeric: true });
+    if (cmpR !== 0) return cmpR;
+    const pa = productById.get(a.product_id)?.product_name || '';
+    const pb = productById.get(b.product_id)?.product_name || '';
+    const cmpP = pa.localeCompare(pb, 'ru');
+    if (cmpP !== 0) return cmpP;
+    const da = a.expiry_date ? String(a.expiry_date).slice(0, 10) : '';
+    const db = b.expiry_date ? String(b.expiry_date).slice(0, 10) : '';
+    return da.localeCompare(db);
+  });
+
+  let r2 = 1;
+  sortedData.forEach((d, i) => {
+    const stripe = i % 2 === 1;
+    const info = getRestaurantInfo(d.restaurant_number);
+    const p = productById.get(d.product_id);
+    const ed = d.expiry_date ? String(d.expiry_date).slice(0, 10) : '';
+    const stockNum = parseFloat(d.stock) || 0;
+    const row = [
+      { v: `Ресторан ${d.restaurant_number}`, t: 's', s: sB(stripe) },
+      { v: info.city, t: 's', s: sC(stripe) },
+      { v: info.address, t: 's', s: sC(stripe) },
+      { v: p?.product_sku || '', t: 's', s: sC(stripe) },
+      { v: p?.product_name || '', t: 's', s: sC(stripe) },
+      { v: ed ? formatBatchDate(ed) : 'без срока', t: 's', s: sC(stripe) },
+      { v: parseFloat(stockNum.toFixed(2)), t: 'n', s: sC(stripe) },
+      { v: p ? unitLabel(p.unit) : '', t: 's', s: sC(stripe) },
+      { v: sourceLabel(d.source), t: 's', s: sC(stripe) },
+      { v: d.submitted_at ? fmtDate(d.submitted_at) : '', t: 's', s: sC(stripe) },
+    ];
+    row.forEach((cell, c) => { ws2[XLSX.utils.encode_cell({ r: r2, c })] = cell; });
+    r2++;
+  });
+  ws2['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(r2 - 1, 0), c: head2.length - 1 } });
+  ws2['!cols'] = cols2;
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Остатки');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Партии');
   const safeName = activeCollection.value.name.replace(/[^а-яА-ЯёЁa-zA-Z0-9\s]/g, '').trim();
   XLSX.writeFile(wb, `Остатки_${safeName}_${new Date().toLocaleDateString('ru-RU')}.xlsx`);
 }
@@ -1446,6 +1712,21 @@ th.sortable:hover .sort-arrow { opacity: 0.7; }
 .sc-cell-batch-stock { font-weight: 600; color: #6b5344; white-space: nowrap; }
 .sc-cell-more { font-size: 10px; color: #c16b4d; line-height: 1.1; }
 .sc-cell-empty-mark { color: #ddd; }
+
+/* Раскрывающиеся группы по датам */
+.prod-group-head.expandable { cursor: pointer; }
+.prod-group-head.expandable:hover { background: #6B321F; }
+.prod-group-head.expanded { background: #6B321F; border-bottom: 2px solid #F4A261; }
+.prod-toggle-icon { display: inline-block; margin-left: 3px; font-size: 10px; color: #F4A261; }
+.col-prod-date { background: #6B321F !important; font-size: 9px !important; min-width: 56px; }
+.prod-date-label { font-weight: 600; line-height: 1.2; white-space: nowrap; }
+.col-prod-total { background: #6B321F !important; font-size: 10px !important; min-width: 50px; border-left: 1px solid rgba(255,255,255,0.15); }
+.col-prod-date-cell { background: rgba(244, 162, 97, 0.04); font-size: 12px; min-width: 56px; }
+.col-prod-date-cell .sc-cell-date-val { font-weight: 600; color: #6B5344; min-height: 24px; line-height: 24px; }
+.col-prod-date-cell .sc-cell-date-val:empty::before { content: '—'; color: #ddd; font-weight: 400; }
+.col-prod-total-cell { background: rgba(80, 35, 20, 0.04); border-left: 1px solid #efe6da; }
+.col-prod-total-cell .sc-cell-total { font-weight: 700; }
+.foot-val-strong { background: rgba(80, 35, 20, 0.06); }
 
 /* Cell edit */
 .sc-cell-editor-head { margin-bottom: 12px; }
