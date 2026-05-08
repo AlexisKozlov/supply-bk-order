@@ -26,6 +26,16 @@ import { useRegisterSW } from 'virtual:pwa-register/vue';
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 // Маркер «однократного автохила» — чтобы не зацикливаться при сбоях.
 const AUTO_HEAL_KEY = 'bk_sw_auto_healed';
+// Таймаут активации waiting SW. Если плагин висит дольше — на сервере идёт
+// сборка (или waiting SW нет), делаем жёсткий релоад и не зависаем кнопкой.
+const SW_ACTIVATE_TIMEOUT_MS = 7000;
+
+function withTimeout(promise, ms, errMsg = 'timeout') {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(errMsg)), ms)),
+  ]);
+}
 
 const updating = ref(false);
 const autoHealing = ref(false);
@@ -66,10 +76,14 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
       autoHealing.value = true;
       // updateServiceWorker(true) внутри плагина: postMessage SKIP_WAITING +
       // ожидание controllerchange + window.location.reload().
-      updateServiceWorker(true).catch((e) => {
-        console.warn('[auto-heal failed]', e);
-        autoHealing.value = false;
-      });
+      // Если процесс активации застрял (waiting SW не отвечает) — сбрасываем
+      // флаг и показываем обычный баннер, чтобы пользователь не висел на
+      // прозрачной странице.
+      withTimeout(updateServiceWorker(true), SW_ACTIVATE_TIMEOUT_MS, 'auto-heal timeout')
+        .catch((e) => {
+          console.warn('[auto-heal failed]', e);
+          autoHealing.value = false;
+        });
     }
   },
   onRegisterError(error) {
@@ -86,12 +100,14 @@ async function doUpdate() {
   updating.value = true;
   try {
     // Плагин сам отправит SKIP_WAITING, дождётся controllerchange и перезагрузит.
-    await updateServiceWorker(true);
+    // Таймаут — на случай, когда waiting SW нет (идёт сборка, /sw.js даёт 404)
+    // или активация застряла. Кнопка не должна висеть бесконечно.
+    await withTimeout(updateServiceWorker(true), SW_ACTIVATE_TIMEOUT_MS, 'doUpdate timeout');
   } catch (e) {
     console.warn('[doUpdate]', e);
-    // Запасной путь: если по какой-то причине плагин не смог активировать
-    // waiting SW (например, его уже нет) — просто перезагружаем страницу
-    // с cache-bust, чтобы загрузить свежий bundle.
+    // Запасной путь: жёсткий релоад с cache-bust. Если идёт сборка — попадём
+    // на maintenance-страницу и подождём; если сборка закончилась — загрузим
+    // свежий bundle.
     const u = new URL(window.location.href);
     u.searchParams.set('_v', Date.now().toString(36));
     window.location.replace(u.toString());

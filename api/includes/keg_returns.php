@@ -477,7 +477,7 @@ if ($method === 'GET' && $krSubSlug === 'export') {
                kc.name AS keg_name,
                (SELECT p.external_code
                   FROM products p
-                  WHERE p.sku = kri.keg_code
+                  WHERE p.sku = kri.keg_code AND p.legal_entity_group = kr.legal_entity_group
                   ORDER BY p.is_active DESC, p.id ASC
                   LIMIT 1) AS external_code
         FROM keg_returns kr

@@ -341,7 +341,10 @@ async function uploadFile(type, file) {
 async function loadLastUpdates() {
   try {
     const le = orderStore.settings.legalEntity
-    const analysisQuery = db.from('analysis_data').select('updated_at').order('updated_at', { ascending: false }).limit(1)
+    // analysis_data — рабочие данные, у каждого юрлица свои; фильтруем по legal_entity.
+    const analysisQuery = le
+      ? db.from('analysis_data').select('updated_at').eq('legal_entity', le).order('updated_at', { ascending: false }).limit(1)
+      : db.from('analysis_data').select('updated_at').order('updated_at', { ascending: false }).limit(1)
     const salesQuery = le
       ? db.from('restaurant_sales').select('created_at').eq('legal_entity_group', getEntityGroupCode(le)).order('created_at', { ascending: false }).limit(1)
       : db.from('restaurant_sales').select('created_at').order('created_at', { ascending: false }).limit(1)

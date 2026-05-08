@@ -5202,16 +5202,18 @@ if ($endpoint === 'rpc') {
         $days = ['week' => 7, 'month' => 30, 'quarter' => 90][$period] ?? 7;
         $from = date('Y-m-d', strtotime("-{$days} days"));
         $prevFrom = date('Y-m-d', strtotime("-" . ($days * 2) . " days"));
-        $leWhere = $le ? " AND o.legal_entity = " . $pdo->quote($le) : '';
-        $leWhereA = $le ? " AND legal_entity = " . $pdo->quote($le) : '';
+        // Если фронт прислал юрлицо — фильтруем все KPI по нему. Иначе — по всем юрлицам.
+        $leAnd = $le ? " AND legal_entity = ?" : '';
+        $leAndAlias = $le ? " AND o.legal_entity = ?" : '';
+        $leArgs = $le ? [$le] : [];
 
-        $curOrders = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE created_at_new >= ?" . ($le ? " AND legal_entity = ?" : ''));
-        $curOrders->execute($le ? [$from, $le] : [$from]);
+        $curOrders = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE created_at_new >= ?" . $leAnd);
+        $curOrders->execute(array_merge([$from], $leArgs));
         $ordersCount = intval($curOrders->fetchColumn());
 
         // Заказы прошлый период
-        $prevOrders = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE created_at_new >= ? AND created_at_new < ?");
-        $prevOrders->execute([$prevFrom, $from]);
+        $prevOrders = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE created_at_new >= ? AND created_at_new < ?" . $leAnd);
+        $prevOrders->execute(array_merge([$prevFrom, $from], $leArgs));
         $prevCount = intval($prevOrders->fetchColumn());
         $ordersDelta = $prevCount > 0 ? round(($ordersCount - $prevCount) / $prevCount * 100) : 0;
 
@@ -5219,57 +5221,71 @@ if ($endpoint === 'rpc') {
         $amtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
             LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
-            WHERE o.created_at_new >= ?");
-        $amtSt->execute([$from]);
+            WHERE o.created_at_new >= ?" . $leAndAlias);
+        $amtSt->execute(array_merge([$from], $leArgs));
         $totalAmount = floatval($amtSt->fetchColumn());
 
         $prevAmtSt = $pdo->prepare("SELECT COALESCE(SUM(oi.qty_boxes * COALESCE(pp.price, 0)), 0)
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
             LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
-            WHERE o.created_at_new >= ? AND o.created_at_new < ?");
-        $prevAmtSt->execute([$prevFrom, $from]);
+            WHERE o.created_at_new >= ? AND o.created_at_new < ?" . $leAndAlias);
+        $prevAmtSt->execute(array_merge([$prevFrom, $from], $leArgs));
         $prevAmount = floatval($prevAmtSt->fetchColumn());
         $amountDelta = $prevAmount > 0 ? round(($totalAmount - $prevAmount) / $prevAmount * 100) : 0;
 
         // Выполнение поставок
-        $totalDel = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date >= ? AND delivery_date <= CURDATE()");
-        $totalDel->execute([$from]);
+        $totalDel = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date >= ? AND delivery_date <= CURDATE()" . $leAnd);
+        $totalDel->execute(array_merge([$from], $leArgs));
         $totalDeliveries = intval($totalDel->fetchColumn());
-        $receivedDel = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date >= ? AND delivery_date <= CURDATE() AND received_at IS NOT NULL");
-        $receivedDel->execute([$from]);
+        $receivedDel = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date >= ? AND delivery_date <= CURDATE() AND received_at IS NOT NULL" . $leAnd);
+        $receivedDel->execute(array_merge([$from], $leArgs));
         $received = intval($receivedDel->fetchColumn());
         $deliveredPct = $totalDeliveries > 0 ? round($received / $totalDeliveries * 100) : 100;
 
         // Просроченные
-        $overdue = $pdo->query("SELECT COUNT(*) FROM orders WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= '{$from}'")->fetchColumn();
+        $overdueCntSt = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= ?" . $leAnd);
+        $overdueCntSt->execute(array_merge([$from], $leArgs));
+        $overdue = $overdueCntSt->fetchColumn();
 
         // Низкий запас
-        $lowStock = $pdo->query("SELECT COUNT(*) FROM analysis_data WHERE consumption > 0 AND stock > 0 AND stock / (consumption / GREATEST(period_days, 1)) <= 3")->fetchColumn();
+        $lowStockSt = $pdo->prepare("SELECT COUNT(*) FROM analysis_data WHERE consumption > 0 AND stock > 0 AND stock / (consumption / GREATEST(period_days, 1)) <= 3" . $leAnd);
+        $lowStockSt->execute($leArgs);
+        $lowStock = $lowStockSt->fetchColumn();
 
-        // Корректировки
+        // Корректировки и чаты — общие BK+VM by design (см. shared_tables_bk_vm),
+        // фильтр по юрлицу не применяем.
         $corrPending = $pdo->query("SELECT COUNT(*) FROM order_corrections WHERE status = 'pending'")->fetchColumn();
-
-        // Чат непрочитанные
         $chatUnread = $pdo->query("SELECT COUNT(*) FROM chat_messages cm JOIN chat_conversations cc ON cc.id = cm.conversation_id WHERE cm.is_read = 0 AND cm.direction = 'from_restaurant' AND cc.status = 'open'")->fetchColumn();
 
         // Оплаты
-        $paymentsUp = $pdo->query("SELECT COUNT(*) FROM supplier_payments WHERE status IN ('upcoming', 'request_due')")->fetchColumn();
+        $paymentsUpSt = $pdo->prepare("SELECT COUNT(*) FROM supplier_payments WHERE status IN ('upcoming', 'request_due')" . $leAnd);
+        $paymentsUpSt->execute($leArgs);
+        $paymentsUp = $paymentsUpSt->fetchColumn();
 
         // Топ поставщиков
         $topSt = $pdo->prepare("SELECT o.supplier, SUM(oi.qty_boxes * COALESCE(pp.price, 0)) as total
             FROM orders o JOIN order_items oi ON oi.order_id = o.id
             LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase'
-            WHERE o.created_at_new >= ?
+            WHERE o.created_at_new >= ?" . $leAndAlias . "
             GROUP BY o.supplier ORDER BY total DESC LIMIT 10");
-        $topSt->execute([$from]);
+        $topSt->execute(array_merge([$from], $leArgs));
         $topSuppliers = $topSt->fetchAll();
 
         // Просроченные заказы (детали)
-        $overdueSt = $pdo->query("SELECT id, supplier, delivery_date, DATEDIFF(CURDATE(), delivery_date) as days_overdue FROM orders WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= '{$from}'" . ($le ? " AND legal_entity = " . $pdo->quote($le) : '') . " ORDER BY delivery_date LIMIT 10");
+        $overdueSql = "SELECT id, supplier, delivery_date, DATEDIFF(CURDATE(), delivery_date) as days_overdue
+            FROM orders
+            WHERE delivery_date < CURDATE() AND received_at IS NULL AND delivery_date >= ?";
+        $overdueArgs = [$from];
+        if ($le) { $overdueSql .= " AND legal_entity = ?"; $overdueArgs[] = $le; }
+        $overdueSql .= " ORDER BY delivery_date LIMIT 10";
+        $overdueSt = $pdo->prepare($overdueSql);
+        $overdueSt->execute($overdueArgs);
         $overdueOrders = $overdueSt->fetchAll();
 
         // Ближайшие оплаты
-        $paysSt = $pdo->query("SELECT id, supplier, payment_date, amount, currency FROM supplier_payments WHERE status IN ('upcoming','request_due') ORDER BY payment_date LIMIT 5");
+        $paysSql = "SELECT id, supplier, payment_date, amount, currency FROM supplier_payments WHERE status IN ('upcoming','request_due')" . $leAnd . " ORDER BY payment_date LIMIT 5";
+        $paysSt = $pdo->prepare($paysSql);
+        $paysSt->execute($leArgs);
         $upcomingPayments = $paysSt->fetchAll();
 
         // Тендеры

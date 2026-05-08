@@ -17,7 +17,8 @@ export function useTabRoute(defaultTab, validTabs = null, paramName = 'tab') {
   const route = useRoute();
   const router = useRouter();
 
-  const isValid = (v) => v != null && (!validTabs || validTabs.includes(v));
+  // Если validTabs не передан или это пустой массив — принимаем любое значение.
+  const isValid = (v) => v != null && (!Array.isArray(validTabs) || validTabs.length === 0 || validTabs.includes(v));
   const initial = isValid(route.query[paramName]) ? String(route.query[paramName]) : defaultTab;
   const tab = ref(initial);
 

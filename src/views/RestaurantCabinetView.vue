@@ -1618,7 +1618,6 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { useTabRoute } from '@/composables/useTabRoute.js';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -1638,7 +1637,11 @@ const toast = useToastStore();
 
 const globalLoading = ref(true);
 const globalError = ref('');
-const activeTab = useTabRoute('dashboard', ['dashboard', 'orders', 'stock', 'warehouse-stock', 'keg-returns', 'surveys', 'scanner', 'info', 'profile']);
+// У кабинета ресторана собственный роутинг — каждый раздел это свой под-роут
+// (/restaurant/dashboard, /restaurant/orders и т.д.). Синхронизацию с URL делают
+// applyRouteToState/syncStateToRoute ниже, поэтому useTabRoute сюда не нужен —
+// он бы добавлял дублирующий `?tab=...` параметр и конфликтовал с под-роутами.
+const activeTab = ref('dashboard');
 const cabBrand = computed(() => {
   const group = roStore.restaurant?.legal_entity_group;
   if (group === 'PS') {

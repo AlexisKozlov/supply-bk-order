@@ -68,10 +68,13 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(day, di) in cellTableRows" :key="day.date" :style="di === 0 ? 'font-weight:600;background:rgba(244,162,97,.06);' : ''">
+              <tr v-for="(day, di) in cellTableRows" :key="day.date" :class="{ 'cell-row-weekend': day.isWeekend }" :style="di === 0 ? 'font-weight:600;background:rgba(244,162,97,.06);' : ''">
                 <td>{{ fmtCellDate(day.date) }}</td>
                 <template v-for="e in cellTableEntities" :key="day.date+e">
-                  <td v-for="(st, si) in stockTypesFor(e)" :key="st" :class="[si === 0 ? 'cell-border-left' : '', { 'cell-manual': day.manual[e]?.[st] }]" @dblclick="canEditCells && startCellEdit(day.date, e, st, day.data[e]?.[st] || 0)">
+                  <td v-for="(st, si) in stockTypesFor(e)" :key="st"
+                    :class="[si === 0 ? 'cell-border-left' : '', { 'cell-manual': day.manual[e]?.[st], 'cell-from-monday': day.fromMonday[e]?.[st] }]"
+                    :title="day.fromMonday[e]?.[st] ? 'Подтянуто с ближайшего понедельника (выходной)' : ''"
+                    @dblclick="canEditCells && startCellEdit(day.date, e, st, day.data[e]?.[st] || 0)">
                     <template v-if="cellEditing?.date === day.date && cellEditing?.entity === e && cellEditing?.type === st">
                       <input type="number" v-model.number="cellEditing.value" class="cell-edit-input" min="0"
                         @keyup.enter="saveCellEdit" @keyup.escape="cellEditing = null" @blur="saveCellEdit" />
@@ -343,41 +346,110 @@ watch(cellPeriod, () => { if (slTab.value === 'cells') loadCellStats(); });
 const cellEntities = computed(() => [...new Set(cellStats.value.map(c => c.legal_entity))].sort());
 const cellTableEntities = computed(() => cellFilterEntity.value ? [cellFilterEntity.value] : cellEntities.value);
 
+// Генерируем строки за все даты диапазона, в выходные дни без записи —
+// подтягиваем значения с ближайшего следующего понедельника, ровно как
+// делает калькулятор паллет в /pallet-calc?tab=summary. Так данные в
+// двух модулях гарантированно совпадают.
 const cellTableRows = computed(() => {
-  const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort().reverse();
+  if (!cellStats.value.length) return [];
   const entities = cellTableEntities.value;
-  return dates.map((date, di) => {
-    const data = {};
-    const manual = {};
+
+  const isWeekend = (s) => {
+    const dow = new Date(s + 'T00:00:00').getDay();
+    return dow === 0 || dow === 6;
+  };
+  const nextMonday = (s) => {
+    const d = new Date(s + 'T00:00:00');
+    const dow = d.getDay();
+    // Сб(6) → +2 дня, Вс(0) → +1 день
+    d.setDate(d.getDate() + (dow === 0 ? 1 : 2));
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  const findCell = (date, entity, type) =>
+    cellStats.value.find(c => c.report_date === date && c.legal_entity === entity && c.stock_type === type);
+
+  // Полный диапазон от самой ранней до самой поздней даты в данных.
+  const knownDates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
+  const minDate = knownDates[0];
+  const maxDate = knownDates[knownDates.length - 1];
+  const datesInRange = [];
+  for (let d = new Date(minDate + 'T00:00:00'); d <= new Date(maxDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    datesInRange.push(`${yyyy}-${mm}-${dd}`);
+  }
+  datesInRange.reverse();
+
+  // Для каждой даты считаем значения по юрлицам с учётом подтяжки с понедельника.
+  const computeFor = (date) => {
+    const isWE = isWeekend(date);
+    const monday = isWE ? nextMonday(date) : null;
+    const out = {};
     for (const e of entities) {
-      data[e] = { cold: 0, frozen: 0, dry: 0, shabany: 0, total: 0 };
-      manual[e] = {};
-      for (const c of cellStats.value) {
-        if (c.report_date === date && c.legal_entity === e) {
-          data[e][c.stock_type] = c.cell_count;
-          data[e].total += c.cell_count;
-          if (c.is_manual) manual[e][c.stock_type] = true;
+      const v = { cold: 0, frozen: 0, dry: 0, shabany: 0, total: 0, manual: {}, fromMonday: {} };
+      for (const t of STOCK_TYPES) {
+        const own = findCell(date, e, t);
+        const fb = !own && monday ? findCell(monday, e, t) : null;
+        const r = own || fb;
+        if (r) {
+          v[t] = r.cell_count;
+          v.total += r.cell_count;
+          if (r.is_manual) v.manual[t] = true;
+          if (!own && fb) v.fromMonday[t] = true;
         }
       }
+      out[e] = v;
     }
-    // Дельта к предыдущему дню
+    return out;
+  };
+
+  const valuesByDate = {};
+  for (const date of datesInRange) valuesByDate[date] = computeFor(date);
+
+  const result = [];
+  for (let i = 0; i < datesInRange.length; i++) {
+    const date = datesInRange[i];
+    const v = valuesByDate[date];
+    const hasAnyData = entities.some(e => v[e].total > 0);
+    if (!hasAnyData) continue;
+
+    const data = {};
+    const manual = {};
+    const fromMonday = {};
+    for (const e of entities) {
+      data[e] = { cold: v[e].cold, frozen: v[e].frozen, dry: v[e].dry, shabany: v[e].shabany, total: v[e].total };
+      manual[e] = v[e].manual;
+      fromMonday[e] = v[e].fromMonday;
+    }
+
+    // Для дельты ищем предыдущий рабочий день (Пн-Пт) с реальными данными.
+    // Иначе сравнение получится бессмысленным (Пн vs Вс который сам подтянут с Пн = 0).
+    let prevWorkday = null;
+    for (let j = i + 1; j < datesInRange.length; j++) {
+      const d2 = datesInRange[j];
+      if (isWeekend(d2)) continue;
+      if (entities.some(e => valuesByDate[d2][e].total > 0)) { prevWorkday = d2; break; }
+    }
     const delta = {};
-    const prevDate = dates[di + 1];
-    if (prevDate) {
+    if (prevWorkday) {
+      const pv = valuesByDate[prevWorkday];
       for (const e of entities) {
         delta[e] = {};
         for (const t of [...STOCK_TYPES, 'total']) {
-          const prev = t === 'total'
-            ? cellStats.value.filter(c => c.report_date === prevDate && c.legal_entity === e).reduce((s, c) => s + c.cell_count, 0)
-            : (cellStats.value.find(c => c.report_date === prevDate && c.legal_entity === e && c.stock_type === t)?.cell_count || 0);
-          const cur = data[e]?.[t] || 0;
+          const cur = data[e][t] || 0;
+          const prev = pv[e][t] || 0;
           const d = cur - prev;
           if (d !== 0) delta[e][t] = d;
         }
       }
     }
-    return { date, data, delta, manual };
-  });
+    result.push({ date, data, delta, manual, fromMonday, isWeekend: isWeekend(date) });
+  }
+  return result;
 });
 
 // ═══ Редактирование ячеек ═══
@@ -424,17 +496,51 @@ const STOCK_TYPE_COLORS = { cold: '#2196F3', frozen: '#9C27B0', dry: '#F4A261', 
 
 function buildChartData() {
   const entities = cellTableEntities.value;
-  const dates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
-  if (dates.length < 2) return { series: [], dates, maxVal: 1 };
+  const knownDates = [...new Set(cellStats.value.map(c => c.report_date))].sort();
+  if (knownDates.length < 2) return { series: [], dates: knownDates, maxVal: 1 };
+
+  const isWeekend = (s) => {
+    const dow = new Date(s + 'T00:00:00').getDay();
+    return dow === 0 || dow === 6;
+  };
+  const nextMondayStr = (s) => {
+    const d = new Date(s + 'T00:00:00');
+    const dow = d.getDay();
+    d.setDate(d.getDate() + (dow === 0 ? 1 : 2));
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  // Полный непрерывный диапазон дат — чтобы выходные тоже попали на график.
+  const dates = [];
+  for (let d = new Date(knownDates[0] + 'T00:00:00'); d <= new Date(knownDates[knownDates.length - 1] + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    dates.push(`${yyyy}-${mm}-${dd}`);
+  }
+
+  // Значение «как в калькуляторе паллет»: своё за день, или подтянутое
+  // с ближайшего следующего понедельника для выходных.
+  const valueAt = (date, entity, type) => {
+    const own = cellStats.value.find(c => c.report_date === date && c.legal_entity === entity && c.stock_type === type);
+    if (own) return own.cell_count;
+    if (isWeekend(date)) {
+      const monday = nextMondayStr(date);
+      const fb = cellStats.value.find(c => c.report_date === monday && c.legal_entity === entity && c.stock_type === type);
+      if (fb) return fb.cell_count;
+    }
+    return 0;
+  };
+
   const series = [];
   let maxVal = 1;
   for (const e of entities) {
     const eName = e.replace(/ООО\s*"([^"]+)"/, '$1');
     for (const st of stockTypesFor(e)) {
-      const points = dates.map(d => {
-        const row = cellStats.value.find(c => c.report_date === d && c.legal_entity === e && c.stock_type === st);
-        return row ? row.cell_count : 0;
-      });
+      const points = dates.map(d => valueAt(d, e, st));
       if (points.every(v => v === 0)) continue;
       const prefix = entities.length > 1 ? `${eName} · ` : '';
       series.push({ label: `${prefix}${STOCK_TYPE_LABELS[st]}`, points, color: STOCK_TYPE_COLORS[st] });
@@ -859,17 +965,28 @@ async function handleUpload() {
       if (error) throw error;
       // Сохраняем статистику ячеек если распознана
       let cellMsg = '';
+      let skippedEntities = null;
       if (cellResult.cells.length) {
         const cellItems = cellResult.cells.map(c => ({ ...c, report_date: cellResult.reportDate }));
         const cellRes = await db.rpc('save_warehouse_cells', { items: cellItems });
         if (cellRes.data?.count > 0) {
           const total = cellResult.cells.reduce((s, c) => s + c.cell_count, 0);
           cellMsg = `, ${total} ячеек за ${cellResult.reportDate}`;
-        } else if (cellRes.data?.skipped) {
-          cellMsg = ` (ячейки за ${cellResult.reportDate} пропущены — есть более свежие данные)`;
+        }
+        // Пропущенные юрлица показываем отдельным warning-тостом — иначе
+        // пользователь не замечает что часть данных не сохранилась.
+        if (Array.isArray(cellRes.data?.skipped) && cellRes.data.skipped.length) {
+          skippedEntities = cellRes.data.skipped;
         }
       }
       toastStore.success(`Загружено ${data?.count || items.length} позиций${cellMsg}`);
+      if (skippedEntities) {
+        toastStore.warning(
+          'Ячейки пропущены',
+          `За ${cellResult.reportDate} есть более свежие данные в БД. Не записаны: ${skippedEntities.join(', ')}.`,
+          0,
+        );
+      }
       await loadData();
     } catch (err) {
       console.error('[ShelfLife]', err);
@@ -1109,6 +1226,10 @@ watch(() => orderStore.settings.legalEntity, (v) => {
 .cell-border-left { border-left: 2px solid var(--border) !important; }
 .cell-entity-header { text-align: center !important; border-left: 2px solid var(--border) !important; font-size: 13px !important; color: var(--bk-brown) !important; background: rgba(139,115,85,.06) !important; }
 .cell-total { font-weight: 700 !important; background: rgba(139,115,85,.03); }
+/* Выходные дни — слегка серый фон, чтобы визуально отличались от рабочих. */
+.cell-row-weekend td { background: rgba(0,0,0,.025); }
+/* Значение, подтянутое с ближайшего понедельника (склад в выходные не работает) — курсивом. */
+.cell-from-monday .cell-val { font-style: italic; opacity: 0.7; }
 
 /* Ручные значения */
 .cell-manual { position: relative; }
