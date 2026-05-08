@@ -7,32 +7,10 @@
         <h1 class="sla-title">Аналитика ячеек</h1>
         <p class="sla-sub">
           <span v-if="filterEntity">Юрлицо: <b>{{ filterEntity }}</b> · </span>
-          <span v-else-if="availableEntities.length > 1">Все юрлица · </span>
+          <span v-else-if="mergeEntities && availableEntities.length > 1">Все юрлица сведены в одно · </span>
+          <span v-else-if="availableEntities.length > 1">Все юрлица раздельно · </span>
           Сводка для презентации руководителю — графики, KPI и экспорт.
         </p>
-      </div>
-      <div class="sla-header-actions">
-        <!-- Скачать график (PNG/SVG, светлый/тёмный) -->
-        <div class="sla-export-wrap" ref="exportWrapEl">
-          <button class="sla-btn outline" :disabled="!rawRows.length" @click.stop="chartExportMenu = !chartExportMenu">
-            Скачать график ▾
-          </button>
-          <div v-if="chartExportMenu" class="sla-export-menu">
-            <button class="sla-export-item" @click="chartExportMenu = false; downloadChartPng(false)">PNG · светлый</button>
-            <button class="sla-export-item" @click="chartExportMenu = false; downloadChartPng(true)">PNG · тёмный</button>
-            <button class="sla-export-item" @click="chartExportMenu = false; downloadChartSvg(false)">SVG · светлый</button>
-            <button class="sla-export-item" @click="chartExportMenu = false; downloadChartSvg(true)">SVG · тёмный</button>
-          </div>
-        </div>
-        <button class="sla-btn outline" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadExcel, 'excel')">
-          {{ exportBusy === 'excel' ? '...' : 'Excel' }}
-        </button>
-        <button class="sla-btn outline" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPdf, 'pdf')">
-          {{ exportBusy === 'pdf' ? '...' : 'PDF' }}
-        </button>
-        <button class="sla-btn primary" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPptx, 'pptx')">
-          {{ exportBusy === 'pptx' ? '...' : 'PowerPoint' }}
-        </button>
       </div>
     </div>
 
@@ -97,6 +75,16 @@
           <input type="checkbox" v-model="comparePrev" />
           Сравнить с прошлым периодом
         </label>
+
+        <label v-if="!filterEntity && availableEntities.length > 1" class="sla-toggle">
+          <input type="checkbox" v-model="mergeEntities" @change="syncToUrl" />
+          Свести юрлица
+        </label>
+
+        <label class="sla-toggle">
+          <input type="checkbox" v-model="showValueLabels" />
+          Показать значения
+        </label>
       </div>
     </div>
 
@@ -108,60 +96,73 @@
     </div>
 
     <template v-else>
-      <!-- ═══ KPI-карточки со спарклайнами ═══ -->
-      <div class="sla-kpi-grid">
-        <article v-for="kpi in kpis" :key="kpi.key" class="sla-kpi" :class="'sla-kpi--' + kpi.tone">
-          <div class="sla-kpi-head">
-            <div class="sla-kpi-label">{{ kpi.label }}</div>
-            <div v-if="kpi.deltaPct !== null" class="sla-kpi-delta" :class="kpi.deltaPct >= 0 ? 'up' : 'down'">
-              {{ kpi.deltaPct >= 0 ? '↑' : '↓' }} {{ Math.abs(kpi.deltaPct).toFixed(1) }}%
+      <!-- ═══ Блоки по юрлицам (KPI + инсайт) ═══ -->
+      <section v-for="block in entityBlocks" :key="'eb-' + block.key" class="sla-entity-block">
+        <header v-if="entityBlocks.length > 1 || mergeEntities || filterEntity" class="sla-entity-header">
+          <span class="sla-entity-dot" :style="{ background: ENTITY_COLORS[block.label] || '#8B7355' }"></span>
+          <h2 class="sla-entity-title">{{ block.label }}</h2>
+        </header>
+
+        <div class="sla-kpi-grid">
+          <article v-for="kpi in block.kpis" :key="kpi.key" class="sla-kpi" :class="'sla-kpi--' + kpi.tone">
+            <div class="sla-kpi-head">
+              <div class="sla-kpi-label">{{ kpi.label }}</div>
+              <div v-if="kpi.deltaPct !== null" class="sla-kpi-delta" :class="kpi.deltaPct >= 0 ? 'up' : 'down'">
+                {{ kpi.deltaPct >= 0 ? '↑' : '↓' }} {{ Math.abs(kpi.deltaPct).toFixed(1) }}%
+              </div>
             </div>
-          </div>
-          <div class="sla-kpi-value">
-            {{ kpi.value }}
-            <span v-if="kpi.unit" class="sla-kpi-unit">{{ kpi.unit }}</span>
-          </div>
-          <div v-if="kpi.subtitle" class="sla-kpi-sub">{{ kpi.subtitle }}</div>
-          <!-- Спарклайн -->
-          <svg v-if="kpi.sparkline?.length" class="sla-kpi-spark" viewBox="0 0 100 24" preserveAspectRatio="none">
-            <polyline
-              :points="sparklinePoints(kpi.sparkline)"
-              fill="none"
-              :stroke="sparkColor(kpi.tone)"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </article>
-      </div>
+            <div class="sla-kpi-value">
+              {{ kpi.value }}
+              <span v-if="kpi.unit" class="sla-kpi-unit">{{ kpi.unit }}</span>
+            </div>
+            <div v-if="kpi.subtitle" class="sla-kpi-sub">{{ kpi.subtitle }}</div>
+            <svg v-if="kpi.sparkline?.length" class="sla-kpi-spark" viewBox="0 0 100 24" preserveAspectRatio="none">
+              <polyline
+                :points="sparklinePoints(kpi.sparkline)"
+                fill="none"
+                :stroke="sparkColor(kpi.tone)"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </article>
+        </div>
 
-      <!-- ═══ Авто-инсайт ═══ -->
-      <div class="sla-insight">
-        <div class="sla-insight-icon">💡</div>
-        <p>{{ autoInsight }}</p>
-      </div>
+        <div class="sla-insight">
+          <div class="sla-insight-icon">💡</div>
+          <p>{{ block.insight }}</p>
+        </div>
+      </section>
 
-      <!-- ═══ Экспорт (видная секция в основном потоке) ═══ -->
+      <!-- ═══ Экспорт (единственная секция скачиваний) ═══ -->
       <section class="sla-export-section">
         <div class="sla-export-section-text">
           <h3>Готово к презентации?</h3>
           <p>Скачайте сводку в нужном формате — все KPI, графики и таблицы вшиты внутрь.</p>
         </div>
         <div class="sla-export-section-buttons">
-          <button class="sla-export-btn" @click="openChartExportMenu">
-            <span class="sla-export-btn-ico">🖼</span>
-            <span>График PNG / SVG</span>
-          </button>
-          <button class="sla-export-btn" :disabled="exportBusy" @click="runExport(downloadExcel, 'excel')">
+          <div class="sla-export-wrap" ref="exportWrapEl">
+            <button class="sla-export-btn" :disabled="!rawRows.length" @click.stop="chartExportMenu = !chartExportMenu">
+              <span class="sla-export-btn-ico">🖼</span>
+              <span>График PNG / SVG ▾</span>
+            </button>
+            <div v-if="chartExportMenu" class="sla-export-menu">
+              <button class="sla-export-item" @click="chartExportMenu = false; downloadChartPng(false)">PNG · светлый</button>
+              <button class="sla-export-item" @click="chartExportMenu = false; downloadChartPng(true)">PNG · тёмный</button>
+              <button class="sla-export-item" @click="chartExportMenu = false; downloadChartSvg(false)">SVG · светлый</button>
+              <button class="sla-export-item" @click="chartExportMenu = false; downloadChartSvg(true)">SVG · тёмный</button>
+            </div>
+          </div>
+          <button class="sla-export-btn" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadExcel, 'excel')">
             <span class="sla-export-btn-ico">📊</span>
             <span>{{ exportBusy === 'excel' ? 'Готовится...' : 'Excel' }}</span>
           </button>
-          <button class="sla-export-btn" :disabled="exportBusy" @click="runExport(downloadPdf, 'pdf')">
+          <button class="sla-export-btn" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPdf, 'pdf')">
             <span class="sla-export-btn-ico">📄</span>
             <span>{{ exportBusy === 'pdf' ? 'Готовится...' : 'PDF' }}</span>
           </button>
-          <button class="sla-export-btn primary" :disabled="exportBusy" @click="runExport(downloadPptx, 'pptx')">
+          <button class="sla-export-btn primary" :disabled="!rawRows.length || !!exportBusy" @click="runExport(downloadPptx, 'pptx')">
             <span class="sla-export-btn-ico">📽</span>
             <span>{{ exportBusy === 'pptx' ? 'Готовится...' : 'PowerPoint' }}</span>
           </button>
@@ -240,6 +241,20 @@
                       style="cursor:pointer"
                       @mouseenter="showTooltip(s, p, $event)"
                       @click="onPointClick(p, $event)"/>
+              <!-- Цифры значений над точками (для презентации) -->
+              <template v-if="showValueLabels && !hiddenSeries.has(s.key)">
+                <text v-for="(p, i) in s.points" :key="'pl'+i"
+                      :x="xPositions.get(p.x)"
+                      :y="chartY(p.y) - 7"
+                      font-size="10"
+                      font-weight="700"
+                      :fill="s.color"
+                      text-anchor="middle"
+                      paint-order="stroke"
+                      stroke="#fff"
+                      stroke-width="2.5"
+                      style="pointer-events:none">{{ p.y }}</text>
+              </template>
             </template>
           </svg>
 
@@ -297,31 +312,40 @@
         </div>
       </section>
 
-      <!-- ═══ Heatmap-календарь ═══ -->
-      <section v-if="heatmapData" class="sla-heatmap-card">
+      <!-- ═══ Heatmap-календари (по одному на юрлицо) ═══ -->
+      <section v-if="entityBlocks.some(b => b.heatmap)" class="sla-heatmap-card">
         <header class="sla-chart-head">
           <h3>Календарь загрузки</h3>
-          <div class="sla-heat-legend">
+          <div v-if="entityBlocks[0]?.heatmap" class="sla-heat-legend">
             <span class="sla-heat-legend-text">Меньше</span>
             <span class="sla-heat-cell" v-for="i in 5" :key="i"
-                  :style="{ background: heatColor((i / 5) * heatmapData.max, heatmapData.max) }"></span>
+                  :style="{ background: heatColor((i / 5) * entityBlocks[0].heatmap.max, entityBlocks[0].heatmap.max) }"></span>
             <span class="sla-heat-legend-text">Больше</span>
           </div>
         </header>
 
-        <div class="sla-heatmap">
-          <div v-for="m in heatmapData.months" :key="m.key" class="sla-heat-month">
-            <div class="sla-heat-month-name">{{ fmtMonthHeader(m.key) }}</div>
-            <div class="sla-heat-grid">
-              <div v-for="dayNum in daysInMonth(m.key)" :key="dayNum"
-                   class="sla-heat-day"
-                   :class="{ empty: !m.days[dayNum] }"
-                   :style="m.days[dayNum] ? { background: heatColor(m.days[dayNum].total, heatmapData.max) } : null"
-                   :title="m.days[dayNum] ? `${dayNum} ${fmtMonthHeader(m.key).split(' ')[0]} · ${m.days[dayNum].total} ячеек` : ''"
-                   @click="m.days[dayNum] && openDrill(m.days[dayNum])">
-                <span v-if="m.days[dayNum]" class="sla-heat-day-num">{{ dayNum }}</span>
+        <div class="sla-heatmap-row">
+          <div v-for="block in entityBlocks" :key="'hm-' + block.key" class="sla-heatmap-cell-block">
+            <div v-if="entityBlocks.length > 1 || mergeEntities || filterEntity" class="sla-heatmap-block-title">
+              <span class="sla-entity-dot" :style="{ background: ENTITY_COLORS[block.label] || '#8B7355' }"></span>
+              {{ block.label }}
+            </div>
+            <div v-if="block.heatmap" class="sla-heatmap">
+              <div v-for="m in block.heatmap.months" :key="block.key + m.key" class="sla-heat-month">
+                <div class="sla-heat-month-name">{{ fmtMonthHeader(m.key) }}</div>
+                <div class="sla-heat-grid">
+                  <div v-for="dayNum in daysInMonth(m.key)" :key="dayNum"
+                       class="sla-heat-day"
+                       :class="{ empty: !m.days[dayNum] }"
+                       :style="m.days[dayNum] ? { background: heatColor(m.days[dayNum].total, block.heatmap.max) } : null"
+                       :title="m.days[dayNum] ? `${dayNum} ${fmtMonthHeader(m.key).split(' ')[0]} · ${m.days[dayNum].total} ячеек` : ''"
+                       @click="m.days[dayNum] && openDrill(m.days[dayNum])">
+                    <span v-if="m.days[dayNum]" class="sla-heat-day-num">{{ dayNum }}</span>
+                  </div>
+                </div>
               </div>
             </div>
+            <div v-else class="sla-empty" style="padding:18px;text-align:center;font-size:12px;">Нет данных</div>
           </div>
         </div>
       </section>
@@ -447,9 +471,13 @@ const granularity = ref('month');
 const groupBy = ref('entity');
 const comparePrev = ref(false);
 // Фильтр по юрлицу. Пустая строка = все юрлица.
-// По умолчанию подставляем активное юрлицо пользователя — чтобы данные
-// разных юрлиц не смешивались автоматически.
-const filterEntity = ref(entityToWarehouseName(orderStore.settings?.legalEntity || ''));
+// По умолчанию — все, и они показываются раздельными блоками.
+// Чтобы получить «свод», есть отдельный тоггл mergeEntities ниже.
+const filterEntity = ref('');
+// Свести юрлица в одно (сумма). Применяется только когда filterEntity = ''.
+const mergeEntities = ref(false);
+// Показывать значения над точками графика (для презентации).
+const showValueLabels = ref(true);
 
 const loading = ref(false);
 const error = ref('');
@@ -476,6 +504,7 @@ function syncFromUrl() {
   if (q.group && GROUPING.some(g => g.key === q.group)) groupBy.value = q.group;
   if (q.compare === '1') comparePrev.value = true;
   if (q.entity !== undefined) filterEntity.value = String(q.entity);
+  if (q.merge === '1') mergeEntities.value = true;
 }
 
 function syncToUrl() {
@@ -490,6 +519,7 @@ function syncToUrl() {
   }
   if (comparePrev.value) q.compare = '1';
   if (filterEntity.value) q.entity = filterEntity.value;
+  if (mergeEntities.value) q.merge = '1';
   router.replace({ query: q }).catch(() => {});
 }
 
@@ -546,6 +576,11 @@ function applyCustomRange() {
 
 watch([granularity, groupBy], syncToUrl);
 watch(comparePrev, () => { syncToUrl(); /* перерасчёт сравнения происходит в computed */ });
+// При выборе конкретного юрлица — автоматически снимаем «Свести»: оно теряет смысл.
+watch(filterEntity, (val) => {
+  if (val) mergeEntities.value = false;
+  syncToUrl();
+});
 
 // ─── Загрузка данных ───
 async function loadData() {
@@ -578,11 +613,10 @@ async function loadData() {
   }
 }
 
-// ─── Подготовка серий ───
-const dailyTotals = computed(() => {
-  // Map<date, { total, byEntity: {entity:n}, byType: {type:n} }>
+// ─── Чистые функции расчёта (используются как для общего, так и для per-entity) ───
+function buildDailyTotals(rows) {
   const byDate = new Map();
-  for (const r of filteredRows.value) {
+  for (const r of rows) {
     if (!byDate.has(r.report_date)) {
       byDate.set(r.report_date, { date: r.report_date, total: 0, byEntity: {}, byType: {} });
     }
@@ -593,7 +627,10 @@ const dailyTotals = computed(() => {
     d.byType[r.stock_type] = (d.byType[r.stock_type] || 0) + cnt;
   }
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-});
+}
+
+// ─── Подготовка серий ───
+const dailyTotals = computed(() => buildDailyTotals(filteredRows.value));
 
 // Дни внутри текущего диапазона (отбрасываем «расширение» для сравнения)
 const currentDays = computed(() => {
@@ -609,68 +646,33 @@ const prevDays = computed(() => {
 // ─── KPI ───
 function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 
-const kpis = computed(() => {
-  const cur = currentDays.value;
-  const prev = prevDays.value;
+function buildKpis(cur, prev) {
   if (!cur.length) return [];
-
   const last = cur[cur.length - 1];
   const peak = cur.reduce((m, d) => d.total > m.total ? d : m, cur[0]);
   const avgVal = avg(cur.map(d => d.total));
-  const sumVal = cur.reduce((s, d) => s + d.total, 0);
-
-  // Δ относительно предыдущего периода
   let deltaPct = null;
   if (prev.length) {
     const prevAvg = avg(prev.map(d => d.total));
     if (prevAvg > 0) deltaPct = ((avgVal - prevAvg) / prevAvg) * 100;
   }
-
   const sparkline = cur.map(d => d.total);
-
   return [
-    {
-      key: 'current',
-      label: 'Текущая загрузка',
-      value: last.total,
-      unit: 'ячеек',
-      subtitle: 'на ' + fmtDateShort(last.date),
-      tone: 'orange',
-      sparkline,
-      deltaPct: null,
-    },
-    {
-      key: 'change',
-      label: 'Изменение к пред. периоду',
+    { key: 'current', label: 'Текущая загрузка', value: last.total, unit: 'ячеек',
+      subtitle: 'на ' + fmtDateShort(last.date), tone: 'orange', sparkline, deltaPct: null },
+    { key: 'change', label: 'Изменение к пред. периоду',
       value: deltaPct !== null ? (deltaPct >= 0 ? '+' : '') + deltaPct.toFixed(1) + '%' : '—',
-      unit: '',
-      subtitle: prev.length ? 'среднее vs среднее' : 'нет данных за пред. период',
+      unit: '', subtitle: prev.length ? 'среднее vs среднее' : 'нет данных за пред. период',
       tone: deltaPct === null ? 'neutral' : (deltaPct >= 0 ? 'green' : 'red'),
-      sparkline,
-      deltaPct,
-    },
-    {
-      key: 'peak',
-      label: 'Пиковая загрузка',
-      value: peak.total,
-      unit: 'ячеек',
-      subtitle: fmtDateShort(peak.date),
-      tone: 'red',
-      sparkline,
-      deltaPct: null,
-    },
-    {
-      key: 'avg',
-      label: 'Среднее за период',
-      value: Math.round(avgVal),
-      unit: 'ячеек',
-      subtitle: 'дней в периоде: ' + cur.length,
-      tone: 'blue',
-      sparkline,
-      deltaPct: null,
-    },
+      sparkline, deltaPct },
+    { key: 'peak', label: 'Пиковая загрузка', value: peak.total, unit: 'ячеек',
+      subtitle: fmtDateShort(peak.date), tone: 'red', sparkline, deltaPct: null },
+    { key: 'avg', label: 'Среднее за период', value: Math.round(avgVal), unit: 'ячеек',
+      subtitle: 'дней в периоде: ' + cur.length, tone: 'blue', sparkline, deltaPct: null },
   ];
-});
+}
+
+const kpis = computed(() => buildKpis(currentDays.value, prevDays.value));
 
 // ─── Sparkline ───
 function sparklinePoints(values) {
@@ -699,18 +701,13 @@ function sparkColor(tone) {
 }
 
 // ─── Авто-инсайт ───
-const autoInsight = computed(() => {
-  const cur = currentDays.value;
-  const prev = prevDays.value;
+function buildInsight(cur, prev) {
   if (!cur.length) return 'Нет данных для анализа.';
-
   const peak = cur.reduce((m, d) => d.total > m.total ? d : m, cur[0]);
   const avgVal = avg(cur.map(d => d.total));
   const last = cur[cur.length - 1];
   const first = cur[0];
-
   const parts = [];
-  // Общая динамика
   if (last.total > first.total) {
     const dPct = ((last.total - first.total) / Math.max(first.total, 1)) * 100;
     parts.push(`За период загрузка выросла с ${first.total} до ${last.total} ячеек (+${dPct.toFixed(0)}%).`);
@@ -720,11 +717,7 @@ const autoInsight = computed(() => {
   } else {
     parts.push(`За период загрузка стабильна: ${last.total} ячеек.`);
   }
-
-  // Пик
   parts.push(`Пик ${fmtDateShort(peak.date)} — ${peak.total} ячеек.`);
-
-  // Сравнение с предыдущим периодом
   if (prev.length) {
     const prevAvg = avg(prev.map(d => d.total));
     if (prevAvg > 0) {
@@ -733,8 +726,6 @@ const autoInsight = computed(() => {
       parts.push(`Среднее за период (${Math.round(avgVal)}) на ${Math.abs(diff).toFixed(0)}% ${verb} прошлого периода.`);
     }
   }
-
-  // Лидирующий тип хранения за последний день
   if (last.byType) {
     const types = Object.entries(last.byType).sort((a, b) => b[1] - a[1]);
     if (types.length) {
@@ -744,9 +735,10 @@ const autoInsight = computed(() => {
       parts.push(`Больше всего занято в режиме «${STOCK_TYPE_LABELS[topType] || topType}» — ${topVal} ячеек (${pct.toFixed(0)}% от всей загрузки на ${fmtDateShort(last.date)}).`);
     }
   }
-
   return parts.join(' ');
-});
+}
+
+const autoInsight = computed(() => buildInsight(currentDays.value, prevDays.value));
 
 function fmtDateShort(iso) {
   if (!iso) return '';
@@ -1030,20 +1022,59 @@ function showTooltip(series, point, evt) {
 function hideTooltip() { chartTooltip.value = null; }
 
 // ─── Heatmap: дни × месяцы ───
-const heatmapData = computed(() => {
-  // По дням за весь currentDays (без прогноза/сравнения)
-  if (!currentDays.value.length) return null;
-  // Группировка по месяцу (yyyy-mm), внутри — по дню месяца (1..31)
+function buildHeatmap(days) {
+  if (!days.length) return null;
   const byMonth = new Map();
-  for (const d of currentDays.value) {
+  for (const d of days) {
     const dt = new Date(d.date);
     const mk = dt.getFullYear() + '-' + pad(dt.getMonth() + 1);
     if (!byMonth.has(mk)) byMonth.set(mk, { key: mk, days: {} });
     byMonth.get(mk).days[dt.getDate()] = d;
   }
   const months = [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key));
-  const max = currentDays.value.reduce((m, d) => Math.max(m, d.total), 0) || 1;
+  const max = days.reduce((m, d) => Math.max(m, d.total), 0) || 1;
   return { months, max };
+}
+const heatmapData = computed(() => buildHeatmap(currentDays.value));
+
+// ─── Per-entity блоки (для дефолтного режима «Все юрлица, раздельно») ───
+// Возвращает массив блоков, каждый со своим набором KPI/инсайт/heatmap.
+// Если выбрано конкретное юрлицо или включён mergeEntities — один блок.
+const entityBlocks = computed(() => {
+  if (!rawRows.value.length) return [];
+  const { start, end } = dateRange.value;
+  const blocks = [];
+
+  // Хелпер: построить блок из массива rows
+  const makeBlock = (label, key, rows) => {
+    const totals = buildDailyTotals(rows);
+    const cur = totals.filter(d => d.date >= start && d.date <= end);
+    const prev = comparePrev.value ? totals.filter(d => d.date < start) : [];
+    return {
+      key,
+      label,
+      currentDays: cur,
+      prevDays: prev,
+      kpis: buildKpis(cur, prev),
+      insight: buildInsight(cur, prev),
+      heatmap: buildHeatmap(cur),
+    };
+  };
+
+  // Один блок: выбран фильтр или включено сведение
+  if (filterEntity.value) {
+    const rows = rawRows.value.filter(r => r.legal_entity === filterEntity.value);
+    blocks.push(makeBlock(filterEntity.value, filterEntity.value, rows));
+  } else if (mergeEntities.value) {
+    blocks.push(makeBlock('Все юрлица (свод)', '__merged__', rawRows.value));
+  } else {
+    // Раздельно по каждому юрлицу
+    for (const e of availableEntities.value) {
+      const rows = rawRows.value.filter(r => r.legal_entity === e);
+      blocks.push(makeBlock(e, e, rows));
+    }
+  }
+  return blocks;
 });
 
 function heatColor(value, max) {
@@ -1245,13 +1276,6 @@ function handleDocClick(e) {
   if (chartExportMenu.value && exportWrapEl.value && !exportWrapEl.value.contains(e.target)) {
     chartExportMenu.value = false;
   }
-}
-function openChartExportMenu() {
-  // Прокрутим к шапке и откроем меню
-  if (exportWrapEl.value) {
-    exportWrapEl.value.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-  setTimeout(() => { chartExportMenu.value = true; }, 200);
 }
 onMounted(() => document.addEventListener('click', handleDocClick));
 onUnmounted(() => document.removeEventListener('click', handleDocClick));
@@ -1587,13 +1611,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.sla-view { padding: 20px; max-width: 1280px; margin: 0 auto; color: #2C1A12; }
+.sla-view {
+  padding: 20px; max-width: 1280px; margin: 0 auto; color: #2C1A12;
+  /* Не даём внутренним блокам тянуть страницу горизонтально:
+     внутри .sla-chart-wrap / .sla-table-scroll есть свой собственный скролл. */
+  overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* На всякий — все секции/контейнеры внутри тоже не должны переполнять. */
+.sla-view > * { max-width: 100%; }
 
 /* Шапка */
 .sla-header {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 18px; margin-bottom: 16px; flex-wrap: wrap;
+  max-width: 100%; min-width: 0;
 }
+.sla-header > div { min-width: 0; }
 .sla-back {
   display: inline-block; margin-bottom: 4px;
   font-size: 13px; color: #6B5344; text-decoration: none;
@@ -1636,7 +1671,11 @@ onMounted(() => {
   padding: 12px 16px; margin-bottom: 16px;
   display: flex; flex-direction: column; gap: 10px;
 }
-.sla-toolbar-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sla-toolbar-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  max-width: 100%; min-width: 0;
+}
+.sla-toolbar-row > * { min-width: 0; max-width: 100%; }
 .sla-toolbar-label {
   font-size: 12px; font-weight: 700; color: #8B7355;
   text-transform: uppercase; letter-spacing: 0.04em;
@@ -1674,6 +1713,29 @@ onMounted(() => {
   padding: 40px; text-align: center; color: #8B7355;
 }
 .sla-error { color: #C62828; }
+
+/* Per-entity блоки */
+.sla-entity-block { margin-bottom: 14px; }
+.sla-entity-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 4px 8px; margin-bottom: 8px;
+  border-bottom: 2px solid #E76F51;
+}
+.sla-entity-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.sla-entity-title { margin: 0; font-size: 17px; font-weight: 700; color: #2C1A12; }
+
+/* Heatmap multi-entity row */
+.sla-heatmap-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+.sla-heatmap-cell-block { min-width: 0; }
+.sla-heatmap-block-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 700; color: #2C1A12;
+  padding: 6px 0 8px; margin-bottom: 6px;
+  border-bottom: 1px dashed #E8DCC8;
+}
 
 /* KPI */
 .sla-kpi-grid {
@@ -1735,7 +1797,12 @@ onMounted(() => {
 .sla-legend-item.dashed { font-style: italic; }
 .sla-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
-.sla-chart-wrap { position: relative; }
+.sla-chart-wrap {
+  position: relative;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
 .sla-chart-svg { width: 100%; height: 360px; display: block; }
 .sla-chart-tooltip {
   position: absolute; pointer-events: none; z-index: 10;
@@ -1904,12 +1971,97 @@ onMounted(() => {
   .sla-drill-grid { grid-template-columns: 1fr; }
 }
 
+/* ═══ Адаптация для планшетов и мобилок ═══ */
 @media (max-width: 900px) {
-  .sla-kpi-grid { grid-template-columns: 1fr 1fr; }
+  .sla-kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sla-view { padding: 14px; }
 }
-@media (max-width: 540px) {
-  .sla-kpi-grid { grid-template-columns: 1fr; }
-  .sla-header-actions { width: 100%; }
+
+@media (max-width: 640px) {
+  .sla-view { padding: 12px; padding-bottom: 80px; }
+
+  /* Шапка */
+  .sla-title { font-size: 19px; }
+  .sla-sub { font-size: 12px; line-height: 1.4; }
+  .sla-back { font-size: 12px; }
+
+  /* Тулбар */
+  .sla-toolbar { padding: 10px 12px; gap: 8px; }
+  .sla-toolbar-row { gap: 6px; }
+  .sla-toolbar-label { font-size: 11px; margin-right: 2px; flex-basis: 100%; margin-bottom: -2px; }
   .sla-toolbar-divider { display: none; }
+  .sla-chip { padding: 5px 10px; font-size: 11.5px; }
+  .sla-toggle { font-size: 12px; padding: 4px 6px; }
+  .sla-date { padding: 5px 8px; font-size: 12px; }
+
+  /* Per-entity блоки */
+  .sla-entity-block { margin-bottom: 18px; }
+  .sla-entity-header { padding: 4px 2px 6px; gap: 8px; }
+  .sla-entity-title { font-size: 15px; }
+
+  /* KPI */
+  .sla-kpi-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sla-kpi { padding: 12px 12px 10px; }
+  .sla-kpi-label { font-size: 11px; }
+  .sla-kpi-value { font-size: 22px; }
+  .sla-kpi-unit { font-size: 12px; }
+  .sla-kpi-sub { font-size: 11px; }
+  .sla-kpi-spark { height: 20px; }
+  .sla-kpi-delta { font-size: 10.5px; padding: 2px 6px; }
+
+  /* Авто-инсайт */
+  .sla-insight { padding: 12px 14px; gap: 10px; }
+  .sla-insight-icon { font-size: 18px; }
+  .sla-insight p { font-size: 12.5px; line-height: 1.45; }
+
+  /* Экспорт */
+  .sla-export-section {
+    padding: 14px; flex-direction: column; align-items: stretch;
+    gap: 12px;
+  }
+  .sla-export-section-text h3 { font-size: 15px; }
+  .sla-export-section-text p { font-size: 12px; }
+  .sla-export-section-buttons { width: 100%; gap: 6px; }
+  .sla-export-btn { flex: 1 1 calc(50% - 4px); justify-content: center; padding: 10px 8px; font-size: 12.5px; }
+  .sla-export-btn-ico { font-size: 16px; }
+  .sla-export-wrap { flex: 1 1 100%; }
+  .sla-export-wrap .sla-export-btn { width: 100%; }
+  .sla-export-menu { left: 0; right: 0; min-width: 0; }
+
+  /* График */
+  .sla-chart-card { padding: 12px 12px 14px; }
+  .sla-chart-head h3 { font-size: 14px; }
+  .sla-chart-legend { gap: 6px; }
+  .sla-legend-item { font-size: 11px; padding: 3px 7px; }
+  .sla-chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .sla-chart-svg { min-width: 640px; height: 280px; }
+  .sla-chart-hint { font-size: 11px; }
+
+  /* Heatmap */
+  .sla-heatmap-card { padding: 12px; }
+  .sla-heatmap-row { grid-template-columns: 1fr; gap: 14px; }
+  .sla-heat-month-name { font-size: 11.5px; }
+  .sla-heat-day-num { font-size: 8.5px; }
+  .sla-heat-legend-text { font-size: 10.5px; }
+
+  /* Сводная таблица */
+  .sla-table-card { padding: 12px; }
+  .sla-table-hint { display: none; }
+  .sla-table-entity-name { font-size: 12px; }
+  .sla-table { font-size: 11.5px; min-width: 460px; }
+  .sla-table thead th { padding: 6px 7px; font-size: 11px; }
+  .sla-table tbody td { padding: 6px 7px; }
+  .sla-table tfoot td { padding: 7px; }
+
+  /* Drill-down модал */
+  .sla-drill { padding: 18px 16px 14px; max-width: 100%; }
+  .sla-drill-head h3 { font-size: 15px; }
+  .sla-drill-total { font-size: 26px; }
+  .sla-drill-grid { grid-template-columns: 1fr; gap: 10px; }
+}
+
+@media (max-width: 380px) {
+  .sla-kpi-grid { grid-template-columns: 1fr; }
+  .sla-export-btn { flex: 1 1 100%; }
 }
 </style>
