@@ -5289,9 +5289,13 @@ if ($endpoint === 'rpc') {
         $upcomingPayments = $paysSt->fetchAll();
 
         // Тендеры
-        $activeTenders = intval($pdo->query("SELECT COUNT(*) FROM tenders WHERE status = 'collecting'")->fetchColumn());
+        $tenSt = $pdo->prepare("SELECT COUNT(*) FROM tenders WHERE status = 'collecting'" . $leAnd);
+        $tenSt->execute($leArgs);
+        $activeTenders = intval($tenSt->fetchColumn());
         // Сборы остатков
-        $activeCollections = intval($pdo->query("SELECT COUNT(*) FROM stock_collections WHERE status = 'active'")->fetchColumn());
+        $collSt = $pdo->prepare("SELECT COUNT(*) FROM stock_collections WHERE status = 'active'" . $leAnd);
+        $collSt->execute($leArgs);
+        $activeCollections = intval($collSt->fetchColumn());
 
         respond([
             'ordersCount' => $ordersCount, 'ordersDelta' => $ordersDelta,

@@ -52,6 +52,14 @@ function shouldIgnoreError(message, source) {
   if (msg.includes('service-worker') || msg.includes('serviceWorker')) return true;
   // Ошибки расширений браузера
   if (src.includes('extension://') || src.includes('moz-extension://')) return true;
+  // Браузерные/расширенческие postMessage-цепочки (например, sendResponse(true)
+  // без последующего ответа). К нашему коду отношения не имеет, шумит в логах.
+  if (msg.includes('message channel closed before a response was received')) return true;
+  if (msg.includes('listener indicated an asynchronous response')) return true;
+  // ResizeObserver спам — известный безвредный шум некоторых браузеров.
+  if (msg.includes('ResizeObserver loop')) return true;
+  // AbortError при отмене fetch (например, при навигации или offline) — это норма.
+  if (msg === 'AbortError' || msg.includes('The operation was aborted') || msg.includes('signal is aborted')) return true;
   return false;
 }
 
