@@ -9,7 +9,7 @@
         </div>
         <div class="upd-actions">
           <button class="upd-btn upd-btn-later" @click="later">Позже</button>
-          <button class="upd-btn upd-btn-primary" @click="doUpdate" :disabled="updating">
+          <button class="upd-btn upd-btn-primary" @click="doUpdate">
             {{ updating ? 'Обновление…' : 'Обновить' }}
           </button>
         </div>
@@ -26,25 +26,18 @@ import { useRegisterSW } from 'virtual:pwa-register/vue';
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 // Маркер «однократного автохила» — чтобы не зацикливаться при сбоях.
 const AUTO_HEAL_KEY = 'bk_sw_auto_healed';
-// Таймаут активации waiting SW. Если плагин висит дольше — на сервере идёт
-// сборка (или waiting SW нет), делаем жёсткий релоад и не зависаем кнопкой.
-const SW_ACTIVATE_TIMEOUT_MS = 7000;
-
-function withTimeout(promise, ms, errMsg = 'timeout') {
-  return Promise.race([
-    promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error(errMsg)), ms)),
-  ]);
-}
+// Сколько ждать активации waiting SW после postMessage SKIP_WAITING прежде
+// чем сделать релоад. Хватает с запасом, страница не зависает.
+const SW_ACTIVATE_DELAY_MS = 800;
 
 const updating = ref(false);
 const autoHealing = ref(false);
 
 // 'prompt': плагин сам отслеживает появление нового SW в ожидании и
-// выставляет needRefresh. updateServiceWorker(true) шлёт waiting-SW сообщение
-// SKIP_WAITING, дожидается controllerchange и перезагружает страницу.
-// Это правильный цикл активации, не нужно вручную unregister/caches.delete.
-const { needRefresh, updateServiceWorker } = useRegisterSW({
+// выставляет needRefresh. updateServiceWorker оставлен только из API хука,
+// мы его НЕ используем — вместо этого посылаем SKIP_WAITING прямым
+// postMessage и потом релоадим. Так кнопка никогда не висит.
+const { needRefresh } = useRegisterSW({
   immediate: true,
   onRegisteredSW(swUrl, registration) {
     if (!registration) return;
@@ -59,7 +52,7 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
         if (resp?.status === 200) {
           await registration.update();
         }
-      } catch (e) { /* offline — ок */ }
+      } catch (e) { /* offline / 404 во время сборки — ок */ }
     }
     checkForUpdate();
     setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL);
@@ -68,22 +61,19 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
     });
 
     // Автохил: если на момент регистрации в скоупе уже есть waiting SW —
-    // значит пользователь застрял в состоянии, когда старый SW не отдал
-    // контроль новому. Активируем новый разово, чтобы не показывать
-    // лишний баннер. Защита от циклов: sessionStorage-маркер.
+    // активируем его разово, чтобы не показывать пользователю лишний баннер.
+    // Защита от циклов: sessionStorage-маркер. На любой сбой просто сбрасываем
+    // флаг и показываем обычный баннер.
     if (registration.waiting && !sessionStorage.getItem(AUTO_HEAL_KEY)) {
       sessionStorage.setItem(AUTO_HEAL_KEY, '1');
       autoHealing.value = true;
-      // updateServiceWorker(true) внутри плагина: postMessage SKIP_WAITING +
-      // ожидание controllerchange + window.location.reload().
-      // Если процесс активации застрял (waiting SW не отвечает) — сбрасываем
-      // флаг и показываем обычный баннер, чтобы пользователь не висел на
-      // прозрачной странице.
-      withTimeout(updateServiceWorker(true), SW_ACTIVATE_TIMEOUT_MS, 'auto-heal timeout')
-        .catch((e) => {
-          console.warn('[auto-heal failed]', e);
-          autoHealing.value = false;
-        });
+      try { registration.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch (_) {}
+      setTimeout(() => {
+        // Активация прошла или нет — в любом случае релоадим.
+        // Новый SW станет контроллером (если успел skipWaiting),
+        // или старый SW обслужит свежий index.html.
+        try { window.location.reload(); } catch (_) { autoHealing.value = false; }
+      }, SW_ACTIVATE_DELAY_MS);
     }
   },
   onRegisterError(error) {
@@ -99,20 +89,22 @@ window.addEventListener('bk:needs-update', () => {
 async function doUpdate() {
   updating.value = true;
   try {
-    // Плагин сам отправит SKIP_WAITING, дождётся controllerchange и перезагрузит.
-    // Таймаут — на случай, когда waiting SW нет (идёт сборка, /sw.js даёт 404)
-    // или активация застряла. Кнопка не должна висеть бесконечно.
-    await withTimeout(updateServiceWorker(true), SW_ACTIVATE_TIMEOUT_MS, 'doUpdate timeout');
-  } catch (e) {
-    console.warn('[doUpdate]', e);
-    // Запасной путь: жёсткий релоад с cache-bust. Если идёт сборка — попадём
-    // на maintenance-страницу и подождём; если сборка закончилась — загрузим
-    // свежий bundle.
-    const u = new URL(window.location.href);
-    u.searchParams.set('_v', Date.now().toString(36));
-    window.location.replace(u.toString());
+    // 1. Если есть waiting SW — даём команду активироваться. Не ждём ответа.
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg?.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      } catch (_) { /* игнор */ }
+    }
   } finally {
-    updating.value = false;
+    // 2. Жёсткий релоад с cache-bust через короткую паузу. Если новый SW
+    //    успел стать контроллером — ок, отдаст свежий index.html. Если идёт
+    //    сборка на сервере (sw.js 404) — попадём на maintenance, ждём.
+    setTimeout(() => {
+      const u = new URL(window.location.href);
+      u.searchParams.set('_v', Date.now().toString(36));
+      window.location.replace(u.toString());
+    }, SW_ACTIVATE_DELAY_MS);
   }
 }
 
@@ -171,7 +163,6 @@ function later() {
   color: white;
 }
 .upd-btn-primary:hover { box-shadow: 0 4px 12px rgba(214,39,0,0.35); transform: translateY(-1px); }
-.upd-btn-primary:disabled { opacity: 0.6; cursor: wait; transform: none; }
 
 .upd-fade-enter-active, .upd-fade-leave-active { transition: all 0.25s ease; }
 .upd-fade-enter-from, .upd-fade-leave-to { opacity: 0; transform: translate(-50%, 20px); }

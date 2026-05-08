@@ -1,13 +1,13 @@
-// Поднимает баннер «Доступна новая версия» (UpdatePrompt) либо предупреждение
-// про идущую сборку — в зависимости от того, что отдаёт сервер. Никакой
-// автоматической перезагрузки, чтобы не терять несохранённые данные.
-import { useToastStore } from '@/stores/toastStore.js';
+// Поднимает баннер «Доступна новая версия» (UpdatePrompt) если на сервере
+// уже выложена новая версия. Если идёт сборка — баннер не показываем
+// (нечего обновлять), просто молча ждём — плагин сам подхватит когда сборка
+// закончится.
 
 const RECHECK_INTERVAL_MS = 30 * 1000;
 
 // Идёт ли сейчас сборка на сервере. Если /sw.js ещё не появился (404) или
 // nginx отдаёт 503 — значит билд в процессе и реальной «новой версии» пока
-// нет. В этом случае показываем мягкое сообщение и периодически перепроверяем.
+// нет.
 async function isServerBuilding() {
   if (typeof fetch !== 'function') return false;
   try {
@@ -18,7 +18,6 @@ async function isServerBuilding() {
     });
     return resp.status === 404 || resp.status === 503;
   } catch (e) {
-    // Сеть упала — не считаем что это билд.
     return false;
   }
 }
@@ -30,40 +29,6 @@ function showBanner() {
   try {
     window.dispatchEvent(new Event('bk:needs-update'));
   } catch (e) { /* игнор */ }
-  try {
-    const toast = useToastStore();
-    toast.warning(
-      'Доступна новая версия портала',
-      'Сохраните введённые данные и нажмите «Обновить» в баннере внизу — старые ссылки не работают.',
-      0,
-    );
-  } catch (e) { /* store не готов */ }
-}
-
-function showBuildingToast() {
-  if (typeof window === 'undefined') return;
-  if (window.__bkBuildingNotified) return;
-  window.__bkBuildingNotified = true;
-  try {
-    const toast = useToastStore();
-    toast.warning(
-      'Портал обновляется',
-      'Сейчас на сервере идёт сборка новой версии. Подождите 1–2 минуты и перезагрузите страницу.',
-      0,
-    );
-  } catch (e) { /* store не готов */ }
-
-  // Через 30 секунд проверим: если сборка закончилась — сбрасываем флаг,
-  // и при следующем чанк-сбое уже сработает обычный баннер «Обновить».
-  setTimeout(async () => {
-    const stillBuilding = await isServerBuilding();
-    if (!stillBuilding) {
-      window.__bkBuildingNotified = false;
-    } else {
-      // Ещё строится — сбрасываем тоже, но через ещё 30 секунд.
-      setTimeout(() => { window.__bkBuildingNotified = false; }, RECHECK_INTERVAL_MS);
-    }
-  }, RECHECK_INTERVAL_MS);
 }
 
 export async function notifyAppUpdateRequired() {
@@ -71,17 +36,17 @@ export async function notifyAppUpdateRequired() {
   // window.onunhandledrejection и вызовет повторный notify (бесконечный цикл).
   try {
     if (typeof window === 'undefined') return;
-    // Если уже показали что-то одно — не повторяемся.
-    if (window.__bkUpdateNotified || window.__bkBuildingNotified) return;
-    // Сначала смотрим: на сервере билд или новая версия уже выложена?
+    if (window.__bkUpdateNotified) return;
+    // Если на сервере идёт сборка — банер не показываем (нечего активировать).
+    // Через 30 секунд ещё раз проверим состояние; когда сборка закончится,
+    // плагин сам зарегистрирует новый SW и поднимет баннер штатно.
     const building = await isServerBuilding();
     if (building) {
-      showBuildingToast();
-    } else {
-      showBanner();
+      setTimeout(() => { notifyAppUpdateRequired(); }, RECHECK_INTERVAL_MS);
+      return;
     }
+    showBanner();
   } catch (e) {
-    // Тихо. Главное чтобы не зациклить onunhandledrejection.
     console.warn('[notifyAppUpdateRequired]', e);
   }
 }
