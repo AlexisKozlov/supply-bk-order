@@ -5104,21 +5104,23 @@ if ($endpoint === 'rpc') {
 
     if ($fn === 'create_payment_if_needed') {
         $orderId = $body['order_id'] ?? '';
-        $ttnDate = trim((string)($body['ttn_date'] ?? $body['delivery_date'] ?? ''));
+        // Опорная дата для отсрочки — теперь дата поставки. Принимаем delivery_date,
+        // оставляем чтение ttn_date для совместимости со старыми клиентами.
+        $deliveryDate = trim((string)($body['delivery_date'] ?? $body['ttn_date'] ?? ''));
         if (!$orderId) respond(['error' => 'order_id required'], 400);
 
         // Получаем заказ и поставщика
-        $order = $pdo->prepare("SELECT o.id, o.supplier, o.legal_entity, o.created_by, o.ttn_date,
+        $order = $pdo->prepare("SELECT o.id, o.supplier, o.legal_entity, o.created_by, o.delivery_date,
             (SELECT SUM(oi.qty_boxes * COALESCE(pp.price, 0)) FROM order_items oi LEFT JOIN product_prices pp ON pp.sku = oi.sku AND pp.legal_entity = o.legal_entity AND pp.price_type = 'purchase' WHERE oi.order_id = o.id) as total_amount
             FROM orders o WHERE o.id = ?");
         $order->execute([$orderId]);
         $o = $order->fetch();
         if (!$o) respond(['skip' => true]); // заказ не найден
 
-        if (!$ttnDate) {
-            $ttnDate = trim((string)($o['ttn_date'] ?? ''));
+        if (!$deliveryDate) {
+            $deliveryDate = trim((string)($o['delivery_date'] ?? ''));
         }
-        if (!$ttnDate) respond(['skip' => true, 'reason' => 'ttn_date_required']);
+        if (!$deliveryDate) respond(['skip' => true, 'reason' => 'delivery_date_required']);
 
         // Проверяем поставщика — российский + есть отсрочка
         $sup = $pdo->prepare("SELECT country, payment_delay_days FROM suppliers WHERE short_name = ? AND legal_entity = ?");
@@ -5138,7 +5140,7 @@ if ($endpoint === 'rpc') {
         if ($exists->fetch()) respond(['skip' => true, 'reason' => 'already_exists']);
 
         $delayDays = intval($s['payment_delay_days']);
-        $dDate = new DateTime($ttnDate);
+        $dDate = new DateTime($deliveryDate);
 
         // Дата окончания отсрочки
         $dueDate = clone $dDate;
@@ -5159,7 +5161,7 @@ if ($endpoint === 'rpc') {
 
         $ins = $pdo->prepare("INSERT INTO supplier_payments (order_id, supplier, legal_entity, delivery_date, payment_delay_days, payment_due_date, payment_date, request_deadline, amount, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $ins->execute([
-            $orderId, $o['supplier'], $o['legal_entity'], $ttnDate,
+            $orderId, $o['supplier'], $o['legal_entity'], $deliveryDate,
             $delayDays, $dueDate->format('Y-m-d'), $payDate->format('Y-m-d'),
             $deadline->format('Y-m-d H:i:s'),
             $o['total_amount'] ?: null,

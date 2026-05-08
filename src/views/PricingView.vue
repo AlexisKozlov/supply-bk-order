@@ -676,6 +676,7 @@
 <script setup>
 import { ref, computed, defineAsyncComponent, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { applyEntityGroupFilter, formatDate, formatDateTimeFull as formatDateTime, toLocalDateStr } from '@/lib/utils.js';
 import { getEntityGroup } from '@/lib/legalEntities.js';
@@ -706,7 +707,7 @@ const sessionToken = localStorage.getItem('bk_session_token') || '';
 const isViewer = computed(() => !userStore.hasAccess('pricing', 'edit'));
 const hasFullAccess = computed(() => userStore.hasAccess('pricing', 'full'));
 
-const activeTab = ref('prices');
+const activeTab = useTabRoute('prices', ['prices', 'agreements', 'deposits', 'dynamics']);
 const loadError = ref(false);
 const rubToBynRate = ref(0.0375);
 const searchQuery = ref('');
@@ -1770,6 +1771,9 @@ onMounted(async () => {
   await loadPrices();
   // Подгрузить протоколы в фоне для отображения бейджей
   loadAgreements();
+  // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`
+  if (activeTab.value === 'deposits') loadDepositList();
+  if (activeTab.value === 'dynamics') loadDynamics();
 });
 
 // При смене юрлица — перезагрузить

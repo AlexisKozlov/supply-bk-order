@@ -155,6 +155,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -167,7 +168,7 @@ const orderStore = useOrderStore();
 const toast = useToastStore();
 const shortEntity = computed(() => ENTITY_SHORT_NAMES[orderStore.settings.legalEntity] || orderStore.settings.legalEntity);
 
-const tab = ref('calc');
+const tab = useTabRoute('calc', ['calc', 'ref']);
 const loading = ref(false);
 const calcData = ref([]);
 const filterCategory = ref('');

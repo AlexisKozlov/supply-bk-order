@@ -298,8 +298,18 @@
             <tfoot>
               <tr class="plt-total">
                 <td colspan="2">Итого</td>
-                <td class="bg-stock num"></td>
-                <td class="bg-stock num"></td>
+                <td class="bg-stock num">
+                  <div class="plt-total-stack">
+                    <span class="plt-total-main">{{ sumTotalColdStock || '' }}</span>
+                    <span v-if="sumAvgColdStock != null" class="plt-total-sub">ср. {{ sumAvgColdStock }}</span>
+                  </div>
+                </td>
+                <td class="bg-stock num">
+                  <div class="plt-total-stack">
+                    <span class="plt-total-main">{{ sumTotalFrozenStock || '' }}</span>
+                    <span v-if="sumAvgFrozenStock != null" class="plt-total-sub">ср. {{ sumAvgFrozenStock }}</span>
+                  </div>
+                </td>
                 <td class="bg-delivery num">{{ sumTotalColdDeliveries || '' }}</td>
                 <td class="bg-delivery num">{{ sumTotalFrozenDeliveries || '' }}</td>
                 <td class="num"></td>
@@ -455,6 +465,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -474,7 +485,7 @@ const legalEntity = computed({
   get: () => orderStore.settings.legalEntity,
   set: (v) => { orderStore.settings.legalEntity = v; },
 });
-const tab = ref('calculator');
+const tab = useTabRoute('calculator', ['calculator', 'summary', 'reference']);
 const tabs = [
   { key: 'calculator', label: 'Калькулятор' },
   { key: 'summary', label: 'Сводка' },
@@ -1205,8 +1216,21 @@ const sumRows = computed(() => {
   return rows;
 });
 
-const sumTotalColdDeliveries = computed(() => sumData.value.entries.reduce((s, e) => s + (e.cold_pallets || 0), 0));
-const sumTotalFrozenDeliveries = computed(() => sumData.value.entries.reduce((s, e) => s + (e.frozen_pallets || 0), 0));
+// Считаем итоги из тех же строк, что отображаются в таблице — сумма строго равна сумме по столбцу.
+const sumTotalColdDeliveries = computed(() => sumRows.value.reduce((s, r) => s + (r.totalCold || 0), 0));
+const sumTotalFrozenDeliveries = computed(() => sumRows.value.reduce((s, r) => s + (r.totalFrozen || 0), 0));
+
+// Сумма и среднее по остаткам за месяц (по дням, где значение заполнено — вкл. выходные с подтянутым из понедельника).
+const sumTotalColdStock = computed(() => sumRows.value.reduce((s, r) => s + (r.coldStock || 0), 0));
+const sumTotalFrozenStock = computed(() => sumRows.value.reduce((s, r) => s + (r.frozenStock || 0), 0));
+const sumAvgColdStock = computed(() => {
+  const vals = sumRows.value.map(r => r.coldStock).filter(v => v != null);
+  return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+});
+const sumAvgFrozenStock = computed(() => {
+  const vals = sumRows.value.map(r => r.frozenStock).filter(v => v != null);
+  return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+});
 
 async function loadSummary() {
   sumLoading.value = true;
@@ -1347,7 +1371,10 @@ function buildSummarySheet(XLSX, rows) {
 
   const headers = ['Дата', 'День', 'Остатки Х', 'Остатки М', 'Итого Х', 'Итого М', 'Приходы Холод', 'Приходы Мороз', 'ТТЛ Холод', 'ТТЛ Мороз'];
   const aoa = [headers];
-  const totalRow = ['Итого', '', '', '', 0, 0, '', '', '', ''];
+  const totalRow = ['Итого', '', 0, 0, 0, 0, '', '', '', ''];
+  const avgRow = ['Среднее (остатки)', '', '', '', '', '', '', '', '', ''];
+  let coldStockSum = 0, coldStockCount = 0;
+  let frozenStockSum = 0, frozenStockCount = 0;
 
   for (const r of rows) {
     const coldText = r.coldEntries.map(e => `${e.supplier_name} (${e.cold_pallets})`).join(', ');
@@ -1359,12 +1386,21 @@ function buildSummarySheet(XLSX, rows) {
       coldText, frozenText,
       '', '',
     ]);
+    totalRow[2] += r.coldStock || 0;
+    totalRow[3] += r.frozenStock || 0;
     totalRow[4] += r.totalCold || 0;
     totalRow[5] += r.totalFrozen || 0;
+    if (r.coldStock != null) { coldStockSum += r.coldStock; coldStockCount++; }
+    if (r.frozenStock != null) { frozenStockSum += r.frozenStock; frozenStockCount++; }
   }
+  totalRow[2] = totalRow[2] || '';
+  totalRow[3] = totalRow[3] || '';
   totalRow[4] = totalRow[4] || '';
   totalRow[5] = totalRow[5] || '';
+  avgRow[2] = coldStockCount ? Math.round(coldStockSum / coldStockCount) : '';
+  avgRow[3] = frozenStockCount ? Math.round(frozenStockSum / frozenStockCount) : '';
   aoa.push(totalRow);
+  aoa.push(avgRow);
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
 
@@ -1407,11 +1443,14 @@ function buildSummarySheet(XLSX, rows) {
     }
   }
 
-  const totalR = dataRows + 1;
-  for (let c = 0; c < 10; c++) {
-    const addr = XLSX.utils.encode_cell({ r: totalR, c });
-    if (!ws[addr]) ws[addr] = { v: '', t: 's' };
-    ws[addr].s = { font: fontTotal, alignment: center, border, fill: totalFill };
+  // Две итоговые строки: «Итого» (суммы) и «Среднее (остатки)».
+  for (let extra = 0; extra < 2; extra++) {
+    const totalR = dataRows + 1 + extra;
+    for (let c = 0; c < 10; c++) {
+      const addr = XLSX.utils.encode_cell({ r: totalR, c });
+      if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+      ws[addr].s = { font: fontTotal, alignment: center, border, fill: totalFill };
+    }
   }
 
   ws['!rows'] = [{ hpt: 28 }];
@@ -1680,16 +1719,36 @@ async function importRefFile(event) {
     await loadAllProducts();
   } catch (e) {
     console.error('[PalletCalc import]', e);
-    toastStore.error('Ошибка импорта файла');
+    const msg = e?.message || '';
+    if (
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Unable to preload CSS') ||
+      msg.includes('Importing a module script failed') ||
+      msg.includes('error loading dynamically imported module')
+    ) {
+      // Старая страница после деплоя — поднимаем баннер обновления.
+      try {
+        const m = await import('@/lib/appUpdateNotify.js');
+        m.notifyAppUpdateRequired();
+      } catch (_) {}
+      toastStore.error('Доступна новая версия портала', 'Нажмите «Обновить» в баннере внизу — это нужно один раз, потом импорт заработает.');
+    } else {
+      toastStore.error('Ошибка импорта файла', msg);
+    }
   }
 }
 
 // ═══ Lifecycle ═══
 function switchTab(key) {
   tab.value = key;
+}
+
+// Загружаем данные вкладки реактивно, чтобы это работало и при клике на таб,
+// и когда вкладка пришла из URL `?tab=...` при первой загрузке/перезагрузке.
+watch(tab, (key) => {
   if (key === 'summary') loadSummary();
   if (key === 'reference') loadRefProducts();
-}
+}, { immediate: true });
 
 function onEntityChange() {
   loadAllProducts();
@@ -1772,6 +1831,10 @@ onMounted(async () => {
 .plt-table .pallets { color: #E76F51; font-size: 14px; }
 .plt-table .col-actions { white-space: nowrap; }
 .plt-total td { font-weight: 700; background: #FFF3E0 !important; border-top: 2px solid #F4A261; }
+.plt-total-hint { font-weight: 400; font-size: 11px; color: #8B6F60; margin-left: 6px; }
+.plt-total-stack { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.plt-total-main { font-weight: 700; }
+.plt-total-sub { font-weight: 400; font-size: 11px; color: #8B6F60; }
 .plt-total-badges { display: flex; gap: 6px; justify-content: center; }
 .has-value td { background: #FFFDE7; }
 .item-name { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

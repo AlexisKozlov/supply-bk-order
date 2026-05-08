@@ -337,6 +337,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -374,7 +375,7 @@ const searchQuery = ref('');
 const filterSupplier = ref('');
 const filterCategory = ref('');
 
-const activeTab = ref('all');
+const activeTab = useTabRoute('all', ['all', 'red', 'orange', 'purple', 'normal', 'dead']);
 const hiddenAnalogs = ref([]);
 const showHidden = ref(false);
 async function loadHiddenAnalogs() {

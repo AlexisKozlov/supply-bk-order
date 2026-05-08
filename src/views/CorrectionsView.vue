@@ -124,6 +124,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber, getEntityGroupCode } from '@/lib/legalEntities.js'
 import { useToastStore } from '@/stores/toastStore.js'
@@ -132,7 +133,7 @@ import { useOrderStore } from '@/stores/orderStore.js'
 const orderStore = useOrderStore()
 
 const toastStore = useToastStore()
-const tab = ref('requests')
+const tab = useTabRoute('requests', ['requests', 'settings'])
 const loading = ref(false)
 const corrections = ref([])
 const statusFilter = ref('')
@@ -268,7 +269,11 @@ function fmtDateTime(d) {
 
 function fmtQty(q) { const n = parseFloat(q); return n % 1 === 0 ? n.toFixed(0) : n.toFixed(1) }
 
-onMounted(loadCorrections)
+onMounted(() => {
+  loadCorrections();
+  // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`
+  if (tab.value === 'settings') loadSettings();
+})
 watch(() => orderStore.settings.legalEntity, () => loadCorrections())
 </script>
 

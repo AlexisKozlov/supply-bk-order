@@ -664,6 +664,7 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { getOrdersAnalytics, getSeasonalityData, getForecastData } from '@/lib/analytics.js';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
@@ -686,7 +687,7 @@ const canCreateOrder = computed(() => userStore.hasAccess('analytics', 'edit'));
 const days = ref(30);
 const loading = ref(false);
 const data = ref(null);
-const activeTab = ref('overview');
+const activeTab = useTabRoute('overview', ['overview', 'products', 'suppliers', 'changes', 'forecast', 'planfact', 'abc-xyz']);
 const seasonality = ref(null);
 const seasonalityLoading = ref(false);
 const forecast = ref(null);
@@ -940,6 +941,7 @@ async function load() {
 }
 
 // Lazy-load сезонности и прогноза при переключении на табы
+// immediate: true — данные подгружаются и при заходе на вкладку через URL `?tab=...`.
 watch(activeTab, async (tab) => {
   if (tab === 'products' && !seasonality.value && !seasonalityLoading.value) {
     const myId = ++_seasonLoadId;
@@ -956,7 +958,7 @@ watch(activeTab, async (tab) => {
   if (tab === 'forecast' && !forecast.value && !forecastLoading.value) {
     await loadForecast();
   }
-});
+}, { immediate: true });
 
 async function loadForecast() {
   const myId = ++_forecastLoadId;

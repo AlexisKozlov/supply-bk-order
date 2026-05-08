@@ -11,7 +11,7 @@
  *   PATCH  keg-returns/{id}         — обновить
  *   POST   keg-returns/{id}/submit       — DRAFT → SUBMITTED
  *   POST   keg-returns/{id}/cancel       — → CANCELLED
- *   POST   keg-returns/{id}/replace-bso  — заменить БСО (10:00–16:00, со списком в историю)
+ *   POST   keg-returns/{id}/replace-bso  — заменить БСО (10:00–15:00, со списком в историю)
  *   GET    keg-returns/{id}/excel        — скачать Excel ТТН
  */
 
@@ -97,13 +97,13 @@ function kegCalcDeadline(string $returnDate): DateTime {
 }
 
 /**
- * Cutoff (16:00 того же рабочего дня, что и dedaline 10:00) — последний момент,
+ * Cutoff (15:00 того же рабочего дня, что и deadline 10:00) — последний момент,
  * когда ресторан ещё может заменить испорченный БСО через спец-эндпоинт.
  * После cutoff менять БСО нельзя (заявки уходят лог-провайдеру финально).
  */
 function kegCalcCutoff(string $returnDate): DateTime {
     $d = kegCalcDeadline($returnDate);
-    $d->setTime(16, 0, 0);
+    $d->setTime(15, 0, 0);
     return $d;
 }
 
@@ -376,7 +376,7 @@ function krGetPickupWeekdays(PDO $pdo, int $restaurantId): int {
 
 /**
  * Добавляет к строке заявки поля deadline_iso, cutoff_iso и can_replace_bso.
- * can_replace_bso = true, если сейчас интервал [deadline 10:00, cutoff 16:00)
+ * can_replace_bso = true, если сейчас интервал [deadline 10:00, cutoff 15:00)
  * и статус ∈ {SUBMITTED, ROUTED}. До deadline ресторан правит БСО обычным
  * редактированием (PATCH), после cutoff — нельзя совсем.
  */
@@ -462,16 +462,30 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     $filterGroup = isset($_GET['legal_entity_group']) ? trim($_GET['legal_entity_group']) : 'BK_VM';
     if (!in_array($filterGroup, ['BK_VM', 'PS'])) $filterGroup = 'BK_VM';
     krRequireGroupAccess($krPortalUser, $filterGroup);
+    // Одна строка = одна позиция кеги в заявке. Заявка с N разными кегами
+    // даст N строк. Так видны количества каждой кеги, а не только сумма.
+    // Внешний код берём из products.external_code (мап по sku=keg_catalog.code).
+    // keg_catalog.code — это артикул кеги, а не внешний код.
     $rows = $pdo->prepare("
-        SELECT kr.id, kr.return_date, kr.status, kr.bso_series, kr.bso_number,
-               kr.vehicle, kr.driver, kr.sender_position_name, kr.created_at, kr.submitted_at, kr.routed_at, kr.updated_at,
+        SELECT kr.id AS request_id,
+               kr.return_date, kr.status, kr.bso_series, kr.bso_number,
+               kr.vehicle, kr.driver, kr.sender_position_name,
+               kr.created_at, kr.routed_at,
                r.number AS restaurant_number, r.city AS restaurant_city,
                r.address AS restaurant_address, r.pickup_address,
-               (SELECT SUM(quantity) FROM keg_return_items WHERE request_id = kr.id) AS total_kegs
+               kri.keg_code AS sku, kri.quantity,
+               kc.name AS keg_name,
+               (SELECT p.external_code
+                  FROM products p
+                  WHERE p.sku = kri.keg_code
+                  ORDER BY p.is_active DESC, p.id ASC
+                  LIMIT 1) AS external_code
         FROM keg_returns kr
         JOIN restaurants r ON r.id = kr.restaurant_id
+        LEFT JOIN keg_return_items kri ON kri.request_id = kr.id
+        LEFT JOIN keg_catalog kc ON kc.code = kri.keg_code
         WHERE kr.legal_entity_group = ? AND kr.status != 'DRAFT'
-        ORDER BY kr.return_date DESC, kr.id DESC
+        ORDER BY kr.return_date DESC, kr.id DESC, kri.keg_code
     ");
     $rows->execute([$filterGroup]);
     $list = $rows->fetchAll();
@@ -482,45 +496,61 @@ if ($method === 'GET' && $krSubSlug === 'export') {
     $sh = $ss->getActiveSheet();
     $sh->setTitle('Возврат кег');
 
-    $headers = ['Ресторан','Адрес погрузки','Дата возврата','Серия БСО','Номер БСО','Статус','Кег','Водитель','Машина','Сдал грузоотправитель','Создана','Маршрутизирована'];
+    $headers = [
+        'Дата возврата (ТТН)', 'Ресторан', 'Адрес погрузки',
+        'Серия БСО', 'Номер БСО', 'Статус',
+        'Артикул и наименование', 'Внешний код кеги', 'Количество',
+        'Водитель', 'Машина', 'Сдал грузоотправитель',
+        'Создана', 'Маршрутизирована',
+    ];
     foreach ($headers as $i => $h) {
         $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($i + 1);
         $sh->setCellValue($col . '1', $h);
     }
-    $headerRange = 'A1:' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers)) . '1';
+    $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+    $headerRange = 'A1:' . $lastCol . '1';
     $sh->getStyle($headerRange)->getFont()->setBold(true)->setSize(11);
     $sh->getStyle($headerRange)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB('F4A261');
     $sh->getStyle($headerRange)->getFont()->getColor()->setRGB('FFFFFF');
     $sh->getStyle($headerRange)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER)->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER)->setWrapText(true);
-    $sh->getRowDimension(1)->setRowHeight(30);
+    $sh->getRowDimension(1)->setRowHeight(34);
 
     $r = 2;
     foreach ($list as $row) {
         $restName = '№' . (int)$row['restaurant_number'] . ' ' . trim(($row['restaurant_city'] ?? '') . ($row['restaurant_address'] ? ', ' . $row['restaurant_address'] : ''));
-        $sh->setCellValue('A' . $r, $restName);
-        $sh->setCellValue('B' . $r, $row['pickup_address'] ?? '');
-        $sh->setCellValue('C' . $r, $row['return_date'] ? date('d.m.Y', strtotime($row['return_date'])) : '');
+        $sh->setCellValue('A' . $r, $row['return_date'] ? date('d.m.Y', strtotime($row['return_date'])) : '');
+        $sh->setCellValue('B' . $r, $restName);
+        $sh->setCellValue('C' . $r, $row['pickup_address'] ?? '');
         $sh->setCellValue('D' . $r, $row['bso_series'] ?? '');
         $sh->setCellValue('E' . $r, $row['bso_number'] ?? '');
         $sh->setCellValue('F' . $r, $statusLabels[$row['status']] ?? $row['status']);
-        $sh->setCellValue('G' . $r, $row['total_kegs'] !== null ? (int)$row['total_kegs'] : '');
-        $sh->setCellValue('H' . $r, $row['driver'] ?? '');
-        $sh->setCellValue('I' . $r, $row['vehicle'] ?? '');
-        $sh->setCellValue('J' . $r, $row['sender_position_name'] ?? '');
-        $sh->setCellValue('K' . $r, $row['created_at'] ? date('d.m.Y H:i', strtotime($row['created_at'])) : '');
-        $sh->setCellValue('L' . $r, $row['routed_at'] ? date('d.m.Y H:i', strtotime($row['routed_at'])) : '');
+        // Артикул + Наименование одной строкой (если кеги нет — оставляем пустым)
+        $sku = trim((string)($row['sku'] ?? ''));
+        $kegName = trim((string)($row['keg_name'] ?? ''));
+        $skuName = $sku !== '' && $kegName !== '' ? ($sku . ' ' . $kegName) : ($sku !== '' ? $sku : $kegName);
+        $sh->setCellValue('G' . $r, $skuName);
+        $sh->setCellValue('H' . $r, $row['external_code'] ?? '');
+        $sh->setCellValue('I' . $r, $row['quantity'] !== null ? (int)$row['quantity'] : '');
+        $sh->setCellValue('J' . $r, $row['driver'] ?? '');
+        $sh->setCellValue('K' . $r, $row['vehicle'] ?? '');
+        $sh->setCellValue('L' . $r, $row['sender_position_name'] ?? '');
+        $sh->setCellValue('M' . $r, $row['created_at'] ? date('d.m.Y H:i', strtotime($row['created_at'])) : '');
+        $sh->setCellValue('N' . $r, $row['routed_at'] ? date('d.m.Y H:i', strtotime($row['routed_at'])) : '');
         // Заливка по статусу
         $color = ['SUBMITTED' => 'FFF3E0', 'ROUTED' => 'E8F5E9', 'CANCELLED' => 'FCE4EC'][$row['status']] ?? 'FFFFFF';
-        $sh->getStyle('A' . $r . ':L' . $r)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB($color);
+        $sh->getStyle('A' . $r . ':' . $lastCol . $r)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setRGB($color);
+        // Внешний код кеги — текстовый формат, чтобы Excel не превращал «900000123» в число с потерей ведущих нулей.
+        $sh->getStyle('H' . $r)->getNumberFormat()->setFormatCode('@');
         $r++;
     }
     // Автоширина колонок
-    foreach (range('A', 'L') as $col) {
+    $colsRange = range('A', $lastCol);
+    foreach ($colsRange as $col) {
         $sh->getColumnDimension($col)->setAutoSize(true);
     }
     // Границы по всему диапазону
     if ($r > 2) {
-        $sh->getStyle('A1:L' . ($r - 1))->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN)->getColor()->setRGB('CCCCCC');
+        $sh->getStyle('A1:' . $lastCol . ($r - 1))->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN)->getColor()->setRGB('CCCCCC');
     }
     $sh->freezePane('A2');
 
@@ -916,8 +946,8 @@ if ($method === 'POST' && $krId && $krAction === 'cancel') {
 
 // ── POST /keg-returns/{id}/replace-bso ──
 // Замена номера БСО, если ресторан испортил бланк. Доступно только в окне
-// [deadline 10:00, cutoff 16:00) и только в статусе SUBMITTED/ROUTED.
-// До 10:00 — ресторан правит БСО обычным PATCH. После 16:00 — никаких изменений.
+// [deadline 10:00, cutoff 15:00) и только в статусе SUBMITTED/ROUTED.
+// До 10:00 — ресторан правит БСО обычным PATCH. После 15:00 — никаких изменений.
 if ($method === 'POST' && $krId && $krAction === 'replace-bso') {
     $row = krGetReturnWithItems($pdo, $krId);
     if (!$row) krRespond(['error' => 'Не найдено'], 404);
@@ -945,7 +975,7 @@ if ($method === 'POST' && $krId && $krAction === 'replace-bso') {
         krRespond(['error' => 'До дедлайна 10:00 правьте БСО обычным редактированием'], 422);
     }
     if ($now >= $cutoff) {
-        krRespond(['error' => 'Окно замены БСО закрыто (после 16:00). Свяжитесь с отделом закупок'], 422);
+        krRespond(['error' => 'Окно замены БСО закрыто (после 15:00). Свяжитесь с отделом закупок'], 422);
     }
 
     $newSeries = trim((string)($body['new_series'] ?? ''));

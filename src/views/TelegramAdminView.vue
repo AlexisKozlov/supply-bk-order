@@ -564,13 +564,14 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
 
 const userStore = useUserStore()
 
-const tab = ref('bot')
+const tab = useTabRoute('bot', ['bot', 'restaurants', 'users', 'questions', 'broadcast', 'log', 'settings'])
 const loading = ref(true)
 
 const linkedUsers = ref([])
@@ -704,7 +705,12 @@ async function sendTestMessage() {
   } finally { testSending.value = false }
 }
 
-onMounted(() => { loadData(); loadBotInfo() })
+onMounted(() => {
+  loadData();
+  loadBotInfo();
+  // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`
+  if (tab.value === 'questions') loadQuestions();
+})
 
 // ═══ Computed ═══
 

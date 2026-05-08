@@ -879,6 +879,7 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { formatMoscowDateTime, formatMoscowRelative, toLocalDateStr } from '@/lib/utils.js';
 import { useUserStore, ROLE_TEMPLATES, MODULES, MODULE_LABELS, loadRbacConfig } from '@/stores/userStore.js';
@@ -895,7 +896,7 @@ const ConfirmModal = defineAsyncComponent(() => import('@/components/modals/Conf
 const userStore = useUserStore();
 const toast = useToastStore();
 
-const activeTab = ref('users');
+const activeTab = useTabRoute('users', ['users', 'sessions', 'audit', 'feedback', 'broadcast', 'stats', 'backup', 'maintenance']);
 const loading = ref(false);
 const saving = ref(false);
 const users = ref([]);
@@ -1609,6 +1610,7 @@ async function deleteChangelog(entry) {
   } catch { toast.error('Ошибка', 'Не удалось удалить'); }
 }
 
+// immediate: true — чтобы данные загружались и при заходе на вкладку через URL `?tab=...`
 watch(activeTab, (tab) => {
   if (tab === 'sessions') {
     loadOnlineUsers();
@@ -1630,11 +1632,12 @@ watch(activeTab, (tab) => {
     if (!Object.keys(statsData.value).length) loadStats();
   }
   if (tab === 'feedback') {
+    loadBugReports();
     startBugPoll();
   } else {
     stopBugPoll();
   }
-});
+}, { immediate: true });
 
 const usersWord = computed(() => {
   const n = users.value.length;

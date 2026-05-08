@@ -443,6 +443,7 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, onMounted, nextTick, inject, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { formatDate, applyEntityGroupFilter } from '@/lib/utils.js';
 import { useOrderStore } from '@/stores/orderStore.js';
@@ -527,7 +528,7 @@ const statuses = [
 ];
 function statusLabel(s) { return statuses.find(x => x.value === s)?.label || s; }
 
-const tab = ref('info');
+const tab = useTabRoute('info', ['info', 'offers', 'compare']);
 const activeOfferIdx = ref(0);
 const loadingTender = ref(false);
 const saving = ref(false);

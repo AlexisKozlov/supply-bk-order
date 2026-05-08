@@ -21,7 +21,7 @@
         <div v-if="!rows.length" class="krt-empty-card">
           <div class="krt-empty-illu" v-html="iconKeg"></div>
           <h3>Заявок пока нет</h3>
-          <p>Создайте заявку, дождитесь маршрутизации — затем распечатайте ТТН на БСО и передайте её водителю вместе с кегами.</p>
+          <p>Сформируйте заявку и сразу распечатайте ТТН на бланке БСО (до дедлайна) — чтобы убедиться, что бланк не испорчен и номер совпадает с фактическим. Дождитесь уведомления о маршрутизации в Telegram, впишите ОТ РУКИ водителя и машину в распечатанный бланк, возьмите подпись водителя — и передайте ему вместе с кегами.</p>
           <button class="krt-btn primary" @click="openNew">+ Новая заявка</button>
         </div>
         <template v-else>
@@ -208,7 +208,7 @@
             </template>
           </section>
 
-          <!-- Секция: Замена БСО (после дедлайна 10:00 и до cutoff 16:00) -->
+          <!-- Секция: Замена БСО (после дедлайна 10:00 и до cutoff 15:00) -->
           <section
             v-if="bsoSectionVisible"
             class="krt-section krt-bso-section"
@@ -222,7 +222,7 @@
               </h3>
             </div>
 
-            <!-- Активный CTA замены: окно 10:00–16:00 -->
+            <!-- Активный CTA замены: окно 10:00–15:00 -->
             <div v-if="form.can_replace_bso" class="krt-bso-replace-cta">
               <div class="krt-bso-replace-text">
                 <div class="krt-bso-replace-title">Испортили БСО при печати?</div>
@@ -237,7 +237,7 @@
 
             <!-- Окно закрылось -->
             <div v-else-if="cutoffPassed && (form.status === 'SUBMITTED' || form.status === 'ROUTED')" class="krt-bso-cutoff-msg">
-              Окно замены БСО закрыто (после 16:00). Если бланк испорчен — свяжитесь с отделом закупок.
+              Окно замены БСО закрыто (после 15:00). Если бланк испорчен — свяжитесь с отделом закупок.
             </div>
 
             <!-- История замен -->
@@ -326,6 +326,19 @@
               </span>
             </div>
           </section>
+
+          <!-- Напоминание распечатать ТТН после формирования и до дедлайна -->
+          <div v-if="form.status === 'SUBMITTED' && !deadlinePassed" class="krt-print-reminder">
+            <div class="krt-print-reminder-icon">🖨</div>
+            <div class="krt-print-reminder-text">
+              <div class="krt-print-reminder-title">Не забудьте распечатать ТТН на бланке БСО до дедлайна</div>
+              <div class="krt-print-reminder-sub">
+                Это нужно, чтобы убедиться, что бланк не испорчен и номер БСО на нём совпадает с фактическим.
+                <template v-if="deadlineFormatted"> Срок: <b>{{ deadlineFormatted }}</b>.</template>
+              </div>
+            </div>
+            <button class="krt-btn primary" @click="printTtn" :disabled="saving">Распечатать сейчас</button>
+          </div>
         </template>
       </div>
 
@@ -484,43 +497,54 @@
         <div class="krt-submitted-icon" aria-hidden="true">
           <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-        <h3 class="krt-submitted-title">ТТН отправлена</h3>
+        <h3 class="krt-submitted-title">Заявка сформирована</h3>
         <p v-if="submittedModal.bsoStr" class="krt-submitted-bso">№ {{ submittedModal.bsoStr }}</p>
 
         <ol class="krt-submitted-steps">
           <li>
             <span class="krt-step-num">1</span>
             <div>
-              <div class="krt-step-title">Заявка создана</div>
+              <div class="krt-step-title">Заявка создана и отправлена в отдел закупок</div>
               <div class="krt-step-sub">
-                Отдел закупок увидит её в общем списке.
                 <template v-if="deadlineFormatted">
-                  Скорректировать состав можно <b>до {{ deadlineFormatted }}</b>.
+                  Состав ещё можно скорректировать <b>до {{ deadlineFormatted }}</b>.
                 </template>
               </div>
             </div>
           </li>
-          <li>
+          <li class="krt-step-key">
             <span class="krt-step-num">2</span>
             <div>
-              <div class="krt-step-title">Дождитесь маршрутизации</div>
-              <div class="krt-step-sub">Когда заявка попадёт в маршрут, мы пришлём уведомление в Telegram-бот <b>@supplyportal_bot</b>.</div>
+              <div class="krt-step-title">До дедлайна распечатайте ТТН на бланке БСО</div>
+              <div class="krt-step-sub">
+                Это обязательно — чтобы убедиться, что бланк не испорчен и номер БСО на бланке совпадает с фактическим.
+                <b class="krt-step-warn">Если бланк испортите при печати — успейте заменить БСО (окно замены — до 15:00 того же дня).</b>
+                После маршрутизации поменять номер уже не получится.
+              </div>
             </div>
           </li>
           <li>
             <span class="krt-step-num">3</span>
             <div>
-              <div class="krt-step-title">Распечатайте ТТН на БСО</div>
+              <div class="krt-step-title">Дождитесь уведомления о маршрутизации</div>
+              <div class="krt-step-sub">Придёт сообщение в Telegram-бот <b>@supplyportal_bot</b> — там будет водитель и машина.</div>
+            </div>
+          </li>
+          <li>
+            <span class="krt-step-num">4</span>
+            <div>
+              <div class="krt-step-title">Впишите ОТ РУКИ и передайте водителю</div>
               <div class="krt-step-sub">
-                После уведомления откройте заявку, скачайте Excel или нажмите «Печать», распечатайте на БСО и передайте водителю вместе с кегами.
-                <b class="krt-step-warn">Не забудьте взять подпись водителя на возвратной ТТН.</b>
+                На уже распечатанном бланке заполните ручкой: <b>водителя, машину, «товар принял к перевозке»</b>.
+                <b class="krt-step-warn">Возьмите подпись водителя на возвратной ТТН и передайте бланк ему вместе с кегами.</b>
               </div>
             </div>
           </li>
         </ol>
 
         <div class="krt-submitted-actions">
-          <button class="krt-btn primary" @click="submittedModal.show = false">Понятно</button>
+          <button class="krt-btn ghost" @click="submittedModal.show = false">Закрыть</button>
+          <button class="krt-btn primary" @click="submittedModal.show = false; printTtn()">Распечатать сейчас</button>
         </div>
       </div>
     </div>
@@ -1179,11 +1203,22 @@ async function deleteDraft() {
 
 async function checkRoutedWarning() {
   const status = form.value?.status;
-  if (status !== 'ROUTED' && status !== 'CANCELLED') {
+  // SUBMITTED — нормальная ситуация: печатаем именно сейчас, чтобы проверить
+  // бланк БСО до дедлайна. После маршрутизации заново не печатаем — водителя
+  // и машину впишем от руки на этом же бланке.
+  if (status === 'SUBMITTED') {
     return await askConfirm({
-      title: 'Заявка не маршрутизирована',
-      message: 'Водителя и автомобиль нужно будет вписать в накладную вручную. Продолжить?',
-      okText: 'Продолжить',
+      title: 'Распечатать ТТН на бланке БСО',
+      message: 'Печатайте сейчас, до дедлайна — чтобы убедиться, что бланк не испорчен и номер БСО совпадает с фактом. После маршрутизации водителя и машину впишите ОТ РУКИ на этот же бланк (заново не печатаем).',
+      okText: 'Распечатать',
+      cancelText: 'Отмена',
+    });
+  }
+  if (status !== 'ROUTED') {
+    return await askConfirm({
+      title: 'Заявка не сформирована',
+      message: 'Заявка ещё в статусе черновика. Сначала нажмите «Сформировать ТТН».',
+      okText: 'Хорошо',
       cancelText: 'Отмена',
     });
   }
@@ -1728,8 +1763,29 @@ onMounted(async () => {
   display: block; margin-top: 6px;
   color: #C16B4D; font-weight: 700; font-size: 12.5px;
 }
+.krt-step-key { /* Подсветить ключевой шаг (печать БСО) */ }
+.krt-step-key .krt-step-num { background: #C16B4D; box-shadow: 0 0 0 4px rgba(193,107,77,0.18); }
+.krt-step-key .krt-step-title { color: #C16B4D; }
 .krt-submitted-actions {
-  display: flex; justify-content: flex-end;
+  display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+}
+
+/* Напоминание о печати */
+.krt-print-reminder {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; margin-top: 14px;
+  background: linear-gradient(135deg, #FFF3E0, #FFE0B2);
+  border: 1.5px solid #F4A261; border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(244,162,97,0.15);
+  flex-wrap: wrap;
+}
+.krt-print-reminder-icon { font-size: 28px; flex-shrink: 0; }
+.krt-print-reminder-text { flex: 1; min-width: 200px; }
+.krt-print-reminder-title { font-weight: 700; color: #2C1A12; font-size: 14px; line-height: 1.3; }
+.krt-print-reminder-sub { font-size: 12.5px; color: #6B5344; line-height: 1.45; margin-top: 4px; }
+@media (max-width: 640px) {
+  .krt-print-reminder { padding: 12px; }
+  .krt-print-reminder .krt-btn { width: 100%; }
 }
 
 @media (max-width: 480px) {

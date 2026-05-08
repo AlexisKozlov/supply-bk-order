@@ -1,6 +1,6 @@
 <template>
   <Transition name="upd-fade">
-    <div v-if="needRefresh" class="upd-banner" role="alert">
+    <div v-if="needRefresh && !autoHealing" class="upd-banner" role="alert">
       <div class="upd-content">
         <div class="upd-icon">🔄</div>
         <div class="upd-text">
@@ -24,12 +24,16 @@ import { useRegisterSW } from 'virtual:pwa-register/vue';
 
 // Проверять обновление раз в 5 минут
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
+// Маркер «однократного автохила» — чтобы не зацикливаться при сбоях.
+const AUTO_HEAL_KEY = 'bk_sw_auto_healed';
 
 const updating = ref(false);
+const autoHealing = ref(false);
 
-// В режиме 'prompt' плагин САМ отслеживает появление нового SW в ожидании
-// и выставляет needRefresh = true. Никакой авто-перезагрузки нет —
-// пользователь увидит баннер и решит, когда обновить.
+// 'prompt': плагин сам отслеживает появление нового SW в ожидании и
+// выставляет needRefresh. updateServiceWorker(true) шлёт waiting-SW сообщение
+// SKIP_WAITING, дожидается controllerchange и перезагружает страницу.
+// Это правильный цикл активации, не нужно вручную unregister/caches.delete.
 const { needRefresh, updateServiceWorker } = useRegisterSW({
   immediate: true,
   onRegisteredSW(swUrl, registration) {
@@ -52,6 +56,21 @@ const { needRefresh, updateServiceWorker } = useRegisterSW({
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checkForUpdate();
     });
+
+    // Автохил: если на момент регистрации в скоупе уже есть waiting SW —
+    // значит пользователь застрял в состоянии, когда старый SW не отдал
+    // контроль новому. Активируем новый разово, чтобы не показывать
+    // лишний баннер. Защита от циклов: sessionStorage-маркер.
+    if (registration.waiting && !sessionStorage.getItem(AUTO_HEAL_KEY)) {
+      sessionStorage.setItem(AUTO_HEAL_KEY, '1');
+      autoHealing.value = true;
+      // updateServiceWorker(true) внутри плагина: postMessage SKIP_WAITING +
+      // ожидание controllerchange + window.location.reload().
+      updateServiceWorker(true).catch((e) => {
+        console.warn('[auto-heal failed]', e);
+        autoHealing.value = false;
+      });
+    }
   },
   onRegisterError(error) {
     console.warn('[SW register error]', error);
@@ -63,46 +82,22 @@ window.addEventListener('bk:needs-update', () => {
   needRefresh.value = true;
 });
 
-// Фолбэк: с skipWaiting+clientsClaim в workbox-конфиге новый SW активируется
-// без «ожидания», и needRefresh от плагина может не выставиться. Ловим
-// controllerchange, чтобы баннер всё равно появился.
-if ('serviceWorker' in navigator) {
-  let initialController = navigator.serviceWorker.controller;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // Первый controllerchange после первичной регистрации SW (controller был null)
-    // — это не апдейт, а первое появление контроллера. Пропускаем.
-    if (!initialController) {
-      initialController = navigator.serviceWorker.controller;
-      return;
-    }
-    needRefresh.value = true;
-  });
-}
-
 async function doUpdate() {
   updating.value = true;
-  // 1. Разрегистрируем SW — на следующей навигации запросы пойдут напрямую
-  // к серверу, минуя любой кэш Service Worker'а. Если идёт сборка — nginx
-  // отдаст maintenance.html, иначе свежий index.html.
-  if ('serviceWorker' in navigator) {
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister()));
-    } catch (e) { /* игнор */ }
+  try {
+    // Плагин сам отправит SKIP_WAITING, дождётся controllerchange и перезагрузит.
+    await updateServiceWorker(true);
+  } catch (e) {
+    console.warn('[doUpdate]', e);
+    // Запасной путь: если по какой-то причине плагин не смог активировать
+    // waiting SW (например, его уже нет) — просто перезагружаем страницу
+    // с cache-bust, чтобы загрузить свежий bundle.
+    const u = new URL(window.location.href);
+    u.searchParams.set('_v', Date.now().toString(36));
+    window.location.replace(u.toString());
+  } finally {
+    updating.value = false;
   }
-  // 2. Чистим всё, что мог сохранить SW в Cache Storage.
-  if ('caches' in window) {
-    try {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    } catch (e) { /* игнор */ }
-  }
-  // 3. Жёсткая перезагрузка с cache-bust параметром, чтобы и HTTP-кэш браузера
-  // отдал свежий index.html. Используем pathname без сохранения query (на случай
-  // старых query-параметров от прежнего билда).
-  const u = new URL(window.location.href);
-  u.searchParams.set('_v', Date.now().toString(36));
-  window.location.replace(u.toString());
 }
 
 function later() {

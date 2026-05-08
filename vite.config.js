@@ -48,8 +48,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        skipWaiting: true,
-        clientsClaim: true,
+        // skipWaiting/clientsClaim НЕЛЬЗЯ включать в режиме 'prompt': иначе новый SW
+        // моментально захватывает старые открытые вкладки, а старый index.html
+        // ссылается на чанки, которых уже нет — кнопки и сохранения «зависают»
+        // до перезагрузки. Активация нового SW происходит только после нажатия
+        // «Обновить» (UpdatePrompt.vue делает unregister + clear caches + reload).
+        skipWaiting: false,
+        clientsClaim: false,
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,otf,woff,woff2}'],
         globIgnores: [

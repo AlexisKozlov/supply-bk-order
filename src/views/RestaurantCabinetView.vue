@@ -1618,6 +1618,7 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { useRestaurantOrderStore } from '@/stores/restaurantOrderStore.js';
 import { useSupplierOrderStore } from '@/stores/supplierOrderStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
@@ -1637,7 +1638,7 @@ const toast = useToastStore();
 
 const globalLoading = ref(true);
 const globalError = ref('');
-const activeTab = ref('dashboard');
+const activeTab = useTabRoute('dashboard', ['dashboard', 'orders', 'stock', 'warehouse-stock', 'keg-returns', 'surveys', 'scanner', 'info', 'profile']);
 const cabBrand = computed(() => {
   const group = roStore.restaurant?.legal_entity_group;
   if (group === 'PS') {

@@ -335,6 +335,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { useTruckLoadingStore } from '@/stores/truckLoadingStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { exportTruckLoading } from '@/lib/truckLoadingExport.js';
@@ -344,7 +345,7 @@ const store = useTruckLoadingStore();
 const toast = useToastStore();
 
 const selectedDate = ref('');
-const activeTab = ref('constructor');
+const activeTab = useTabRoute('constructor', ['constructor', 'vehicles']);
 
 // Drag & drop state
 const dragOverTruck = ref(null);

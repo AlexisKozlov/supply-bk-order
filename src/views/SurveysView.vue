@@ -394,6 +394,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { formatRestaurantNumber } from '@/lib/legalEntities.js'
 import { useUserStore } from '@/stores/userStore.js'
@@ -439,7 +440,7 @@ const detail = ref(null)
 const form = ref(makeEmptySurvey())
 const formSnapshot = ref('')
 const isCreating = ref(false)
-const activeTab = ref('settings')
+const activeTab = useTabRoute('settings', ['settings', 'results'])
 const searchText = ref('')
 const statusFilter = ref('all')
 const menuOpen = ref(false)

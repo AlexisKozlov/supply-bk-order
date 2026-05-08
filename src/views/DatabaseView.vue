@@ -323,6 +323,7 @@
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useTabRoute } from '@/composables/useTabRoute.js';
 import { db } from '@/lib/apiClient.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -349,7 +350,7 @@ const restaurantStore = useRestaurantStore();
 const isViewer = computed(() => !userStore.hasAccess('database', 'edit'));
 const isAdmin = computed(() => userStore.hasAccess('database', 'full'));
 
-const activeTab = ref('products');
+const activeTab = useTabRoute('products', ['products', 'suppliers', 'restaurants', 'recipes']);
 const searchQuery = ref('');
 const loading = ref(false);
 const products = ref([]);
@@ -530,26 +531,25 @@ const filteredRecipes = computed(() => {
   return recipes.value.filter(r => (r.name||'').toLowerCase().includes(q) || (r.code||'').toLowerCase().includes(q));
 });
 
-// Watch route query — handles sidebar "Новый товар" click when already on this page
+// Watch route query — handles sidebar "Новый товар" click when already on this page.
+// Сменой вкладки занимается useTabRoute (см. activeTab выше), а данные подгружаются
+// в watch(activeTab) ниже и в onMounted.
 watch(() => route.query, (q) => {
   if (q?.action === 'new-product') {
     activeTab.value = 'products';
     editCardModal.value = { show: true, product: null };
     router.replace({ name: 'database' });
   }
-  if (q?.tab === 'suppliers') {
-    activeTab.value = 'suppliers';
-    loadSuppliers();
-  }
-  if (q?.tab === 'restaurants') {
-    switchToRestaurants();
-  }
-  if (q?.tab === 'recipes') {
-    switchToRecipes();
-  }
   if (typeof q?.search === 'string') {
     searchQuery.value = q.search;
   }
+});
+
+// Догрузка данных при смене вкладки (включая первую загрузку с URL `?tab=...`).
+watch(activeTab, (t) => {
+  if (t === 'suppliers') loadSuppliers();
+  else if (t === 'restaurants') restaurantStore.load(orderStore.settings.legalEntity);
+  else if (t === 'recipes' && !recipes.value.length) loadRecipes();
 });
 
 watch(() => orderStore.settings.legalEntity, () => {
@@ -562,9 +562,9 @@ watch(() => orderStore.settings.legalEntity, () => {
 onMounted(() => {
   loadProducts();
   loadSuppliers();
-  if (route.query.tab === 'suppliers') activeTab.value = 'suppliers';
-  if (route.query.tab === 'restaurants') switchToRestaurants();
-  if (route.query.tab === 'recipes') switchToRecipes();
+  // Догружаем данные текущей вкладки, если она пришла из URL `?tab=...`.
+  if (activeTab.value === 'restaurants') restaurantStore.load(orderStore.settings.legalEntity);
+  if (activeTab.value === 'recipes' && !recipes.value.length) loadRecipes();
   if (typeof route.query.search === 'string') searchQuery.value = route.query.search;
   if (route.query.action === 'new-product') {
     activeTab.value = 'products';

@@ -124,18 +124,9 @@
                   <template v-if="tab === 'transit' || tab === 'pending'">
                     Доставка:
                     <input type="date" class="pf-date-input" :value="editDeliveryDate" @change="onDeliveryDateChange" />
-                    <template v-if="isRuSupplier">
-                      <span class="pf-drawer-sep">·</span>
-                      Дата ТТН:
-                      <input type="date" class="pf-date-input" v-model="editTtnDate" />
-                    </template>
                   </template>
                   <template v-else>
                     Доставка: {{ formatDate(selectedOrder?.delivery_date) }}
-                    <template v-if="selectedOrder?.ttn_date">
-                      <span class="pf-drawer-sep">·</span>
-                      ТТН: {{ formatDate(selectedOrder.ttn_date) }}
-                    </template>
                   </template>
                   <template v-if="selectedOrder?.created_by">
                     <span class="pf-drawer-sep">·</span>
@@ -284,6 +275,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useTabRoute } from '@/composables/useTabRoute.js'
 import { db } from '@/lib/apiClient.js'
 import { useUserStore } from '@/stores/userStore.js'
 import { useOrderStore } from '@/stores/orderStore.js'
@@ -303,7 +295,7 @@ const { confirmModal, confirm, onConfirm, onCancel } = useConfirm()
 
 const canEditPF = computed(() => userStore.hasAccess('plan-fact', 'edit'))
 
-const tab = ref('pending')
+const tab = useTabRoute('pending', ['pending', 'transit', 'received'])
 const loading = ref(false)
 const lastLoadedAt = ref(null)
 const loadError = ref(false)
@@ -364,10 +356,6 @@ const selectedOrder = ref(null)
 const drawerItems = ref([])
 const actFile = ref(null)
 const editDeliveryDate = ref('')
-const editTtnDate = ref('')
-const supplierCountry = ref(null)
-
-const isRuSupplier = computed(() => supplierCountry.value === 'RU')
 
 function nowLocal() {
   const d = new Date()
@@ -578,12 +566,6 @@ function openDrawer(order) {
   selectedOrder.value = order
   actFile.value = null
   editDeliveryDate.value = order.delivery_date || ''
-  editTtnDate.value = order.ttn_date || ''
-  // Загружаем страну поставщика
-  supplierCountry.value = null
-  db.from('suppliers').select('country').eq('short_name', order.supplier).limit(1).then(({ data }) => {
-    supplierCountry.value = data?.[0]?.country || null
-  })
   drawerItems.value = (order.order_items || []).map(item => {
     // qty_boxes и received_qty теперь в учётных коробках
     const orderAccounting = Number(item.qty_boxes) || 0
@@ -733,13 +715,13 @@ async function acceptAsOrdered() {
     if (editDeliveryDate.value && editDeliveryDate.value !== selectedOrder.value.delivery_date) {
       updateData2.delivery_date = editDeliveryDate.value
     }
-    if (editTtnDate.value) updateData2.ttn_date = editTtnDate.value
     await db.from('orders').update(updateData2).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
-    const paymentDate2 = editTtnDate.value || selectedOrder.value.ttn_date || ''
+    // Оплата считается от даты поставки (актуализируется в шапке drawer'a при приёмке).
+    const paymentDate2 = editDeliveryDate.value || selectedOrder.value.delivery_date || ''
     if (paymentDate2) {
       await db.rpc('create_payment_if_needed', {
         order_id: selectedOrder.value.id,
-        ttn_date: paymentDate2,
+        delivery_date: paymentDate2,
       }).catch(() => {})
     }
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
@@ -785,19 +767,18 @@ async function saveReceived() {
     }))
     await db.rpc('batch_update_received_qty', { items: allItems })
     const now = nowLocal()
-    // Обновляем дату поставки и дату ТТН
+    // Обновляем дату поставки, если её актуализировали в шапке drawer'a
     const updateData = { received_at: now, received_by: userName }
     if (editDeliveryDate.value && editDeliveryDate.value !== selectedOrder.value.delivery_date) {
       updateData.delivery_date = editDeliveryDate.value
     }
-    if (editTtnDate.value) updateData.ttn_date = editTtnDate.value
     await db.from('orders').update(updateData).eq('id', selectedOrder.value.id).eq('legal_entity', legalEntity.value)
-    // Создаём запись оплаты для российских поставщиков (отсрочка от даты ТТН)
-    const paymentDate = editTtnDate.value || selectedOrder.value.ttn_date || ''
+    // Создаём запись оплаты для российских поставщиков (отсрочка отсчитывается от даты поставки)
+    const paymentDate = editDeliveryDate.value || selectedOrder.value.delivery_date || ''
     if (paymentDate) {
       await db.rpc('create_payment_if_needed', {
         order_id: selectedOrder.value.id,
-        ttn_date: paymentDate,
+        delivery_date: paymentDate,
       }).catch(() => {})
     }
     if (actFile.value) await uploadActFile(selectedOrder.value.id)
