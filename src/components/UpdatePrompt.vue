@@ -26,32 +26,11 @@ import { useRegisterSW } from 'virtual:pwa-register/vue';
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 
 const updating = ref(false);
-const needRefresh = ref(false);
 
-// В режиме autoUpdate новый SW сразу активируется и берёт контроль над вкладкой.
-// Тост показываем по событию controllerchange — это значит, что в текущей вкладке
-// уже работает свежая версия SW и пользователю стоит обновить страницу,
-// чтобы загрузить актуальный index.html и ассеты.
-if ('serviceWorker' in navigator) {
-  let initialController = navigator.serviceWorker.controller;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // Первый controllerchange после первичной регистрации SW (когда controller был null)
-    // — это не апдейт, а просто появление контроллера. Пропускаем.
-    if (!initialController) {
-      initialController = navigator.serviceWorker.controller;
-      return;
-    }
-    needRefresh.value = true;
-  });
-}
-
-// Сигнал из main.js при ошибке загрузки чанков после деплоя — поднимаем
-// тот же баннер, чтобы пользователь обновил страницу когда удобно.
-window.addEventListener('bk:needs-update', () => {
-  needRefresh.value = true;
-});
-
-useRegisterSW({
+// В режиме 'prompt' плагин САМ отслеживает появление нового SW в ожидании
+// и выставляет needRefresh = true. Никакой авто-перезагрузки нет —
+// пользователь увидит баннер и решит, когда обновить.
+const { needRefresh, updateServiceWorker } = useRegisterSW({
   immediate: true,
   onRegisteredSW(swUrl, registration) {
     if (!registration) return;
@@ -68,13 +47,8 @@ useRegisterSW({
         }
       } catch (e) { /* offline — ок */ }
     }
-    // Сразу при загрузке проверяем, нет ли свежей версии — иначе пользователь
-    // увидит закэшированный SW'ом старый index.html и будет ждать 5 минут до
-    // первой плановой проверки.
     checkForUpdate();
     setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL);
-    // Также проверяем при возвращении во вкладку — если пользователь
-    // долго не работал, ждать 5 минут не нужно.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') checkForUpdate();
     });
@@ -83,6 +57,27 @@ useRegisterSW({
     console.warn('[SW register error]', error);
   },
 });
+
+// Сигнал из main.js / router при ошибке загрузки чанков — поднимаем тот же баннер.
+window.addEventListener('bk:needs-update', () => {
+  needRefresh.value = true;
+});
+
+// Фолбэк: с skipWaiting+clientsClaim в workbox-конфиге новый SW активируется
+// без «ожидания», и needRefresh от плагина может не выставиться. Ловим
+// controllerchange, чтобы баннер всё равно появился.
+if ('serviceWorker' in navigator) {
+  let initialController = navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Первый controllerchange после первичной регистрации SW (controller был null)
+    // — это не апдейт, а первое появление контроллера. Пропускаем.
+    if (!initialController) {
+      initialController = navigator.serviceWorker.controller;
+      return;
+    }
+    needRefresh.value = true;
+  });
+}
 
 async function doUpdate() {
   updating.value = true;

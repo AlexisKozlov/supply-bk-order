@@ -29,7 +29,10 @@ export default defineConfig({
     vue(),
     cleanupCopiedLegacyPublicAssets(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt': плагин НЕ перезагружает страницу автоматически, мы сами
+      // показываем баннер «Обновить» через UpdatePrompt.vue. С 'autoUpdate'
+      // совместно с clientsClaim происходила нежеланная авто-перезагрузка.
+      registerType: 'prompt',
       manifest: {
         name: 'Supply Department — Отдел закупок',
         short_name: 'Закупки',
