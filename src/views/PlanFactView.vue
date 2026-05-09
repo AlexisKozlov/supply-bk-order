@@ -743,10 +743,12 @@ async function saveReceived() {
   const itemsWithFact = drawerItems.value.filter(i => i._factValue !== null)
   if (!itemsWithFact.length) return
   const discrepancies = itemsWithFact.filter(i => i._delta !== 0).length
-  const msg = discrepancies > 0
-    ? `Будет сохранено ${itemsWithFact.length} позиций, из них ${discrepancies} с расхождениями.`
-    : `Все ${itemsWithFact.length} позиций совпадают с заказом.`
-  const ok = await confirm('Сохранить приёмку?', msg)
+  const withoutFact = drawerItems.value.length - itemsWithFact.length
+  const lines = []
+  if (discrepancies > 0) lines.push(`${itemsWithFact.length} позиций с фактом, из них ${discrepancies} с расхождением.`)
+  else lines.push(`${itemsWithFact.length} позиций совпадают с заказом.`)
+  if (withoutFact > 0) lines.push(`⚠️ Остальные ${withoutFact} позиций будут приняты как заказано (полностью).`)
+  const ok = await confirm('Сохранить приёмку?', lines.join('\n'))
   if (!ok) return
 
   saving.value = true
