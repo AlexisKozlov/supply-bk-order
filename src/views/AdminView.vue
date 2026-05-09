@@ -1929,8 +1929,11 @@ function onBugMsgClick(e) {
 
 // Второй аргумент urlsMap — { path: url }. Vue ловит изменения через
 // :data-img-rev в template-узле, поэтому рендер пересчитывается при
-// заполнении одноразовых URL картинок.
-function renderMsgContent(msg, urlsMap = bugImageUrls.value) {
+// заполнении одноразовых URL картинок. Default НЕ пишем в сигнатуре,
+// чтобы избежать TDZ-ошибки при ранних вызовах из watch immediate
+// (минификатор иногда переставляет порядок объявлений).
+function renderMsgContent(msg, urlsMap) {
+  if (!urlsMap) urlsMap = bugImageUrls.value;
   if (!msg) return '';
   // Экранируем всё, включая кавычки — чтобы нельзя было вырваться из src="..."
   const escapeHtml = (s) => s
