@@ -281,7 +281,7 @@ import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
 import { db } from '@/lib/apiClient.js';
-import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, copyToClipboard, toLocalDateStr, applyEntityGroupFilter, toPhysicalBoxes } from '@/lib/utils.js';
 import { getEntityGroupCode } from '@/lib/legalEntities.js';
 import { saveOrder } from '@/lib/saveOrder.js';
 import { recalculateAdu, loadAduData } from '@/lib/aduCalculator.js';
@@ -1143,9 +1143,8 @@ function buildOrderText() {
     ? orderStore.settings.deliveryDate.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' }) : '—';
   const lines = orderStore.items.map(item => {
     const qpb = getQpb(item); const mult = getMultiplicity(item);
-    // qty_boxes теперь в учётных → accountingBoxes = finalOrder
-    const accountingBoxes = orderStore.settings.unit === 'boxes' ? item.finalOrder : item.finalOrder / qpb;
-    const physBoxes = Math.ceil(accountingBoxes / mult);
+    // Единые хелперы — те же значения что в Excel, в строках таблицы и в БД.
+    const physBoxes = toPhysicalBoxes(item, item.finalOrder, orderStore.settings.unit);
     if (physBoxes <= 0) return null;
     // Штуки считаем от физических коробок (после округления), чтобы соответствовать реальной отгрузке
     const pieces = Math.round(physBoxes * mult * qpb);

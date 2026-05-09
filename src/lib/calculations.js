@@ -1,4 +1,4 @@
-import { daysBetween, roundUp, safeDivide, getQpb, getMultiplicity } from './utils.js';
+import { daysBetween, roundUp, safeDivide, getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes } from './utils.js';
 
 function validateDates(today, deliveryDate) {
   return today && deliveryDate && today instanceof Date && deliveryDate instanceof Date && !isNaN(today) && !isNaN(deliveryDate);
@@ -112,15 +112,9 @@ export function calculateBufferItem(item, settings, cdaParams) {
 function calculatePallets(item, unit) {
   if (!item.boxesPerPallet || !item.finalOrder) return null;
 
-  const qpb = getQpb(item) || 1;
-  const mult = getMultiplicity(item) || 1;
-
-  const accountingBoxes = Math.round(
-    unit === 'boxes'
-      ? item.finalOrder
-      : item.finalOrder / qpb
-  );
-  const physBoxes = Math.round(accountingBoxes / mult);
+  // Используем общие хелперы — иначе Math.round vs Math.ceil давал
+  // разное число паллет в Excel, в тексте поставщика и при сохранении.
+  const physBoxes = toPhysicalBoxes(item, item.finalOrder, unit);
 
   return {
     pallets: Math.floor(physBoxes / item.boxesPerPallet),

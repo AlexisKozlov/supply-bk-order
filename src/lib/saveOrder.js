@@ -1,5 +1,5 @@
 import { db } from './apiClient.js';
-import { getQpb, getMultiplicity, toLocalDateStr } from './utils.js';
+import { getQpb, getMultiplicity, toLocalDateStr, toAccountingBoxes } from './utils.js';
 
 /**
  * Сохранить или обновить заказ в БД.
@@ -7,18 +7,16 @@ import { getQpb, getMultiplicity, toLocalDateStr } from './utils.js';
  */
 export async function saveOrder({ items, settings, editingOrderId, note, userName, expectedUpdatedAt }) {
  try {
-  // Приводим все позиции к учётным коробкам (формат хранения)
+  // Приводим все позиции к учётным коробкам (формат хранения).
+  // qty_boxes округляется ВВЕРХ через единый хелпер (раньше Math.round
+  // давал 1.41 → 1 коробка — заказ занижался).
   const allItems = items.map(item => {
-    const qpb  = Math.max(getQpb(item), 1);
     const mult = Math.max(getMultiplicity(item), 1);
-    const accountingBoxes = settings.unit === 'boxes'
-      ? item.finalOrder
-      : item.finalOrder / qpb;
     return {
       sku:                item.sku || null,
       name:               item.name,
-      qty_boxes:          Math.round(Math.max(0, accountingBoxes)),
-      qty_per_box:        Math.round(item.qtyPerBox || 1),
+      qty_boxes:          toAccountingBoxes(item, item.finalOrder, settings.unit),
+      qty_per_box:        Math.max(1, Math.round(item.qtyPerBox || 1)),
       multiplicity:       mult,
       consumption_period: Math.round(item.consumptionPeriod || 0),
       stock:              Math.round((item.stock || 0) * 100) / 100,

@@ -51,6 +51,29 @@ export function getMultiplicity(item) {
   return item.multiplicity || 1;
 }
 
+/**
+ * Перевод finalOrder в УЧЁТНЫЕ коробки.
+ * Учётные = коробки в той фасовке, в которой товар лежит в учёте (qty_per_box штук в каждой).
+ * Округление вверх — иначе при ручной правке finalOrder в штуках с остатком от qpb
+ * можно потерять часть заказа в БД (Math.round(1.41) = 1 → недозаказ).
+ */
+export function toAccountingBoxes(item, finalOrder, unit) {
+  const qpb = item.qtyPerBox > 0 ? item.qtyPerBox : 1;
+  const value = unit === 'boxes' ? (finalOrder || 0) : (finalOrder || 0) / qpb;
+  return Math.max(0, Math.ceil(value));
+}
+
+/**
+ * Перевод finalOrder в ФИЗИЧЕСКИЕ коробки.
+ * Физические = коробки той фасовки, что отгружает поставщик (если кратность=2,
+ * то 1 физ.коробка = 2 учётных). Используется для расчёта паллет и текста заказа.
+ * Округление вверх по тем же причинам.
+ */
+export function toPhysicalBoxes(item, finalOrder, unit) {
+  const mult = item.multiplicity > 0 ? item.multiplicity : 1;
+  return Math.ceil(toAccountingBoxes(item, finalOrder, unit) / mult);
+}
+
 export function toLocalDateStr(d) {
   if (!(d instanceof Date) || isNaN(d)) return '';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

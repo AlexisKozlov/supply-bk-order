@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { reactive, ref, computed, watch, toRaw } from 'vue';
 import { calculateItem, calculateBufferItem } from '@/lib/calculations.js';
-import { getQpb, getMultiplicity, applyEntityGroupFilter } from '@/lib/utils.js';
+import { getQpb, getMultiplicity, applyEntityGroupFilter, toPhysicalBoxes } from '@/lib/utils.js';
 import { DEFAULT_ENTITY } from '@/lib/legalEntities.js';
 import { db } from '@/lib/apiClient.js';
 import { useUserStore } from './userStore.js';
@@ -87,10 +87,9 @@ export const useOrderStore = defineStore('order', () => {
     const unit = settings.unit;
     activeItems.forEach(item => {
       if (!item.boxesPerPallet || !item.finalOrder) return;
-      const qpb = item.qtyPerBox || 1;
-      const mult = item.multiplicity || 1;
-      const accountingBoxes = unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb);
-      const physBoxes = Math.round(accountingBoxes / mult);
+      // Используем единые хелперы — иначе общие паллеты в шапке могли
+      // не совпадать с поштучным расчётом в строках и в Excel.
+      const physBoxes = toPhysicalBoxes(item, item.finalOrder, unit);
       totalPallets += Math.floor(physBoxes / item.boxesPerPallet);
       totalBoxesLeft += physBoxes % item.boxesPerPallet;
     });

@@ -1,4 +1,4 @@
-import { getQpb, getMultiplicity } from './utils.js';
+import { getQpb, getMultiplicity, toAccountingBoxes, toPhysicalBoxes } from './utils.js';
 
 export async function exportToExcel(items, settings, priceMap) {
   const XLSX = await import('xlsx-js-style');
@@ -91,12 +91,10 @@ export async function exportToExcel(items, settings, priceMap) {
   items.forEach(item => {
     if (!item.finalOrder || item.finalOrder <= 0) return;
     const qpb  = getQpb(item);
-    const mult = getMultiplicity(item);
-    // qty_boxes теперь в учётных коробках
-    const accountingBoxes = settings.unit === 'boxes'
-      ? item.finalOrder
-      : Math.round(item.finalOrder / qpb);
-    const physBoxes = Math.round(accountingBoxes / mult);
+    // Единые хелперы — раньше Math.round давал расхождение с текстом для
+    // поставщика (Math.ceil) и с расчётом паллет на экране.
+    const accountingBoxes = toAccountingBoxes(item, item.finalOrder, settings.unit);
+    const physBoxes = toPhysicalBoxes(item, item.finalOrder, settings.unit);
     const pieces = settings.unit === 'pieces' ? item.finalOrder : accountingBoxes * qpb;
     const unit = item.unitOfMeasure || 'шт';
     const nameWithSku = item.sku ? `${item.sku}  ${item.name || ''}` : (item.name || '');
@@ -150,9 +148,9 @@ export async function exportToExcel(items, settings, priceMap) {
         if (!item.finalOrder || item.finalOrder <= 0) return;
         const pi = priceMap[item.sku];
         if (!pi) return;
-        const qpb_ = getQpb(item); const mult_ = getMultiplicity(item);
-        const ab = settings.unit === 'boxes' ? item.finalOrder : Math.round(item.finalOrder / qpb_);
-        const pb = Math.round(ab / mult_);
+        const qpb_ = getQpb(item);
+        const ab = toAccountingBoxes(item, item.finalOrder, settings.unit);
+        const pb = toPhysicalBoxes(item, item.finalOrder, settings.unit);
         const pc = settings.unit === 'pieces' ? item.finalOrder : ab * qpb_;
         const pr = parseFloat(pi.price) || 0;
         let lineSum = 0;
