@@ -1206,6 +1206,11 @@ const bcHasAnyTarget = computed(() => Object.values(bcTargets.value).some(Boolea
 const onlineUsers = ref([]);
 const onlineLoading = ref(false);
 let onlineTimer = null;
+// bugPollTimer объявлен здесь, а не рядом с bugPoll/startBugPoll,
+// потому что immediate watch на activeTab может сработать с tab='feedback'
+// до того, как setup дойдёт до конца файла. let-переменные имеют TDZ —
+// startBugPoll() при чтении bugPollTimer падал «Cannot access X before initialization».
+let bugPollTimer = null;
 
 const onlineWord = computed(() => {
   const n = onlineUsers.value.length;
@@ -2061,8 +2066,8 @@ function formatBugDate(str) {
     d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
-// Автообновление обращений (каждые 10 сек, если таб активен)
-let bugPollTimer = null;
+// bugPollTimer объявлен выше (рядом с onlineTimer) — иначе TDZ при
+// immediate watch на activeTab, если таб 'feedback' открывается сразу.
 
 async function bugPoll() {
   if (activeTab.value !== 'feedback') return;
