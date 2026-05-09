@@ -24,9 +24,29 @@ export async function saveOrder({ items, settings, editingOrderId, note, userNam
     };
   });
 
-  const itemsWithOrder = allItems
-    .filter(i => i.qty_boxes > 0)
-    .map((i, idx) => ({ ...i, sort_order: idx }));
+  // Агрегируем позиции с одинаковым SKU: иначе при наличии в заказе двух
+  // карточек одного товара в БД сохранятся 2 строки, а при загрузке
+  // обратно через loadOrderIntoForm дубль пропускается → потеря количества
+  // для второй карточки. Нет SKU (свободные позиции) — оставляем как есть.
+  const aggregated = [];
+  const bySku = new Map();
+  for (const it of allItems.filter(i => i.qty_boxes > 0)) {
+    if (!it.sku) { aggregated.push(it); continue; }
+    const prev = bySku.get(it.sku);
+    if (prev) {
+      prev.qty_boxes += it.qty_boxes;
+      // consumption_period/stock/transit: берём максимум — все карточки
+      // одного SKU должны были показывать одни и те же значения,
+      // но если расходятся — выбираем безопасное.
+      prev.consumption_period = Math.max(prev.consumption_period, it.consumption_period);
+      prev.stock = Math.max(prev.stock, it.stock);
+      prev.transit = Math.max(prev.transit, it.transit);
+    } else {
+      bySku.set(it.sku, it);
+      aggregated.push(it);
+    }
+  }
+  const itemsWithOrder = aggregated.map((i, idx) => ({ ...i, sort_order: idx }));
   if (!itemsWithOrder.length) {
     return { error: 'Нет позиций с количеством. Укажите количество для заказа.' };
   }

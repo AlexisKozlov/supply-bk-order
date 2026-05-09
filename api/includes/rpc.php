@@ -1841,6 +1841,10 @@ if ($endpoint === 'rpc') {
         if (!checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
         try {
             $pdo->beginTransaction();
+            // Удаляем зависимый платёж: иначе в supplier_payments оставались
+            // «висячие» строки с несуществующим order_id, дашборд продолжал
+            // их учитывать.
+            $pdo->prepare("DELETE FROM `supplier_payments` WHERE `order_id`=?")->execute([$orderId]);
             $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);
             $pdo->prepare("DELETE FROM `orders` WHERE `id`=?")->execute([$orderId]);
             $pdo->commit();
@@ -3656,15 +3660,22 @@ if ($endpoint === 'rpc') {
         $items = $body['items'] ?? [];
         if (!$orderId || empty($order)) respond(['error' => 'Не указаны данные заказа'], 400);
         if (count($items) > 5000) respond(['error' => 'Слишком много позиций (макс. 5000)'], 400);
-        // Проверяем доступ к юрлицу заказа
-        $orderCheck = $pdo->prepare("SELECT legal_entity FROM orders WHERE id=?");
+        // Проверяем доступ к юрлицу заказа + статус приёмки.
+        $orderCheck = $pdo->prepare("SELECT legal_entity, supplier, delivery_date, received_at FROM orders WHERE id=?");
         $orderCheck->execute([$orderId]);
         $orderRow = $orderCheck->fetch();
         if (!$orderRow) respond(['error' => 'Заказ не найден'], 404);
         if (!checkLegalEntityAccess($caller, $orderRow['legal_entity'])) respond(['error' => 'Нет доступа к данному юр. лицу'], 403);
+        // Принятый заказ редактировать нельзя — UI скрывает кнопки, но прямой
+        // POST на update_order до этого фикса проходил.
+        if (!empty($orderRow['received_at'])) {
+            respond(['error' => 'Заказ уже принят, его нельзя редактировать'], 409);
+        }
         $expectedUpdatedAt = $body['expected_updated_at'] ?? null;
-        // Белый список полей заказа
-        $orderWhitelist = ['supplier','legal_entity','delivery_date','delivery_date_2','unit','note','details','cda_mode','safety_coef','today_date','safety_days','period_days','has_transit','show_stock_column'];
+        // Белый список полей заказа.
+        // legal_entity убран — смена юрлица заказа портит данные (позиции
+        // остаются от старой группы). Если действительно нужно — отдельный сценарий.
+        $orderWhitelist = ['supplier','delivery_date','delivery_date_2','unit','note','details','cda_mode','safety_coef','today_date','safety_days','period_days','has_transit','show_stock_column'];
         $order = array_intersect_key($order, array_flip($orderWhitelist));
         $order['updated_at'] = date('Y-m-d H:i:s');
         // Белый список полей позиции
@@ -3705,6 +3716,22 @@ if ($endpoint === 'rpc') {
                 $pdo->prepare("INSERT INTO `order_items` ($cn) VALUES ($ph)")->execute(array_values($item));
             }
             $pdo->commit();
+            // Если поменялась дата доставки или поставщик — пересчитываем
+            // существующий supplier_payment, иначе в дашборде оплат старая
+            // payment_date/payment_due_date будут вечно.
+            $supplierChanged = isset($order['supplier']) && $order['supplier'] !== ($orderRow['supplier'] ?? '');
+            $deliveryChanged = isset($order['delivery_date']) && $order['delivery_date'] !== ($orderRow['delivery_date'] ?? '');
+            if ($supplierChanged || $deliveryChanged) {
+                try {
+                    // Удаляем старый платёж — он будет пересоздан create_payment_if_needed.
+                    $pdo->prepare("DELETE FROM supplier_payments WHERE order_id=?")->execute([$orderId]);
+                    // Не вызываем сразу create_payment_if_needed, чтобы не дёргать RPC изнутри RPC.
+                    // Достаточно того, что фронт после save вызовет его сам (PlanFactView),
+                    // либо приёмщик при receive — также передёрнет платёж.
+                } catch (PDOException $e) {
+                    error_log("update_order: payment cleanup failed: " . $e->getMessage());
+                }
+            }
             respond(['success' => true, 'updated_at' => $order['updated_at']]);
         } catch (PDOException $e) {
             $pdo->rollBack();
