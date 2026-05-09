@@ -95,7 +95,7 @@
         <div class="buffer-seg buffer-red" :style="{ width: bufferSegWidth('red') }"></div>
         <div class="buffer-seg buffer-yellow" :style="{ width: bufferSegWidth('yellow') }"></div>
         <div class="buffer-seg buffer-green" :style="{ width: bufferSegWidth('green') }"></div>
-        <div class="buffer-marker" :style="{ left: bufferMarkerPos }" :title="'Остаток: ' + nf.format(Math.round((item.stock || 0) + (item.transit || 0)))"></div>
+        <div class="buffer-marker" :style="{ left: bufferMarkerPos }" :title="'Остаток к приходу: ' + nf.format(Math.round(stockAfterDeliveryForMarker))"></div>
       </div>
       <div v-if="calc.buffer && !compact" class="buffer-text">{{ nf.format(Math.round(calc.buffer.total)) }}</div>
       <div v-else-if="!calc.buffer" class="buffer-text" style="color:#999">—</div>
@@ -455,11 +455,23 @@ function bufferSegWidth(zone) {
   return Math.round((b[zone] / b.total) * 100) + '%';
 }
 
+// Маркер показывает прогноз «сколько останется НА МОМЕНТ ПРИХОДА» относительно
+// буфера — именно от этого значения считается дозаказ. Раньше показывал
+// текущий (stock+transit), и пользователь видел «зелёную зону», хотя
+// заказ предлагал 0 — путаница. Теперь маркер согласован с расчётом.
+const stockAfterDeliveryForMarker = computed(() => {
+  const s = props.settings;
+  if (!s.deliveryDate || !s.today) return 0;
+  const transitDays = Math.max(0, Math.ceil((s.deliveryDate - s.today) / 86400000));
+  const periodDays = s.periodDays > 0 ? s.periodDays : 30;
+  const daily = (props.item.consumptionPeriod || 0) / periodDays;
+  const stockAfter = (props.item.stock || 0) + (props.item.transit || 0) - daily * transitDays;
+  return Math.max(0, stockAfter);
+});
 const bufferMarkerPos = computed(() => {
   const b = calc.value.buffer;
   if (!b || b.total <= 0) return '0%';
-  const stock = (props.item.stock || 0) + (props.item.transit || 0);
-  const pct = Math.min(100, Math.max(0, (stock / b.total) * 100));
+  const pct = Math.min(100, Math.max(0, (stockAfterDeliveryForMarker.value / b.total) * 100));
   return pct + '%';
 });
 

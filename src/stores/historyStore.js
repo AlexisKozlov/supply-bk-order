@@ -138,10 +138,22 @@ export const useHistoryStore = defineStore('history', () => {
     return data || [];
   }
 
+  // Сбрасываем кэш — после save заказа фронт должен перезагрузить список,
+  // иначе пользователь, перешедший в Историю, видит устаревшие данные
+  // (без только что созданного заказа).
+  function invalidate() {
+    orders.value = [];
+    plans.value = [];
+    hasMoreOrders.value = false;
+    hasMorePlans.value = false;
+    _requestIds.orders++;
+    _requestIds.plans++;
+  }
+
   return {
     orders, plans, loading, loadingMore, error,
     hasMoreOrders, hasMorePlans,
     loadOrders, loadPlans, loadMoreOrders, loadMorePlans,
-    deleteOrder, loadOrderLog,
+    deleteOrder, loadOrderLog, invalidate,
   };
 });

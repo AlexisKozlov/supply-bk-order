@@ -3599,6 +3599,34 @@ if ($endpoint === 'rpc') {
         respond(['count' => $count, 'new_count' => $newCount]);
     }
 
+    // Нормализация числовых полей позиции заказа: защита от NaN/Infinity/
+    // отрицательных значений и нелепо больших чисел. Раньше клиент мог
+    // прислать qty_boxes=-5 или 1e308 — MySQL падал, либо сохранялся мусор.
+    // ─ помещено единообразно: используется в create_order и update_order.
+    if (!function_exists('sanitizeOrderItemNumbers')) {
+        function sanitizeOrderItemNumbers(array $item): array {
+            $clip = function ($v, $min, $max, $isInt) {
+                if ($v === null || $v === '') return null;
+                $n = is_numeric($v) ? (float)$v : 0.0;
+                if (!is_finite($n)) $n = 0.0;
+                if ($n < $min) $n = $min;
+                if ($n > $max) $n = $max;
+                return $isInt ? (int)$n : $n;
+            };
+            // qty_boxes: int 0..999_999
+            if (array_key_exists('qty_boxes', $item))          $item['qty_boxes']          = $clip($item['qty_boxes'], 0, 999_999, true);
+            if (array_key_exists('qty_per_box', $item))        $item['qty_per_box']        = $clip($item['qty_per_box'], 1, 999_999, true);
+            if (array_key_exists('multiplicity', $item))       $item['multiplicity']       = $clip($item['multiplicity'], 1, 99_999, true);
+            if (array_key_exists('boxes_per_pallet', $item))   $item['boxes_per_pallet']   = $clip($item['boxes_per_pallet'], 0, 99_999, true);
+            if (array_key_exists('consumption_period', $item)) $item['consumption_period'] = $clip($item['consumption_period'], 0, 9_999_999, true);
+            if (array_key_exists('stock', $item))              $item['stock']              = $clip($item['stock'], 0, 9_999_999, false);
+            if (array_key_exists('transit', $item))            $item['transit']            = $clip($item['transit'], 0, 9_999_999, false);
+            if (array_key_exists('final_order', $item))        $item['final_order']        = $clip($item['final_order'], 0, 9_999_999, false);
+            if (array_key_exists('received_qty', $item))       $item['received_qty']       = $clip($item['received_qty'], 0, 9_999_999, false);
+            return $item;
+        }
+    }
+
     if ($fn === 'create_order') {
         $caller = getSessionUser($pdo);
         if (!$caller) respond(['error' => 'Требуется авторизация по сессии'], 401);
@@ -3632,6 +3660,7 @@ if ($endpoint === 'rpc') {
             // Вставляем позиции
             foreach ($items as $item) {
                 $item = array_intersect_key($item, array_flip($itemWhitelist));
+                $item = sanitizeOrderItemNumbers($item);
                 $item['id'] = uuid();
                 $item['order_id'] = $order['id'];
                 $cols = array_keys($item);
@@ -3708,6 +3737,7 @@ if ($endpoint === 'rpc') {
             $pdo->prepare("DELETE FROM `order_items` WHERE `order_id`=?")->execute([$orderId]);
             foreach ($items as $item) {
                 $item = array_intersect_key($item, array_flip($itemWhitelist));
+                $item = sanitizeOrderItemNumbers($item);
                 $item['id'] = uuid();
                 $item['order_id'] = $orderId;
                 $cols = array_keys($item);

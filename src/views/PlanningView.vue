@@ -589,6 +589,13 @@ const isFullscreen = ref(false);
 const compactPlan = ref(localStorage.getItem('bk_compact_plan') === '1');
 const truckEnabled = ref(false);
 const truckPallets = ref(32);
+// Санитизируем ввод вместимости — иначе пользователь мог стереть поле
+// или ввести 0, в шапке показывалось «(0 пал)», но в расчёте подменялось
+// на 32 → дезинформация.
+watch(truckPallets, (v) => {
+  if (!Number.isFinite(v) || v < 1) { truckPallets.value = 1; return; }
+  if (v > 100) { truckPallets.value = 100; return; }
+});
 const hideExcluded = ref(false);
 const existingOrders = ref([]); // заказы в пути (без received_at) для этого поставщика
 const existingOrdersLoading = ref(false);

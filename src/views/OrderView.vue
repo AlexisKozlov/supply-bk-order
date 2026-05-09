@@ -277,6 +277,7 @@ import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, 
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useOrderStore } from '@/stores/orderStore.js';
 import { useDraftStore } from '@/stores/draftStore.js';
+import { useHistoryStore } from '@/stores/historyStore.js';
 import { useSupplierStore } from '@/stores/supplierStore.js';
 import { useToastStore } from '@/stores/toastStore.js';
 import { useUserStore } from '@/stores/userStore.js';
@@ -302,6 +303,7 @@ const route         = useRoute();
 const router        = useRouter();
 const orderStore    = useOrderStore();
 const draftStore    = useDraftStore();
+const historyStore  = useHistoryStore();
 const supplierStore = useSupplierStore();
 const toast         = useToastStore();
 const userStore     = useUserStore();
@@ -777,6 +779,9 @@ async function onSaveConfirm(note) {
 
     const label = orderStore.editingOrderId ? 'Заказ обновлён' : 'Заказ сохранён';
     toast.success(label, `Сохранено: ${result.itemsCount} позиций`);
+    // Сбрасываем кэш истории — иначе при переходе в раздел «История» пользователь
+    // не увидит только что созданный заказ (или увидит старую версию обновлённого).
+    historyStore.invalidate();
 
     showSaveModal.value = false;
     // Снимаем блокировку заказа перед обнулением ID
